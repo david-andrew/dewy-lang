@@ -1,0 +1,22 @@
+# Integer set, implemented as a thin layer over IntMap.
+
+let intset_new = ():>int => {
+    return intmap_new()
+}
+
+let intset_size = (s:int):>int => {
+    return intmap_size(s)
+}
+
+let intset_add = (s:int key:int):>void => {
+    intmap_put(s key 1)
+    return void
+}
+
+let intset_has = (s:int key:int):>int => {
+    return intmap_has(s key)
+}
+
+let intset_remove = (s:int key:int):>int => {
+    return intmap_remove(s key)
+}

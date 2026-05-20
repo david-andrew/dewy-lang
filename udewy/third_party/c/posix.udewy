@@ -1,0 +1,18 @@
+import p"hosted.udewy"
+
+# Minimal POSIX bindings for the hosted C backend. These let udewy programs
+# perform file I/O and spawn subprocesses through libc when targeting the C
+# backend on a POSIX host.
+
+let open = (path:int flags:int mode:int):>int => extern
+let read = (fd:int buf:int cap:int):>int => extern
+let write = (fd:int buf:int len:int):>int => extern
+let close = (fd:int):>int => extern
+let lseek = (fd:int offset:int whence:int):>int => extern
+let dup2 = (oldfd:int newfd:int):>int => extern
+let mkdir = (path:int mode:int):>int => extern
+let unlink = (path:int):>int => extern
+let chdir = (path:int):>int => extern
+let fork = ():>int => extern
+let execve = (path:int argv:int envp:int):>int => extern
+let waitpid = (pid:int status_ptr:int flags:int):>int => extern

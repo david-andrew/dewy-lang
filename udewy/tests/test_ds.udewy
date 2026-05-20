@@ -1,0 +1,114 @@
+import p"../stdlib/stdlib.udewy"
+import p"../stdlib/ds/ds.udewy"
+
+let assert_eq = (actual:int expected:int label:int):>void => {
+    if actual not=? expected {
+        eprint("FAIL: ")
+        eprint(label)
+        eprint(" actual=")
+        let buf:int = bb_new(32)
+        bb_push_int(buf actual)
+        bb_push_byte(buf 0)
+        eprint(bb_data(buf))
+        eprint(" expected=")
+        bb_reset(buf)
+        bb_push_int(buf expected)
+        bb_push_byte(buf 0)
+        eprint(bb_data(buf))
+        eprintl("")
+        host_exit(1)
+    }
+    return void
+}
+
+let test_bytebuf = ():>void => {
+    let bb:int = bb_new(4)
+    assert_eq(bb_len(bb) 0 "bb empty len")
+    bb_push_byte(bb 65)
+    bb_push_byte(bb 66)
+    bb_push_byte(bb 67)
+    assert_eq(bb_len(bb) 3 "bb after push")
+    bb_push_str(bb "Hello, world!")
+    assert_eq(bb_len(bb) 16 "bb after push_str")
+    bb_push_int(bb 12345)
+    assert_eq(bb_len(bb) 21 "bb after push_int")
+    bb_push_int(bb 0)
+    assert_eq(bb_len(bb) 22 "bb push_int zero")
+    bb_push_int(bb 0 - 42)
+    assert_eq(bb_len(bb) 25 "bb push_int negative")
+    return void
+}
+
+let test_vec = ():>void => {
+    let v:int = vec_new(2)
+    assert_eq(vec_len(v) 0 "vec empty len")
+    vec_push(v 10)
+    vec_push(v 20)
+    vec_push(v 30)
+    vec_push(v 40)
+    vec_push(v 50)
+    assert_eq(vec_len(v) 5 "vec push len")
+    assert_eq(vec_get(v 0) 10 "vec get 0")
+    assert_eq(vec_get(v 4) 50 "vec get 4")
+    assert_eq(vec_pop(v) 50 "vec pop")
+    assert_eq(vec_len(v) 4 "vec post pop len")
+    vec_set(v 2 999)
+    assert_eq(vec_get(v 2) 999 "vec set/get")
+    return void
+}
+
+let test_map = ():>void => {
+    let m:int = map_new()
+    assert_eq(map_size(m) 0 "map empty")
+    map_put_str(m "alpha" 1)
+    map_put_str(m "beta" 2)
+    map_put_str(m "gamma" 3)
+    assert_eq(map_size(m) 3 "map size 3")
+    assert_eq(map_get_str(m "alpha") 1 "map alpha")
+    assert_eq(map_get_str(m "beta") 2 "map beta")
+    assert_eq(map_get_str(m "gamma") 3 "map gamma")
+    assert_eq(map_get_str(m "missing") MAP_MISSING "map missing")
+    map_put_str(m "alpha" 100)
+    assert_eq(map_get_str(m "alpha") 100 "map alpha update")
+    assert_eq(map_size(m) 3 "map size after update")
+    # Force a few rehashes
+    let i:int = 0
+    loop i <? 256 {
+        let key:int = bb_new(16)
+        bb_push_str(key "key_")
+        bb_push_int(key i)
+        map_put(m bb_data(key) bb_len(key) i * 7)
+        i = i + 1
+    }
+    assert_eq(map_size(m) 259 "map size after many")
+    let i2:int = 0
+    loop i2 <? 256 {
+        let key:int = bb_new(16)
+        bb_push_str(key "key_")
+        bb_push_int(key i2)
+        assert_eq(map_get(m bb_data(key) bb_len(key)) i2 * 7 "map many lookup")
+        i2 = i2 + 1
+    }
+    return void
+}
+
+let test_intset = ():>void => {
+    let s:int = intset_new()
+    intset_add(s 100)
+    intset_add(s 200)
+    intset_add(s 100)
+    assert_eq(intset_size(s) 2 "intset size 2")
+    assert_eq(intset_has(s 100) TRUE_VAL "intset has 100")
+    assert_eq(intset_has(s 300) FALSE_VAL "intset miss 300")
+    return void
+}
+
+let main = ():>int => {
+    arena_init()
+    test_bytebuf()
+    test_vec()
+    test_map()
+    test_intset()
+    printl("ALL DS TESTS PASSED")
+    return 0
+}

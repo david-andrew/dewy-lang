@@ -276,6 +276,13 @@ class Wasm32Backend(Backend):
             output.append(f"      call ${self._module_init_name}")
             output.append("      drop")
             output.append("    end")
+        main_arity = 0
+        for label_id in self._fn_table_ids:
+            if self._fn_labels.get(label_id) == self._user_main_name:
+                main_arity = self._fn_param_counts.get(label_id, 0)
+                break
+        for _ in range(main_arity):
+            output.append("    i64.const 0")
         output.append(f"    call {self._user_main_name}")
         output.append("  )")
 

@@ -1,0 +1,774 @@
+# Tokenizer for udewy.
+#
+# Token kinds are integers matching the order of udewy/t1.py's Kind enum, so
+# the parser can use the same numeric ordering. Tokens are stored across three
+# parallel Vecs (values, locations, kinds) bundled into a TokenStream handle.
+
+import p"./t0.udewy"
+
+# ----------------------------------------------------------------------------
+# Token kinds. Order matches udewy.t1.Kind.
+# ----------------------------------------------------------------------------
+
+const TK_IDENT:int          = 1
+const TK_IDENT_CALL:int     = 2
+const TK_STRING:int         = 3
+const TK_TYPE_PARAM:int     = 4
+const TK_VOID:int           = 5
+const TK_NUMBER:int         = 6
+const TK_LET:int            = 7
+const TK_CONST:int          = 8
+const TK_IF:int             = 9
+const TK_LOOP:int           = 10
+const TK_ELSE:int           = 11
+const TK_RETURN:int         = 12
+const TK_BREAK:int          = 13
+const TK_CONTINUE:int       = 14
+const TK_EXTERN:int         = 15
+const TK_PLUS:int           = 16
+const TK_MINUS:int          = 17
+const TK_MUL:int            = 18
+const TK_IDIV:int           = 19
+const TK_MOD:int            = 20
+const TK_EQ:int             = 21
+const TK_NOT_EQ:int         = 22
+const TK_GT:int             = 23
+const TK_GT_EQ:int          = 24
+const TK_LT:int             = 25
+const TK_LT_EQ:int          = 26
+const TK_AND:int            = 27
+const TK_OR:int             = 28
+const TK_XOR:int            = 29
+const TK_NOT:int            = 30
+const TK_LEFT_SHIFT:int     = 31
+const TK_RIGHT_SHIFT:int    = 32
+const TK_ASSIGN:int         = 33
+const TK_UPDATE_ASSIGN:int  = 34
+const TK_EXPR_CALL:int      = 35
+const TK_LEFT_PAREN:int     = 36
+const TK_RIGHT_PAREN:int    = 37
+const TK_LEFT_BRACE:int     = 38
+const TK_RIGHT_BRACE:int    = 39
+const TK_LEFT_BRACKET:int   = 40
+const TK_RIGHT_BRACKET:int  = 41
+const TK_COLON_TMP:int      = 42   # _TK_COLON
+const TK_FN_COLON_TMP:int   = 43   # _TK_FN_COLON
+const TK_TYPE:int           = 44
+const TK_FN_TYPE:int        = 45
+const TK_FN_ARROW:int       = 46
+const TK_PIPE:int           = 47
+const TK_TRANSMUTE:int      = 48
+
+# ----------------------------------------------------------------------------
+# Characters
+# ----------------------------------------------------------------------------
+
+const T1_CH_HASH:int = 35
+const T1_CH_DQUOTE:int = 34
+const T1_CH_LBRACKET:int = 91
+const T1_CH_RBRACKET:int = 93
+const T1_CH_LBRACE:int = 123
+const T1_CH_RBRACE:int = 125
+const T1_CH_LPAREN:int = 40
+const T1_CH_RPAREN:int = 41
+const T1_CH_LANGLE:int = 60
+const T1_CH_RANGLE:int = 62
+const T1_CH_EQ:int = 61
+const T1_CH_QUESTION:int = 63
+const T1_CH_PIPE:int = 124
+const T1_CH_COLON:int = 58
+const T1_CH_PLUS:int = 43
+const T1_CH_MINUS:int = 45
+const T1_CH_STAR:int = 42
+const T1_CH_SLASH:int = 47
+const T1_CH_PERCENT:int = 37
+const T1_CH_LSHIFT:int = T1_CH_LANGLE
+const T1_CH_RSHIFT:int = T1_CH_RANGLE
+const T1_CH_UNDERSCORE:int = 95
+
+# Sentinel value for "no value"
+const TK_NO_VALUE:int = 0
+
+# ----------------------------------------------------------------------------
+# TokenStream
+# ----------------------------------------------------------------------------
+
+const TS_VALUES:int = 0
+const TS_LOCATIONS:int = 8
+const TS_KINDS:int = 16
+const TS_SRC:int = 24
+
+let ts_new = (src:int):>int => {
+    let ts:int = arena_alloc(32)
+    __store__(vec_new(256) ts + TS_VALUES)
+    __store__(vec_new(256) ts + TS_LOCATIONS)
+    __store__(vec_new(256) ts + TS_KINDS)
+    __store__(src ts + TS_SRC)
+    return ts
+}
+
+let ts_count = (ts:int):>int => {
+    return vec_len(__load__(ts + TS_KINDS))
+}
+
+let ts_kind = (ts:int idx:int):>int => {
+    return vec_get(__load__(ts + TS_KINDS) idx)
+}
+
+let ts_value = (ts:int idx:int):>int => {
+    return vec_get(__load__(ts + TS_VALUES) idx)
+}
+
+let ts_location = (ts:int idx:int):>int => {
+    return vec_get(__load__(ts + TS_LOCATIONS) idx)
+}
+
+let ts_src = (ts:int):>int => {
+    return __load__(ts + TS_SRC)
+}
+
+let ts_push = (ts:int value:int loc:int kind:int):>void => {
+    vec_push(__load__(ts + TS_VALUES) value)
+    vec_push(__load__(ts + TS_LOCATIONS) loc)
+    vec_push(__load__(ts + TS_KINDS) kind)
+    return void
+}
+
+let ts_pop = (ts:int):>void => {
+    vec_pop(__load__(ts + TS_VALUES))
+    vec_pop(__load__(ts + TS_LOCATIONS))
+    vec_pop(__load__(ts + TS_KINDS))
+    return void
+}
+
+let ts_set_kind = (ts:int idx:int kind:int):>void => {
+    vec_set(__load__(ts + TS_KINDS) idx kind)
+    return void
+}
+
+# Character class for in-place ops (=? prefix combos like +=, -=, ==?, etc.)
+let t1_is_in_place_op_kind = (kind:int):>int => {
+    if kind =? TK_PLUS { return TRUE_VAL }
+    if kind =? TK_MINUS { return TRUE_VAL }
+    if kind =? TK_MUL { return TRUE_VAL }
+    if kind =? TK_IDIV { return TRUE_VAL }
+    if kind =? TK_MOD { return TRUE_VAL }
+    if kind =? TK_EQ { return TRUE_VAL }
+    if kind =? TK_NOT_EQ { return TRUE_VAL }
+    if kind =? TK_GT { return TRUE_VAL }
+    if kind =? TK_GT_EQ { return TRUE_VAL }
+    if kind =? TK_LT { return TRUE_VAL }
+    if kind =? TK_LT_EQ { return TRUE_VAL }
+    if kind =? TK_AND { return TRUE_VAL }
+    if kind =? TK_OR { return TRUE_VAL }
+    if kind =? TK_XOR { return TRUE_VAL }
+    if kind =? TK_NOT { return TRUE_VAL }
+    if kind =? TK_LEFT_SHIFT { return TRUE_VAL }
+    if kind =? TK_RIGHT_SHIFT { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t1_is_hex_digit = (c:int):>int => {
+    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
+    if (c >=? 97) and (c <=? 102) { return TRUE_VAL }
+    if (c >=? 65) and (c <=? 70) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t1_hex_value = (c:int):>int => {
+    if (c >=? 48) and (c <=? 57) { return c - 48 }
+    if (c >=? 97) and (c <=? 102) { return c - 97 + 10 }
+    return c - 65 + 10
+}
+
+# Returns the offset one past the matching ']' for a bracketed type starting
+# at idx. Tracks (), [], {}, <> nesting; strings are skipped; '#' is rejected.
+let t1_bracketed_type_end = (src:int n:int start:int):>int => {
+    if __load_u8__(src + start) not=? T1_CH_LBRACKET {
+        diag_error(start "bracketed_type_end expects '['")
+    }
+    let stack:int = vec_new(8)
+    vec_push(stack T1_CH_LBRACKET)
+    let i:int = start + 1
+    loop (i <? n) and (vec_len(stack) >? 0) {
+        let c:int = __load_u8__(src + i)
+        if c =? T1_CH_HASH {
+            diag_error(i "udewy doesn't support comments inside bracketed type annotations")
+        }
+        if c =? T1_CH_DQUOTE {
+            i = t0_string_end(src n i)
+            continue
+        }
+        if c =? T1_CH_LPAREN {
+            vec_push(stack T1_CH_LPAREN)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_LBRACKET {
+            vec_push(stack T1_CH_LBRACKET)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_LBRACE {
+            vec_push(stack T1_CH_LBRACE)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_LANGLE {
+            vec_push(stack T1_CH_LANGLE)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_RPAREN {
+            if vec_top(stack) not=? T1_CH_LPAREN {
+                diag_error(i "mismatched delimiter inside bracketed type annotation")
+            }
+            vec_pop(stack)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_RBRACKET {
+            if vec_top(stack) not=? T1_CH_LBRACKET {
+                diag_error(i "mismatched delimiter inside bracketed type annotation")
+            }
+            vec_pop(stack)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_RBRACE {
+            if vec_top(stack) not=? T1_CH_LBRACE {
+                diag_error(i "mismatched delimiter inside bracketed type annotation")
+            }
+            vec_pop(stack)
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_RANGLE {
+            if vec_top(stack) not=? T1_CH_LANGLE {
+                diag_error(i "mismatched delimiter inside bracketed type annotation")
+            }
+            vec_pop(stack)
+            i = i + 1
+            continue
+        }
+        i = i + 1
+    }
+    if vec_len(stack) >? 0 {
+        diag_error(start "unterminated bracketed type annotation")
+    }
+    return i
+}
+
+# Try to match a sorted (longest-first) symbol prefix at src[i]. Returns the
+# matched kind or 0 if none. On match, writes the token length to len_out.
+let t1_match_symbol = (src:int n:int i:int len_out:int):>int => {
+    if i + 3 <=? n {
+        let a:int = __load_u8__(src + i)
+        let b:int = __load_u8__(src + i + 1)
+        let c:int = __load_u8__(src + i + 2)
+        if (a =? T1_CH_RANGLE) and (b =? T1_CH_EQ) and (c =? T1_CH_QUESTION) {
+            __store__(3 len_out)
+            return TK_GT_EQ
+        }
+        if (a =? T1_CH_LANGLE) and (b =? T1_CH_EQ) and (c =? T1_CH_QUESTION) {
+            __store__(3 len_out)
+            return TK_LT_EQ
+        }
+    }
+    if i + 2 <=? n {
+        let a2:int = __load_u8__(src + i)
+        let b2:int = __load_u8__(src + i + 1)
+        if (a2 =? T1_CH_SLASH) and (b2 =? T1_CH_SLASH) {
+            __store__(2 len_out)
+            return TK_IDIV
+        }
+        if (a2 =? T1_CH_EQ) and (b2 =? T1_CH_QUESTION) {
+            __store__(2 len_out)
+            return TK_EQ
+        }
+        if (a2 =? T1_CH_RANGLE) and (b2 =? T1_CH_QUESTION) {
+            __store__(2 len_out)
+            return TK_GT
+        }
+        if (a2 =? T1_CH_LANGLE) and (b2 =? T1_CH_QUESTION) {
+            __store__(2 len_out)
+            return TK_LT
+        }
+        if (a2 =? T1_CH_COLON) and (b2 =? T1_CH_RANGLE) {
+            __store__(2 len_out)
+            return TK_FN_COLON_TMP
+        }
+        if (a2 =? T1_CH_EQ) and (b2 =? T1_CH_RANGLE) {
+            __store__(2 len_out)
+            return TK_FN_ARROW
+        }
+        if (a2 =? T1_CH_PIPE) and (b2 =? T1_CH_RANGLE) {
+            __store__(2 len_out)
+            return TK_PIPE
+        }
+        if (a2 =? T1_CH_LANGLE) and (b2 =? T1_CH_LANGLE) {
+            __store__(2 len_out)
+            return TK_LEFT_SHIFT
+        }
+        if (a2 =? T1_CH_RANGLE) and (b2 =? T1_CH_RANGLE) {
+            __store__(2 len_out)
+            return TK_RIGHT_SHIFT
+        }
+    }
+    if i <? n {
+        let a3:int = __load_u8__(src + i)
+        if a3 =? T1_CH_PLUS { __store__(1 len_out)  return TK_PLUS }
+        if a3 =? T1_CH_MINUS { __store__(1 len_out)  return TK_MINUS }
+        if a3 =? T1_CH_STAR { __store__(1 len_out)  return TK_MUL }
+        if a3 =? T1_CH_PERCENT { __store__(1 len_out)  return TK_MOD }
+        if a3 =? T1_CH_LPAREN { __store__(1 len_out)  return TK_LEFT_PAREN }
+        if a3 =? T1_CH_RPAREN { __store__(1 len_out)  return TK_RIGHT_PAREN }
+        if a3 =? T1_CH_LBRACE { __store__(1 len_out)  return TK_LEFT_BRACE }
+        if a3 =? T1_CH_RBRACE { __store__(1 len_out)  return TK_RIGHT_BRACE }
+        if a3 =? T1_CH_LBRACKET { __store__(1 len_out)  return TK_LEFT_BRACKET }
+        if a3 =? T1_CH_RBRACKET { __store__(1 len_out)  return TK_RIGHT_BRACKET }
+        if a3 =? T1_CH_COLON { __store__(1 len_out)  return TK_COLON_TMP }
+        if a3 =? T1_CH_EQ { __store__(1 len_out)  return TK_ASSIGN }
+    }
+    return 0
+}
+
+# Look up an identifier as a keyword. Writes the value into val_out and
+# returns the kind, or 0 if not a keyword.
+let t1_match_keyword = (src:int start:int len:int val_out:int):>int => {
+    if len =? 3 {
+        if str_eq_len(src + start 3 "let" 3) { __store__(TK_NO_VALUE val_out)  return TK_LET }
+        if str_eq_len(src + start 3 "and" 3) { __store__(TK_NO_VALUE val_out)  return TK_AND }
+        if str_eq_len(src + start 3 "xor" 3) { __store__(TK_NO_VALUE val_out)  return TK_XOR }
+        if str_eq_len(src + start 3 "not" 3) { __store__(TK_NO_VALUE val_out)  return TK_NOT }
+        return 0
+    }
+    if len =? 2 {
+        if str_eq_len(src + start 2 "if" 2) { __store__(TK_NO_VALUE val_out)  return TK_IF }
+        if str_eq_len(src + start 2 "or" 2) { __store__(TK_NO_VALUE val_out)  return TK_OR }
+        return 0
+    }
+    if len =? 4 {
+        if str_eq_len(src + start 4 "loop" 4) { __store__(TK_NO_VALUE val_out)  return TK_LOOP }
+        if str_eq_len(src + start 4 "else" 4) { __store__(TK_NO_VALUE val_out)  return TK_ELSE }
+        if str_eq_len(src + start 4 "true" 4) {
+            __store__(0 - 1 val_out)
+            return TK_NUMBER
+        }
+        return 0
+    }
+    if len =? 5 {
+        if str_eq_len(src + start 5 "const" 5) { __store__(TK_NO_VALUE val_out)  return TK_CONST }
+        if str_eq_len(src + start 5 "break" 5) { __store__(TK_NO_VALUE val_out)  return TK_BREAK }
+        if str_eq_len(src + start 5 "false" 5) {
+            __store__(0 val_out)
+            return TK_NUMBER
+        }
+        return 0
+    }
+    if len =? 6 {
+        if str_eq_len(src + start 6 "return" 6) { __store__(TK_NO_VALUE val_out)  return TK_RETURN }
+        if str_eq_len(src + start 6 "extern" 6) { __store__(TK_NO_VALUE val_out)  return TK_EXTERN }
+        if str_eq_len(src + start 6 "import" 6) {
+            __store__(0 - 2 val_out)   # signal "import keyword found"
+            return 0 - 1
+        }
+        return 0
+    }
+    if len =? 8 {
+        if str_eq_len(src + start 8 "continue" 8) { __store__(TK_NO_VALUE val_out)  return TK_CONTINUE }
+        return 0
+    }
+    if len =? 9 {
+        if str_eq_len(src + start 9 "transmute" 9) { __store__(TK_NO_VALUE val_out)  return TK_TRANSMUTE }
+        return 0
+    }
+    return 0
+}
+
+let t1_is_ident_start = (c:int):>int => {
+    return t0_is_ident_start(c)
+}
+
+let t1_is_ident = (c:int):>int => {
+    return t0_is_ident(c)
+}
+
+let t1_is_digit = (c:int):>int => {
+    return t0_is_digit(c)
+}
+
+# Main tokenizer. `src` is a length-prefixed udewy string (length at -8).
+let t1_tokenize = (src:int):>int => {
+    let n:int = str_len(src)
+    let ts:int = ts_new(src)
+    let i:int = 0
+    loop i <? n {
+        # Sanity check: a pending _TK_COLON / _TK_FN_COLON must be followed by a
+        # type annotation. This catches stray colons that the parser would not
+        # otherwise reject in a single pass.
+        let count:int = ts_count(ts)
+        if count >=? 2 {
+            let prev_kind:int = ts_kind(ts count - 2)
+            if (prev_kind =? TK_COLON_TMP) or (prev_kind =? TK_FN_COLON_TMP) {
+                diag_error(i "colon must be followed by a type annotation")
+            }
+        }
+
+        let c:int = __load_u8__(src + i)
+
+        # whitespace
+        if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_LF) or (c =? CH_CR) {
+            i = i + 1
+            continue
+        }
+
+        # line comment
+        if c =? T1_CH_HASH {
+            i = i + 1
+            loop (i <? n) and (__load_u8__(src + i) not=? CH_LF) {
+                i = i + 1
+            }
+            continue
+        }
+
+        # identifier / keyword
+        if t1_is_ident_start(c) {
+            let start:int = i
+            i = i + 1
+            loop (i <? n) and (t1_is_ident(__load_u8__(src + i))) {
+                i = i + 1
+            }
+            let ident_len:int = i - start
+            let val_out:int = __static_alloca__(8)
+            let kind:int = t1_match_keyword(src start ident_len val_out)
+            if kind =? 0 - 1 {
+                # import keyword: error
+                diag_error(start "`import` is a preprocessing directive and may only appear in the leading import prelude")
+            }
+            if kind not=? 0 {
+                ts_push(ts __load__(val_out) start kind)
+                continue
+            }
+
+            # check for void specifically (becomes TK_VOID, unless preceded by :)
+            let prev_count:int = ts_count(ts)
+            let prev_top_kind:int = 0
+            if prev_count >? 0 { prev_top_kind = ts_kind(ts prev_count - 1) }
+
+            if (i <? n) and (__load_u8__(src + i) =? T1_CH_LPAREN) {
+                ts_push(ts ident_len start TK_IDENT_CALL)
+                i = i + 1
+                continue
+            }
+            if (prev_count >? 0) and (prev_top_kind =? TK_COLON_TMP) {
+                ts_pop(ts)
+                ts_push(ts ident_len start TK_TYPE)
+                continue
+            }
+            if (prev_count >? 0) and (prev_top_kind =? TK_FN_COLON_TMP) {
+                ts_pop(ts)
+                ts_push(ts ident_len start TK_FN_TYPE)
+                continue
+            }
+            if (ident_len =? 4) and str_eq_len(src + start 4 "void" 4) {
+                ts_push(ts TK_NO_VALUE start TK_VOID)
+                continue
+            }
+            ts_push(ts ident_len start TK_IDENT)
+            continue
+        }
+
+        # hex number 0x...
+        if c =? 48 {
+            if (i + 1 <? n) and (__load_u8__(src + i + 1) =? 120) {
+                let hex_start:int = i
+                i = i + 2
+                let hex_val:int = 0
+                let hex_saw:int = FALSE_VAL
+                loop i <? n {
+                    let hc:int = __load_u8__(src + i)
+                    if hc =? T1_CH_UNDERSCORE {
+                        i = i + 1
+                        continue
+                    }
+                    if not t1_is_hex_digit(hc) { break }
+                    hex_saw = TRUE_VAL
+                    hex_val = (hex_val << 4) or t1_hex_value(hc)
+                    i = i + 1
+                }
+                if not hex_saw {
+                    diag_error(hex_start "number literal must contain at least one digit")
+                }
+                ts_push(ts hex_val hex_start TK_NUMBER)
+                continue
+            }
+            if (i + 1 <? n) and (__load_u8__(src + i + 1) =? 98) {
+                let bin_start:int = i
+                i = i + 2
+                let bin_val:int = 0
+                let bin_saw:int = FALSE_VAL
+                loop i <? n {
+                    let bc:int = __load_u8__(src + i)
+                    if bc =? T1_CH_UNDERSCORE {
+                        i = i + 1
+                        continue
+                    }
+                    if (bc not=? 48) and (bc not=? 49) { break }
+                    bin_saw = TRUE_VAL
+                    bin_val = (bin_val << 1) or (bc - 48)
+                    i = i + 1
+                }
+                if not bin_saw {
+                    diag_error(bin_start "number literal must contain at least one digit")
+                }
+                ts_push(ts bin_val bin_start TK_NUMBER)
+                continue
+            }
+        }
+
+        # decimal number
+        if t1_is_digit(c) {
+            let dec_start:int = i
+            let dec_val:int = 0
+            let dec_saw:int = FALSE_VAL
+            loop i <? n {
+                let dc:int = __load_u8__(src + i)
+                if dc =? T1_CH_UNDERSCORE {
+                    i = i + 1
+                    continue
+                }
+                if not t1_is_digit(dc) { break }
+                dec_saw = TRUE_VAL
+                dec_val = dec_val * 10 + (dc - 48)
+                i = i + 1
+            }
+            if not dec_saw {
+                diag_error(dec_start "number literal must contain at least one digit")
+            }
+            ts_push(ts dec_val dec_start TK_NUMBER)
+            continue
+        }
+
+        # string
+        if c =? T1_CH_DQUOTE {
+            let s_start:int = i
+            i = t0_string_end(src n s_start)
+            ts_push(ts i - s_start s_start TK_STRING)
+            continue
+        }
+
+        # bracketed type after _TK_COLON
+        let prev_n:int = ts_count(ts)
+        if prev_n >? 0 {
+            let prev_k:int = ts_kind(ts prev_n - 1)
+            if (c =? T1_CH_LBRACKET) and (prev_k =? TK_COLON_TMP) {
+                let bt_start:int = i
+                i = t1_bracketed_type_end(src n bt_start)
+                ts_pop(ts)
+                ts_push(ts i - bt_start bt_start TK_TYPE)
+                continue
+            }
+        }
+
+        # )( -> TK_RIGHT_PAREN + TK_EXPR_CALL
+        if c =? T1_CH_RPAREN {
+            if (i + 1 <? n) and (__load_u8__(src + i + 1) =? T1_CH_LPAREN) {
+                ts_push(ts TK_NO_VALUE i TK_RIGHT_PAREN)
+                ts_push(ts TK_NO_VALUE i TK_EXPR_CALL)
+                i = i + 2
+                continue
+            }
+        }
+
+        # not =? -> TK_NOT_EQ
+        if c =? T1_CH_EQ {
+            if (i + 1 <? n) and (__load_u8__(src + i + 1) =? T1_CH_QUESTION) {
+                let nc:int = ts_count(ts)
+                if (nc >? 0) and (ts_kind(ts nc - 1) =? TK_NOT) {
+                    ts_pop(ts)
+                    ts_push(ts TK_NO_VALUE i TK_NOT_EQ)
+                    i = i + 2
+                    continue
+                }
+            }
+        }
+
+        # in-place assignment <op>=
+        if c =? T1_CH_EQ {
+            let nc2:int = ts_count(ts)
+            if (nc2 >? 0) and t1_is_in_place_op_kind(ts_kind(ts nc2 - 1)) {
+                let op_kind:int = ts_kind(ts nc2 - 1)
+                ts_pop(ts)
+                ts_push(ts op_kind i TK_UPDATE_ASSIGN)
+                i = i + 1
+                continue
+            }
+        }
+
+        # general symbol match
+        let len_out:int = __static_alloca__(8)
+        let sym_kind:int = t1_match_symbol(src n i len_out)
+        if sym_kind not=? 0 {
+            let sym_len:int = __load__(len_out)
+            ts_push(ts TK_NO_VALUE i sym_kind)
+            i = i + sym_len
+            continue
+        }
+
+        # bracketed type parameter starting with '<'
+        if c =? T1_CH_LANGLE {
+            let stack_depth:int = 1
+            let tp_start:int = i
+            i = i + 1
+            loop (i <? n) and (stack_depth >? 0) {
+                let tc:int = __load_u8__(src + i)
+                if tc =? T1_CH_HASH {
+                    diag_error(i "udewy doesn't support comments inside type parameters")
+                }
+                if tc =? T1_CH_LANGLE { stack_depth = stack_depth + 1 }
+                if tc =? T1_CH_RANGLE { stack_depth = stack_depth - 1 }
+                i = i + 1
+            }
+            if stack_depth not=? 0 {
+                diag_error(tp_start "unterminated type parameter")
+            }
+            ts_push(ts i - tp_start tp_start TK_TYPE_PARAM)
+            continue
+        }
+
+        diag_error(i "Unrecognized token")
+    }
+    return ts
+}
+
+# ----------------------------------------------------------------------------
+# Helpers for downstream code
+# ----------------------------------------------------------------------------
+
+# Return the identifier-like substring (length-prefixed udewy string) for
+# token idx. Works for TK_IDENT, TK_IDENT_CALL, TK_TYPE, TK_FN_TYPE,
+# TK_TYPE_PARAM, TK_STRING.
+let t1_token_text = (ts:int idx:int):>int => {
+    let loc:int = ts_location(ts idx)
+    let val:int = ts_value(ts idx)
+    let kind:int = ts_kind(ts idx)
+    let src:int = ts_src(ts)
+    let bb:int = bb_new(val + 1)
+    bb_push_bytes(bb src + loc val)
+    return bb_finalize_as_string(bb)
+}
+
+# ----------------------------------------------------------------------------
+# dump_token: matches t1.py's dump_token format.
+# ----------------------------------------------------------------------------
+
+let t1_kind_name = (kind:int):>int => {
+    if kind =? TK_IDENT { return "TK_IDENT" }
+    if kind =? TK_IDENT_CALL { return "TK_IDENT_CALL" }
+    if kind =? TK_STRING { return "TK_STRING" }
+    if kind =? TK_TYPE_PARAM { return "TK_TYPE_PARAM" }
+    if kind =? TK_VOID { return "TK_VOID" }
+    if kind =? TK_NUMBER { return "TK_NUMBER" }
+    if kind =? TK_LET { return "TK_LET" }
+    if kind =? TK_CONST { return "TK_CONST" }
+    if kind =? TK_IF { return "TK_IF" }
+    if kind =? TK_LOOP { return "TK_LOOP" }
+    if kind =? TK_ELSE { return "TK_ELSE" }
+    if kind =? TK_RETURN { return "TK_RETURN" }
+    if kind =? TK_BREAK { return "TK_BREAK" }
+    if kind =? TK_CONTINUE { return "TK_CONTINUE" }
+    if kind =? TK_EXTERN { return "TK_EXTERN" }
+    if kind =? TK_PLUS { return "TK_PLUS" }
+    if kind =? TK_MINUS { return "TK_MINUS" }
+    if kind =? TK_MUL { return "TK_MUL" }
+    if kind =? TK_IDIV { return "TK_IDIV" }
+    if kind =? TK_MOD { return "TK_MOD" }
+    if kind =? TK_EQ { return "TK_EQ" }
+    if kind =? TK_NOT_EQ { return "TK_NOT_EQ" }
+    if kind =? TK_GT { return "TK_GT" }
+    if kind =? TK_GT_EQ { return "TK_GT_EQ" }
+    if kind =? TK_LT { return "TK_LT" }
+    if kind =? TK_LT_EQ { return "TK_LT_EQ" }
+    if kind =? TK_AND { return "TK_AND" }
+    if kind =? TK_OR { return "TK_OR" }
+    if kind =? TK_XOR { return "TK_XOR" }
+    if kind =? TK_NOT { return "TK_NOT" }
+    if kind =? TK_LEFT_SHIFT { return "TK_LEFT_SHIFT" }
+    if kind =? TK_RIGHT_SHIFT { return "TK_RIGHT_SHIFT" }
+    if kind =? TK_ASSIGN { return "TK_ASSIGN" }
+    if kind =? TK_UPDATE_ASSIGN { return "TK_UPDATE_ASSIGN" }
+    if kind =? TK_EXPR_CALL { return "TK_EXPR_CALL" }
+    if kind =? TK_LEFT_PAREN { return "TK_LEFT_PAREN" }
+    if kind =? TK_RIGHT_PAREN { return "TK_RIGHT_PAREN" }
+    if kind =? TK_LEFT_BRACE { return "TK_LEFT_BRACE" }
+    if kind =? TK_RIGHT_BRACE { return "TK_RIGHT_BRACE" }
+    if kind =? TK_LEFT_BRACKET { return "TK_LEFT_BRACKET" }
+    if kind =? TK_RIGHT_BRACKET { return "TK_RIGHT_BRACKET" }
+    if kind =? TK_COLON_TMP { return "_TK_COLON" }
+    if kind =? TK_FN_COLON_TMP { return "_TK_FN_COLON" }
+    if kind =? TK_TYPE { return "TK_TYPE" }
+    if kind =? TK_FN_TYPE { return "TK_FN_TYPE" }
+    if kind =? TK_FN_ARROW { return "TK_FN_ARROW" }
+    if kind =? TK_PIPE { return "TK_PIPE" }
+    if kind =? TK_TRANSMUTE { return "TK_TRANSMUTE" }
+    return "TK_UNKNOWN"
+}
+
+# Emit each token in a normalized form: `KIND LOC HEX_VALUE\n`. For easy
+# byte-identical comparison with the python tokenizer.
+let t1_dump_normalized = (ts:int):>int => {
+    let bb:int = bb_new(4096)
+    let count:int = ts_count(ts)
+    let i:int = 0
+    loop i <? count {
+        bb_push_int(bb ts_kind(ts i))
+        bb_push_byte(bb CH_SPACE)
+        bb_push_int(bb ts_location(ts i))
+        bb_push_byte(bb CH_SPACE)
+        bb_push_hex(bb ts_value(ts i))
+        bb_push_byte(bb CH_LF)
+        i = i + 1
+    }
+    return bb_finalize_as_string(bb)
+}
+
+let t1_dump_token = (ts:int idx:int):>int => {
+    let kind:int = ts_kind(ts idx)
+    let loc:int = ts_location(ts idx)
+    let val:int = ts_value(ts idx)
+    let src:int = ts_src(ts)
+    let bb:int = bb_new(64)
+    bb_push_byte(bb 40)  # (
+    bb_push_str(bb t1_kind_name(kind))
+
+    if kind =? TK_IDENT {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_bytes(bb src + loc val)
+    } else if kind =? TK_IDENT_CALL {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_bytes(bb src + loc val)
+        bb_push_byte(bb T1_CH_LPAREN)
+    } else if kind =? TK_TYPE {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_byte(bb T1_CH_COLON)
+        bb_push_bytes(bb src + loc val)
+    } else if kind =? TK_FN_TYPE {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_byte(bb T1_CH_COLON)
+        bb_push_byte(bb T1_CH_RANGLE)
+        bb_push_bytes(bb src + loc val)
+    } else if kind =? TK_TYPE_PARAM {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_bytes(bb src + loc val)
+    } else if kind =? TK_STRING {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_bytes(bb src + loc val)
+    } else if kind =? TK_NUMBER {
+        bb_push_byte(bb CH_SPACE)
+        bb_push_int(bb val)
+    }
+
+    bb_push_byte(bb 41)  # )
+    return bb_finalize_as_string(bb)
+}

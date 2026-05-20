@@ -1,0 +1,1808 @@
+# C backend for the udewy bootstrap. Emits portable C99 code with helper
+# wrappers for known libc/posix externs. Mirrors udewy/backend/c.py.
+
+import p"./common.udewy"
+import p"../t1.udewy"
+
+# Bit flags for required helpers.
+const CH_BOOL:int             = 1
+const CH_SIGNED_DIV:int       = 2
+const CH_SIGNED_MOD:int       = 4
+const CH_UNSIGNED_DIV:int     = 8
+const CH_UNSIGNED_MOD:int     = 16
+const CH_SIGNED_SHR:int       = 32
+const CH_I64_TO_F32:int       = 64
+const CH_I64_TO_F64:int       = 128
+const CH_F32_TO_I64:int       = 256
+const CH_F64_TO_I64:int       = 512
+const CH_F32_FROM_BITS:int    = 1024
+const CH_F64_FROM_BITS:int    = 2048
+const CH_LOAD_U8:int          = 4096
+const CH_LOAD_I8:int          = 8192
+const CH_LOAD_U16:int         = 16384
+const CH_LOAD_I16:int         = 32768
+const CH_LOAD_U32:int         = 65536
+const CH_LOAD_I32:int         = 131072
+const CH_LOAD_U64:int         = 262144
+const CH_LOAD_I64:int         = 524288
+const CH_STORE_U8:int         = 1048576
+const CH_STORE_U16:int        = 2097152
+const CH_STORE_U32:int        = 4194304
+const CH_STORE_U64:int        = 8388608
+const CH_ALLOCA:int           = 16777216
+
+# Capability flags.
+const CAP_STDIO:int  = 1
+const CAP_STDLIB:int = 2
+const CAP_MATH:int   = 4
+const CAP_POSIX:int  = 8
+
+# Backend state (single instance, mirroring Python). All defined as globals
+# so the function-pointer dispatch in common.udewy can reach them.
+
+let c_next_label:int = 0
+let c_module_init_name:int = 0
+let c_reachable:int = 0
+let c_have_reachable:int = 0
+let c_capabilities:int = 0       # bitmask of CAP_*
+let c_helpers:int = 0            # bitmask of CH_*
+
+# Per-function builder state, stored as parallel vectors keyed by label_id.
+let c_fn_names:int = 0           # intmap label_id -> mangled name
+let c_fn_source_names:int = 0    # intmap label_id -> original name
+let c_fn_param_counts:int = 0    # intmap label_id -> param count
+let c_extern_fn:int = 0          # intset of extern label_ids
+let c_main_label_id:int = 0      # -1 if no main yet
+
+let c_global_names:int = 0       # intmap label_id -> name
+let c_global_initializers:int = 0  # intmap label_id -> "<udewy str OR int>"; see c_global_init_is_str
+let c_global_init_is_str:int = 0   # intset of label_ids whose init is a string
+let c_extern_globals:int = 0     # intset
+let c_string_contents:int = 0    # intmap label_id -> bytes-buffer-string
+let c_array_label_ids:int = 0    # vec of label_ids for arrays in insertion order
+let c_array_elements:int = 0     # intmap label_id -> elements vec
+let c_array_kinds:int = 0        # intmap label_id -> kinds vec
+let c_static_sizes:int = 0       # intmap label_id -> size
+
+let c_function_order:int = 0     # vec of label_ids
+let c_function_lines:int = 0     # intmap label_id -> vec of strings (body lines)
+let c_function_locals:int = 0    # intmap label_id -> local_count
+let c_function_param_counts:int = 0 # intmap label_id -> param_count
+
+let c_current_fn:int = 0         # current label_id, -1 if none
+let c_current_lines:int = 0      # cached vec of current function's lines
+let c_current_indent:int = 0
+let c_current_temp_count:int = 0
+let c_current_expr:int = 0       # current expression string, 0 if none
+let c_current_saved:int = 0      # vec of saved value expressions (strings)
+let c_cond_lhs_stack:int = 0     # vec of strings (for cond_and/cond_or)
+
+let c_alloc_state = ():>void => {
+    c_fn_names = intmap_new()
+    c_fn_source_names = intmap_new()
+    c_fn_param_counts = intmap_new()
+    c_extern_fn = intset_new()
+    c_main_label_id = 0 - 1
+    c_global_names = intmap_new()
+    c_global_initializers = intmap_new()
+    c_global_init_is_str = intset_new()
+    c_extern_globals = intset_new()
+    c_string_contents = intmap_new()
+    c_array_label_ids = vec_new(8)
+    c_array_elements = intmap_new()
+    c_array_kinds = intmap_new()
+    c_static_sizes = intmap_new()
+    c_function_order = vec_new(16)
+    c_function_lines = intmap_new()
+    c_function_locals = intmap_new()
+    c_function_param_counts = intmap_new()
+    c_current_fn = 0 - 1
+    c_current_indent = 1
+    c_current_expr = 0
+    c_current_saved = vec_new(8)
+    c_cond_lhs_stack = vec_new(4)
+    return void
+}
+
+let c_str = (s:int):>int => {
+    let bb:int = bb_new(str_len(s))
+    bb_push_str(bb s)
+    return bb_finalize_as_string(bb)
+}
+
+# Make a copy of a length-prefixed udewy string.
+let c_clone_str = (s:int):>int => {
+    let n:int = str_len(s)
+    let bb:int = bb_new(n)
+    bb_push_str(bb s)
+    return bb_finalize_as_string(bb)
+}
+
+# Encode int as udewy string.
+let c_int_to_str = (n:int):>int => {
+    let bb:int = bb_new(16)
+    bb_push_int(bb n)
+    return bb_finalize_as_string(bb)
+}
+
+# Render a u64 literal "UINT64_C(0xHHHHHHHHHHHHHHHH)".
+let c_u64_literal = (value:int):>int => {
+    let bb:int = bb_new(32)
+    bb_push_str(bb "UINT64_C(0x")
+    let i:int = 60
+    loop i >=? 0 {
+        let nib:int = (value >> i) and 15
+        let c:int = nib + 48
+        if nib >=? 10 { c = nib + 55 }
+        bb_push_byte(bb c)
+        i = i - 4
+    }
+    bb_push_byte(bb 41)
+    return bb_finalize_as_string(bb)
+}
+
+# Mangle a name into a C identifier. Replaces non-[A-Za-z0-9_] with '_'.
+# Returns "udewy_fn_<sanitized>_<label_id>".
+let c_mangle_function_name = (name:int label_id:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "udewy_fn_")
+    if name =? 0 {
+        bb_push_str(bb "fn_")
+        bb_push_int(bb label_id)
+        bb_push_byte(bb 95)
+        bb_push_int(bb label_id)
+        return bb_finalize_as_string(bb)
+    }
+    let n:int = str_len(name)
+    let clean:int = bb_new(n + 2)
+    let i:int = 0
+    loop i <? n {
+        let ch:int = __load_u8__(name + i)
+        let ok:int = 0
+        if (ch >=? 48) and (ch <=? 57) { ok = 1 }
+        else if (ch >=? 65) and (ch <=? 90) { ok = 1 }
+        else if (ch >=? 97) and (ch <=? 122) { ok = 1 }
+        else if ch =? 95 { ok = 1 }
+        if ok { bb_push_byte(clean ch) }
+        else { bb_push_byte(clean 95) }
+        i = i + 1
+    }
+    let clean_str:int = bb_finalize_as_string(clean)
+    # Trim leading underscores. (Cheap: skip them when copying.)
+    let cs_len:int = str_len(clean_str)
+    let start:int = 0
+    loop (start <? cs_len) and (__load_u8__(clean_str + start) =? 95) {
+        start = start + 1
+    }
+    let end:int = cs_len
+    loop (end >? start) and (__load_u8__(clean_str + end - 1) =? 95) {
+        end = end - 1
+    }
+    if end =? start {
+        bb_push_str(bb "fn_")
+        bb_push_int(bb label_id)
+    } else {
+        # If first char is digit, prefix with fn_
+        let first:int = __load_u8__(clean_str + start)
+        if (first >=? 48) and (first <=? 57) { bb_push_str(bb "fn_") }
+        bb_push_bytes(bb clean_str + start end - start)
+    }
+    bb_push_byte(bb 95)
+    bb_push_int(bb label_id)
+    return bb_finalize_as_string(bb)
+}
+
+# --- Per-function emit helpers ---
+
+let c_indent_str = ():>int => {
+    let bb:int = bb_new(c_current_indent * 4)
+    let i:int = 0
+    loop i <? c_current_indent {
+        bb_push_str(bb "    ")
+        i = i + 1
+    }
+    return bb_finalize_as_string(bb)
+}
+
+let c_emit_line = (line:int):>void => {
+    let bb:int = bb_new(str_len(line) + 16)
+    let i:int = 0
+    loop i <? c_current_indent {
+        bb_push_str(bb "    ")
+        i = i + 1
+    }
+    bb_push_str(bb line)
+    vec_push(c_current_lines bb_finalize_as_string(bb))
+    return void
+}
+
+let c_set_current = (expr:int):>void => { c_current_expr = expr  return void }
+
+# Allocate a temp and emit "    udewy_word tN = expr;". Returns "tN".
+let c_emit_temp = (expr:int):>int => {
+    let name_bb:int = bb_new(8)
+    bb_push_byte(name_bb 116)
+    bb_push_int(name_bb c_current_temp_count)
+    let name:int = bb_finalize_as_string(name_bb)
+    c_current_temp_count = c_current_temp_count + 1
+
+    let line:int = bb_new(64 + str_len(expr))
+    bb_push_str(line "udewy_word ")
+    bb_push_str(line name)
+    bb_push_str(line " = ")
+    bb_push_str(line expr)
+    bb_push_byte(line 59)
+    c_emit_line(bb_finalize_as_string(line))
+    return name
+}
+
+# Returns 1 if expr is already a "simple" reference (temp, arg, local, literal).
+let c_is_simple_expr = (expr:int):>int => {
+    let n:int = str_len(expr)
+    if n =? 0 { return 0 }
+    let c0:int = __load_u8__(expr)
+    # "tN"
+    if c0 =? 116 {
+        if n =? 1 { return 0 }
+        let i:int = 1
+        let ok:int = 1
+        loop i <? n {
+            let c:int = __load_u8__(expr + i)
+            if (c <? 48) or (c >? 57) { ok = 0  break }
+            i = i + 1
+        }
+        if ok { return 1 }
+    }
+    # "argN" or "localN"
+    if str_prefix(expr "arg") {
+        let i:int = 3
+        let ok:int = 1
+        if i =? n { ok = 0 }
+        loop i <? n {
+            let c:int = __load_u8__(expr + i)
+            if (c <? 48) or (c >? 57) { ok = 0  break }
+            i = i + 1
+        }
+        if ok { return 1 }
+    }
+    if str_prefix(expr "local") {
+        let i:int = 5
+        let ok:int = 1
+        if i =? n { ok = 0 }
+        loop i <? n {
+            let c:int = __load_u8__(expr + i)
+            if (c <? 48) or (c >? 57) { ok = 0  break }
+            i = i + 1
+        }
+        if ok { return 1 }
+    }
+    if str_prefix(expr "UINT64_C(") {
+        if __load_u8__(expr + n - 1) =? 41 { return 1 }
+    }
+    return 0
+}
+
+let c_save_current = ():>int => {
+    let expr:int = c_current_expr
+    let temp:int = expr
+    if not c_is_simple_expr(expr) {
+        temp = c_emit_temp(expr)
+    }
+    vec_push(c_current_saved temp)
+    return temp
+}
+
+let c_pop_saved = ():>int => {
+    let n:int = vec_len(c_current_saved)
+    let v:int = vec_get(c_current_saved n - 1)
+    vec_pop(c_current_saved)
+    return v
+}
+
+let c_pop_saved_n = (n:int):>int => {
+    let result:int = vec_new(n)
+    let total:int = vec_len(c_current_saved)
+    let i:int = 0
+    loop i <? n {
+        vec_push(result vec_get(c_current_saved total - n + i))
+        i = i + 1
+    }
+    let j:int = 0
+    loop j <? n {
+        vec_pop(c_current_saved)
+        j = j + 1
+    }
+    return result
+}
+
+# --- Capability detection ---
+
+# Returns capability flag for the import path, or 0.
+# Paths under /third_party/c/<name>.udewy map to cap by basename.
+let c_capability_from_path = (path:int):>int => {
+    let pn:int = str_len(path)
+    let marker:int = "third_party/c/"
+    let mn:int = str_len(marker)
+    let idx:int = 0
+    let found:int = 0 - 1
+    loop idx <=? pn - mn {
+        let m:int = 1
+        let i:int = 0
+        loop i <? mn {
+            if __load_u8__(path + idx + i) not=? __load_u8__(marker + i) { m = 0  break }
+            i = i + 1
+        }
+        if m { found = idx + mn  break }
+        idx = idx + 1
+    }
+    if found <? 0 { return 0 }
+    # Read basename up to ".udewy"
+    let start:int = found
+    let dot:int = found
+    loop dot <? pn {
+        if __load_u8__(path + dot) =? 46 { break }
+        dot = dot + 1
+    }
+    let len:int = dot - start
+    if str_eq_len(path + start len "stdio" 5) and (len =? 5) { return CAP_STDIO }
+    if str_eq_len(path + start len "stdlib" 6) and (len =? 6) { return CAP_STDLIB }
+    if str_eq_len(path + start len "math" 4) and (len =? 4) { return CAP_MATH }
+    if str_eq_len(path + start len "posix" 5) and (len =? 5) { return CAP_POSIX }
+    return 0
+}
+
+let c_set_imported_sources = (paths:int):>void => {
+    if paths =? 0 { return void }
+    let n:int = vec_len(paths)
+    let i:int = 0
+    loop i <? n {
+        let cap:int = c_capability_from_path(vec_get(paths i))
+        c_capabilities = c_capabilities or cap
+        i = i + 1
+    }
+    return void
+}
+
+let c_has_capability = (cap:int):>int => {
+    if (c_capabilities and cap) =? 0 { return FALSE_VAL }
+    return TRUE_VAL
+}
+
+# Known extern -> capability map. Returns 0 if not known.
+let c_known_extern_capability = (name:int):>int => {
+    if str_eq(name "putchar") { return CAP_STDIO }
+    if str_eq(name "puts") { return CAP_STDIO }
+    if str_eq(name "malloc") { return CAP_STDLIB }
+    if str_eq(name "calloc") { return CAP_STDLIB }
+    if str_eq(name "free") { return CAP_STDLIB }
+    if str_eq(name "exit") { return CAP_STDLIB }
+    if str_eq(name "open") { return CAP_POSIX }
+    if str_eq(name "read") { return CAP_POSIX }
+    if str_eq(name "write") { return CAP_POSIX }
+    if str_eq(name "close") { return CAP_POSIX }
+    if str_eq(name "lseek") { return CAP_POSIX }
+    if str_eq(name "dup2") { return CAP_POSIX }
+    if str_eq(name "mkdir") { return CAP_POSIX }
+    if str_eq(name "unlink") { return CAP_POSIX }
+    if str_eq(name "chdir") { return CAP_POSIX }
+    if str_eq(name "fork") { return CAP_POSIX }
+    if str_eq(name "execve") { return CAP_POSIX }
+    if str_eq(name "waitpid") { return CAP_POSIX }
+    return 0
+}
+
+# Build "udewy_c_<capname>_<name>" wrapper name. Returns 0 if name has no wrapper.
+let c_known_extern_wrapper = (name:int):>int => {
+    let cap:int = c_known_extern_capability(name)
+    if cap =? 0 { return 0 }
+    if not c_has_capability(cap) { return 0 }
+    let cap_str:int = 0
+    if cap =? CAP_STDIO  { cap_str = "stdio" }
+    else if cap =? CAP_STDLIB { cap_str = "stdlib" }
+    else if cap =? CAP_MATH   { cap_str = "math" }
+    else if cap =? CAP_POSIX  { cap_str = "posix" }
+    let bb:int = bb_new(32 + str_len(name))
+    bb_push_str(bb "udewy_c_")
+    bb_push_str(bb cap_str)
+    bb_push_byte(bb 95)
+    bb_push_str(bb name)
+    return bb_finalize_as_string(bb)
+}
+
+let c_should_warn_unused_extern = (name:int):>int => {
+    let cap:int = c_known_extern_capability(name)
+    if cap =? 0 { return TRUE_VAL }
+    if not c_has_capability(cap) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+# --- Expression helpers ---
+
+let c_symbol_expr = (name:int):>int => {
+    let bb:int = bb_new(str_len(name) + 24)
+    bb_push_str(bb "((udewy_word)(uintptr_t)(&")
+    bb_push_str(bb name)
+    bb_push_str(bb "))")
+    return bb_finalize_as_string(bb)
+}
+
+let c_string_data_expr = (label_id:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "((udewy_word)(uintptr_t)(((unsigned char *)&udewy_string_")
+    bb_push_int(bb label_id)
+    bb_push_str(bb ") + sizeof(udewy_word)))")
+    return bb_finalize_as_string(bb)
+}
+
+let c_array_data_expr = (label_id:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "((udewy_word)(uintptr_t)(((unsigned char *)&udewy_array_")
+    bb_push_int(bb label_id)
+    bb_push_str(bb ") + sizeof(udewy_word)))")
+    return bb_finalize_as_string(bb)
+}
+
+let c_static_data_expr = (label_id:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "((udewy_word)(uintptr_t)(&udewy_static_")
+    bb_push_int(bb label_id)
+    bb_push_str(bb "))")
+    return bb_finalize_as_string(bb)
+}
+
+let c_fn_addr_expr = (label_id:int):>int => {
+    let name:int = intmap_get(c_fn_names label_id)
+    let wrapper:int = c_known_extern_wrapper(name)
+    if wrapper not=? 0 { return c_symbol_expr(wrapper) }
+    return c_symbol_expr(name)
+}
+
+let c_fn_cast_expr = (expr:int arg_count:int):>int => {
+    let bb:int = bb_new(64 + str_len(expr) + arg_count * 16)
+    bb_push_str(bb "((udewy_word (*)(")
+    if arg_count =? 0 {
+        bb_push_str(bb "void")
+    } else {
+        let i:int = 0
+        loop i <? arg_count {
+            if i >? 0 { bb_push_str(bb ", ") }
+            bb_push_str(bb "udewy_word")
+            i = i + 1
+        }
+    }
+    bb_push_str(bb "))(uintptr_t)(")
+    bb_push_str(bb expr)
+    bb_push_str(bb "))")
+    return bb_finalize_as_string(bb)
+}
+
+let c_direct_call_expr = (label_id:int args:int):>int => {
+    let name:int = intmap_get(c_fn_names label_id)
+    if intset_has(c_extern_fn label_id) {
+        let wrapper:int = c_known_extern_wrapper(name)
+        if wrapper not=? 0 { name = wrapper }
+    }
+    let bb:int = bb_new(64 + str_len(name))
+    bb_push_str(bb name)
+    bb_push_byte(bb 40)
+    let n:int = vec_len(args)
+    let i:int = 0
+    loop i <? n {
+        if i >? 0 { bb_push_str(bb ", ") }
+        bb_push_str(bb vec_get(args i))
+        i = i + 1
+    }
+    bb_push_byte(bb 41)
+    return bb_finalize_as_string(bb)
+}
+
+let c_indirect_call_expr = (fn_expr:int args:int):>int => {
+    let cast:int = c_fn_cast_expr(fn_expr vec_len(args))
+    let bb:int = bb_new(64 + str_len(cast))
+    bb_push_str(bb cast)
+    bb_push_byte(bb 40)
+    let n:int = vec_len(args)
+    let i:int = 0
+    loop i <? n {
+        if i >? 0 { bb_push_str(bb ", ") }
+        bb_push_str(bb vec_get(args i))
+        i = i + 1
+    }
+    bb_push_byte(bb 41)
+    return bb_finalize_as_string(bb)
+}
+
+# --- Module lifecycle ---
+
+let c_begin_module = ():>void => { return void }
+
+let c_set_module_init = (name:int):>void => {
+    c_module_init_name = name
+    return void
+}
+
+let c_set_reachable_functions = (s:int):>void => {
+    c_reachable = s
+    c_have_reachable = TRUE_VAL
+    return void
+}
+
+# --- Data section ---
+
+let c_intern_string = (data:int len:int):>int => {
+    let label_id:int = c_next_label
+    c_next_label = c_next_label + 1
+    # Store raw bytes as a length-prefixed udewy string copy.
+    let bb:int = bb_new(len + 1)
+    bb_push_bytes(bb data len)
+    intmap_put(c_string_contents label_id bb_finalize_as_string(bb))
+    return label_id
+}
+
+let c_intern_array = (elems_vec:int kinds_vec:int):>int => {
+    let label_id:int = c_next_label
+    c_next_label = c_next_label + 1
+    vec_push(c_array_label_ids label_id)
+    # Copy vecs.
+    let e:int = vec_new(vec_len(elems_vec))
+    let k:int = vec_new(vec_len(kinds_vec))
+    let i:int = 0
+    loop i <? vec_len(elems_vec) {
+        vec_push(e vec_get(elems_vec i))
+        vec_push(k vec_get(kinds_vec i))
+        i = i + 1
+    }
+    intmap_put(c_array_elements label_id e)
+    intmap_put(c_array_kinds label_id k)
+    return label_id
+}
+
+# kind is SV_* (1..5). value is int (when SV_INT) or string (otherwise).
+let c_define_global = (name:int kind:int value:int):>int => {
+    let label_id:int = c_next_label
+    c_next_label = c_next_label + 1
+    let gname:int = 0
+    if name =? 0 {
+        let bb:int = bb_new(32)
+        bb_push_str(bb "udewy_global_")
+        bb_push_int(bb label_id)
+        gname = bb_finalize_as_string(bb)
+    } else {
+        gname = c_clone_str(name)
+    }
+    intmap_put(c_global_names label_id gname)
+    if kind =? 1 {
+        intmap_put(c_global_initializers label_id value)
+    } else {
+        intmap_put(c_global_initializers label_id value)
+        intset_add(c_global_init_is_str label_id)
+    }
+    return label_id
+}
+
+let c_declare_extern_global = (name:int):>int => {
+    let label_id:int = c_next_label
+    c_next_label = c_next_label + 1
+    intmap_put(c_global_names label_id c_clone_str(name))
+    intmap_put(c_global_initializers label_id 0)
+    intset_add(c_extern_globals label_id)
+    return label_id
+}
+
+let c_intern_static = (size:int):>int => {
+    let label_id:int = c_next_label
+    c_next_label = c_next_label + 1
+    intmap_put(c_static_sizes label_id size)
+    return label_id
+}
+
+let c_push_string_ref = (label_id:int):>void => { c_set_current(c_string_data_expr(label_id))  return void }
+let c_push_array_ref = (label_id:int):>void => { c_set_current(c_array_data_expr(label_id))  return void }
+let c_push_global_ref = (label_id:int):>void => { c_set_current(c_symbol_expr(intmap_get(c_global_names label_id)))  return void }
+let c_push_static_ref = (label_id:int):>void => { c_set_current(c_static_data_expr(label_id))  return void }
+
+let c_load_global = (label_id:int):>void => { c_set_current(intmap_get(c_global_names label_id))  return void }
+
+let c_store_global = (label_id:int):>void => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb intmap_get(c_global_names label_id))
+    bb_push_str(bb " = ")
+    bb_push_str(bb c_current_expr)
+    bb_push_byte(bb 59)
+    c_emit_line(bb_finalize_as_string(bb))
+    return void
+}
+
+let c_function_ref = (label_id:int):>int => { return c_fn_addr_expr(label_id) }
+let c_string_ref = (label_id:int):>int => { return c_string_data_expr(label_id) }
+let c_array_ref = (label_id:int):>int => { return c_array_data_expr(label_id) }
+let c_static_ref = (label_id:int):>int => { return c_static_data_expr(label_id) }
+
+# --- Functions ---
+
+let c_declare_function = (name:int num_params:int):>int => {
+    let label_id:int = c_next_label
+    c_next_label = c_next_label + 1
+    intmap_put(c_fn_names label_id c_mangle_function_name(name label_id))
+    if name =? 0 {
+        intmap_put(c_fn_source_names label_id intmap_get(c_fn_names label_id))
+    } else {
+        intmap_put(c_fn_source_names label_id c_clone_str(name))
+    }
+    intmap_put(c_fn_param_counts label_id num_params)
+    return label_id
+}
+
+let c_bind_extern_function = (label_id:int name:int):>void => {
+    intmap_put(c_fn_names label_id c_clone_str(name))
+    intmap_put(c_fn_source_names label_id c_clone_str(name))
+    intset_add(c_extern_fn label_id)
+    return void
+}
+
+let c_declare_extern_function = (name:int num_params:int):>int => {
+    let label_id:int = c_declare_function(name num_params)
+    c_bind_extern_function(label_id name)
+    intmap_put(c_fn_param_counts label_id num_params)
+    return label_id
+}
+
+let c_begin_function = (label_id:int name:int param_count:int is_main:int):>void => {
+    if not intset_has(c_extern_fn label_id) {
+        intmap_put(c_fn_names label_id c_mangle_function_name(name label_id))
+    }
+    intmap_put(c_fn_source_names label_id c_clone_str(name))
+    intmap_put(c_fn_param_counts label_id param_count)
+    let lines:int = vec_new(32)
+    intmap_put(c_function_lines label_id lines)
+    intmap_put(c_function_locals label_id 0)
+    intmap_put(c_function_param_counts label_id param_count)
+    vec_push(c_function_order label_id)
+    c_current_fn = label_id
+    c_current_lines = lines
+    c_current_indent = 1
+    c_current_temp_count = 0
+    c_current_expr = 0
+    vec_set_len(c_current_saved 0)
+    if is_main { c_main_label_id = label_id }
+    return void
+}
+
+let c_end_function = ():>void => { c_current_fn = 0 - 1  return void }
+
+let c_load_param = (index:int):>void => {
+    let bb:int = bb_new(16)
+    bb_push_str(bb "arg")
+    bb_push_int(bb index)
+    c_set_current(bb_finalize_as_string(bb))
+    return void
+}
+
+let c_alloc_local = ():>int => {
+    let slot:int = intmap_get(c_function_locals c_current_fn)
+    intmap_put(c_function_locals c_current_fn slot + 1)
+    return slot
+}
+
+let c_load_local = (slot:int):>void => {
+    let bb:int = bb_new(16)
+    bb_push_str(bb "local")
+    bb_push_int(bb slot)
+    c_set_current(bb_finalize_as_string(bb))
+    return void
+}
+
+let c_store_local = (slot:int):>void => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "local")
+    bb_push_int(bb slot)
+    bb_push_str(bb " = ")
+    bb_push_str(bb c_current_expr)
+    bb_push_byte(bb 59)
+    c_emit_line(bb_finalize_as_string(bb))
+    return void
+}
+
+let c_push_const_i64 = (value:int):>void => { c_set_current(c_u64_literal(value))  return void }
+let c_push_void = ():>void => { c_set_current("UINT64_C(0)")  return void }
+let c_push_fn_ref = (label_id:int):>void => { c_set_current(c_fn_addr_expr(label_id))  return void }
+let c_pop_value = ():>void => { return void }
+let c_save_value = ():>void => { c_save_current()  return void }
+let c_restore_value = ():>void => { c_set_current(c_pop_saved())  return void }
+
+let c_unary_op = (op_kind:int):>void => {
+    let v:int = c_current_expr
+    let bb:int = bb_new(32 + str_len(v))
+    if op_kind =? TK_MINUS {
+        bb_push_str(bb "(udewy_word)(UINT64_C(0) - ")
+        bb_push_str(bb v)
+        bb_push_byte(bb 41)
+    } else if op_kind =? TK_NOT {
+        bb_push_byte(bb 126)
+        bb_push_str(bb v)
+    }
+    c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    return void
+}
+
+let c_concat3 = (a:int b:int c:int):>int => {
+    let bb:int = bb_new(str_len(a) + str_len(b) + str_len(c))
+    bb_push_str(bb a)
+    bb_push_str(bb b)
+    bb_push_str(bb c)
+    return bb_finalize_as_string(bb)
+}
+
+let c_bool_helper = (cond_expr:int):>int => {
+    c_helpers = c_helpers or CH_BOOL
+    let bb:int = bb_new(32 + str_len(cond_expr))
+    bb_push_str(bb "udewy_bool_from_c(")
+    bb_push_str(bb cond_expr)
+    bb_push_byte(bb 41)
+    return bb_finalize_as_string(bb)
+}
+
+let c_binary_op = (op_kind:int):>void => {
+    let rhs:int = c_current_expr
+    let lhs:int = c_pop_saved()
+    let expr:int = 0
+    if op_kind =? TK_PLUS         { expr = c_concat3(lhs " + " rhs) }
+    else if op_kind =? TK_MINUS   { expr = c_concat3(lhs " - " rhs) }
+    else if op_kind =? TK_MUL     { expr = c_concat3(lhs " * " rhs) }
+    else if op_kind =? TK_IDIV {
+        c_helpers = c_helpers or CH_SIGNED_DIV
+        let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+        bb_push_str(bb "udewy_signed_div(")
+        bb_push_str(bb lhs)
+        bb_push_str(bb ", ")
+        bb_push_str(bb rhs)
+        bb_push_byte(bb 41)
+        expr = bb_finalize_as_string(bb)
+    } else if op_kind =? TK_MOD {
+        c_helpers = c_helpers or CH_SIGNED_MOD
+        let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+        bb_push_str(bb "udewy_signed_mod(")
+        bb_push_str(bb lhs)
+        bb_push_str(bb ", ")
+        bb_push_str(bb rhs)
+        bb_push_byte(bb 41)
+        expr = bb_finalize_as_string(bb)
+    } else if op_kind =? TK_LEFT_SHIFT {
+        let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+        bb_push_str(bb lhs)
+        bb_push_str(bb " << (")
+        bb_push_str(bb rhs)
+        bb_push_str(bb " & UINT64_C(63))")
+        expr = bb_finalize_as_string(bb)
+    } else if op_kind =? TK_RIGHT_SHIFT {
+        let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+        bb_push_str(bb lhs)
+        bb_push_str(bb " >> (")
+        bb_push_str(bb rhs)
+        bb_push_str(bb " & UINT64_C(63))")
+        expr = bb_finalize_as_string(bb)
+    } else if op_kind =? TK_AND   { expr = c_concat3(lhs " & " rhs) }
+    else if op_kind =? TK_OR      { expr = c_concat3(lhs " | " rhs) }
+    else if op_kind =? TK_XOR     { expr = c_concat3(lhs " ^ " rhs) }
+    else if op_kind =? TK_EQ      { expr = c_bool_helper(c_concat3(lhs " == " rhs)) }
+    else if op_kind =? TK_NOT_EQ  { expr = c_bool_helper(c_concat3(lhs " != " rhs)) }
+    else if op_kind =? TK_GT      { expr = c_bool_helper(c_concat3(c_concat3("(int64_t)" lhs " > (int64_t)") rhs "")) }
+    else if op_kind =? TK_LT      { expr = c_bool_helper(c_concat3(c_concat3("(int64_t)" lhs " < (int64_t)") rhs "")) }
+    else if op_kind =? TK_GT_EQ   { expr = c_bool_helper(c_concat3(c_concat3("(int64_t)" lhs " >= (int64_t)") rhs "")) }
+    else if op_kind =? TK_LT_EQ   { expr = c_bool_helper(c_concat3(c_concat3("(int64_t)" lhs " <= (int64_t)") rhs "")) }
+    c_set_current(c_emit_temp(expr))
+    return void
+}
+
+let c_pipe_call = ():>void => {
+    let fn_expr:int = c_current_expr
+    let arg:int = c_pop_saved()
+    let args:int = vec_new(1)
+    vec_push(args arg)
+    c_set_current(c_emit_temp(c_indirect_call_expr(fn_expr args)))
+    return void
+}
+
+let c_load_mem = (width:int signed:int):>void => {
+    let suffix_n:int = width
+    let helper_flag:int = 0
+    let name:int = 0
+    if width =? 8 {
+        if signed { helper_flag = CH_LOAD_I8  name = "udewy_load_i8" }
+        else      { helper_flag = CH_LOAD_U8  name = "udewy_load_u8" }
+    } else if width =? 16 {
+        if signed { helper_flag = CH_LOAD_I16  name = "udewy_load_i16" }
+        else      { helper_flag = CH_LOAD_U16  name = "udewy_load_u16" }
+    } else if width =? 32 {
+        if signed { helper_flag = CH_LOAD_I32  name = "udewy_load_i32" }
+        else      { helper_flag = CH_LOAD_U32  name = "udewy_load_u32" }
+    } else {
+        if signed { helper_flag = CH_LOAD_I64  name = "udewy_load_i64" }
+        else      { helper_flag = CH_LOAD_U64  name = "udewy_load_u64" }
+    }
+    c_helpers = c_helpers or helper_flag
+    let bb:int = bb_new(32 + str_len(c_current_expr))
+    bb_push_str(bb name)
+    bb_push_byte(bb 40)
+    bb_push_str(bb c_current_expr)
+    bb_push_byte(bb 41)
+    c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    return void
+}
+
+let c_store_mem = (width:int):>void => {
+    let addr:int = c_current_expr
+    let value:int = c_pop_saved()
+    let helper_flag:int = 0
+    let name:int = 0
+    if width =? 8       { helper_flag = CH_STORE_U8  name = "udewy_store_u8" }
+    else if width =? 16 { helper_flag = CH_STORE_U16 name = "udewy_store_u16" }
+    else if width =? 32 { helper_flag = CH_STORE_U32 name = "udewy_store_u32" }
+    else                { helper_flag = CH_STORE_U64 name = "udewy_store_u64" }
+    c_helpers = c_helpers or helper_flag
+    let bb:int = bb_new(48)
+    bb_push_str(bb name)
+    bb_push_byte(bb 40)
+    bb_push_str(bb value)
+    bb_push_str(bb ", ")
+    bb_push_str(bb addr)
+    bb_push_str(bb ");")
+    c_emit_line(bb_finalize_as_string(bb))
+    c_set_current("UINT64_C(0)")
+    return void
+}
+
+let c_signed_shr = ():>void => {
+    let bits:int = c_current_expr
+    let value:int = c_pop_saved()
+    c_helpers = c_helpers or CH_SIGNED_SHR
+    let bb:int = bb_new(48)
+    bb_push_str(bb "udewy_signed_shr_impl(")
+    bb_push_str(bb value)
+    bb_push_str(bb ", ")
+    bb_push_str(bb bits)
+    bb_push_byte(bb 41)
+    c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    return void
+}
+
+let c_call_direct = (label_id:int num_args:int):>void => {
+    # Args order: saved values up to num_args, current_expr is "Nth" arg.
+    # Convention matches python: arg_exprs = pop_saved_values(num_args).
+    # Looking at p0/python: current_expr isn't part of pop -- pop_saved_values
+    # returns all args from saved (each pushed via save_value).
+    let args:int = c_pop_saved_n(num_args)
+    c_set_current(c_emit_temp(c_direct_call_expr(label_id args)))
+    return void
+}
+
+let c_call_indirect = (num_args:int):>void => {
+    let values:int = c_pop_saved_n(num_args + 1)
+    let fn_expr:int = vec_get(values 0)
+    let args:int = vec_new(num_args)
+    let i:int = 1
+    loop i <=? num_args {
+        vec_push(args vec_get(values i))
+        i = i + 1
+    }
+    c_set_current(c_emit_temp(c_indirect_call_expr(fn_expr args)))
+    return void
+}
+
+let c_max_call_args = ():>int => { return 0 - 1 }
+
+let c_begin_if = ():>void => {
+    let bb:int = bb_new(32 + str_len(c_current_expr))
+    bb_push_str(bb "if (")
+    bb_push_str(bb c_current_expr)
+    bb_push_str(bb " != UINT64_C(0)) \{")
+    c_emit_line(bb_finalize_as_string(bb))
+    c_current_indent = c_current_indent + 1
+    return void
+}
+
+let c_begin_else = ():>void => {
+    c_current_indent = c_current_indent - 1
+    c_emit_line("\} else \{")
+    c_current_indent = c_current_indent + 1
+    return void
+}
+
+let c_end_if = ():>void => {
+    c_current_indent = c_current_indent - 1
+    c_emit_line("\}")
+    return void
+}
+
+let c_begin_loop = ():>void => {
+    c_emit_line("for (;;) \{")
+    c_current_indent = c_current_indent + 1
+    return void
+}
+
+let c_begin_loop_body = ():>void => {
+    let bb:int = bb_new(32 + str_len(c_current_expr))
+    bb_push_str(bb "if (")
+    bb_push_str(bb c_current_expr)
+    bb_push_str(bb " == UINT64_C(0)) \{")
+    c_emit_line(bb_finalize_as_string(bb))
+    c_current_indent = c_current_indent + 1
+    c_emit_line("break;")
+    c_current_indent = c_current_indent - 1
+    c_emit_line("\}")
+    return void
+}
+
+let c_end_loop = ():>void => {
+    c_current_indent = c_current_indent - 1
+    c_emit_line("\}")
+    return void
+}
+
+let c_emit_break = ():>void => { c_emit_line("break;")  return void }
+let c_emit_continue = ():>void => { c_emit_line("continue;")  return void }
+
+let c_emit_return = ():>void => {
+    let bb:int = bb_new(16 + str_len(c_current_expr))
+    bb_push_str(bb "return ")
+    bb_push_str(bb c_current_expr)
+    bb_push_byte(bb 59)
+    c_emit_line(bb_finalize_as_string(bb))
+    return void
+}
+
+let c_cond_and_split = ():>int => {
+    vec_push(c_cond_lhs_stack c_current_expr)
+    return 0
+}
+
+let c_cond_and_join = (false_label:int):>void => {
+    let rhs:int = c_current_expr
+    let lhs:int = vec_get(c_cond_lhs_stack vec_len(c_cond_lhs_stack) - 1)
+    vec_pop(c_cond_lhs_stack)
+    let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+    bb_push_str(bb "((")
+    bb_push_str(bb lhs)
+    bb_push_str(bb ") ? (")
+    bb_push_str(bb rhs)
+    bb_push_str(bb ") : UINT64_C(0))")
+    c_set_current(bb_finalize_as_string(bb))
+    return void
+}
+
+let c_cond_or_split = ():>int => {
+    vec_push(c_cond_lhs_stack c_current_expr)
+    return 0
+}
+
+let c_cond_or_join = (done_label:int):>void => {
+    let rhs:int = c_current_expr
+    let lhs:int = vec_get(c_cond_lhs_stack vec_len(c_cond_lhs_stack) - 1)
+    vec_pop(c_cond_lhs_stack)
+    let bb:int = bb_new(32 + str_len(lhs) * 2 + str_len(rhs))
+    bb_push_str(bb "((")
+    bb_push_str(bb lhs)
+    bb_push_str(bb ") ? (")
+    bb_push_str(bb lhs)
+    bb_push_str(bb ") : (")
+    bb_push_str(bb rhs)
+    bb_push_str(bb "))")
+    c_set_current(bb_finalize_as_string(bb))
+    return void
+}
+
+# --- Intrinsics ---
+
+let g_c_intrinsics:int = 0
+
+let c_init_intrinsics = ():>void => {
+    if g_c_intrinsics not=? 0 { return void }
+    core_intrinsics_init()
+    let m:int = map_new()
+    let cap:int = map_cap(g_core_intrinsics)
+    let slots:int = map_slots(g_core_intrinsics)
+    let i:int = 0
+    loop i <? cap {
+        let slot:int = slots + (i * 32)
+        if __load__(slot) =? 1 {
+            map_put(m __load__(slot + 8) __load__(slot + 16) __load__(slot + 24))
+        }
+        i = i + 1
+    }
+    map_put_str(m "__i64_to_f32_bits__" 1)
+    map_put_str(m "__i64_to_f64_bits__" 1)
+    map_put_str(m "__f32_bits_to_i64__" 1)
+    map_put_str(m "__f64_bits_to_i64__" 1)
+    g_c_intrinsics = m
+    return void
+}
+
+let c_mixed_extern_arg_slots = (name:int):>int => {
+    if not str_prefix(name "__call_extern_mixed_") { return 0 - 1 }
+    let n:int = str_len(name)
+    if n <? 23 { return 0 - 1 }
+    if __load_u8__(name + n - 2) not=? 95 { return 0 - 1 }
+    if __load_u8__(name + n - 1) not=? 95 { return 0 - 1 }
+    let mid_len:int = n - 22
+    if mid_len <? 1 { return 0 - 1 }
+    let v:int = 0
+    let i:int = 0
+    loop i <? mid_len {
+        let ch:int = __load_u8__(name + 20 + i)
+        if (ch <? 48) or (ch >? 57) { return 0 - 1 }
+        v = v * 10 + (ch - 48)
+        i = i + 1
+    }
+    return v
+}
+
+let c_is_intrinsic = (name:int):>int => {
+    c_init_intrinsics()
+    if map_has_str(g_c_intrinsics name) { return TRUE_VAL }
+    if c_mixed_extern_arg_slots(name) >=? 0 { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let c_intrinsic_arity = (name:int):>int => {
+    c_init_intrinsics()
+    let m:int = c_mixed_extern_arg_slots(name)
+    if m >=? 0 { return 1 + m * 2 }
+    if map_has_str(g_c_intrinsics name) { return map_get_str(g_c_intrinsics name) }
+    return 0 - 1
+}
+
+let c_intrinsic_static_arg_indices = (name:int):>int => {
+    let m:int = c_mixed_extern_arg_slots(name)
+    if m <? 0 { return 0 }
+    let mask:int = 0
+    let i:int = 0
+    loop i <? m {
+        mask = mask or (1 << (1 + i * 2))
+        i = i + 1
+    }
+    return mask
+}
+
+# Mixed extern call wrapper. Builds the call expression with proper type conversion.
+let c_call_extern_mixed = (tags:int):>void => {
+    let n:int = vec_len(tags)
+    let current_arg:int = c_current_expr
+    let saved:int = c_pop_saved_n(n)
+    let fn_expr:int = vec_get(saved 0)
+    let args_raw:int = vec_new(n)
+    let i:int = 1
+    loop i <? n {
+        vec_push(args_raw vec_get(saved i))
+        i = i + 1
+    }
+    vec_push(args_raw current_arg)
+
+    # Build cast: ((udewy_word (*)(<type1>, <type2>, ...))(uintptr_t)(<fn_expr>))(<conv_args>)
+    let cast:int = bb_new(96)
+    bb_push_str(cast "((udewy_word (*)(")
+    let j:int = 0
+    loop j <? n {
+        if j >? 0 { bb_push_str(cast ", ") }
+        let tag:int = vec_get(tags j)
+        if tag =? 0 { bb_push_str(cast "udewy_word") }
+        else if tag =? 1 { bb_push_str(cast "float") }
+        else { bb_push_str(cast "double") }
+        j = j + 1
+    }
+    bb_push_str(cast "))(uintptr_t)(")
+    bb_push_str(cast fn_expr)
+    bb_push_str(cast "))(")
+    let k:int = 0
+    loop k <? n {
+        if k >? 0 { bb_push_str(cast ", ") }
+        let tag:int = vec_get(tags k)
+        let val:int = vec_get(args_raw k)
+        if tag =? 0 {
+            bb_push_str(cast val)
+        } else if tag =? 1 {
+            c_helpers = c_helpers or CH_F32_FROM_BITS
+            bb_push_str(cast "udewy_f32_from_bits(")
+            bb_push_str(cast val)
+            bb_push_byte(cast 41)
+        } else {
+            c_helpers = c_helpers or CH_F64_FROM_BITS
+            bb_push_str(cast "udewy_f64_from_bits(")
+            bb_push_str(cast val)
+            bb_push_byte(cast 41)
+        }
+        k = k + 1
+    }
+    bb_push_byte(cast 41)
+    c_set_current(c_emit_temp(bb_finalize_as_string(cast)))
+    return void
+}
+
+let c_mixed_extern_type_tags = (name:int static_args_map:int):>int => {
+    let m:int = c_mixed_extern_arg_slots(name)
+    let tags:int = vec_new(m)
+    let i:int = 0
+    loop i <? m {
+        let idx:int = 1 + i * 2
+        vec_push(tags intmap_get(static_args_map idx))
+        i = i + 1
+    }
+    return tags
+}
+
+let c_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
+    if str_eq(name "__load_u8__")        { c_load_mem(8 0) }
+    else if str_eq(name "__load_u16__")  { c_load_mem(16 0) }
+    else if str_eq(name "__load_u32__")  { c_load_mem(32 0) }
+    else if str_eq(name "__load_u64__")  { c_load_mem(64 0) }
+    else if str_eq(name "__load__")      { c_load_mem(64 0) }
+    else if str_eq(name "__store_u8__")  { c_store_mem(8) }
+    else if str_eq(name "__store_u16__") { c_store_mem(16) }
+    else if str_eq(name "__store_u32__") { c_store_mem(32) }
+    else if str_eq(name "__store_u64__") { c_store_mem(64) }
+    else if str_eq(name "__store__")     { c_store_mem(64) }
+    else if str_eq(name "__load_i8__")   { c_load_mem(8 1) }
+    else if str_eq(name "__load_i16__")  { c_load_mem(16 1) }
+    else if str_eq(name "__load_i32__")  { c_load_mem(32 1) }
+    else if str_eq(name "__load_i64__")  { c_load_mem(64 1) }
+    else if str_eq(name "__store_i8__")  { c_store_mem(8) }
+    else if str_eq(name "__store_i16__") { c_store_mem(16) }
+    else if str_eq(name "__store_i32__") { c_store_mem(32) }
+    else if str_eq(name "__store_i64__") { c_store_mem(64) }
+    else if str_eq(name "__alloca__") {
+        c_helpers = c_helpers or CH_ALLOCA
+        let size:int = c_current_expr
+        let bb:int = bb_new(64 + str_len(size))
+        bb_push_str(bb "((udewy_word)(uintptr_t)UDEWY_ALLOCA((size_t)((")
+        bb_push_str(bb size)
+        bb_push_str(bb " + UINT64_C(7)) & ~UINT64_C(7))))")
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else if str_eq(name "__signed_shr__")    { c_signed_shr() }
+    else if str_eq(name "__unsigned_idiv__") {
+        c_helpers = c_helpers or CH_UNSIGNED_DIV
+        let rhs:int = c_current_expr
+        let lhs:int = c_pop_saved()
+        let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+        bb_push_str(bb "udewy_unsigned_div(")
+        bb_push_str(bb lhs)
+        bb_push_str(bb ", ")
+        bb_push_str(bb rhs)
+        bb_push_byte(bb 41)
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else if str_eq(name "__unsigned_mod__") {
+        c_helpers = c_helpers or CH_UNSIGNED_MOD
+        let rhs:int = c_current_expr
+        let lhs:int = c_pop_saved()
+        let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
+        bb_push_str(bb "udewy_unsigned_mod(")
+        bb_push_str(bb lhs)
+        bb_push_str(bb ", ")
+        bb_push_str(bb rhs)
+        bb_push_byte(bb 41)
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else if str_eq(name "__unsigned_lt__") {
+        let rhs:int = c_current_expr
+        let lhs:int = c_pop_saved()
+        c_set_current(c_emit_temp(c_bool_helper(c_concat3(lhs " < " rhs))))
+    }
+    else if str_eq(name "__unsigned_gt__") {
+        let rhs:int = c_current_expr
+        let lhs:int = c_pop_saved()
+        c_set_current(c_emit_temp(c_bool_helper(c_concat3(lhs " > " rhs))))
+    }
+    else if str_eq(name "__unsigned_lte__") {
+        let rhs:int = c_current_expr
+        let lhs:int = c_pop_saved()
+        c_set_current(c_emit_temp(c_bool_helper(c_concat3(lhs " <= " rhs))))
+    }
+    else if str_eq(name "__unsigned_gte__") {
+        let rhs:int = c_current_expr
+        let lhs:int = c_pop_saved()
+        c_set_current(c_emit_temp(c_bool_helper(c_concat3(lhs " >= " rhs))))
+    }
+    else if str_eq(name "__i64_to_f32_bits__") {
+        c_helpers = c_helpers or CH_I64_TO_F32
+        let bb:int = bb_new(32 + str_len(c_current_expr))
+        bb_push_str(bb "udewy_i64_to_f32_bits(")
+        bb_push_str(bb c_current_expr)
+        bb_push_byte(bb 41)
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else if str_eq(name "__i64_to_f64_bits__") {
+        c_helpers = c_helpers or CH_I64_TO_F64
+        let bb:int = bb_new(32 + str_len(c_current_expr))
+        bb_push_str(bb "udewy_i64_to_f64_bits(")
+        bb_push_str(bb c_current_expr)
+        bb_push_byte(bb 41)
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else if str_eq(name "__f32_bits_to_i64__") {
+        c_helpers = c_helpers or CH_F32_TO_I64
+        let bb:int = bb_new(32 + str_len(c_current_expr))
+        bb_push_str(bb "udewy_f32_bits_to_i64(")
+        bb_push_str(bb c_current_expr)
+        bb_push_byte(bb 41)
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else if str_eq(name "__f64_bits_to_i64__") {
+        c_helpers = c_helpers or CH_F64_TO_I64
+        let bb:int = bb_new(32 + str_len(c_current_expr))
+        bb_push_str(bb "udewy_f64_bits_to_i64(")
+        bb_push_str(bb c_current_expr)
+        bb_push_byte(bb 41)
+        c_set_current(c_emit_temp(bb_finalize_as_string(bb)))
+    }
+    else {
+        c_call_extern_mixed(c_mixed_extern_type_tags(name static_args_map))
+    }
+    return void
+}
+
+let c_get_builtin_constants = ():>int => { return map_new() }
+
+# --- Render the final C source ---
+
+let c_render_helper = (out:int flag:int):>void => {
+    if (c_helpers and flag) =? 0 { return void }
+    if flag =? CH_BOOL {
+        bb_push_str(out "static udewy_word udewy_bool_from_c(int cond) \{\n    return cond ? UDEWY_TRUE : UINT64_C(0);\n\}\n\n")
+    } else if flag =? CH_SIGNED_DIV {
+        bb_push_str(out "static udewy_word udewy_signed_div(udewy_word lhs, udewy_word rhs) \{\n    if (rhs == 0) \{ return UINT64_C(0xFFFFFFFFFFFFFFFF); \}\n    if (lhs == UINT64_C(0x8000000000000000) && rhs == UINT64_C(0xFFFFFFFFFFFFFFFF)) \{ return lhs; \}\n    return (udewy_word)(((int64_t)lhs) / ((int64_t)rhs));\n\}\n\n")
+    } else if flag =? CH_SIGNED_MOD {
+        bb_push_str(out "static udewy_word udewy_signed_mod(udewy_word lhs, udewy_word rhs) \{\n    if (rhs == 0) \{ return lhs; \}\n    if (lhs == UINT64_C(0x8000000000000000) && rhs == UINT64_C(0xFFFFFFFFFFFFFFFF)) \{ return UINT64_C(0); \}\n    return (udewy_word)(((int64_t)lhs) % ((int64_t)rhs));\n\}\n\n")
+    } else if flag =? CH_UNSIGNED_DIV {
+        bb_push_str(out "static udewy_word udewy_unsigned_div(udewy_word lhs, udewy_word rhs) \{\n    if (rhs == 0) \{ return UINT64_C(0xFFFFFFFFFFFFFFFF); \}\n    return lhs / rhs;\n\}\n\n")
+    } else if flag =? CH_UNSIGNED_MOD {
+        bb_push_str(out "static udewy_word udewy_unsigned_mod(udewy_word lhs, udewy_word rhs) \{\n    if (rhs == 0) \{ return lhs; \}\n    return lhs % rhs;\n\}\n\n")
+    } else if flag =? CH_SIGNED_SHR {
+        bb_push_str(out "static udewy_word udewy_signed_shr_impl(udewy_word value, udewy_word bits) \{\n    uint64_t shift = bits & UINT64_C(63);\n    uint64_t raw = value >> shift;\n    if (shift == 0) \{ return value; \}\n    if (((int64_t)value) < 0) \{ raw |= (~UINT64_C(0)) << (64 - shift); \}\n    return raw;\n\}\n\n")
+    } else if flag =? CH_I64_TO_F32 {
+        bb_push_str(out "static udewy_word udewy_i64_to_f32_bits(udewy_word value) \{\n    union \{ float f; uint32_t u; \} b;\n    b.f = (float)(int64_t)value;\n    return (udewy_word)b.u;\n\}\n\n")
+    } else if flag =? CH_I64_TO_F64 {
+        bb_push_str(out "static udewy_word udewy_i64_to_f64_bits(udewy_word value) \{\n    union \{ double f; uint64_t u; \} b;\n    b.f = (double)(int64_t)value;\n    return b.u;\n\}\n\n")
+    } else if flag =? CH_F32_TO_I64 {
+        bb_push_str(out "static udewy_word udewy_f32_bits_to_i64(udewy_word value) \{\n    union \{ uint32_t u; float f; \} b;\n    b.u = (uint32_t)value;\n    return (udewy_word)(int64_t)b.f;\n\}\n\n")
+    } else if flag =? CH_F64_TO_I64 {
+        bb_push_str(out "static udewy_word udewy_f64_bits_to_i64(udewy_word value) \{\n    union \{ uint64_t u; double f; \} b;\n    b.u = (uint64_t)value;\n    return (udewy_word)(int64_t)b.f;\n\}\n\n")
+    } else if flag =? CH_F32_FROM_BITS {
+        bb_push_str(out "static float udewy_f32_from_bits(udewy_word value) \{\n    union \{ uint32_t u; float f; \} b;\n    b.u = (uint32_t)value;\n    return b.f;\n\}\n\n")
+    } else if flag =? CH_F64_FROM_BITS {
+        bb_push_str(out "static double udewy_f64_from_bits(udewy_word value) \{\n    union \{ uint64_t u; double f; \} b;\n    b.u = (uint64_t)value;\n    return b.f;\n\}\n\n")
+    } else if flag =? CH_LOAD_U8 {
+        bb_push_str(out "static udewy_word udewy_load_u8(udewy_word addr) \{ return (udewy_word)(*(const unsigned char *)(uintptr_t)addr); \}\n\n")
+    } else if flag =? CH_LOAD_I8 {
+        bb_push_str(out "static udewy_word udewy_load_i8(udewy_word addr) \{ return (udewy_word)(int64_t)(int8_t)(*(const unsigned char *)(uintptr_t)addr); \}\n\n")
+    } else if flag =? CH_LOAD_U16 {
+        bb_push_str(out "static udewy_word udewy_load_u16(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8);\n\}\n\n")
+    } else if flag =? CH_LOAD_I16 {
+        bb_push_str(out "static udewy_word udewy_load_i16(udewy_word addr) \{ return (udewy_word)(int64_t)(int16_t)udewy_load_u16(addr); \}\n\n")
+    } else if flag =? CH_LOAD_U32 {
+        bb_push_str(out "static udewy_word udewy_load_u32(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24);\n\}\n\n")
+    } else if flag =? CH_LOAD_I32 {
+        bb_push_str(out "static udewy_word udewy_load_i32(udewy_word addr) \{ return (udewy_word)(int64_t)(int32_t)udewy_load_u32(addr); \}\n\n")
+    } else if flag =? CH_LOAD_U64 {
+        bb_push_str(out "static udewy_word udewy_load_u64(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24) | ((udewy_word)p[4] << 32) | ((udewy_word)p[5] << 40) | ((udewy_word)p[6] << 48) | ((udewy_word)p[7] << 56);\n\}\n\n")
+    } else if flag =? CH_LOAD_I64 {
+        bb_push_str(out "static udewy_word udewy_load_i64(udewy_word addr) \{ return udewy_load_u64(addr); \}\n\n")
+    } else if flag =? CH_STORE_U8 {
+        bb_push_str(out "static udewy_word udewy_store_u8(udewy_word value, udewy_word addr) \{ *(unsigned char *)(uintptr_t)addr = (unsigned char)value; return UINT64_C(0); \}\n\n")
+    } else if flag =? CH_STORE_U16 {
+        bb_push_str(out "static udewy_word udewy_store_u16(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8);\n    return UINT64_C(0);\n\}\n\n")
+    } else if flag =? CH_STORE_U32 {
+        bb_push_str(out "static udewy_word udewy_store_u32(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n    return UINT64_C(0);\n\}\n\n")
+    } else if flag =? CH_STORE_U64 {
+        bb_push_str(out "static udewy_word udewy_store_u64(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n    p[4] = (unsigned char)(value >> 32); p[5] = (unsigned char)(value >> 40); p[6] = (unsigned char)(value >> 48); p[7] = (unsigned char)(value >> 56);\n    return UINT64_C(0);\n\}\n\n")
+    }
+    return void
+}
+
+let c_extern_wrapper_def = (out:int name:int wrapper:int):>void => {
+    bb_push_str(out "static udewy_word ")
+    bb_push_str(out wrapper)
+    if str_eq(name "putchar") {
+        bb_push_str(out "(udewy_word arg0) \{ return (udewy_word)(int64_t)putchar((int)arg0); \}\n")
+    } else if str_eq(name "puts") {
+        bb_push_str(out "(udewy_word arg0) \{ return (udewy_word)(int64_t)puts((const char *)(uintptr_t)arg0); \}\n")
+    } else if str_eq(name "malloc") {
+        bb_push_str(out "(udewy_word arg0) \{ return (udewy_word)(uintptr_t)malloc((size_t)arg0); \}\n")
+    } else if str_eq(name "calloc") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1) \{ return (udewy_word)(uintptr_t)calloc((size_t)arg0, (size_t)arg1); \}\n")
+    } else if str_eq(name "free") {
+        bb_push_str(out "(udewy_word arg0) \{ free((void *)(uintptr_t)arg0); return UINT64_C(0); \}\n")
+    } else if str_eq(name "exit") {
+        bb_push_str(out "(udewy_word arg0) \{ exit((int)arg0); return UINT64_C(0); \}\n")
+    } else if str_eq(name "open") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)open((const char *)(uintptr_t)arg0, (int)arg1, (mode_t)arg2); \}\n")
+    } else if str_eq(name "read") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)read((int)arg0, (void *)(uintptr_t)arg1, (size_t)arg2); \}\n")
+    } else if str_eq(name "write") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)write((int)arg0, (const void *)(uintptr_t)arg1, (size_t)arg2); \}\n")
+    } else if str_eq(name "close") {
+        bb_push_str(out "(udewy_word arg0) \{ return (udewy_word)(int64_t)close((int)arg0); \}\n")
+    } else if str_eq(name "lseek") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)lseek((int)arg0, (off_t)(int64_t)arg1, (int)arg2); \}\n")
+    } else if str_eq(name "dup2") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1) \{ return (udewy_word)(int64_t)dup2((int)arg0, (int)arg1); \}\n")
+    } else if str_eq(name "mkdir") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1) \{ return (udewy_word)(int64_t)mkdir((const char *)(uintptr_t)arg0, (mode_t)arg1); \}\n")
+    } else if str_eq(name "unlink") {
+        bb_push_str(out "(udewy_word arg0) \{ return (udewy_word)(int64_t)unlink((const char *)(uintptr_t)arg0); \}\n")
+    } else if str_eq(name "chdir") {
+        bb_push_str(out "(udewy_word arg0) \{ return (udewy_word)(int64_t)chdir((const char *)(uintptr_t)arg0); \}\n")
+    } else if str_eq(name "fork") {
+        bb_push_str(out "(void) \{ return (udewy_word)(int64_t)fork(); \}\n")
+    } else if str_eq(name "execve") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)execve((const char *)(uintptr_t)arg0, (char *const *)(uintptr_t)arg1, (char *const *)(uintptr_t)arg2); \}\n")
+    } else if str_eq(name "waitpid") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)waitpid((pid_t)(int64_t)arg0, (int *)(uintptr_t)arg1, (int)arg2); \}\n")
+    }
+    return void
+}
+
+let c_render_arg_signature = (out:int param_count:int):>void => {
+    if param_count =? 0 {
+        bb_push_str(out "void")
+        return void
+    }
+    let i:int = 0
+    loop i <? param_count {
+        if i >? 0 { bb_push_str(out ", ") }
+        bb_push_str(out "udewy_word arg")
+        bb_push_int(out i)
+        i = i + 1
+    }
+    return void
+}
+
+let c_finish_module = ():>int => {
+    let out:int = bb_new(8192)
+    bb_push_str(out "#include <stdint.h>\n")
+    bb_push_str(out "#include <stddef.h>\n")
+    if c_has_capability(CAP_STDIO)  { bb_push_str(out "#include <stdio.h>\n") }
+    if c_has_capability(CAP_STDLIB) { bb_push_str(out "#include <stdlib.h>\n") }
+    if c_has_capability(CAP_MATH)   { bb_push_str(out "#include <math.h>\n") }
+    if c_has_capability(CAP_POSIX) {
+        bb_push_str(out "#include <fcntl.h>\n")
+        bb_push_str(out "#include <sys/stat.h>\n")
+        bb_push_str(out "#include <sys/wait.h>\n")
+        bb_push_str(out "#include <unistd.h>\n")
+    }
+    bb_push_byte(out 10)
+    bb_push_str(out "typedef uint64_t udewy_word;\n")
+    bb_push_str(out "#define UDEWY_TRUE (~UINT64_C(0))\n\n")
+
+    if (c_helpers and CH_ALLOCA) not=? 0 {
+        bb_push_str(out "#if defined(__GNUC__) || defined(__clang__)\n#define UDEWY_ALLOCA(size) __builtin_alloca(size)\n#elif defined(__has_include)\n#if __has_include(<alloca.h>)\n#include <alloca.h>\n#define UDEWY_ALLOCA(size) alloca(size)\n#endif\n#endif\n#ifndef UDEWY_ALLOCA\n#error \"udewy C backend requires alloca support\"\n#endif\n\n")
+    }
+    c_render_helper(out CH_BOOL)
+    c_render_helper(out CH_SIGNED_DIV)
+    c_render_helper(out CH_SIGNED_MOD)
+    c_render_helper(out CH_UNSIGNED_DIV)
+    c_render_helper(out CH_UNSIGNED_MOD)
+    c_render_helper(out CH_SIGNED_SHR)
+    c_render_helper(out CH_I64_TO_F32)
+    c_render_helper(out CH_I64_TO_F64)
+    c_render_helper(out CH_F32_TO_I64)
+    c_render_helper(out CH_F64_TO_I64)
+    c_render_helper(out CH_F32_FROM_BITS)
+    c_render_helper(out CH_F64_FROM_BITS)
+    c_render_helper(out CH_LOAD_U8)
+    c_render_helper(out CH_LOAD_I8)
+    c_render_helper(out CH_LOAD_U16)
+    c_render_helper(out CH_LOAD_I16)
+    c_render_helper(out CH_LOAD_U32)
+    c_render_helper(out CH_LOAD_I32)
+    c_render_helper(out CH_LOAD_U64)
+    c_render_helper(out CH_LOAD_I64)
+    c_render_helper(out CH_STORE_U8)
+    c_render_helper(out CH_STORE_U16)
+    c_render_helper(out CH_STORE_U32)
+    c_render_helper(out CH_STORE_U64)
+
+    # --- Data definitions ---
+    # Strings.
+    let i:int = 0
+    loop i <? c_next_label {
+        if intmap_has(c_string_contents i) {
+            let bytes:int = intmap_get(c_string_contents i)
+            let blen:int = str_len(bytes)
+            let w:int = blen
+            if w =? 0 { w = 1 }
+            bb_push_str(out "static struct \{ udewy_word len; unsigned char data[")
+            bb_push_int(out w)
+            bb_push_str(out "]; \} udewy_string_")
+            bb_push_int(out i)
+            bb_push_str(out " = \{\n    ")
+            bb_push_str(out c_u64_literal(blen))
+            bb_push_str(out ",\n    \{ ")
+            if blen =? 0 {
+                bb_push_byte(out 48)
+            } else {
+                let k:int = 0
+                loop k <? blen {
+                    if k >? 0 { bb_push_str(out ", ") }
+                    bb_push_int(out __load_u8__(bytes + k))
+                    k = k + 1
+                }
+            }
+            bb_push_str(out " \},\n\};\n")
+        }
+        i = i + 1
+    }
+    # Arrays.
+    let ai:int = 0
+    loop ai <? vec_len(c_array_label_ids) {
+        let lid:int = vec_get(c_array_label_ids ai)
+        let elems:int = intmap_get(c_array_elements lid)
+        let kinds:int = intmap_get(c_array_kinds lid)
+        let n:int = vec_len(elems)
+        let w:int = n
+        if w =? 0 { w = 1 }
+        bb_push_str(out "static struct \{ udewy_word len; udewy_word data[")
+        bb_push_int(out w)
+        bb_push_str(out "]; \} udewy_array_")
+        bb_push_int(out lid)
+        bb_push_str(out " = \{\n    ")
+        bb_push_str(out c_u64_literal(n))
+        bb_push_str(out ",\n    \{ ")
+        if n =? 0 {
+            bb_push_str(out "UINT64_C(0)")
+        } else {
+            let k:int = 0
+            loop k <? n {
+                if k >? 0 { bb_push_str(out ", ") }
+                if vec_get(kinds k) =? 1 {
+                    bb_push_str(out c_u64_literal(vec_get(elems k)))
+                } else {
+                    bb_push_str(out "UINT64_C(0)")
+                }
+                k = k + 1
+            }
+        }
+        bb_push_str(out " \},\n\};\n")
+        ai = ai + 1
+    }
+    # Statics.
+    let si:int = 0
+    loop si <? c_next_label {
+        if intmap_has(c_static_sizes si) {
+            let sz:int = intmap_get(c_static_sizes si)
+            let w:int = sz
+            if w =? 0 { w = 1 }
+            bb_push_str(out "static unsigned char udewy_static_")
+            bb_push_int(out si)
+            bb_push_byte(out 91)
+            bb_push_int(out w)
+            bb_push_str(out "] = \{0\};\n")
+        }
+        si = si + 1
+    }
+    # Globals.
+    let gi:int = 0
+    loop gi <? c_next_label {
+        if intmap_has(c_global_names gi) {
+            let gn:int = intmap_get(c_global_names gi)
+            if intset_has(c_extern_globals gi) {
+                bb_push_str(out "extern udewy_word ")
+                bb_push_str(out gn)
+                bb_push_str(out ";\n")
+            } else {
+                let init:int = intmap_get(c_global_initializers gi)
+                if intset_has(c_global_init_is_str gi) {
+                    bb_push_str(out "static udewy_word ")
+                    bb_push_str(out gn)
+                    bb_push_str(out " = UINT64_C(0);\n")
+                } else {
+                    bb_push_str(out "static udewy_word ")
+                    bb_push_str(out gn)
+                    bb_push_str(out " = ")
+                    bb_push_str(out c_u64_literal(init))
+                    bb_push_str(out ";\n")
+                }
+            }
+        }
+        gi = gi + 1
+    }
+    bb_push_byte(out 10)
+
+    # --- Prototypes (defined first then externs) ---
+    let order_n:int = vec_len(c_function_order)
+    let pi:int = 0
+    loop pi <? order_n {
+        let lid:int = vec_get(c_function_order pi)
+        if not intset_has(c_extern_fn lid) {
+            if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable lid) {
+                bb_push_str(out "static udewy_word ")
+                bb_push_str(out intmap_get(c_fn_names lid))
+                bb_push_byte(out 40)
+                c_render_arg_signature(out intmap_get(c_function_param_counts lid))
+                bb_push_str(out ");\n")
+            }
+        }
+        pi = pi + 1
+    }
+    let ei:int = 0
+    loop ei <? c_next_label {
+        if intset_has(c_extern_fn ei) {
+            let name:int = intmap_get(c_fn_names ei)
+            let wrapper:int = c_known_extern_wrapper(name)
+            if wrapper =? 0 {
+                if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable ei) {
+                    bb_push_str(out "extern udewy_word ")
+                    bb_push_str(out name)
+                    bb_push_byte(out 40)
+                    c_render_arg_signature(out intmap_get(c_fn_param_counts ei))
+                    bb_push_str(out ");\n")
+                }
+            } else {
+                if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable ei) {
+                    bb_push_str(out "static udewy_word ")
+                    bb_push_str(out wrapper)
+                    bb_push_byte(out 40)
+                    c_render_arg_signature(out intmap_get(c_fn_param_counts ei))
+                    bb_push_str(out ");\n")
+                }
+            }
+        }
+        ei = ei + 1
+    }
+    bb_push_byte(out 10)
+
+    # --- Extern wrappers definitions ---
+    let wi:int = 0
+    loop wi <? c_next_label {
+        if intset_has(c_extern_fn wi) {
+            if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable wi) {
+                let name:int = intmap_get(c_fn_names wi)
+                let wrapper:int = c_known_extern_wrapper(name)
+                if wrapper not=? 0 {
+                    c_extern_wrapper_def(out name wrapper)
+                }
+            }
+        }
+        wi = wi + 1
+    }
+    bb_push_byte(out 10)
+
+    # --- Backend init for non-trivial globals/arrays ---
+    let init_lines:int = vec_new(8)
+    let arr_idx:int = 0
+    loop arr_idx <? vec_len(c_array_label_ids) {
+        let lid:int = vec_get(c_array_label_ids arr_idx)
+        let elems:int = intmap_get(c_array_elements lid)
+        let kinds:int = intmap_get(c_array_kinds lid)
+        let n:int = vec_len(elems)
+        let k:int = 0
+        loop k <? n {
+            if vec_get(kinds k) not=? 1 {
+                let bb:int = bb_new(64)
+                bb_push_str(bb "    udewy_array_")
+                bb_push_int(bb lid)
+                bb_push_str(bb ".data[")
+                bb_push_int(bb k)
+                bb_push_str(bb "] = ")
+                bb_push_str(bb vec_get(elems k))
+                bb_push_byte(bb 59)
+                vec_push(init_lines bb_finalize_as_string(bb))
+            }
+            k = k + 1
+        }
+        arr_idx = arr_idx + 1
+    }
+    let g2:int = 0
+    loop g2 <? c_next_label {
+        if intmap_has(c_global_names g2) and (not intset_has(c_extern_globals g2)) {
+            if intset_has(c_global_init_is_str g2) {
+                let bb:int = bb_new(64)
+                bb_push_str(bb "    ")
+                bb_push_str(bb intmap_get(c_global_names g2))
+                bb_push_str(bb " = ")
+                bb_push_str(bb intmap_get(c_global_initializers g2))
+                bb_push_byte(bb 59)
+                vec_push(init_lines bb_finalize_as_string(bb))
+            }
+        }
+        g2 = g2 + 1
+    }
+    let need_init:int = FALSE_VAL
+    if vec_len(init_lines) >? 0 {
+        need_init = TRUE_VAL
+        bb_push_str(out "static void udewy_backend_init(void) \{\n")
+        let li:int = 0
+        loop li <? vec_len(init_lines) {
+            bb_push_str(out vec_get(init_lines li))
+            bb_push_byte(out 10)
+            li = li + 1
+        }
+        bb_push_str(out "\}\n\n")
+    }
+
+    # --- Function bodies ---
+    let fi:int = 0
+    loop fi <? order_n {
+        let lid:int = vec_get(c_function_order fi)
+        if not intset_has(c_extern_fn lid) {
+            if (c_have_reachable =? FALSE_VAL) or intset_has(c_reachable lid) {
+                bb_push_str(out "static udewy_word ")
+                bb_push_str(out intmap_get(c_fn_names lid))
+                bb_push_byte(out 40)
+                c_render_arg_signature(out intmap_get(c_function_param_counts lid))
+                bb_push_str(out ") \{\n")
+                let nl:int = intmap_get(c_function_locals lid)
+                let li:int = 0
+                loop li <? nl {
+                    bb_push_str(out "    udewy_word local")
+                    bb_push_int(out li)
+                    bb_push_str(out " = UINT64_C(0);\n")
+                    li = li + 1
+                }
+                let lines:int = intmap_get(c_function_lines lid)
+                let lc:int = vec_len(lines)
+                let lj:int = 0
+                loop lj <? lc {
+                    bb_push_str(out vec_get(lines lj))
+                    bb_push_byte(out 10)
+                    lj = lj + 1
+                }
+                bb_push_str(out "\}\n\n")
+            }
+        }
+        fi = fi + 1
+    }
+
+    # --- main() wrapper ---
+    bb_push_str(out "int main(int argc, char **argv) \{\n    (void)argc; (void)argv;\n")
+    if need_init { bb_push_str(out "    udewy_backend_init();\n") }
+    if c_module_init_name not=? 0 {
+        bb_push_str(out "    ")
+        # Find which fn matches module_init_name source.
+        let found:int = 0
+        let mi:int = 0
+        loop mi <? c_next_label {
+            if intmap_has(c_fn_source_names mi) {
+                if str_eq(intmap_get(c_fn_source_names mi) c_module_init_name) {
+                    bb_push_str(out intmap_get(c_fn_names mi))
+                    found = 1
+                    break
+                }
+            }
+            mi = mi + 1
+        }
+        if not found { bb_push_str(out c_module_init_name) }
+        bb_push_str(out "();\n")
+    }
+    if c_main_label_id <? 0 {
+        bb_push_str(out "    return 0;\n")
+    } else {
+        bb_push_str(out "    return (int)")
+        bb_push_str(out intmap_get(c_fn_names c_main_label_id))
+        let main_params:int = intmap_get(c_function_param_counts c_main_label_id)
+        if main_params =? 0 {
+            bb_push_str(out "();\n")
+        } else if main_params =? 1 {
+            bb_push_str(out "((udewy_word)argc);\n")
+        } else {
+            bb_push_str(out "((udewy_word)argc, (udewy_word)(uintptr_t)argv);\n")
+        }
+    }
+    bb_push_str(out "\}\n")
+    return bb_finalize_as_string(out)
+}
+
+# --- compile_and_link / run ---
+
+let c_compile_and_link = (code:int input_name:int cache_dir:int options:int):>int => {
+    fs_mkdir_p(cache_dir)
+    let c_bb:int = bb_new(str_len(cache_dir) + str_len(input_name) + 4)
+    bb_push_str(c_bb cache_dir)
+    bb_push_byte(c_bb 47)
+    bb_push_str(c_bb input_name)
+    bb_push_str(c_bb ".c")
+    let c_path:int = bb_finalize_as_string(c_bb)
+
+    let exe_bb:int = bb_new(str_len(cache_dir) + str_len(input_name) + 2)
+    bb_push_str(exe_bb cache_dir)
+    bb_push_byte(exe_bb 47)
+    bb_push_str(exe_bb input_name)
+    let exe_path:int = bb_finalize_as_string(exe_bb)
+
+    fs_write_file(path_to_cstr(c_path) code str_len(code))
+
+    let argv:int = vec_new(8)
+    vec_push(argv c_str("cc"))
+    vec_push(argv c_str("-std=c99"))
+    vec_push(argv c_str("-o"))
+    vec_push(argv exe_path)
+    vec_push(argv c_path)
+    if c_has_capability(CAP_MATH) { vec_push(argv c_str("-lm")) }
+    proc_run_or_die(argv "C compiler failed")
+    return exe_path
+}
+
+let c_run = (output_path:int args:int options:int):>int => {
+    let argv:int = vec_new(vec_len(args) + 1)
+    vec_push(argv output_path)
+    let i:int = 0
+    loop i <? vec_len(args) {
+        vec_push(argv vec_get(args i))
+        i = i + 1
+    }
+    return proc_run(argv)
+}
+
+let c_get_compile_message = (output_path:int options:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "Compiled: ")
+    bb_push_str(bb output_path)
+    return bb_finalize_as_string(bb)
+}
+
+let c_install_backend = ():>void => {
+    c_alloc_state()
+    be_begin_module = c_begin_module
+    be_finish_module = c_finish_module
+    be_set_module_init = c_set_module_init
+    be_set_imported_sources = c_set_imported_sources
+    be_intern_string = c_intern_string
+    be_intern_array = c_intern_array
+    be_define_global = c_define_global
+    be_declare_extern_global = c_declare_extern_global
+    be_intern_static = c_intern_static
+    be_push_string_ref = c_push_string_ref
+    be_push_array_ref = c_push_array_ref
+    be_push_global_ref = c_push_global_ref
+    be_push_static_ref = c_push_static_ref
+    be_load_global = c_load_global
+    be_store_global = c_store_global
+    be_function_ref = c_function_ref
+    be_string_ref = c_string_ref
+    be_array_ref = c_array_ref
+    be_static_ref = c_static_ref
+    be_declare_function = c_declare_function
+    be_bind_extern_function = c_bind_extern_function
+    be_declare_extern_function = c_declare_extern_function
+    be_should_warn_unused_extern = c_should_warn_unused_extern
+    be_begin_function = c_begin_function
+    be_end_function = c_end_function
+    be_set_reachable_functions = c_set_reachable_functions
+    be_load_param = c_load_param
+    be_alloc_local = c_alloc_local
+    be_load_local = c_load_local
+    be_store_local = c_store_local
+    be_push_const_i64 = c_push_const_i64
+    be_push_void = c_push_void
+    be_push_fn_ref = c_push_fn_ref
+    be_pop_value = c_pop_value
+    be_save_value = c_save_value
+    be_restore_value = c_restore_value
+    be_unary_op = c_unary_op
+    be_binary_op = c_binary_op
+    be_pipe_call = c_pipe_call
+    be_begin_if = c_begin_if
+    be_begin_else = c_begin_else
+    be_end_if = c_end_if
+    be_begin_loop = c_begin_loop
+    be_begin_loop_body = c_begin_loop_body
+    be_end_loop = c_end_loop
+    be_emit_break = c_emit_break
+    be_emit_continue = c_emit_continue
+    be_cond_and_split = c_cond_and_split
+    be_cond_and_join = c_cond_and_join
+    be_cond_or_split = c_cond_or_split
+    be_cond_or_join = c_cond_or_join
+    be_emit_return = c_emit_return
+    be_call_direct = c_call_direct
+    be_call_indirect = c_call_indirect
+    be_max_call_args = c_max_call_args
+    be_is_intrinsic = c_is_intrinsic
+    be_intrinsic_arity = c_intrinsic_arity
+    be_intrinsic_static_arg_indices = c_intrinsic_static_arg_indices
+    be_emit_intrinsic = c_emit_intrinsic
+    be_get_builtin_constants = c_get_builtin_constants
+    be_compile_and_link = c_compile_and_link
+    be_run = c_run
+    be_get_compile_message = c_get_compile_message
+    return void
+}

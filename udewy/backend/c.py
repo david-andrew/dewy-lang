@@ -14,6 +14,7 @@ _CAPABILITY_HEADERS: dict[str, set[str]] = {
     "stdio": {"<stdio.h>"},
     "stdlib": {"<stdlib.h>"},
     "math": {"<math.h>"},
+    "posix": {"<unistd.h>", "<fcntl.h>", "<sys/stat.h>", "<sys/wait.h>"},
 }
 
 _CAPABILITY_LINK_ARGS: dict[str, list[str]] = {
@@ -29,6 +30,18 @@ _KNOWN_EXTERN_CAPABILITIES: dict[str, str] = {
     "calloc": "stdlib",
     "free": "stdlib",
     "exit": "stdlib",
+    "open": "posix",
+    "read": "posix",
+    "write": "posix",
+    "close": "posix",
+    "lseek": "posix",
+    "dup2": "posix",
+    "mkdir": "posix",
+    "unlink": "posix",
+    "chdir": "posix",
+    "fork": "posix",
+    "execve": "posix",
+    "waitpid": "posix",
 }
 
 _HELPER_DEPS: dict[str, set[str]] = {
@@ -689,6 +702,66 @@ class CBackend(Backend):
                 "    return UINT64_C(0);",
                 "}",
             ],
+            "open": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1, udewy_word arg2) {{",
+                "    return (udewy_word)(int64_t)open((const char *)(uintptr_t)arg0, (int)arg1, (mode_t)arg2);",
+                "}",
+            ],
+            "read": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1, udewy_word arg2) {{",
+                "    return (udewy_word)(int64_t)read((int)arg0, (void *)(uintptr_t)arg1, (size_t)arg2);",
+                "}",
+            ],
+            "write": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1, udewy_word arg2) {{",
+                "    return (udewy_word)(int64_t)write((int)arg0, (const void *)(uintptr_t)arg1, (size_t)arg2);",
+                "}",
+            ],
+            "close": [
+                f"static udewy_word {wrapper}(udewy_word arg0) {{",
+                "    return (udewy_word)(int64_t)close((int)arg0);",
+                "}",
+            ],
+            "lseek": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1, udewy_word arg2) {{",
+                "    return (udewy_word)(int64_t)lseek((int)arg0, (off_t)(int64_t)arg1, (int)arg2);",
+                "}",
+            ],
+            "dup2": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1) {{",
+                "    return (udewy_word)(int64_t)dup2((int)arg0, (int)arg1);",
+                "}",
+            ],
+            "mkdir": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1) {{",
+                "    return (udewy_word)(int64_t)mkdir((const char *)(uintptr_t)arg0, (mode_t)arg1);",
+                "}",
+            ],
+            "unlink": [
+                f"static udewy_word {wrapper}(udewy_word arg0) {{",
+                "    return (udewy_word)(int64_t)unlink((const char *)(uintptr_t)arg0);",
+                "}",
+            ],
+            "chdir": [
+                f"static udewy_word {wrapper}(udewy_word arg0) {{",
+                "    return (udewy_word)(int64_t)chdir((const char *)(uintptr_t)arg0);",
+                "}",
+            ],
+            "fork": [
+                f"static udewy_word {wrapper}(void) {{",
+                "    return (udewy_word)(int64_t)fork();",
+                "}",
+            ],
+            "execve": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1, udewy_word arg2) {{",
+                "    return (udewy_word)(int64_t)execve((const char *)(uintptr_t)arg0, (char *const *)(uintptr_t)arg1, (char *const *)(uintptr_t)arg2);",
+                "}",
+            ],
+            "waitpid": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1, udewy_word arg2) {{",
+                "    return (udewy_word)(int64_t)waitpid((pid_t)(int64_t)arg0, (int *)(uintptr_t)arg1, (int)arg2);",
+                "}",
+            ],
         }
         return "\n".join(wrappers[name])
 
@@ -776,7 +849,7 @@ class CBackend(Backend):
         return prototypes
 
     def _render_main_wrapper(self) -> str:
-        lines = ["int main(int argc, char **argv) {", "    (void)argc;", "    (void)argv;"]
+        lines = ["int main(int argc, char **argv) {"]
 
         if self._render_backend_init() is not None:
             lines.append("    udewy_backend_init();")
@@ -790,9 +863,21 @@ class CBackend(Backend):
             lines.append(f"    {module_init_name}();")
 
         if self._main_label_id is None:
+            lines.append("    (void)argc;")
+            lines.append("    (void)argv;")
             lines.append("    return 0;")
         else:
-            lines.append(f"    return (int){self._fn_names[self._main_label_id]}();")
+            main_params = self._fn_param_counts.get(self._main_label_id, 0)
+            main_name = self._fn_names[self._main_label_id]
+            if main_params == 0:
+                lines.append("    (void)argc;")
+                lines.append("    (void)argv;")
+                lines.append(f"    return (int){main_name}();")
+            elif main_params == 1:
+                lines.append("    (void)argv;")
+                lines.append(f"    return (int){main_name}((udewy_word)argc);")
+            else:
+                lines.append(f"    return (int){main_name}((udewy_word)argc, (udewy_word)(uintptr_t)argv);")
 
         lines.append("}")
         return "\n".join(lines)

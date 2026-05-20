@@ -1,0 +1,93 @@
+# Growable vector of int64 values.
+#
+# Vec is a pointer to a 24-byte header:
+#   +0  cap   number of slots the underlying buffer can hold
+#   +8  len   number of slots currently used
+#   +16 data  pointer to underlying slot buffer (8 bytes per slot)
+
+const VEC_OFF_CAP:int = 0
+const VEC_OFF_LEN:int = 8
+const VEC_OFF_DATA:int = 16
+const VEC_HEADER_SIZE:int = 24
+
+let vec_new = (initial_cap:int):>int => {
+    let hdr:int = arena_alloc(VEC_HEADER_SIZE)
+    let cap:int = initial_cap
+    if cap <? 4 { cap = 4 }
+    let data:int = arena_alloc(cap * 8)
+    __store__(cap hdr + VEC_OFF_CAP)
+    __store__(0 hdr + VEC_OFF_LEN)
+    __store__(data hdr + VEC_OFF_DATA)
+    return hdr
+}
+
+let vec_cap = (v:int):>int => {
+    return __load__(v + VEC_OFF_CAP)
+}
+
+let vec_len = (v:int):>int => {
+    return __load__(v + VEC_OFF_LEN)
+}
+
+let vec_data = (v:int):>int => {
+    return __load__(v + VEC_OFF_DATA)
+}
+
+let vec_reset = (v:int):>void => {
+    __store__(0 v + VEC_OFF_LEN)
+    return void
+}
+
+let vec_grow = (v:int min_cap:int):>void => {
+    let cap:int = vec_cap(v)
+    if cap >=? min_cap { return void }
+    let new_cap:int = cap
+    loop new_cap <? min_cap {
+        new_cap = new_cap * 2
+    }
+    let old_data:int = vec_data(v)
+    let new_data:int = arena_alloc(new_cap * 8)
+    let len:int = vec_len(v)
+    let i:int = 0
+    loop i <? len {
+        __store__(__load__(old_data + (i << 3)) new_data + (i << 3))
+        i = i + 1
+    }
+    __store__(new_cap v + VEC_OFF_CAP)
+    __store__(new_data v + VEC_OFF_DATA)
+    return void
+}
+
+let vec_push = (v:int val:int):>void => {
+    let len:int = vec_len(v)
+    vec_grow(v len + 1)
+    let data:int = vec_data(v)
+    __store__(val data + (len << 3))
+    __store__(len + 1 v + VEC_OFF_LEN)
+    return void
+}
+
+let vec_pop = (v:int):>int => {
+    let len:int = vec_len(v)
+    len = len - 1
+    __store__(len v + VEC_OFF_LEN)
+    return __load__(vec_data(v) + (len << 3))
+}
+
+let vec_get = (v:int idx:int):>int => {
+    return __load__(vec_data(v) + (idx << 3))
+}
+
+let vec_set = (v:int idx:int val:int):>void => {
+    __store__(val vec_data(v) + (idx << 3))
+    return void
+}
+
+let vec_top = (v:int):>int => {
+    return __load__(vec_data(v) + ((vec_len(v) - 1) << 3))
+}
+
+let vec_set_len = (v:int new_len:int):>void => {
+    __store__(new_len v + VEC_OFF_LEN)
+    return void
+}

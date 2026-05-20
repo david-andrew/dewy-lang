@@ -1,0 +1,11 @@
+# Generic data structures entry point.
+# All of these are backed by the arena allocator. Memory is never freed; growth
+# allocates a new buffer and copies the live data, leaking the old buffer's
+# arena bytes. This trade is fine for one-shot programs like the bootstrap.
+
+import p"./bytebuf.udewy"
+import p"./vec.udewy"
+import p"./map.udewy"
+import p"./set.udewy"
+import p"./intmap.udewy"
+import p"./intset.udewy"

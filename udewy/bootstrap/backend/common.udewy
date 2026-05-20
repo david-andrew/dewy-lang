@@ -1,0 +1,146 @@
+# Backend protocol -- function pointer globals populated by select_backend().
+#
+# Every Backend method in udewy/backend/common.py maps to a global function
+# pointer here. Backends populate these pointers at startup via select_backend.
+# The parser then calls through them with normal indirect call syntax.
+
+import p"../runtime/runtime.udewy"
+import p"../t1.udewy"
+
+# ----------------------------------------------------------------------------
+# Core intrinsic arities (mirrors backend.common.CORE_INTRINSIC_ARITIES)
+# ----------------------------------------------------------------------------
+
+let g_core_intrinsics:int = 0   # Map of name -> arity
+
+let core_intrinsics_init = ():>void => {
+    if g_core_intrinsics not=? 0 { return void }
+    let m:int = map_new()
+    map_put_str(m "__load_u8__" 1)
+    map_put_str(m "__load_u16__" 1)
+    map_put_str(m "__load_u32__" 1)
+    map_put_str(m "__load_u64__" 1)
+    map_put_str(m "__store_u8__" 2)
+    map_put_str(m "__store_u16__" 2)
+    map_put_str(m "__store_u32__" 2)
+    map_put_str(m "__store_u64__" 2)
+    map_put_str(m "__load_i8__" 1)
+    map_put_str(m "__load_i16__" 1)
+    map_put_str(m "__load_i32__" 1)
+    map_put_str(m "__load_i64__" 1)
+    map_put_str(m "__store_i8__" 2)
+    map_put_str(m "__store_i16__" 2)
+    map_put_str(m "__store_i32__" 2)
+    map_put_str(m "__store_i64__" 2)
+    map_put_str(m "__load__" 1)
+    map_put_str(m "__store__" 2)
+    map_put_str(m "__alloca__" 1)
+    map_put_str(m "__static_alloca__" 1)
+    map_put_str(m "__signed_shr__" 2)
+    map_put_str(m "__unsigned_idiv__" 2)
+    map_put_str(m "__unsigned_mod__" 2)
+    map_put_str(m "__unsigned_lt__" 2)
+    map_put_str(m "__unsigned_gt__" 2)
+    map_put_str(m "__unsigned_lte__" 2)
+    map_put_str(m "__unsigned_gte__" 2)
+    g_core_intrinsics = m
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Function pointer globals. All initialized to 0; populated by select_backend.
+# ----------------------------------------------------------------------------
+#
+# Module lifecycle
+let be_begin_module:int = 0           # fn ():>void
+let be_finish_module:int = 0          # fn ():>int (returns length-prefixed code string)
+let be_set_module_init:int = 0        # fn (name:int):>void   (0 if no init)
+let be_set_imported_sources:int = 0   # fn (paths_vec:int):>void
+
+# Data section
+let be_intern_string:int = 0          # fn (data:int len:int):>int
+let be_intern_array:int = 0           # fn (elements_vec:int kinds_vec:int):>int
+let be_define_global:int = 0          # fn (name:int kind:int value:int):>int  kind: 0=int, 1=fn, 2=str, 3=arr, 4=static
+let be_declare_extern_global:int = 0  # fn (name:int):>int
+let be_intern_static:int = 0          # fn (size:int):>int
+let be_push_string_ref:int = 0        # fn (label_id:int):>void
+let be_push_array_ref:int = 0         # fn (label_id:int):>void
+let be_push_global_ref:int = 0        # fn (label_id:int):>void
+let be_push_static_ref:int = 0        # fn (label_id:int):>void
+let be_load_global:int = 0            # fn (label_id:int):>void
+let be_store_global:int = 0           # fn (label_id:int):>void
+let be_function_ref:int = 0           # fn (label_id:int):>int
+let be_string_ref:int = 0             # fn (label_id:int):>int
+let be_array_ref:int = 0              # fn (label_id:int):>int
+let be_static_ref:int = 0             # fn (label_id:int):>int
+
+# Functions
+let be_declare_function:int = 0       # fn (name:int num_params:int):>int
+let be_bind_extern_function:int = 0   # fn (label_id:int name:int):>void
+let be_declare_extern_function:int = 0  # fn (name:int num_params:int):>int
+let be_should_warn_unused_extern:int = 0  # fn (name:int):>int
+let be_begin_function:int = 0         # fn (label_id:int name:int param_count:int is_main:int):>void
+let be_end_function:int = 0           # fn ():>void
+let be_set_reachable_functions:int = 0  # fn (label_ids_set:int):>void
+let be_load_param:int = 0             # fn (index:int):>void
+let be_alloc_local:int = 0            # fn ():>int
+let be_load_local:int = 0             # fn (slot:int):>void
+let be_store_local:int = 0            # fn (slot:int):>void
+
+# Value stack
+let be_push_const_i64:int = 0         # fn (value:int):>void
+let be_push_void:int = 0              # fn ():>void
+let be_push_fn_ref:int = 0            # fn (label_id:int):>void
+let be_pop_value:int = 0              # fn ():>void
+let be_save_value:int = 0             # fn ():>void
+let be_restore_value:int = 0          # fn ():>void
+
+# Operators
+let be_unary_op:int = 0               # fn (op_kind:int):>void
+let be_binary_op:int = 0              # fn (op_kind:int):>void
+let be_pipe_call:int = 0              # fn ():>void
+
+# Control flow
+let be_begin_if:int = 0
+let be_begin_else:int = 0
+let be_end_if:int = 0
+let be_begin_loop:int = 0
+let be_begin_loop_body:int = 0
+let be_end_loop:int = 0
+let be_emit_break:int = 0
+let be_emit_continue:int = 0
+let be_cond_and_split:int = 0         # fn ():>int (returns label)
+let be_cond_and_join:int = 0          # fn (label:int):>void
+let be_cond_or_split:int = 0          # fn ():>int
+let be_cond_or_join:int = 0           # fn (label:int):>void
+let be_emit_return:int = 0
+
+# Calls
+let be_call_direct:int = 0            # fn (label_id:int num_args:int):>void
+let be_call_indirect:int = 0          # fn (num_args:int):>void
+let be_max_call_args:int = 0          # fn ():>int (-1 = unlimited)
+
+# Intrinsics
+let be_is_intrinsic:int = 0           # fn (name:int):>int
+let be_intrinsic_arity:int = 0        # fn (name:int):>int (-1 = unsupported)
+let be_intrinsic_static_arg_indices:int = 0  # fn (name:int):>int (bitmask)
+let be_emit_intrinsic:int = 0         # fn (name:int num_args:int static_args_map:int):>void
+let be_get_builtin_constants:int = 0  # fn ():>int (returns Map of name -> int)
+
+# Compilation
+let be_compile_and_link:int = 0       # fn (code:int input_name:int cache_dir:int options:int):>int
+let be_run:int = 0                    # fn (output_path:int args:int options:int):>int
+let be_get_compile_message:int = 0    # fn (output_path:int options:int):>int
+
+# Default for backends without source-level capability modules.
+let be_default_should_warn_unused_extern = (name:int):>int => {
+    return TRUE_VAL
+}
+
+let be_default_set_imported_sources = (paths_vec:int):>void => {
+    return void
+}
+
+let be_default_intrinsic_static_arg_indices = (name:int):>int => {
+    return 0
+}

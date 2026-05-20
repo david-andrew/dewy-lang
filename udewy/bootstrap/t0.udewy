@@ -1,0 +1,670 @@
+# Import preprocessor for udewy.
+#
+# Matches udewy/t0.py: recursively resolves `import p"..."` directives, applies
+# `$supported_targets`, target-conditional `if $target ...` blocks, and
+# `$warning`/`$error` diagnostics. Returns the combined source with imported
+# content prepended, plus the lists of imported source paths and native link
+# artifacts.
+
+import p"./runtime/runtime.udewy"
+
+# ----------------------------------------------------------------------------
+# Character classification
+# ----------------------------------------------------------------------------
+
+const T0_CH_HASH:int = 35
+const T0_CH_LF:int = 10
+const T0_CH_CR:int = 13
+const T0_CH_TAB:int = 9
+const T0_CH_SP:int = 32
+const T0_CH_DQUOTE:int = 34
+const T0_CH_BACKSLASH:int = 92
+const T0_CH_LBRACE:int = 123
+const T0_CH_RBRACE:int = 125
+const T0_CH_LBRACKET:int = 91
+const T0_CH_RBRACKET:int = 93
+const T0_CH_LPAREN:int = 40
+const T0_CH_RPAREN:int = 41
+const T0_CH_EQ:int = 61
+const T0_CH_QUESTION:int = 63
+const T0_CH_BANG:int = 33
+const T0_CH_p:int = 112
+const T0_CH_DOLLAR:int = 36
+
+let t0_is_horizontal_ws = (c:int):>int => {
+    if c =? T0_CH_SP { return TRUE_VAL }
+    if c =? T0_CH_TAB { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t0_is_vertical_ws = (c:int):>int => {
+    if c =? T0_CH_LF { return TRUE_VAL }
+    if c =? T0_CH_CR { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t0_is_ws = (c:int):>int => {
+    if t0_is_horizontal_ws(c) { return TRUE_VAL }
+    if t0_is_vertical_ws(c) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t0_is_alpha = (c:int):>int => {
+    if (c >=? 65) and (c <=? 90) { return TRUE_VAL }
+    if (c >=? 97) and (c <=? 122) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t0_is_digit = (c:int):>int => {
+    if (c >=? 48) and (c <=? 57) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t0_is_ident_start = (c:int):>int => {
+    if t0_is_alpha(c) { return TRUE_VAL }
+    if c =? 95 { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let t0_is_ident = (c:int):>int => {
+    if t0_is_ident_start(c) { return TRUE_VAL }
+    if t0_is_digit(c) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+# ----------------------------------------------------------------------------
+# Source navigation
+# ----------------------------------------------------------------------------
+
+# All these helpers take (src:int len:int idx:int) where src is a raw byte
+# pointer (no length prefix required).
+
+let t0_skip_whitespace = (src:int n:int idx:int):>int => {
+    loop idx <? n {
+        if not t0_is_ws(__load_u8__(src + idx)) { return idx }
+        idx = idx + 1
+    }
+    return idx
+}
+
+let t0_skip_horizontal_ws = (src:int n:int idx:int):>int => {
+    loop idx <? n {
+        if not t0_is_horizontal_ws(__load_u8__(src + idx)) { return idx }
+        idx = idx + 1
+    }
+    return idx
+}
+
+let t0_skip_comment = (src:int n:int idx:int):>int => {
+    if idx >=? n { return idx }
+    if __load_u8__(src + idx) not=? T0_CH_HASH { return idx }
+    idx = idx + 1
+    loop (idx <? n) and (__load_u8__(src + idx) not=? T0_CH_LF) {
+        idx = idx + 1
+    }
+    return idx
+}
+
+let t0_skip_trivia = (src:int n:int idx:int):>int => {
+    loop idx <? n {
+        let after_ws:int = t0_skip_whitespace(src n idx)
+        let after_comment:int = t0_skip_comment(src n after_ws)
+        if after_comment =? idx { return idx }
+        idx = after_comment
+    }
+    return idx
+}
+
+# Find the closing quote of a double-quoted string starting at src[idx]=='"'.
+# Returns the offset one past the closing quote.
+let t0_string_end = (src:int n:int idx:int):>int => {
+    # idx points at opening quote
+    let i:int = idx + 1
+    loop (i <? n) and (__load_u8__(src + i) not=? T0_CH_DQUOTE) {
+        let c:int = __load_u8__(src + i)
+        if (c =? T0_CH_LBRACE) or (c =? T0_CH_RBRACE) {
+            diag_error(i "interpolation not supported in udewy strings")
+        }
+        if c =? T0_CH_BACKSLASH {
+            i = i + 1
+            if i >=? n {
+                diag_error(i "unterminated string")
+            }
+        }
+        i = i + 1
+    }
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_DQUOTE) {
+        diag_error(i "unterminated string")
+    }
+    return i + 1
+}
+
+# Does src[idx..] start with the identifier `name` (length-prefixed) followed
+# by a non-ident character?
+let t0_starts_with_name = (src:int n:int idx:int name:int):>int => {
+    let name_len:int = str_len(name)
+    if idx + name_len >? n { return FALSE_VAL }
+    if not str_eq_len(src + idx name_len name name_len) { return FALSE_VAL }
+    let end_idx:int = idx + name_len
+    if end_idx >=? n { return TRUE_VAL }
+    if t0_is_ident(__load_u8__(src + end_idx)) { return FALSE_VAL }
+    return TRUE_VAL
+}
+
+# After a directive's final token, advance past trailing horizontal whitespace,
+# optional comment, and the final newline. If `}` follows on the same line,
+# allow it (for compact target-conditional blocks).
+let t0_consume_directive_eol = (src:int n:int idx:int context:int):>int => {
+    idx = t0_skip_horizontal_ws(src n idx)
+    idx = t0_skip_comment(src n idx)
+    if idx <? n {
+        let c:int = __load_u8__(src + idx)
+        if (not t0_is_vertical_ws(c)) and (c not=? T0_CH_RBRACE) {
+            eprint("error: unexpected trailing content after ")
+            eprintl(context)
+            host_exit(1)
+        }
+    }
+    return t0_skip_whitespace(src n idx)
+}
+
+# ----------------------------------------------------------------------------
+# Load state (shared across recursive loads)
+# ----------------------------------------------------------------------------
+
+# LoadState header (16 bytes):
+#   +0  imported_sources (Set of absolute path strings)
+#   +8  imported_artifacts (Set of absolute path strings)
+const LS_SOURCES:int = 0
+const LS_ARTIFACTS:int = 8
+
+let load_state_new = ():>int => {
+    let ls:int = arena_alloc(16)
+    __store__(set_new() ls + LS_SOURCES)
+    __store__(set_new() ls + LS_ARTIFACTS)
+    return ls
+}
+
+let load_state_sources = (ls:int):>int => { return __load__(ls + LS_SOURCES) }
+let load_state_artifacts = (ls:int):>int => { return __load__(ls + LS_ARTIFACTS) }
+
+# ----------------------------------------------------------------------------
+# LoadedProgram return value
+# ----------------------------------------------------------------------------
+#
+# LoadedProgram header (24 bytes):
+#   +0  source             (length-prefixed string, the combined source)
+#   +8  link_artifacts     (Vec of length-prefixed strings)
+#   +16 imported_sources   (Vec of length-prefixed strings)
+
+const LP_SOURCE:int = 0
+const LP_ARTIFACTS:int = 8
+const LP_SOURCES:int = 16
+
+let loaded_new = (source:int artifacts:int sources:int):>int => {
+    let lp:int = arena_alloc(24)
+    __store__(source lp + LP_SOURCE)
+    __store__(artifacts lp + LP_ARTIFACTS)
+    __store__(sources lp + LP_SOURCES)
+    return lp
+}
+
+let loaded_source = (lp:int):>int => { return __load__(lp + LP_SOURCE) }
+let loaded_artifacts = (lp:int):>int => { return __load__(lp + LP_ARTIFACTS) }
+let loaded_sources = (lp:int):>int => { return __load__(lp + LP_SOURCES) }
+
+# ----------------------------------------------------------------------------
+# PreludeContext (per file, threaded through prelude processing)
+# ----------------------------------------------------------------------------
+#
+# +0  source (length-prefixed)
+# +8  source_path (resolved absolute, length-prefixed)
+# +16 source_dir
+# +24 target_backend
+# +32 state (LoadState)
+# +40 imported_source_parts (Vec of source strings)
+# +48 imported_source_paths (Vec of path strings)
+# +56 link_artifacts (Vec of path strings)
+
+const PC_SRC:int = 0
+const PC_PATH:int = 8
+const PC_DIR:int = 16
+const PC_TARGET:int = 24
+const PC_STATE:int = 32
+const PC_SOURCE_PARTS:int = 40
+const PC_SOURCE_PATHS:int = 48
+const PC_ARTIFACTS:int = 56
+
+let pc_new = (src:int path:int dir:int target:int state:int):>int => {
+    let pc:int = arena_alloc(64)
+    __store__(src pc + PC_SRC)
+    __store__(path pc + PC_PATH)
+    __store__(dir pc + PC_DIR)
+    __store__(target pc + PC_TARGET)
+    __store__(state pc + PC_STATE)
+    __store__(vec_new(4) pc + PC_SOURCE_PARTS)
+    __store__(vec_new(4) pc + PC_SOURCE_PATHS)
+    __store__(vec_new(4) pc + PC_ARTIFACTS)
+    return pc
+}
+
+# ----------------------------------------------------------------------------
+# Directive parsing
+# ----------------------------------------------------------------------------
+
+# Parse `import p"..."` starting at idx. On success, returns the path string
+# (length-prefixed) and writes the next idx to next_idx_out. Returns 0 if no
+# match.
+let t0_parse_import_directive = (src:int n:int idx:int next_idx_out:int):>int => {
+    if not t0_starts_with_name(src n idx "import") { return 0 }
+    let end_kw:int = idx + 6
+    let i:int = t0_skip_horizontal_ws(src n end_kw)
+    if i >=? n {
+        diag_error(end_kw "Expected path string after import")
+    }
+    if __load_u8__(src + i) not=? T0_CH_p {
+        diag_error(end_kw "Expected path string after import")
+    }
+    if (i + 1 >=? n) or (__load_u8__(src + i + 1) not=? T0_CH_DQUOTE) {
+        diag_error(end_kw "Expected path string after import")
+    }
+    let string_start:int = i + 1
+    let end_idx:int = t0_string_end(src n string_start)
+    let path_len:int = end_idx - string_start - 2
+    let bb:int = bb_new(path_len + 1)
+    bb_push_bytes(bb src + string_start + 1 path_len)
+    let path:int = bb_finalize_as_string(bb)
+    let next_idx:int = t0_consume_directive_eol(src n end_idx "import")
+    __store__(next_idx next_idx_out)
+    return path
+}
+
+# Parse `$supported_targets = ["a" "b" ...]`. On match writes to next_idx_out,
+# stores a Set of strings in targets_out, and returns TRUE_VAL.
+let t0_parse_supported_targets = (src:int n:int idx:int targets_out:int next_idx_out:int):>int => {
+    if not t0_starts_with_name(src n idx "$supported_targets") { return FALSE_VAL }
+    let i:int = idx + 18
+    i = t0_skip_horizontal_ws(src n i)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_EQ) {
+        diag_error(i "Expected '=' after $supported_targets")
+    }
+    i = i + 1
+    i = t0_skip_horizontal_ws(src n i)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_LBRACKET) {
+        diag_error(i "Expected target list after \$supported_targets =")
+    }
+    i = i + 1
+    let targets:int = set_new()
+    loop true {
+        i = t0_skip_trivia(src n i)
+        if (i <? n) and (__load_u8__(src + i) =? T0_CH_RBRACKET) {
+            i = i + 1
+            break
+        }
+        if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_DQUOTE) {
+            diag_error(i "Expected string target in $supported_targets list")
+        }
+        let str_start:int = i + 1
+        let end_idx:int = t0_string_end(src n i)
+        let str_len_b:int = end_idx - str_start - 1
+        # Add the target string into the set (copy bytes for safety).
+        let bb:int = bb_new(str_len_b + 1)
+        bb_push_bytes(bb src + str_start str_len_b)
+        let s:int = bb_finalize_as_string(bb)
+        set_add_str(targets s)
+        i = end_idx
+    }
+    let next_idx:int = t0_consume_directive_eol(src n i "$supported_targets")
+    __store__(targets targets_out)
+    __store__(next_idx next_idx_out)
+    return TRUE_VAL
+}
+
+# Parse `if $target (=?|not=?) "x" {` returning the "active" boolean and the
+# block-start offset (just past the '{'). next_idx_out is unused for this
+# return; we return TRUE_VAL/FALSE_VAL via active_out and block_start_out.
+let t0_parse_if_target_condition = (src:int n:int idx:int target:int active_out:int block_start_out:int):>int => {
+    if not t0_starts_with_name(src n idx "if") { return FALSE_VAL }
+    let i:int = t0_skip_trivia(src n idx + 2)
+    if not t0_starts_with_name(src n i "$target") {
+        diag_error(i "Expected $target in preprocessor if")
+    }
+    i = i + 7
+    i = t0_skip_trivia(src n i)
+    let negate:int = FALSE_VAL
+    if (i + 1 <? n) and (__load_u8__(src + i) =? T0_CH_EQ) and (__load_u8__(src + i + 1) =? T0_CH_QUESTION) {
+        i = i + 2
+    } else if (i + 4 <? n) and (__load_u8__(src + i) =? 110) and (__load_u8__(src + i + 1) =? 111) and (__load_u8__(src + i + 2) =? 116) and (__load_u8__(src + i + 3) =? T0_CH_EQ) and (__load_u8__(src + i + 4) =? T0_CH_QUESTION) {
+        negate = TRUE_VAL
+        i = i + 5
+    } else {
+        diag_error(i "Expected =? or not=? in preprocessor if")
+    }
+    i = t0_skip_trivia(src n i)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_DQUOTE) {
+        diag_error(i "Expected string target in preprocessor if")
+    }
+    let str_start:int = i + 1
+    let end_idx:int = t0_string_end(src n i)
+    let tlen:int = end_idx - str_start - 1
+    let active:int = FALSE_VAL
+    if str_eq_len(src + str_start tlen target str_len(target)) { active = TRUE_VAL }
+    if negate {
+        if active { active = FALSE_VAL } else { active = TRUE_VAL }
+    }
+    i = t0_skip_trivia(src n end_idx)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_LBRACE) {
+        diag_error(i "Expected '\{' after preprocessor if condition")
+    }
+    __store__(active active_out)
+    __store__(i + 1 block_start_out)
+    return TRUE_VAL
+}
+
+# Skip from the inside of a `{...}` preprocessor block to one past the matching
+# `}`, respecting strings and comments.
+let t0_skip_preprocessor_block = (src:int n:int idx:int):>int => {
+    let depth:int = 1
+    let i:int = idx
+    loop i <? n {
+        let c:int = __load_u8__(src + i)
+        if c =? T0_CH_DQUOTE {
+            i = t0_string_end(src n i)
+            continue
+        }
+        if c =? T0_CH_HASH {
+            i = t0_skip_comment(src n i)
+            continue
+        }
+        if c =? T0_CH_LBRACE {
+            depth = depth + 1
+        } else if c =? T0_CH_RBRACE {
+            depth = depth - 1
+            if depth =? 0 { return i + 1 }
+        }
+        i = i + 1
+    }
+    diag_error(n "Unterminated preprocessor if block")
+    return n
+}
+
+# Parse `\$warning("msg")` or `\$error("msg")`. On match writes the start
+# location, message string, kind (0=warning 1=error) and next idx; returns
+# TRUE_VAL.
+let t0_parse_meta_diagnostic = (src:int n:int idx:int kind_out:int msg_out:int start_out:int next_idx_out:int):>int => {
+    let start:int = idx
+    let kind:int = 0
+    let i:int = idx
+    if t0_starts_with_name(src n idx "$warning") {
+        kind = 0
+        i = idx + 8
+    } else if t0_starts_with_name(src n idx "$error") {
+        kind = 1
+        i = idx + 6
+    } else {
+        return FALSE_VAL
+    }
+    i = t0_skip_horizontal_ws(src n i)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_LPAREN) {
+        if kind =? 0 {
+            diag_error(i "Expected '(' after $warning")
+        } else {
+            diag_error(i "Expected '(' after $error")
+        }
+    }
+    i = i + 1
+    i = t0_skip_horizontal_ws(src n i)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_DQUOTE) {
+        if kind =? 0 {
+            diag_error(i "Expected string message in $warning")
+        } else {
+            diag_error(i "Expected string message in $error")
+        }
+    }
+    let str_start:int = i + 1
+    let end_idx:int = t0_string_end(src n i)
+    let mlen:int = end_idx - str_start - 1
+    let bb:int = bb_new(mlen + 1)
+    bb_push_bytes(bb src + str_start mlen)
+    let msg:int = bb_finalize_as_string(bb)
+    i = t0_skip_horizontal_ws(src n end_idx)
+    if (i >=? n) or (__load_u8__(src + i) not=? T0_CH_RPAREN) {
+        if kind =? 0 {
+            diag_error(i "Expected ')' after $warning message")
+        } else {
+            diag_error(i "Expected ')' after $error message")
+        }
+    }
+    i = i + 1
+    let after_eol:int = t0_consume_directive_eol(src n i "$warning")
+    __store__(kind kind_out)
+    __store__(msg msg_out)
+    __store__(start start_out)
+    __store__(after_eol next_idx_out)
+    return TRUE_VAL
+}
+
+# ----------------------------------------------------------------------------
+# Recursive loading
+# ----------------------------------------------------------------------------
+
+# Determine whether a path string ends with ".udewy".
+let t0_path_is_udewy = (path:int):>int => {
+    let n:int = str_len(path)
+    if n <? 6 { return FALSE_VAL }
+    let want:int = ".udewy"
+    if str_eq_len(path + n - 6 6 want 6) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+# Resolve and load an import path. Returns a LoadedProgram pointer with
+# possibly empty source (for duplicates and non-udewy artifacts).
+let t0_load_imported_path = (import_path_str:int source_dir:int target:int state:int):>int => {
+    let resolved:int = path_resolve(source_dir import_path_str)
+    let resolved_cstr:int = path_to_cstr(resolved)
+    if not fs_exists(resolved_cstr) {
+        eprint("error: Import file not found: ")
+        eprintl(resolved)
+        host_exit(1)
+    }
+
+    if t0_path_is_udewy(resolved) {
+        if set_has_str(load_state_sources(state) resolved) {
+            let empty:int = bb_new(1)
+            return loaded_new(bb_finalize_as_string(empty) vec_new(2) vec_new(2))
+        }
+        let loaded:int = t0_load_program_full(resolved target state)
+        let sources:int = vec_new(4)
+        vec_push(sources resolved)
+        let inner_sources:int = loaded_sources(loaded)
+        let k:int = 0
+        loop k <? vec_len(inner_sources) {
+            vec_push(sources vec_get(inner_sources k))
+            k = k + 1
+        }
+        return loaded_new(loaded_source(loaded) loaded_artifacts(loaded) sources)
+    }
+
+    # native artifact
+    if set_has_str(load_state_artifacts(state) resolved) {
+        let empty2:int = bb_new(1)
+        return loaded_new(bb_finalize_as_string(empty2) vec_new(2) vec_new(2))
+    }
+    set_add_str(load_state_artifacts(state) resolved)
+    let artifacts:int = vec_new(2)
+    vec_push(artifacts resolved)
+    let empty3:int = bb_new(1)
+    return loaded_new(bb_finalize_as_string(empty3) artifacts vec_new(2))
+}
+
+# Process a single prelude item starting at idx. Returns the next idx or -1
+# if no recognized directive starts at idx.
+let t0_process_prelude_item = (pc:int idx:int):>int => {
+    let src:int = __load__(pc + PC_SRC)
+    let n:int = str_len(src)
+    let state:int = __load__(pc + PC_STATE)
+    let target:int = __load__(pc + PC_TARGET)
+    let source_dir:int = __load__(pc + PC_DIR)
+
+    # try import
+    let scratch:int = __static_alloca__(64)
+    let path:int = t0_parse_import_directive(src n idx scratch)
+    if path not=? 0 {
+        let next_idx:int = __load__(scratch)
+        let loaded:int = t0_load_imported_path(path source_dir target state)
+        let loaded_src:int = loaded_source(loaded)
+        if str_len(loaded_src) >? 0 {
+            vec_push(__load__(pc + PC_SOURCE_PARTS) loaded_src)
+        }
+        let arts:int = loaded_artifacts(loaded)
+        let i:int = 0
+        loop i <? vec_len(arts) {
+            vec_push(__load__(pc + PC_ARTIFACTS) vec_get(arts i))
+            i = i + 1
+        }
+        let isrcs:int = loaded_sources(loaded)
+        let j:int = 0
+        loop j <? vec_len(isrcs) {
+            vec_push(__load__(pc + PC_SOURCE_PATHS) vec_get(isrcs j))
+            j = j + 1
+        }
+        return next_idx
+    }
+
+    # try $supported_targets
+    let targets_out:int = scratch
+    let next_out:int = scratch + 8
+    if t0_parse_supported_targets(src n idx targets_out next_out) {
+        let targets:int = __load__(targets_out)
+        if not set_has_str(targets target) {
+            eprint("error: source does not support target ")
+            eprintl(target)
+            host_exit(1)
+        }
+        return __load__(next_out)
+    }
+
+    # try `if $target ...`
+    let active_out:int = scratch
+    let block_start_out:int = scratch + 8
+    if t0_parse_if_target_condition(src n idx target active_out block_start_out) {
+        let active:int = __load__(active_out)
+        let block_start:int = __load__(block_start_out)
+        let block_end:int = 0
+        if active {
+            block_end = t0_process_prelude_block(pc block_start)
+        } else {
+            block_end = t0_skip_preprocessor_block(src n block_start)
+        }
+        return t0_consume_directive_eol(src n block_end "preprocessor if")
+    }
+
+    # try $warning / $error
+    let kind_out:int = scratch
+    let msg_out:int = scratch + 8
+    let start_out:int = scratch + 16
+    let next_out2:int = scratch + 24
+    if t0_parse_meta_diagnostic(src n idx kind_out msg_out start_out next_out2) {
+        let kind:int = __load__(kind_out)
+        let msg:int = __load__(msg_out)
+        let start:int = __load__(start_out)
+        if kind =? 0 {
+            diag_warning(start msg)
+        } else {
+            diag_error(start msg)
+        }
+        return __load__(next_out2)
+    }
+
+    return 0 - 1
+}
+
+# Process the body of an active `if $target ...` block, returning the offset
+# one past the matching `}`.
+let t0_process_prelude_block = (pc:int idx:int):>int => {
+    let src:int = __load__(pc + PC_SRC)
+    let n:int = str_len(src)
+    loop true {
+        idx = t0_skip_trivia(src n idx)
+        if idx >=? n {
+            diag_error(n "Unterminated preprocessor if block")
+        }
+        if __load_u8__(src + idx) =? T0_CH_RBRACE {
+            return idx + 1
+        }
+        let next_idx:int = t0_process_prelude_item(pc idx)
+        if next_idx =? 0 - 1 {
+            diag_error(idx "Expected preprocessor directive or '\}' in preprocessor if block")
+        }
+        idx = next_idx
+    }
+    return n
+}
+
+# Read source from disk, run the prelude, return a LoadedProgram.
+let t0_load_program_full = (source_path:int target:int state:int):>int => {
+    let resolved:int = path_normalize(source_path)
+    if set_has_str(load_state_sources(state) resolved) {
+        let empty:int = bb_new(1)
+        return loaded_new(bb_finalize_as_string(empty) vec_new(2) vec_new(2))
+    }
+    set_add_str(load_state_sources(state) resolved)
+
+    let source:int = fs_read_file(path_to_cstr(resolved))
+    if source =? 0 {
+        eprint("error: cannot read ")
+        eprintl(resolved)
+        host_exit(1)
+    }
+    diag_set_source(path_to_cstr(resolved) source str_len(source))
+    let dir:int = path_dirname(resolved)
+    let pc:int = pc_new(source resolved dir target state)
+
+    let n:int = str_len(source)
+    let body_parts:int = vec_new(4)
+    let idx:int = 0
+    let body_cursor:int = 0
+    loop true {
+        idx = t0_skip_trivia(source n idx)
+        if idx >=? n { break }
+        let next_idx:int = t0_process_prelude_item(pc idx)
+        if next_idx =? 0 - 1 { break }
+        # capture body bytes between body_cursor and idx
+        let span_len:int = idx - body_cursor
+        if span_len >? 0 {
+            let bb:int = bb_new(span_len + 1)
+            bb_push_bytes(bb source + body_cursor span_len)
+            vec_push(body_parts bb_finalize_as_string(bb))
+        }
+        idx = next_idx
+        body_cursor = idx
+    }
+    let tail_len:int = n - body_cursor
+    if tail_len >? 0 {
+        let bb_tail:int = bb_new(tail_len + 1)
+        bb_push_bytes(bb_tail source + body_cursor tail_len)
+        vec_push(body_parts bb_finalize_as_string(bb_tail))
+    }
+
+    let imported_parts:int = __load__(pc + PC_SOURCE_PARTS)
+    let combined:int = bb_new(n + 1024)
+    let k:int = 0
+    loop k <? vec_len(imported_parts) {
+        bb_push_str(combined vec_get(imported_parts k))
+        bb_push_byte(combined T0_CH_LF)
+        k = k + 1
+    }
+    let j:int = 0
+    loop j <? vec_len(body_parts) {
+        bb_push_str(combined vec_get(body_parts j))
+        j = j + 1
+    }
+
+    return loaded_new(bb_finalize_as_string(combined) __load__(pc + PC_ARTIFACTS) __load__(pc + PC_SOURCE_PATHS))
+}
+
+# Convenience entry: build state and call full loader.
+let t0_load_program = (source_path:int target:int):>int => {
+    let state:int = load_state_new()
+    return t0_load_program_full(source_path target state)
+}

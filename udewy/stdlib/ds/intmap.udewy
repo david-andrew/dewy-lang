@@ -1,0 +1,170 @@
+# Integer-keyed, integer-valued hash map (open addressing, linear probing).
+#
+# IntMap is a pointer to a 32-byte header:
+#   +0  cap     number of slots (always a power of 2)
+#   +8  size    number of occupied slots
+#   +16 tomb    number of tombstone slots
+#   +24 slots   pointer to slot array
+#
+# Each slot is 24 bytes:
+#   +0  state   0 = empty, 1 = occupied, 2 = tombstone
+#   +8  key     the key int
+#   +16 value   the stored value int
+
+const IM_OFF_CAP:int = 0
+const IM_OFF_SIZE:int = 8
+const IM_OFF_TOMB:int = 16
+const IM_OFF_SLOTS:int = 24
+const IM_HEADER_SIZE:int = 32
+
+const IM_SLOT_STATE:int = 0
+const IM_SLOT_KEY:int = 8
+const IM_SLOT_VALUE:int = 16
+const IM_SLOT_SIZE:int = 24
+
+const IM_EMPTY:int = 0
+const IM_OCCUPIED:int = 1
+const IM_TOMBSTONE:int = 2
+
+const IM_INITIAL_CAP:int = 16
+const IM_MISSING:int = -1
+
+let im_alloc_slots = (cap:int):>int => {
+    let bytes:int = cap * IM_SLOT_SIZE
+    let slots:int = arena_alloc(bytes)
+    zero_bytes(slots bytes)
+    return slots
+}
+
+let intmap_new = ():>int => {
+    let hdr:int = arena_alloc(IM_HEADER_SIZE)
+    __store__(IM_INITIAL_CAP hdr + IM_OFF_CAP)
+    __store__(0 hdr + IM_OFF_SIZE)
+    __store__(0 hdr + IM_OFF_TOMB)
+    __store__(im_alloc_slots(IM_INITIAL_CAP) hdr + IM_OFF_SLOTS)
+    return hdr
+}
+
+let intmap_size = (m:int):>int => {
+    return __load__(m + IM_OFF_SIZE)
+}
+
+let intmap_cap = (m:int):>int => {
+    return __load__(m + IM_OFF_CAP)
+}
+
+let intmap_slots = (m:int):>int => {
+    return __load__(m + IM_OFF_SLOTS)
+}
+
+# splitmix-ish bit-mix hash for int keys.
+let intmap_hash = (k:int):>int => {
+    k = (k xor (k >> 33)) * 0xff51afd7ed558ccd
+    k = (k xor (k >> 33)) * 0xc4ceb9fe1a85ec53
+    k = k xor (k >> 33)
+    return k
+}
+
+let intmap_probe = (m:int key:int):>int => {
+    let cap:int = intmap_cap(m)
+    let mask:int = cap - 1
+    let slots:int = intmap_slots(m)
+    let idx:int = intmap_hash(key) and mask
+    let first_tomb:int = -1
+    loop true {
+        let slot:int = slots + (idx * IM_SLOT_SIZE)
+        let state:int = __load__(slot + IM_SLOT_STATE)
+        if state =? IM_EMPTY {
+            if first_tomb not=? -1 { return first_tomb }
+            return slot
+        }
+        if state =? IM_TOMBSTONE {
+            if first_tomb =? -1 { first_tomb = slot }
+        } else {
+            if __load__(slot + IM_SLOT_KEY) =? key { return slot }
+        }
+        idx = (idx + 1) and mask
+    }
+    return 0
+}
+
+let intmap_put_raw = (m:int key:int value:int):>void => {
+    let slot:int = intmap_probe(m key)
+    let state:int = __load__(slot + IM_SLOT_STATE)
+    if state =? IM_OCCUPIED {
+        __store__(value slot + IM_SLOT_VALUE)
+        return void
+    }
+    if state =? IM_TOMBSTONE {
+        __store__(__load__(m + IM_OFF_TOMB) - 1 m + IM_OFF_TOMB)
+    }
+    __store__(IM_OCCUPIED slot + IM_SLOT_STATE)
+    __store__(key slot + IM_SLOT_KEY)
+    __store__(value slot + IM_SLOT_VALUE)
+    __store__(intmap_size(m) + 1 m + IM_OFF_SIZE)
+    return void
+}
+
+let intmap_resize = (m:int new_cap:int):>void => {
+    let old_slots:int = intmap_slots(m)
+    let old_cap:int = intmap_cap(m)
+    let new_slots:int = im_alloc_slots(new_cap)
+    __store__(new_cap m + IM_OFF_CAP)
+    __store__(0 m + IM_OFF_SIZE)
+    __store__(0 m + IM_OFF_TOMB)
+    __store__(new_slots m + IM_OFF_SLOTS)
+    let i:int = 0
+    loop i <? old_cap {
+        let slot:int = old_slots + (i * IM_SLOT_SIZE)
+        if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED {
+            intmap_put_raw(m __load__(slot + IM_SLOT_KEY) __load__(slot + IM_SLOT_VALUE))
+        }
+        i = i + 1
+    }
+    return void
+}
+
+let intmap_maybe_grow = (m:int):>void => {
+    let cap:int = intmap_cap(m)
+    let size:int = intmap_size(m)
+    let tomb:int = __load__(m + IM_OFF_TOMB)
+    if ((size + tomb) * 10) >=? (cap * 7) {
+        if (size * 10) >=? (cap * 4) {
+            intmap_resize(m cap * 2)
+        } else {
+            intmap_resize(m cap)
+        }
+    }
+    return void
+}
+
+let intmap_put = (m:int key:int value:int):>void => {
+    intmap_maybe_grow(m)
+    intmap_put_raw(m key value)
+    return void
+}
+
+let intmap_get = (m:int key:int):>int => {
+    let slot:int = intmap_probe(m key)
+    if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED {
+        return __load__(slot + IM_SLOT_VALUE)
+    }
+    return IM_MISSING
+}
+
+let intmap_has = (m:int key:int):>int => {
+    let slot:int = intmap_probe(m key)
+    if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let intmap_remove = (m:int key:int):>int => {
+    let slot:int = intmap_probe(m key)
+    if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED {
+        __store__(IM_TOMBSTONE slot + IM_SLOT_STATE)
+        __store__(intmap_size(m) - 1 m + IM_OFF_SIZE)
+        __store__(__load__(m + IM_OFF_TOMB) + 1 m + IM_OFF_TOMB)
+        return TRUE_VAL
+    }
+    return FALSE_VAL
+}

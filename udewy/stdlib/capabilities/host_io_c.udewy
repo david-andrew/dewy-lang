@@ -1,17 +1,36 @@
 import p"../../third_party/c/stdio.udewy"
 import p"../../third_party/c/stdlib.udewy"
+import p"../../third_party/c/posix.udewy"
 
 const STDIN:int = 0
 const STDOUT:int = 1
 const STDERR:int = 2
 
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
+
 let host_write = (fd:int buf:int len:int):>int => {
-    let i:int = 0
-    loop i <? len {
-        putchar(__load_u8__(buf + i))
-        i = i + 1
-    }
-    return len
+    return write(fd buf len)
+}
+
+let host_read = (fd:int buf:int cap:int):>int => {
+    return read(fd buf cap)
+}
+
+let host_open = (path_cstr:int flags:int mode:int):>int => {
+    return open(path_cstr flags mode)
+}
+
+let host_close = (fd:int):>int => {
+    return close(fd)
+}
+
+let host_lseek = (fd:int offset:int whence:int):>int => {
+    return lseek(fd offset whence)
 }
 
 let host_exit = (code:int):>void => {
@@ -20,5 +39,33 @@ let host_exit = (code:int):>void => {
 }
 
 let host_mmap_rw = (size:int):>int => {
-    return malloc(size)
+    return calloc(size 1)
+}
+
+let host_fork = ():>int => {
+    return fork()
+}
+
+let host_execve = (path_cstr:int argv:int envp:int):>int => {
+    return execve(path_cstr argv envp)
+}
+
+let host_waitpid = (pid:int status_ptr:int flags:int):>int => {
+    return waitpid(pid status_ptr flags)
+}
+
+let host_dup2 = (oldfd:int newfd:int):>int => {
+    return dup2(oldfd newfd)
+}
+
+let host_mkdir = (path_cstr:int mode:int):>int => {
+    return mkdir(path_cstr mode)
+}
+
+let host_unlink = (path_cstr:int):>int => {
+    return unlink(path_cstr)
+}
+
+let host_chdir = (path_cstr:int):>int => {
+    return chdir(path_cstr)
 }

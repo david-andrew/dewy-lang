@@ -1,0 +1,1448 @@
+# RISC-V backend for the udewy bootstrap. Generates GNU assembler syntax
+# targeting Linux RISC-V 64 with LP64 ABI. Mirrors udewy/backend/riscv.py.
+
+import p"./common.udewy"
+import p"./linux.udewy"
+import p"../t1.udewy"
+
+const RV_SAVE_AREA_BYTES:int = 112
+const RV_MAX_STACK_ADJUST_IMM:int = 2032
+
+let rv_function_ids:int = 0
+let rv_function_codes:int = 0
+let rv_current_fn_code:int = 0
+let rv_reachable:int = 0
+let rv_have_reachable:int = 0
+let rv_data:int = 0
+let rv_next_label:int = 0
+let rv_extern_symbols:int = 0
+let rv_module_init_name:int = 0
+let rv_requires_hard_float:int = 0
+
+let rv_current_fn_epilogue:int = 0
+let rv_stack_offset:int = 0
+let rv_param_slots:int = 0
+let rv_saved_depth:int = 0
+let rv_spilled_depth:int = 0
+let rv_min_slot_offset:int = 0
+let rv_frame_setup_index:int = 0
+
+let rv_if_else_labels:int = 0
+let rv_if_end_labels:int = 0
+let rv_if_else_emitted:int = 0
+let rv_loop_start_labels:int = 0
+let rv_loop_end_labels:int = 0
+
+let rv_fn_labels:int = 0
+let rv_global_labels:int = 0
+let rv_string_labels:int = 0
+let rv_array_labels:int = 0
+let rv_static_labels:int = 0
+
+let rv_alloc_state = ():>void => {
+    rv_function_ids = vec_new(16)
+    rv_function_codes = vec_new(16)
+    rv_data = vec_new(32)
+    rv_extern_symbols = set_new()
+    rv_param_slots = vec_new(8)
+    rv_if_else_labels = vec_new(4)
+    rv_if_end_labels = vec_new(4)
+    rv_if_else_emitted = vec_new(4)
+    rv_loop_start_labels = vec_new(4)
+    rv_loop_end_labels = vec_new(4)
+    rv_fn_labels = intmap_new()
+    rv_global_labels = intmap_new()
+    rv_string_labels = intmap_new()
+    rv_array_labels = intmap_new()
+    rv_static_labels = intmap_new()
+    return void
+}
+
+let rv_str = (s:int):>int => {
+    let bb:int = bb_new(str_len(s))
+    bb_push_str(bb s)
+    return bb_finalize_as_string(bb)
+}
+
+let rv_emit_indented = (s:int):>void => {
+    let bb:int = bb_new(8 + str_len(s))
+    bb_push_str(bb "    ")
+    bb_push_str(bb s)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_emit_label_str = (label:int):>void => {
+    let bb:int = bb_new(str_len(label) + 1)
+    bb_push_str(bb label)
+    bb_push_byte(bb 58)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_emit_data_label = (label:int):>void => {
+    let bb:int = bb_new(str_len(label) + 1)
+    bb_push_str(bb label)
+    bb_push_byte(bb 58)
+    vec_push(rv_data bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_new_label = (prefix:int):>int => {
+    let bb:int = bb_new(8 + str_len(prefix))
+    bb_push_byte(bb 46)
+    bb_push_str(bb prefix)
+    bb_push_int(bb rv_next_label)
+    rv_next_label = rv_next_label + 1
+    return bb_finalize_as_string(bb)
+}
+
+let rv_arg_reg = (i:int):>int => {
+    if i =? 0 { return "a0" }
+    if i =? 1 { return "a1" }
+    if i =? 2 { return "a2" }
+    if i =? 3 { return "a3" }
+    if i =? 4 { return "a4" }
+    if i =? 5 { return "a5" }
+    if i =? 6 { return "a6" }
+    if i =? 7 { return "a7" }
+    return 0
+}
+
+let rv_value_cache_reg = (i:int):>int => {
+    if i =? 0 { return "s2" }
+    if i =? 1 { return "s3" }
+    if i =? 2 { return "s4" }
+    return 0
+}
+
+let rv_fp_arg_reg = (i:int):>int => {
+    if i =? 0 { return "fa0" }
+    if i =? 1 { return "fa1" }
+    if i =? 2 { return "fa2" }
+    if i =? 3 { return "fa3" }
+    if i =? 4 { return "fa4" }
+    if i =? 5 { return "fa5" }
+    if i =? 6 { return "fa6" }
+    if i =? 7 { return "fa7" }
+    return 0
+}
+
+let rv_note_slot = (slot:int):>void => {
+    if slot <? rv_min_slot_offset { rv_min_slot_offset = slot }
+    return void
+}
+
+let rv_frame_bytes = ():>int => {
+    let required:int = RV_SAVE_AREA_BYTES
+    if 0 - rv_min_slot_offset >? required { required = 0 - rv_min_slot_offset }
+    return (required + 15) and (0 - 16)
+}
+
+# Compose "    <s1> <s2>"
+let rv_emit_2 = (s1:int s2:int):>void => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "    ")
+    bb_push_str(bb s1)
+    bb_push_byte(bb 32)
+    bb_push_str(bb s2)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+# "    op dst, src1, src2"
+let rv_emit_3op = (op:int dst:int s1:int s2:int):>void => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "    ")
+    bb_push_str(bb op)
+    bb_push_byte(bb 32)
+    bb_push_str(bb dst)
+    bb_push_str(bb ", ")
+    bb_push_str(bb s1)
+    bb_push_str(bb ", ")
+    bb_push_str(bb s2)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+# "    op dst, src"
+let rv_emit_2op = (op:int dst:int src:int):>void => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "    ")
+    bb_push_str(bb op)
+    bb_push_byte(bb 32)
+    bb_push_str(bb dst)
+    bb_push_str(bb ", ")
+    bb_push_str(bb src)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+# "    op dst, imm"
+let rv_emit_imm = (op:int dst:int imm:int):>void => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "    ")
+    bb_push_str(bb op)
+    bb_push_byte(bb 32)
+    bb_push_str(bb dst)
+    bb_push_str(bb ", ")
+    bb_push_int(bb imm)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+# "    op dst, off(base)"
+let rv_emit_mem = (op:int dst:int off:int base:int):>void => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "    ")
+    bb_push_str(bb op)
+    bb_push_byte(bb 32)
+    bb_push_str(bb dst)
+    bb_push_str(bb ", ")
+    bb_push_int(bb off)
+    bb_push_byte(bb 40)
+    bb_push_str(bb base)
+    bb_push_byte(bb 41)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+# Build "addi <reg>, <reg>, <amount>" instructions for a stack adjust.
+# `amount` may be positive (sp += amount) or negative (sp -= |amount|).
+let rv_emit_sp_adjust = (amount:int):>void => {
+    if amount >=? 0 {
+        let remaining:int = amount
+        loop remaining >? 0 {
+            let chunk:int = remaining
+            if chunk >? RV_MAX_STACK_ADJUST_IMM { chunk = RV_MAX_STACK_ADJUST_IMM }
+            chunk = chunk and (0 - 16)
+            if chunk =? 0 { chunk = remaining }
+            rv_emit_3op("addi" "sp" "sp" int_to_str(chunk))
+            remaining = remaining - chunk
+        }
+    } else {
+        let remaining:int = 0 - amount
+        loop remaining >? 0 {
+            let chunk:int = remaining
+            if chunk >? RV_MAX_STACK_ADJUST_IMM { chunk = RV_MAX_STACK_ADJUST_IMM }
+            chunk = chunk and (0 - 16)
+            if chunk =? 0 { chunk = remaining }
+            let bb:int = bb_new(32)
+            bb_push_str(bb "    addi sp, sp, -")
+            bb_push_int(bb chunk)
+            vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+            remaining = remaining - chunk
+        }
+    }
+    return void
+}
+
+# Helper: convert int to udewy string.
+let int_to_str = (n:int):>int => {
+    let bb:int = bb_new(16)
+    bb_push_int(bb n)
+    return bb_finalize_as_string(bb)
+}
+
+let rv_set_frame_pointer = (frame_bytes:int):>void => {
+    rv_emit_2op("mv" "s0" "sp")
+    let remaining:int = frame_bytes
+    loop remaining >? 0 {
+        let chunk:int = remaining
+        if chunk >? 2047 { chunk = 2047 }
+        rv_emit_3op("addi" "s0" "s0" int_to_str(chunk))
+        remaining = remaining - chunk
+    }
+    return void
+}
+
+let rv_save_reg = (reg:int):>void => {
+    if rv_spilled_depth >? 0 {
+        rv_emit_indented("addi sp, sp, -16")
+        rv_emit_mem("sd" reg 0 "sp")
+        rv_spilled_depth = rv_spilled_depth + 1
+    } else if rv_saved_depth <? 3 {
+        rv_emit_2op("mv" rv_value_cache_reg(rv_saved_depth) reg)
+    } else {
+        let i:int = 0
+        loop i <? rv_saved_depth {
+            rv_emit_indented("addi sp, sp, -16")
+            rv_emit_mem("sd" rv_value_cache_reg(i) 0 "sp")
+            i = i + 1
+        }
+        rv_emit_indented("addi sp, sp, -16")
+        rv_emit_mem("sd" reg 0 "sp")
+        rv_spilled_depth = rv_saved_depth + 1
+    }
+    rv_saved_depth = rv_saved_depth + 1
+    return void
+}
+
+let rv_pop_saved_into = (reg:int):>void => {
+    rv_saved_depth = rv_saved_depth - 1
+    if rv_spilled_depth >? 0 {
+        rv_emit_mem("ld" reg 0 "sp")
+        rv_emit_indented("addi sp, sp, 16")
+        rv_spilled_depth = rv_spilled_depth - 1
+    } else if rv_saved_depth <? 3 {
+        let cache_reg:int = rv_value_cache_reg(rv_saved_depth)
+        if not str_eq(cache_reg reg) {
+            rv_emit_2op("mv" reg cache_reg)
+        }
+    }
+    return void
+}
+
+let rv_prepare_call_args = (num_args:int fn_reg:int):>int => {
+    let reg_count:int = num_args
+    if reg_count >? 8 { reg_count = 8 }
+    let stack_count:int = num_args - reg_count
+    let stack_bytes:int = ((stack_count * 8) + 15) and (0 - 16)
+    let consumed:int = num_args
+    if fn_reg not=? 0 { consumed = consumed + 1 }
+
+    if rv_spilled_depth >? 0 {
+        rv_emit_2op("mv" "t6" "sp")
+        if stack_bytes >? 0 {
+            let bb:int = bb_new(32)
+            bb_push_str(bb "    addi sp, sp, -")
+            bb_push_int(bb stack_bytes)
+            vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+            let o:int = 0
+            loop o <? stack_count {
+                let src_off:int = (stack_count - 1 - o) * 16
+                rv_emit_mem("ld" "t0" src_off "t6")
+                rv_emit_mem("sd" "t0" o * 8 "sp")
+                o = o + 1
+            }
+        }
+        let ri:int = reg_count - 1
+        loop ri >=? 0 {
+            let src_off:int = (stack_count + (reg_count - 1 - ri)) * 16
+            rv_emit_mem("ld" rv_arg_reg(ri) src_off "t6")
+            ri = ri - 1
+        }
+        if fn_reg not=? 0 {
+            rv_emit_mem("ld" fn_reg num_args * 16 "t6")
+        }
+        rv_saved_depth = rv_saved_depth - consumed
+        rv_spilled_depth = rv_spilled_depth - consumed
+        return stack_bytes + consumed * 16
+    }
+
+    if stack_bytes >? 0 {
+        let bb:int = bb_new(32)
+        bb_push_str(bb "    addi sp, sp, -")
+        bb_push_int(bb stack_bytes)
+        vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+        let o:int = stack_count - 1
+        loop o >=? 0 {
+            rv_pop_saved_into("t0")
+            rv_emit_mem("sd" "t0" o * 8 "sp")
+            o = o - 1
+        }
+    }
+    let ri2:int = reg_count - 1
+    loop ri2 >=? 0 {
+        rv_pop_saved_into(rv_arg_reg(ri2))
+        ri2 = ri2 - 1
+    }
+    if fn_reg not=? 0 {
+        rv_pop_saved_into(fn_reg)
+    }
+    return stack_bytes
+}
+
+# --- Module lifecycle ---
+
+let rv_begin_module = ():>void => { return void }
+let rv_set_module_init = (name:int):>void => { rv_module_init_name = name  return void }
+let rv_set_reachable_functions = (s:int):>void => {
+    rv_reachable = s
+    rv_have_reachable = TRUE_VAL
+    return void
+}
+
+let rv_finish_module = ():>int => {
+    let out:int = bb_new(4096)
+    bb_push_str(out ".text\n")
+    bb_push_str(out ".globl _start\n")
+    let cap:int = map_cap(rv_extern_symbols)
+    let slots:int = map_slots(rv_extern_symbols)
+    let names:int = vec_new(16)
+    let i:int = 0
+    loop i <? cap {
+        let slot:int = slots + (i * 32)
+        if __load__(slot) =? 1 {
+            let key:int = __load__(slot + 8)
+            let keylen:int = __load__(slot + 16)
+            let bb:int = bb_new(keylen + 1)
+            bb_push_bytes(bb key keylen)
+            vec_push(names bb_finalize_as_string(bb))
+        }
+        i = i + 1
+    }
+    let m:int = vec_len(names)
+    let a:int = 1
+    loop a <? m {
+        let cur:int = vec_get(names a)
+        let b:int = a - 1
+        loop b >=? 0 {
+            let prev:int = vec_get(names b)
+            if str_lex_cmp(prev cur) <=? 0 { break }
+            vec_set(names b + 1 prev)
+            b = b - 1
+        }
+        vec_set(names b + 1 cur)
+        a = a + 1
+    }
+    let k:int = 0
+    loop k <? m {
+        bb_push_str(out ".extern ")
+        bb_push_str(out vec_get(names k))
+        bb_push_byte(out 10)
+        k = k + 1
+    }
+    bb_push_byte(out 10)
+    bb_push_str(out "_start:\n")
+    bb_push_str(out ".option push\n")
+    bb_push_str(out ".option norelax\n")
+    bb_push_str(out "    la gp, __global_pointer$\n")
+    bb_push_str(out ".option pop\n")
+    bb_push_str(out "    li s0, 0\n")
+    bb_push_str(out "    ld a0, 0(sp)\n")
+    bb_push_str(out "    addi a1, sp, 8\n")
+    bb_push_str(out "    andi sp, sp, -16\n")
+    if rv_module_init_name not=? 0 {
+        bb_push_str(out "    call ")
+        bb_push_str(out rv_module_init_name)
+        bb_push_byte(out 10)
+    }
+    bb_push_str(out "    call __main__\n")
+    bb_push_str(out "    li a7, 94\n")
+    bb_push_str(out "    ecall\n\n")
+    let nf:int = vec_len(rv_function_ids)
+    let fi:int = 0
+    loop fi <? nf {
+        let lid:int = vec_get(rv_function_ids fi)
+        if (rv_have_reachable =? FALSE_VAL) or intset_has(rv_reachable lid) {
+            let lines:int = vec_get(rv_function_codes fi)
+            let ll:int = vec_len(lines)
+            let li:int = 0
+            loop li <? ll {
+                bb_push_str(out vec_get(lines li))
+                bb_push_byte(out 10)
+                li = li + 1
+            }
+        }
+        fi = fi + 1
+    }
+    bb_push_str(out "\n.data\n")
+    bb_push_str(out ".hidden __dso_handle\n")
+    bb_push_str(out ".weak __dso_handle\n")
+    bb_push_str(out "__dso_handle:\n")
+    bb_push_str(out "    .dword 0\n")
+    let nd:int = vec_len(rv_data)
+    let di:int = 0
+    loop di <? nd {
+        bb_push_str(out vec_get(rv_data di))
+        bb_push_byte(out 10)
+        di = di + 1
+    }
+    bb_push_str(out "\n.section .note.GNU-stack,\"\",@progbits\n\n")
+    return bb_finalize_as_string(out)
+}
+
+# --- Data section ---
+
+let rv_intern_string = (data:int len:int):>int => {
+    let label_id:int = rv_next_label
+    let label:int = rv_new_label("str")
+    intmap_put(rv_string_labels label_id label)
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .data.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"aw\",@progbits")
+    vec_push(rv_data bb_finalize_as_string(bb))
+    rv_emit_data_label(label)
+    let bb2:int = bb_new(32)
+    bb_push_str(bb2 "    .dword ")
+    bb_push_int(bb2 len)
+    vec_push(rv_data bb_finalize_as_string(bb2))
+    if len >? 0 {
+        let bb3:int = bb_new(8 + len * 4)
+        bb_push_str(bb3 "    .byte ")
+        let i:int = 0
+        loop i <? len {
+            if i >? 0 { bb_push_str(bb3 ", ") }
+            bb_push_int(bb3 __load_u8__(data + i))
+            i = i + 1
+        }
+        vec_push(rv_data bb_finalize_as_string(bb3))
+    }
+    return label_id
+}
+
+let rv_intern_array = (elems_vec:int kinds_vec:int):>int => {
+    let label_id:int = rv_next_label
+    let label:int = rv_new_label("arr")
+    intmap_put(rv_array_labels label_id label)
+    let n:int = vec_len(elems_vec)
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .data.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"aw\",@progbits")
+    vec_push(rv_data bb_finalize_as_string(bb))
+    rv_emit_data_label(label)
+    let bb2:int = bb_new(32)
+    bb_push_str(bb2 "    .dword ")
+    bb_push_int(bb2 n)
+    vec_push(rv_data bb_finalize_as_string(bb2))
+    let i:int = 0
+    loop i <? n {
+        let kind:int = vec_get(kinds_vec i)
+        let val:int = vec_get(elems_vec i)
+        let line:int = bb_new(32)
+        bb_push_str(line "    .dword ")
+        if kind =? 1 { bb_push_int(line val) }
+        else { bb_push_str(line val) }
+        vec_push(rv_data bb_finalize_as_string(line))
+        i = i + 1
+    }
+    return label_id
+}
+
+let rv_define_global = (name:int kind:int value:int):>int => {
+    let label_id:int = rv_next_label
+    let label:int = 0
+    if name =? 0 {
+        label = rv_new_label("global")
+    } else {
+        label = rv_str(name)
+        rv_next_label = rv_next_label + 1
+    }
+    intmap_put(rv_global_labels label_id label)
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .data.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"aw\",@progbits")
+    vec_push(rv_data bb_finalize_as_string(bb))
+    rv_emit_data_label(label)
+    let line:int = bb_new(32)
+    bb_push_str(line "    .dword ")
+    if kind =? 1 { bb_push_int(line value) } else { bb_push_str(line value) }
+    vec_push(rv_data bb_finalize_as_string(line))
+    return label_id
+}
+
+let rv_declare_extern_global = (name:int):>int => {
+    let label_id:int = rv_next_label
+    rv_next_label = rv_next_label + 1
+    let label:int = rv_str(name)
+    intmap_put(rv_global_labels label_id label)
+    set_add_str(rv_extern_symbols label)
+    return label_id
+}
+
+let rv_intern_static = (size:int):>int => {
+    let label_id:int = rv_next_label
+    let label:int = rv_new_label("static")
+    intmap_put(rv_static_labels label_id label)
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .bss.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"aw\",@nobits")
+    vec_push(rv_data bb_finalize_as_string(bb))
+    rv_emit_data_label(label)
+    if size >? 0 {
+        let line:int = bb_new(32)
+        bb_push_str(line "    .zero ")
+        bb_push_int(line size)
+        vec_push(rv_data bb_finalize_as_string(line))
+    }
+    return label_id
+}
+
+let rv_push_string_ref = (label_id:int):>void => {
+    let label:int = intmap_get(rv_string_labels label_id)
+    rv_emit_2op("la" "a0" label)
+    rv_emit_indented("addi a0, a0, 8")
+    return void
+}
+
+let rv_push_array_ref = (label_id:int):>void => {
+    let label:int = intmap_get(rv_array_labels label_id)
+    rv_emit_2op("la" "a0" label)
+    rv_emit_indented("addi a0, a0, 8")
+    return void
+}
+
+let rv_push_global_ref = (label_id:int):>void => {
+    rv_emit_2op("la" "a0" intmap_get(rv_global_labels label_id))
+    return void
+}
+
+let rv_push_static_ref = (label_id:int):>void => {
+    rv_emit_2op("la" "a0" intmap_get(rv_static_labels label_id))
+    return void
+}
+
+let rv_load_global = (label_id:int):>void => {
+    rv_emit_2op("la" "t0" intmap_get(rv_global_labels label_id))
+    rv_emit_mem("ld" "a0" 0 "t0")
+    return void
+}
+
+let rv_store_global = (label_id:int):>void => {
+    rv_emit_2op("la" "t0" intmap_get(rv_global_labels label_id))
+    rv_emit_mem("sd" "a0" 0 "t0")
+    return void
+}
+
+let rv_function_ref = (label_id:int):>int => { return intmap_get(rv_fn_labels label_id) }
+
+let rv_string_ref = (label_id:int):>int => {
+    let label:int = intmap_get(rv_string_labels label_id)
+    let bb:int = bb_new(str_len(label) + 4)
+    bb_push_str(bb label)
+    bb_push_str(bb "+8")
+    return bb_finalize_as_string(bb)
+}
+
+let rv_array_ref = (label_id:int):>int => {
+    let label:int = intmap_get(rv_array_labels label_id)
+    let bb:int = bb_new(str_len(label) + 4)
+    bb_push_str(bb label)
+    bb_push_str(bb "+8")
+    return bb_finalize_as_string(bb)
+}
+
+let rv_static_ref = (label_id:int):>int => { return intmap_get(rv_static_labels label_id) }
+
+# --- Functions ---
+
+let rv_declare_function = (name:int num_params:int):>int => {
+    let label_id:int = rv_next_label
+    let label:int = 0
+    if name =? 0 {
+        label = rv_new_label("fn")
+    } else {
+        label = rv_str(name)
+        rv_next_label = rv_next_label + 1
+    }
+    intmap_put(rv_fn_labels label_id label)
+    return label_id
+}
+
+let rv_bind_extern_function = (label_id:int name:int):>void => {
+    let label:int = rv_str(name)
+    intmap_put(rv_fn_labels label_id label)
+    set_add_str(rv_extern_symbols label)
+    return void
+}
+
+let rv_declare_extern_function = (name:int num_params:int):>int => {
+    let label_id:int = rv_declare_function(name num_params)
+    set_add_str(rv_extern_symbols intmap_get(rv_fn_labels label_id))
+    return label_id
+}
+
+let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>void => {
+    let label:int = intmap_get(rv_fn_labels label_id)
+    rv_saved_depth = 0
+    rv_spilled_depth = 0
+    rv_min_slot_offset = 0
+    let code:int = vec_new(64)
+    vec_push(rv_function_ids label_id)
+    vec_push(rv_function_codes code)
+    rv_current_fn_code = code
+
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .text.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"ax\",@progbits")
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    if is_main { rv_emit_label_str("__main__") }
+    rv_emit_label_str(label)
+    rv_frame_setup_index = vec_len(rv_current_fn_code)
+    rv_emit_indented("# frame setup")
+
+    vec_set_len(rv_param_slots 0)
+    rv_stack_offset = 0 - RV_SAVE_AREA_BYTES
+    let i:int = 0
+    loop i <? param_count {
+        let slot:int = rv_stack_offset
+        vec_push(rv_param_slots slot)
+        rv_note_slot(slot)
+        if i <? 8 {
+            rv_emit_mem("sd" rv_arg_reg(i) slot "s0")
+        } else {
+            let caller_off:int = (i - 8) * 8
+            rv_emit_mem("ld" "t0" caller_off "s0")
+            rv_emit_mem("sd" "t0" slot "s0")
+        }
+        rv_stack_offset = rv_stack_offset - 8
+        i = i + 1
+    }
+    let ebb:int = bb_new(str_len(label) + 16)
+    bb_push_str(ebb label)
+    bb_push_str(ebb "_epilogue")
+    rv_current_fn_epilogue = bb_finalize_as_string(ebb)
+    return void
+}
+
+# Reconstruct the prologue: stack adjust + frame pointer setup + save regs.
+let rv_end_function = ():>void => {
+    let fb:int = rv_frame_bytes()
+    # Build the prologue lines into a temporary vec.
+    let saved:int = rv_current_fn_code
+    let prologue:int = vec_new(32)
+    rv_current_fn_code = prologue
+    rv_emit_sp_adjust(0 - fb)
+    rv_emit_indented("mv t0, s0")
+    rv_set_frame_pointer(fb)
+    rv_emit_indented("sd ra, -8(s0)")
+    rv_emit_indented("sd t0, -16(s0)")
+    rv_emit_indented("sd s1, -24(s0)")
+    rv_emit_indented("sd s2, -32(s0)")
+    rv_emit_indented("sd s3, -40(s0)")
+    rv_emit_indented("sd s4, -48(s0)")
+    rv_emit_indented("sd s5, -56(s0)")
+    rv_emit_indented("sd s6, -64(s0)")
+    rv_emit_indented("sd s7, -72(s0)")
+    rv_emit_indented("sd s8, -80(s0)")
+    rv_emit_indented("sd s9, -88(s0)")
+    rv_emit_indented("sd s10, -96(s0)")
+    rv_emit_indented("sd s11, -104(s0)")
+    rv_current_fn_code = saved
+
+    # Splice prologue into saved at rv_frame_setup_index, replacing 1 element.
+    let insert_at:int = rv_frame_setup_index
+    let plen:int = vec_len(prologue)
+    # Build new vec: [0..insert_at) ++ prologue ++ [insert_at+1..)
+    let new_code:int = vec_new(vec_len(saved) + plen)
+    let i:int = 0
+    loop i <? insert_at {
+        vec_push(new_code vec_get(saved i))
+        i = i + 1
+    }
+    let j:int = 0
+    loop j <? plen {
+        vec_push(new_code vec_get(prologue j))
+        j = j + 1
+    }
+    let k:int = insert_at + 1
+    loop k <? vec_len(saved) {
+        vec_push(new_code vec_get(saved k))
+        k = k + 1
+    }
+    # Replace in function codes
+    let last:int = vec_len(rv_function_codes) - 1
+    vec_set(rv_function_codes last new_code)
+    rv_current_fn_code = new_code
+
+    rv_emit_label_str(rv_current_fn_epilogue)
+    rv_emit_indented("ld s1, -24(s0)")
+    rv_emit_indented("ld s2, -32(s0)")
+    rv_emit_indented("ld s3, -40(s0)")
+    rv_emit_indented("ld s4, -48(s0)")
+    rv_emit_indented("ld s5, -56(s0)")
+    rv_emit_indented("ld s6, -64(s0)")
+    rv_emit_indented("ld s7, -72(s0)")
+    rv_emit_indented("ld s8, -80(s0)")
+    rv_emit_indented("ld s9, -88(s0)")
+    rv_emit_indented("ld s10, -96(s0)")
+    rv_emit_indented("ld s11, -104(s0)")
+    rv_emit_indented("ld ra, -8(s0)")
+    rv_emit_indented("ld t0, -16(s0)")
+    rv_emit_indented("mv sp, s0")
+    rv_emit_indented("mv s0, t0")
+    rv_emit_indented("ret")
+    rv_current_fn_code = 0
+    return void
+}
+
+let rv_load_param = (index:int):>void => {
+    rv_emit_mem("ld" "a0" vec_get(rv_param_slots index) "s0")
+    return void
+}
+
+let rv_alloc_local = ():>int => {
+    let slot:int = rv_stack_offset
+    rv_stack_offset = rv_stack_offset - 8
+    rv_note_slot(slot)
+    return slot
+}
+
+let rv_load_local = (slot:int):>void => { rv_emit_mem("ld" "a0" slot "s0")  return void }
+let rv_store_local = (slot:int):>void => { rv_emit_mem("sd" "a0" slot "s0")  return void }
+
+let rv_push_const_i64 = (value:int):>void => { rv_emit_imm("li" "a0" value)  return void }
+let rv_push_void = ():>void => { rv_emit_indented("li a0, 0")  return void }
+let rv_push_fn_ref = (label_id:int):>void => {
+    rv_emit_2op("la" "a0" intmap_get(rv_fn_labels label_id))
+    return void
+}
+let rv_pop_value = ():>void => { return void }
+let rv_save_value = ():>void => { rv_save_reg("a0")  return void }
+let rv_restore_value = ():>void => { rv_pop_saved_into("a0")  return void }
+
+let rv_unary_op = (op_kind:int):>void => {
+    if op_kind =? TK_MINUS { rv_emit_2op("neg" "a0" "a0") }
+    else if op_kind =? TK_NOT { rv_emit_2op("not" "a0" "a0") }
+    return void
+}
+
+let rv_binary_op = (op_kind:int):>void => {
+    rv_emit_2op("mv" "t0" "a0")
+    rv_pop_saved_into("a0")
+    if op_kind =? TK_PLUS         { rv_emit_3op("add" "a0" "a0" "t0") }
+    else if op_kind =? TK_MINUS   { rv_emit_3op("sub" "a0" "a0" "t0") }
+    else if op_kind =? TK_MUL     { rv_emit_3op("mul" "a0" "a0" "t0") }
+    else if op_kind =? TK_IDIV    { rv_emit_3op("div" "a0" "a0" "t0") }
+    else if op_kind =? TK_MOD     { rv_emit_3op("rem" "a0" "a0" "t0") }
+    else if op_kind =? TK_LEFT_SHIFT  { rv_emit_3op("sll" "a0" "a0" "t0") }
+    else if op_kind =? TK_RIGHT_SHIFT { rv_emit_3op("srl" "a0" "a0" "t0") }
+    else if op_kind =? TK_AND     { rv_emit_3op("and" "a0" "a0" "t0") }
+    else if op_kind =? TK_OR      { rv_emit_3op("or"  "a0" "a0" "t0") }
+    else if op_kind =? TK_XOR     { rv_emit_3op("xor" "a0" "a0" "t0") }
+    else if op_kind =? TK_EQ {
+        rv_emit_3op("sub" "t1" "a0" "t0")
+        rv_emit_2op("seqz" "a0" "t1")
+        rv_emit_2op("neg" "a0" "a0")
+    } else if op_kind =? TK_NOT_EQ {
+        rv_emit_3op("sub" "t1" "a0" "t0")
+        rv_emit_2op("snez" "a0" "t1")
+        rv_emit_2op("neg" "a0" "a0")
+    } else if op_kind =? TK_GT {
+        rv_emit_3op("sgt" "a0" "a0" "t0")
+        rv_emit_2op("neg" "a0" "a0")
+    } else if op_kind =? TK_LT {
+        rv_emit_3op("slt" "a0" "a0" "t0")
+        rv_emit_2op("neg" "a0" "a0")
+    } else if op_kind =? TK_GT_EQ {
+        rv_emit_3op("slt" "a0" "a0" "t0")
+        rv_emit_2op("seqz" "a0" "a0")
+        rv_emit_2op("neg" "a0" "a0")
+    } else if op_kind =? TK_LT_EQ {
+        rv_emit_3op("sgt" "a0" "a0" "t0")
+        rv_emit_2op("seqz" "a0" "a0")
+        rv_emit_2op("neg" "a0" "a0")
+    }
+    return void
+}
+
+let rv_pipe_call = ():>void => {
+    rv_emit_2op("mv" "t5" "a0")
+    rv_pop_saved_into("a0")
+    rv_emit_indented("jalr ra, t5, 0")
+    return void
+}
+
+let rv_load_mem = (width:int signed:int):>void => {
+    if width =? 64 { rv_emit_mem("ld" "a0" 0 "a0") }
+    else if width =? 32 {
+        if signed { rv_emit_mem("lw" "a0" 0 "a0") } else { rv_emit_mem("lwu" "a0" 0 "a0") }
+    } else if width =? 16 {
+        if signed { rv_emit_mem("lh" "a0" 0 "a0") } else { rv_emit_mem("lhu" "a0" 0 "a0") }
+    } else if width =? 8 {
+        if signed { rv_emit_mem("lb" "a0" 0 "a0") } else { rv_emit_mem("lbu" "a0" 0 "a0") }
+    }
+    return void
+}
+
+let rv_store_mem = (width:int):>void => {
+    rv_pop_saved_into("t0")
+    if width =? 64      { rv_emit_mem("sd" "t0" 0 "a0") }
+    else if width =? 32 { rv_emit_mem("sw" "t0" 0 "a0") }
+    else if width =? 16 { rv_emit_mem("sh" "t0" 0 "a0") }
+    else if width =? 8  { rv_emit_mem("sb" "t0" 0 "a0") }
+    rv_emit_indented("li a0, 0")
+    return void
+}
+
+let rv_signed_shr = ():>void => {
+    rv_emit_2op("mv" "t0" "a0")
+    rv_pop_saved_into("a0")
+    rv_emit_3op("sra" "a0" "a0" "t0")
+    return void
+}
+
+let rv_unsigned_idiv = ():>void => {
+    rv_emit_2op("mv" "t0" "a0")
+    rv_pop_saved_into("a0")
+    rv_emit_3op("divu" "a0" "a0" "t0")
+    return void
+}
+
+let rv_unsigned_mod = ():>void => {
+    rv_emit_2op("mv" "t0" "a0")
+    rv_pop_saved_into("a0")
+    rv_emit_3op("remu" "a0" "a0" "t0")
+    return void
+}
+
+# kind: 0=gt, 1=lt, 2=gte, 3=lte
+let rv_unsigned_cmp = (kind:int):>void => {
+    rv_emit_2op("mv" "t0" "a0")
+    rv_pop_saved_into("a0")
+    if kind =? 0 {
+        rv_emit_3op("sltu" "a0" "t0" "a0")
+    } else if kind =? 1 {
+        rv_emit_3op("sltu" "a0" "a0" "t0")
+    } else if kind =? 2 {
+        rv_emit_3op("sltu" "a0" "a0" "t0")
+        rv_emit_2op("seqz" "a0" "a0")
+    } else {
+        rv_emit_3op("sltu" "a0" "t0" "a0")
+        rv_emit_2op("seqz" "a0" "a0")
+    }
+    rv_emit_2op("neg" "a0" "a0")
+    return void
+}
+
+let rv_alloca = ():>void => {
+    rv_emit_indented("addi a0, a0, 15")
+    rv_emit_indented("andi a0, a0, -16")
+    rv_emit_3op("sub" "t0" "sp" "a0")
+    rv_emit_2op("mv" "sp" "t0")
+    rv_emit_2op("mv" "a0" "t0")
+    return void
+}
+
+let rv_call_direct = (label_id:int num_args:int):>void => {
+    let stack_bytes:int = rv_prepare_call_args(num_args 0)
+    let label:int = intmap_get(rv_fn_labels label_id)
+    let bb:int = bb_new(32 + str_len(label))
+    bb_push_str(bb "    call ")
+    bb_push_str(bb label)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    if stack_bytes >? 0 {
+        rv_emit_3op("addi" "sp" "sp" int_to_str(stack_bytes))
+    }
+    return void
+}
+
+let rv_call_indirect = (num_args:int):>void => {
+    let stack_bytes:int = rv_prepare_call_args(num_args "t5")
+    rv_emit_indented("jalr ra, t5, 0")
+    if stack_bytes >? 0 {
+        rv_emit_3op("addi" "sp" "sp" int_to_str(stack_bytes))
+    }
+    return void
+}
+
+let rv_max_call_args = ():>int => { return 0 - 1 }
+
+let rv_syscall = (num_args:int):>void => {
+    if num_args =? 1 {
+        rv_emit_2op("mv" "a7" "a0")
+        rv_emit_indented("ecall")
+    } else if num_args =? 2 {
+        rv_emit_2op("mv" "t0" "a0")
+        rv_pop_saved_into("a7")
+        rv_emit_2op("mv" "a0" "t0")
+        rv_emit_indented("ecall")
+    } else if num_args =? 3 {
+        rv_emit_2op("mv" "a1" "a0")
+        rv_pop_saved_into("a0")
+        rv_pop_saved_into("a7")
+        rv_emit_indented("ecall")
+    } else if num_args =? 4 {
+        rv_emit_2op("mv" "a2" "a0")
+        rv_pop_saved_into("a1")
+        rv_pop_saved_into("a0")
+        rv_pop_saved_into("a7")
+        rv_emit_indented("ecall")
+    } else if num_args =? 5 {
+        rv_emit_2op("mv" "a3" "a0")
+        rv_pop_saved_into("a2")
+        rv_pop_saved_into("a1")
+        rv_pop_saved_into("a0")
+        rv_pop_saved_into("a7")
+        rv_emit_indented("ecall")
+    } else if num_args =? 6 {
+        rv_emit_2op("mv" "a4" "a0")
+        rv_pop_saved_into("a3")
+        rv_pop_saved_into("a2")
+        rv_pop_saved_into("a1")
+        rv_pop_saved_into("a0")
+        rv_pop_saved_into("a7")
+        rv_emit_indented("ecall")
+    } else if num_args =? 7 {
+        rv_emit_2op("mv" "a5" "a0")
+        rv_pop_saved_into("a4")
+        rv_pop_saved_into("a3")
+        rv_pop_saved_into("a2")
+        rv_pop_saved_into("a1")
+        rv_pop_saved_into("a0")
+        rv_pop_saved_into("a7")
+        rv_emit_indented("ecall")
+    }
+    return void
+}
+
+let rv_mixed_extern_arg_slots = (name:int):>int => {
+    if not str_prefix(name "__call_extern_mixed_") { return 0 - 1 }
+    let n:int = str_len(name)
+    if n <? 23 { return 0 - 1 }
+    if __load_u8__(name + n - 2) not=? 95 { return 0 - 1 }
+    if __load_u8__(name + n - 1) not=? 95 { return 0 - 1 }
+    let mid_len:int = n - 22
+    if mid_len <? 1 { return 0 - 1 }
+    let v:int = 0
+    let i:int = 0
+    loop i <? mid_len {
+        let c:int = __load_u8__(name + 20 + i)
+        if (c <? 48) or (c >? 57) { return 0 - 1 }
+        v = v * 10 + (c - 48)
+        i = i + 1
+    }
+    if (v <? 1) or (v >? 8) { return 0 - 1 }
+    return v
+}
+
+let rv_call_extern_fp_mixed = (tags:int):>void => {
+    rv_requires_hard_float = TRUE_VAL
+    let n:int = vec_len(tags)
+    let gp_slots:int = vec_new(n)
+    let fp_slots:int = vec_new(n)
+    let gp_count:int = 0
+    let fp_count:int = 0
+    let i:int = 0
+    loop i <? n {
+        let k:int = vec_get(tags i)
+        if k =? 0 {
+            vec_push(gp_slots gp_count)
+            vec_push(fp_slots 0 - 1)
+            gp_count = gp_count + 1
+        } else {
+            vec_push(gp_slots 0 - 1)
+            vec_push(fp_slots fp_count)
+            fp_count = fp_count + 1
+        }
+        i = i + 1
+    }
+    let ai:int = n - 1
+    loop ai >=? 0 {
+        let k:int = vec_get(tags ai)
+        if k =? 0 {
+            let dst:int = rv_arg_reg(vec_get(gp_slots ai))
+            if not str_eq(dst "a0") {
+                rv_emit_2op("mv" dst "a0")
+            }
+        } else if k =? 1 {
+            rv_emit_2op("fmv.w.x" rv_fp_arg_reg(vec_get(fp_slots ai)) "a0")
+        } else {
+            rv_emit_2op("fmv.d.x" rv_fp_arg_reg(vec_get(fp_slots ai)) "a0")
+        }
+        if ai >? 0 { rv_pop_saved_into("a0") }
+        ai = ai - 1
+    }
+    rv_pop_saved_into("t5")
+    rv_emit_indented("jalr ra, t5, 0")
+    return void
+}
+
+let rv_mixed_extern_type_tags = (name:int static_args_map:int):>int => {
+    let m:int = rv_mixed_extern_arg_slots(name)
+    let tags:int = vec_new(m)
+    let i:int = 0
+    loop i <? m {
+        let idx:int = 1 + i * 2
+        vec_push(tags intmap_get(static_args_map idx))
+        i = i + 1
+    }
+    return tags
+}
+
+# --- Control flow ---
+
+let rv_begin_if = ():>void => {
+    let el:int = rv_new_label("else")
+    let en:int = rv_new_label("if_end")
+    vec_push(rv_if_else_labels el)
+    vec_push(rv_if_end_labels en)
+    vec_push(rv_if_else_emitted FALSE_VAL)
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    beqz a0, ")
+    bb_push_str(bb el)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_begin_else = ():>void => {
+    let top:int = vec_len(rv_if_else_labels) - 1
+    let el:int = vec_get(rv_if_else_labels top)
+    let en:int = vec_get(rv_if_end_labels top)
+    vec_set(rv_if_else_emitted top TRUE_VAL)
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    j ")
+    bb_push_str(bb en)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    rv_emit_label_str(el)
+    return void
+}
+
+let rv_end_if = ():>void => {
+    let top:int = vec_len(rv_if_else_labels) - 1
+    let el:int = vec_get(rv_if_else_labels top)
+    let en:int = vec_get(rv_if_end_labels top)
+    let emit:int = vec_get(rv_if_else_emitted top)
+    vec_pop(rv_if_else_labels)
+    vec_pop(rv_if_end_labels)
+    vec_pop(rv_if_else_emitted)
+    if emit =? FALSE_VAL { rv_emit_label_str(el) }
+    rv_emit_label_str(en)
+    return void
+}
+
+let rv_begin_loop = ():>void => {
+    let s:int = rv_new_label("loop_start")
+    let e:int = rv_new_label("loop_end")
+    vec_push(rv_loop_start_labels s)
+    vec_push(rv_loop_end_labels e)
+    rv_emit_label_str(s)
+    return void
+}
+
+let rv_begin_loop_body = ():>void => {
+    let top:int = vec_len(rv_loop_end_labels) - 1
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    beqz a0, ")
+    bb_push_str(bb vec_get(rv_loop_end_labels top))
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_end_loop = ():>void => {
+    let top:int = vec_len(rv_loop_start_labels) - 1
+    let s:int = vec_get(rv_loop_start_labels top)
+    let e:int = vec_get(rv_loop_end_labels top)
+    vec_pop(rv_loop_start_labels)
+    vec_pop(rv_loop_end_labels)
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    j ")
+    bb_push_str(bb s)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    rv_emit_label_str(e)
+    return void
+}
+
+let rv_emit_break = ():>void => {
+    let top:int = vec_len(rv_loop_end_labels) - 1
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    j ")
+    bb_push_str(bb vec_get(rv_loop_end_labels top))
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_emit_continue = ():>void => {
+    let top:int = vec_len(rv_loop_start_labels) - 1
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    j ")
+    bb_push_str(bb vec_get(rv_loop_start_labels top))
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let rv_cond_and_split = ():>int => {
+    let lbl:int = rv_new_label("cond_and_false")
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    beqz a0, ")
+    bb_push_str(bb lbl)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return lbl
+}
+
+let rv_cond_and_join = (false_label:int):>void => {
+    let done:int = rv_new_label("cond_and_done")
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    j ")
+    bb_push_str(bb done)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    rv_emit_label_str(false_label)
+    rv_emit_indented("li a0, 0")
+    rv_emit_label_str(done)
+    return void
+}
+
+let rv_cond_or_split = ():>int => {
+    let done:int = rv_new_label("cond_or_done")
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    bnez a0, ")
+    bb_push_str(bb done)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return done
+}
+
+let rv_cond_or_join = (done_label:int):>void => {
+    rv_emit_label_str(done_label)
+    return void
+}
+
+let rv_emit_return = ():>void => {
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    j ")
+    bb_push_str(bb rv_current_fn_epilogue)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+# --- Intrinsics ---
+
+let g_rv_intrinsics:int = 0
+
+let rv_init_intrinsics = ():>void => {
+    if g_rv_intrinsics not=? 0 { return void }
+    core_intrinsics_init()
+    let m:int = map_new()
+    let cap:int = map_cap(g_core_intrinsics)
+    let slots:int = map_slots(g_core_intrinsics)
+    let i:int = 0
+    loop i <? cap {
+        let slot:int = slots + (i * 32)
+        if __load__(slot) =? 1 {
+            map_put(m __load__(slot + 8) __load__(slot + 16) __load__(slot + 24))
+        }
+        i = i + 1
+    }
+    linux_syscall_intrinsics_into(m)
+    map_put_str(m "__i64_to_f32_bits__" 1)
+    map_put_str(m "__i64_to_f64_bits__" 1)
+    map_put_str(m "__f32_bits_to_i64__" 1)
+    map_put_str(m "__f64_bits_to_i64__" 1)
+    g_rv_intrinsics = m
+    return void
+}
+
+let rv_is_intrinsic = (name:int):>int => {
+    rv_init_intrinsics()
+    if map_has_str(g_rv_intrinsics name) { return TRUE_VAL }
+    if rv_mixed_extern_arg_slots(name) >=? 0 { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let rv_intrinsic_arity = (name:int):>int => {
+    rv_init_intrinsics()
+    let m:int = rv_mixed_extern_arg_slots(name)
+    if m >=? 0 { return 1 + m * 2 }
+    if map_has_str(g_rv_intrinsics name) { return map_get_str(g_rv_intrinsics name) }
+    return 0 - 1
+}
+
+let rv_intrinsic_static_arg_indices = (name:int):>int => {
+    let m:int = rv_mixed_extern_arg_slots(name)
+    if m <? 0 { return 0 }
+    let mask:int = 0
+    let i:int = 0
+    loop i <? m {
+        mask = mask or (1 << (1 + i * 2))
+        i = i + 1
+    }
+    return mask
+}
+
+let rv_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
+    if str_eq(name "__load_u8__")        { rv_load_mem(8 0) }
+    else if str_eq(name "__load_u16__")  { rv_load_mem(16 0) }
+    else if str_eq(name "__load_u32__")  { rv_load_mem(32 0) }
+    else if str_eq(name "__load_u64__")  { rv_load_mem(64 0) }
+    else if str_eq(name "__load__")      { rv_load_mem(64 0) }
+    else if str_eq(name "__store_u8__")  { rv_store_mem(8) }
+    else if str_eq(name "__store_u16__") { rv_store_mem(16) }
+    else if str_eq(name "__store_u32__") { rv_store_mem(32) }
+    else if str_eq(name "__store_u64__") { rv_store_mem(64) }
+    else if str_eq(name "__store__")     { rv_store_mem(64) }
+    else if str_eq(name "__load_i8__")   { rv_load_mem(8 1) }
+    else if str_eq(name "__load_i16__")  { rv_load_mem(16 1) }
+    else if str_eq(name "__load_i32__")  { rv_load_mem(32 1) }
+    else if str_eq(name "__load_i64__")  { rv_load_mem(64 1) }
+    else if str_eq(name "__store_i8__")  { rv_store_mem(8) }
+    else if str_eq(name "__store_i16__") { rv_store_mem(16) }
+    else if str_eq(name "__store_i32__") { rv_store_mem(32) }
+    else if str_eq(name "__store_i64__") { rv_store_mem(64) }
+    else if str_eq(name "__signed_shr__")    { rv_signed_shr() }
+    else if str_eq(name "__unsigned_idiv__") { rv_unsigned_idiv() }
+    else if str_eq(name "__unsigned_mod__")  { rv_unsigned_mod() }
+    else if str_eq(name "__unsigned_lt__")   { rv_unsigned_cmp(1) }
+    else if str_eq(name "__unsigned_gt__")   { rv_unsigned_cmp(0) }
+    else if str_eq(name "__unsigned_lte__")  { rv_unsigned_cmp(3) }
+    else if str_eq(name "__unsigned_gte__")  { rv_unsigned_cmp(2) }
+    else if str_eq(name "__alloca__")        { rv_alloca() }
+    else if str_eq(name "__i64_to_f32_bits__") {
+        rv_requires_hard_float = TRUE_VAL
+        rv_emit_indented("fcvt.s.l ft0, a0")
+        rv_emit_indented("fmv.x.w a0, ft0")
+        rv_emit_indented("slli a0, a0, 32")
+        rv_emit_indented("srli a0, a0, 32")
+    }
+    else if str_eq(name "__i64_to_f64_bits__") {
+        rv_requires_hard_float = TRUE_VAL
+        rv_emit_indented("fcvt.d.l ft0, a0")
+        rv_emit_indented("fmv.x.d a0, ft0")
+    }
+    else if str_eq(name "__f32_bits_to_i64__") {
+        rv_requires_hard_float = TRUE_VAL
+        rv_emit_indented("fmv.w.x ft0, a0")
+        rv_emit_indented("fcvt.l.s a0, ft0, rtz")
+    }
+    else if str_eq(name "__f64_bits_to_i64__") {
+        rv_requires_hard_float = TRUE_VAL
+        rv_emit_indented("fmv.d.x ft0, a0")
+        rv_emit_indented("fcvt.l.d a0, ft0, rtz")
+    }
+    else if str_prefix(name "__syscall") {
+        rv_syscall(num_args)
+    }
+    else {
+        rv_call_extern_fp_mixed(rv_mixed_extern_type_tags(name static_args_map))
+    }
+    return void
+}
+
+let rv_get_builtin_constants = ():>int => {
+    return linux_builtin_constants(1)
+}
+
+# --- compile_and_link / run ---
+
+let rv_toolchain_run = (argv:int err_msg:int):>void => {
+    proc_run_or_die(argv err_msg)
+    return void
+}
+
+let rv_compile_and_link = (code:int input_name:int cache_dir:int options:int):>int => {
+    fs_mkdir_p(cache_dir)
+    let asm_bb:int = bb_new(str_len(cache_dir) + str_len(input_name) + 4)
+    bb_push_str(asm_bb cache_dir)
+    bb_push_byte(asm_bb 47)
+    bb_push_str(asm_bb input_name)
+    bb_push_str(asm_bb ".s")
+    let asm_path:int = bb_finalize_as_string(asm_bb)
+
+    let obj_bb:int = bb_new(str_len(cache_dir) + str_len(input_name) + 4)
+    bb_push_str(obj_bb cache_dir)
+    bb_push_byte(obj_bb 47)
+    bb_push_str(obj_bb input_name)
+    bb_push_str(obj_bb ".o")
+    let obj_path:int = bb_finalize_as_string(obj_bb)
+
+    let exe_bb:int = bb_new(str_len(cache_dir) + str_len(input_name) + 2)
+    bb_push_str(exe_bb cache_dir)
+    bb_push_byte(exe_bb 47)
+    bb_push_str(exe_bb input_name)
+    let exe_path:int = bb_finalize_as_string(exe_bb)
+
+    fs_write_file(path_to_cstr(asm_path) code str_len(code))
+
+    let av1:int = vec_new(8)
+    vec_push(av1 rv_str("riscv64-linux-gnu-as"))
+    if rv_requires_hard_float =? TRUE_VAL {
+        vec_push(av1 rv_str("-march=rv64gc"))
+        vec_push(av1 rv_str("-mabi=lp64d"))
+    }
+    vec_push(av1 asm_path)
+    vec_push(av1 rv_str("-o"))
+    vec_push(av1 obj_path)
+    proc_run_or_die(av1 "riscv assembler failed")
+
+    let av2:int = vec_new(16)
+    vec_push(av2 rv_str("riscv64-linux-gnu-ld"))
+    vec_push(av2 rv_str("--gc-sections"))
+    vec_push(av2 rv_str("-e"))
+    vec_push(av2 rv_str("_start"))
+    vec_push(av2 obj_path)
+    vec_push(av2 rv_str("-o"))
+    vec_push(av2 exe_path)
+    proc_run_or_die(av2 "riscv linker failed")
+    return exe_path
+}
+
+let rv_run = (output_path:int args:int options:int):>int => {
+    let argv:int = vec_new(vec_len(args) + 2)
+    vec_push(argv rv_str("qemu-riscv64"))
+    vec_push(argv output_path)
+    let i:int = 0
+    loop i <? vec_len(args) {
+        vec_push(argv vec_get(args i))
+        i = i + 1
+    }
+    return proc_run(argv)
+}
+
+let rv_get_compile_message = (output_path:int options:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "Compiled: ")
+    bb_push_str(bb output_path)
+    return bb_finalize_as_string(bb)
+}
+
+let rv_install_backend = ():>void => {
+    rv_alloc_state()
+    be_begin_module = rv_begin_module
+    be_finish_module = rv_finish_module
+    be_set_module_init = rv_set_module_init
+    be_set_imported_sources = be_default_set_imported_sources
+    be_intern_string = rv_intern_string
+    be_intern_array = rv_intern_array
+    be_define_global = rv_define_global
+    be_declare_extern_global = rv_declare_extern_global
+    be_intern_static = rv_intern_static
+    be_push_string_ref = rv_push_string_ref
+    be_push_array_ref = rv_push_array_ref
+    be_push_global_ref = rv_push_global_ref
+    be_push_static_ref = rv_push_static_ref
+    be_load_global = rv_load_global
+    be_store_global = rv_store_global
+    be_function_ref = rv_function_ref
+    be_string_ref = rv_string_ref
+    be_array_ref = rv_array_ref
+    be_static_ref = rv_static_ref
+    be_declare_function = rv_declare_function
+    be_bind_extern_function = rv_bind_extern_function
+    be_declare_extern_function = rv_declare_extern_function
+    be_should_warn_unused_extern = be_default_should_warn_unused_extern
+    be_begin_function = rv_begin_function
+    be_end_function = rv_end_function
+    be_set_reachable_functions = rv_set_reachable_functions
+    be_load_param = rv_load_param
+    be_alloc_local = rv_alloc_local
+    be_load_local = rv_load_local
+    be_store_local = rv_store_local
+    be_push_const_i64 = rv_push_const_i64
+    be_push_void = rv_push_void
+    be_push_fn_ref = rv_push_fn_ref
+    be_pop_value = rv_pop_value
+    be_save_value = rv_save_value
+    be_restore_value = rv_restore_value
+    be_unary_op = rv_unary_op
+    be_binary_op = rv_binary_op
+    be_pipe_call = rv_pipe_call
+    be_begin_if = rv_begin_if
+    be_begin_else = rv_begin_else
+    be_end_if = rv_end_if
+    be_begin_loop = rv_begin_loop
+    be_begin_loop_body = rv_begin_loop_body
+    be_end_loop = rv_end_loop
+    be_emit_break = rv_emit_break
+    be_emit_continue = rv_emit_continue
+    be_cond_and_split = rv_cond_and_split
+    be_cond_and_join = rv_cond_and_join
+    be_cond_or_split = rv_cond_or_split
+    be_cond_or_join = rv_cond_or_join
+    be_emit_return = rv_emit_return
+    be_call_direct = rv_call_direct
+    be_call_indirect = rv_call_indirect
+    be_max_call_args = rv_max_call_args
+    be_is_intrinsic = rv_is_intrinsic
+    be_intrinsic_arity = rv_intrinsic_arity
+    be_intrinsic_static_arg_indices = rv_intrinsic_static_arg_indices
+    be_emit_intrinsic = rv_emit_intrinsic
+    be_get_builtin_constants = rv_get_builtin_constants
+    be_compile_and_link = rv_compile_and_link
+    be_run = rv_run
+    be_get_compile_message = rv_get_compile_message
+    return void
+}

@@ -1,0 +1,108 @@
+# Subprocess helpers built on host_fork/host_execve/host_waitpid.
+# `argv` is a Vec of length-prefixed udewy strings.
+# `envp` is currently always passed as the empty environment.
+
+# Standard PATH directories to search when prog has no '/'.
+let proc_search_dirs:int = 0
+
+let proc_init_search_dirs = ():>void => {
+    if proc_search_dirs not=? 0 { return void }
+    proc_search_dirs = vec_new(4)
+    vec_push(proc_search_dirs "/usr/local/bin")
+    vec_push(proc_search_dirs "/usr/bin")
+    vec_push(proc_search_dirs "/bin")
+    vec_push(proc_search_dirs "/usr/local/sbin")
+    vec_push(proc_search_dirs "/usr/sbin")
+    return void
+}
+
+# Returns true if cstr `s` contains a '/' before its NUL terminator.
+let proc_cstr_has_slash = (s:int):>int => {
+    let i:int = 0
+    loop true {
+        let c:int = __load_u8__(s + i)
+        if c =? 0 { return FALSE_VAL }
+        if c =? 47 { return TRUE_VAL }
+        i = i + 1
+    }
+    return FALSE_VAL
+}
+
+# Returns a length-prefixed udewy string "<dir>/<name>".
+let proc_join_cstr = (dir_str:int name_cstr:int):>int => {
+    let nlen:int = cstr_len(name_cstr)
+    let bb:int = bb_new(str_len(dir_str) + nlen + 2)
+    bb_push_str(bb dir_str)
+    bb_push_byte(bb 47)
+    bb_push_bytes(bb name_cstr nlen)
+    return bb_finalize_as_string(bb)
+}
+
+let proc_build_cstr_argv = (argv:int):>int => {
+    let n:int = vec_len(argv)
+    # n + 1 pointers, NUL-terminated
+    let table:int = arena_alloc((n + 1) * 8)
+    let i:int = 0
+    loop i <? n {
+        __store__(path_to_cstr(vec_get(argv i)) table + (i << 3))
+        i = i + 1
+    }
+    __store__(0 table + (n << 3))
+    return table
+}
+
+# Run a subprocess and wait for it. Returns the exit status (positive integer)
+# or a negative error code on fork/exec failure. argv[0] is also the program.
+let proc_run = (argv:int):>int => {
+    if vec_len(argv) =? 0 { return 0 - 1 }
+    let prog:int = vec_get(argv 0)
+    let prog_cstr:int = path_to_cstr(prog)
+    let argv_table:int = proc_build_cstr_argv(argv)
+    let envp_table:int = arena_alloc(8)
+    __store__(0 envp_table)
+
+    let pid:int = host_fork()
+    if pid <? 0 { return pid }
+    if pid =? 0 {
+        # child
+        host_execve(prog_cstr argv_table envp_table)
+        # PATH search if prog has no slash.
+        if not proc_cstr_has_slash(prog_cstr) {
+            proc_init_search_dirs()
+            let j:int = 0
+            loop j <? vec_len(proc_search_dirs) {
+                let candidate:int = proc_join_cstr(vec_get(proc_search_dirs j) prog_cstr)
+                host_execve(path_to_cstr(candidate) argv_table envp_table)
+                j = j + 1
+            }
+        }
+        host_exit(127)
+    }
+    let status:int = __static_alloca__(8)
+    __store__(0 status)
+    let rc:int = host_waitpid(pid status 0)
+    if rc <? 0 { return rc }
+    let st:int = __load__(status)
+    # WIFEXITED: (status & 0x7f) == 0 -> exit status in high byte
+    if (st and 0x7f) =? 0 {
+        return (st >> 8) and 0xff
+    }
+    # signaled or other: return 128 + signal
+    return 128 + (st and 0x7f)
+}
+
+# Convenience that runs and exits the caller on non-zero exit.
+let proc_run_or_die = (argv:int err_msg:int):>void => {
+    let rc:int = proc_run(argv)
+    if rc not=? 0 {
+        eprint("error: ")
+        eprint(err_msg)
+        eprint(" (exit ")
+        let bb:int = bb_new(16)
+        bb_push_int(bb rc)
+        eprint(bb_finalize_as_string(bb))
+        eprintl(")")
+        host_exit(1)
+    }
+    return void
+}

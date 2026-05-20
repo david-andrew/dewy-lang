@@ -1,0 +1,40 @@
+# String set, implemented as a thin layer over Map.
+
+let set_new = ():>int => {
+    return map_new()
+}
+
+let set_size = (s:int):>int => {
+    return map_size(s)
+}
+
+let set_add = (s:int key:int keylen:int):>void => {
+    map_put(s key keylen 1)
+    return void
+}
+
+let set_add_str = (s:int key:int):>void => {
+    map_put(s key str_len(key) 1)
+    return void
+}
+
+let set_add_cstr = (s:int key:int):>void => {
+    map_put(s key cstr_len(key) 1)
+    return void
+}
+
+let set_has = (s:int key:int keylen:int):>int => {
+    return map_has(s key keylen)
+}
+
+let set_has_str = (s:int key:int):>int => {
+    return map_has(s key str_len(key))
+}
+
+let set_has_cstr = (s:int key:int):>int => {
+    return map_has(s key cstr_len(key))
+}
+
+let set_remove = (s:int key:int keylen:int):>int => {
+    return map_remove(s key keylen)
+}

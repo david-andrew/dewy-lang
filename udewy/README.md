@@ -1968,4 +1968,24 @@ All are equally correct.
   - `wasm.py` - WebAssembly browser
   - `common.py` - Backend protocol definition
 - `tests/` - Test programs
-- `bootstrap/` - Self-hosted compiler modules
+- `bootstrap/` - Self-hosted bootstrap compiler (in udewy itself)
+  - `main.udewy` - CLI entry point
+  - `t0.udewy`, `t1.udewy`, `p0.udewy` - Preprocessor, tokenizer, parser
+  - `runtime/` - Host I/O, subprocess, fs, diagnostics, paths, strbuf
+  - `backend/` - One file per backend (x86_64, riscv, arm, c, wasm)
+
+## Bootstrap Compiler
+
+The `bootstrap/` directory contains a self-hosted compiler written in udewy
+itself. It is feature-equivalent to the Python implementation and supports all
+five backends (x86_64, riscv, arm, c, wasm32). The x86_64 and C backends are
+fully self-hosting: the bootstrap can compile itself targeting either.
+
+```bash
+# Compile the bootstrap to a native binary (via the Python compiler)
+python -m udewy --target x86_64 -c udewy/bootstrap/main.udewy
+# Now use the bootstrap to compile programs
+./__dewycache__/main --target wasm32 -c udewy/tests/test_hello.udewy
+# Self-host: bootstrap compiles itself
+./__dewycache__/main --target x86_64 -c udewy/bootstrap/main.udewy
+```

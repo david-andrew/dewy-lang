@@ -1,0 +1,128 @@
+# Shared Linux constants for the x86_64 / riscv / arm backends.
+
+import p"../runtime/runtime.udewy"
+
+# Helper -- add a single key/value to a builtins map.
+let lin_put = (m:int key:int val:int):>void => {
+    map_put_str(m key val)
+    return void
+}
+
+let linux_common_into = (m:int):>void => {
+    lin_put(m "STDIN" 0)
+    lin_put(m "STDOUT" 1)
+    lin_put(m "STDERR" 2)
+    lin_put(m "O_RDONLY" 0)
+    lin_put(m "O_WRONLY" 1)
+    lin_put(m "O_RDWR" 2)
+    lin_put(m "O_CREAT" 64)
+    lin_put(m "O_TRUNC" 512)
+    lin_put(m "O_APPEND" 1024)
+    lin_put(m "PROT_NONE" 0)
+    lin_put(m "PROT_READ" 1)
+    lin_put(m "PROT_WRITE" 2)
+    lin_put(m "PROT_EXEC" 4)
+    lin_put(m "MAP_SHARED" 1)
+    lin_put(m "MAP_PRIVATE" 2)
+    lin_put(m "MAP_ANONYMOUS" 32)
+    lin_put(m "MAP_FIXED" 16)
+    return void
+}
+
+let x86_64_linux_syscalls_into = (m:int):>void => {
+    lin_put(m "SYS_READ" 0)
+    lin_put(m "SYS_WRITE" 1)
+    lin_put(m "SYS_OPEN" 2)
+    lin_put(m "SYS_CLOSE" 3)
+    lin_put(m "SYS_STAT" 4)
+    lin_put(m "SYS_FSTAT" 5)
+    lin_put(m "SYS_LSEEK" 8)
+    lin_put(m "SYS_MMAP" 9)
+    lin_put(m "SYS_MUNMAP" 11)
+    lin_put(m "SYS_BRK" 12)
+    lin_put(m "SYS_IOCTL" 16)
+    lin_put(m "SYS_PIPE" 22)
+    lin_put(m "SYS_DUP" 32)
+    lin_put(m "SYS_DUP2" 33)
+    lin_put(m "SYS_GETPID" 39)
+    lin_put(m "SYS_FORK" 57)
+    lin_put(m "SYS_EXECVE" 59)
+    lin_put(m "SYS_EXIT" 60)
+    lin_put(m "SYS_WAIT4" 61)
+    lin_put(m "SYS_KILL" 62)
+    lin_put(m "SYS_GETCWD" 79)
+    lin_put(m "SYS_CHDIR" 80)
+    lin_put(m "SYS_MKDIR" 83)
+    lin_put(m "SYS_RMDIR" 84)
+    lin_put(m "SYS_CREAT" 85)
+    lin_put(m "SYS_UNLINK" 87)
+    lin_put(m "SYS_GETUID" 102)
+    lin_put(m "SYS_GETGID" 104)
+    lin_put(m "SYS_GETEUID" 107)
+    lin_put(m "SYS_GETEGID" 108)
+    lin_put(m "SYS_CLOCK_GETTIME" 228)
+    lin_put(m "SYS_EXIT_GROUP" 231)
+    return void
+}
+
+let newstyle_linux_syscalls_into = (m:int):>void => {
+    lin_put(m "SYS_GETCWD" 17)
+    lin_put(m "SYS_DUP" 23)
+    lin_put(m "SYS_DUP3" 24)
+    lin_put(m "SYS_IOCTL" 29)
+    lin_put(m "SYS_MKDIRAT" 34)
+    lin_put(m "SYS_UNLINKAT" 35)
+    lin_put(m "SYS_FTRUNCATE" 46)
+    lin_put(m "SYS_FACCESSAT" 48)
+    lin_put(m "SYS_CHDIR" 49)
+    lin_put(m "SYS_OPENAT" 56)
+    lin_put(m "SYS_CLOSE" 57)
+    lin_put(m "SYS_PIPE2" 59)
+    lin_put(m "SYS_LSEEK" 62)
+    lin_put(m "SYS_READ" 63)
+    lin_put(m "SYS_WRITE" 64)
+    lin_put(m "SYS_READV" 65)
+    lin_put(m "SYS_WRITEV" 66)
+    lin_put(m "SYS_FSTAT" 80)
+    lin_put(m "SYS_EXIT" 93)
+    lin_put(m "SYS_EXIT_GROUP" 94)
+    lin_put(m "SYS_KILL" 129)
+    lin_put(m "SYS_GETPID" 172)
+    lin_put(m "SYS_GETUID" 174)
+    lin_put(m "SYS_GETEUID" 175)
+    lin_put(m "SYS_GETGID" 176)
+    lin_put(m "SYS_GETEGID" 177)
+    lin_put(m "SYS_BRK" 214)
+    lin_put(m "SYS_MUNMAP" 215)
+    lin_put(m "SYS_CLONE" 220)
+    lin_put(m "SYS_EXECVE" 221)
+    lin_put(m "SYS_MMAP" 222)
+    lin_put(m "SYS_WAIT4" 260)
+    lin_put(m "AT_FDCWD" 0 - 100)
+    return void
+}
+
+# Returns a fresh Map containing the appropriate Linux builtin constants.
+# kind: 0 = x86_64, 1 = newstyle (riscv/arm)
+let linux_builtin_constants = (kind:int):>int => {
+    let m:int = map_new()
+    linux_common_into(m)
+    if kind =? 0 {
+        x86_64_linux_syscalls_into(m)
+    } else {
+        newstyle_linux_syscalls_into(m)
+    }
+    return m
+}
+
+# Add syscall intrinsic arities (__syscall0__ through __syscall6__) to a map.
+let linux_syscall_intrinsics_into = (m:int):>void => {
+    map_put_str(m "__syscall0__" 1)
+    map_put_str(m "__syscall1__" 2)
+    map_put_str(m "__syscall2__" 3)
+    map_put_str(m "__syscall3__" 4)
+    map_put_str(m "__syscall4__" 5)
+    map_put_str(m "__syscall5__" 6)
+    map_put_str(m "__syscall6__" 7)
+    return void
+}

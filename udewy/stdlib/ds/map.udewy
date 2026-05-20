@@ -1,0 +1,241 @@
+# String-keyed, int-valued hash map (open addressing, linear probing).
+#
+# Map is a pointer to a 32-byte header:
+#   +0  cap     number of slots (always a power of 2)
+#   +8  size    number of occupied slots
+#   +16 tomb    number of tombstone slots
+#   +24 slots   pointer to slot array
+#
+# Each slot is 32 bytes:
+#   +0  state   0 = empty, 1 = occupied, 2 = tombstone
+#   +8  key     pointer to key bytes
+#   +16 keylen  number of bytes in the key
+#   +24 value   the stored int value
+
+const MAP_OFF_CAP:int = 0
+const MAP_OFF_SIZE:int = 8
+const MAP_OFF_TOMB:int = 16
+const MAP_OFF_SLOTS:int = 24
+const MAP_HEADER_SIZE:int = 32
+
+const MAP_SLOT_STATE:int = 0
+const MAP_SLOT_KEY:int = 8
+const MAP_SLOT_KEYLEN:int = 16
+const MAP_SLOT_VALUE:int = 24
+const MAP_SLOT_SIZE:int = 32
+
+const MAP_EMPTY:int = 0
+const MAP_OCCUPIED:int = 1
+const MAP_TOMBSTONE:int = 2
+
+const MAP_INITIAL_CAP:int = 16
+
+let map_alloc_slots = (cap:int):>int => {
+    let bytes:int = cap * MAP_SLOT_SIZE
+    let slots:int = arena_alloc(bytes)
+    zero_bytes(slots bytes)
+    return slots
+}
+
+let map_new = ():>int => {
+    let hdr:int = arena_alloc(MAP_HEADER_SIZE)
+    __store__(MAP_INITIAL_CAP hdr + MAP_OFF_CAP)
+    __store__(0 hdr + MAP_OFF_SIZE)
+    __store__(0 hdr + MAP_OFF_TOMB)
+    __store__(map_alloc_slots(MAP_INITIAL_CAP) hdr + MAP_OFF_SLOTS)
+    return hdr
+}
+
+let map_cap = (m:int):>int => {
+    return __load__(m + MAP_OFF_CAP)
+}
+
+let map_size = (m:int):>int => {
+    return __load__(m + MAP_OFF_SIZE)
+}
+
+let map_slots = (m:int):>int => {
+    return __load__(m + MAP_OFF_SLOTS)
+}
+
+# FNV-1a hash over a byte sequence.
+let map_hash = (ptr:int len:int):>int => {
+    let h:int = 0xcbf29ce484222325
+    let i:int = 0
+    loop i <? len {
+        h = h xor __load_u8__(ptr + i)
+        h = h * 0x100000001b3
+        i = i + 1
+    }
+    return h
+}
+
+let map_slot_addr = (slots:int idx:int):>int => {
+    return slots + (idx * MAP_SLOT_SIZE)
+}
+
+let map_slot_state = (slot:int):>int => {
+    return __load__(slot + MAP_SLOT_STATE)
+}
+
+let map_slot_key = (slot:int):>int => {
+    return __load__(slot + MAP_SLOT_KEY)
+}
+
+let map_slot_keylen = (slot:int):>int => {
+    return __load__(slot + MAP_SLOT_KEYLEN)
+}
+
+let map_slot_value = (slot:int):>int => {
+    return __load__(slot + MAP_SLOT_VALUE)
+}
+
+let map_keys_equal = (key_a:int len_a:int key_b:int len_b:int):>int => {
+    if len_a not=? len_b { return FALSE_VAL }
+    let i:int = 0
+    loop i <? len_a {
+        if __load_u8__(key_a + i) not=? __load_u8__(key_b + i) {
+            return FALSE_VAL
+        }
+        i = i + 1
+    }
+    return TRUE_VAL
+}
+
+# Find the slot for the given key. Returns the slot address.
+# If the key is present, that slot is returned. Otherwise the first empty or
+# tombstone slot encountered along the probe chain is returned.
+let map_probe = (m:int key:int keylen:int):>int => {
+    let cap:int = map_cap(m)
+    let mask:int = cap - 1
+    let slots:int = map_slots(m)
+    let idx:int = map_hash(key keylen) and mask
+    let first_tomb:int = -1
+    loop true {
+        let slot:int = map_slot_addr(slots idx)
+        let state:int = map_slot_state(slot)
+        if state =? MAP_EMPTY {
+            if first_tomb not=? -1 { return first_tomb }
+            return slot
+        }
+        if state =? MAP_TOMBSTONE {
+            if first_tomb =? -1 { first_tomb = slot }
+        } else {
+            if map_keys_equal(map_slot_key(slot) map_slot_keylen(slot) key keylen) {
+                return slot
+            }
+        }
+        idx = (idx + 1) and mask
+    }
+    return 0
+}
+
+let map_resize = (m:int new_cap:int):>void => {
+    let old_slots:int = map_slots(m)
+    let old_cap:int = map_cap(m)
+    let new_slots:int = map_alloc_slots(new_cap)
+    __store__(new_cap m + MAP_OFF_CAP)
+    __store__(0 m + MAP_OFF_SIZE)
+    __store__(0 m + MAP_OFF_TOMB)
+    __store__(new_slots m + MAP_OFF_SLOTS)
+    let i:int = 0
+    loop i <? old_cap {
+        let slot:int = map_slot_addr(old_slots i)
+        if map_slot_state(slot) =? MAP_OCCUPIED {
+            map_put_raw(m map_slot_key(slot) map_slot_keylen(slot) map_slot_value(slot))
+        }
+        i = i + 1
+    }
+    return void
+}
+
+let map_maybe_grow = (m:int):>void => {
+    let cap:int = map_cap(m)
+    let size:int = map_size(m)
+    let tomb:int = __load__(m + MAP_OFF_TOMB)
+    # grow when load factor (occupied + tombstones) exceeds 0.7
+    if ((size + tomb) * 10) >=? (cap * 7) {
+        if (size * 10) >=? (cap * 4) {
+            map_resize(m cap * 2)
+        } else {
+            map_resize(m cap)
+        }
+    }
+    return void
+}
+
+let map_put_raw = (m:int key:int keylen:int value:int):>void => {
+    let slot:int = map_probe(m key keylen)
+    let state:int = map_slot_state(slot)
+    if state =? MAP_OCCUPIED {
+        __store__(value slot + MAP_SLOT_VALUE)
+        return void
+    }
+    if state =? MAP_TOMBSTONE {
+        __store__(__load__(m + MAP_OFF_TOMB) - 1 m + MAP_OFF_TOMB)
+    }
+    __store__(MAP_OCCUPIED slot + MAP_SLOT_STATE)
+    __store__(key slot + MAP_SLOT_KEY)
+    __store__(keylen slot + MAP_SLOT_KEYLEN)
+    __store__(value slot + MAP_SLOT_VALUE)
+    __store__(map_size(m) + 1 m + MAP_OFF_SIZE)
+    return void
+}
+
+let map_put = (m:int key:int keylen:int value:int):>void => {
+    map_maybe_grow(m)
+    map_put_raw(m key keylen value)
+    return void
+}
+
+# Convenience for length-prefixed udewy strings (length at key-8).
+let map_put_str = (m:int key:int value:int):>void => {
+    map_put(m key str_len(key) value)
+    return void
+}
+
+# Convenience for null-terminated cstrings.
+let map_put_cstr = (m:int key:int value:int):>void => {
+    map_put(m key cstr_len(key) value)
+    return void
+}
+
+# Lookup. Returns sentinel = -1 (0xFF..FF) if not found.
+const MAP_MISSING:int = -1
+
+let map_get = (m:int key:int keylen:int):>int => {
+    let slot:int = map_probe(m key keylen)
+    if map_slot_state(slot) =? MAP_OCCUPIED {
+        return map_slot_value(slot)
+    }
+    return MAP_MISSING
+}
+
+let map_get_str = (m:int key:int):>int => {
+    return map_get(m key str_len(key))
+}
+
+let map_get_cstr = (m:int key:int):>int => {
+    return map_get(m key cstr_len(key))
+}
+
+let map_has = (m:int key:int keylen:int):>int => {
+    let slot:int = map_probe(m key keylen)
+    if map_slot_state(slot) =? MAP_OCCUPIED { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let map_has_str = (m:int key:int):>int => {
+    return map_has(m key str_len(key))
+}
+
+let map_remove = (m:int key:int keylen:int):>int => {
+    let slot:int = map_probe(m key keylen)
+    if map_slot_state(slot) =? MAP_OCCUPIED {
+        __store__(MAP_TOMBSTONE slot + MAP_SLOT_STATE)
+        __store__(map_size(m) - 1 m + MAP_OFF_SIZE)
+        __store__(__load__(m + MAP_OFF_TOMB) + 1 m + MAP_OFF_TOMB)
+        return TRUE_VAL
+    }
+    return FALSE_VAL
+}

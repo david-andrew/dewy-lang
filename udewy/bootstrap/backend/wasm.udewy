@@ -1,0 +1,1409 @@
+# wasm32 backend for the udewy bootstrap. Emits WebAssembly Text format (WAT)
+# with browser-focused host function imports. Mirrors udewy/backend/wasm.py.
+#
+# Coverage notes vs. the Python backend:
+#   * Full core language: all operators, intrinsics, control flow, calls.
+#   * All host imports are emitted (host_log, dom, canvas, pointer, keyboard,
+#     audio, webgl, gpu, audio queue) so games that target those intrinsics
+#     can be compiled by this bootstrap.
+#   * The browser-hosting HTML/JS embed/split modes are deferred -- the
+#     bootstrap writes the .wat file alongside a minimal scaffold; richer
+#     hosting belongs in a separate driver.
+
+import p"./common.udewy"
+import p"../t1.udewy"
+
+let w_imports:int = 0          # vec of strings (full import lines, sorted-by-insertion)
+let w_function_ids:int = 0     # vec of label_ids (table order)
+let w_function_codes:int = 0   # intmap label_id -> vec of lines (just the body, not the header)
+let w_extern_label_ids:int = 0 # intset
+let w_defined_label_ids:int = 0
+let w_reachable:int = 0
+let w_have_reachable:int = 0
+
+let w_current_label_id:int = 0
+let w_current_code:int = 0
+let w_current_param_count:int = 0
+let w_current_local_count:int = 0
+let w_current_locals_extra:int = 0  # vec of strings, additional local decls
+
+let w_next_label:int = 0
+let w_data_offset:int = 1024
+let w_data_segments:int = 0    # vec of pairs encoded as alternating: offset, data-string
+
+let w_module_init_name:int = 0
+let w_user_main_name:int = 0
+
+let w_if_stack_depth:int = 0
+let w_loop_labels:int = 0      # vec of pairs encoded as alternating: loop_label, block_label
+let w_block_depth:int = 0
+
+let w_fn_labels:int = 0
+let w_fn_indices:int = 0
+let w_fn_param_counts:int = 0
+let w_indirect_arities:int = 0 # intset
+let w_global_offsets:int = 0
+let w_string_offsets:int = 0
+let w_array_offsets:int = 0
+let w_array_elements:int = 0
+let w_array_kinds:int = 0
+let w_static_offsets:int = 0
+let w_next_fn_index:int = 0
+
+let w_str = (s:int):>int => {
+    let bb:int = bb_new(str_len(s))
+    bb_push_str(bb s)
+    return bb_finalize_as_string(bb)
+}
+
+let w_int_to_str = (n:int):>int => {
+    let bb:int = bb_new(16)
+    bb_push_int(bb n)
+    return bb_finalize_as_string(bb)
+}
+
+let w_alloc_state = ():>void => {
+    w_imports = vec_new(64)
+    w_function_ids = vec_new(16)
+    w_function_codes = intmap_new()
+    w_extern_label_ids = intset_new()
+    w_defined_label_ids = intset_new()
+    w_data_segments = vec_new(16)
+    w_loop_labels = vec_new(8)
+    w_indirect_arities = intset_new()
+    w_fn_labels = intmap_new()
+    w_fn_indices = intmap_new()
+    w_fn_param_counts = intmap_new()
+    w_global_offsets = intmap_new()
+    w_string_offsets = intmap_new()
+    w_array_offsets = intmap_new()
+    w_array_elements = intmap_new()
+    w_array_kinds = intmap_new()
+    w_static_offsets = intmap_new()
+    w_user_main_name = w_str("$__main__")
+    w_add_host_imports()
+    return void
+}
+
+let w_add_import_line = (line:int):>void => {
+    let n:int = vec_len(w_imports)
+    let i:int = 0
+    loop i <? n {
+        if str_eq(vec_get(w_imports i) line) { return void }
+        i = i + 1
+    }
+    vec_push(w_imports line)
+    return void
+}
+
+# Add all browser host imports. Mirrors python's _setup_imports().
+let w_add_host_imports = ():>void => {
+    w_add_import_line("(import \"env\" \"host_log\" (func $host_log (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_exit\" (func $host_exit (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_time\" (func $host_time (result i64)))")
+    w_add_import_line("(import \"env\" \"host_random\" (func $host_random (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_set_text\" (func $host_dom_set_text (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_append\" (func $host_dom_append (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_clear\" (func $host_dom_clear (result i64)))")
+    w_add_import_line("(import \"env\" \"host_dom_append_int\" (func $host_dom_append_int (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_log_int\" (func $host_log_int (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_init\" (func $host_canvas_init (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_width\" (func $host_canvas_width (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_height\" (func $host_canvas_height (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_present\" (func $host_canvas_present (result i64)))")
+    w_add_import_line("(import \"env\" \"host_canvas_set_aspect_lock\" (func $host_canvas_set_aspect_lock (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_frame_count\" (func $host_frame_count (result i64)))")
+    w_add_import_line("(import \"env\" \"host_frame_time\" (func $host_frame_time (result i64)))")
+    w_add_import_line("(import \"env\" \"host_window_width\" (func $host_window_width (result i64)))")
+    w_add_import_line("(import \"env\" \"host_window_height\" (func $host_window_height (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_x\" (func $host_pointer_x (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_y\" (func $host_pointer_y (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_down\" (func $host_pointer_down (result i64)))")
+    w_add_import_line("(import \"env\" \"host_key_down\" (func $host_key_down (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_key_pressed\" (func $host_key_pressed (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_key_released\" (func $host_key_released (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_init\" (func $host_audio_init (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_play\" (func $host_audio_play (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_sample_rate\" (func $host_audio_sample_rate (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_stream_init\" (func $host_audio_stream_init (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_stream_write\" (func $host_audio_stream_write (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_stream_needs_samples\" (func $host_audio_stream_needs_samples (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_init\" (func $host_webgl_init (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform1i\" (func $host_webgl_uniform1i (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform2i\" (func $host_webgl_uniform2i (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform1iv\" (func $host_webgl_uniform1iv (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_uniform2iv\" (func $host_webgl_uniform2iv (param i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_webgl_render\" (func $host_webgl_render (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_init\" (func $host_gpu_init (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_viewport\" (func $host_gpu_set_viewport (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_clear\" (func $host_gpu_clear (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_perspective_frustum\" (func $host_gpu_set_perspective_frustum (param i64 i64 i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_view_matrix\" (func $host_gpu_set_view_matrix (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_texture\" (func $host_gpu_set_texture (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_blend\" (func $host_gpu_set_blend (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_depth_test\" (func $host_gpu_set_depth_test (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_depth_write\" (func $host_gpu_set_depth_write (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_set_line_width\" (func $host_gpu_set_line_width (param i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_submit\" (func $host_gpu_submit (param i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_overlay_begin\" (func $host_gpu_overlay_begin (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_overlay_end\" (func $host_gpu_overlay_end (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_create_texture\" (func $host_gpu_create_texture (param i64 i64 i64 i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_present\" (func $host_gpu_present (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_window_width\" (func $host_gpu_window_width (result i64)))")
+    w_add_import_line("(import \"env\" \"host_gpu_window_height\" (func $host_gpu_window_height (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_queue_init\" (func $host_audio_queue_init (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_queue_push\" (func $host_audio_queue_push (param i64 i64) (result i64)))")
+    w_add_import_line("(import \"env\" \"host_audio_queue_size\" (func $host_audio_queue_size (result i64)))")
+    return void
+}
+
+let w_new_label = (prefix:int):>int => {
+    let bb:int = bb_new(8 + str_len(prefix))
+    bb_push_byte(bb 36)
+    bb_push_str(bb prefix)
+    bb_push_int(bb w_next_label)
+    w_next_label = w_next_label + 1
+    return bb_finalize_as_string(bb)
+}
+
+let w_emit = (line:int):>void => {
+    let bb:int = bb_new(str_len(line) + 4)
+    bb_push_str(bb "    ")
+    bb_push_str(bb line)
+    vec_push(w_current_code bb_finalize_as_string(bb))
+    return void
+}
+
+# Allocate `size` bytes in linear memory and return its offset. Aligns to 8.
+let w_alloc_data = (data_bytes:int len:int):>int => {
+    let offset:int = w_data_offset
+    vec_push(w_data_segments offset)
+    let bb:int = bb_new(len + 8)
+    bb_push_bytes(bb data_bytes len)
+    vec_push(w_data_segments bb_finalize_as_string(bb))
+    w_data_offset = w_data_offset + len
+    if (w_data_offset and 7) not=? 0 {
+        w_data_offset = w_data_offset + (8 - (w_data_offset and 7))
+    }
+    return offset
+}
+
+# Encode an int as 8 little-endian bytes into a buffer at the given pointer.
+let w_encode_i64_le = (buf:int n:int):>void => {
+    let i:int = 0
+    loop i <? 8 {
+        __store_u8__((n >> (i * 8)) and 255 buf + i)
+        i = i + 1
+    }
+    return void
+}
+
+# --- Module lifecycle ---
+
+let w_begin_module = ():>void => { return void }
+let w_set_module_init = (name:int):>void => { w_module_init_name = name  return void }
+let w_set_reachable_functions = (s:int):>void => {
+    w_reachable = s
+    w_have_reachable = TRUE_VAL
+    return void
+}
+
+# Resolve a reference value (string like ".str3+8" or ".global2") to an offset.
+# Used when emitting array/global initializers.
+let w_resolve_data_ref = (value:int):>int => {
+    # Detect "+8" suffix.
+    let vlen:int = str_len(value)
+    let has_plus8:int = FALSE_VAL
+    if vlen >=? 2 {
+        if (__load_u8__(value + vlen - 2) =? 43) and (__load_u8__(value + vlen - 1) =? 56) {
+            has_plus8 = TRUE_VAL
+        }
+    }
+    let prefix_len:int = vlen
+    if has_plus8 { prefix_len = vlen - 2 }
+
+    # Match against generated label patterns: ".strN", ".arrN", ".staticN", ".globalN"
+    if has_plus8 {
+        if str_eq_len(value 4 ".str" 4) {
+            let id:int = w_parse_int(value 4 prefix_len)
+            return intmap_get(w_string_offsets id) + 8
+        }
+        if str_eq_len(value 4 ".arr" 4) {
+            let id:int = w_parse_int(value 4 prefix_len)
+            return intmap_get(w_array_offsets id) + 8
+        }
+    }
+    if str_eq_len(value 7 ".static" 7) {
+        let id:int = w_parse_int(value 7 prefix_len)
+        return intmap_get(w_static_offsets id)
+    }
+    if str_eq_len(value 7 ".global" 7) {
+        let id:int = w_parse_int(value 7 prefix_len)
+        return intmap_get(w_global_offsets id)
+    }
+    return 0
+}
+
+let w_parse_int = (s:int start:int end:int):>int => {
+    let v:int = 0
+    let i:int = start
+    loop i <? end {
+        v = v * 10 + (__load_u8__(s + i) - 48)
+        i = i + 1
+    }
+    return v
+}
+
+# --- Data section ---
+
+let w_intern_string = (data:int len:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let full:int = arena_alloc(len + 8)
+    w_encode_i64_le(full len)
+    let i:int = 0
+    loop i <? len {
+        __store_u8__(__load_u8__(data + i) full + 8 + i)
+        i = i + 1
+    }
+    let offset:int = w_alloc_data(full len + 8)
+    intmap_put(w_string_offsets label_id offset)
+    return label_id
+}
+
+let w_intern_array = (elems_vec:int kinds_vec:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let n:int = vec_len(elems_vec)
+    let buf:int = arena_alloc((n + 1) * 8)
+    w_encode_i64_le(buf n)
+    # elements are already resolved offsets (or ints for SV_INT); store directly.
+    let i:int = 0
+    loop i <? n {
+        w_encode_i64_le(buf + (i + 1) * 8 vec_get(elems_vec i))
+        i = i + 1
+    }
+    let offset:int = w_alloc_data(buf (n + 1) * 8)
+    intmap_put(w_array_offsets label_id offset)
+    intmap_put(w_array_elements label_id elems_vec)
+    intmap_put(w_array_kinds label_id kinds_vec)
+    return label_id
+}
+
+let w_define_global = (name:int kind:int value:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let buf:int = arena_alloc(8)
+    w_encode_i64_le(buf value)
+    let offset:int = w_alloc_data(buf 8)
+    intmap_put(w_global_offsets label_id offset)
+    return label_id
+}
+
+let w_declare_extern_global = (name:int):>int => {
+    # extern globals are not supported on WASM. Allocate a zero-init slot anyway
+    # so compilation can proceed and the offset is well-defined.
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let buf:int = arena_alloc(8)
+    w_encode_i64_le(buf 0)
+    let offset:int = w_alloc_data(buf 8)
+    intmap_put(w_global_offsets label_id offset)
+    return label_id
+}
+
+let w_intern_static = (size:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let offset:int = w_data_offset
+    intmap_put(w_static_offsets label_id offset)
+    w_data_offset = w_data_offset + size
+    if (w_data_offset and 7) not=? 0 {
+        w_data_offset = w_data_offset + (8 - (w_data_offset and 7))
+    }
+    return label_id
+}
+
+let w_emit_const_i64 = (value:int):>void => {
+    let bb:int = bb_new(32)
+    bb_push_str(bb "i64.const ")
+    bb_push_int(bb value)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_emit_const_i32 = (value:int):>void => {
+    let bb:int = bb_new(32)
+    bb_push_str(bb "i32.const ")
+    bb_push_int(bb value)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_push_string_ref = (label_id:int):>void => {
+    w_emit_const_i64(intmap_get(w_string_offsets label_id) + 8)
+    return void
+}
+
+let w_push_array_ref = (label_id:int):>void => {
+    w_emit_const_i64(intmap_get(w_array_offsets label_id) + 8)
+    return void
+}
+
+let w_push_global_ref = (label_id:int):>void => {
+    w_emit_const_i64(intmap_get(w_global_offsets label_id))
+    return void
+}
+
+let w_push_static_ref = (label_id:int):>void => {
+    w_emit_const_i64(intmap_get(w_static_offsets label_id))
+    return void
+}
+
+let w_load_global = (label_id:int):>void => {
+    w_emit_const_i32(intmap_get(w_global_offsets label_id))
+    w_emit("i64.load")
+    return void
+}
+
+let w_store_global = (label_id:int):>void => {
+    w_emit("local.set $swap0")
+    w_emit_const_i32(intmap_get(w_global_offsets label_id))
+    w_emit("local.get $swap0")
+    w_emit("i64.store")
+    return void
+}
+
+let w_function_ref = (label_id:int):>int => {
+    return intmap_get(w_fn_indices label_id)
+}
+
+let w_string_ref = (label_id:int):>int => { return intmap_get(w_string_offsets label_id) + 8 }
+let w_array_ref = (label_id:int):>int => { return intmap_get(w_array_offsets label_id) + 8 }
+let w_static_ref = (label_id:int):>int => { return intmap_get(w_static_offsets label_id) }
+
+# --- Functions ---
+
+let w_declare_function = (name:int num_params:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let fn_name:int = 0
+    if name =? 0 {
+        let bb:int = bb_new(16)
+        bb_push_str(bb "$fn")
+        bb_push_int(bb label_id)
+        fn_name = bb_finalize_as_string(bb)
+    } else if str_eq(name "main") {
+        fn_name = w_user_main_name
+    } else {
+        let bb:int = bb_new(str_len(name) + 2)
+        bb_push_byte(bb 36)
+        bb_push_str(bb name)
+        fn_name = bb_finalize_as_string(bb)
+    }
+    intmap_put(w_fn_labels label_id fn_name)
+    intmap_put(w_fn_indices label_id w_next_fn_index)
+    intmap_put(w_fn_param_counts label_id num_params)
+    vec_push(w_function_ids label_id)
+    w_next_fn_index = w_next_fn_index + 1
+    return label_id
+}
+
+let w_bind_extern_function = (label_id:int name:int):>void => {
+    let bb:int = bb_new(str_len(name) + 2)
+    bb_push_byte(bb 36)
+    bb_push_str(bb name)
+    let fn_name:int = bb_finalize_as_string(bb)
+    intmap_put(w_fn_labels label_id fn_name)
+    intset_add(w_extern_label_ids label_id)
+    let param_count:int = intmap_get(w_fn_param_counts label_id)
+    let line:int = bb_new(128)
+    bb_push_str(line "(import \"env\" \"")
+    bb_push_str(line name)
+    bb_push_str(line "\" (func ")
+    bb_push_str(line fn_name)
+    let i:int = 0
+    loop i <? param_count {
+        bb_push_str(line " (param i64)")
+        i = i + 1
+    }
+    bb_push_str(line " (result i64)))")
+    w_add_import_line(bb_finalize_as_string(line))
+    return void
+}
+
+let w_declare_extern_function = (name:int num_params:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    intmap_put(w_fn_param_counts label_id num_params)
+    w_bind_extern_function(label_id name)
+    return label_id
+}
+
+let w_begin_function = (label_id:int name:int param_count:int is_main:int):>void => {
+    intset_add(w_defined_label_ids label_id)
+    let fn_name:int = intmap_get(w_fn_labels label_id)
+    if fn_name =? 0 {
+        let bb:int = bb_new(16)
+        bb_push_str(bb "$fn")
+        bb_push_int(bb label_id)
+        fn_name = bb_finalize_as_string(bb)
+        intmap_put(w_fn_labels label_id fn_name)
+    }
+    intmap_put(w_fn_param_counts label_id param_count)
+    w_current_label_id = label_id
+    w_current_param_count = param_count
+    w_current_local_count = 0
+    w_current_code = vec_new(32)
+    w_current_locals_extra = vec_new(4)
+    intmap_put(w_function_codes label_id w_current_code)
+    w_block_depth = 0
+    # Preamble: capture stack_ptr into local.
+    w_emit("global.get $stack_ptr")
+    w_emit("local.set $stack_base")
+    return void
+}
+
+let w_end_function = ():>void => {
+    w_emit("local.get $stack_base")
+    w_emit("global.set $stack_ptr")
+    w_emit("i64.const 0")
+    w_emit("return")
+    return void
+}
+
+let w_load_param = (index:int):>void => {
+    let bb:int = bb_new(16)
+    bb_push_str(bb "local.get $p")
+    bb_push_int(bb index)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_alloc_local = ():>int => {
+    let slot:int = w_current_param_count + w_current_local_count
+    w_current_local_count = w_current_local_count + 1
+    let decl:int = bb_new(16)
+    bb_push_str(decl "(local $l")
+    bb_push_int(decl slot)
+    bb_push_str(decl " i64)")
+    vec_push(w_current_locals_extra bb_finalize_as_string(decl))
+    return slot
+}
+
+let w_load_local = (slot:int):>void => {
+    let bb:int = bb_new(16)
+    if slot <? w_current_param_count {
+        bb_push_str(bb "local.get $p")
+    } else {
+        bb_push_str(bb "local.get $l")
+    }
+    bb_push_int(bb slot)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_store_local = (slot:int):>void => {
+    let bb:int = bb_new(16)
+    if slot <? w_current_param_count {
+        bb_push_str(bb "local.set $p")
+    } else {
+        bb_push_str(bb "local.set $l")
+    }
+    bb_push_int(bb slot)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_push_const_i64 = (value:int):>void => { w_emit_const_i64(value)  return void }
+let w_push_void = ():>void => { w_emit("i64.const 0")  return void }
+
+let w_push_fn_ref = (label_id:int):>void => {
+    if intset_has(w_extern_label_ids label_id) { return void }  # unsupported, silently zero
+    w_emit_const_i64(intmap_get(w_fn_indices label_id))
+    return void
+}
+
+let w_pop_value = ():>void => { w_emit("drop")  return void }
+let w_save_value = ():>void => { return void }      # wasm operand stack handles it
+let w_restore_value = ():>void => { return void }
+
+let w_unary_op = (op_kind:int):>void => {
+    if op_kind =? TK_MINUS {
+        w_emit("i64.const -1")
+        w_emit("i64.mul")
+    } else if op_kind =? TK_NOT {
+        w_emit("i64.const -1")
+        w_emit("i64.xor")
+    }
+    return void
+}
+
+let w_emit_cmp_normalize = ():>void => {
+    w_emit("i64.extend_i32_s")
+    w_emit("i64.const 0")
+    w_emit("i64.sub")
+    return void
+}
+
+let w_emit_signed_idiv = ():>void => {
+    w_emit("local.set $div_rhs")
+    w_emit("local.set $div_lhs")
+    w_emit("local.get $div_rhs")
+    w_emit("i64.eqz")
+    w_emit("if (result i64)")
+    w_emit("  i64.const -1")
+    w_emit("else")
+    w_emit("  local.get $div_lhs")
+    w_emit("  i64.const 0x8000000000000000")
+    w_emit("  i64.eq")
+    w_emit("  if (result i64)")
+    w_emit("    local.get $div_rhs")
+    w_emit("    i64.const -1")
+    w_emit("    i64.eq")
+    w_emit("    if (result i64)")
+    w_emit("      local.get $div_lhs")
+    w_emit("    else")
+    w_emit("      local.get $div_lhs")
+    w_emit("      local.get $div_rhs")
+    w_emit("      i64.div_s")
+    w_emit("    end")
+    w_emit("  else")
+    w_emit("    local.get $div_lhs")
+    w_emit("    local.get $div_rhs")
+    w_emit("    i64.div_s")
+    w_emit("  end")
+    w_emit("end")
+    return void
+}
+
+let w_emit_signed_mod = ():>void => {
+    w_emit("local.set $div_rhs")
+    w_emit("local.set $div_lhs")
+    w_emit("local.get $div_rhs")
+    w_emit("i64.eqz")
+    w_emit("if (result i64)")
+    w_emit("  local.get $div_lhs")
+    w_emit("else")
+    w_emit("  local.get $div_lhs")
+    w_emit("  i64.const 0x8000000000000000")
+    w_emit("  i64.eq")
+    w_emit("  if (result i64)")
+    w_emit("    local.get $div_rhs")
+    w_emit("    i64.const -1")
+    w_emit("    i64.eq")
+    w_emit("    if (result i64)")
+    w_emit("      i64.const 0")
+    w_emit("    else")
+    w_emit("      local.get $div_lhs")
+    w_emit("      local.get $div_rhs")
+    w_emit("      i64.rem_s")
+    w_emit("    end")
+    w_emit("  else")
+    w_emit("    local.get $div_lhs")
+    w_emit("    local.get $div_rhs")
+    w_emit("    i64.rem_s")
+    w_emit("  end")
+    w_emit("end")
+    return void
+}
+
+let w_emit_unsigned_idiv = ():>void => {
+    w_emit("local.set $div_rhs")
+    w_emit("local.set $div_lhs")
+    w_emit("local.get $div_rhs")
+    w_emit("i64.eqz")
+    w_emit("if (result i64)")
+    w_emit("  i64.const -1")
+    w_emit("else")
+    w_emit("  local.get $div_lhs")
+    w_emit("  local.get $div_rhs")
+    w_emit("  i64.div_u")
+    w_emit("end")
+    return void
+}
+
+let w_emit_unsigned_mod = ():>void => {
+    w_emit("local.set $div_rhs")
+    w_emit("local.set $div_lhs")
+    w_emit("local.get $div_rhs")
+    w_emit("i64.eqz")
+    w_emit("if (result i64)")
+    w_emit("  local.get $div_lhs")
+    w_emit("else")
+    w_emit("  local.get $div_lhs")
+    w_emit("  local.get $div_rhs")
+    w_emit("  i64.rem_u")
+    w_emit("end")
+    return void
+}
+
+let w_binary_op = (op_kind:int):>void => {
+    if op_kind =? TK_PLUS         { w_emit("i64.add") }
+    else if op_kind =? TK_MINUS   { w_emit("i64.sub") }
+    else if op_kind =? TK_MUL     { w_emit("i64.mul") }
+    else if op_kind =? TK_IDIV    { w_emit_signed_idiv() }
+    else if op_kind =? TK_MOD     { w_emit_signed_mod() }
+    else if op_kind =? TK_LEFT_SHIFT  { w_emit("i64.shl") }
+    else if op_kind =? TK_RIGHT_SHIFT { w_emit("i64.shr_u") }
+    else if op_kind =? TK_AND     { w_emit("i64.and") }
+    else if op_kind =? TK_OR      { w_emit("i64.or") }
+    else if op_kind =? TK_XOR     { w_emit("i64.xor") }
+    else if op_kind =? TK_EQ      { w_emit("i64.eq")    w_emit_cmp_normalize() }
+    else if op_kind =? TK_NOT_EQ  { w_emit("i64.ne")    w_emit_cmp_normalize() }
+    else if op_kind =? TK_GT      { w_emit("i64.gt_s")  w_emit_cmp_normalize() }
+    else if op_kind =? TK_LT      { w_emit("i64.lt_s")  w_emit_cmp_normalize() }
+    else if op_kind =? TK_GT_EQ   { w_emit("i64.ge_s")  w_emit_cmp_normalize() }
+    else if op_kind =? TK_LT_EQ   { w_emit("i64.le_s")  w_emit_cmp_normalize() }
+    return void
+}
+
+let w_pipe_call = ():>void => {
+    intset_add(w_indirect_arities 1)
+    w_emit("i32.wrap_i64")
+    w_emit("call_indirect (type $type_fn1)")
+    return void
+}
+
+let w_load_mem = (width:int signed:int):>void => {
+    w_emit("i32.wrap_i64")
+    if width =? 64 { w_emit("i64.load") }
+    else if width =? 32 {
+        if signed { w_emit("i64.load32_s") } else { w_emit("i64.load32_u") }
+    } else if width =? 16 {
+        if signed { w_emit("i64.load16_s") } else { w_emit("i64.load16_u") }
+    } else if width =? 8 {
+        if signed { w_emit("i64.load8_s") } else { w_emit("i64.load8_u") }
+    }
+    return void
+}
+
+let w_store_mem = (width:int):>void => {
+    w_emit("i32.wrap_i64")
+    w_emit("local.set $swap1")
+    w_emit("local.set $swap0")
+    w_emit("local.get $swap1")
+    w_emit("local.get $swap0")
+    if width =? 64 { w_emit("i64.store") }
+    else if width =? 32 { w_emit("i64.store32") }
+    else if width =? 16 { w_emit("i64.store16") }
+    else if width =? 8 { w_emit("i64.store8") }
+    w_emit("i64.const 0")
+    return void
+}
+
+let w_signed_shr = ():>void => { w_emit("i64.shr_s")  return void }
+let w_unsigned_idiv = ():>void => { w_emit_unsigned_idiv()  return void }
+let w_unsigned_mod = ():>void => { w_emit_unsigned_mod()  return void }
+
+# kind: 0=gt, 1=lt, 2=gte, 3=lte
+let w_unsigned_cmp = (kind:int):>void => {
+    if kind =? 0      { w_emit("i64.gt_u") }
+    else if kind =? 1 { w_emit("i64.lt_u") }
+    else if kind =? 2 { w_emit("i64.ge_u") }
+    else              { w_emit("i64.le_u") }
+    w_emit_cmp_normalize()
+    return void
+}
+
+let w_alloca = ():>void => {
+    w_emit("i32.wrap_i64")
+    w_emit("i32.const 7")
+    w_emit("i32.add")
+    w_emit("i32.const -8")
+    w_emit("i32.and")
+    w_emit("local.set $alloc_size")
+    w_emit("global.get $stack_ptr")
+    w_emit("local.get $alloc_size")
+    w_emit("i32.sub")
+    w_emit("local.tee $alloc_ptr")
+    w_emit("global.set $stack_ptr")
+    w_emit("local.get $alloc_ptr")
+    w_emit("i64.extend_i32_u")
+    return void
+}
+
+let w_call_direct = (label_id:int num_args:int):>void => {
+    let fn_name:int = intmap_get(w_fn_labels label_id)
+    let bb:int = bb_new(16 + str_len(fn_name))
+    bb_push_str(bb "call ")
+    bb_push_str(bb fn_name)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_call_indirect = (num_args:int):>void => {
+    intset_add(w_indirect_arities num_args)
+    # In wasm the arguments are already on the stack, but the fn index is on
+    # top. We need to peel the fn off, then args, then fn back.
+    # Simpler: store fn index in a temp local.
+    w_emit("local.set $swap0")
+    w_emit("local.get $swap0")
+    w_emit("i32.wrap_i64")
+    let bb:int = bb_new(48)
+    bb_push_str(bb "call_indirect (type $type_fn")
+    bb_push_int(bb num_args)
+    bb_push_byte(bb 41)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_max_call_args = ():>int => { return 0 - 1 }
+
+let w_emit_break = ():>void => {
+    let top:int = vec_len(w_loop_labels) - 2
+    let block_label:int = vec_get(w_loop_labels top + 1)
+    let bb:int = bb_new(16 + str_len(block_label))
+    bb_push_str(bb "br ")
+    bb_push_str(bb block_label)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_emit_continue = ():>void => {
+    let top:int = vec_len(w_loop_labels) - 2
+    let loop_label:int = vec_get(w_loop_labels top)
+    let bb:int = bb_new(16 + str_len(loop_label))
+    bb_push_str(bb "br ")
+    bb_push_str(bb loop_label)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_emit_return = ():>void => {
+    w_emit("local.get $stack_base")
+    w_emit("global.set $stack_ptr")
+    w_emit("return")
+    return void
+}
+
+let w_begin_if = ():>void => {
+    w_emit("i64.const 0")
+    w_emit("i64.ne")
+    w_emit("if")
+    w_block_depth = w_block_depth + 1
+    return void
+}
+
+let w_begin_else = ():>void => { w_emit("else")  return void }
+
+let w_end_if = ():>void => {
+    w_emit("end")
+    w_block_depth = w_block_depth - 1
+    return void
+}
+
+let w_begin_loop = ():>void => {
+    let loop_label:int = w_new_label("loop")
+    let block_label:int = w_new_label("block")
+    vec_push(w_loop_labels loop_label)
+    vec_push(w_loop_labels block_label)
+    let bb:int = bb_new(16 + str_len(block_label))
+    bb_push_str(bb "block ")
+    bb_push_str(bb block_label)
+    w_emit(bb_finalize_as_string(bb))
+    let bb2:int = bb_new(16 + str_len(loop_label))
+    bb_push_str(bb2 "loop ")
+    bb_push_str(bb2 loop_label)
+    w_emit(bb_finalize_as_string(bb2))
+    w_block_depth = w_block_depth + 2
+    return void
+}
+
+let w_begin_loop_body = ():>void => {
+    let top:int = vec_len(w_loop_labels) - 2
+    let block_label:int = vec_get(w_loop_labels top + 1)
+    w_emit("i64.eqz")
+    let bb:int = bb_new(16 + str_len(block_label))
+    bb_push_str(bb "br_if ")
+    bb_push_str(bb block_label)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_end_loop = ():>void => {
+    let top:int = vec_len(w_loop_labels) - 2
+    let loop_label:int = vec_get(w_loop_labels top)
+    let bb:int = bb_new(16 + str_len(loop_label))
+    bb_push_str(bb "br ")
+    bb_push_str(bb loop_label)
+    w_emit(bb_finalize_as_string(bb))
+    w_emit("end")
+    w_emit("end")
+    vec_pop(w_loop_labels)
+    vec_pop(w_loop_labels)
+    w_block_depth = w_block_depth - 2
+    return void
+}
+
+let w_cond_and_split = ():>int => {
+    w_emit("local.set $sc_tmp")
+    w_emit("local.get $sc_tmp")
+    w_emit("i64.eqz")
+    w_emit("if (result i64)")
+    w_emit("  i64.const 0")
+    w_emit("else")
+    return 0
+}
+
+let w_cond_and_join = (lbl:int):>void => { w_emit("end")  return void }
+
+let w_cond_or_split = ():>int => {
+    w_emit("local.set $sc_tmp")
+    w_emit("local.get $sc_tmp")
+    w_emit("i64.eqz")
+    w_emit("if (result i64)")
+    return 0
+}
+
+let w_cond_or_join = (lbl:int):>void => {
+    w_emit("else")
+    w_emit("  local.get $sc_tmp")
+    w_emit("end")
+    return void
+}
+
+# --- Intrinsics ---
+
+let g_w_intrinsics:int = 0
+
+let w_init_intrinsics = ():>void => {
+    if g_w_intrinsics not=? 0 { return void }
+    core_intrinsics_init()
+    let m:int = map_new()
+    let cap:int = map_cap(g_core_intrinsics)
+    let slots:int = map_slots(g_core_intrinsics)
+    let i:int = 0
+    loop i <? cap {
+        let slot:int = slots + (i * 32)
+        if __load__(slot) =? 1 {
+            map_put(m __load__(slot + 8) __load__(slot + 16) __load__(slot + 24))
+        }
+        i = i + 1
+    }
+    map_put_str(m "__i64_to_f32_bits__" 1)
+    map_put_str(m "__i64_to_f64_bits__" 1)
+    map_put_str(m "__f32_bits_to_i64__" 1)
+    map_put_str(m "__f64_bits_to_i64__" 1)
+    map_put_str(m "__host_log__" 2)
+    map_put_str(m "__host_exit__" 1)
+    map_put_str(m "__host_time__" 0)
+    map_put_str(m "__host_random__" 0)
+    map_put_str(m "__dom_set_text__" 2)
+    map_put_str(m "__dom_append__" 2)
+    map_put_str(m "__dom_clear__" 0)
+    map_put_str(m "__dom_append_int__" 1)
+    map_put_str(m "__log_int__" 1)
+    map_put_str(m "__canvas_init__" 2)
+    map_put_str(m "__canvas_width__" 0)
+    map_put_str(m "__canvas_height__" 0)
+    map_put_str(m "__canvas_present__" 0)
+    map_put_str(m "__canvas_set_aspect_lock__" 1)
+    map_put_str(m "__frame_count__" 0)
+    map_put_str(m "__frame_time__" 0)
+    map_put_str(m "__window_width__" 0)
+    map_put_str(m "__window_height__" 0)
+    map_put_str(m "__pointer_x__" 0)
+    map_put_str(m "__pointer_y__" 0)
+    map_put_str(m "__pointer_down__" 0)
+    map_put_str(m "__key_down__" 2)
+    map_put_str(m "__key_pressed__" 2)
+    map_put_str(m "__key_released__" 2)
+    map_put_str(m "__audio_init__" 3)
+    map_put_str(m "__audio_play__" 0)
+    map_put_str(m "__audio_sample_rate__" 0)
+    map_put_str(m "__audio_stream_init__" 2)
+    map_put_str(m "__audio_stream_write__" 0)
+    map_put_str(m "__audio_stream_needs_samples__" 0)
+    map_put_str(m "__webgl_init__" 4)
+    map_put_str(m "__webgl_uniform1i__" 3)
+    map_put_str(m "__webgl_uniform2i__" 4)
+    map_put_str(m "__webgl_uniform1iv__" 4)
+    map_put_str(m "__webgl_uniform2iv__" 4)
+    map_put_str(m "__webgl_render__" 0)
+    map_put_str(m "__gpu_init__" 2)
+    map_put_str(m "__gpu_set_viewport__" 2)
+    map_put_str(m "__gpu_clear__" 3)
+    map_put_str(m "__gpu_set_perspective_frustum__" 6)
+    map_put_str(m "__gpu_set_view_matrix__" 1)
+    map_put_str(m "__gpu_set_texture__" 1)
+    map_put_str(m "__gpu_set_blend__" 1)
+    map_put_str(m "__gpu_set_depth_test__" 1)
+    map_put_str(m "__gpu_set_depth_write__" 1)
+    map_put_str(m "__gpu_set_line_width__" 1)
+    map_put_str(m "__gpu_submit__" 3)
+    map_put_str(m "__gpu_overlay_begin__" 2)
+    map_put_str(m "__gpu_overlay_end__" 0)
+    map_put_str(m "__gpu_create_texture__" 5)
+    map_put_str(m "__gpu_present__" 0)
+    map_put_str(m "__gpu_window_width__" 0)
+    map_put_str(m "__gpu_window_height__" 0)
+    map_put_str(m "__audio_queue_init__" 2)
+    map_put_str(m "__audio_queue_push__" 2)
+    map_put_str(m "__audio_queue_size__" 0)
+    g_w_intrinsics = m
+    return void
+}
+
+let w_is_intrinsic = (name:int):>int => {
+    w_init_intrinsics()
+    if map_has_str(g_w_intrinsics name) { return TRUE_VAL }
+    return FALSE_VAL
+}
+
+let w_intrinsic_arity = (name:int):>int => {
+    w_init_intrinsics()
+    if map_has_str(g_w_intrinsics name) { return map_get_str(g_w_intrinsics name) }
+    return 0 - 1
+}
+
+let w_intrinsic_static_arg_indices = (name:int):>int => { return 0 }
+
+let w_emit_host_call = (name:int host_name:int):>void => {
+    let bb:int = bb_new(32 + str_len(host_name))
+    bb_push_str(bb "call ")
+    bb_push_str(bb host_name)
+    w_emit(bb_finalize_as_string(bb))
+    return void
+}
+
+let w_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
+    if str_eq(name "__load_u8__")        { w_load_mem(8 0) }
+    else if str_eq(name "__load_u16__")  { w_load_mem(16 0) }
+    else if str_eq(name "__load_u32__")  { w_load_mem(32 0) }
+    else if str_eq(name "__load_u64__")  { w_load_mem(64 0) }
+    else if str_eq(name "__load__")      { w_load_mem(64 0) }
+    else if str_eq(name "__store_u8__")  { w_store_mem(8) }
+    else if str_eq(name "__store_u16__") { w_store_mem(16) }
+    else if str_eq(name "__store_u32__") { w_store_mem(32) }
+    else if str_eq(name "__store_u64__") { w_store_mem(64) }
+    else if str_eq(name "__store__")     { w_store_mem(64) }
+    else if str_eq(name "__load_i8__")   { w_load_mem(8 1) }
+    else if str_eq(name "__load_i16__")  { w_load_mem(16 1) }
+    else if str_eq(name "__load_i32__")  { w_load_mem(32 1) }
+    else if str_eq(name "__load_i64__")  { w_load_mem(64 1) }
+    else if str_eq(name "__store_i8__")  { w_store_mem(8) }
+    else if str_eq(name "__store_i16__") { w_store_mem(16) }
+    else if str_eq(name "__store_i32__") { w_store_mem(32) }
+    else if str_eq(name "__store_i64__") { w_store_mem(64) }
+    else if str_eq(name "__signed_shr__")    { w_signed_shr() }
+    else if str_eq(name "__unsigned_idiv__") { w_unsigned_idiv() }
+    else if str_eq(name "__unsigned_mod__")  { w_unsigned_mod() }
+    else if str_eq(name "__unsigned_lt__")   { w_unsigned_cmp(1) }
+    else if str_eq(name "__unsigned_gt__")   { w_unsigned_cmp(0) }
+    else if str_eq(name "__unsigned_lte__")  { w_unsigned_cmp(3) }
+    else if str_eq(name "__unsigned_gte__")  { w_unsigned_cmp(2) }
+    else if str_eq(name "__alloca__")        { w_alloca() }
+    else if str_eq(name "__i64_to_f32_bits__") {
+        w_emit("f32.convert_i64_s")
+        w_emit("i32.reinterpret_f32")
+        w_emit("i64.extend_i32_u")
+    } else if str_eq(name "__i64_to_f64_bits__") {
+        w_emit("f64.convert_i64_s")
+        w_emit("i64.reinterpret_f64")
+    } else if str_eq(name "__f32_bits_to_i64__") {
+        w_emit("i32.wrap_i64")
+        w_emit("f32.reinterpret_i32")
+        w_emit("i64.trunc_f32_s")
+    } else if str_eq(name "__f64_bits_to_i64__") {
+        w_emit("f64.reinterpret_i64")
+        w_emit("i64.trunc_f64_s")
+    } else if str_eq(name "__host_log__") { w_emit_host_call(name "$host_log") }
+    else if str_eq(name "__host_exit__") { w_emit_host_call(name "$host_exit") }
+    else if str_eq(name "__host_time__") { w_emit_host_call(name "$host_time") }
+    else if str_eq(name "__host_random__") { w_emit_host_call(name "$host_random") }
+    else if str_eq(name "__dom_set_text__") { w_emit_host_call(name "$host_dom_set_text") }
+    else if str_eq(name "__dom_append__") { w_emit_host_call(name "$host_dom_append") }
+    else if str_eq(name "__dom_clear__") { w_emit_host_call(name "$host_dom_clear") }
+    else if str_eq(name "__dom_append_int__") { w_emit_host_call(name "$host_dom_append_int") }
+    else if str_eq(name "__log_int__") { w_emit_host_call(name "$host_log_int") }
+    else if str_eq(name "__canvas_init__") { w_emit_host_call(name "$host_canvas_init") }
+    else if str_eq(name "__canvas_width__") { w_emit_host_call(name "$host_canvas_width") }
+    else if str_eq(name "__canvas_height__") { w_emit_host_call(name "$host_canvas_height") }
+    else if str_eq(name "__canvas_present__") { w_emit_host_call(name "$host_canvas_present") }
+    else if str_eq(name "__canvas_set_aspect_lock__") { w_emit_host_call(name "$host_canvas_set_aspect_lock") }
+    else if str_eq(name "__frame_count__") { w_emit_host_call(name "$host_frame_count") }
+    else if str_eq(name "__frame_time__") { w_emit_host_call(name "$host_frame_time") }
+    else if str_eq(name "__window_width__") { w_emit_host_call(name "$host_window_width") }
+    else if str_eq(name "__window_height__") { w_emit_host_call(name "$host_window_height") }
+    else if str_eq(name "__pointer_x__") { w_emit_host_call(name "$host_pointer_x") }
+    else if str_eq(name "__pointer_y__") { w_emit_host_call(name "$host_pointer_y") }
+    else if str_eq(name "__pointer_down__") { w_emit_host_call(name "$host_pointer_down") }
+    else if str_eq(name "__key_down__") { w_emit_host_call(name "$host_key_down") }
+    else if str_eq(name "__key_pressed__") { w_emit_host_call(name "$host_key_pressed") }
+    else if str_eq(name "__key_released__") { w_emit_host_call(name "$host_key_released") }
+    else if str_eq(name "__audio_init__") { w_emit_host_call(name "$host_audio_init") }
+    else if str_eq(name "__audio_play__") { w_emit_host_call(name "$host_audio_play") }
+    else if str_eq(name "__audio_sample_rate__") { w_emit_host_call(name "$host_audio_sample_rate") }
+    else if str_eq(name "__audio_stream_init__") { w_emit_host_call(name "$host_audio_stream_init") }
+    else if str_eq(name "__audio_stream_write__") { w_emit_host_call(name "$host_audio_stream_write") }
+    else if str_eq(name "__audio_stream_needs_samples__") { w_emit_host_call(name "$host_audio_stream_needs_samples") }
+    else if str_eq(name "__webgl_init__") { w_emit_host_call(name "$host_webgl_init") }
+    else if str_eq(name "__webgl_uniform1i__") { w_emit_host_call(name "$host_webgl_uniform1i") }
+    else if str_eq(name "__webgl_uniform2i__") { w_emit_host_call(name "$host_webgl_uniform2i") }
+    else if str_eq(name "__webgl_uniform1iv__") { w_emit_host_call(name "$host_webgl_uniform1iv") }
+    else if str_eq(name "__webgl_uniform2iv__") { w_emit_host_call(name "$host_webgl_uniform2iv") }
+    else if str_eq(name "__webgl_render__") { w_emit_host_call(name "$host_webgl_render") }
+    else if str_eq(name "__gpu_init__") { w_emit_host_call(name "$host_gpu_init") }
+    else if str_eq(name "__gpu_set_viewport__") { w_emit_host_call(name "$host_gpu_set_viewport") }
+    else if str_eq(name "__gpu_clear__") { w_emit_host_call(name "$host_gpu_clear") }
+    else if str_eq(name "__gpu_set_perspective_frustum__") { w_emit_host_call(name "$host_gpu_set_perspective_frustum") }
+    else if str_eq(name "__gpu_set_view_matrix__") { w_emit_host_call(name "$host_gpu_set_view_matrix") }
+    else if str_eq(name "__gpu_set_texture__") { w_emit_host_call(name "$host_gpu_set_texture") }
+    else if str_eq(name "__gpu_set_blend__") { w_emit_host_call(name "$host_gpu_set_blend") }
+    else if str_eq(name "__gpu_set_depth_test__") { w_emit_host_call(name "$host_gpu_set_depth_test") }
+    else if str_eq(name "__gpu_set_depth_write__") { w_emit_host_call(name "$host_gpu_set_depth_write") }
+    else if str_eq(name "__gpu_set_line_width__") { w_emit_host_call(name "$host_gpu_set_line_width") }
+    else if str_eq(name "__gpu_submit__") { w_emit_host_call(name "$host_gpu_submit") }
+    else if str_eq(name "__gpu_overlay_begin__") { w_emit_host_call(name "$host_gpu_overlay_begin") }
+    else if str_eq(name "__gpu_overlay_end__") { w_emit_host_call(name "$host_gpu_overlay_end") }
+    else if str_eq(name "__gpu_create_texture__") { w_emit_host_call(name "$host_gpu_create_texture") }
+    else if str_eq(name "__gpu_present__") { w_emit_host_call(name "$host_gpu_present") }
+    else if str_eq(name "__gpu_window_width__") { w_emit_host_call(name "$host_gpu_window_width") }
+    else if str_eq(name "__gpu_window_height__") { w_emit_host_call(name "$host_gpu_window_height") }
+    else if str_eq(name "__audio_queue_init__") { w_emit_host_call(name "$host_audio_queue_init") }
+    else if str_eq(name "__audio_queue_push__") { w_emit_host_call(name "$host_audio_queue_push") }
+    else if str_eq(name "__audio_queue_size__") { w_emit_host_call(name "$host_audio_queue_size") }
+    return void
+}
+
+let w_get_builtin_constants = ():>int => { return map_new() }
+
+# --- Finish module: render WAT ---
+
+let w_emit_data_segment = (out:int offset:int data_str:int):>void => {
+    bb_push_str(out "  (data (i32.const ")
+    bb_push_int(out offset)
+    bb_push_str(out ") \"")
+    let n:int = str_len(data_str)
+    let i:int = 0
+    loop i <? n {
+        let b:int = __load_u8__(data_str + i)
+        bb_push_byte(out 92)
+        let hi:int = (b >> 4) and 15
+        let lo:int = b and 15
+        let h:int = hi + 48
+        if hi >=? 10 { h = hi + 87 }
+        bb_push_byte(out h)
+        let l:int = lo + 48
+        if lo >=? 10 { l = lo + 87 }
+        bb_push_byte(out l)
+        i = i + 1
+    }
+    bb_push_str(out "\")\n")
+    return void
+}
+
+let w_finish_module = ():>int => {
+    let out:int = bb_new(8192)
+    bb_push_str(out "(module\n")
+    bb_push_str(out "  (import \"env\" \"memory\" (memory 32))\n")
+
+    let imp_n:int = vec_len(w_imports)
+    let imp_i:int = 0
+    loop imp_i <? imp_n {
+        bb_push_str(out "  ")
+        bb_push_str(out vec_get(w_imports imp_i))
+        bb_push_byte(out 10)
+        imp_i = imp_i + 1
+    }
+
+    # Function types for indirect calls.
+    let cap_ia:int = map_cap(w_indirect_arities)
+    let slots_ia:int = map_slots(w_indirect_arities)
+    let arities:int = vec_new(8)
+    let k:int = 0
+    loop k <? cap_ia {
+        let slot:int = slots_ia + (k * 32)
+        if __load__(slot) =? 1 {
+            vec_push(arities __load__(slot + 8))
+        }
+        k = k + 1
+    }
+    # Sort.
+    let m:int = vec_len(arities)
+    let a:int = 1
+    loop a <? m {
+        let cur:int = vec_get(arities a)
+        let b:int = a - 1
+        loop b >=? 0 {
+            if vec_get(arities b) <=? cur { break }
+            vec_set(arities b + 1 vec_get(arities b))
+            b = b - 1
+        }
+        vec_set(arities b + 1 cur)
+        a = a + 1
+    }
+    let ai:int = 0
+    loop ai <? m {
+        let arity:int = vec_get(arities ai)
+        bb_push_str(out "  (type $type_fn")
+        bb_push_int(out arity)
+        bb_push_str(out " (func")
+        let pi:int = 0
+        loop pi <? arity {
+            bb_push_str(out " (param i64)")
+            pi = pi + 1
+        }
+        bb_push_str(out " (result i64)))\n")
+        ai = ai + 1
+    }
+
+    bb_push_str(out "  (global $stack_ptr (mut i32) (i32.const 2097152))\n")
+    if w_module_init_name not=? 0 {
+        bb_push_str(out "  (global $__udewy_module_init_done (mut i32) (i32.const 0))\n")
+    }
+
+    let table_n:int = vec_len(w_function_ids)
+    if table_n >? 0 {
+        bb_push_str(out "  (table ")
+        bb_push_int(out table_n)
+        bb_push_str(out " funcref)\n")
+    }
+
+    # Emit functions.
+    let fi:int = 0
+    loop fi <? table_n {
+        let lid:int = vec_get(w_function_ids fi)
+        let fn_name:int = intmap_get(w_fn_labels lid)
+        let pc:int = intmap_get(w_fn_param_counts lid)
+        if (w_have_reachable not=? FALSE_VAL) and (not intset_has(w_reachable lid)) {
+            # Stub reachable-but-unused: keep table layout intact.
+            bb_push_str(out "  (func ")
+            bb_push_str(out fn_name)
+            let pi:int = 0
+            loop pi <? pc {
+                bb_push_str(out " (param i64)")
+                pi = pi + 1
+            }
+            bb_push_str(out " (result i64) i64.const 0)\n")
+        } else if intset_has(w_defined_label_ids lid) {
+            bb_push_str(out "  (func ")
+            bb_push_str(out fn_name)
+            let pi2:int = 0
+            loop pi2 <? pc {
+                bb_push_str(out " (param $p")
+                bb_push_int(out pi2)
+                bb_push_str(out " i64)")
+                pi2 = pi2 + 1
+            }
+            bb_push_str(out " (result i64)\n")
+            # Standard locals.
+            bb_push_str(out "    (local $swap0 i64)\n")
+            bb_push_str(out "    (local $swap1 i32)\n")
+            bb_push_str(out "    (local $div_lhs i64)\n")
+            bb_push_str(out "    (local $div_rhs i64)\n")
+            bb_push_str(out "    (local $sc_tmp i64)\n")
+            bb_push_str(out "    (local $stack_base i32)\n")
+            bb_push_str(out "    (local $alloc_size i32)\n")
+            bb_push_str(out "    (local $alloc_ptr i32)\n")
+            # Function-specific extra locals.
+            let lines:int = intmap_get(w_function_codes lid)
+            # We don't separately track them; the alloc_local pushes decls into
+            # current_locals_extra at the time. But we discarded that on
+            # end_function. We need to keep them per-function. Store them in
+            # the line vec at the front using a marker.
+            # For simplicity, scan lines for "local.set $lN" / "local.get $lN"
+            # and emit unique local decls.
+            let seen:int = intset_new()
+            let lc:int = vec_len(lines)
+            let li:int = 0
+            loop li <? lc {
+                let line:int = vec_get(lines li)
+                # Look for "$l" followed by digits.
+                let len:int = str_len(line)
+                let j:int = 0
+                loop j <? len - 2 {
+                    if (__load_u8__(line + j) =? 36) and (__load_u8__(line + j + 1) =? 108) {
+                        let c:int = __load_u8__(line + j + 2)
+                        if (c >=? 48) and (c <=? 57) {
+                            let id_start:int = j + 2
+                            let id_end:int = id_start
+                            loop id_end <? len {
+                                let cc:int = __load_u8__(line + id_end)
+                                if (cc <? 48) or (cc >? 57) { break }
+                                id_end = id_end + 1
+                            }
+                            let slot:int = w_parse_int(line id_start id_end)
+                            if not intset_has(seen slot) {
+                                intset_add(seen slot)
+                                bb_push_str(out "    (local $l")
+                                bb_push_int(out slot)
+                                bb_push_str(out " i64)\n")
+                            }
+                        }
+                    }
+                    j = j + 1
+                }
+                li = li + 1
+            }
+            # Emit body lines.
+            let li2:int = 0
+            loop li2 <? lc {
+                bb_push_str(out vec_get(lines li2))
+                bb_push_byte(out 10)
+                li2 = li2 + 1
+            }
+            bb_push_str(out "  )\n")
+        } else {
+            # Extern function: imported (already in imports).
+        }
+        fi = fi + 1
+    }
+
+    # main wrapper.
+    bb_push_str(out "  (func $main (result i64)\n")
+    if w_module_init_name not=? 0 {
+        bb_push_str(out "    global.get $__udewy_module_init_done\n")
+        bb_push_str(out "    if\n")
+        bb_push_str(out "    else\n")
+        bb_push_str(out "      i32.const 1\n")
+        bb_push_str(out "      global.set $__udewy_module_init_done\n")
+        bb_push_str(out "      call $")
+        bb_push_str(out w_module_init_name)
+        bb_push_byte(out 10)
+        bb_push_str(out "      drop\n")
+        bb_push_str(out "    end\n")
+    }
+    # Find the user main label_id (if any) to know its arity.
+    let main_arity:int = 0
+    let mi:int = 0
+    loop mi <? table_n {
+        let lid_m:int = vec_get(w_function_ids mi)
+        if str_eq(intmap_get(w_fn_labels lid_m) w_user_main_name) {
+            main_arity = intmap_get(w_fn_param_counts lid_m)
+            break
+        }
+        mi = mi + 1
+    }
+    let pa:int = 0
+    loop pa <? main_arity {
+        bb_push_str(out "    i64.const 0\n")
+        pa = pa + 1
+    }
+    bb_push_str(out "    call ")
+    bb_push_str(out w_user_main_name)
+    bb_push_byte(out 10)
+    bb_push_str(out "  )\n")
+
+    # Function table element.
+    if table_n >? 0 {
+        bb_push_str(out "  (elem (i32.const 0)")
+        let ei:int = 0
+        loop ei <? table_n {
+            bb_push_byte(out 32)
+            bb_push_str(out intmap_get(w_fn_labels vec_get(w_function_ids ei)))
+            ei = ei + 1
+        }
+        bb_push_str(out ")\n")
+    }
+
+    # Data segments.
+    let ds_n:int = vec_len(w_data_segments)
+    let di:int = 0
+    loop di <? ds_n {
+        w_emit_data_segment(out vec_get(w_data_segments di) vec_get(w_data_segments di + 1))
+        di = di + 2
+    }
+
+    bb_push_str(out "  (export \"main\" (func $main))\n")
+    bb_push_str(out ")\n")
+    return bb_finalize_as_string(out)
+}
+
+# --- compile_and_link / run ---
+
+let w_compile_and_link = (code:int input_name:int cache_dir:int options:int):>int => {
+    fs_mkdir_p(cache_dir)
+    let path_bb:int = bb_new(str_len(cache_dir) + str_len(input_name) + 8)
+    bb_push_str(path_bb cache_dir)
+    bb_push_byte(path_bb 47)
+    bb_push_str(path_bb input_name)
+    bb_push_str(path_bb ".wat")
+    let wat_path:int = bb_finalize_as_string(path_bb)
+    fs_write_file(path_to_cstr(wat_path) code str_len(code))
+    return wat_path
+}
+
+let w_run = (output_path:int args:int options:int):>int => {
+    # WASM can't run native programs; the bootstrap just leaves the .wat file.
+    eprint("wasm: cannot directly run ")
+    eprintl(output_path)
+    return 0
+}
+
+let w_get_compile_message = (output_path:int options:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "Compiled: ")
+    bb_push_str(bb output_path)
+    bb_push_str(bb " (WAT)")
+    return bb_finalize_as_string(bb)
+}
+
+let w_install_backend = ():>void => {
+    w_alloc_state()
+    be_begin_module = w_begin_module
+    be_finish_module = w_finish_module
+    be_set_module_init = w_set_module_init
+    be_set_imported_sources = be_default_set_imported_sources
+    be_intern_string = w_intern_string
+    be_intern_array = w_intern_array
+    be_define_global = w_define_global
+    be_declare_extern_global = w_declare_extern_global
+    be_intern_static = w_intern_static
+    be_push_string_ref = w_push_string_ref
+    be_push_array_ref = w_push_array_ref
+    be_push_global_ref = w_push_global_ref
+    be_push_static_ref = w_push_static_ref
+    be_load_global = w_load_global
+    be_store_global = w_store_global
+    be_function_ref = w_function_ref
+    be_string_ref = w_string_ref
+    be_array_ref = w_array_ref
+    be_static_ref = w_static_ref
+    be_declare_function = w_declare_function
+    be_bind_extern_function = w_bind_extern_function
+    be_declare_extern_function = w_declare_extern_function
+    be_should_warn_unused_extern = be_default_should_warn_unused_extern
+    be_begin_function = w_begin_function
+    be_end_function = w_end_function
+    be_set_reachable_functions = w_set_reachable_functions
+    be_load_param = w_load_param
+    be_alloc_local = w_alloc_local
+    be_load_local = w_load_local
+    be_store_local = w_store_local
+    be_push_const_i64 = w_push_const_i64
+    be_push_void = w_push_void
+    be_push_fn_ref = w_push_fn_ref
+    be_pop_value = w_pop_value
+    be_save_value = w_save_value
+    be_restore_value = w_restore_value
+    be_unary_op = w_unary_op
+    be_binary_op = w_binary_op
+    be_pipe_call = w_pipe_call
+    be_begin_if = w_begin_if
+    be_begin_else = w_begin_else
+    be_end_if = w_end_if
+    be_begin_loop = w_begin_loop
+    be_begin_loop_body = w_begin_loop_body
+    be_end_loop = w_end_loop
+    be_emit_break = w_emit_break
+    be_emit_continue = w_emit_continue
+    be_cond_and_split = w_cond_and_split
+    be_cond_and_join = w_cond_and_join
+    be_cond_or_split = w_cond_or_split
+    be_cond_or_join = w_cond_or_join
+    be_emit_return = w_emit_return
+    be_call_direct = w_call_direct
+    be_call_indirect = w_call_indirect
+    be_max_call_args = w_max_call_args
+    be_is_intrinsic = w_is_intrinsic
+    be_intrinsic_arity = w_intrinsic_arity
+    be_intrinsic_static_arg_indices = w_intrinsic_static_arg_indices
+    be_emit_intrinsic = w_emit_intrinsic
+    be_get_builtin_constants = w_get_builtin_constants
+    be_compile_and_link = w_compile_and_link
+    be_run = w_run
+    be_get_compile_message = w_get_compile_message
+    return void
+}

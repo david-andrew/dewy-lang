@@ -2,16 +2,74 @@ const STDIN:int = 0
 const STDOUT:int = 1
 const STDERR:int = 2
 
-# wasm32: host_write logs to the browser console (fd is ignored)
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
+
+# wasm32 lacks a host filesystem and subprocess facility. host_write logs to
+# the browser console, and the rest are stubbed to fail or no-op so that
+# higher level code can fall back gracefully.
 let host_write = (fd:int buf:int len:int):>int => {
     __host_log__(buf len)
     return len
 }
 
+let host_read = (fd:int buf:int cap:int):>int => {
+    return 0 - 1
+}
+
+let host_open = (path_cstr:int flags:int mode:int):>int => {
+    return 0 - 1
+}
+
+let host_close = (fd:int):>int => {
+    return 0 - 1
+}
+
+let host_lseek = (fd:int offset:int whence:int):>int => {
+    return 0 - 1
+}
+
 let host_exit = (code:int):>void => {
+    __host_exit__(code)
     return void
 }
 
+# wasm32 cannot dynamically grow linear memory from user code, so we burn a
+# large static slab up front. 32 MB matches the host arena size on native.
+const WASM_ARENA_RESERVED:int = 0x2000000
+
 let host_mmap_rw = (size:int):>int => {
-    return 0
+    return __static_alloca__(WASM_ARENA_RESERVED)
+}
+
+let host_fork = ():>int => {
+    return 0 - 1
+}
+
+let host_execve = (path_cstr:int argv:int envp:int):>int => {
+    return 0 - 1
+}
+
+let host_waitpid = (pid:int status_ptr:int flags:int):>int => {
+    return 0 - 1
+}
+
+let host_dup2 = (oldfd:int newfd:int):>int => {
+    return 0 - 1
+}
+
+let host_mkdir = (path_cstr:int mode:int):>int => {
+    return 0 - 1
+}
+
+let host_unlink = (path_cstr:int):>int => {
+    return 0 - 1
+}
+
+let host_chdir = (path_cstr:int):>int => {
+    return 0 - 1
 }

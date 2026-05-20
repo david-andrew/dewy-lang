@@ -1,0 +1,59 @@
+# File system helpers above the host_io capability layer. All paths passed to
+# these helpers must be NUL-terminated cstrings.
+
+const SEEK_END:int = 2
+const SEEK_SET:int = 0
+
+# Read an entire file into an arena-allocated length-prefixed string. Returns
+# the data pointer (length at -8). On error, returns 0.
+let fs_read_file = (path_cstr:int):>int => {
+    let fd:int = host_open(path_cstr O_RDONLY 0)
+    if fd <? 0 { return 0 }
+
+    let bb:int = bb_new(4096)
+    let tmp:int = arena_alloc(4096)
+    loop true {
+        let n:int = host_read(fd tmp 4096)
+        if n <=? 0 { break }
+        bb_push_bytes(bb tmp n)
+    }
+    host_close(fd)
+    return bb_finalize_as_string(bb)
+}
+
+# Write `data` (raw bytes, `len` bytes) to a file. Returns 0 on success,
+# negative on error.
+let fs_write_file = (path_cstr:int data:int len:int):>int => {
+    let fd:int = host_open(path_cstr (O_WRONLY or O_CREAT) or O_TRUNC 0x1a4)
+    if fd <? 0 { return fd }
+    let written:int = 0
+    loop written <? len {
+        let n:int = host_write(fd data + written len - written)
+        if n <=? 0 {
+            host_close(fd)
+            return 0 - 1
+        }
+        written = written + n
+    }
+    host_close(fd)
+    return 0
+}
+
+# Write a length-prefixed udewy string to a file.
+let fs_write_string = (path_cstr:int s:int):>int => {
+    return fs_write_file(path_cstr s str_len(s))
+}
+
+# Create a directory (mode 0755). Succeeds if it already exists.
+let fs_mkdir_p = (path_cstr:int):>int => {
+    let rc:int = host_mkdir(path_cstr 0x1ed)
+    return rc
+}
+
+# Probe whether a path exists by trying to open it for reading.
+let fs_exists = (path_cstr:int):>int => {
+    let fd:int = host_open(path_cstr O_RDONLY 0)
+    if fd <? 0 { return FALSE_VAL }
+    host_close(fd)
+    return TRUE_VAL
+}

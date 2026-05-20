@@ -2,19 +2,55 @@ const STDIN:int = 0
 const STDOUT:int = 1
 const STDERR:int = 2
 
+const SYS_DUP3:int = 24
+const SYS_MKDIRAT:int = 34
+const SYS_UNLINKAT:int = 35
+const SYS_CHDIR:int = 49
+const SYS_OPENAT:int = 56
+const SYS_CLOSE:int = 57
+const SYS_LSEEK:int = 62
 const SYS_READ:int = 63
 const SYS_WRITE:int = 64
-const SYS_CLOSE:int = 57
-const SYS_MMAP:int = 222
 const SYS_EXIT:int = 93
+const SYS_CLONE:int = 220
+const SYS_EXECVE:int = 221
+const SYS_MMAP:int = 222
+const SYS_WAIT4:int = 260
+
+const AT_FDCWD:int = 0 - 100
+
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
 
 const PROT_READ:int = 1
 const PROT_WRITE:int = 2
 const MAP_PRIVATE:int = 2
 const MAP_ANONYMOUS:int = 32
 
+const CLONE_FORK_FLAGS:int = 17
+
 let host_write = (fd:int buf:int len:int):>int => {
     return __syscall3__(SYS_WRITE fd buf len)
+}
+
+let host_read = (fd:int buf:int cap:int):>int => {
+    return __syscall3__(SYS_READ fd buf cap)
+}
+
+let host_open = (path_cstr:int flags:int mode:int):>int => {
+    return __syscall4__(SYS_OPENAT AT_FDCWD path_cstr flags mode)
+}
+
+let host_close = (fd:int):>int => {
+    return __syscall1__(SYS_CLOSE fd)
+}
+
+let host_lseek = (fd:int offset:int whence:int):>int => {
+    return __syscall3__(SYS_LSEEK fd offset whence)
 }
 
 let host_exit = (code:int):>void => {
@@ -24,4 +60,32 @@ let host_exit = (code:int):>void => {
 
 let host_mmap_rw = (size:int):>int => {
     return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
+}
+
+let host_fork = ():>int => {
+    return __syscall5__(SYS_CLONE CLONE_FORK_FLAGS 0 0 0 0)
+}
+
+let host_execve = (path_cstr:int argv:int envp:int):>int => {
+    return __syscall3__(SYS_EXECVE path_cstr argv envp)
+}
+
+let host_waitpid = (pid:int status_ptr:int flags:int):>int => {
+    return __syscall4__(SYS_WAIT4 pid status_ptr flags 0)
+}
+
+let host_dup2 = (oldfd:int newfd:int):>int => {
+    return __syscall3__(SYS_DUP3 oldfd newfd 0)
+}
+
+let host_mkdir = (path_cstr:int mode:int):>int => {
+    return __syscall3__(SYS_MKDIRAT AT_FDCWD path_cstr mode)
+}
+
+let host_unlink = (path_cstr:int):>int => {
+    return __syscall3__(SYS_UNLINKAT AT_FDCWD path_cstr 0)
+}
+
+let host_chdir = (path_cstr:int):>int => {
+    return __syscall1__(SYS_CHDIR path_cstr)
 }

@@ -1,0 +1,21 @@
+import p"../bootstrap/t0.udewy"
+
+let main = (argc:int argv:int):>int => {
+    arena_init()
+    if argc <? 2 {
+        eprintl("usage: test_bootstrap_t0 <file>")
+        return 1
+    }
+    let path_cstr:int = __load__(argv + 8)
+    let path:int = path_from_cstr(path_cstr)
+
+    let target:int = bb_finalize_as_string(bb_new(8))
+    let bb:int = bb_new(8)
+    bb_push_str(bb "x86_64")
+    target = bb_finalize_as_string(bb)
+
+    let loaded:int = t0_load_program(path target)
+    let src:int = loaded_source(loaded)
+    host_write(STDOUT src str_len(src))
+    return 0
+}

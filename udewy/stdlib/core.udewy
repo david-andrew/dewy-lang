@@ -73,6 +73,24 @@ let str_eq = (s1:int s2:int):>int => {
     return str_eq_len(s1 str_len(s1) s2 str_len(s2))
 }
 
+let str_lex_cmp = (a:int b:int):>int => {
+    let alen:int = str_len(a)
+    let blen:int = str_len(b)
+    let n:int = alen
+    if blen <? n { n = blen }
+    let i:int = 0
+    loop i <? n {
+        let ca:int = __load_u8__(a + i)
+        let cb:int = __load_u8__(b + i)
+        if ca <? cb { return 0 - 1 }
+        if ca >? cb { return 1 }
+        i = i + 1
+    }
+    if alen <? blen { return 0 - 1 }
+    if alen >? blen { return 1 }
+    return 0
+}
+
 let str_prefix = (s:int prefix:int):>int => {
     let prefix_len:int = str_len(prefix)
     let i:int = 0

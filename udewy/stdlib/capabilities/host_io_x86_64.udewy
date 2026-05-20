@@ -6,8 +6,24 @@ const SYS_READ:int = 0
 const SYS_WRITE:int = 1
 const SYS_OPEN:int = 2
 const SYS_CLOSE:int = 3
+const SYS_LSEEK:int = 8
 const SYS_MMAP:int = 9
+const SYS_BRK:int = 12
+const SYS_DUP2:int = 33
+const SYS_FORK:int = 57
+const SYS_EXECVE:int = 59
 const SYS_EXIT:int = 60
+const SYS_WAIT4:int = 61
+const SYS_MKDIR:int = 83
+const SYS_UNLINK:int = 87
+const SYS_CHDIR:int = 80
+
+const O_RDONLY:int = 0
+const O_WRONLY:int = 1
+const O_RDWR:int = 2
+const O_CREAT:int = 64
+const O_TRUNC:int = 512
+const O_APPEND:int = 1024
 
 const PROT_READ:int = 1
 const PROT_WRITE:int = 2
@@ -18,6 +34,22 @@ let host_write = (fd:int buf:int len:int):>int => {
     return __syscall3__(SYS_WRITE fd buf len)
 }
 
+let host_read = (fd:int buf:int cap:int):>int => {
+    return __syscall3__(SYS_READ fd buf cap)
+}
+
+let host_open = (path_cstr:int flags:int mode:int):>int => {
+    return __syscall3__(SYS_OPEN path_cstr flags mode)
+}
+
+let host_close = (fd:int):>int => {
+    return __syscall1__(SYS_CLOSE fd)
+}
+
+let host_lseek = (fd:int offset:int whence:int):>int => {
+    return __syscall3__(SYS_LSEEK fd offset whence)
+}
+
 let host_exit = (code:int):>void => {
     __syscall1__(SYS_EXIT code)
     return void
@@ -25,4 +57,32 @@ let host_exit = (code:int):>void => {
 
 let host_mmap_rw = (size:int):>int => {
     return __syscall6__(SYS_MMAP 0 size (PROT_READ or PROT_WRITE) (MAP_PRIVATE or MAP_ANONYMOUS) (0 - 1) 0)
+}
+
+let host_fork = ():>int => {
+    return __syscall0__(SYS_FORK)
+}
+
+let host_execve = (path_cstr:int argv:int envp:int):>int => {
+    return __syscall3__(SYS_EXECVE path_cstr argv envp)
+}
+
+let host_waitpid = (pid:int status_ptr:int flags:int):>int => {
+    return __syscall4__(SYS_WAIT4 pid status_ptr flags 0)
+}
+
+let host_dup2 = (oldfd:int newfd:int):>int => {
+    return __syscall2__(SYS_DUP2 oldfd newfd)
+}
+
+let host_mkdir = (path_cstr:int mode:int):>int => {
+    return __syscall2__(SYS_MKDIR path_cstr mode)
+}
+
+let host_unlink = (path_cstr:int):>int => {
+    return __syscall1__(SYS_UNLINK path_cstr)
+}
+
+let host_chdir = (path_cstr:int):>int => {
+    return __syscall1__(SYS_CHDIR path_cstr)
 }

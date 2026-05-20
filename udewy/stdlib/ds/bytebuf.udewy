@@ -1,0 +1,153 @@
+# Growable byte buffer.
+#
+# ByteBuf is a pointer to a 24-byte header:
+#   +0  cap   number of bytes the underlying buffer can hold
+#   +8  len   number of bytes currently stored
+#   +16 data  pointer to underlying byte buffer
+#
+# All allocations come from the arena allocator. Growth allocates a new buffer
+# and copies; the old buffer's storage in the arena is leaked. This is fine
+# for the bootstrap compiler which uses a single big arena per run.
+
+const BB_OFF_CAP:int = 0
+const BB_OFF_LEN:int = 8
+const BB_OFF_DATA:int = 16
+const BB_HEADER_SIZE:int = 24
+
+let bb_new = (initial_cap:int):>int => {
+    let hdr:int = arena_alloc(BB_HEADER_SIZE)
+    let data:int = arena_alloc(initial_cap)
+    __store__(initial_cap hdr + BB_OFF_CAP)
+    __store__(0 hdr + BB_OFF_LEN)
+    __store__(data hdr + BB_OFF_DATA)
+    return hdr
+}
+
+let bb_cap = (bb:int):>int => {
+    return __load__(bb + BB_OFF_CAP)
+}
+
+let bb_len = (bb:int):>int => {
+    return __load__(bb + BB_OFF_LEN)
+}
+
+let bb_data = (bb:int):>int => {
+    return __load__(bb + BB_OFF_DATA)
+}
+
+let bb_reset = (bb:int):>void => {
+    __store__(0 bb + BB_OFF_LEN)
+    return void
+}
+
+let bb_grow = (bb:int min_cap:int):>void => {
+    let cap:int = bb_cap(bb)
+    if cap >=? min_cap { return void }
+    let new_cap:int = cap
+    if new_cap <? 16 { new_cap = 16 }
+    loop new_cap <? min_cap {
+        new_cap = new_cap * 2
+    }
+    let old_data:int = bb_data(bb)
+    let new_data:int = arena_alloc(new_cap)
+    let len:int = bb_len(bb)
+    copy_bytes(new_data old_data len)
+    __store__(new_cap bb + BB_OFF_CAP)
+    __store__(new_data bb + BB_OFF_DATA)
+    return void
+}
+
+let bb_push_byte = (bb:int b:int):>void => {
+    let len:int = bb_len(bb)
+    bb_grow(bb len + 1)
+    let data:int = bb_data(bb)
+    __store_u8__(b data + len)
+    __store__(len + 1 bb + BB_OFF_LEN)
+    return void
+}
+
+let bb_push_bytes = (bb:int src:int n:int):>void => {
+    let len:int = bb_len(bb)
+    bb_grow(bb len + n)
+    let data:int = bb_data(bb)
+    copy_bytes(data + len src n)
+    __store__(len + n bb + BB_OFF_LEN)
+    return void
+}
+
+# push a length-prefixed udewy string (length at ptr-8, data at ptr).
+let bb_push_str = (bb:int s:int):>void => {
+    bb_push_bytes(bb s str_len(s))
+    return void
+}
+
+# push a null-terminated c-string.
+let bb_push_cstr = (bb:int s:int):>void => {
+    bb_push_bytes(bb s cstr_len(s))
+    return void
+}
+
+# push the decimal representation of a signed integer.
+let bb_push_int = (bb:int n:int):>void => {
+    if n =? 0 {
+        bb_push_byte(bb CH_0)
+        return void
+    }
+    let neg:int = FALSE_VAL
+    if n <? 0 {
+        neg = TRUE_VAL
+        n = 0 - n
+    }
+    let tmp:int = __static_alloca__(24)
+    let i:int = 0
+    loop n >? 0 {
+        __store_u8__((n % 10) + CH_0 tmp + i)
+        n = n // 10
+        i = i + 1
+    }
+    if neg {
+        bb_push_byte(bb CH_MINUS)
+    }
+    loop i >? 0 {
+        i = i - 1
+        bb_push_byte(bb __load_u8__(tmp + i))
+    }
+    return void
+}
+
+# push the lowercase hex representation of an unsigned integer (no 0x prefix).
+let bb_push_hex = (bb:int n:int):>void => {
+    if n =? 0 {
+        bb_push_byte(bb CH_0)
+        return void
+    }
+    let tmp:int = __static_alloca__(16)
+    let i:int = 0
+    loop n not=? 0 {
+        let d:int = n and 0xf
+        if d <? 10 {
+            __store_u8__(d + CH_0 tmp + i)
+        } else {
+            __store_u8__(d - 10 + 97 tmp + i)
+        }
+        n = n >> 4
+        i = i + 1
+    }
+    loop i >? 0 {
+        i = i - 1
+        bb_push_byte(bb __load_u8__(tmp + i))
+    }
+    return void
+}
+
+# install a length prefix in front of the data (8 bytes) and return a pointer
+# to the data itself. Useful for materializing a finished buffer as a normal
+# length-prefixed udewy string/array. NOTE: the caller is responsible for
+# making sure the bb is not modified after this call.
+let bb_finalize_as_string = (bb:int):>int => {
+    let len:int = bb_len(bb)
+    let out:int = arena_alloc(len + 8)
+    __store__(len out)
+    copy_bytes(out + 8 bb_data(bb) len)
+    return out + 8
+}
