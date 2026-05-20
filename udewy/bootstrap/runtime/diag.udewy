@@ -9,6 +9,15 @@ let g_src_ptr:int = 0
 let g_src_len:int = 0
 let g_src_name:int = 0
 
+# When `g_diag_recoverable` is true, `diag_error` and `diag_error_str` set
+# `g_diag_aborted` and return instead of calling `host_exit`. Callers that opt
+# into this mode must check `g_diag_aborted` after each call into code that
+# may raise (e.g. the tokenizer) and bail out gracefully. This is used by the
+# in-browser playground so that a syntax error during live highlighting
+# doesn't trap the whole wasm instance.
+let g_diag_recoverable:int = false
+let g_diag_aborted:int = false
+
 let diag_set_source = (path_cstr:int src:int src_len:int):>void => {
     g_src_name = path_cstr
     g_src_ptr = src
@@ -102,15 +111,25 @@ let diag_emit_context = (fd:int loc:int):>void => {
 }
 
 let diag_error = (loc:int msg:int):>void => {
+    if g_diag_aborted { return void }
     eprint("SyntaxError: ")
     eprint(msg)
     diag_emit_context(STDERR loc)
+    if g_diag_recoverable {
+        g_diag_aborted = true
+        return void
+    }
     host_exit(1)
     return void
 }
 
 let diag_error_str = (msg:int):>void => {
+    if g_diag_aborted { return void }
     eprintl(msg)
+    if g_diag_recoverable {
+        g_diag_aborted = true
+        return void
+    }
     host_exit(1)
     return void
 }

@@ -1,0 +1,61 @@
+# Web-compiler entry point for the bootstrap compiler.
+#
+# Built as a wasm32 module: the JS host writes user source bytes into a fixed
+# linear-memory buffer, calls main() with no args, and reads the resulting
+# WAT bytes back via `host_compile_emit_wat`. Diagnostics still flow through
+# the existing `eprint`/`host_log` path so JS can capture them via the normal
+# host_log import.
+#
+# This module turns the bootstrap compiler into a library you can run in the
+# browser. The playground page (udewy/tests/web/playground.udewy) is the UI
+# that drives it; this file knows nothing about UI.
+#
+# Each compile expects a fresh wasm instance so global state (arena,
+# w_data_segments, w_imports, etc.) starts empty.
+
+$supported_targets = ["wasm32"]
+
+import p"./runtime/runtime.udewy"
+import p"./t1.udewy"
+import p"./p0.udewy"
+import p"./backend/common.udewy"
+import p"./backend/wasm.udewy"
+
+# Maximum source size accepted in a single compile (1 MB). The buffer is
+# this many bytes plus 16 for the length prefix and trailing NUL.
+const COMPILE_SRC_CAP:int = 1048576
+
+# Source buffer the JS host writes into. 8 leading bytes hold the length so
+# the body doubles as a length-prefixed udewy string.
+const COMPILE_SRC_BUF:int = __static_alloca__(1048592)
+
+# Host imports the calling JS must provide:
+#   host_compile_get_src(buf, cap):>int
+#       Copy the source bytes to compile into `buf` (capacity `cap`), return
+#       the number of bytes written, or -1 on error.
+#   host_compile_emit_wat(buf, len):>void
+#       Hand the WAT bytes back to JS for wabt.js to assemble.
+let host_compile_get_src = (buf:int cap:int):>int => extern
+let host_compile_emit_wat = (buf:int len:int):>void => extern
+
+let main = ():>int => {
+    arena_init()
+
+    let src:int = COMPILE_SRC_BUF + 8
+    let src_len:int = host_compile_get_src(src COMPILE_SRC_CAP)
+    if src_len <? 0 {
+        eprintl("error: failed to read source from host")
+        return 1
+    }
+    __store__(src_len COMPILE_SRC_BUF)
+    __store_u8__(0 src + src_len)
+
+    diag_set_source(0 src src_len)
+
+    w_install_backend()
+    let toks:int = t1_tokenize(src)
+    let wat:int = parse_run(toks src)
+
+    host_compile_emit_wat(wat str_len(wat))
+    return 0
+}

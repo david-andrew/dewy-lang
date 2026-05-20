@@ -338,6 +338,10 @@ def tokenize(src:str)->list[Token]:
             while i < n and stack > 0:
                 if src[i] == '#':
                     error(src, i, "udewy doesn't support comments inside type parameters")
+                # `:>` is opaque: its `>` is a function return arrow, not a closer.
+                if src[i] == ':' and i + 1 < n and src[i + 1] == '>':
+                    i += 2
+                    continue
                 if src[i] == '<':
                     stack += 1
                 if src[i] == '>':

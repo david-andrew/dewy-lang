@@ -151,6 +151,14 @@ class Wasm32Backend(Backend):
             '(import "env" "host_audio_queue_init" (func $__host_audio_queue_init__ (param i64 i64) (result i64)))',
             '(import "env" "host_audio_queue_push" (func $__host_audio_queue_push__ (param i64 i64) (result i64)))',
             '(import "env" "host_audio_queue_size" (func $__host_audio_queue_size__ (result i64)))',
+            # Editor primitives (playground / contenteditable surfaces).
+            '(import "env" "ud_dom_get_text_len" (func $__ud_dom_get_text_len__ (param i64) (result i64)))',
+            '(import "env" "ud_dom_get_text" (func $__ud_dom_get_text__ (param i64 i64 i64) (result i64)))',
+            '(import "env" "ud_dom_get_caret" (func $__ud_dom_get_caret__ (param i64) (result i64)))',
+            '(import "env" "ud_dom_set_caret" (func $__ud_dom_set_caret__ (param i64 i64) (result i64)))',
+            '(import "env" "ud_dom_add_event_listener" (func $__ud_dom_add_event_listener__ (param i64 i64 i64 i64) (result i64)))',
+            '(import "env" "ud_dom_value" (func $__ud_dom_value__ (param i64 i64 i64) (result i64)))',
+            '(import "env" "ud_dom_focus" (func $__ud_dom_focus__ (param i64) (result i64)))',
         ]
         self._imports.extend(host_imports)
     
@@ -260,7 +268,7 @@ class Wasm32Backend(Backend):
             output.append('  (global $__udewy_module_init_done (mut i32) (i32.const 0))')
 
         if self._fn_table_ids:
-            output.append(f"  (table {len(self._fn_table_ids)} funcref)")
+            output.append(f"  (table $__udewy_fn_table {len(self._fn_table_ids)} funcref)")
         
         # Functions: emit in declaration order so table indices stay correct.
         # Unreachable functions become tiny stubs so the function-table layout
@@ -303,8 +311,12 @@ class Wasm32Backend(Backend):
             hex_data = "".join(f"\\{b:02x}" for b in data)
             output.append(f'  (data (i32.const {offset}) "{hex_data}")')
         
-        # Export main
+        # Export main and the function table so JS host code can dispatch
+        # callbacks held by udewy code (event listeners etc.) through
+        # `instance.exports.__udewy_fn_table.get(idx)(...)`.
         output.append('  (export "main" (func $main))')
+        if self._fn_table_ids:
+            output.append('  (export "__udewy_fn_table" (table $__udewy_fn_table))')
         
         output.append(")")
         return "\n".join(output)
@@ -1753,10 +1765,13 @@ const AUDIO_SCRIPT_BUFFER_SIZE = 8192;  // Larger buffer for less crackling
 const AUDIO_BUFFER_0_OFFSET = 786432;
 const AUDIO_BUFFER_1_OFFSET = 786432 + (AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes
 
+const udewyTextEncoder = new TextEncoder();
+const udewyTextDecoder = new TextDecoder();
+
 function decodeString(ptr, len) {
     const view = new Uint8Array(memory.buffer);
     const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));
-    return new TextDecoder().decode(bytes);
+    return udewyTextDecoder.decode(bytes);
 }
 
 function domRegister(node) {
@@ -2384,6 +2399,90 @@ const imports = {
             style.alignItems = domFlexAlign(align);
             style.justifyContent = domFlexJustify(justify);
             style.flexWrap = Number(wrap) !== 0 ? 'wrap' : 'nowrap';
+            return 0n;
+        },
+        // Editor primitives.
+        ud_dom_get_text_len: (handle) => {
+            const node = domGet(handle);
+            const text = (node && 'value' in node) ? node.value : (node ? node.textContent : '');
+            return BigInt(udewyTextEncoder.encode(text || '').length);
+        },
+        ud_dom_get_text: (handle, bufPtr, cap) => {
+            const node = domGet(handle);
+            const text = (node && 'value' in node) ? node.value : (node ? node.textContent : '');
+            const encoded = udewyTextEncoder.encode(text || '');
+            const n = Math.min(encoded.length, Number(cap));
+            new Uint8Array(memory.buffer, Number(bufPtr), n).set(encoded.subarray(0, n));
+            return BigInt(n);
+        },
+        ud_dom_get_caret: (handle) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return 0n;
+            const range = sel.getRangeAt(0).cloneRange();
+            range.selectNodeContents(node);
+            range.setEnd(sel.anchorNode || node, sel.anchorOffset || 0);
+            return BigInt(udewyTextEncoder.encode(range.toString()).length);
+        },
+        ud_dom_set_caret: (handle, byteOffset) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const target = Number(byteOffset);
+            const sel = window.getSelection();
+            if (!sel) return 0n;
+            // Walk text nodes counting UTF-8 bytes until we hit the target.
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+            let consumed = 0;
+            let tn = walker.nextNode();
+            const range = document.createRange();
+            while (tn) {
+                const bytes = udewyTextEncoder.encode(tn.nodeValue || '');
+                if (consumed + bytes.length >= target) {
+                    // Find char offset for the byte target inside this text node.
+                    const remaining = target - consumed;
+                    const charOffset = udewyTextDecoder.decode(bytes.subarray(0, remaining)).length;
+                    range.setStart(tn, charOffset);
+                    range.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    return 0n;
+                }
+                consumed += bytes.length;
+                tn = walker.nextNode();
+            }
+            // Past the end: caret at end of node.
+            range.selectNodeContents(node);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return 0n;
+        },
+        ud_dom_add_event_listener: (handle, eventPtr, eventLen, fnIndex) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const eventName = decodeString(eventPtr, eventLen);
+            const idx = Number(fnIndex);
+            node.addEventListener(eventName, () => {
+                if (!wasmInstance) return;
+                const table = wasmInstance.exports.__udewy_fn_table;
+                if (!table) return;
+                const fn = table.get(idx);
+                if (typeof fn === 'function') fn();
+            });
+            return 0n;
+        },
+        ud_dom_value: (handle, valuePtr, valueLen) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const text = decodeString(valuePtr, valueLen);
+            if ('value' in node) node.value = text;
+            else node.textContent = text;
+            return 0n;
+        },
+        ud_dom_focus: (handle) => {
+            const node = domGet(handle);
+            if (node && node.focus) node.focus();
             return 0n;
         },
         // Canvas graphics

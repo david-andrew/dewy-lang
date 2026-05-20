@@ -31,6 +31,14 @@ let ud_dom_add_class = (node:int class_name:int class_len:int):>int => extern
 let ud_dom_set_style = (node:int property:int property_len:int value:int value_len:int):>int => extern
 let ud_dom_set_flex = (node:int direction:int gap:int align:int justify:int wrap:int):>int => extern
 
+let ud_dom_get_text_len = (node:int):>int => extern
+let ud_dom_get_text = (node:int buf:int cap:int):>int => extern
+let ud_dom_get_caret = (node:int):>int => extern
+let ud_dom_set_caret = (node:int byte_offset:int):>int => extern
+let ud_dom_add_event_listener = (node:int event:int event_len:int fn_idx:int):>int => extern
+let ud_dom_value = (node:int value:int value_len:int):>int => extern
+let ud_dom_focus = (node:int):>int => extern
+
 let Web_SetTitle = (title:int):>void => {
     ud_dom_set_title(title __load__(title - 8))
     return 0
@@ -135,4 +143,70 @@ let Web_Image = (parent:int src:int alt:int):>int => {
     Web_SetAttr(image "src" src)
     Web_SetAttr(image "alt" alt)
     return image
+}
+
+# Make a node behave like a text editor surface. Pass true to enable.
+let Web_SetContentEditable = (node:int editable:int):>void => {
+    if editable {
+        Web_SetAttr(node "contenteditable" "plaintext-only")
+    } else {
+        Web_SetAttr(node "contenteditable" "false")
+    }
+    return 0
+}
+
+# Copy the (text) value of a node into a freshly-allocated udewy string and
+# return its pointer. Works on contenteditable elements (textContent) and
+# <input>/<textarea> (value).
+let Web_GetText = (node:int):>int => {
+    let n:int = ud_dom_get_text_len(node)
+    let bb:int = bb_new(n + 1)
+    if n >? 0 {
+        let tmp:int = arena_alloc(n)
+        ud_dom_get_text(node tmp n)
+        bb_push_bytes(bb tmp n)
+    }
+    return bb_finalize_as_string(bb)
+}
+
+# Replace the (text) value of a node from a udewy string.
+let Web_SetValue = (node:int text:int):>void => {
+    ud_dom_value(node text __load__(text - 8))
+    return 0
+}
+
+# Return the current caret byte offset within `node` (counts UTF-8 bytes),
+# or 0 if there is no caret inside this node.
+let Web_GetCaret = (node:int):>int => {
+    return ud_dom_get_caret(node)
+}
+
+# Place the caret at the given UTF-8 byte offset inside `node`.
+let Web_SetCaret = (node:int byte_offset:int):>void => {
+    ud_dom_set_caret(node byte_offset)
+    return 0
+}
+
+# Wire up an event listener. `callback` is a function reference; on event
+# the host shim looks up the function-table slot and invokes it with no
+# arguments.
+let Web_AddEventListener = (node:int event:int callback:int):>void => {
+    ud_dom_add_event_listener(node event __load__(event - 8) callback)
+    return 0
+}
+
+let Web_AddInputListener = (node:int callback:int):>void => {
+    Web_AddEventListener(node "input" callback)
+    return 0
+}
+
+let Web_AddClickListener = (node:int callback:int):>void => {
+    Web_AddEventListener(node "click" callback)
+    return 0
+}
+
+# Move keyboard focus to a node.
+let Web_Focus = (node:int):>void => {
+    ud_dom_focus(node)
+    return 0
 }

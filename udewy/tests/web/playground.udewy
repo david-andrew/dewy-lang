@@ -1,0 +1,189 @@
+$supported_targets = ["wasm32"]
+
+import p"../../third_party/web/dom.udewy"
+import p"../../third_party/web/highlight.udewy"
+import p"../../third_party/web/artifacts/web_compiler.wasm"
+import p"../../third_party/web/artifacts/wabt.js"
+import p"../../third_party/web/playground_host.js"
+
+# The Run button click handler reads the editor text and asks JS to compile
+# + run via `host_playground_run`. JS owns the wabt + iframe pipeline because
+# both pieces are entirely JS-side.
+let host_playground_run = (src:int src_len:int):>void => extern
+
+const STARTER_SOURCE:int =
+"# Hello from the udewy playground.
+# Edit this code and press Run.
+
+let main = ():>int => \{
+    __host_log__(\"hello from udewy\" 16)
+    return 0
+\}
+"
+
+# Globals so the input / click callbacks can find the live DOM nodes without
+# re-walking the document.
+let g_editor:int = 0
+let g_status:int = 0
+
+let playground_on_input = ():>void => {
+    if g_editor =? 0 { return void }
+    let caret:int = Web_GetCaret(g_editor)
+    let src:int = Web_GetText(g_editor)
+    Web_RenderHighlightedSource(g_editor src)
+    Web_SetCaret(g_editor caret)
+    return void
+}
+
+let playground_on_run = ():>void => {
+    if g_editor =? 0 { return void }
+    let src:int = Web_GetText(g_editor)
+    host_playground_run(src str_len(src))
+    return void
+}
+
+# Apply the editor's monospace / dark code-block styling. Used both for the
+# initial render and after every rehighlight.
+let style_editor = (node:int):>void => {
+    Web_SetStyle(node "white-space" "pre-wrap")
+    Web_SetStyle(node "word-break" "break-word")
+    Web_SetStyle(node "min-height" "16rem")
+    Web_SetStyle(node "padding" "1rem")
+    Web_SetStyle(node "margin" "0")
+    Web_SetStyle(node "border-radius" "14px")
+    Web_SetStyle(node "background" "#1e1e1e")
+    Web_SetStyle(node "color" "#d4d4d4")
+    Web_SetStyle(node "font-family" "ui-monospace, SFMono-Regular, Menlo, monospace")
+    Web_SetStyle(node "font-size" "0.95rem")
+    Web_SetStyle(node "line-height" "1.55")
+    Web_SetStyle(node "outline" "none")
+    Web_SetStyle(node "tab-size" "4")
+    return void
+}
+
+let style_status = (node:int):>void => {
+    Web_SetStyle(node "white-space" "pre-wrap")
+    Web_SetStyle(node "min-height" "4rem")
+    Web_SetStyle(node "padding" "0.75rem 1rem")
+    Web_SetStyle(node "margin" "0")
+    Web_SetStyle(node "border-radius" "10px")
+    Web_SetStyle(node "background" "#fff7f0")
+    Web_SetStyle(node "color" "#8a3700")
+    Web_SetStyle(node "font-family" "ui-monospace, SFMono-Regular, Menlo, monospace")
+    Web_SetStyle(node "font-size" "0.85rem")
+    return void
+}
+
+let style_run_button = (node:int):>void => {
+    Web_SetStyle(node "padding" "0.6rem 1.4rem")
+    Web_SetStyle(node "border" "none")
+    Web_SetStyle(node "border-radius" "999px")
+    Web_SetStyle(node "background" "#4c8f6a")
+    Web_SetStyle(node "color" "#ffffff")
+    Web_SetStyle(node "font-weight" "700")
+    Web_SetStyle(node "font-size" "0.95rem")
+    Web_SetStyle(node "cursor" "pointer")
+    Web_SetStyle(node "letter-spacing" "0.04em")
+    return void
+}
+
+let main = ():>int => {
+    Web_SetTitle("udewy playground")
+    Web_SetFaviconSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#1e1e1e'/><text x='32' y='44' text-anchor='middle' font-family='ui-monospace, Menlo' font-size='34' font-weight='800' fill='#d9822b'>&#x03BC;</text></svg>")
+
+    let root:int = Web_Root()
+    Web_Clear(root)
+    Web_SetStyle(root "background" "#f6f2eb")
+    Web_SetStyle(root "color" "#232734")
+    Web_SetStyle(root "font-family" "Inter, ui-sans-serif, system-ui, sans-serif")
+    Web_SetStyle(root "padding" "2rem 1.25rem")
+    Web_SetStyle(root "min-height" "100vh")
+
+    let article:int = Web_AppendElement(root "article")
+    Web_FlexColumn(article 18)
+    Web_SetStyle(article "max-width" "1100px")
+    Web_SetStyle(article "margin" "0 auto")
+
+    let header:int = Web_AppendElement(article "header")
+    Web_FlexRow(header 16)
+    Web_SetStyle(header "align-items" "center")
+    Web_SetStyle(header "justify-content" "space-between")
+
+    let title_block:int = Web_AppendElement(header "div")
+    Web_FlexColumn(title_block 4)
+    let kicker:int = Web_AppendTextElement(title_block "p" "udewy")
+    Web_SetStyle(kicker "margin" "0")
+    Web_SetStyle(kicker "color" "#8f5f2f")
+    Web_SetStyle(kicker "font-weight" "700")
+    Web_SetStyle(kicker "letter-spacing" "0.10em")
+    Web_SetStyle(kicker "text-transform" "uppercase")
+    let title:int = Web_AppendTextElement(title_block "h1" "playground")
+    Web_SetStyle(title "margin" "0")
+    Web_SetStyle(title "font-size" "clamp(1.8rem, 5vw, 2.6rem)")
+    Web_SetStyle(title "letter-spacing" "-0.04em")
+
+    let run_btn:int = Web_AppendTextElement(header "button" "Run")
+    style_run_button(run_btn)
+    Web_SetAttr(run_btn "id" "udewy-run")
+
+    let panes:int = Web_AppendElement(article "section")
+    Web_FlexRow(panes 18)
+    Web_SetStyle(panes "align-items" "stretch")
+
+    let left:int = Web_AppendElement(panes "div")
+    Web_FlexColumn(left 10)
+    Web_SetStyle(left "flex" "1 1 0")
+    Web_SetStyle(left "min-width" "0")
+
+    let left_label:int = Web_AppendTextElement(left "p" "Source")
+    Web_SetStyle(left_label "margin" "0")
+    Web_SetStyle(left_label "font-weight" "600")
+    Web_SetStyle(left_label "color" "#596171")
+
+    let editor:int = Web_AppendElement(left "pre")
+    Web_SetAttr(editor "id" "udewy-editor")
+    Web_SetAttr(editor "spellcheck" "false")
+    style_editor(editor)
+    Web_SetContentEditable(editor true)
+    g_editor = editor
+
+    let right:int = Web_AppendElement(panes "div")
+    Web_FlexColumn(right 10)
+    Web_SetStyle(right "flex" "1 1 0")
+    Web_SetStyle(right "min-width" "0")
+
+    let right_label:int = Web_AppendTextElement(right "p" "Output")
+    Web_SetStyle(right_label "margin" "0")
+    Web_SetStyle(right_label "font-weight" "600")
+    Web_SetStyle(right_label "color" "#596171")
+
+    let iframe_host:int = Web_AppendElement(right "div")
+    Web_SetAttr(iframe_host "id" "udewy-iframe-host")
+    Web_SetStyle(iframe_host "flex" "1 1 0")
+    Web_SetStyle(iframe_host "min-height" "16rem")
+    Web_SetStyle(iframe_host "border-radius" "14px")
+    Web_SetStyle(iframe_host "background" "#ffffff")
+    Web_SetStyle(iframe_host "border" "1px solid rgba(35, 39, 52, 0.18)")
+    Web_SetStyle(iframe_host "overflow" "hidden")
+    Web_SetStyle(iframe_host "position" "relative")
+
+    let placeholder:int = Web_AppendTextElement(iframe_host "p" "Press Run to compile and execute your program.")
+    Web_SetStyle(placeholder "margin" "0")
+    Web_SetStyle(placeholder "padding" "1rem")
+    Web_SetStyle(placeholder "color" "#8a8a8a")
+    Web_SetStyle(placeholder "font-family" "ui-monospace, SFMono-Regular, Menlo, monospace")
+    Web_SetStyle(placeholder "font-size" "0.85rem")
+
+    let status:int = Web_AppendElement(article "pre")
+    Web_SetAttr(status "id" "udewy-status")
+    style_status(status)
+    g_status = status
+
+    # Seed the editor with the starter source then highlight it.
+    Web_RenderHighlightedSource(g_editor STARTER_SOURCE)
+
+    Web_AddInputListener(g_editor playground_on_input)
+    Web_AddClickListener(run_btn playground_on_run)
+
+    return 0
+}

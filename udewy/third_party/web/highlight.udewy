@@ -59,13 +59,17 @@ let hl_emit_color = (parent:int src:int start:int end_idx:int color:int):>void =
     return void
 }
 
-# Emit a comment-aware plain run: anywhere we see '#', the comment up to LF
-# is colored, the rest is plain. Mirrors _highlight_plain in the Python.
+# Emit a comment+metatag-aware plain run: anywhere we see '#' the comment up
+# to LF is colored, anywhere we see `$ident` it's colored as a metatag, the
+# rest is plain.
 let hl_emit_plain_run = (parent:int src:int n:int start:int end_idx:int):>void => {
     let cursor:int = start
     loop cursor <? end_idx {
         let i:int = cursor
-        loop (i <? end_idx) and (__load_u8__(src + i) not=? T0_CH_HASH) {
+        loop i <? end_idx {
+            let c:int = __load_u8__(src + i)
+            if c =? T0_CH_HASH { break }
+            if c =? T0_CH_DOLLAR { break }
             i = i + 1
         }
         if i >=? end_idx {
@@ -73,10 +77,26 @@ let hl_emit_plain_run = (parent:int src:int n:int start:int end_idx:int):>void =
             return void
         }
         if cursor <? i { hl_emit_plain(parent src cursor i) }
-        let ce:int = t0_skip_comment(src n i)
-        if ce >? end_idx { ce = end_idx }
-        hl_emit_color(parent src i ce HL_COMMENT)
-        cursor = ce
+        let c:int = __load_u8__(src + i)
+        if c =? T0_CH_HASH {
+            let ce:int = t0_skip_comment(src n i)
+            if ce >? end_idx { ce = end_idx }
+            hl_emit_color(parent src i ce HL_COMMENT)
+            cursor = ce
+            continue
+        }
+        let j:int = i + 1
+        if (j <? end_idx) and t0_is_ident_start(__load_u8__(src + j)) {
+            j = j + 1
+            loop (j <? end_idx) and t0_is_ident(__load_u8__(src + j)) {
+                j = j + 1
+            }
+            hl_emit_metatag(parent src i j - i)
+            cursor = j
+        } else {
+            hl_emit_plain(parent src i i + 1)
+            cursor = i + 1
+        }
     }
     return void
 }
@@ -89,11 +109,32 @@ let hl_emit_trivia = (parent:int src:int n:int start:int):>int => {
     return end_idx
 }
 
+# Emit a string range src[start..end_idx] (must include the quotes), coloring
+# `\X` escape sequences yellow and the rest as a normal string. Mirrors the
+# tmLanguage `constant.character.escape` capture.
+let hl_emit_string_range = (parent:int src:int start:int end_idx:int):>void => {
+    let cursor:int = start
+    let i:int = start
+    loop i <? end_idx {
+        let c:int = __load_u8__(src + i)
+        if (c =? T0_CH_BACKSLASH) and (i + 1 <? end_idx) {
+            if cursor <? i { hl_emit_color(parent src cursor i HL_STRING) }
+            hl_emit_color(parent src i i + 2 HL_FUNCTION)
+            i = i + 2
+            cursor = i
+            continue
+        }
+        i = i + 1
+    }
+    if cursor <? end_idx { hl_emit_color(parent src cursor end_idx HL_STRING) }
+    return void
+}
+
 # Emit a '"..."' string literal starting at `start` (must point at the opening
 # quote). Returns the cursor one past the closing quote.
 let hl_emit_string_at = (parent:int src:int n:int start:int):>int => {
     let end_idx:int = t0_string_end(src n start)
-    hl_emit_color(parent src start end_idx HL_STRING)
+    hl_emit_string_range(parent src start end_idx)
     return end_idx
 }
 
@@ -317,7 +358,7 @@ let hl_token_color = (kind:int):>int => {
     if kind =? TK_CONTINUE { return HL_KEYWORD }
     if kind =? TK_EXTERN { return HL_KEYWORD }
     if kind =? TK_TRANSMUTE { return HL_KEYWORD }
-    if kind =? TK_VOID { return HL_KEYWORD }
+    if kind =? TK_VOID { return HL_DECLARATION }
     if kind =? TK_AND { return HL_KEYWORD }
     if kind =? TK_OR { return HL_KEYWORD }
     if kind =? TK_XOR { return HL_KEYWORD }
@@ -475,10 +516,31 @@ let hl_emit_t1 = (parent:int src:int n:int):>void => {
 
         let end_idx:int = hl_token_end(src n loc val kind)
 
+        # `let|const IDENT = (` -> color IDENT as a function definition.
+        let ident_is_fn_def:int = false
+        if (kind =? TK_IDENT) and (i >=? 1) {
+            let prev_kind:int = ts_kind(ts i - 1)
+            if (prev_kind =? TK_LET) or (prev_kind =? TK_CONST) {
+                if (i + 2 <? count) and (ts_kind(ts i + 1) =? TK_ASSIGN) and (ts_kind(ts i + 2) =? TK_LEFT_PAREN) {
+                    ident_is_fn_def = true
+                }
+            }
+        }
+
+        # `true` / `false` are tokenized as TK_NUMBER; color as declarations.
+        let is_bool_lit:int = false
+        if kind =? TK_NUMBER {
+            let tlen:int = end_idx - loc
+            if (tlen =? 4) and str_eq_len(src + loc 4 "true" 4) { is_bool_lit = true }
+            if (tlen =? 5) and str_eq_len(src + loc 5 "false" 5) { is_bool_lit = true }
+        }
+
         if kind =? TK_IDENT_CALL {
             let name_end:int = loc + val
             hl_emit_color(parent src loc name_end HL_FUNCTION)
             hl_emit_color(parent src name_end end_idx HL_PUNCTUATION)
+        } else if kind =? TK_STRING {
+            hl_emit_string_range(parent src loc end_idx)
         } else if merged_type {
             hl_emit_color(parent src loc - 1 loc HL_OPERATOR)
             hl_emit_color(parent src loc end_idx HL_TYPE)
@@ -488,6 +550,10 @@ let hl_emit_t1 = (parent:int src:int n:int):>void => {
         } else if merged_not_eq {
             hl_emit_color(parent src loc - 3 loc HL_DECLARATION)
             hl_emit_color(parent src loc end_idx HL_OPERATOR)
+        } else if ident_is_fn_def {
+            hl_emit_color(parent src loc end_idx HL_FUNCTION)
+        } else if is_bool_lit {
+            hl_emit_color(parent src loc end_idx HL_DECLARATION)
         } else {
             let color:int = hl_token_color(kind)
             if color =? 0 {
@@ -512,13 +578,31 @@ let hl_emit_t1 = (parent:int src:int n:int):>void => {
 # Append syntax-highlighted udewy source code under `parent`. Runs the prelude
 # scanner first to consume directives that t1 can't tokenize, then tokenizes
 # the remainder and emits colored spans for each token (with comment-aware
-# plain runs in the gaps).
+# plain runs in the gaps). Tolerates t1 syntax errors via the recoverable
+# diag mode -- the tokenizer bails out and we just stop highlighting at the
+# error point.
 let Web_AppendHighlightedSource = (parent:int src:int):>void => {
     if g_arena =? 0 { arena_init() }
     let n:int = str_len(src)
+
+    g_diag_recoverable = true
+    g_diag_aborted = false
+
     let prelude_end:int = hl_prelude(parent src n)
-    if prelude_end >=? n { return void }
+    if prelude_end >=? n {
+        g_diag_recoverable = false
+        return void
+    }
     let tail:int = hl_make_str(src prelude_end n - prelude_end)
     hl_emit_t1(parent tail n - prelude_end)
+    g_diag_recoverable = false
+    return void
+}
+
+# Replace `parent`'s children with a freshly-rendered highlighted version of
+# `src`. Used by the playground editor to live-update on every input event.
+let Web_RenderHighlightedSource = (parent:int src:int):>void => {
+    Web_Clear(parent)
+    Web_AppendHighlightedSource(parent src)
     return void
 }

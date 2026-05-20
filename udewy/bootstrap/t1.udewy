@@ -404,6 +404,7 @@ let t1_tokenize = (src:int):>int => {
     let ts:int = ts_new(src)
     let i:int = 0
     loop i <? n {
+        if g_diag_aborted { break }
         # Sanity check: a pending _TK_COLON / _TK_FN_COLON must be followed by a
         # type annotation. This catches stray colons that the parser would not
         # otherwise reject in a single pass.
@@ -625,6 +626,11 @@ let t1_tokenize = (src:int):>int => {
                 let tc:int = __load_u8__(src + i)
                 if tc =? T1_CH_HASH {
                     diag_error(i "udewy doesn't support comments inside type parameters")
+                }
+                # `:>` is opaque: its `>` is a function return arrow, not a closer.
+                if (tc =? T1_CH_COLON) and (i + 1 <? n) and (__load_u8__(src + i + 1) =? T1_CH_RANGLE) {
+                    i = i + 2
+                    continue
                 }
                 if tc =? T1_CH_LANGLE { stack_depth = stack_depth + 1 }
                 if tc =? T1_CH_RANGLE { stack_depth = stack_depth - 1 }
