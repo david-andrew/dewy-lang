@@ -15,16 +15,71 @@ const STARTER_SOURCE:int =
 "# Hello from the udewy playground.
 # Edit this code and press Run.
 
-let main = ():>int => \{
-    __host_log__(\"hello from udewy\" 16)
-    return 0
+let print = (s:string):>void => \{
+    let len:int = __load__(s - 8)
+    __host_log__(s len)
+    return void
 \}
-"
+
+let main = ():>int => \{
+    print(\"hello from udewy in wasm!\")
+    return 0
+\}"
 
 # Globals so the input / click callbacks can find the live DOM nodes without
 # re-walking the document.
 let g_editor:int = 0
 let g_status:int = 0
+let g_gutter:int = 0
+let g_toggle_btn:int = 0
+let g_line_numbers_shown:int = false
+
+# Count source lines in `src`. Always reports at least 1.
+let count_lines = (src:int):>int => {
+    let n:int = str_len(src)
+    let lines:int = 1
+    let i:int = 0
+    loop i <? n {
+        if __load_u8__(src + i) =? CH_LF { lines = lines + 1 }
+        i = i + 1
+    }
+    return lines
+}
+
+# Build "1\n2\n...\nN" as a fresh udewy string.
+let build_line_numbers = (count:int):>int => {
+    let bb:int = bb_new(count * 4)
+    let i:int = 1
+    loop i <=? count {
+        bb_push_int(bb i)
+        if i <? count { bb_push_byte(bb CH_LF) }
+        i = i + 1
+    }
+    return bb_finalize_as_string(bb)
+}
+
+let update_line_numbers = ():>void => {
+    if g_gutter =? 0 { return void }
+    if not g_line_numbers_shown { return void }
+    let src:int = Web_GetText(g_editor)
+    Web_SetText(g_gutter build_line_numbers(count_lines(src)))
+    return void
+}
+
+let on_toggle_line_numbers = ():>void => {
+    if g_gutter =? 0 { return void }
+    if g_line_numbers_shown {
+        Web_SetStyle(g_gutter "display" "none")
+        Web_SetText(g_toggle_btn "Show line numbers")
+        g_line_numbers_shown = false
+    } else {
+        Web_SetStyle(g_gutter "display" "block")
+        g_line_numbers_shown = true
+        update_line_numbers()
+        Web_SetText(g_toggle_btn "Hide line numbers")
+    }
+    return void
+}
 
 let playground_on_input = ():>void => {
     if g_editor =? 0 { return void }
@@ -32,6 +87,7 @@ let playground_on_input = ():>void => {
     let src:int = Web_GetText(g_editor)
     Web_RenderHighlightedSource(g_editor src)
     Web_SetCaret(g_editor caret)
+    update_line_numbers()
     return void
 }
 
@@ -55,7 +111,7 @@ let style_editor = (node:int):>void => {
     Web_SetStyle(node "color" "#d4d4d4")
     Web_SetStyle(node "font-family" "ui-monospace, SFMono-Regular, Menlo, monospace")
     Web_SetStyle(node "font-size" "0.95rem")
-    Web_SetStyle(node "line-height" "1.55")
+    Web_SetStyle(node "line-height" "1.15")
     Web_SetStyle(node "outline" "none")
     Web_SetStyle(node "tab-size" "4")
     return void
@@ -87,9 +143,52 @@ let style_run_button = (node:int):>void => {
     return void
 }
 
+let style_subtle_button = (node:int):>void => {
+    Web_SetStyle(node "padding" "0.3rem 0.75rem")
+    Web_SetStyle(node "border" "1px solid #d4cabb")
+    Web_SetStyle(node "border-radius" "999px")
+    Web_SetStyle(node "background" "#fbf7f0")
+    Web_SetStyle(node "color" "#596171")
+    Web_SetStyle(node "font-family" "Inter, ui-sans-serif, system-ui, sans-serif")
+    Web_SetStyle(node "font-size" "0.78rem")
+    Web_SetStyle(node "font-weight" "600")
+    Web_SetStyle(node "cursor" "pointer")
+    return void
+}
+
+# Inject a page-wide stylesheet. Used for things browser selectors handle
+# more naturally than inline styles -- in particular `::selection` so we can
+# render an IDE-style translucent highlight that keeps the original syntax
+# colors visible.
+let inject_global_styles = ():>void => {
+    let s:int = Web_AppendElement(Web_Body() "style")
+    Web_SetText(s "::selection \{ background-color: rgb(38, 79, 120); color: inherit; \}")
+    return void
+}
+
+# Line-number gutter that sits to the left of the editor. Must keep
+# font-family / font-size / line-height / vertical padding identical to
+# style_editor so each gutter row aligns with the matching editor row.
+# Width is intrinsic to its content so it stays as tight as possible.
+let style_gutter = (node:int):>void => {
+    Web_SetStyle(node "white-space" "pre")
+    Web_SetStyle(node "padding" "1rem 0.4rem 1rem 0.6rem")
+    Web_SetStyle(node "margin" "0")
+    Web_SetStyle(node "background" "#1a1a1a")
+    Web_SetStyle(node "color" "#6e6e6e")
+    Web_SetStyle(node "font-family" "ui-monospace, SFMono-Regular, Menlo, monospace")
+    Web_SetStyle(node "font-size" "0.95rem")
+    Web_SetStyle(node "line-height" "1.15")
+    Web_SetStyle(node "text-align" "right")
+    Web_SetStyle(node "user-select" "none")
+    Web_SetStyle(node "flex" "0 0 auto")
+    return void
+}
+
 let main = ():>int => {
     Web_SetTitle("udewy playground")
     Web_SetFaviconSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#1e1e1e'/><text x='32' y='44' text-anchor='middle' font-family='ui-monospace, Menlo' font-size='34' font-weight='800' fill='#d9822b'>&#x03BC;</text></svg>")
+    inject_global_styles()
 
     let root:int = Web_Root()
     Web_Clear(root)
@@ -135,17 +234,42 @@ let main = ():>int => {
     Web_SetStyle(left "flex" "1 1 0")
     Web_SetStyle(left "min-width" "0")
 
-    let left_label:int = Web_AppendTextElement(left "p" "Source")
+    let left_header:int = Web_AppendElement(left "div")
+    Web_FlexRow(left_header 8)
+    Web_SetStyle(left_header "align-items" "center")
+    Web_SetStyle(left_header "justify-content" "space-between")
+
+    let left_label:int = Web_AppendTextElement(left_header "p" "Source")
     Web_SetStyle(left_label "margin" "0")
     Web_SetStyle(left_label "font-weight" "600")
     Web_SetStyle(left_label "color" "#596171")
 
-    let editor:int = Web_AppendElement(left "pre")
+    let toggle_ln:int = Web_AppendTextElement(left_header "button" "Show line numbers")
+    style_subtle_button(toggle_ln)
+    g_toggle_btn = toggle_ln
+
+    let editor_wrap:int = Web_AppendElement(left "div")
+    Web_SetStyle(editor_wrap "display" "flex")
+    Web_SetStyle(editor_wrap "flex-direction" "row")
+    Web_SetStyle(editor_wrap "border-radius" "14px")
+    Web_SetStyle(editor_wrap "overflow" "hidden")
+    Web_SetStyle(editor_wrap "background" "#1e1e1e")
+
+    let gutter:int = Web_AppendElement(editor_wrap "pre")
+    style_gutter(gutter)
+    Web_SetStyle(gutter "display" "none")
+    g_gutter = gutter
+
+    let editor:int = Web_AppendElement(editor_wrap "pre")
     Web_SetAttr(editor "id" "udewy-editor")
     Web_SetAttr(editor "spellcheck" "false")
     style_editor(editor)
     Web_SetContentEditable(editor true)
+    Web_SetStyle(editor "flex" "1 1 auto")
+    Web_SetStyle(editor "min-width" "0")
     g_editor = editor
+
+    Web_AddClickListener(toggle_ln on_toggle_line_numbers)
 
     let right:int = Web_AppendElement(panes "div")
     Web_FlexColumn(right 10)

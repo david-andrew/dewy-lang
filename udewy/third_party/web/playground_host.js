@@ -287,6 +287,13 @@ html, body { margin: 0; padding: 0; height: 100%; background: #ffffff; color: #2
             }
             return;
         }
+        if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            const editor = document.getElementById('udewy-editor');
+            if (!editor || !editor.contains(e.target)) return;
+            e.preventDefault();
+            document.execCommand('insertText', false, '    ');
+            return;
+        }
         if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
         const editor = document.getElementById('udewy-editor');
         if (!editor || !editor.contains(e.target)) return;
