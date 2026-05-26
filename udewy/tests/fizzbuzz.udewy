@@ -1,0 +1,19 @@
+let printed:bool = false
+let print = (s:string):>void => {
+    printed = true  # Mark that print was called
+    __host_log__(s __load__(s - 8))
+    return void
+}
+
+let main = ():>int => {
+    let i:int = 1
+    loop i <=? 20 {
+        printed = false
+        if i % 3 =? 0 { print("Fizz") }
+        if i % 5 =? 0 { print("Buzz") }
+        if not printed { __log_int__(i) }
+        print("\n")
+        i = i + 1
+    }
+    return 0
+}

@@ -12,7 +12,9 @@ import p"../../third_party/web/playground_host.js"
 let host_playground_run = (src:int src_len:int):>void => extern
 
 const EX_FIZZBUZZ:int =
-"let print = (s:string):>void => \{
+"let printed:bool = false
+let print = (s:string):>void => \{
+    printed = true  # Mark that print was called
     __host_log__(s __load__(s - 8))
     return void
 \}
@@ -20,10 +22,10 @@ const EX_FIZZBUZZ:int =
 let main = ():>int => \{
     let i:int = 1
     loop i <=? 20 \{
-        if (i % 15) =? 0 \{ print(\"FizzBuzz\") \}
-        else if (i % 3) =? 0 \{ print(\"Fizz\") \}
-        else if (i % 5) =? 0 \{ print(\"Buzz\") \}
-        else \{ __log_int__(i) \}
+        printed = false
+        if i % 3 =? 0 \{ print(\"Fizz\") \}
+        if i % 5 =? 0 \{ print(\"Buzz\") \}
+        if not printed \{ __log_int__(i) \}
         print(\"\\n\")
         i = i + 1
     \}
@@ -32,25 +34,28 @@ let main = ():>int => \{
 "
 
 const EX_FIB:int =
-"let fib = (n:int):>int => \{
-    if n <? 2 \{ return n \}
-    return fib(n - 1) + fib(n - 2)
-\}
-
-let print = (s:string):>void => \{
+"let puts = (s:string):>void => \{
     __host_log__(s __load__(s - 8))
+    return void
+\}
+let puti = (i:int):>void => \{
+    __log_int__(i)
     return void
 \}
 
 let main = ():>int => \{
     let i:int = 0
-    loop i <? 15 \{
-        print(\"fib(\")
-        __log_int__(i)
-        print(\") = \")
-        __log_int__(fib(i))
-        print(\"\\n\")
+    let i0:int = 0
+    let i1:int = 1
+    loop i <? 100 \{
+        puts(\"fib(\")
+        puti(i)
+        puts(\") = \")
+        puti(i0)
+        puts(\"\\n\")
         i = i + 1
+        i1 = i0 + i1
+        i0 = i1 - i0
     \}
     return 0
 \}
@@ -262,8 +267,8 @@ let on_example_change = ():>void => {
 # Apply the editor's monospace / dark code-block styling. Used both for the
 # initial render and after every rehighlight.
 let style_editor = (node:int):>void => {
-    Web_SetStyle(node "white-space" "pre-wrap")
-    Web_SetStyle(node "word-break" "break-word")
+    Web_SetStyle(node "white-space" "pre")
+    Web_SetStyle(node "overflow-x" "auto")
     Web_SetStyle(node "min-height" "16rem")
     Web_SetStyle(node "padding" "1rem")
     Web_SetStyle(node "margin" "0")

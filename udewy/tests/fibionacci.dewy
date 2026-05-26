@@ -1,0 +1,25 @@
+let puts = (s:string):>void => {
+    __host_log__(s __load__(s - 8))
+    return void
+}
+let puti = (i:int):>void => {
+    __log_int__(i)
+    return void
+}
+
+let main = ():>int => {
+    let i:int = 0
+    let i0:int = 0
+    let i1:int = 1
+    loop i <? 100 {
+        puts("fib(")
+        puti(i)
+        puts(") = ")
+        puti(i0)
+        puts("\n")
+        i = i + 1
+        i1 = i0 + i1
+        i0 = i1 - i0
+    }
+    return 0
+}
