@@ -12,6 +12,7 @@
     { "include": "#metatag" },
     { "include": "#type-annotation" },
     { "include": "#function-definition" },
+    { "include": "#transmute" },
     { "include": "#word-operator" },
     { "include": "#keyword" },
     { "include": "#function-call" },
@@ -92,6 +93,10 @@
         {
           "name": "keyword.declaration.udewy",
           "match": "\\b(let|const)\\b"
+        },
+        {
+          "name": "storage.modifier.extern.udewy",
+          "match": "\\bextern\\b"
         }
       ]
     },
@@ -125,6 +130,29 @@
     "word-operator": {
       "name": "keyword.other.udewy",
       "match": "\\b(and|or|xor|not|transmute)\\b"
+    },
+    "transmute": {
+      "patterns": [
+        {
+          "begin": "(\\btransmute\\b)\\s*(?=<)",
+          "beginCaptures": {
+            "1": { "name": "keyword.other.udewy" }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [{ "include": "#type-parameter" }]
+        },
+        {
+          "begin": "(\\btransmute\\b)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "beginCaptures": {
+            "1": { "name": "keyword.other.udewy" },
+            "2": { "name": "entity.name.type.udewy" }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [{ "include": "#type-parameter" }]
+        }
+      ]
     },
     "operator": {
       "patterns": [
@@ -178,20 +206,50 @@
           }
         },
         {
-          "match": "(:>)\\s*([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
+          "begin": "(:>)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "beginCaptures": {
             "1": { "name": "punctuation.separator.return-type.udewy" },
             "2": { "name": "entity.name.type.udewy" }
-          }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [{ "include": "#type-parameter" }]
         },
         {
-          "match": "(:)\\s*([A-Za-z_][A-Za-z0-9_]*)",
-          "captures": {
+          "begin": "(:)\\s*(?=\\[)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.separator.type.udewy" }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [
+            { "include": "#bracketed-type" },
+            { "include": "#type-parameter" }
+          ]
+        },
+        {
+          "begin": "(:)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "beginCaptures": {
             "1": { "name": "punctuation.separator.type.udewy" },
             "2": { "name": "entity.name.type.udewy" }
-          }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [{ "include": "#type-parameter" }]
         }
       ]
+    },
+    "type-parameter": {
+      "name": "entity.name.type.udewy",
+      "begin": "<",
+      "end": "(?<!:)>",
+      "patterns": [{ "include": "#type-parameter" }]
+    },
+    "bracketed-type": {
+      "name": "entity.name.type.udewy",
+      "begin": "\\[",
+      "end": "\\]",
+      "patterns": [{ "include": "#bracketed-type" }]
     },
     "function-definition": {
       "match": "\\b(let|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\(",
