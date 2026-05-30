@@ -52,6 +52,9 @@ let main = ():>int => {
 }
 ```
 
+## Status & Scope
+This repo contains a reference implementation of udewy, including a lot of supplimentary features for more pleasant everyday use (e.g. multiple backends, graphics support, float bit helpers, etc). The core trusted computing rung for udewy will likely be a more simplified implementation targeting a single backend (likely risc-v), and skipping most of the other nice-to-have features present in this implementation.
+
 ---
 
 # Part 1: Core Language Specification
@@ -342,7 +345,7 @@ All other cases use truncating signed division toward zero.
 
 The shift amount is masked to the low 6 bits (0-63).
 
-**Important:** The `>>` operator performs an **unsigned (logical) shift**, filling vacated bits with zeros regardless of the sign bit. For arithmetic (signed) right shift that preserves the sign bit, use the `__signed_shr__` intrinsic.
+**Important:** The `>>` operator performs an **unsigned (logical) shift**, filling vacated bits with zeros regardless of the sign bit. For arithmetic (signed) right shift that preserves the sign bit, use the `__signed_shr__` intrinsic. See [Semantic Differences](#32-semantic-differences-both-compile-different-behavior)
 
 ### Comparison Operators
 
@@ -846,7 +849,9 @@ Use `__signed_shr__` when you need sign-preserving right shift. The `>>` operato
 
 # Part 3: Well-Formedness and Divergence
 
-This section documents all cases where udewy behavior can diverge from full Dewy. Writing well-formed udewy requires programmer diligence in these areas.
+This section documents all cases where udewy behavior can diverge from full Dewy. Writing well-formed udewy *today* requires programmer diligence in these areas. 
+
+> When the full dewy compiler is available, well-formedness will be machine-verifiable.
 
 ## 3.1 Type Mismatches (udewy compiles, Dewy rejects)
 
@@ -865,21 +870,26 @@ These patterns compile in both udewy and Dewy but may behave differently:
 
 | Pattern | udewy Behavior | Dewy Behavior |
 |---------|---------------|---------------|
-| `x >> n` (x is signed) | Unsigned shift (zeros fill) | Signed shift (sign bit fills) |
-| `a and b` / `a or b` | Both sides always evaluated | Short-circuit evaluation |
-| `str1 =? str2` | Compares pointers | May compare content |
-| Integer overflow | Wraps silently | May trap or wrap |
+| `x >> n` (when x is signed) | Unsigned shift (zeros fill) | Signed shift (sign bit fills)* |
+| `a and b` / `a or b` | Both sides always evaluated* | Short-circuit evaluation |
+| `str1 =? str2` | Compares pointers | Compares content |
+| updating a value in an array | global instance updated (all arrays are static) | scope local instance is updated
 
-## 3.3 Programmer Diligence Required
+> NOTE: Dewy selects signed or unsigned shift based on left operand type.
 
-To write well-formed udewy:
+> NOTE: `and` / `or` can short-circuit in udewy when they are the condition in an `if` or `loop` expression (which matches regular dewy behavior).
+
+In general, using any of these differences is considered not well-formed.
+
+## 3.3 Programmer Diligence Required Today
+
+Until automatic well-formedness verification is implemented in the dewy compiler, manual care should be taken to write well-formed udewy:
 
 1. **Use `__signed_shr__`** when arithmetic shift is needed for signed values
 2. **Short-circuit only in conditions** - side effects in `and`/`or` operands still always occur in ordinary expressions; only `if`/`loop` conditions short-circuit
 3. **Implement content comparison functions** for string/array equality
 4. **Use unsigned intrinsics explicitly** when raw unsigned interpretation matters
-5. **Use parentheses when helpful** to make complex grouping explicit
-6. **Test with increasing compiler strictness** as the Dewy compiler matures
+5. **Test with increasing compiler strictness** as the Dewy compiler matures. The full dewy compiler will be able to flag ALL cases of ill-formed udewy.
 
 ---
 
@@ -943,11 +953,47 @@ Each backend implements the parser protocol and provides:
 
 ### Intrinsic Categories
 
-Intrinsics and backend-provided names fall into these categories:
+Intrinsics and backend-provided names fall into tiers. The tiers matter for portability, for self-hosting, and for thinking about what a minimal trusted-base implementation would need to reproduce.
 
-1. **Core intrinsics** - Implemented by all backends (memory operations, `__signed_shr__`, unsigned arithmetic/comparison intrinsics)
-2. **Platform intrinsics** - Provided by specific backends for their target environment
-3. **Builtin constants** - Backends can provide named constants automatically available to programs
+#### Minimal core (language-level)
+
+These are the operations defined in [Part 2: Core Intrinsics](#part-2-core-intrinsics). Every backend in this repository implements them:
+
+- Memory: `__load__` / `__store__` and the sized variants, `__alloca__`, `__static_alloca__`
+- Arithmetic helpers: `__signed_shr__`, `__unsigned_idiv__`, `__unsigned_mod__`, unsigned comparisons
+
+A program that uses only core intrinsics plus ordinary udewy syntax is backend-portable at the *language* level. It still needs a platform layer for I/O, allocation, and exit unless it is fully freestanding.
+
+This tier is the practical floor for a self-hosting compiler, a hand-written bootstrap implementation, or a future minimal single-backend profile (for example targeting only RISC-V Linux). It deliberately excludes graphics, browser host functions, mixed FP extern calls, and third-party library shims.
+
+#### Platform surface (per-backend)
+
+Each backend adds the intrinsics and builtin constants needed for its environment:
+
+- **Native Linux backends** (`x86_64`, `riscv`, `arm`): `__syscall0__` through `__syscall6__`, plus syscall numbers, file descriptors, and mmap/open flags
+- **WASM browser backend**: host functions such as `__host_log__`, `__host_exit__`, and (when used) canvas/DOM/WebGL/input intrinsics documented in Addendum D
+- **C backend**: no syscalls; hosted behavior comes from explicit `extern` bindings via `udewy/third_party/c/` capability imports
+
+Portable programs should call these through a **platform abstraction layer** (wrapper functions + target-specific imports), not by sprinkling backend-specific intrinsics through application logic.
+
+#### Optional extensions (not required for the language or bootstrap)
+
+These are real and supported in this reference implementation, but they are not part of the minimal udewy language contract:
+
+- **Mixed GP/FP extern calls** (`__call_extern_mixed_N__`, float bit-pattern helpers) on native Linux and C backends — for linking to C libraries such as SDL/OpenGL
+- **Third-party integrations** documented in Addendum E (SDL, Clay)
+- **WASM graphics and input** (canvas, WebGL, pointer/keyboard) — for browser demos and interactive programs
+
+A smaller trusted-base compiler could omit entire extension families as long as the programs it is asked to compile do not use them.
+
+#### Summary table
+
+| Tier | Examples | Required for self-hosting bootstrap? |
+|------|----------|-------------------------------------|
+| Core intrinsics | `__load__`, `__store__`, `__alloca__`, `__signed_shr__` | Yes |
+| Platform intrinsics | `__syscall3__`, `__host_log__`, libc `extern` via C capabilities | Yes, but only the surface for the chosen target |
+| Builtin constants | `SYS_WRITE`, `STDOUT`, browser host imports | Per target |
+| Optional extensions | canvas/WebGL, `__call_extern_mixed_*__`, SDL/Clay | No |
 
 For example:
 - Linux backends provide `__syscall0__` through `__syscall6__` intrinsics, plus builtin constants for syscall numbers (`SYS_WRITE`, `SYS_EXIT`, etc.) and common flags
@@ -1135,7 +1181,7 @@ udewy deliberately omits features to keep the compiler simple and auditable:
 - **No closures or nested functions**: Functions only at top level
 - **No function overloading**: Each function name has exactly one definition
 - **Expression `and`/`or` are bitwise**: Both sides are always evaluated; only `if`/`loop` conditions short-circuit
-- **No floating-point**: Everything is 64-bit integers
+- **No floating-point**: Everything is 64-bit integers (with the caveat that float-bit helpers exist for extern ABI interop)
 - **No garbage collection**: Manual memory management via syscalls
 
 ---
@@ -1980,6 +2026,46 @@ The `bootstrap/` directory contains a self-hosted compiler written in udewy
 itself. It is feature-equivalent to the Python implementation and supports all
 five backends (x86_64, riscv, arm, c, wasm32). The x86_64 and C backends are
 fully self-hosting: the bootstrap can compile itself targeting either.
+
+### Backend-agnostic core
+
+Most of the bootstrap is not tied to a single backend. The preprocessor
+(`t0.udewy`, `t1.udewy`), tokenizer, parser (`p0.udewy`), and the shared backend
+protocol (`backend/common.udewy`) are ordinary udewy code that emits through the
+abstract `Backend` interface. Each concrete backend file (`backend/x86_64.udewy`,
+`backend/wasm.udewy`, etc.) implements that interface for one target.
+
+The only backend-specific coupling in day-to-day compiler logic is whatever the
+selected backend must provide at codegen time (syscalls vs browser host
+functions vs C `extern` lowering). The compiler *algorithm* is the same across
+targets.
+
+### Host I/O behind capabilities
+
+Operating-system interactions (reading and writing files, spawning subprocesses,
+printing diagnostics, exiting) go through `stdlib/stdlib.udewy`, which imports a
+**host I/O capability module** for the active compile target:
+
+- `stdlib/capabilities/host_io_x86_64.udewy`
+- `stdlib/capabilities/host_io_riscv.udewy`
+- `stdlib/capabilities/host_io_arm.udewy`
+- `stdlib/capabilities/host_io_wasm32.udewy`
+- `stdlib/capabilities/host_io_c.udewy`
+
+The bootstrap `runtime/` helpers (`fs.udewy`, `process.udewy`, `diag.udewy`,
+`paths.udewy`) sit on top of that shared `host_*` API. Adding a new backend
+means implementing host I/O for that target, not rewriting the parser.
+
+### Why the bootstrap includes WASM
+
+The wasm32 backend is part of the bootstrap so udewy programs including the compiler itself can be hosted and demonstrated directly in the browser.
+
+- `main.udewy` is the normal CLI entry point (native or hosted C).
+- `web_compiler.udewy` is a wasm32-only library entry point: a JavaScript host feeds source bytes in, the bootstrap runs `t1` + `p0` + the wasm backend, and WAT bytes come back out for assembly in the browser. The playground under `udewy/tests/web/` is the UI that drives it.
+
+Longer term, browser hosting might move up to full Dewy instead of living in the trusted-base rung; at that point we would ship Dewy-compiled compiler artifacts for the web rather than depending on udewy's wasm backend forever. For now, having wasm in the bootstrap is a practical way to demo the language and the self-hosted compiler on the web.
+
+### Usage
 
 ```bash
 # Compile the bootstrap to a native binary (via the Python compiler)

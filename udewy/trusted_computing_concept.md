@@ -155,12 +155,20 @@ tools and applications
 E.g. we'll need to think about how the OS is interleaved in our trusted computing base. This is because the Oberon Programming Language (and presumably udewy) will need to make use of various OS features like interacting with files, stdin/stdout, etc.
 
 
-## TBD mDewy: milli-dewy,
-if need extra layer between μDewy and full Dewy, mDewy would be it
-- structs (dot accessing members)
-- arrays with known element sizes
-- C-level type checking
-- tbd other necessary features for max power, min impl requirements
+## TBD ndewy: nano-dewy,
+potentially a layer below μDewy which removes a lot of the general-usability features in favor of the core trusted computing base. Likely differences:
+- single backend target only: riscv
+- no imports
+- no in-place operators
+- etc. 
+
+In general, look for features that cost a lot in terms of udewy impl complexity, but won't be missed by a machine-code generator (i.e. ndewy is more a backend target for compilers than something people would write in themselves)
+
+The alternative would just be to have a separate minimal udewy implementation that is the actual trusted computing rung without all the everyday extras/backends/features.
+
+An interesting side idea would be to have one nano-dewy per each architecture we'd like to be able to bootstrap the trusted computing base from. Basically it's the philosophical debate between if a single architecture can be the origin of the trusted computing base, or if bootstrapping off of other architectures is a reasonable capability
+
+
 ### Bootsrapping
 
 ### Input
