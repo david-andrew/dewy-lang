@@ -61,6 +61,10 @@ class CombinedAssignmentOp(t1.InedibleToken):
 class OpFn(t1.InedibleToken):
     op: t1.Operator|BroadcastOp|CombinedAssignmentOp
 
+@dataclass
+class Placeholder(t1.InedibleToken):
+    """`$` used for constructing predicate functions, e.g. `x => x >? 10` can be constructed as `$ >? 10`"""
+    ...
 
 @dataclass
 class QJuxtapose(t1.InedibleToken):
@@ -192,6 +196,7 @@ atom_tokens: set[type[t1.Token]] = {
     t1.Integer,
     t1.Semicolon,
     OpFn,
+    Placeholder,
     KeywordExpr,
     Flow,
 }
@@ -277,16 +282,16 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (t1.IString, MultiplyJuxtapose),
     (t1.BasedString, MultiplyJuxtapose),
     (t1.Bool, MultiplyJuxtapose),
-    (t1.Integer, MultiplyJuxtapose),
-    (t1.Real, MultiplyJuxtapose),
     (OpFn, MultiplyJuxtapose),
+    (Placeholder, MultiplyJuxtapose), # `$5`, `$x`, `$3.14` etc. have too many intersections with other `$` syntax, so don't consider them for multiplication at all
     (MultiplyJuxtapose, t1.String),
     (MultiplyJuxtapose, t1.IString),
     (MultiplyJuxtapose, t1.BasedString),
     (MultiplyJuxtapose, t1.Bool),
-    (MultiplyJuxtapose, t1.Integer),
-    (MultiplyJuxtapose, t1.Real),
+    (MultiplyJuxtapose, t1.Integer),  # TBD if keep these two cases or not. right-side jux-mul for numbers is rare and not really great style
+    (MultiplyJuxtapose, t1.Real),     # e.g. `(x+1)5`, or `(y)3.14159`. For now, block them as it seems like bad style, but can enable them later if there's a good reason/example 
     (MultiplyJuxtapose, OpFn),
+    (MultiplyJuxtapose, Placeholder), # `5$` is also a bit odd, so block it for now
 
     # things that CANNOT be called
     (t1.String, CallJuxtapose),
@@ -565,6 +570,17 @@ def make_op_functions(tokens: list[t1.Token]) -> None:
             tokens[i] = OpFn(token.loc, token.inner[0])
         i += 1
 
+
+def make_placeholders(tokens: list[t1.Token]) -> None:
+    """convert any `$` identifiers into placeholder tokens"""
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        recurse_into(token, make_placeholders)
+        if isinstance(token, t1.Identifier) and token.name == '$':
+            tokens[i] = Placeholder(token.loc)
+        i += 1
+
 def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
     """
     Return True if `token` is a keyword whose name is in `stop`.
@@ -584,7 +600,7 @@ def _token_summary(token: t1.Token) -> str:
     if isinstance(token, t1.Semicolon): return "semicolon ';'"
     if isinstance(token, t1.String): return "string literal"
     if isinstance(token, t1.IString): return "template string"
-    if isinstance(token, t1.Bool): return f"boolean literal"
+    if isinstance(token, t1.Bool): return "boolean literal"
     if isinstance(token, t1.Integer): return "integer literal"
     if isinstance(token, t1.Real): return "real literal"
     if isinstance(token, t1.Block): return f"block {token.kind!r}"
@@ -1019,6 +1035,8 @@ def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
     make_combined_assignment_operators(tokens)
     # convert any (op) into an identifier token for that operator (e.g. (+=) -> +=)
     make_op_functions(tokens)
+    # convert any `$` identifiers into placeholder tokens
+    make_placeholders(tokens)
 
     # bundle up keyword expressions and flows into single atom tokens
     bundle_keyword_exprs(tokens, ctx=ctx)

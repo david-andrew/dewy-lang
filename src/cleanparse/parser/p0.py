@@ -223,7 +223,6 @@ def get_associativity(op: t2.Operator) -> Associativity | list[Associativity]:
 class Context:
     srcfile: SrcFile
 
-# TODO: consider making ASTs include a span now that we don't keep the old tokens for containers
 @dataclass
 class AST:
     loc: Span
@@ -445,7 +444,7 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
             ast = parse_keyword_expr(t, ctx)
         elif isinstance(t, t2.Flow):
             ast = parse_flow(t, ctx)
-        elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Bool, t1.Integer, t2.OpFn)):
+        elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Bool, t1.Integer, t2.OpFn, t2.Placeholder)):
             ast = Atom(t.loc, t)
         items.append(ast)
 
@@ -1024,6 +1023,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
         if isinstance(tok, t2.BroadcastOp): return f"BroadcastOp({_op_label(tok.op)})"
         if isinstance(tok, t2.CombinedAssignmentOp): return f"CombinedAssignmentOp({_op_label(tok.op)})"
         if isinstance(tok, t2.OpFn): return f"OpFn({_op_label(tok.op)})"
+        if isinstance(tok, t2.Placeholder): return "Placeholder($)"
         return type(tok).__name__
 
     def text_label(text: str) -> str:

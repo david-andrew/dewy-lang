@@ -26,7 +26,7 @@ keywords: set[str] = {
 
 # tokenized as symbols, but are treated as identifiers (rather than operators)
 symbolic_identifiers: set[str] = {
-    '..', '...', '∞', '∅',  # technically `;` is also a symbolic identifier, but we give it it's own token class for convenience
+    '..', '...', '$', '∞', '∅',  # technically `;` is also a symbolic identifier, but we give it it's own token class for convenience
 }
 
 # special case-insensitive identifiers that get their own container 
