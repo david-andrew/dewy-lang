@@ -1,0 +1,6 @@
+# Import host IO capabilities based on current target
+if $target =? "x86_64" { import p"./host_io_x86_64.udewy" }
+if $target =? "riscv"  { import p"./host_io_riscv.udewy" }
+if $target =? "arm"    { import p"./host_io_arm.udewy" }
+if $target =? "wasm32" { import p"./host_io_wasm32.udewy" }
+if $target =? "c"      { import p"./host_io_c.udewy" }
