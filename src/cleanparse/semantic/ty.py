@@ -13,6 +13,9 @@ Bottom:
 - never
 - noreturn
 - empty
+Dynamic:
+- <dewy probably just won't support dynamic/runtime types>
+- dyn
 
 I think noreturn will be a separate case from bottom
 """
@@ -67,7 +70,7 @@ system_types: list[str|tuple[str, str]] = [
     ('int64', 'int'),
 
     # tbd string stuff
-    'uscalar',     # char # unicode scalar # rune # char # string<length=1>
+    'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
     'grapheme', 
     'string',   # array<unicode_scalar> | array<grapheme>
     
