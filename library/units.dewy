@@ -1,0 +1,107 @@
+
+#{
+Usage:
+from units import SI... prefixes...          # <all SI units, and all prefixes>
+from units import SI.second, prefixes...     # second, k, kilo, M, mega, G, giga, ...
+from units import SI.time..., prefixes...    # s, second, seconds, k, kilo, M, mega, G, giga, ...
+from units import US...
+import units...
+# etc.
+# though actually probably you wouldn't import the prefixes separately, as there'd be some compile-time construction to generate all prefixed-versions of each unit
+
+sleep(10seconds)
+}#
+
+
+# some base/core unit machinery
+dimensions = [
+    LENGTH,
+    MASS,
+    TIME,
+    CURRENT,
+    TEMPERATURE,
+    AMOUNT_OF_SUBSTANCE,
+    LUMINOUS_INTENSITY 
+    = 
+    [
+        1 0 0 0 0 0 0
+        0 1 0 0 0 0 0
+        0 0 1 0 0 0 0
+        0 0 0 1 0 0 0
+        0 0 0 0 1 0 0
+        0 0 0 0 0 1 0
+        0 0 0 0 0 0 1
+    ]
+
+    # tbd how to handle unitless units... 
+    # PLANE_ANGLE = singleton
+    # SOLID_ANGLE = singleton
+]
+
+const prefixe_names = [
+    quetta = 1e30
+    ronna = 1e27 
+    yotta = 1e24 
+    zetta = 1e21 
+    exa = 1e18 
+    peta = 1e15 
+    tera = 1e12 
+    giga = 1e9 
+    mega = 1e6 
+    kilo = 1e3 
+    hecto = 1e2 
+    deca = 1e1 
+    deci = 1e-1 
+    centi = 1e-2 
+    milli = 1e-3 
+    micro = 1e-6 
+    nano = 1e-9 
+    pico = 1e-12 
+    femto = 1e-15 
+    atto = 1e-18 
+    zepto = 1e-21 
+    yocto = 1e-24 
+    ronto = 1e-33 
+    quecto = 1e-30 
+]
+const prefix_symbols = [
+    Q = 1e30
+    R = 1e27
+    Y = 1e24
+    Z = 1e21
+    E = 1e18
+    P = 1e15
+    T = 1e12
+    G = 1e9
+    M = 1e6
+    k = 1e3
+    h = 1e2
+    da = 1e1
+    d = 1e-1
+    c = 1e-2
+    m = 1e-3
+    μ = 1e-6
+    n = 1e-9
+    p = 1e-12
+    f = 1e-15
+    a = 1e-18
+    z = 1e-21
+    y = 1e-24
+    r = 1e-33
+    q = 1e-30
+]
+const prefixes = [
+    prefix_symbols...
+    prefix_names...
+]
+
+const SI = [
+    # TBD compile-time process for generating each SI unit
+]
+
+
+const US = []
+const Imperial = []
+
+# etc.
+
