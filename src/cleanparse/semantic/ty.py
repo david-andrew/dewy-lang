@@ -105,10 +105,10 @@ class TypeNot:
     type: TypeExpr
 
 
-@dataclass
-class TypeFunc:
-    args: list[TypeExpr]
-    ret: TypeExpr
+# @dataclass
+# class TypeFunc:
+#     args: list[TypeExpr]
+#     ret: TypeExpr
 
 Primitive: TypeAlias = str   # has to be in the _named_types set
 
@@ -120,7 +120,7 @@ VOID_TYPE: VoidType = 'void'
 INFERRED_TYPE: InferredType = 'untyped'
 NORETURN_TYPE: NoReturnType = 'noreturn'
 
-TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeFunc #| TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
+TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot #| TypeFunc | TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
 Type: TypeAlias = TypeExpr | VoidType | InferredType | NoReturnType # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -151,10 +151,10 @@ def satisfies(t: TypeExpr, target: TypeExpr) -> bool:
         return all(satisfies(t, item) for item in target.items)
     if isinstance(target, TypeNot):
         return not satisfies(t, target.type)
-    if isinstance(target, TypeFunc):
-        if isinstance(t, TypeFunc):
-            return all(satisfies(t_arg, target_arg) for t_arg, target_arg in zip(t.args, target.args)) and satisfies(t.ret, target.ret)
-        return False
+    # if isinstance(target, TypeFunc):
+    #     if isinstance(t, TypeFunc):
+    #         return all(satisfies(t_arg, target_arg) for t_arg, target_arg in zip(t.args, target.args)) and satisfies(t.ret, target.ret)
+    #     return False
 
     pdb.set_trace()
     # should be unreachable, but indicates unhandled case

@@ -3,7 +3,8 @@ semantic analysis pass 0:
 - type checking
 - ambiguity resolution
 """
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
+from collections import ChainMap
 from ..parser import p0, t2, t1
 from . import hir, ty
 from ..reporting import SrcFile, ReportException, Error, Pointer, Span
@@ -16,17 +17,16 @@ import pdb
 class Context:
     """global context for the typechecker"""
     srcfile: SrcFile
-    declarations: dict[str, ty.Type] #TODO: handling different scopes...
+    declarations: ChainMap[str, ty.Type] = field(default_factory=ChainMap) #TODO: handling different scopes...
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
-    ctx = Context(srcfile, {
-        'printf': ty.TypeFunc(args=['string'], ret=ty.VOID_TYPE),
-    })
+    ctx = Context(srcfile)
     block = p0.parse(srcfile)
     return tcr_block(block, ctx=ctx)
 
 def try_in_comprehension(f:Callable, *args, **kwargs):
+    """allow exception-raising functions to be used in comprehensions by capturing the exception as a value rather than raising it upwards"""
     try:
         return f(*args, **kwargs)
     except Exception as e:
