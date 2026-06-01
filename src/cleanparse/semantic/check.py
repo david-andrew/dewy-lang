@@ -8,7 +8,7 @@ from collections import ChainMap
 from ..parser import p0, t2, t1
 from . import hir, ty
 from ..reporting import SrcFile, ReportException, Error, Pointer, Span
-from typing import Callable
+from typing import Callable, Literal
 
 
 import pdb
@@ -47,6 +47,15 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                 raise ValueError(f'USER ERROR: Ambiguous AST {ast} has too many valid options that could not be disambiguated: {passes=}. {ast=}')
             return passes[0]
 
+        
+        case p0.KeywordExpr(parts=[t1.Keyword(name='let'|'const' as name), p0.AST() as expr]): 
+            return tcr_decl(name, expr, ctx=ctx)
+        
+        # etc. keyword cases as outlined in t2
+        # final catch-all case (internal error since t2 shouldn't produce anything like this)
+        case p0.KeywordExpr():
+            raise ValueError(f'NOT IMPLEMENTED -OR- INTERNAL ERROR: unrecognized keyword expression structure: {ast=}')
+
         case p0.Block(): return tcr_block(ast, ctx=ctx)
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block)
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
@@ -63,6 +72,24 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             pdb.set_trace()
             raise NotImplementedError(f'typecheck_and_resolve_inner not implemented for {type(ast)}')
 
+
+def tcr_decl(kind:Literal['let', 'const'], body: p0.AST|t1.Keyword, *, ctx: Context) -> hir.AST:
+    """
+    let|const <id>
+    let|const <id> = <expr>
+    let|const <id>:<typeexpr>
+    let|const <id>:<typeexpr> = <expr>
+    """
+    match body:
+        case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as expr):
+            pdb.set_trace()
+            return hir.Decl(kind, name, expr.type, expr)
+        case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as expr):
+            pdb.set_trace()
+        
+    
+    
+    pdb.set_trace()
 
 def tcr_block(block: p0.Block, *, ctx: Context) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
