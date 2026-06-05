@@ -48,13 +48,20 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return passes[0]
 
         
-        case p0.KeywordExpr(parts=[t1.Keyword(name='let'|'const' as name), p0.AST() as expr]): 
-            return tcr_decl(name, expr, ctx=ctx)
-        
+        case p0.KeywordExpr(parts=[t1.Keyword(name='let'|'const'), p0.AST()]):
+            return tcr_declare(ast, ctx=ctx)
+
+        case p0.KeywordExpr(parts=[t1.Keyword(name='import'|'from'), *_]):
+            return tcr_import(ast, ctx=ctx)
+
         # etc. keyword cases as outlined in t2
         # final catch-all case (internal error since t2 shouldn't produce anything like this)
         case p0.KeywordExpr():
+            pdb.set_trace()
             raise ValueError(f'NOT IMPLEMENTED -OR- INTERNAL ERROR: unrecognized keyword expression structure: {ast=}')
+
+        case p0.BinOp(op=t1.Operator(symbol=':='|'='|'::')):
+            return tcr_assign(ast, ctx=ctx)
 
         case p0.Block(): return tcr_block(ast, ctx=ctx)
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block)
@@ -73,28 +80,110 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             raise NotImplementedError(f'typecheck_and_resolve_inner not implemented for {type(ast)}')
 
 
-def tcr_decl(kind:Literal['let', 'const'], body: p0.AST|t1.Keyword, *, ctx: Context) -> hir.AST:
+def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context) -> hir.AST:
     """
     let|const <id>
     let|const <id> = <expr>
     let|const <id>:<typeexpr>
     let|const <id>:<typeexpr> = <expr>
+
+    TODO := and ::
+
+    basically 4 parameters:
+    - let vs const
+    - typed vs untyped
+    - = vs := vs ::   (though := is a bit of a special case since it doesn't need let or const)
+    - expr vs undefined
+
     """
-    match body:
-        case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as expr):
+    # typeexpr = None
+    # right = None
+    # compiletime = False
+    # keyword = ast.parts[0].name
+    # assert keyword in ['let', 'const'], f'INTERNAL ERROR: invalid keyword: {keyword}'
+
+
+
+
+    match ast.parts:
+        case [
+            t1.Keyword(name='let'|'const'), 
+            p0.BinOp(
+                left=p0.Atom(item=t1.Identifier(name=name)), 
+                op=t1.Operator(symbol='='|'::'|':=' as op),
+                right=p0.AST() as right)
+            ]:
+            expr = typecheck_and_resolve_inner(right, ctx=ctx)
+            # decl assign
+            # declare the name in the context
+            # note that this name is untyped since no type was provided
+            # depending on the op, may need to register as compiletime work, etc. etc.
             pdb.set_trace()
-            return hir.Decl(kind, name, expr.type, expr)
-        case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as expr):
+        
+        case [
+            t1.Keyword(name='let'|'const'),
+            p0.BinOp(
+                left=p0.BinOp(
+                    left=p0.Atom(item=t1.Identifier(name=name)),
+                    op=t1.Operator(symbol=':'),
+                    right=p0.AST() as typeexpr),
+                op=t1.Operator(symbol='='|'::'|':=' as op),
+                right=p0.AST() as right)
+            ]:
+            # decl assign + type annotation
             pdb.set_trace()
+        
+        case [
+            t1.Keyword(name='let'|'const'),
+            p0.Atom(item=t1.Identifier(name=name))
+        ]:
+            # decl only
+            pdb.set_trace()
+        case [
+            t1.Keyword(name='let'|'const'),
+            p0.BinOp(
+                left=p0.Atom(item=t1.Identifier(name=name)),
+                op=t1.Operator(symbol=':'),
+                right=p0.AST() as typeexpr
+            ),
+        ]:
+            # decl only + type annotation
+            pdb.set_trace()
+        case _:
+            pdb.set_trace()
+
+
+        # case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
+        #     resolved_expr = typecheck_and_resolve_inner(right, ctx=ctx)
+        #     pdb.set_trace()
+        #     return hir.Decl(kind, name, resolved_expr.type, resolved_expr)
+        # case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as expr):
+        #     pdb.set_trace()
         
     
     
     pdb.set_trace()
 
+def tcr_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
+    """
+    non-declare assignments, e.g. `name=value`
+    compiletime assignments, e.g. `name::value`
+    implicit declarations, e.g. `name:=value`
+    """
+    pdb.set_trace()
+
+def tcr_import(ast: p0.KeywordExpr, *, ctx: Context) -> hir.AST:
+    pdb.set_trace()
+
 def tcr_block(block: p0.Block, *, ctx: Context) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
-    type_block = block.kind == '<>'
     # scoped = block.kind == '{}' #TODO: would need to make a nested scope/context for this...
+
+    # open a new scope if the block is a scoped block
+    type_block = block.kind == '<>'
+    if block.kind == '{}': ctx = replace(ctx, declarations=ctx.declarations.new_child())
+
+    # typecheck and resolve the inner items
     results = [typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block) for item in block.inner]
 
     match block.kind:
@@ -162,7 +251,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
                 pdb.set_trace()
             case t2.CallJuxtapose():
                 # if isinstance(left, hir.AtHandle): return typecheck_partial_eval(left, right)
-                return typecheck_function_call(left, right)
+                return tcr_function_call(left, right)
             case t2.IndexJuxtapose():
                 pdb.set_trace()
             case t2.MultiplyJuxtapose():
@@ -174,12 +263,24 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
         pdb.set_trace()
 
 
+    if binop.op.symbol == '=>': return tcr_function_literal(binop, ctx=ctx)
+
 
     # more specialized structures (e.g. assignment, spread, collect, parameterization, etc.)
     pdb.set_trace()
 
 
-def typecheck_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
+def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLiteral:
+    """
+    function literal: `args => body`
+    """
+    signature = binop.left
+    body = typecheck_and_resolve_inner(binop.right, ctx=ctx)
+    #TODO: some sort of extraction of the signature into something...
+
+    pdb.set_trace()
+
+def tcr_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
     if not isinstance(left.type, ty.TypeFunc):
         # TODO: full user error report
         # might have some early errors for things that are function-like, but different instances.
