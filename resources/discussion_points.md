@@ -123,7 +123,7 @@ my_tensor = [
 ]
 ```
 
-## will complex list comprehensions be column vectors if people use usual spacing?
+## will complex list comprehensions be column vectors if people use usual spacing? [it doesn't matter. row and column vectors are still 1D (not 2D like in matlab row vectors), so complex spaced comprehensions/etc. are free to not be marked as row vs column, but can still have a concrete shape=[N] or length=N. See `### small note on row vs column vectors`]
 
 e.g.
 
@@ -151,7 +151,7 @@ row_vec = [1 2 3]
 
 (perhaps comprehensions are just the default vector dimension by default, regardless of how the spacing inside was)
 
-Alternatively in most cases it won't matter whether the list is a row or column vector. In cases where it does matter, the user can make use of either \ and ; to specify the opposite vector dimension. e.g.
+~~Alternatively in most cases it won't matter whether the list is a row or column vector. In cases where it does matter, the user can make use of either \ and ; to specify the opposite vector dimension. e.g.~~
 
 ```
 row_vec = [
@@ -163,7 +163,7 @@ row_vec = [
 col_vec = [1; 2; 3]
 ```
 
-So if a person wanted to make the original comprehension return a row vector instead of a column vector, they'd do
+~~So if a person wanted to make the original comprehension return a row vector instead of a column vector, they'd do~~
 
 ```
 primes = [
@@ -194,6 +194,81 @@ primes: int[10 1] = [
             i
 ][..10)
 ```
+
+Alternatively, a clean thing would just be to prepend `row` or `col` in front of the comprehension to indicate which it should be
+```dewy
+// this is a column vector
+primes = col[
+    2
+    lazy i in [3, 5..)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+            i
+][..10)
+
+
+// this is a row vector
+primes = row[
+    2
+    lazy i in [3, 5..)
+        if i .mod #ctx.primes .=? 0 |> @reduce(, (prev, v) => prev and v)
+            i
+][..10)
+```
+
+### Small note on row vs column vectors
+technically spacing will distinguish between row and column vectors when `row` or `col` not used to disambiguate
+```
+rv = [1 2 3 4]
+cv = [
+    1
+    2
+    3
+    4
+]
+```
+But the way dewy will handle it which is much nicer than matlab is that both `rv` and `cv` are 1D, so there isn't a pain where you're dealing with `1xN` vs `Nx1` dimensions.
+```dewy
+rv.shape = [4]
+cv.shape = [4]
+
+# both work fine
+loop i in rv { printl"row element: {i}" }
+loop i in cv { printl"col element: {i}" }
+
+
+A = [
+    0 1 0 0
+    1 0 0 0
+    0 0 0 1
+    0 0 1 0
+]
+
+# order matters for row vs col vector
+result = rv * A * cv
+result = rv * A
+result = A * cv
+result = cv * A   # error
+result = A * rv   # error
+result = cv * A * rv   # error
+```
+basically an internal property would be kept on the array object (perhaps just compiletime metadata), keeping track of if its a row or column vector, and that participates in the type checking process for matric math (in addition to all the type checking to ensure the dimensions match up)
+
+This makes it not matter so much when doing complex comprehensions
+```dewy
+let complex_example = [
+    1 2 3 4
+    loop i in 5..10
+        i
+    11
+    12
+    13
+    14
+    loop j in 15..20 j
+
+]
+```
+basically the type system can under the hood note that this is not a valid vector/array shape, but it still has `length=20`
+
 
 
 ### is \ syntax or escaping a newline? [DONE: syntax]
@@ -288,12 +363,169 @@ gen = b // generator object
 B = gen // 2
 B = gen // 4
 B = gen // 6
-
 ```
+
+> NOTE: see below, this example is no longer true. instead
+```dewy
+A = { 1+1 2+2 3+3 }   # generator<int length=3>
+B = ()=>{1+1 2+2 3+3} # ():>generator<int length=3>
+
+# need to use .next to progress the generator like a typical iterator
+# it does not express values without something explicit consuming it
+A.next # 2
+A.next # 4
+A.next # 6
+A.next # undefined
+
+b = B
+b.next # 2
+b.next # 4
+b.next # 6
+b.next # undefined
+```
+
+
 
 More thought is needed on this though. Basically should come up with a long list of examples and use cases
 
-## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces as in regular arrays. Parsing precedence will determine what attaches to .. and user's can use ()/[] to disambiguate]
+One idea might be:
+```
+typeof({1+1 2+2 3+3}) => <int int int>
+
+<int int int> <=> generator<int length=3>
+
+# <int int int> of generator<int> so you could use <int int int> anywhere that a generator was expected
+```
+
+
+## Generators and mixing yield/return [implicit list of values is generator if more than 1. adding any `yield` statements makes it a generator. loops yielding values is a generator (regardless of number of elements loop would return). Generator literals are just like any other expression in the language]
+
+```dewy
+let generator:type = (yield_type:type return_type:type=void) => ...
+
+let fn = ():>generator<int int> => {
+    yield 1
+    yield 2
+    yield 3
+    return 4
+}
+
+# basically a wrapper over the inner generator, including the return
+# basically the same semantics as python
+let fn2 = ():>generator<int int> => {
+    result = yield from fn
+    return result
+}
+```
+
+dewy obviously doesn't have exceptions, so the whole `StopIterator` containing the return value in python definitely isn't mirrored here. Probably if you wanted the pure mechanical way without any sugar, it might be more like this:
+```dewy
+let fn2 = ():>generator<int int> => {
+    gen = fn
+    loop value in gen yield value
+    return gen.result
+}
+```
+
+
+Another note, keyword expressions like `yield` or `return` can be done implicitly depending on context, and the keywords become required when you want something more complex
+
+```dewy
+# single values
+A0:int = {1}         # implicit version
+A1:int = {return 1}  # explicit version. tbd if this is allowed
+
+# generators with no return value
+B0:generator<int> = {1 2 3}
+B1:generator<int> = {
+    yield 1
+    yield 2
+    yield 3
+}
+
+# generators with return values
+# cannot be spelled implicitly
+C0:generator<int int> = {
+    yield 1
+    yield 2
+    yield 3
+    return 42
+}
+```
+technically all of the `generator<int>` could be narrowed to `<int int int>`. Probably we would allow `A1:int={return 1}` as it lets the pattern be uniform, and also allows `C0:generator<int int>` to be valid. Otherwise you'd have to wrap those in functions, but then it wouldn't really make sense that you didn't need to wrap `B1` in a function, and if you had to wrap `B1`, then why not `B0` which is just the implicit spelling of `B1`? So yeah `A1` can stay; I think the rule with return will be that the thing gets returns up until the nearest thing that catches it, which could be an assignment, or it could be a function boundary.
+
+Though actually that might be a bit of a problem, because what about if you wanted to return an error:
+```dewy
+let parse_float = (s:string):>real|error => {
+    let point_idx
+    let chars:array<char> = [
+        loop i in 0.. and c in s {
+            if c in? '0123456789' { c }  # yield is captured by enclosing [ ]
+            else if c =? '.' {
+                if point_idx isnt? undefined return error"encountered multiple decimal points in number '{string}'"  # return breaks out of function
+                point_idx = i
+            }
+            else return error'encountered unexpected character "{c}"'
+        }
+    ]
+
+    whole_part = int.parse(chars[..point_idx-1])
+    if point_idx is? undefined return whole_part
+    fraction_chars = chars[point_idx+1..]
+    fraction = int.parse(fraction_chars) / 10^fraction_chars.length
+
+    return whole_part + fraction    
+}
+
+```
+this is a bit contrived, but it shows how you might be capturing sequential expressions, but want to return something over the function boundary like an error. I think the solution to this is actually just to make use of another old keyword I came up with; `express`. Basically in a non-generator context, `express` is the spelling for giving back one value. 
+
+Though question, why not just use `yield`? if you `yield` a single value, it's equivalent to expressing it, but if you yield multiple values, it's the same as a generator? then
+
+```dewy
+A0:int = {1}
+# A1:int = {yield 1}  # no, actually it's generator<int> since it has `yield`
+B0:generator<int> = {1 2 3}
+B1:generator<int> = {
+    yield 1
+    yield 2
+    yield 3
+}
+C0:generator<int int> = {
+    yield 1
+    yield 2
+    yield 3
+    return 42
+}
+```
+
+honestly this is probably even better! Because then the pattern is even more uniform. the implicit version is just syntax sugar for the yield version. And `C0` only works because it was turned into an actual generator object, so `return` can behave differently in a generator, in the same way `return` behaves differently in a nested function--`returns` stop at certain boundaries.
+
+ChatGPT suggests that it is not the number of yields that determines if a block is or isn't a generator. Instead any block with a yield becomes a generator. The full set of distinguishers is:
+- contains a `yield` expression
+- has multiple expressed values
+- contains a loop where the body expresses values
+- ~~type-annotation expects a generator~~ I'm not sure about this one. `let A:generator<int> = {10}` I think this errors rather than works
+
+```
+{10}              # int
+{yield 10}        # generator<int count=1>
+{1 2 3}           # generator<int count=3>
+{loop i in xs i}  # generator<typeof(xs[int]) count=xs.length>
+```
+
+Miscellanius consequences of this design:
+- generator literals can only be iterated once `A = {1 2 3 4} loop a in A printl"a={a}"; loop a in A ... # second loop exits immediately because it's already spent`
+- returning a generator literal from a function is the method for reuse `fn=()=>{1 2 3 4}  loop i in fn {...} loop i in fn {...} # etc. can keep interating over fn's returned generator`
+- the only way to express a single value is implicitly e.g. `let a = {10}` since `let b = {yield 10}` makes a generator. (or could introduce `express` keyword, but probably not worth it)
+- wrapping any generator in `[]` collects the values. Means you can't have a list of generators? or you'd have to wrap in their own generator so that the outer generator is what gets consumed instead of the inner one `gen_list:array<generator<int>> = [(gen1 gen2 gen3 gen4)]` vs `flat_list:array<int> = [gen1 gen2 gen3 gen4]`
+- loops yielding values inside of `[]` are always generators regardless of loop length. that way types are more stable for given syntax rather than dependent on runtime values: `A:generator<int> = [loop i in 0..0 i]`
+
+Open question: can you make a generator without some sort of block/parenthesis? e.g. `let A = yield 1`, does that make `A:generator<int length=1>`? I'm probably not going to have python style two-way send/receive from generators, so there is room in the semantics for it to work that way. I guess it's mostly a question of if bare yield statements can be captured, which I think becomes relevant in more complex settings, and perhaps actually no you don't want them capturable
+
+
+
+## How does multidimensional indexing work? [DONE: each dimension access is separated by spaces as in regular arrays. Parsing precedence will determine what attaches to `..` and user's can use ()/[] to disambiguate]
 
 e.g. if you have this 3D array, how can you index each dimension with a range?
 
@@ -350,6 +582,10 @@ my_tensor[..2,0 .. () [0 4 5]] // should return a 4D tensor of shape [3 5 1 3]
   i.e. each space separated thing accesses that dimension. If you want to access multiple elements in a particular dimension, you need to wrap them up so that they are a single expression in the indexing block
 
 Basically the question really comes down to how are lists containing ranges handled from a parsing point of view? In generally, juxtaposing a tensor with a list will try to access the tensor. Though actually, since matrix multiplication is a thing, aren't there contexts where we'd want it to multiply rather than access? Probably need the type of the left and right to determine if it's a multiply or an access... Perhaps array literals on the right-hand-side cannot be multiplied with juxtaposition, and will always be interpreted as accessing? still needs type information, but it's a pretty good clear rule.
+
+### Small note about row vs column vectors
+
+
 
 ## Juxtaposition for everything [Yes! rely on type safety to determine what happens or compile error if incompatible]
 
