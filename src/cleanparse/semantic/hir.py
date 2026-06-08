@@ -23,6 +23,7 @@ perhaps after this phase theres a second typechecking phase making use of all th
 
 from dataclasses import dataclass
 from typing import Literal
+from ..parser import t0
 from ..reporting import Span
 from . import ty
 
@@ -36,18 +37,24 @@ class AST:
 @dataclass
 class Void(AST): ...
 
-@dataclass
-class Identifier(AST):
-    name: str
+@dataclass 
+class Return(AST):
+    item: AST|None = None
+
+
+# @dataclass
+# class Identifier(AST):
+#     name: str
 
 @dataclass
 class Bool(AST):
     value: bool
 
-# @dataclass
-# class Int(AST):
-#     # prefix: 
-#     value: int
+@dataclass
+class Integer(AST):
+    prefix: t0.BasePrefix
+    value: int
+
 
 @dataclass
 class String(AST):
@@ -57,10 +64,10 @@ class String(AST):
 # TODO:perhaps we can make the call dataclass even more uniform here... 
 # e.g. dealing with named vs positional vs unpack vs collect vs etc. args
 # TODO: also `func` might not be an identifier... might be a func literal, opfn etc.
-@dataclass
-class Call(AST):
-    func: Identifier #|FunctionLiteral
-    args: list[AST] #TODO: named args, partial eval, etc.
+# @dataclass
+# class Call(AST):
+#     func: Identifier #|FunctionLiteral
+#     args: list[AST] #TODO: named args, partial eval, etc.
 
 @dataclass
 class Partial(AST):

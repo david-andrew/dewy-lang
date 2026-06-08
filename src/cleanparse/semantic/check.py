@@ -5,7 +5,7 @@ semantic analysis pass 0:
 """
 from dataclasses import dataclass, replace, field
 from collections import ChainMap
-from ..parser import p0, t2, t1
+from ..parser import p0, t2, t1, t0
 from . import hir, ty
 from ..reporting import SrcFile, ReportException, Error, Pointer, Span
 from typing import Callable, Literal
@@ -48,11 +48,14 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return passes[0]
 
         
-        case p0.KeywordExpr(parts=[t1.Keyword(name='let'|'const'), p0.AST()]):
+        case p0.KeywordExpr(parts=[t1.Keyword(name='let'|'const'), *_]):
             return tcr_declare(ast, ctx=ctx)
 
         case p0.KeywordExpr(parts=[t1.Keyword(name='import'|'from'), *_]):
             return tcr_import(ast, ctx=ctx)
+        
+        case p0.KeywordExpr(parts=[t1.Keyword(name='return'), *_]):
+            return tcr_return(ast, ctx=ctx)
 
         # etc. keyword cases as outlined in t2
         # final catch-all case (internal error since t2 shouldn't produce anything like this)
@@ -67,6 +70,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block)
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
         case p0.Atom(item=t1.String(content=content)): return hir.String(ast.item.loc, 'string', content)
+        case p0.Atom(item=t1.Integer(value=value)): return hir.Integer(ast.item.loc, 'int', value.prefix, t0.parse_integer(value.src, value.prefix))
         # case p0.Atom(item=t1.Real()): ...
         # case p0.Atom(item=t1.BasedString()): ...
         # case p0.Atom(item=t1.Semicolon()): ...
@@ -174,6 +178,13 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
 
 def tcr_import(ast: p0.KeywordExpr, *, ctx: Context) -> hir.AST:
     pdb.set_trace()
+
+def tcr_return(ast: p0.KeywordExpr, *, ctx: Context) -> hir.AST:
+    if len(ast.parts) > 2: raise ValueError(f'INTERNAL ERROR: return statement may only contain zero or one expression, got {len(ast.parts)}. {ast.parts=}. (should have been caught during p0 phase)')
+    if len(ast.parts) == 1:
+        return hir.Return(ast.parts[0].loc, ty.VOID_TYPE)
+    item = typecheck_and_resolve_inner(ast.parts[1], ctx=ctx)
+    return hir.Return(ast.parts[0].loc, ty.VOID_TYPE, item)
 
 def tcr_block(block: p0.Block, *, ctx: Context) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`

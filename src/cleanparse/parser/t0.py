@@ -66,32 +66,38 @@ decoration_characters = superscripts | subscripts | misc_decorations | primes
 # numbers may have _ as a separator (if _ is not in the set of digits)
 BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0g']
 base_prefixes: set[BasePrefix] = set(BasePrefix.__args__)
-base_digits: dict[BasePrefix, set[str]] = {
-    '0b': {*'01'},  # binary
-    '0t': {*'012'},  # ternary
-    '0q': {*'0123'},  # quaternary
-    '0s': {*'012345'},  # seximal
-    '0o': {*'01234567'},  # octal
-    '0d': {*'0123456789'},  # decimal
-    '0z': {*'0123456789xeXE'},  # dozenal (case-insensitive)
-    '0x': {*'0123456789abcdefABCDEF'},  # hexadecimal (case-insensitive)
-    '0u': {*'0123456789abcdefghijklmnopqrstuvABCDEFGHIJKLMNOPQRSTUV'},  # base 32 (duotrigesimal)
-    '0r': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'},  # base 36 (hexatrigesimal)
-    '0g': {*'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-/_='},  # base 64 (tetrasexagesimal)
+
+
+# dict[base_prefix, (digits, is_case_insensitive, extra_digits)]
+BASE_SPECS: dict[BasePrefix, tuple[str, bool, dict[str, int | None]]] = {
+    '0b': ('01', False, {}),  # binary
+    '0t': ('012', False, {'T': -1}),  # ternary (and also support balanced ternary with 'T')
+    '0q': ('0123', False, {}),  # quaternary
+    '0s': ('012345', False, {}),  # seximal
+    '0o': ('01234567', False, {}),  # octal
+    '0d': ('0123456789', False, {}),  # decimal
+    '0z': ('0123456789XE', True, {}),  # dozenal (case-insensitive)
+    '0x': ('0123456789abcdef', True, {}),  # hexadecimal (case-insensitive)
+    '0u': ('0123456789abcdefghijklmnopqrstuv', True, {}),  # base 32 (duotrigesimal) (case-insensitive)
+    '0r': ('0123456789abcdefghijklmnopqrstuvwxyz', True, {}),  # base 36 (hexatrigesimal) (case-insensitive)
+    '0g': ('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/', False, {'-': 62, '_': 63, '=': None}),  # base 64 (tetrasexagesimal) (case-sensitive)
 }
-base_radixes: dict[BasePrefix, int] = {
-    '0b': 2,
-    '0t': 3,
-    '0q': 4,
-    '0s': 6,
-    '0o': 8,
-    '0d': 10,
-    '0z': 12,
-    '0x': 16,
-    '0u': 32,
-    '0r': 36,
-    '0g': 64,
-}
+
+# map from base prefix to number of digits in the base
+base_radixes: dict[BasePrefix, int] = {base: len(base_digits) for base, (base_digits, *_) in BASE_SPECS.items()}
+
+# map from base prefix to a dict of digit characters to their values
+base_digit_values: dict[BasePrefix, dict[str, int | None]] = {}
+for base, (base_digits, is_case_insensitive, extra_digits) in BASE_SPECS.items():
+    values = {c:i for i, c in enumerate(base_digits)} | extra_digits
+    if is_case_insensitive:
+        for c in base_digits:
+            if c.isalpha():
+                values[c.swapcase()] = values[c]
+    base_digit_values[base] = values
+
+# map from base prefix to the set of digit characters in the base
+base_digits: dict[BasePrefix, set[str]] = {base: set(values.keys()) for base, values in base_digit_values.items()}
 
 # commonly used bases
 base10: BasePrefix = '0d'
@@ -103,6 +109,20 @@ def is_based_digit(digit: str, base: BasePrefix) -> bool:
     """determine if a digit is valid in a given base"""
     digits = base_digits[base]
     return digit in digits
+
+def parse_integer(s:str, prefix:BasePrefix) -> int:
+    """Parse an integer from a string, handling base prefixes and underscores"""
+    digit_values = base_digit_values[prefix]
+    skip_underscores = '_' not in digit_values
+    if s.startswith(prefix): s = s[len(prefix):]
+    radix = base_radixes[prefix]
+    value = 0
+    for c in s:
+        if skip_underscores and c == '_': continue
+        d = digit_values[c]
+        if d is None: continue # skip none (e.g. base64 padding)
+        value = value * radix + d
+    return value
 
 
 # Mostly operators, but also some special identifiers
