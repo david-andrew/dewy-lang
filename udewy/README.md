@@ -63,7 +63,7 @@ This repo contains a reference implementation of udewy, including a lot of suppl
 
 ### Character Set
 
-udewy source files are encoded in ASCII. UTF-8 is compatible in contexts where extended characters are allowed (e.g. string literals).
+udewy source code is ASCII. Bytes outside the ASCII range may only appear inside string literals, path literals, and comments; the compiler never interprets them. Inside string literals they pass through to the program verbatim (see [String Literals](#string-literals)).
 
 Valid ASCII characters:
 - Letters: `A-Z`, `a-z`
@@ -171,6 +171,8 @@ This is a very \
 long string that appears \
 on one line"
 ```
+
+**Non-ASCII content:** Aside from escape sequences, the bytes between the quotes are copied into the literal **verbatim**. The compiler performs no encoding validation, conversion, or normalization, so a literal contains exactly the bytes of the source file. Since source files are conventionally UTF-8, `"μZero"` produces the UTF-8 encoding of `μ` (`0xCE 0xBC`) followed by `Zero` — 6 bytes. A source file saved in another encoding would pass its raw bytes through just the same. The length prefix counts **bytes**, not characters or codepoints; all text-encoding interpretation is left to the program. A backslash followed by a non-ASCII character passes that character's bytes through unchanged.
 
 **Memory layout:** String literals are stored in static memory with an 8-byte length prefix. The variable holds a pointer to the first character (after the length). See [Memory Layout](#16-memory-layout).
 
@@ -702,7 +704,7 @@ Both strings and arrays share the same layout in memory:
 
 - **Length prefix:** 8 bytes containing the number of elements (not byte count)
 - **Data:** The actual content
-  - Strings: 1 byte per character (ASCII)
+  - Strings: 1 byte per element (raw bytes; non-ASCII source text contributes its encoded bytes verbatim, one element each)
   - Arrays: 8 bytes per element (all elements are 64-bit)
 
 When you use a string or array literal, the variable holds a pointer to the **start of the data** (after the length). Access the length at `ptr - 8`:

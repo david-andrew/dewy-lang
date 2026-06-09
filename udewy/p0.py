@@ -121,17 +121,23 @@ def escape_code_to_value(c: str) -> int:
 
 
 def decode_string_literal(src: str, start: int, length: int) -> bytes:
+    """Content bytes are copied verbatim except for escape sequences; the
+    compiler does no encoding validation or conversion."""
     str_content = src[start + 1 : start + length - 1]
     processed: list[int] = []
     i = 0
     while i < len(str_content):
         if str_content[i] == '\\' and i + 1 < len(str_content):
-            val = escape_code_to_value(str_content[i + 1])
-            if val != -1:
-                processed.append(val)
+            esc = str_content[i + 1]
+            if ord(esc) > 127:
+                processed.extend(esc.encode("utf-8", "surrogateescape"))
+            else:
+                val = escape_code_to_value(esc)
+                if val != -1:
+                    processed.append(val)
             i = i + 2
             continue
-        processed.append(ord(str_content[i]))
+        processed.extend(str_content[i].encode("utf-8", "surrogateescape"))
         i = i + 1
     return bytes(processed)
 

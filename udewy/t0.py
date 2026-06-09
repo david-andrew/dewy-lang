@@ -363,7 +363,9 @@ def _load_program(source_path: Path, target_backend: str, state: _LoadState) -> 
         return LoadedProgram("", [], [])
     state.imported_sources.add(source_path)
 
-    source = source_path.read_text()
+    # surrogateescape round-trips arbitrary bytes, so string literals can carry
+    # any source bytes through to the binary verbatim (see decode_string_literal)
+    source = source_path.read_text(encoding="utf-8", errors="surrogateescape")
     source_dir = source_path.parent
     imported_source_parts: list[str] = []
     imported_source_paths: list[str] = []
