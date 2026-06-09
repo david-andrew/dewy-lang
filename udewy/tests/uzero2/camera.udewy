@@ -1,0 +1,150 @@
+# ============================================================================
+# uZero2 camera: chase camera, banked visual basis, hover bob, free-fly
+# camera (editor / flyover), and the column-major f32 view matrix builder.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+
+# ---------- Player chase camera ------------------------------------------------
+
+let update_chase = ():>void => {
+    let dfx:Q16 = fx - prev_fx
+    let dfy:Q16 = fy - prev_fy
+    let dfz:Q16 = fz - prev_fz
+    let yaw_rate_q:Q16 = fp_mul(dfx rx) + fp_mul(dfy ry) + fp_mul(dfz rz)
+
+    let speed:Q16 = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    vis_speed = speed
+    vis_boost_norm = (speed << 16) // (TOP_SPEED + BOOST_BONUS)
+    let sn:Q16 = 0
+    if TOP_SPEED >? 0 {
+        sn = (speed << 16) // TOP_SPEED
+    }
+    if sn >? FP_ONE { sn = FP_ONE }
+    vis_speed_norm = sn
+
+    let yaw_rate:int = __signed_shr__(yaw_rate_q * RAW_PER_RAD FP_SHIFT)
+    let bank_target:Angle = fp_mul(yaw_rate * BANK_GAIN sn)
+    if bank_target >? BANK_MAX { bank_target = BANK_MAX }
+    if bank_target <? (-BANK_MAX) { bank_target = -BANK_MAX }
+    bank += fp_mul(bank_target - bank BANK_ALPHA)
+
+    let cos_b:Q16 = cos_fp(bank)
+    let sin_b:Q16 = sin_fp(bank)
+    vfx = fx
+    vfy = fy
+    vfz = fz
+    vrx = fp_mul(rx cos_b) - fp_mul(ux sin_b)
+    vry = fp_mul(ry cos_b) - fp_mul(uy sin_b)
+    vrz = fp_mul(rz cos_b) - fp_mul(uz sin_b)
+    vux = fp_mul(ux cos_b) + fp_mul(rx sin_b)
+    vuy = fp_mul(uy cos_b) + fp_mul(ry sin_b)
+    vuz = fp_mul(uz cos_b) + fp_mul(rz sin_b)
+
+    prev_fx = fx
+    prev_fy = fy
+    prev_fz = fz
+
+    cam_fx += fp_mul(fx - cam_fx ORIENT_ALPHA)
+    cam_fy += fp_mul(fy - cam_fy ORIENT_ALPHA)
+    cam_fz += fp_mul(fz - cam_fz ORIENT_ALPHA)
+    cam_ux += fp_mul(ux - cam_ux ORIENT_ALPHA)
+    cam_uy += fp_mul(uy - cam_uy ORIENT_ALPHA)
+    cam_uz += fp_mul(uz - cam_uz ORIENT_ALPHA)
+    let cum:Q16 = fp_sqrt((cam_ux * cam_ux) + (cam_uy * cam_uy) + (cam_uz * cam_uz))
+    if cum >? 1024 {
+        cam_ux = fp_div(cam_ux cum)
+        cam_uy = fp_div(cam_uy cum)
+        cam_uz = fp_div(cam_uz cum)
+    }
+    let cf_dot_cu:Q16 = fp_mul(cam_fx cam_ux) + fp_mul(cam_fy cam_uy) + fp_mul(cam_fz cam_uz)
+    cam_fx -= fp_mul(cam_ux cf_dot_cu)
+    cam_fy -= fp_mul(cam_uy cf_dot_cu)
+    cam_fz -= fp_mul(cam_uz cf_dot_cu)
+    let cfm:Q16 = fp_sqrt((cam_fx * cam_fx) + (cam_fy * cam_fy) + (cam_fz * cam_fz))
+    if cfm >? 1024 {
+        cam_fx = fp_div(cam_fx cfm)
+        cam_fy = fp_div(cam_fy cfm)
+        cam_fz = fp_div(cam_fz cfm)
+    }
+
+    let target_cam_x:Q16 = cx - fp_mul(CAM_BACK cam_fx) + fp_mul(CAM_LIFT cam_ux)
+    let target_cam_y:Q16 = cy - fp_mul(CAM_BACK cam_fy) + fp_mul(CAM_LIFT cam_uy)
+    let target_cam_z:Q16 = cz - fp_mul(CAM_BACK cam_fz) + fp_mul(CAM_LIFT cam_uz)
+    cam_x += fp_mul(target_cam_x - cam_x POS_ALPHA)
+    cam_y += fp_mul(target_cam_y - cam_y POS_ALPHA)
+    cam_z += fp_mul(target_cam_z - cam_z POS_ALPHA)
+
+    let scale:Q16 = FP_ONE + fp_mul(sn FOV_PUNCH)
+    cur_fov_top_q16 = fp_mul(131072 scale)
+    return void
+}
+
+# Hard-set the camera basis (used when entering a state so the smoothed
+# camera doesn't swing across the map).
+let camera_snap_behind_craft = ():>void => {
+    cam_fx = fx
+    cam_fy = fy
+    cam_fz = fz
+    cam_ux = ux
+    cam_uy = uy
+    cam_uz = uz
+    cam_x = cx - fp_mul(CAM_BACK fx) + fp_mul(CAM_LIFT ux)
+    cam_y = cy - fp_mul(CAM_BACK fy) + fp_mul(CAM_LIFT uy)
+    cam_z = cz - fp_mul(CAM_BACK fz) + fp_mul(CAM_LIFT uz)
+    cur_fov_top_q16 = 131072
+    return void
+}
+
+# ---------- Orbit camera (title / track-select flyover / results) ---------------
+
+# Orbit around a focus point at a given radius and height; angle in fine
+# units (65536 per turn) so slow orbits stay smooth.
+let camera_orbit = (focus_x:Q16 focus_y:Q16 focus_z:Q16 radius:Q16 height:Q16 angle:AngleFine):>void => {
+    let c:Q16 = cos_fine(angle)
+    let s:Q16 = sin_fine(angle)
+    cam_x = focus_x + fp_mul(radius c)
+    cam_y = focus_y + height
+    cam_z = focus_z + fp_mul(radius s)
+    let dx:Q16 = focus_x - cam_x
+    let dy:Q16 = focus_y - cam_y
+    let dz:Q16 = focus_z - cam_z
+    let m:Q16 = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+    if m >? 1024 {
+        cam_fx = fp_div(dx m)
+        cam_fy = fp_div(dy m)
+        cam_fz = fp_div(dz m)
+    }
+    # up = world up rejected off forward
+    let d:Q16 = cam_fy
+    cam_ux = -fp_mul(cam_fx d)
+    cam_uy = FP_ONE - fp_mul(cam_fy d)
+    cam_uz = -fp_mul(cam_fz d)
+    let um:Q16 = fp_sqrt((cam_ux * cam_ux) + (cam_uy * cam_uy) + (cam_uz * cam_uz))
+    if um >? 1024 {
+        cam_ux = fp_div(cam_ux um)
+        cam_uy = fp_div(cam_uy um)
+        cam_uz = fp_div(cam_uz um)
+    }
+    cur_fov_top_q16 = 131072
+    return void
+}
+
+# ---------- Hover bob ------------------------------------------------------------
+
+let bob_off_x:Q16 = 0
+let bob_off_y:Q16 = 0
+let bob_off_z:Q16 = 0
+
+let update_bob = ():>void => {
+    let phase:Angle = (frame_count * BOB_FREQ_NUM) // BOB_FREQ_DEN
+    phase = phase % ANG_TURN
+    if phase <? 0 { phase += ANG_TURN }
+    let s:Q16 = sin_fp(phase)
+    let amp:Q16 = fp_mul(BOB_AMP s)
+    bob_off_x = fp_mul(ux amp)
+    bob_off_y = fp_mul(uy amp)
+    bob_off_z = fp_mul(uz amp)
+    return void
+}

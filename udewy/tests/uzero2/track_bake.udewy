@@ -1,0 +1,629 @@
+# ============================================================================
+# uZero2 track bake: node/segment graph -> sampled frames + render meshes.
+#
+# Each segment is sampled into evenly spaced "frames" along its Hermite
+# centerline. A frame carries position, forward, up, half-widths, the
+# cross-section angle, lift, surface kind, cumulative arc and lap progress.
+#
+# Frame up vectors come from parallel transport of the start node's up along
+# the curve (projection method), then a correction twist is distributed
+# smoothly along the segment so the end exactly matches the end node's up
+# (plus any whole extra twists for corkscrews). This gives C0-continuous
+# orientation across junctions for free.
+#
+# The cross-section is a circular arc in the (right, up) plane parameterised
+# by a single signed angle (0 = flat ribbon, +pi = half-pipe, +2pi = closed
+# pipe interior, -2pi = exterior cylinder), with constant surface arc length
+# = track width so flat track morphs into pipes without stretching. A "lift"
+# parameter slides the arc center onto the centerline, which makes centred
+# tubes and (with a varying width profile) surfaces of revolution: spheres,
+# funnels, cones.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./track_model.udewy"
+
+# ---------- Frame access ------------------------------------------------------
+
+let fr_p = (sg:Ptr i:FrameId):>Ptr => {
+    return __load__(sg + SG_FRAMES) + i * FR_STRIDE
+}
+
+let seg_nsamp = (sg:Ptr):>int => {
+    return __load__(sg + SG_NSAMP)
+}
+
+# ---------- Hermite centerline -------------------------------------------------
+
+const HM_P0:Vec3 = __static_alloca__(24)
+const HM_M0:Vec3 = __static_alloca__(24)
+const HM_P1:Vec3 = __static_alloca__(24)
+const HM_M1:Vec3 = __static_alloca__(24)
+
+# Load the Hermite control values for a segment into the HM_* scratch.
+let hermite_setup = (sg:Ptr):>void => {
+    let nd0:Ptr = node_p(__load__(sg + SG_N0))
+    let nd1:Ptr = node_p(__load__(sg + SG_N1))
+    v3_copy(HM_P0 nd0 + ND_PX)
+    v3_copy(HM_P1 nd1 + ND_PX)
+    let dx:Q16 = v3_x(HM_P1) - v3_x(HM_P0)
+    let dy:Q16 = v3_y(HM_P1) - v3_y(HM_P0)
+    let dz:Q16 = v3_z(HM_P1) - v3_z(HM_P0)
+    let chord:Q16 = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+    let tl0:Q16 = __load__(nd0 + ND_TLEN)
+    if tl0 <=? 0 { tl0 = chord }
+    let tl1:Q16 = __load__(nd1 + ND_TLEN)
+    if tl1 <=? 0 { tl1 = chord }
+    v3_scale(HM_M0 nd0 + ND_TX tl0 * __load__(sg + SG_FLIP0))
+    v3_scale(HM_M1 nd1 + ND_TX tl1 * __load__(sg + SG_FLIP1))
+    return void
+}
+
+let hermite_pos = (t:Q16 out:Vec3):>void => {
+    let t2:Q16 = fp_mul(t t)
+    let t3:Q16 = fp_mul(t2 t)
+    let h00:Q16 = (2 * t3) - (3 * t2) + FP_ONE
+    let h10:Q16 = t3 - (2 * t2) + t
+    let h01:Q16 = (3 * t2) - (2 * t3)
+    let h11:Q16 = t3 - t2
+    v3_set(out
+           fp_mul(h00 v3_x(HM_P0)) + fp_mul(h10 v3_x(HM_M0)) + fp_mul(h01 v3_x(HM_P1)) + fp_mul(h11 v3_x(HM_M1))
+           fp_mul(h00 v3_y(HM_P0)) + fp_mul(h10 v3_y(HM_M0)) + fp_mul(h01 v3_y(HM_P1)) + fp_mul(h11 v3_y(HM_M1))
+           fp_mul(h00 v3_z(HM_P0)) + fp_mul(h10 v3_z(HM_M0)) + fp_mul(h01 v3_z(HM_P1)) + fp_mul(h11 v3_z(HM_M1)))
+    return void
+}
+
+# Unnormalized derivative dP/dt.
+let hermite_tan = (t:Q16 out:Vec3):>void => {
+    let t2:Q16 = fp_mul(t t)
+    let d00:Q16 = (6 * t2) - (6 * t)
+    let d10:Q16 = (3 * t2) - (4 * t) + FP_ONE
+    let d01:Q16 = (6 * t) - (6 * t2)
+    let d11:Q16 = (3 * t2) - (2 * t)
+    v3_set(out
+           fp_mul(d00 v3_x(HM_P0)) + fp_mul(d10 v3_x(HM_M0)) + fp_mul(d01 v3_x(HM_P1)) + fp_mul(d11 v3_x(HM_M1))
+           fp_mul(d00 v3_y(HM_P0)) + fp_mul(d10 v3_y(HM_M0)) + fp_mul(d01 v3_y(HM_P1)) + fp_mul(d11 v3_y(HM_M1))
+           fp_mul(d00 v3_z(HM_P0)) + fp_mul(d10 v3_z(HM_M0)) + fp_mul(d01 v3_z(HM_P1)) + fp_mul(d11 v3_z(HM_M1)))
+    return void
+}
+
+# ---------- Cross-section evaluation -------------------------------------------
+# Shared by mesh baking and the runtime surface query. Call xse_setup (or
+# xse_setup_interp) to load a frame context, then xse_point / xse_solve.
+
+const XSE_C:Vec3 = __static_alloca__(24)
+const XSE_F:Vec3 = __static_alloca__(24)
+const XSE_U:Vec3 = __static_alloca__(24)
+const XSE_R:Vec3 = __static_alloca__(24)
+const XSE_TMP:Vec3 = __static_alloca__(24)
+let xse_wl:Q16 = 0
+let xse_wr:Q16 = 0
+let xse_w:Q16 = 0
+let xse_xs:Angle = 0                     # raw cross-section angle
+let xse_lift:Q16 = 0
+let xse_radius:Q16 = 0                   # signed; 0 = flat
+let xse_lift_off:Q16 = 0                 # arc center shift toward the centerline
+let xse_closed:bool = false
+
+# Derive the cached cross-section values from the loaded frame fields.
+let xse_finish = ():>void => {
+    v3_cross(XSE_R XSE_F XSE_U)
+    xse_w = xse_wl + xse_wr
+    if xse_w <? 6553 { xse_w = 6553 }
+    let axs:int = abs_i(xse_xs)
+    xse_closed = false
+    if axs >=? XSECT_CLOSED_MIN { xse_closed = true }
+    if axs <? XSECT_FLAT_EPS {
+        xse_radius = 0
+        xse_lift_off = 0
+    } else {
+        xse_radius = (xse_w * 16297) // (xse_xs * 100)
+        # Lift is faded in below 90 degrees of curl so a flat morph never
+        # multiplies a huge radius by a residual lift.
+        let lift_eff:Q16 = xse_lift
+        if axs <? 256 {
+            lift_eff = fp_mul(lift_eff (axs << 16) // 256)
+        }
+        xse_lift_off = fp_mul(xse_radius lift_eff)
+    }
+    return void
+}
+
+let xse_setup = (fp:Ptr):>void => {
+    v3_copy(XSE_C fp + FR_PX)
+    v3_copy(XSE_F fp + FR_FX)
+    v3_copy(XSE_U fp + FR_UX)
+    xse_wl = __load__(fp + FR_WL)
+    xse_wr = __load__(fp + FR_WR)
+    xse_xs = __load__(fp + FR_XSECT)
+    xse_lift = __load__(fp + FR_LIFT)
+    xse_finish()
+    return void
+}
+
+# Interpolate two adjacent frames (t in [0, FP_ONE]) into the context.
+let xse_setup_interp = (fa:Ptr fb:Ptr t:Q16):>void => {
+    v3_lerp(XSE_C fa + FR_PX fb + FR_PX t)
+    v3_lerp(XSE_F fa + FR_FX fb + FR_FX t)
+    v3_norm(XSE_F)
+    v3_lerp(XSE_U fa + FR_UX fb + FR_UX t)
+    v3_reject(XSE_U XSE_F)
+    v3_norm(XSE_U)
+    xse_wl = __load__(fa + FR_WL) + fp_mul(__load__(fb + FR_WL) - __load__(fa + FR_WL) t)
+    xse_wr = __load__(fa + FR_WR) + fp_mul(__load__(fb + FR_WR) - __load__(fa + FR_WR) t)
+    xse_xs = __load__(fa + FR_XSECT) + fp_mul(__load__(fb + FR_XSECT) - __load__(fa + FR_XSECT) t)
+    xse_lift = __load__(fa + FR_LIFT) + fp_mul(__load__(fb + FR_LIFT) - __load__(fa + FR_LIFT) t)
+    xse_finish()
+    return void
+}
+
+# Surface point and normal at lateral arc coordinate s (Q16 metres,
+# negative = left of the centerline).
+let xse_point = (s:Q16 out_pos:Vec3 out_n:Vec3):>void => {
+    if xse_radius =? 0 {
+        v3_copy(out_pos XSE_C)
+        v3_addscaled(out_pos out_pos XSE_R s)
+        v3_copy(out_n XSE_U)
+        return void
+    }
+    let phi:AngleFine = (s * xse_xs * 64) // xse_w
+    let sp:Q16 = sin_fine(phi)
+    let cp:Q16 = cos_fine(phi)
+    let off_u:Q16 = fp_mul(xse_radius FP_ONE - cp) - xse_lift_off
+    let off_r:Q16 = fp_mul(xse_radius sp)
+    v3_copy(out_pos XSE_C)
+    v3_addscaled(out_pos out_pos XSE_U off_u)
+    v3_addscaled(out_pos out_pos XSE_R off_r)
+    v3_set(out_n
+           fp_mul(v3_x(XSE_U) cp) - fp_mul(v3_x(XSE_R) sp)
+           fp_mul(v3_y(XSE_U) cp) - fp_mul(v3_y(XSE_R) sp)
+           fp_mul(v3_z(XSE_U) cp) - fp_mul(v3_z(XSE_R) sp))
+    return void
+}
+
+# Nearest lateral coordinate of a probe point (unclamped, Q16 metres).
+let xse_solve_s = (px:Q16 py:Q16 pz:Q16):>Q16 => {
+    v3_set(XSE_TMP px - v3_x(XSE_C) py - v3_y(XSE_C) pz - v3_z(XSE_C))
+    let x_loc:Q16 = v3_dot(XSE_TMP XSE_R)
+    if xse_radius =? 0 {
+        return x_loc
+    }
+    let y_loc:Q16 = v3_dot(XSE_TMP XSE_U)
+    let oy:Q16 = xse_radius - xse_lift_off
+    let qx:Q16 = x_loc
+    let qy:Q16 = y_loc - oy
+    let phi:AngleFine = 0
+    if xse_radius >? 0 {
+        phi = atan2_fine(qx (-qy))
+    } else {
+        phi = atan2_fine((-qx) qy)
+    }
+    return fp_mul(xse_radius fine_to_rad_q16(phi))
+}
+
+# ---------- Per-segment bake ----------------------------------------------------
+
+const BK_POS:Vec3 = __static_alloca__(24)
+const BK_TAN:Vec3 = __static_alloca__(24)
+const BK_UP:Vec3 = __static_alloca__(24)
+const BK_TARGET:Vec3 = __static_alloca__(24)
+const BK_TMP:Vec3 = __static_alloca__(24)
+
+# Sun direction for baked vertex shading.
+const BK_SUN_X:Q16 = 22229
+const BK_SUN_Y:Q16 = 57147
+const BK_SUN_Z:Q16 = 15878
+
+let bake_estimate_len = (sg:Ptr):>Q16 => {
+    hermite_setup(sg)
+    let total:Q16 = 0
+    let prev_x:Q16 = v3_x(HM_P0)
+    let prev_y:Q16 = v3_y(HM_P0)
+    let prev_z:Q16 = v3_z(HM_P0)
+    let i:int = 1
+    loop i <=? 16 {
+        hermite_pos((i * FP_ONE) // 16 BK_POS)
+        let dx:Q16 = v3_x(BK_POS) - prev_x
+        let dy:Q16 = v3_y(BK_POS) - prev_y
+        let dz:Q16 = v3_z(BK_POS) - prev_z
+        total += fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        prev_x = v3_x(BK_POS)
+        prev_y = v3_y(BK_POS)
+        prev_z = v3_z(BK_POS)
+        i += 1
+    }
+    return total
+}
+
+# Surface kind at parametric position t for this segment.
+let bake_kind_at = (sg:Ptr t:Q16):>SurfKind => {
+    let override:int = __load__(sg + SG_SURF)
+    if override >=? 0 {
+        return override
+    }
+    if t <? FP_HALF {
+        return __load__(node_p(__load__(sg + SG_N0)) + ND_SURF)
+    }
+    return __load__(node_p(__load__(sg + SG_N1)) + ND_SURF)
+}
+
+# Bake centerline frames for one segment.
+let bake_segment_frames = (si:SegId):>void => {
+    let sg:Ptr = seg_p(si)
+    let nd0:Ptr = node_p(__load__(sg + SG_N0))
+    let nd1:Ptr = node_p(__load__(sg + SG_N1))
+
+    let len:Q16 = bake_estimate_len(sg)
+    __store__(len sg + SG_LEN)
+    let n:int = clamp_i(len // SAMPLE_SPACING + 2 8 MAX_FRAMES_PER_SEG)
+
+    if __load__(sg + SG_FRAME_CAP) <? n {
+        let cap:int = n + (n // 4)
+        if cap >? MAX_FRAMES_PER_SEG { cap = MAX_FRAMES_PER_SEG }
+        __store__(arena_alloc(cap * FR_STRIDE) sg + SG_FRAMES)
+        __store__(cap sg + SG_FRAME_CAP)
+    }
+    __store__(n sg + SG_NSAMP)
+
+    hermite_setup(sg)
+
+    # Pass 1: positions + forward tangents.
+    let i:int = 0
+    loop i <? n {
+        let t:Q16 = (i * FP_ONE) // (n - 1)
+        let fp:Ptr = fr_p(sg i)
+        hermite_pos(t BK_POS)
+        v3_copy(fp + FR_PX BK_POS)
+        hermite_tan(t BK_TAN)
+        if v3_norm(BK_TAN) <=? 256 {
+            if i >? 0 {
+                v3_copy(BK_TAN fr_p(sg i - 1) + FR_FX)
+            } else {
+                v3_copy(BK_TAN nd0 + ND_TX)
+                v3_scale(BK_TAN BK_TAN FP_ONE * __load__(sg + SG_FLIP0))
+            }
+        }
+        v3_copy(fp + FR_FX BK_TAN)
+        i += 1
+    }
+
+    # Pass 2: parallel-transport the start up along the tangents.
+    v3_copy(BK_UP nd0 + ND_UX)
+    v3_reject(BK_UP fr_p(sg 0) + FR_FX)
+    v3_norm(BK_UP)
+    i = 0
+    loop i <? n {
+        let fp:Ptr = fr_p(sg i)
+        v3_reject(BK_UP fp + FR_FX)
+        v3_norm(BK_UP)
+        v3_copy(fp + FR_UX BK_UP)
+        i += 1
+    }
+
+    # Pass 3: distribute the roll correction (end-up mismatch + extra twists).
+    v3_copy(BK_TARGET nd1 + ND_UX)
+    let last:Ptr = fr_p(sg n - 1)
+    v3_reject(BK_TARGET last + FR_FX)
+    v3_norm(BK_TARGET)
+    let c:Q16 = v3_dot(last + FR_UX BK_TARGET)
+    v3_cross(BK_TMP last + FR_UX BK_TARGET)
+    let s:Q16 = v3_dot(BK_TMP last + FR_FX)
+    let total_fine:AngleFine = atan2_fine(s c) + (__load__(sg + SG_TWIST) * ANG_FINE_PER_RAW)
+    if total_fine not=? 0 {
+        i = 1
+        loop i <? n {
+            let fp:Ptr = fr_p(sg i)
+            let frac:Q16 = fp_smooth((i * FP_ONE) // (n - 1))
+            v3_rotate_about(fp + FR_UX fp + FR_FX fp_mul(total_fine frac))
+            i += 1
+        }
+    }
+
+    # Pass 4: attributes + cumulative arc.
+    let wl0:Q16 = __load__(nd0 + ND_WL)
+    let wr0:Q16 = __load__(nd0 + ND_WR)
+    let xs0:int = __load__(nd0 + ND_XSECT)
+    let lf0:Q16 = __load__(nd0 + ND_LIFT)
+    let wl1:Q16 = __load__(nd1 + ND_WL)
+    let wr1:Q16 = __load__(nd1 + ND_WR)
+    let xs1:int = __load__(nd1 + ND_XSECT)
+    let lf1:Q16 = __load__(nd1 + ND_LIFT)
+    let acc:Q16 = 0
+    i = 0
+    loop i <? n {
+        let t:Q16 = (i * FP_ONE) // (n - 1)
+        let te:Q16 = fp_smooth(t)
+        let fp:Ptr = fr_p(sg i)
+        __store__(wl0 + fp_mul(wl1 - wl0 te) fp + FR_WL)
+        __store__(wr0 + fp_mul(wr1 - wr0 te) fp + FR_WR)
+        __store__(xs0 + fp_mul(xs1 - xs0 te) fp + FR_XSECT)
+        __store__(lf0 + fp_mul(lf1 - lf0 te) fp + FR_LIFT)
+        __store__(bake_kind_at(sg t) fp + FR_KIND)
+        if i >? 0 {
+            let pp:Ptr = fr_p(sg i - 1)
+            let dx:Q16 = __load__(fp + FR_PX) - __load__(pp + FR_PX)
+            let dy:Q16 = __load__(fp + FR_PY) - __load__(pp + FR_PY)
+            let dz:Q16 = __load__(fp + FR_PZ) - __load__(pp + FR_PZ)
+            acc += fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        }
+        __store__(acc fp + FR_CUMARC)
+        __store__(0 fp + FR_PROG)
+        i += 1
+    }
+    __store__(acc sg + SG_LEN)
+    return void
+}
+
+# ---------- Mesh bake -----------------------------------------------------------
+
+const MB_POS:Vec3 = __static_alloca__(24)
+const MB_NRM:Vec3 = __static_alloca__(24)
+
+let seg_mesh_cols = (sg:Ptr):>int => {
+    let xs_max:int = max_i(abs_i(__load__(node_p(__load__(sg + SG_N0)) + ND_XSECT))
+                           abs_i(__load__(node_p(__load__(sg + SG_N1)) + ND_XSECT)))
+    let ldiv:int = clamp_i(2 + (xs_max * 14) // 1024 2 MESH_MAX_COLS)
+    return ldiv + 1
+}
+
+let mesh_vert_p = (sg:Ptr row:int col:int):>Ptr => {
+    return __load__(sg + SG_MESH) + (row * __load__(sg + SG_MESH_COLS) + col) * MV_STRIDE
+}
+
+let bake_segment_mesh = (si:SegId):>void => {
+    let sg:Ptr = seg_p(si)
+    let rows:int = __load__(sg + SG_NSAMP)
+    let cols:int = seg_mesh_cols(sg)
+    let need:int = rows * cols * MV_STRIDE
+    if __load__(sg + SG_MESH_CAP) <? need {
+        let cap:int = need + (need // 4)
+        __store__(arena_alloc(cap) sg + SG_MESH)
+        __store__(cap sg + SG_MESH_CAP)
+    }
+    __store__(rows sg + SG_MESH_ROWS)
+    __store__(cols sg + SG_MESH_COLS)
+
+    let i:int = 0
+    loop i <? rows {
+        let fp:Ptr = fr_p(sg i)
+        xse_setup(fp)
+        let v_q:Q16 = (__load__(fp + FR_CUMARC) << 16) // (CHECKER_TILE * 2)
+        let j:int = 0
+        loop j <? cols {
+            let s:Q16 = (-xse_wl) + (xse_w * j) // (cols - 1)
+            xse_point(s MB_POS MB_NRM)
+            let mv:Ptr = mesh_vert_p(sg i j)
+            __store__(v3_x(MB_POS) mv)
+            __store__(v3_y(MB_POS) mv + 8)
+            __store__(v3_z(MB_POS) mv + 16)
+            __store__((s << 16) // (CHECKER_TILE * 2) mv + 24)
+            __store__(v_q mv + 32)
+            let d:Q16 = fp_mul(v3_x(MB_NRM) BK_SUN_X) + fp_mul(v3_y(MB_NRM) BK_SUN_Y) + fp_mul(v3_z(MB_NRM) BK_SUN_Z)
+            __store__(36044 + fp_mul(29491 abs_i(d)) mv + 40)
+            j += 1
+        }
+        i += 1
+    }
+    return void
+}
+
+# ---------- AABB ----------------------------------------------------------------
+
+let bake_segment_aabb = (si:SegId):>void => {
+    let sg:Ptr = seg_p(si)
+    let n:int = __load__(sg + SG_NSAMP)
+    let minx:Q16 = 0x7FFFFFFFFFFF
+    let miny:Q16 = 0x7FFFFFFFFFFF
+    let minz:Q16 = 0x7FFFFFFFFFFF
+    let maxx:Q16 = -0x7FFFFFFFFFFF
+    let maxy:Q16 = -0x7FFFFFFFFFFF
+    let maxz:Q16 = -0x7FFFFFFFFFFF
+    let w_max:Q16 = 0
+    let i:int = 0
+    loop i <? n {
+        let fp:Ptr = fr_p(sg i)
+        minx = min_i(minx __load__(fp + FR_PX))
+        miny = min_i(miny __load__(fp + FR_PY))
+        minz = min_i(minz __load__(fp + FR_PZ))
+        maxx = max_i(maxx __load__(fp + FR_PX))
+        maxy = max_i(maxy __load__(fp + FR_PY))
+        maxz = max_i(maxz __load__(fp + FR_PZ))
+        w_max = max_i(w_max __load__(fp + FR_WL) + __load__(fp + FR_WR))
+        i += 1
+    }
+    let pad:Q16 = w_max + RAIL_HEIGHT + 131072
+    __store__(minx - pad sg + SG_MINX)
+    __store__(miny - pad sg + SG_MINY)
+    __store__(minz - pad sg + SG_MINZ)
+    __store__(maxx + pad sg + SG_MAXX)
+    __store__(maxy + pad sg + SG_MAXY)
+    __store__(maxz + pad sg + SG_MAXZ)
+    return void
+}
+
+# ---------- Progress assignment ---------------------------------------------------
+
+const NODE_PROG_MAX:int = 512
+const NODE_PROG_BUF:Ptr = __static_alloca__(4096)     # NODE_PROG_MAX * 8
+
+let node_prog_get = (n:NodeId):>int => { return __load__(NODE_PROG_BUF + n * 8) }
+let node_prog_set = (n:NodeId v:int):>void => {
+    __store__(v NODE_PROG_BUF + n * 8)
+    return void
+}
+
+# Assign SG_PROG0 / SG_PROG1 for every segment. Route segments get fixed
+# slices; off-route chains are interpolated between known junction values.
+let bake_progress = ():>void => {
+    let nr:int = vec_len(g_route)
+    g_lap_len = nr * PROG_PER_SEG
+    g_route_closed = false
+    if nr >? 0 {
+        let first_n0:NodeId = __load__(seg_p(vec_get(g_route 0)) + SG_N0)
+        let last_n1:NodeId = __load__(seg_p(vec_get(g_route nr - 1)) + SG_N1)
+        if first_n0 =? last_n1 { g_route_closed = true }
+    }
+
+    let i:int = 0
+    loop i <? node_count() {
+        node_prog_set(i (-1))
+        i += 1
+    }
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        __store__(-1 sg + SG_ROUTE_IDX)
+        __store__(-1 sg + SG_PROG0)
+        s += 1
+    }
+
+    let k:int = 0
+    loop k <? nr {
+        let sid:SegId = vec_get(g_route k)
+        let sg:Ptr = seg_p(sid)
+        __store__(k sg + SG_ROUTE_IDX)
+        __store__(k * PROG_PER_SEG sg + SG_PROG0)
+        __store__((k + 1) * PROG_PER_SEG sg + SG_PROG1)
+        if node_prog_get(__load__(sg + SG_N0)) <? 0 {
+            node_prog_set(__load__(sg + SG_N0) k * PROG_PER_SEG)
+        }
+        if node_prog_get(__load__(sg + SG_N1)) <? 0 {
+            node_prog_set(__load__(sg + SG_N1) (k + 1) * PROG_PER_SEG)
+        }
+        k += 1
+    }
+
+    # Off-route chains: walk forward until a node with known progress (or a
+    # dead end), then distribute linearly along the chain.
+    let chain_max:int = 32
+    let chain_buf:Ptr = __static_alloca__(256)
+    s = 0
+    loop s <? seg_count() {
+        if __load__(seg_p(s) + SG_PROG0) <? 0 {
+            let chain_len:int = 1
+            __store__(s chain_buf)
+            let node:NodeId = __load__(seg_p(s) + SG_N1)
+            let end_prog:int = -1
+            let guard:int = 0
+            loop guard <? chain_max {
+                if node_prog_get(node) >=? 0 {
+                    end_prog = node_prog_get(node)
+                    guard = chain_max
+                } else {
+                    let nxt:SegId = -1
+                    let oc:int = node_out_count(node)
+                    let oi:int = 0
+                    loop oi <? oc {
+                        let cand:SegId = node_out_seg(node oi)
+                        if (nxt <? 0) and (__load__(seg_p(cand) + SG_PROG0) <? 0) {
+                            nxt = cand
+                        }
+                        oi += 1
+                    }
+                    if (nxt <? 0) or (chain_len >=? chain_max) {
+                        guard = chain_max
+                    } else {
+                        __store__(nxt chain_buf + chain_len * 8)
+                        chain_len += 1
+                        node = __load__(seg_p(nxt) + SG_N1)
+                        guard += 1
+                    }
+                }
+            }
+
+            let start_prog:int = node_prog_get(__load__(seg_p(s) + SG_N0))
+            if start_prog <? 0 { start_prog = 0 }
+            if end_prog <? 0 {
+                end_prog = start_prog + chain_len * PROG_PER_SEG
+            }
+            if end_prog <=? start_prog {
+                end_prog += g_lap_len
+            }
+            if end_prog <=? start_prog {
+                end_prog = start_prog + chain_len * PROG_PER_SEG
+            }
+            let span:int = end_prog - start_prog
+            let j:int = 0
+            loop j <? chain_len {
+                let csg:Ptr = seg_p(__load__(chain_buf + j * 8))
+                __store__(start_prog + (span * j) // chain_len csg + SG_PROG0)
+                __store__(start_prog + (span * (j + 1)) // chain_len csg + SG_PROG1)
+                if node_prog_get(__load__(csg + SG_N1)) <? 0 {
+                    node_prog_set(__load__(csg + SG_N1) __load__(csg + SG_PROG1))
+                }
+                j += 1
+            }
+        }
+        s += 1
+    }
+
+    # Fill per-frame progress.
+    s = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        let n:int = __load__(sg + SG_NSAMP)
+        let p0:int = __load__(sg + SG_PROG0)
+        let span:int = __load__(sg + SG_PROG1) - p0
+        let len:Q16 = __load__(sg + SG_LEN)
+        if len <=? 0 { len = 1 }
+        let f:int = 0
+        loop f <? n {
+            let fp:Ptr = fr_p(sg f)
+            let frac:Q16 = fp_div(__load__(fp + FR_CUMARC) len)
+            __store__(p0 + fp_mul(span frac) fp + FR_PROG)
+            f += 1
+        }
+        s += 1
+    }
+    return void
+}
+
+# ---------- Whole-track bake -------------------------------------------------------
+
+let bake_track_bounds = ():>void => {
+    g_track_min_x = 0x7FFFFFFFFFFF
+    g_track_min_y = 0x7FFFFFFFFFFF
+    g_track_min_z = 0x7FFFFFFFFFFF
+    g_track_max_x = -0x7FFFFFFFFFFF
+    g_track_max_y = -0x7FFFFFFFFFFF
+    g_track_max_z = -0x7FFFFFFFFFFF
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        g_track_min_x = min_i(g_track_min_x __load__(sg + SG_MINX))
+        g_track_min_y = min_i(g_track_min_y __load__(sg + SG_MINY))
+        g_track_min_z = min_i(g_track_min_z __load__(sg + SG_MINZ))
+        g_track_max_x = max_i(g_track_max_x __load__(sg + SG_MAXX))
+        g_track_max_y = max_i(g_track_max_y __load__(sg + SG_MAXY))
+        g_track_max_z = max_i(g_track_max_z __load__(sg + SG_MAXZ))
+        s += 1
+    }
+    g_kill_y = g_track_min_y - KILL_PLANE_DROP
+    return void
+}
+
+# Monotonic bake counter; render layers key their caches off the per-segment
+# stamp so any rebake invalidates them.
+let g_bake_stamp:int = 0
+
+# Re-bake one segment (frames + mesh + AABB). Used by the editor.
+let bake_one_segment = (si:SegId):>void => {
+    bake_segment_frames(si)
+    bake_segment_mesh(si)
+    bake_segment_aabb(si)
+    g_bake_stamp += 1
+    __store__(g_bake_stamp seg_p(si) + SG_BAKE_STAMP)
+    return void
+}
+
+let track_bake = ():>void => {
+    track_build_adjacency()
+    let s:int = 0
+    loop s <? seg_count() {
+        bake_one_segment(s)
+        s += 1
+    }
+    bake_progress()
+    bake_track_bounds()
+    return void
+}

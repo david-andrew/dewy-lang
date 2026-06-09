@@ -1,0 +1,263 @@
+# ============================================================================
+# uZero2 track query: probe point -> nearest surface point + normal.
+#
+# track_query() projects the probe onto the hinted segment's frame array
+# (windowed nearest, like the old waypoint query), follows graph neighbours
+# when the window hits a segment end (forks / merges resolve geometrically),
+# then solves the cross-section arc for the exact surface point and normal.
+#
+# track_query_global() re-acquires a segment from scratch by scanning the
+# per-segment AABBs; physics uses it while airborne / off-track so crafts
+# can jump between disconnected sections.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+
+# ---------- Query results -----------------------------------------------------
+
+let surf_x:Q16 = 0
+let surf_y:Q16 = 65536
+let surf_z:Q16 = 0
+let surf_nx:Q16 = 0
+let surf_ny:Q16 = 65536
+let surf_nz:Q16 = 0
+let surf_fx:Q16 = 0                      # track forward at the query point
+let surf_fy:Q16 = 0
+let surf_fz:Q16 = -65536
+let surf_t:Q16 = 0                       # lateral arc coordinate (signed, unclamped)
+let surf_wl:Q16 = 0                      # left half-width at the query point
+let surf_wr:Q16 = 0
+let surf_kind:SurfKind = 0
+let surf_rails:int = 0
+let surf_closed:bool = false             # closed pipe: no lateral edges
+let surf_seg:SegId = 0
+let surf_si:FrameId = 0
+let surf_prog:Q16 = 0                    # lap progress in [0, g_lap_len)
+let surf_past_end:bool = false           # probe overshot an open chain end
+
+const TQ_POS:Vec3 = __static_alloca__(24)
+const TQ_NRM:Vec3 = __static_alloca__(24)
+
+# ---------- Frame window search -------------------------------------------------
+
+let tq_best_seg:SegId = 0
+let tq_best_si:FrameId = 0
+let tq_best_d2:int = 0
+
+# Scan frames [lo, hi] of segment sid; keep the global best (squared
+# centerline distance).
+let tq_scan_window = (sid:SegId lo:int hi:int px:Q16 py:Q16 pz:Q16):>void => {
+    let sg:Ptr = seg_p(sid)
+    let n:int = seg_nsamp(sg)
+    let i:int = max_i(lo 0)
+    let top:int = min_i(hi n - 1)
+    loop i <=? top {
+        let fp:Ptr = fr_p(sg i)
+        let dx:Q16 = px - __load__(fp + FR_PX)
+        let dy:Q16 = py - __load__(fp + FR_PY)
+        let dz:Q16 = pz - __load__(fp + FR_PZ)
+        let d2:int = (dx * dx) + (dy * dy) + (dz * dz)
+        if d2 <? tq_best_d2 {
+            tq_best_d2 = d2
+            tq_best_seg = sid
+            tq_best_si = i
+        }
+        i += 1
+    }
+    return void
+}
+
+# Scan the near end of every segment incident to node nid (except skip_sid).
+let tq_scan_node_neighbors = (nid:NodeId skip_sid:SegId px:Q16 py:Q16 pz:Q16):>void => {
+    let adj:VecHandle = __load__(node_p(nid) + ND_ADJ)
+    if adj =? 0 { return void }
+    let i:int = 0
+    loop i <? vec_len(adj) {
+        let sid:SegId = vec_get(adj i)
+        if sid not=? skip_sid {
+            let sg:Ptr = seg_p(sid)
+            let n:int = seg_nsamp(sg)
+            if __load__(sg + SG_N0) =? nid {
+                tq_scan_window(sid 0 QUERY_WINDOW px py pz)
+            }
+            if __load__(sg + SG_N1) =? nid {
+                tq_scan_window(sid n - 1 - QUERY_WINDOW n - 1 px py pz)
+            }
+        }
+        i += 1
+    }
+    return void
+}
+
+# ---------- Main query -----------------------------------------------------------
+
+# Refine around the best frame: project onto the chord to the next frame,
+# build an interpolated cross-section context, solve it, publish surf_*.
+let tq_refine = (px:Q16 py:Q16 pz:Q16):>void => {
+    let sg:Ptr = seg_p(tq_best_seg)
+    let n:int = seg_nsamp(sg)
+    let ia:int = tq_best_si
+    if ia >=? n - 1 { ia = n - 2 }
+    let fa:Ptr = fr_p(sg ia)
+    let fb:Ptr = fr_p(sg ia + 1)
+
+    let segx:Q16 = __load__(fb + FR_PX) - __load__(fa + FR_PX)
+    let segy:Q16 = __load__(fb + FR_PY) - __load__(fa + FR_PY)
+    let segz:Q16 = __load__(fb + FR_PZ) - __load__(fa + FR_PZ)
+    let pax:Q16 = px - __load__(fa + FR_PX)
+    let pay:Q16 = py - __load__(fa + FR_PY)
+    let paz:Q16 = pz - __load__(fa + FR_PZ)
+    let seg_len2:int = (segx * segx) + (segy * segy) + (segz * segz)
+    let t:Q16 = 0
+    if seg_len2 >? 0 {
+        let dot:int = (pax * segx) + (pay * segy) + (paz * segz)
+        t = clamp_i((dot << 16) // seg_len2 0 FP_ONE)
+    }
+
+    # When the best frame sits before the hint's previous frame, projecting
+    # toward the next frame is still correct: t clamps to 0.
+    xse_setup_interp(fa fb t)
+    let s:Q16 = xse_solve_s(px py pz)
+    surf_t = s
+    # Closed pipes have no edges (atan2 already wrapped phi); open sections
+    # clamp to the arc extent.
+    let s_c:Q16 = s
+    if xse_closed =? false {
+        s_c = clamp_i(s_c (-xse_wl) xse_wr)
+    }
+    xse_point(s_c TQ_POS TQ_NRM)
+
+    surf_x = v3_x(TQ_POS)
+    surf_y = v3_y(TQ_POS)
+    surf_z = v3_z(TQ_POS)
+    surf_nx = v3_x(TQ_NRM)
+    surf_ny = v3_y(TQ_NRM)
+    surf_nz = v3_z(TQ_NRM)
+    surf_fx = v3_x(XSE_F)
+    surf_fy = v3_y(XSE_F)
+    surf_fz = v3_z(XSE_F)
+    surf_wl = xse_wl
+    surf_wr = xse_wr
+    surf_closed = xse_closed
+    surf_kind = __load__(fa + FR_KIND)
+    if t >? FP_HALF {
+        surf_kind = __load__(fb + FR_KIND)
+    }
+    surf_rails = __load__(sg + SG_RAILS)
+    surf_seg = tq_best_seg
+    surf_si = tq_best_si
+    # Longitudinal sanity: the cross-section solve assumes the probe sits in
+    # the plane of the chord. A large offset along track-forward means the
+    # probe is past an open chain end (or over a gap), not over this frame.
+    surf_past_end = false
+    let along:Q16 = fp_mul(px - surf_x v3_x(XSE_F)) + fp_mul(py - surf_y v3_y(XSE_F)) + fp_mul(pz - surf_z v3_z(XSE_F))
+    if (along >? SAMPLE_SPACING * 2) or (along <? SAMPLE_SPACING * (-2)) {
+        surf_past_end = true
+    }
+    let pa:Q16 = __load__(fa + FR_PROG)
+    surf_prog = pa + fp_mul(__load__(fb + FR_PROG) - pa t)
+    if (g_lap_len >? 0) and (surf_prog >=? g_lap_len) {
+        surf_prog -= g_lap_len
+    }
+    return void
+}
+
+let track_query = (px:Q16 py:Q16 pz:Q16 hint_seg:SegId hint_si:FrameId):>void => {
+    if hint_seg <? 0 { hint_seg = 0 }
+    if hint_seg >=? seg_count() { hint_seg = 0 }
+    let sg:Ptr = seg_p(hint_seg)
+    let n:int = seg_nsamp(sg)
+    if hint_si <? 0 { hint_si = 0 }
+    if hint_si >=? n { hint_si = n - 1 }
+
+    tq_best_d2 = 0x7FFFFFFFFFFFFFFF
+    tq_best_seg = hint_seg
+    tq_best_si = hint_si
+    tq_scan_window(hint_seg hint_si - QUERY_WINDOW hint_si + QUERY_WINDOW px py pz)
+
+    if tq_best_si <=? QUERY_END_MARGIN {
+        tq_scan_node_neighbors(__load__(sg + SG_N0) hint_seg px py pz)
+    }
+    if tq_best_si >=? n - 1 - QUERY_END_MARGIN {
+        tq_scan_node_neighbors(__load__(sg + SG_N1) hint_seg px py pz)
+    }
+
+    tq_refine(px py pz)
+    return void
+}
+
+# ---------- Global re-acquire ------------------------------------------------------
+
+# Distance-squared from a point to a segment's AABB (0 if inside).
+let tq_aabb_d2 = (sg:Ptr px:Q16 py:Q16 pz:Q16):>int => {
+    let dx:Q16 = 0
+    if px <? __load__(sg + SG_MINX) { dx = __load__(sg + SG_MINX) - px }
+    if px >? __load__(sg + SG_MAXX) { dx = px - __load__(sg + SG_MAXX) }
+    let dy:Q16 = 0
+    if py <? __load__(sg + SG_MINY) { dy = __load__(sg + SG_MINY) - py }
+    if py >? __load__(sg + SG_MAXY) { dy = py - __load__(sg + SG_MAXY) }
+    let dz:Q16 = 0
+    if pz <? __load__(sg + SG_MINZ) { dz = __load__(sg + SG_MINZ) - pz }
+    if pz >? __load__(sg + SG_MAXZ) { dz = pz - __load__(sg + SG_MAXZ) }
+    return (dx * dx) + (dy * dy) + (dz * dz)
+}
+
+# Scan every segment's AABB, coarsely sample the best candidates, then run
+# the precise query from the winning frame.
+let track_query_global = (px:Q16 py:Q16 pz:Q16):>void => {
+    let best_seg:SegId = 0
+    let best_si:FrameId = 0
+    let best_d2:int = 0x7FFFFFFFFFFFFFFF
+    let margin2:int = BROADPHASE_MARGIN * BROADPHASE_MARGIN
+
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        if tq_aabb_d2(sg px py pz) <=? margin2 {
+            let n:int = seg_nsamp(sg)
+            let i:int = 0
+            loop i <? n {
+                let fp:Ptr = fr_p(sg i)
+                let dx:Q16 = px - __load__(fp + FR_PX)
+                let dy:Q16 = py - __load__(fp + FR_PY)
+                let dz:Q16 = pz - __load__(fp + FR_PZ)
+                let d2:int = (dx * dx) + (dy * dy) + (dz * dz)
+                if d2 <? best_d2 {
+                    best_d2 = d2
+                    best_seg = s
+                    best_si = i
+                }
+                i += 4
+            }
+        }
+        s += 1
+    }
+
+    if best_d2 =? 0x7FFFFFFFFFFFFFFF {
+        # Nothing nearby: fall back to the nearest AABB.
+        let s2:int = 0
+        loop s2 <? seg_count() {
+            let d2:int = tq_aabb_d2(seg_p(s2) px py pz)
+            if d2 <? best_d2 {
+                best_d2 = d2
+                best_seg = s2
+                best_si = 0
+            }
+            s2 += 1
+        }
+    }
+
+    track_query(px py pz best_seg best_si)
+    return void
+}
+
+# Signed distance of the probe from the hover target along the surface
+# normal. Uses the most recent surf_* results.
+let normal_gap = (px:Q16 py:Q16 pz:Q16):>Q16 => {
+    let tx:Q16 = surf_x + fp_mul(HOVER_HEIGHT surf_nx)
+    let ty:Q16 = surf_y + fp_mul(HOVER_HEIGHT surf_ny)
+    let tz:Q16 = surf_z + fp_mul(HOVER_HEIGHT surf_nz)
+    return fp_mul(px - tx surf_nx) + fp_mul(py - ty surf_ny) + fp_mul(pz - tz surf_nz)
+}

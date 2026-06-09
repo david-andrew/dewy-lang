@@ -1,0 +1,24 @@
+# ============================================================================
+# uZero2: descriptive type aliases.
+#
+# These are Dewy "ignored type declarations": udewy parses and discards them,
+# but they let the rest of the program carry meaningful type annotations that
+# stay well-formed for the future dewy compiler. At runtime everything is a
+# 64-bit integer.
+# ============================================================================
+
+Q16:type = int          # 16.16 fixed point. 1.0 = 65536. World units: 1.0 = 1 metre.
+Angle:type = int        # angle, 1024 units per full turn
+AngleFine:type = int    # angle, 65536 units per full turn (high-resolution)
+Ptr:type = int          # raw memory address
+Cstr:type = int         # pointer to NUL-terminated character data
+Vec3:type = [x:Q16 y:Q16 z:Q16]            # pointer to 3 consecutive Q16 cells (24 bytes)
+NodeId:type = int       # index into the track node table
+SegId:type = int        # index into the track segment table
+FrameId:type = int      # index of a baked sample frame within a segment
+KeyId:type = int        # abstract key id (KEY_* constants)
+SurfKind:type = int     # SURF_* tag
+VecHandle:type = int    # stdlib growable vector handle
+TexSlot:type = int      # pointer to a 4-byte texture id cell
+F32Bits:type = int      # IEEE-754 single bit pattern in the low 32 bits
+F64Bits:type = int      # IEEE-754 double bit pattern

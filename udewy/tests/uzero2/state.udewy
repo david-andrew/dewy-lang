@@ -1,0 +1,166 @@
+# ============================================================================
+# uZero2: mutable global game state + static buffers. Backend-agnostic.
+# ============================================================================
+
+import p"./prelude.udewy"
+
+# ---------- Game flow ---------------------------------------------------------
+
+let running:bool = true
+let frame_count:int = 0
+let game_state:int = ST_TITLE
+let play_mode:int = MODE_RACE
+let race_start_frame:int = 0
+let title_blink_phase:int = 0
+let game_over_frames:int = 0
+let results_camera_frames:int = 0
+let pause_cursor:int = 0
+let menu_cursor:int = 0
+let tracksel_cursor:int = 0
+let current_track:int = 0                # index into the built-in track list
+let menu_flash_frames:int = 0            # transient status message timer
+let prev_state:int = 0                   # state to return to after PAUSE
+
+# ---------- Key edge tracking ---------------------------------------------------
+
+const KEYS_NOW:Ptr = __static_alloca__(52)        # KEY_COUNT bytes
+const KEYS_PREV:Ptr = __static_alloca__(52)
+
+# ---------- Mouse (refreshed by input_update) -------------------------------------
+
+let mouse_x:int = 0                      # window pixels
+let mouse_y:int = 0
+let mouse_buttons:int = 0                # MOUSE_L | MOUSE_M | MOUSE_R bits
+let mouse_buttons_prev:int = 0
+let mouse_wheel:int = 0                  # wheel steps this frame (+ = away)
+let mouse_prev_x:int = 0
+let mouse_prev_y:int = 0
+
+# Last known window size (set every frame by frame_step).
+let scr_w:int = 1280
+let scr_h:int = 720
+
+# ---------- Camera -----------------------------------------------------------------
+
+let cam_x:Q16 = 0
+let cam_y:Q16 = 360448
+let cam_z:Q16 = 983040
+let cam_fx:Q16 = 0
+let cam_fy:Q16 = 0
+let cam_fz:Q16 = -65536
+let cam_ux:Q16 = 0
+let cam_uy:Q16 = 65536
+let cam_uz:Q16 = 0
+let cur_fov_top_q16:Q16 = 131072
+
+# ---------- Player visual basis (rolled by bank for turn lean) ----------------------
+
+let vfx:Q16 = 0
+let vfy:Q16 = 0
+let vfz:Q16 = -65536
+let vrx:Q16 = 65536
+let vry:Q16 = 0
+let vrz:Q16 = 0
+let vux:Q16 = 0
+let vuy:Q16 = 65536
+let vuz:Q16 = 0
+
+# ---------- Per-car scratch globals --------------------------------------------------
+# A car's record is loaded into these, physics runs, then it is stored back.
+# AI cars share the same path.
+
+let cx:Q16 = 0
+let cy:Q16 = 98304
+let cz:Q16 = 0
+let cvx:Q16 = 0
+let cvy:Q16 = 0
+let cvz:Q16 = 0
+let fx:Q16 = 0
+let fy:Q16 = 0
+let fz:Q16 = -65536
+let rx:Q16 = 65536
+let ry:Q16 = 0
+let rz:Q16 = 0
+let ux:Q16 = 0
+let uy:Q16 = 65536
+let uz:Q16 = 0
+let energy:Q16 = 65536
+let speed_overcap:Q16 = 0
+let boost_active_frames:int = 0
+let cur_seg:SegId = 0
+let cur_si:FrameId = 0
+let cur_lap:int = 0
+let cur_status:int = 0
+let prev_fx:Q16 = 0
+let prev_fy:Q16 = 0
+let prev_fz:Q16 = -65536
+let bank:Angle = 0
+let was_airborne:bool = true
+let wall_contact:bool = false
+let top_speed_mult:Q16 = 65536
+let ai_aim:Q16 = 0
+let ai_aim_timer:int = 0
+let ai_boost_thresh:Q16 = 62259
+let ai_branch:int = 0
+let lg_seg:SegId = 0                     # last grounded segment / frame
+let lg_si:FrameId = 0
+let respawn_timer:int = 0
+let wrongway_frames:int = 0
+
+# ---------- HUD readouts (published by update_chase) -----------------------------------
+
+let vis_speed:Q16 = 0
+let vis_speed_norm:Q16 = 0
+let vis_boost_norm:Q16 = 0
+
+let player_position:int = 1
+let player_finish_frame:int = 0
+let active_cars:int = MAX_CARS           # 1 in playground / test-drive modes
+
+# ---------- Static buffers ----------------------------------------------------------------
+
+const CAR_BUF:Ptr = __static_alloca__(5120)            # CAR_BUF_BYTES
+const TRAIL_BUF:Ptr = __static_alloca__(2016)          # TRAIL_BUF_BYTES
+let trail_head:int = 0
+let trail_count:int = 0
+const SPARK_BUF:Ptr = __static_alloca__(10752)         # SPARK_BUF_BYTES
+let spark_head:int = 0
+const SPEED_LINE_STATE:Ptr = __static_alloca__(7680)   # SPEED_LINE_STATE_BYTES
+
+# Texture pixels and id slots: one checker per surface kind, ground, wall,
+# plus the font atlas.
+const CHECKER_PIXELS:Ptr = __static_alloca__(160)      # 10 textures * 16 bytes
+const CHECKER_TEXIDS:Ptr = __static_alloca__(80)       # 10 id cells (8 bytes each)
+const TEX_GROUND:int = 7                               # slots 0..6 = SURF_* kinds
+const TEX_WALL:int = 8
+const FONT_ATLAS_PIXELS:Ptr = __static_alloca__(12288) # FONT_ATLAS_BYTES
+const FONT_TEXID:Ptr = __static_alloca__(8)
+
+# ---------- Audio buffers --------------------------------------------------------------------
+
+const AUDIO_MIX_BUF:Ptr = __static_alloca__(1600)      # AUDIO_FRAME_BYTES
+const AUDIO_MUSIC_BUF:Ptr = __static_alloca__(176400)  # MUSIC_LOOP_BYTES
+const SFX_TABLE_BUF:Ptr = __static_alloca__(423360)    # SFX_TABLE_BYTES
+const SFX_VOICES:Ptr = __static_alloca__(320)          # SFX_BUF_BYTES
+let audio_enabled:int = 0
+let music_play_pos:int = 0
+let engine_phase:int = 0
+
+# ---------- Per-frame computed input (player or AI) --------------------------------------------
+
+let in_thrust:int = 0
+let in_brake:int = 0
+let in_steer_l:int = 0
+let in_steer_r:int = 0
+let in_strafe_l:int = 0
+let in_strafe_r:int = 0
+let in_boost:int = 0
+let in_boost_prev:int = 0
+let in_respawn:int = 0
+
+# ---------- FPS counter -------------------------------------------------------------------------
+
+let show_fps:int = SHOW_FPS_DEFAULT
+let fps_last_ticks:int = 0
+let fps_sample_count:int = 0
+let fps_value:int = 0

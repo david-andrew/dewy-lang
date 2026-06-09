@@ -1,0 +1,333 @@
+# ============================================================================
+# uZero2 WebAssembly / WebGL platform layer.
+#
+# Exposes the same backend surface as platform_sdl.udewy on top of the WASM
+# host intrinsics (udewy/backend/wasm.py): batched WebGL renderer, keyboard
+# lookup by KeyboardEvent.code, Int16 audio ring, Date.now() time.
+# ============================================================================
+
+$supported_targets = ["wasm32"]
+
+import p"./prelude.udewy"
+
+# ---------- Vertex scratch buffer ----------------------------------------------
+# Immediate-mode style emissions are batched between gpu_*_begin / gpu_end and
+# flushed with one __gpu_submit__. 9 f32 per vertex (x,y,z,u,v,r,g,b,a).
+
+const GPU_VERT_STRIDE:int = 36
+const GPU_MAX_VERTS:int = 8192
+const GPU_SCRATCH_BYTES:int = 294912     # 8192 * 36
+const GPU_SCRATCH:Ptr = __static_alloca__(294912)
+
+# Current primitive kind (host enum): 0=QUADS 1=QUAD_STRIP 2=TRIS 3=LINES
+let bk_prim_kind:int = 0
+let bk_vert_count:int = 0
+let bk_cur_r:Q16 = 65536
+let bk_cur_g:Q16 = 65536
+let bk_cur_b:Q16 = 65536
+let bk_cur_a:Q16 = 65536
+let bk_quit:bool = false
+
+# ---------- Key map (KEY_* id -> KeyboardEvent.code cstr) -----------------------
+
+const KEYMAP_BUF:Ptr = __static_alloca__(416)     # KEY_COUNT * 8
+
+let keymap_set = (key:KeyId code:Cstr):>void => {
+    __store__(code KEYMAP_BUF + key * 8)
+    return void
+}
+
+let keymap_init = ():>void => {
+    keymap_set(KEY_W "KeyW\0")
+    keymap_set(KEY_A "KeyA\0")
+    keymap_set(KEY_S "KeyS\0")
+    keymap_set(KEY_D "KeyD\0")
+    keymap_set(KEY_Q "KeyQ\0")
+    keymap_set(KEY_E "KeyE\0")
+    keymap_set(KEY_R "KeyR\0")
+    keymap_set(KEY_F "KeyF\0")
+    keymap_set(KEY_T "KeyT\0")
+    keymap_set(KEY_G "KeyG\0")
+    keymap_set(KEY_Y "KeyY\0")
+    keymap_set(KEY_H "KeyH\0")
+    keymap_set(KEY_U "KeyU\0")
+    keymap_set(KEY_O "KeyO\0")
+    keymap_set(KEY_I "KeyI\0")
+    keymap_set(KEY_J "KeyJ\0")
+    keymap_set(KEY_K "KeyK\0")
+    keymap_set(KEY_L "KeyL\0")
+    keymap_set(KEY_Z "KeyZ\0")
+    keymap_set(KEY_X "KeyX\0")
+    keymap_set(KEY_C "KeyC\0")
+    keymap_set(KEY_V "KeyV\0")
+    keymap_set(KEY_B "KeyB\0")
+    keymap_set(KEY_N "KeyN\0")
+    keymap_set(KEY_M "KeyM\0")
+    keymap_set(KEY_P "KeyP\0")
+    keymap_set(KEY_UP "ArrowUp\0")
+    keymap_set(KEY_DOWN "ArrowDown\0")
+    keymap_set(KEY_LEFT "ArrowLeft\0")
+    keymap_set(KEY_RIGHT "ArrowRight\0")
+    keymap_set(KEY_SPACE "Space\0")
+    keymap_set(KEY_ENTER "Enter\0")
+    keymap_set(KEY_ESC "Escape\0")
+    keymap_set(KEY_TAB "Tab\0")
+    keymap_set(KEY_LSHIFT "ShiftLeft\0")
+    keymap_set(KEY_1 "Digit1\0")
+    keymap_set(KEY_2 "Digit2\0")
+    keymap_set(KEY_3 "Digit3\0")
+    keymap_set(KEY_4 "Digit4\0")
+    keymap_set(KEY_5 "Digit5\0")
+    keymap_set(KEY_6 "Digit6\0")
+    keymap_set(KEY_7 "Digit7\0")
+    keymap_set(KEY_8 "Digit8\0")
+    keymap_set(KEY_9 "Digit9\0")
+    keymap_set(KEY_0 "Digit0\0")
+    keymap_set(KEY_F5 "F5\0")
+    keymap_set(KEY_F9 "F9\0")
+    keymap_set(KEY_DELETE "Delete\0")
+    keymap_set(KEY_BACKSPACE "Backspace\0")
+    keymap_set(KEY_LCTRL "ControlLeft\0")
+    keymap_set(KEY_LALT "AltLeft\0")
+    keymap_set(KEY_F2 "F2\0")
+    return void
+}
+
+# ---------- Lifecycle ------------------------------------------------------------
+
+let backend_init = (width:int height:int title_ptr:Cstr):>int => {
+    keymap_init()
+    return __gpu_init__(width height)
+}
+
+let backend_shutdown = ():>void => {
+    return void
+}
+
+let backend_poll = ():>void => {
+    return void
+}
+
+let backend_present = ():>void => {
+    __gpu_present__()
+    return void
+}
+
+let backend_get_size = (out_w_ptr:Ptr out_h_ptr:Ptr):>void => {
+    __store_u32__(__gpu_window_width__() out_w_ptr)
+    __store_u32__(__gpu_window_height__() out_h_ptr)
+    return void
+}
+
+# ---------- Time / input -----------------------------------------------------------
+
+let time_ms = ():>int => {
+    return __host_time__()
+}
+
+let plat_key_down = (key:KeyId):>bool => {
+    let code:Cstr = __load__(KEYMAP_BUF + key * 8)
+    if __key_down__(code cstr_len(code)) not=? 0 {
+        return true
+    }
+    return false
+}
+
+let plat_quit_requested = ():>bool => {
+    return bk_quit
+}
+
+# Browser pointer: position + primary button only (no wheel intrinsic).
+let plat_mouse_x = ():>int => { return __pointer_x__() }
+let plat_mouse_y = ():>int => { return __pointer_y__() }
+let plat_mouse_buttons = ():>int => {
+    if __pointer_down__() not=? 0 { return MOUSE_L }
+    return 0
+}
+let plat_mouse_wheel = ():>int => { return 0 }
+
+# ---------- GPU: per-frame state ------------------------------------------------------
+
+let gpu_set_viewport = (w:int h:int):>void => {
+    __gpu_set_viewport__(w h)
+    return void
+}
+
+let gpu_clear = (r_q:Q16 g_q:Q16 b_q:Q16):>void => {
+    __gpu_clear__(r_q g_q b_q)
+    return void
+}
+
+# ---------- GPU: camera / projection ----------------------------------------------------
+
+let gpu_set_perspective_frustum = (l_q:Q16 r_q:Q16 b_q:Q16 t_q:Q16 near_q:Q16 far_q:Q16):>void => {
+    __gpu_set_perspective_frustum__(l_q r_q b_q t_q near_q far_q)
+    return void
+}
+
+let gpu_set_view_matrix = (mat_ptr:Ptr):>void => {
+    __gpu_set_view_matrix__(mat_ptr)
+    return void
+}
+
+# ---------- GPU: render state -------------------------------------------------------------
+
+let gpu_set_texture = (tex_id:int):>void => {
+    __gpu_set_texture__(tex_id)
+    return void
+}
+
+let gpu_set_color3 = (r_q:Q16 g_q:Q16 b_q:Q16):>void => {
+    bk_cur_r = r_q
+    bk_cur_g = g_q
+    bk_cur_b = b_q
+    bk_cur_a = 65536
+    return void
+}
+
+let gpu_set_color4 = (r_q:Q16 g_q:Q16 b_q:Q16 a_q:Q16):>void => {
+    bk_cur_r = r_q
+    bk_cur_g = g_q
+    bk_cur_b = b_q
+    bk_cur_a = a_q
+    return void
+}
+
+let gpu_enable_depth_test = (on:bool):>void => {
+    __gpu_set_depth_test__(on)
+    return void
+}
+
+let gpu_enable_depth_write = (on:bool):>void => {
+    __gpu_set_depth_write__(on)
+    return void
+}
+
+let gpu_enable_blend_alpha = (on:bool):>void => {
+    if on not=? 0 { __gpu_set_blend__(1) } else { __gpu_set_blend__(0) }
+    return void
+}
+
+let gpu_enable_blend_additive = (on:bool):>void => {
+    if on not=? 0 { __gpu_set_blend__(2) } else { __gpu_set_blend__(0) }
+    return void
+}
+
+# ---------- GPU: geometry submission ---------------------------------------------------------
+
+let gpu_quads_begin = ():>void => {
+    bk_prim_kind = 0
+    bk_vert_count = 0
+    return void
+}
+
+let gpu_quad_strip_begin = ():>void => {
+    bk_prim_kind = 1
+    bk_vert_count = 0
+    return void
+}
+
+let gpu_tris_begin = ():>void => {
+    bk_prim_kind = 2
+    bk_vert_count = 0
+    return void
+}
+
+let gpu_lines_begin = (width_q:Q16):>void => {
+    __gpu_set_line_width__(width_q)
+    bk_prim_kind = 3
+    bk_vert_count = 0
+    return void
+}
+
+let gpu_end = ():>void => {
+    if bk_vert_count >? 0 {
+        __gpu_submit__(bk_prim_kind GPU_SCRATCH bk_vert_count)
+    }
+    bk_vert_count = 0
+    return void
+}
+
+let emit_vert = (x_b:F32Bits y_b:F32Bits z_b:F32Bits u_b:F32Bits v_b:F32Bits):>void => {
+    if bk_vert_count >=? GPU_MAX_VERTS {
+        return void
+    }
+    let off:Ptr = GPU_SCRATCH + bk_vert_count * GPU_VERT_STRIDE
+    __store_u32__(x_b off)
+    __store_u32__(y_b (off + 4))
+    __store_u32__(z_b (off + 8))
+    __store_u32__(u_b (off + 12))
+    __store_u32__(v_b (off + 16))
+    __store_u32__(q16_to_f32(bk_cur_r) (off + 20))
+    __store_u32__(q16_to_f32(bk_cur_g) (off + 24))
+    __store_u32__(q16_to_f32(bk_cur_b) (off + 28))
+    __store_u32__(q16_to_f32(bk_cur_a) (off + 32))
+    bk_vert_count += 1
+    return void
+}
+
+let gpu_vertex3 = (x_q:Q16 y_q:Q16 z_q:Q16):>void => {
+    emit_vert(q16_to_f32(x_q) q16_to_f32(y_q) q16_to_f32(z_q) 0 0)
+    return void
+}
+
+let gpu_vertex3_uv = (x_q:Q16 y_q:Q16 z_q:Q16 u_q:Q16 v_q:Q16):>void => {
+    emit_vert(q16_to_f32(x_q) q16_to_f32(y_q) q16_to_f32(z_q) q16_to_f32(u_q) q16_to_f32(v_q))
+    return void
+}
+
+# ---------- GPU: display lists (not available on WebGL1; callers fall back) ------
+
+let gpu_list_supported = ():>bool => { return false }
+let gpu_list_create = ():>int => { return 0 }
+let gpu_list_begin = (id:int):>void => { return void }
+let gpu_list_end = ():>void => { return void }
+let gpu_list_call = (id:int):>void => { return void }
+let gpu_list_delete = (id:int):>void => { return void }
+
+# ---------- GPU: 2D HUD overlay -----------------------------------------------------------------
+
+let gpu_overlay_begin = (sw_px:int sh_px:int):>void => {
+    __gpu_overlay_begin__(sw_px sh_px)
+    return void
+}
+
+let gpu_overlay_end = ():>void => {
+    __gpu_overlay_end__()
+    return void
+}
+
+let gpu_vertex_px = (x_px:int y_px:int):>void => {
+    emit_vert(__i64_to_f32_bits__(x_px) __i64_to_f32_bits__(y_px) 0 0 0)
+    return void
+}
+
+let gpu_vertex_px_uv = (x_px:int y_px:int u_q:Q16 v_q:Q16):>void => {
+    emit_vert(__i64_to_f32_bits__(x_px) __i64_to_f32_bits__(y_px) 0 q16_to_f32(u_q) q16_to_f32(v_q))
+    return void
+}
+
+# ---------- GPU: textures ---------------------------------------------------------------------
+
+let gpu_texture_create = (tex_slot_ptr:TexSlot w:int h:int pixels_ptr:Ptr repeat:bool nearest:bool):>void => {
+    let id:int = __gpu_create_texture__(w h pixels_ptr repeat nearest)
+    __store_u32__(id tex_slot_ptr)
+    return void
+}
+
+# ---------- Audio --------------------------------------------------------------------------------
+
+let audio_init = (sample_rate:int channels:int):>int => {
+    let rc:int = __audio_queue_init__(sample_rate channels)
+    if rc =? 0 { return 1 }
+    return 0
+}
+
+let audio_push_pcm_s16 = (buf_ptr:Ptr n_bytes:int):>void => {
+    __audio_queue_push__(buf_ptr n_bytes)
+    return void
+}
+
+let audio_queued_bytes = ():>int => {
+    return __audio_queue_size__()
+}

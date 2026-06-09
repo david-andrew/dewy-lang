@@ -1,0 +1,13 @@
+# ============================================================================
+# uZero2: common prelude. Every module imports this first; the preprocessor
+# dedupes repeated imports so the stdlib / shared modules are included once,
+# in dependency order.
+# ============================================================================
+
+$supported_targets = ["x86_64" "c" "wasm32"]
+
+import p"../../stdlib/stdlib.udewy"
+import p"../../stdlib/ds/ds.udewy"
+import p"./types.udewy"
+import p"./math.udewy"
+import p"./constants.udewy"

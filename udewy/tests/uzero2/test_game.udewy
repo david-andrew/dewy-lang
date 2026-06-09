@@ -1,0 +1,149 @@
+# ============================================================================
+# uZero2 headless gameplay test: load every built-in track, bake it, then
+# run a grid of AI-driven cars for a while and check they survive, advance
+# and stay near the track. Exercises physics + query + AI + the .uztrack
+# parser on real content with no graphics.
+# Run: python -m udewy udewy/tests/uzero2/test_game.udewy
+# ============================================================================
+
+$supported_targets = ["x86_64" "c"]
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_query.udewy"
+import p"./track_format.udewy"
+import p"./tracks_builtin.udewy"
+import p"./physics.udewy"
+import p"./ai.udewy"
+
+let fails:int = 0
+
+let check = (label:Cstr ok:bool):>void => {
+    if ok {
+        print("PASS ")
+    } else {
+        print("FAIL ")
+        fails += 1
+    }
+    let i:int = 0
+    loop __load_u8__(label + i) not=? 0 {
+        host_write(STDOUT label + i 1)
+        i += 1
+    }
+    print("\n")
+    return void
+}
+
+const SIM_FRAMES:int = 2400              # 40 seconds at 60 fps
+const SIM_CARS:int = 8
+
+let sim_track = (idx:int):>void => {
+    print("track ")
+    print_int(idx)
+    print("\n")
+    let ok:bool = track_parse(builtin_track_text(idx))
+    check("parse\0" ok)
+    if ok =? false {
+        print("  error line ")
+        print_int(fmt_error_line)
+        print("\n")
+        return void
+    }
+    track_bake()
+    check("bake_segs\0" seg_count() >? 0)
+    check("bake_lap\0" g_lap_len >? 0)
+
+    init_cars(SIM_CARS)
+    current_car_is_player = 0
+
+    let f:int = 0
+    loop f <? SIM_FRAMES {
+        let i:int = 0
+        loop i <? SIM_CARS {
+            car_load(i)
+            ai_compute_input(i)
+            physics_step()
+            car_store(i)
+            i += 1
+        }
+        pending_sfx = -1
+        f += 1
+    }
+
+    let alive:int = 0
+    let progressed:int = 0
+    let in_bounds:int = 0
+    let pad:Q16 = 6553600                # 100 m slack around the track box
+    if g_route_closed =? false {
+        pad = 26214400                   # open layouts: ballistic falls range further
+    }
+    let i:int = 0
+    loop i <? SIM_CARS {
+        car_load(i)
+        if cur_status =? 0 { alive += 1 }
+        let prog:int = car_get_progress(i)
+        if prog >? g_lap_len // 4 { progressed += 1 }
+        let px:Q16 = car_get_cx(i)
+        let py:Q16 = car_get_cy(i)
+        let pz:Q16 = car_get_cz(i)
+        if (px >? g_track_min_x - pad) and (px <? g_track_max_x + pad)
+           and (py >? g_kill_y) and (py <? g_track_max_y + pad)
+           and (pz >? g_track_min_z - pad) and (pz <? g_track_max_z + pad) {
+            in_bounds += 1
+        } else {
+            print("  car ")
+            print_int(i)
+            print(" out at ")
+            print_int(px // 65536)
+            print(",")
+            print_int(py // 65536)
+            print(",")
+            print_int(pz // 65536)
+            print("  box ")
+            print_int(g_track_min_x // 65536)
+            print("..")
+            print_int(g_track_max_x // 65536)
+            print(" y>")
+            print_int(g_kill_y // 65536)
+            print(" z ")
+            print_int(g_track_min_z // 65536)
+            print("..")
+            print_int(g_track_max_z // 65536)
+            print("\n")
+        }
+        i += 1
+    }
+    print("  alive ")
+    print_int(alive)
+    print("  progressed ")
+    print_int(progressed)
+    print("  in_bounds ")
+    print_int(in_bounds)
+    print("  player_prog ")
+    print_int(car_get_progress(0) // FP_ONE)
+    print("/")
+    print_int((g_lap_len // FP_ONE) * 3)
+    print("\n")
+    check("alive\0" alive =? SIM_CARS)
+    if g_route_closed {
+        check("progressed\0" progressed >=? SIM_CARS - 2)
+    }
+    check("in_bounds\0" in_bounds =? SIM_CARS)
+    return void
+}
+
+let main = ():>int => {
+    arena_init()
+    let t:int = 0
+    loop t <? TRACK_COUNT {
+        sim_track(t)
+        t += 1
+    }
+    print("\nfailures: ")
+    print_int(fails)
+    print("\n")
+    if fails >? 0 { return 1 }
+    return 0
+}

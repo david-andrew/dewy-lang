@@ -1,0 +1,19 @@
+# ============================================================================
+# uZero2: unified entry point / target router.
+#
+#   python -m udewy udewy/tests/uzero2/uzero2.udewy                 (native)
+#   python -m udewy udewy/tests/uzero2/uzero2.udewy --target c
+#   python -m udewy udewy/tests/uzero2/uzero2.udewy --target wasm32
+# ============================================================================
+
+$supported_targets = ["x86_64" "c" "wasm32"]
+
+if $target =? "x86_64" {
+    import p"./entry_sdl.udewy"
+}
+if $target =? "c" {
+    import p"./entry_sdl.udewy"
+}
+if $target =? "wasm32" {
+    import p"./entry_wasm.udewy"
+}

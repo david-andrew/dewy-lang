@@ -1,0 +1,764 @@
+# ============================================================================
+# uZero2 physics: per-car magnet-snap hover model on the track-graph query.
+#
+# The proven uzero_multi feel is preserved: hover gap along the surface
+# normal, SNAP_ALPHA pull, slope gravity, lateral grip, boost/overcap. What
+# changed: the surface comes from track_query (cross-section aware), walls
+# only exist where a segment has rails, open edges let the craft fall off,
+# and falling below the kill plane respawns at the last grounded frame.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_query.udewy"
+
+# ---------- Car load / store ---------------------------------------------------
+
+let car_load = (idx:int):>void => {
+    let o:Ptr = CAR_BUF + idx * CAR_STRIDE
+    cx = __load__(o + CARF_CX)
+    cy = __load__(o + CARF_CY)
+    cz = __load__(o + CARF_CZ)
+    cvx = __load__(o + CARF_CVX)
+    cvy = __load__(o + CARF_CVY)
+    cvz = __load__(o + CARF_CVZ)
+    fx = __load__(o + CARF_FX)
+    fy = __load__(o + CARF_FY)
+    fz = __load__(o + CARF_FZ)
+    ux = __load__(o + CARF_UX)
+    uy = __load__(o + CARF_UY)
+    uz = __load__(o + CARF_UZ)
+    rx = __load__(o + CARF_RX)
+    ry = __load__(o + CARF_RY)
+    rz = __load__(o + CARF_RZ)
+    energy = __load__(o + CARF_ENERGY)
+    speed_overcap = __load__(o + CARF_OVERCAP)
+    boost_active_frames = __load__(o + CARF_BOOST_FRAMES)
+    cur_seg = __load__(o + CARF_SEG)
+    cur_si = __load__(o + CARF_SI)
+    cur_lap = __load__(o + CARF_LAP)
+    cur_status = __load__(o + CARF_STATUS)
+    prev_fx = __load__(o + CARF_PREV_FX)
+    prev_fy = __load__(o + CARF_PREV_FY)
+    prev_fz = __load__(o + CARF_PREV_FZ)
+    bank = __load__(o + CARF_BANK)
+    was_airborne = __load__(o + CARF_AIRBORNE)
+    wall_contact = __load__(o + CARF_WALL_CONTACT)
+    in_boost_prev = __load__(o + CARF_BOOST_PREV)
+    top_speed_mult = __load__(o + CARF_TOP_SPEED_MULT)
+    ai_aim = __load__(o + CARF_AI_AIM)
+    ai_aim_timer = __load__(o + CARF_AI_AIM_TIMER)
+    ai_boost_thresh = __load__(o + CARF_AI_BOOST_THRESH)
+    ai_branch = __load__(o + CARF_AI_BRANCH)
+    lg_seg = __load__(o + CARF_LG_SEG)
+    lg_si = __load__(o + CARF_LG_SI)
+    respawn_timer = __load__(o + CARF_RESPAWN_TIMER)
+    wrongway_frames = __load__(o + CARF_WRONGWAY)
+    return void
+}
+
+let car_store = (idx:int):>void => {
+    let o:Ptr = CAR_BUF + idx * CAR_STRIDE
+    __store__(cx (o + CARF_CX))
+    __store__(cy (o + CARF_CY))
+    __store__(cz (o + CARF_CZ))
+    __store__(cvx (o + CARF_CVX))
+    __store__(cvy (o + CARF_CVY))
+    __store__(cvz (o + CARF_CVZ))
+    __store__(fx (o + CARF_FX))
+    __store__(fy (o + CARF_FY))
+    __store__(fz (o + CARF_FZ))
+    __store__(ux (o + CARF_UX))
+    __store__(uy (o + CARF_UY))
+    __store__(uz (o + CARF_UZ))
+    __store__(rx (o + CARF_RX))
+    __store__(ry (o + CARF_RY))
+    __store__(rz (o + CARF_RZ))
+    __store__(energy (o + CARF_ENERGY))
+    __store__(speed_overcap (o + CARF_OVERCAP))
+    __store__(boost_active_frames (o + CARF_BOOST_FRAMES))
+    __store__(cur_seg (o + CARF_SEG))
+    __store__(cur_si (o + CARF_SI))
+    __store__(cur_lap (o + CARF_LAP))
+    __store__(cur_status (o + CARF_STATUS))
+    __store__(prev_fx (o + CARF_PREV_FX))
+    __store__(prev_fy (o + CARF_PREV_FY))
+    __store__(prev_fz (o + CARF_PREV_FZ))
+    __store__(bank (o + CARF_BANK))
+    __store__(was_airborne (o + CARF_AIRBORNE))
+    __store__(wall_contact (o + CARF_WALL_CONTACT))
+    __store__(in_boost_prev (o + CARF_BOOST_PREV))
+    __store__(top_speed_mult (o + CARF_TOP_SPEED_MULT))
+    __store__(ai_aim (o + CARF_AI_AIM))
+    __store__(ai_aim_timer (o + CARF_AI_AIM_TIMER))
+    __store__(ai_boost_thresh (o + CARF_AI_BOOST_THRESH))
+    __store__(ai_branch (o + CARF_AI_BRANCH))
+    __store__(lg_seg (o + CARF_LG_SEG))
+    __store__(lg_si (o + CARF_LG_SI))
+    __store__(respawn_timer (o + CARF_RESPAWN_TIMER))
+    __store__(wrongway_frames (o + CARF_WRONGWAY))
+    let lap_len:int = g_lap_len
+    if lap_len <=? 0 { lap_len = PROG_PER_SEG }
+    let frac:Q16 = __load__(fr_p(seg_p(cur_seg) min_i(cur_si seg_nsamp(seg_p(cur_seg)) - 1)) + FR_PROG)
+    __store__(cur_lap * lap_len + frac (o + CARF_PROGRESS))
+    return void
+}
+
+let car_get_progress = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_PROGRESS) }
+let car_get_status = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_STATUS) }
+let car_get_lap = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_LAP) }
+let car_get_hue = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_HUE) }
+let car_get_cx = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_CX) }
+let car_get_cy = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_CY) }
+let car_get_cz = (idx:int):>int => { return __load__(CAR_BUF + idx * CAR_STRIDE + CARF_CZ) }
+
+# ---------- Grid placement -------------------------------------------------------
+
+let start_si = ():>FrameId => {
+    let sg:Ptr = seg_p(g_start_seg)
+    let n:int = seg_nsamp(sg)
+    return clamp_i(fp_mul(g_start_t (n - 1) * FP_ONE) >> 16 0 n - 1)
+}
+
+const GRID_R:Vec3 = __static_alloca__(24)
+
+let init_cars = (count:int):>void => {
+    active_cars = clamp_i(count 1 MAX_CARS)
+    xs_seed(0xA17D00D5)
+    let sg:Ptr = seg_p(g_start_seg)
+    let si:FrameId = start_si()
+    let fp:Ptr = fr_p(sg si)
+    v3_cross(GRID_R fp + FR_FX fp + FR_UX)
+    let bfx:Q16 = __load__(fp + FR_FX)
+    let bfy:Q16 = __load__(fp + FR_FY)
+    let bfz:Q16 = __load__(fp + FR_FZ)
+    let bux:Q16 = __load__(fp + FR_UX)
+    let buy:Q16 = __load__(fp + FR_UY)
+    let buz:Q16 = __load__(fp + FR_UZ)
+    let brx:Q16 = v3_x(GRID_R)
+    let bry:Q16 = v3_y(GRID_R)
+    let brz:Q16 = v3_z(GRID_R)
+    let base_x:Q16 = __load__(fp + FR_PX) + fp_mul(bux HOVER_HEIGHT)
+    let base_y:Q16 = __load__(fp + FR_PY) + fp_mul(buy HOVER_HEIGHT)
+    let base_z:Q16 = __load__(fp + FR_PZ) + fp_mul(buz HOVER_HEIGHT)
+
+    let i:int = 0
+    loop i <? active_cars {
+        let row:int = i // 4
+        let col:int = i % 4
+        let lateral_q:Q16 = (col * 393216) - 589824
+        let behind_q:Q16 = row * 524288
+        let o:Ptr = CAR_BUF + i * CAR_STRIDE
+        __store__(base_x + fp_mul(brx lateral_q) - fp_mul(bfx behind_q) (o + CARF_CX))
+        __store__(base_y + fp_mul(bry lateral_q) - fp_mul(bfy behind_q) (o + CARF_CY))
+        __store__(base_z + fp_mul(brz lateral_q) - fp_mul(bfz behind_q) (o + CARF_CZ))
+        __store__(0 (o + CARF_CVX))
+        __store__(0 (o + CARF_CVY))
+        __store__(0 (o + CARF_CVZ))
+        __store__(bfx (o + CARF_FX))
+        __store__(bfy (o + CARF_FY))
+        __store__(bfz (o + CARF_FZ))
+        __store__(bux (o + CARF_UX))
+        __store__(buy (o + CARF_UY))
+        __store__(buz (o + CARF_UZ))
+        __store__(brx (o + CARF_RX))
+        __store__(bry (o + CARF_RY))
+        __store__(brz (o + CARF_RZ))
+        __store__(ENERGY_FULL (o + CARF_ENERGY))
+        __store__(0 (o + CARF_OVERCAP))
+        __store__(0 (o + CARF_BOOST_FRAMES))
+        __store__(g_start_seg (o + CARF_SEG))
+        __store__(si (o + CARF_SI))
+        __store__(0 (o + CARF_LAP))
+        __store__(0 (o + CARF_PROGRESS))
+        __store__(0 (o + CARF_STATUS))
+        __store__(bfx (o + CARF_PREV_FX))
+        __store__(bfy (o + CARF_PREV_FY))
+        __store__(bfz (o + CARF_PREV_FZ))
+        __store__(0 (o + CARF_BANK))
+        let hue:Q16 = (i * FP_ONE) // MAX_CARS
+        if i =? 0 {
+            hue = 40632
+        }
+        __store__(hue (o + CARF_HUE))
+        __store__(1 (o + CARF_AIRBORNE))
+        __store__(0 (o + CARF_WALL_CONTACT))
+        __store__(0 (o + CARF_BOOST_PREV))
+        if i =? 0 {
+            __store__(FP_ONE (o + CARF_TOP_SPEED_MULT))
+            __store__(0 (o + CARF_AI_AIM))
+            __store__(0 (o + CARF_AI_AIM_TIMER))
+            __store__(62259 (o + CARF_AI_BOOST_THRESH))
+            __store__(0 (o + CARF_AI_BRANCH))
+        } else {
+            __store__(55706 + xs_range(13108) (o + CARF_TOP_SPEED_MULT))
+            __store__((-524288) + xs_range(1048576) (o + CARF_AI_AIM))
+            __store__(60 + xs_range(180) (o + CARF_AI_AIM_TIMER))
+            __store__(55706 + xs_range(7864) (o + CARF_AI_BOOST_THRESH))
+            __store__(xs_range(0x7FFFFFFF) (o + CARF_AI_BRANCH))
+        }
+        __store__(g_start_seg (o + CARF_LG_SEG))
+        __store__(si (o + CARF_LG_SI))
+        __store__(0 (o + CARF_RESPAWN_TIMER))
+        __store__(0 (o + CARF_WRONGWAY))
+        i += 1
+    }
+    return void
+}
+
+# ---------- Audio / explosion triggers ----------------------------------------------
+
+let pending_sfx:int = -1
+let pending_explode_player:int = 0
+let current_car_is_player:int = 0
+
+let trigger_sfx = (kind:int):>void => {
+    pending_sfx = kind
+    return void
+}
+
+# ---------- Orientation helpers -------------------------------------------------------
+
+let reortho_forward = ():>void => {
+    let f_dot_u:Q16 = fp_mul(fx ux) + fp_mul(fy uy) + fp_mul(fz uz)
+    fx -= fp_mul(ux f_dot_u)
+    fy -= fp_mul(uy f_dot_u)
+    fz -= fp_mul(uz f_dot_u)
+    let m:Q16 = fp_sqrt((fx * fx) + (fy * fy) + (fz * fz))
+    if m >? 1024 {
+        fx = fp_div(fx m)
+        fy = fp_div(fy m)
+        fz = fp_div(fz m)
+    }
+    return void
+}
+
+let update_right = ():>void => {
+    rx = fp_mul(fy uz) - fp_mul(fz uy)
+    ry = fp_mul(fz ux) - fp_mul(fx uz)
+    rz = fp_mul(fx uy) - fp_mul(fy ux)
+    return void
+}
+
+let rotate_forward = (angle:Angle):>void => {
+    let c:Q16 = cos_fp(angle)
+    let s:Q16 = sin_fp(angle)
+    let nfx:Q16 = fp_mul(fx c) + fp_mul(rx s)
+    let nfy:Q16 = fp_mul(fy c) + fp_mul(ry s)
+    let nfz:Q16 = fp_mul(fz c) + fp_mul(rz s)
+    fx = nfx
+    fy = nfy
+    fz = nfz
+    update_right()
+    return void
+}
+
+# ---------- Sparks (data only; drawn by render_world) ----------------------------------
+
+let spark_emit = (px:Q16 py:Q16 pz:Q16 nx:Q16 ny:Q16 nz:Q16 count:int):>void => {
+    let i:int = 0
+    loop i <? count {
+        let slot:Ptr = SPARK_BUF + (spark_head * SPARK_STRIDE)
+        spark_head = (spark_head + 1) % SPARK_MAX
+        let speed:Q16 = SPARK_BASE_SPEED + xs_range(SPARK_SPEED_VAR) - (SPARK_SPEED_VAR // 2)
+        let jx:Q16 = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let jy:Q16 = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        let jz:Q16 = xs_range(SPARK_JITTER * 2) - SPARK_JITTER
+        __store__(px slot)
+        __store__(py (slot + 8))
+        __store__(pz (slot + 16))
+        __store__(fp_mul(nx speed) + jx (slot + 24))
+        __store__(fp_mul(ny speed) + jy + SPARK_UP_BIAS (slot + 32))
+        __store__(fp_mul(nz speed) + jz (slot + 40))
+        __store__(FP_ONE (slot + 48))
+        i += 1
+    }
+    return void
+}
+
+let spark_step = ():>void => {
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        let slot:Ptr = SPARK_BUF + (i * SPARK_STRIDE)
+        let life:Q16 = __load__(slot + 48)
+        if life >? 0 {
+            __store__(__load__(slot) + __load__(slot + 24) slot)
+            __store__(__load__(slot + 8) + __load__(slot + 32) (slot + 8))
+            __store__(__load__(slot + 16) + __load__(slot + 40) (slot + 16))
+            __store__(__load__(slot + 32) - SPARK_GRAVITY (slot + 32))
+            life -= SPARK_LIFE_DECAY
+            if life <? 0 { life = 0 }
+            __store__(life (slot + 48))
+        }
+        i += 1
+    }
+    return void
+}
+
+# ---------- Respawn ----------------------------------------------------------------------
+
+let respawn_car = ():>void => {
+    let sg:Ptr = seg_p(lg_seg)
+    let si:FrameId = clamp_i(lg_si 0 seg_nsamp(sg) - 1)
+    let fp:Ptr = fr_p(sg si)
+    cx = __load__(fp + FR_PX) + fp_mul(__load__(fp + FR_UX) RESPAWN_LIFT)
+    cy = __load__(fp + FR_PY) + fp_mul(__load__(fp + FR_UY) RESPAWN_LIFT)
+    cz = __load__(fp + FR_PZ) + fp_mul(__load__(fp + FR_UZ) RESPAWN_LIFT)
+    cvx = 0
+    cvy = 0
+    cvz = 0
+    fx = __load__(fp + FR_FX)
+    fy = __load__(fp + FR_FY)
+    fz = __load__(fp + FR_FZ)
+    ux = __load__(fp + FR_UX)
+    uy = __load__(fp + FR_UY)
+    uz = __load__(fp + FR_UZ)
+    update_right()
+    cur_seg = lg_seg
+    cur_si = si
+    speed_overcap = 0
+    boost_active_frames = 0
+    respawn_timer = RESPAWN_FREEZE_FRAMES
+    was_airborne = true
+    wall_contact = false
+    return void
+}
+
+# ---------- Per-frame query helper ----------------------------------------------------------
+
+let surf_is_apron:bool = false           # current surf_* is the ground apron
+
+# Lateral off-surface test against the current surf_* result. Closed pipes
+# have no edges. Rails keep the craft on; open edges count as off as soon as
+# the craft fully leaves the surface.
+let lateral_off_surface = ():>bool => {
+    if surf_is_apron { return false }
+    if surf_past_end { return true }
+    if surf_closed { return false }
+    let margin_r:Q16 = CRAFT_HALF_W
+    if (surf_rails and RAIL_RIGHT) not=? 0 { margin_r = OFF_TRACK_LAT }
+    let margin_l:Q16 = CRAFT_HALF_W
+    if (surf_rails and RAIL_LEFT) not=? 0 { margin_l = OFF_TRACK_LAT }
+    if surf_t >? surf_wr + margin_r { return true }
+    if surf_t <? -(surf_wl + margin_l) { return true }
+    return false
+}
+
+# Replace the surf_* result with the flat ground apron under the craft.
+# Track hints (surf_seg / surf_si / surf_prog) are left alone so the craft
+# can re-acquire features it drives toward.
+let apron_override = ():>void => {
+    surf_is_apron = true
+    surf_x = cx
+    surf_y = g_apron_y
+    surf_z = cz
+    surf_nx = 0
+    surf_ny = FP_ONE
+    surf_nz = 0
+    let hx:Q16 = fx
+    let hz:Q16 = fz
+    let hm:Q16 = fp_sqrt((hx * hx) + (hz * hz))
+    if hm >? 1024 {
+        surf_fx = fp_div(hx hm)
+        surf_fy = 0
+        surf_fz = fp_div(hz hm)
+    } else {
+        surf_fx = 0
+        surf_fy = 0
+        surf_fz = -FP_ONE
+    }
+    surf_t = 0
+    surf_wl = 0x7FFFFFFFFFFF
+    surf_wr = 0x7FFFFFFFFFFF
+    surf_kind = SURF_NORMAL
+    surf_rails = 0
+    surf_closed = false
+    surf_past_end = false
+    return void
+}
+
+# Query the track at the craft position; falls back to a global broadphase
+# re-acquire when the hinted result is implausibly far (jumps between
+# disconnected sections, editor teleports, ...). On apron tracks the flat
+# ground plane competes with the queried surface: whichever is closer along
+# its normal wins (with a small bias toward real track), so features can be
+# entered, ridden and left freely.
+let craft_query = ():>void => {
+    track_query(cx cy cz cur_seg cur_si)
+    let gap:Q16 = normal_gap(cx cy cz)
+    let reacquire:Q16 = 3276800          # 50 m from the hover target
+    if g_has_apron { reacquire = AIR_GAP * 2 }
+    if abs_i(gap) >? reacquire {
+        track_query_global(cx cy cz)
+        gap = normal_gap(cx cy cz)
+    }
+    surf_is_apron = false
+    if g_has_apron {
+        let apron_gap:Q16 = cy - (g_apron_y + HOVER_HEIGHT)
+        let track_ok:bool = lateral_off_surface() =? false
+        if track_ok and (abs_i(gap) <=? abs_i(apron_gap) + 131072) {
+            return void
+        }
+        apron_override()
+    }
+    return void
+}
+
+# ---------- Physics step ---------------------------------------------------------------------
+
+let physics_step = ():>void => {
+    if cur_status not=? 0 {
+        cvx -= cvx // 64
+        cvy -= GRAVITY
+        cvz -= cvz // 64
+        cx += cvx
+        cy += cvy
+        cz += cvz
+        if cy <? g_kill_y {
+            cy = g_kill_y
+            cvy = 0
+        }
+        return void
+    }
+
+    if respawn_timer >? 0 {
+        respawn_timer -= 1
+        craft_query()
+        cur_seg = surf_seg
+        cur_si = surf_si
+        return void
+    }
+
+    craft_query()
+    let gap_now:Q16 = normal_gap(cx cy cz)
+    let airborne:int = 0
+    if gap_now >? AIR_GAP { airborne = 1 }
+    if lateral_off_surface() { airborne = 1 }
+
+    if (was_airborne not=? 0) and (airborne =? 0) {
+        let speed_xy:Q16 = fp_sqrt((cvx * cvx) + (cvz * cvz))
+        let burst:int = 6 + (speed_xy // 32768)
+        if burst >? SPARK_MAX_BURST { burst = SPARK_MAX_BURST }
+        spark_emit(cx cy cz surf_nx surf_ny surf_nz burst)
+    }
+    was_airborne = airborne
+
+    if airborne =? 0 {
+        ux = surf_nx
+        uy = surf_ny
+        uz = surf_nz
+    } else {
+        let any_input:int = in_thrust or in_brake or in_steer_l or in_steer_r or in_strafe_l or in_strafe_r or in_boost
+        if any_input not=? 0 {
+            if uy <? -58982 {
+                if (ux >? -6553) and (ux <? 6553) {
+                    ux += 6553
+                }
+            }
+            ux += fp_mul((-ux) UP_ALPHA_AIR)
+            uy += fp_mul(FP_ONE - uy UP_ALPHA_AIR)
+            uz += fp_mul((-uz) UP_ALPHA_AIR)
+            let um:Q16 = fp_sqrt((ux * ux) + (uy * uy) + (uz * uz))
+            if um >? 1024 {
+                ux = fp_div(ux um)
+                uy = fp_div(uy um)
+                uz = fp_div(uz um)
+            }
+        }
+    }
+    reortho_forward()
+    update_right()
+
+    let speed_xyz:Q16 = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let speed_norm:Q16 = 0
+    if TOP_SPEED >? 0 {
+        speed_norm = (speed_xyz << 16) // (TOP_SPEED + 1)
+    }
+    if speed_norm >? FP_ONE { speed_norm = FP_ONE }
+    if speed_norm <? 0 { speed_norm = 0 }
+
+    let steer_in:int = 0
+    if in_steer_l not=? 0 { steer_in -= 1 }
+    if in_steer_r not=? 0 { steer_in += 1 }
+    let steer_rate:Angle = STEER_BASE - fp_mul((STEER_BASE - STEER_MIN) speed_norm)
+    if steer_in not=? 0 {
+        rotate_forward(steer_in * steer_rate)
+    }
+
+    let thrust_active:int = 0
+    if in_thrust not=? 0 {
+        cvx += fp_mul(fx THRUST_ACCEL)
+        cvy += fp_mul(fy THRUST_ACCEL)
+        cvz += fp_mul(fz THRUST_ACCEL)
+        thrust_active = 1
+    }
+
+    let player_edge:int = (in_boost not=? 0) and (in_boost_prev =? 0)
+    let ai_ready:int = (current_car_is_player =? 0) and (in_boost not=? 0) and (boost_active_frames =? 0)
+    let boost_pressed:int = player_edge or ai_ready
+    in_boost_prev = in_boost
+    if (boost_pressed not=? 0) and (energy >=? BOOST_COST_Q) and (boost_active_frames =? 0) {
+        cvx += fp_mul(fx BOOST_IMPULSE)
+        cvy += fp_mul(fy BOOST_IMPULSE)
+        cvz += fp_mul(fz BOOST_IMPULSE)
+        boost_active_frames = BOOST_DURATION
+        speed_overcap = BOOST_BONUS
+        energy -= BOOST_COST_Q
+        trigger_sfx(SFX_KIND_BOOST)
+    }
+    if boost_active_frames >? 0 {
+        boost_active_frames -= 1
+    }
+
+    if surf_kind =? SURF_BOOST {
+        cvx += fp_mul(fx PAD_IMPULSE)
+        cvy += fp_mul(fy PAD_IMPULSE)
+        cvz += fp_mul(fz PAD_IMPULSE)
+        if speed_overcap <? PAD_BOOST_OVERCAP {
+            speed_overcap = PAD_BOOST_OVERCAP
+        }
+    }
+    if surf_kind =? SURF_RECHARGE {
+        if energy <? ENERGY_FULL {
+            energy += RECHARGE_RATE
+            if energy >? ENERGY_FULL { energy = ENERGY_FULL }
+        }
+    }
+
+    if speed_overcap >? 0 {
+        let overcap_decay:Q16 = BOOST_OVERCAP_STRAIGHT_DECAY
+        if steer_in not=? 0 { overcap_decay = BOOST_OVERCAP_TURN_DECAY }
+        speed_overcap -= overcap_decay
+        if speed_overcap <? 0 { speed_overcap = 0 }
+    }
+
+    if in_brake not=? 0 {
+        let fwd_speed:Q16 = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        if fwd_speed >? 0 {
+            let brake:Q16 = BRAKE_DECEL
+            if brake >? fwd_speed { brake = fwd_speed }
+            cvx -= fp_mul(fx brake)
+            cvy -= fp_mul(fy brake)
+            cvz -= fp_mul(fz brake)
+        }
+    }
+
+    let strafe:Q16 = 0
+    if in_strafe_l not=? 0 { strafe -= STRAFE_RATE }
+    if in_strafe_r not=? 0 { strafe += STRAFE_RATE }
+    if strafe not=? 0 {
+        cx += fp_mul(rx strafe)
+        cy += fp_mul(ry strafe)
+        cz += fp_mul(rz strafe)
+    }
+
+    if airborne =? 0 {
+        let side_dot:Q16 = fp_mul(cvx rx) + fp_mul(cvy ry) + fp_mul(cvz rz)
+        let fwd_dot:Q16 = fp_mul(cvx fx) + fp_mul(cvy fy) + fp_mul(cvz fz)
+        let new_side:Q16 = side_dot - fp_mul(side_dot LATERAL_GRIP)
+        let plane_sq:int = (fwd_dot * fwd_dot) + (side_dot * side_dot)
+        let new_fwd_sq:int = plane_sq - (new_side * new_side)
+        let new_fwd:Q16 = fwd_dot
+        if new_fwd_sq >? 0 {
+            new_fwd = fp_sqrt(new_fwd_sq)
+            if fwd_dot <? 0 { new_fwd = -new_fwd }
+        }
+        let dfwd:Q16 = new_fwd - fwd_dot
+        let dside:Q16 = new_side - side_dot
+        cvx += fp_mul(fx dfwd) + fp_mul(rx dside)
+        cvy += fp_mul(fy dfwd) + fp_mul(ry dside)
+        cvz += fp_mul(fz dfwd) + fp_mul(rz dside)
+
+        let drag:Q16 = DRAG_COAST
+        if thrust_active not=? 0 { drag = DRAG_THRUST }
+        let drag_force:Q16 = fp_mul(new_fwd drag)
+        cvx -= fp_mul(fx drag_force)
+        cvy -= fp_mul(fy drag_force)
+        cvz -= fp_mul(fz drag_force)
+    }
+
+    let max_speed:Q16 = fp_mul(TOP_SPEED top_speed_mult) + speed_overcap
+    let cur_speed:Q16 = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    if cur_speed >? max_speed {
+        cvx = fp_div(fp_mul(cvx max_speed) cur_speed)
+        cvy = fp_div(fp_mul(cvy max_speed) cur_speed)
+        cvz = fp_div(fp_mul(cvz max_speed) cur_speed)
+    }
+
+    if airborne not=? 0 {
+        cvy -= GRAVITY
+    } else {
+        let cv_dot_n:Q16 = fp_mul(cvx surf_nx) + fp_mul(cvy surf_ny) + fp_mul(cvz surf_nz)
+        cvx -= fp_mul(surf_nx cv_dot_n)
+        cvy -= fp_mul(surf_ny cv_dot_n)
+        cvz -= fp_mul(surf_nz cv_dot_n)
+        let proj:Q16 = fp_mul(SLOPE_GRAVITY surf_ny)
+        cvx += fp_mul(surf_nx proj)
+        cvy += fp_mul(surf_ny proj) - SLOPE_GRAVITY
+        cvz += fp_mul(surf_nz proj)
+    }
+
+    cx += cvx
+    cy += cvy
+    cz += cvz
+
+    # ---- rail collision -------------------------------------------------------
+    let pre_cvx:Q16 = cvx
+    let pre_cvy:Q16 = cvy
+    let pre_cvz:Q16 = cvz
+    craft_query()
+    let off_track:bool = lateral_off_surface()
+    if off_track {
+        wall_contact = false
+    }
+    let hit_rail:bool = false
+    if (off_track =? false) and (surf_closed =? false) {
+        let dir:int = 0
+        let push:Q16 = 0
+        if (surf_t >? surf_wr - CRAFT_HALF_W) and ((surf_rails and RAIL_RIGHT) not=? 0) {
+            dir = 1
+            push = surf_t - (surf_wr - CRAFT_HALF_W)
+        }
+        if (surf_t <? -(surf_wl - CRAFT_HALF_W)) and ((surf_rails and RAIL_LEFT) not=? 0) {
+            dir = -1
+            push = (-(surf_wl - CRAFT_HALF_W)) - surf_t
+        }
+        if dir not=? 0 {
+            hit_rail = true
+            let q_rx:Q16 = fp_mul(fy surf_nz) - fp_mul(fz surf_ny)
+            let q_ry:Q16 = fp_mul(fz surf_nx) - fp_mul(fx surf_nz)
+            let q_rz:Q16 = fp_mul(fx surf_ny) - fp_mul(fy surf_nx)
+            cx -= dir * fp_mul(q_rx push)
+            cy -= dir * fp_mul(q_ry push)
+            cz -= dir * fp_mul(q_rz push)
+            let lat_v:Q16 = fp_mul(cvx q_rx) + fp_mul(cvy q_ry) + fp_mul(cvz q_rz)
+            if (dir >? 0) and (lat_v >? 0) {
+                cvx -= fp_mul(q_rx lat_v)
+                cvy -= fp_mul(q_ry lat_v)
+                cvz -= fp_mul(q_rz lat_v)
+            }
+            if (dir <? 0) and (lat_v <? 0) {
+                cvx -= fp_mul(q_rx lat_v)
+                cvy -= fp_mul(q_ry lat_v)
+                cvz -= fp_mul(q_rz lat_v)
+            }
+            let was_zero:int = energy <=? 0
+            let cost:Q16 = WALL_DRAIN
+            if wall_contact =? 0 {
+                cost = WALL_HIT_INITIAL
+                trigger_sfx(SFX_KIND_WALL)
+            }
+            energy -= cost
+            if energy <? 0 { energy = 0 }
+            wall_contact = true
+            if was_zero not=? 0 {
+                cur_status = 1
+                if current_car_is_player not=? 0 {
+                    pending_explode_player = 1
+                }
+                spark_emit(cx cy cz q_rx q_ry q_rz SPARK_MAX_BURST)
+            }
+        }
+    }
+    if hit_rail =? false {
+        wall_contact = false
+    }
+
+    let dvx:Q16 = cvx - pre_cvx
+    let dvy:Q16 = cvy - pre_cvy
+    let dvz:Q16 = cvz - pre_cvz
+    let imp_mag:Q16 = fp_sqrt((dvx * dvx) + (dvy * dvy) + (dvz * dvz))
+    if imp_mag >? SPARK_IMPULSE_THRESHOLD {
+        let burst:int = (imp_mag - SPARK_IMPULSE_THRESHOLD) // SPARK_IMPULSE_PER_PARTICLE + 1
+        if burst >? SPARK_MAX_BURST { burst = SPARK_MAX_BURST }
+        spark_emit(cx cy cz fp_div(dvx imp_mag) fp_div(dvy imp_mag) fp_div(dvz imp_mag) burst)
+    }
+
+    # ---- magnet snap ------------------------------------------------------------
+    craft_query()
+    let post_off:bool = lateral_off_surface()
+    let post_gap:Q16 = normal_gap(cx cy cz)
+    if (post_off =? false) and (post_gap <=? AIR_GAP) {
+        let snap_amt:Q16 = fp_mul(-post_gap SNAP_ALPHA)
+        cx += fp_mul(snap_amt surf_nx)
+        cy += fp_mul(snap_amt surf_ny)
+        cz += fp_mul(snap_amt surf_nz)
+    }
+
+    # ---- lap progress / hints -----------------------------------------------------
+    let lap_len:int = g_lap_len
+    if (lap_len >? 0) and g_route_closed {
+        # Normalized circular progress step vs the pre-step hint frame; a step
+        # that carries the position across the start boundary changes the lap.
+        let psg:Ptr = seg_p(cur_seg)
+        let pfp:Ptr = fr_p(psg clamp_i(cur_si 0 seg_nsamp(psg) - 1))
+        let prev_frac:Q16 = __load__(pfp + FR_PROG)
+        if prev_frac >=? lap_len { prev_frac -= lap_len }
+        let d:Q16 = surf_prog - prev_frac
+        if d >? lap_len // 2 { d -= lap_len }
+        if d <? -(lap_len // 2) { d += lap_len }
+        let newp:Q16 = prev_frac + d
+        if newp >=? lap_len {
+            cur_lap += 1
+            trigger_sfx(SFX_KIND_LAP)
+        }
+        if newp <? 0 {
+            cur_lap -= 1
+        }
+    }
+    cur_seg = surf_seg
+    cur_si = surf_si
+
+    # ---- wrong-way detection ----------------------------------------------------------
+    if (lap_len >? 0) and ((post_gap <=? AIR_GAP) and (post_off =? false)) {
+        let along:Q16 = fp_mul(cvx surf_fx) + fp_mul(cvy surf_fy) + fp_mul(cvz surf_fz)
+        if along <? (-16384) {
+            wrongway_frames += 1
+        } else {
+            if along >? 16384 {
+                wrongway_frames = 0
+            }
+        }
+    } else {
+        wrongway_frames = 0
+    }
+
+    # ---- last grounded frame + kill plane ------------------------------------------------
+    if (post_off =? false) and (post_gap <=? AIR_GAP) {
+        if (surf_t <? surf_wr) and (surf_t >? -surf_wl) {
+            lg_seg = surf_seg
+            lg_si = surf_si
+        }
+    }
+    if (cy <? g_kill_y) or (in_respawn not=? 0) {
+        respawn_car()
+    }
+    return void
+}
+
+# ---------- Engine trail (player only) ------------------------------------------------------
+
+let trail_push = ():>void => {
+    let ex:Q16 = cx + fp_mul(ux TRAIL_OFFSET_UP) - fp_mul(fx TRAIL_OFFSET_BACK)
+    let ey:Q16 = cy + fp_mul(uy TRAIL_OFFSET_UP) - fp_mul(fy TRAIL_OFFSET_BACK)
+    let ez:Q16 = cz + fp_mul(uz TRAIL_OFFSET_UP) - fp_mul(fz TRAIL_OFFSET_BACK)
+    let boost_q:Q16 = 0
+    if boost_active_frames >? 0 {
+        boost_q = (boost_active_frames * FP_ONE) // BOOST_DURATION
+    }
+    let o:Ptr = TRAIL_BUF + (trail_head * TRAIL_STRIDE)
+    __store__(ex o)
+    __store__(ey (o + 8))
+    __store__(ez (o + 16))
+    __store__(rx (o + 24))
+    __store__(ry (o + 32))
+    __store__(rz (o + 40))
+    __store__(boost_q (o + 48))
+    trail_head = (trail_head + 1) % TRAIL_LEN
+    if trail_count <? TRAIL_LEN {
+        trail_count += 1
+    }
+    return void
+}

@@ -1,0 +1,267 @@
+# ============================================================================
+# uZero2 menus: title, main menu, track select (with orbiting flyover of the
+# baked track), pause and results screens. State transitions live in
+# game.udewy; this module renders and moves cursors.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./tracks_builtin.udewy"
+import p"./physics.udewy"
+import p"./camera.udewy"
+import p"./render_world.udewy"
+import p"./render_hud.udewy"
+import p"./input.udewy"
+
+# ---------- Track flyover camera --------------------------------------------------
+
+let flyover_camera = ():>void => {
+    let cx_q:Q16 = (g_track_min_x + g_track_max_x) // 2
+    let cy_q:Q16 = (g_track_min_y + g_track_max_y) // 2
+    let cz_q:Q16 = (g_track_min_z + g_track_max_z) // 2
+    let ex:Q16 = g_track_max_x - g_track_min_x
+    let ez:Q16 = g_track_max_z - g_track_min_z
+    let extent:Q16 = max_i(ex ez)
+    if extent <? 13107200 { extent = 13107200 }          # at least 200 m
+    let radius:Q16 = (extent * 3) // 4
+    let height:Q16 = extent // 3
+    camera_orbit(cx_q cy_q cz_q radius height (frame_count * 16) % ANG_FINE_TURN)
+    return void
+}
+
+# ---------- Title ------------------------------------------------------------------
+
+const TITLE_TEXT:Cstr = "UZERO 2\0"
+const TITLE_SUB:Cstr = "PARAMETRIC EDITION\0"
+const TITLE_PROMPT:Cstr = "PRESS ENTER\0"
+
+let render_title = (sw:int sh:int):>void => {
+    flyover_camera()
+    render_world_common(sw sh)
+
+    gpu_overlay_begin(sw sh)
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    text_draw_centered(sw // 2 sh // 2 - 130 TITLE_TEXT 10)
+    gpu_set_color4(45875 45875 FP_ONE FP_ONE)
+    text_draw_centered(sw // 2 sh // 2 - 20 TITLE_SUB 3)
+    if title_blink_phase <? 80 {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+        text_draw_centered(sw // 2 sh - 90 TITLE_PROMPT 3)
+    }
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Main menu ----------------------------------------------------------------
+
+const MENU_ITEM_RACE:Cstr = "RACE\0"
+const MENU_ITEM_PLAYGROUND:Cstr = "PLAYGROUND\0"
+const MENU_ITEM_EDITOR:Cstr = "TRACK EDITOR\0"
+const MENU_CURSOR_GLYPH:Cstr = ">\0"
+const MENU_TITLE:Cstr = "MAIN MENU\0"
+const MENU_ITEM_COUNT:int = 3
+
+let menu_item_text = (i:int):>Cstr => {
+    if i =? 1 { return MENU_ITEM_PLAYGROUND }
+    if i =? 2 { return MENU_ITEM_EDITOR }
+    return MENU_ITEM_RACE
+}
+
+let render_menu = (sw:int sh:int):>void => {
+    flyover_camera()
+    render_world_common(sw sh)
+
+    gpu_overlay_begin(sw sh)
+    let panel_w:int = 420
+    let x0:int = (sw - panel_w) // 2
+    let y0:int = sh // 2 - 140
+    draw_panel(x0 y0 x0 + panel_w y0 + 280)
+
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    text_draw_centered(sw // 2 y0 + 24 MENU_TITLE 4)
+
+    let i:int = 0
+    loop i <? MENU_ITEM_COUNT {
+        let iy:int = y0 + 100 + i * 52
+        if i =? menu_cursor {
+            gpu_set_color4(FP_ONE FP_ONE 26214 FP_ONE)
+            text_draw(x0 + 36 iy MENU_CURSOR_GLYPH 4)
+        } else {
+            gpu_set_color4(45875 52428 65535 FP_ONE)
+        }
+        text_draw(x0 + 80 iy menu_item_text(i) 4)
+        i += 1
+    }
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Track select ---------------------------------------------------------------
+
+const TRACKSEL_TITLE:Cstr = "SELECT TRACK\0"
+const TRACKSEL_LAPS:Cstr = "LAPS \0"
+const TRACKSEL_HINT:Cstr = "ENTER TO RACE  ESC TO BACK\0"
+
+# The selected track is already loaded + baked (game.udewy reloads on cursor
+# move), so the flyover always shows the live selection.
+let render_tracksel = (sw:int sh:int track_count:int):>void => {
+    flyover_camera()
+    render_world_common(sw sh)
+
+    gpu_overlay_begin(sw sh)
+    let panel_w:int = 480
+    let x0:int = (sw - panel_w) // 2
+    let y0:int = sh - 280
+    draw_panel(x0 40 x0 + panel_w 110)
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    text_draw_centered(sw // 2 60 TRACKSEL_TITLE 4)
+
+    draw_panel(x0 y0 x0 + panel_w sh - 60)
+    let i:int = 0
+    loop i <? track_count {
+        let iy:int = y0 + 28 + i * 48
+        if i =? tracksel_cursor {
+            gpu_set_color4(FP_ONE FP_ONE 26214 FP_ONE)
+            text_draw(x0 + 24 iy MENU_CURSOR_GLYPH 3)
+        } else {
+            gpu_set_color4(45875 52428 65535 FP_ONE)
+        }
+        text_draw(x0 + 60 iy builtin_track_name(i) 3)
+        i += 1
+    }
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 45875)
+    let hx:int = text_draw(x0 + 60 y0 + 28 + track_count * 48 TRACKSEL_LAPS 2)
+    text_draw(hx y0 + 28 + track_count * 48 fmt_int(g_track_laps) 2)
+    text_draw_centered(sw // 2 sh - 84 TRACKSEL_HINT 2)
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Pause -----------------------------------------------------------------------
+
+const PAUSE_TITLE:Cstr = "PAUSED\0"
+const PAUSE_RESUME:Cstr = "RESUME\0"
+const PAUSE_RESTART:Cstr = "RESTART\0"
+const PAUSE_QUIT:Cstr = "QUIT TO MENU\0"
+const PAUSE_ITEM_COUNT:int = 3
+
+let pause_item_text = (i:int):>Cstr => {
+    if i =? 1 { return PAUSE_RESTART }
+    if i =? 2 { return PAUSE_QUIT }
+    return PAUSE_RESUME
+}
+
+# Drawn on top of the frozen race world (game.udewy renders that first).
+let render_pause_overlay = (sw:int sh:int):>void => {
+    gpu_overlay_begin(sw sh)
+    gpu_set_texture(0)
+    gpu_set_color4(0 0 0 32768)
+    gpu_quads_begin()
+    hud_quad(0 0 sw sh)
+    gpu_end()
+
+    let panel_w:int = 380
+    let x0:int = (sw - panel_w) // 2
+    let y0:int = sh // 2 - 140
+    draw_panel(x0 y0 x0 + panel_w y0 + 280)
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    text_draw_centered(sw // 2 y0 + 24 PAUSE_TITLE 4)
+
+    let i:int = 0
+    loop i <? PAUSE_ITEM_COUNT {
+        let iy:int = y0 + 100 + i * 52
+        if i =? pause_cursor {
+            gpu_set_color4(FP_ONE FP_ONE 26214 FP_ONE)
+            text_draw(x0 + 36 iy MENU_CURSOR_GLYPH 3)
+        } else {
+            gpu_set_color4(45875 52428 65535 FP_ONE)
+        }
+        text_draw(x0 + 80 iy pause_item_text(i) 3)
+        i += 1
+    }
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Results -----------------------------------------------------------------------
+
+const RESULTS_TITLE:Cstr = "RESULTS\0"
+const RESULTS_YOU:Cstr = " YOU\0"
+const RESULTS_CPU:Cstr = " CPU \0"
+const RESULTS_LAPS_COL:Cstr = "LAP \0"
+const RESULTS_PROMPT:Cstr = "PRESS ENTER\0"
+
+let render_results = (sw:int sh:int):>void => {
+    flyover_camera()
+    render_world_common(sw sh)
+    draw_all_cars()
+
+    gpu_overlay_begin(sw sh)
+    let panel_w:int = 460
+    let x0:int = (sw - panel_w) // 2
+    draw_panel(x0 60 x0 + panel_w sh - 110)
+    gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
+    text_draw_centered(sw // 2 84 RESULTS_TITLE 4)
+
+    let rank:int = 0
+    let shown:int = min_i(active_cars 10)
+    loop rank <? shown {
+        let car_idx:int = results_sorted_car(rank)
+        let row_y:int = 160 + rank * 38
+        if car_idx =? 0 {
+            gpu_set_color4(FP_ONE FP_ONE 26214 FP_ONE)
+        } else {
+            gpu_set_color4(45875 52428 65535 FP_ONE)
+        }
+        let xx:int = text_draw(x0 + 32 row_y fmt_int(rank + 1) 3)
+        if car_idx =? 0 {
+            xx = text_draw(xx row_y RESULTS_YOU 3)
+        } else {
+            xx = text_draw(xx row_y RESULTS_CPU 3)
+            xx = text_draw(xx row_y fmt_int(car_idx) 3)
+        }
+        text_draw_right(x0 + panel_w - 80 row_y RESULTS_LAPS_COL 2)
+        text_draw_right(x0 + panel_w - 32 row_y fmt_int(clamp_i(car_get_lap(car_idx) + 1 1 g_track_laps)) 3)
+        rank += 1
+    }
+
+    if (results_camera_frames % 120) <? 80 {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+        text_draw_centered(sw // 2 sh - 90 RESULTS_PROMPT 3)
+    }
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Game over ------------------------------------------------------------------------
+
+const GAMEOVER_TEXT:Cstr = "GAME OVER\0"
+const GAMEOVER_PROMPT:Cstr = "PRESS ENTER\0"
+
+let render_gameover = (sw:int sh:int):>void => {
+    gpu_set_viewport(sw sh)
+    gpu_clear(COL_SKY_R // 4 COL_SKY_G // 4 COL_SKY_B // 4)
+    gpu_enable_depth_test(1)
+    set_perspective(sw sh)
+    apply_camera()
+    draw_ground()
+    draw_track()
+    draw_all_cars()
+    draw_sparks()
+
+    gpu_overlay_begin(sw sh)
+    gpu_set_texture(0)
+    gpu_set_color4(0 0 0 45875)
+    gpu_quads_begin()
+    hud_quad(0 0 sw sh)
+    gpu_end()
+    gpu_set_color4(FP_ONE 13107 13107 FP_ONE)
+    text_draw_centered(sw // 2 sh // 2 - 80 GAMEOVER_TEXT 6)
+    if (game_over_frames % 120) <? 80 {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+        text_draw_centered(sw // 2 sh // 2 + 40 GAMEOVER_PROMPT 3)
+    }
+    gpu_overlay_end()
+    return void
+}

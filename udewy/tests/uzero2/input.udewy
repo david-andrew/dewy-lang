@@ -1,0 +1,106 @@
+# ============================================================================
+# uZero2 input: per-frame key snapshot + edge detection over the abstract
+# KEY_* ids, and the player drive-input mapping. Imported after a platform
+# module (needs plat_key_down).
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+
+# Refresh KEYS_NOW / KEYS_PREV and the mouse snapshot. Call once per frame
+# after backend_poll().
+let input_update = ():>void => {
+    let k:int = 0
+    loop k <? KEY_COUNT {
+        __store_u8__(__load_u8__(KEYS_NOW + k) KEYS_PREV + k)
+        if plat_key_down(k) {
+            __store_u8__(1 KEYS_NOW + k)
+        } else {
+            __store_u8__(0 KEYS_NOW + k)
+        }
+        k += 1
+    }
+    mouse_prev_x = mouse_x
+    mouse_prev_y = mouse_y
+    mouse_buttons_prev = mouse_buttons
+    mouse_x = plat_mouse_x()
+    mouse_y = plat_mouse_y()
+    mouse_buttons = plat_mouse_buttons()
+    mouse_wheel = plat_mouse_wheel()
+    return void
+}
+
+let key_down = (k:KeyId):>bool => {
+    if __load_u8__(KEYS_NOW + k) not=? 0 { return true }
+    return false
+}
+
+let key_pressed = (k:KeyId):>bool => {
+    if (__load_u8__(KEYS_NOW + k) not=? 0) and (__load_u8__(KEYS_PREV + k) =? 0) {
+        return true
+    }
+    return false
+}
+
+let mouse_down = (b:int):>bool => {
+    if (mouse_buttons and b) not=? 0 { return true }
+    return false
+}
+
+let mouse_pressed = (b:int):>bool => {
+    if ((mouse_buttons and b) not=? 0) and ((mouse_buttons_prev and b) =? 0) {
+        return true
+    }
+    return false
+}
+
+let mouse_released = (b:int):>bool => {
+    if ((mouse_buttons and b) =? 0) and ((mouse_buttons_prev and b) not=? 0) {
+        return true
+    }
+    return false
+}
+
+let mouse_dx = ():>int => { return mouse_x - mouse_prev_x }
+let mouse_dy = ():>int => { return mouse_y - mouse_prev_y }
+
+# Menu navigation shorthands.
+let nav_up_pressed = ():>bool => {
+    if key_pressed(KEY_UP) { return true }
+    return key_pressed(KEY_W)
+}
+
+let nav_down_pressed = ():>bool => {
+    if key_pressed(KEY_DOWN) { return true }
+    return key_pressed(KEY_S)
+}
+
+let nav_confirm_pressed = ():>bool => {
+    if key_pressed(KEY_ENTER) { return true }
+    return key_pressed(KEY_SPACE)
+}
+
+let nav_back_pressed = ():>bool => {
+    return key_pressed(KEY_ESC)
+}
+
+# Fill the in_* scratch from the keyboard (player car).
+let gather_player_input = ():>void => {
+    in_thrust = 0
+    if key_down(KEY_W) or key_down(KEY_UP) { in_thrust = 1 }
+    in_brake = 0
+    if key_down(KEY_S) or key_down(KEY_DOWN) { in_brake = 1 }
+    in_steer_l = 0
+    if key_down(KEY_A) or key_down(KEY_LEFT) { in_steer_l = 1 }
+    in_steer_r = 0
+    if key_down(KEY_D) or key_down(KEY_RIGHT) { in_steer_r = 1 }
+    in_strafe_l = 0
+    if key_down(KEY_Q) { in_strafe_l = 1 }
+    in_strafe_r = 0
+    if key_down(KEY_E) { in_strafe_r = 1 }
+    in_boost = 0
+    if key_down(KEY_SPACE) { in_boost = 1 }
+    in_respawn = 0
+    if key_pressed(KEY_R) { in_respawn = 1 }
+    return void
+}

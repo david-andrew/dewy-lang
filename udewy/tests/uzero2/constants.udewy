@@ -1,0 +1,484 @@
+# ============================================================================
+# uZero2: tunable constants. Backend-agnostic.
+# ============================================================================
+
+import p"./types.udewy"
+
+# ---------- Game states ------------------------------------------------------
+
+const ST_TITLE:int = 0
+const ST_MENU:int = 1
+const ST_TRACKSEL:int = 2
+const ST_RACE:int = 3
+const ST_PAUSE:int = 4
+const ST_RESULTS:int = 5
+const ST_GAMEOVER:int = 6
+const ST_EDITOR:int = 7
+
+# Play modes (what a RACE-like state is running as).
+const MODE_RACE:int = 0
+const MODE_PLAYGROUND:int = 1
+const MODE_TESTDRIVE:int = 2             # editor test drive
+
+# ---------- Abstract key ids -------------------------------------------------
+# The platform layer maps these to SDL scancodes / browser KeyboardEvent codes.
+
+const KEY_W:KeyId = 0
+const KEY_A:KeyId = 1
+const KEY_S:KeyId = 2
+const KEY_D:KeyId = 3
+const KEY_Q:KeyId = 4
+const KEY_E:KeyId = 5
+const KEY_R:KeyId = 6
+const KEY_F:KeyId = 7
+const KEY_T:KeyId = 8
+const KEY_G:KeyId = 9
+const KEY_Y:KeyId = 10
+const KEY_H:KeyId = 11
+const KEY_U:KeyId = 12
+const KEY_O:KeyId = 13
+const KEY_I:KeyId = 14
+const KEY_J:KeyId = 15
+const KEY_K:KeyId = 16
+const KEY_L:KeyId = 17
+const KEY_Z:KeyId = 18
+const KEY_X:KeyId = 19
+const KEY_C:KeyId = 20
+const KEY_V:KeyId = 21
+const KEY_B:KeyId = 22
+const KEY_N:KeyId = 23
+const KEY_M:KeyId = 24
+const KEY_P:KeyId = 25
+const KEY_UP:KeyId = 26
+const KEY_DOWN:KeyId = 27
+const KEY_LEFT:KeyId = 28
+const KEY_RIGHT:KeyId = 29
+const KEY_SPACE:KeyId = 30
+const KEY_ENTER:KeyId = 31
+const KEY_ESC:KeyId = 32
+const KEY_TAB:KeyId = 33
+const KEY_LSHIFT:KeyId = 34
+const KEY_1:KeyId = 35
+const KEY_2:KeyId = 36
+const KEY_3:KeyId = 37
+const KEY_4:KeyId = 38
+const KEY_5:KeyId = 39
+const KEY_6:KeyId = 40
+const KEY_7:KeyId = 41
+const KEY_8:KeyId = 42
+const KEY_9:KeyId = 43
+const KEY_0:KeyId = 44
+const KEY_F5:KeyId = 45
+const KEY_F9:KeyId = 46
+const KEY_DELETE:KeyId = 47
+const KEY_BACKSPACE:KeyId = 48
+const KEY_LCTRL:KeyId = 49
+const KEY_LALT:KeyId = 50
+const KEY_F2:KeyId = 51
+const KEY_COUNT:int = 52
+
+# Mouse button bits (plat_mouse_buttons).
+const MOUSE_L:int = 1
+const MOUSE_M:int = 2
+const MOUSE_R:int = 4
+
+# ---------- Physics constants -----------------------------------------------
+
+const HOVER_HEIGHT:Q16 = 98304           # 1.5 m above the surface
+const TOP_SPEED:Q16 = 500000             # 7.6 m/frame
+const BOOST_BONUS:Q16 = 400000           # 6.1 m/frame extra cap during boost
+const THRUST_ACCEL:Q16 = 4000
+const BRAKE_DECEL:Q16 = 3277
+const STRAFE_RATE:Q16 = 32768
+
+const BOOST_IMPULSE:Q16 = 65536
+const BOOST_DURATION:int = 90
+const ENERGY_FULL:Q16 = 65536
+const BOOST_COST_Q:Q16 = 8192            # 1/8 of the bar per boost
+
+const BOOST_OVERCAP_TURN_DECAY:Q16 = 4500
+const BOOST_OVERCAP_STRAIGHT_DECAY:Q16 = 800
+
+const STEER_BASE:Angle = 14
+const STEER_MIN:Angle = 11
+
+const LATERAL_GRIP:Q16 = 9830
+const DRAG_COAST:Q16 = 100
+const DRAG_THRUST:Q16 = 327
+
+const SNAP_ALPHA:Q16 = 39322             # 0.60
+const AIR_GAP:Q16 = 262144               # 4 m above hover target = airborne
+const GRAVITY:Q16 = 6000
+const SLOPE_GRAVITY:Q16 = 300
+const UP_ALPHA_AIR:Q16 = 6553
+
+# Respawn handling: a car that falls this far below the lowest point of the
+# track (or below an open pit) gets put back on its last grounded frame.
+const KILL_PLANE_DROP:Q16 = 13107200     # 200 m
+const RESPAWN_LIFT:Q16 = 196608          # 3 m above the surface on respawn
+const RESPAWN_FREEZE_FRAMES:int = 30
+
+# ---------- Energy / damage rules -------------------------------------------
+
+const WALL_HIT_INITIAL:Q16 = 1311
+const WALL_DRAIN:Q16 = 327
+const RECHARGE_RATE:Q16 = 656
+const PAD_BOOST_OVERCAP:Q16 = 200000
+const PAD_IMPULSE:Q16 = 32768
+
+# ---------- Camera ----------------------------------------------------------
+
+const CAM_BACK:Q16 = 983040              # 15 m behind craft
+const CAM_LIFT:Q16 = 262144              # 4 m above craft
+const POS_ALPHA:Q16 = 7864               # 0.12
+const ORIENT_ALPHA:Q16 = 6553            # 0.10
+const FOV_PUNCH:Q16 = 26214
+
+const CRAFT_HALF_W:Q16 = 163840          # 2.5 m
+
+# ---------- Visual polish ---------------------------------------------------
+
+const RAW_PER_RAD:int = 163
+const BANK_GAIN:int = 10
+const BANK_MAX:Angle = 60
+const BANK_ALPHA:Q16 = 11796
+
+const BOB_AMP:Q16 = 19660
+const BOB_FREQ_NUM:int = 24
+const BOB_FREQ_DEN:int = 1
+
+const TRAIL_LEN:int = 36
+const TRAIL_STRIDE:int = 56
+const TRAIL_BUF_BYTES:int = 2016
+const TRAIL_HALF_W:Q16 = 49152
+const TRAIL_OFFSET_BACK:Q16 = 131072
+const TRAIL_OFFSET_UP:Q16 = 13107
+
+const SPARK_MAX:int = 192
+const SPARK_STRIDE:int = 56
+const SPARK_BUF_BYTES:int = 10752
+const SPARK_LIFE_DECAY:Q16 = 2185
+const SPARK_BASE_SPEED:Q16 = 65536
+const SPARK_SPEED_VAR:Q16 = 65536
+const SPARK_JITTER:Q16 = 19660
+const SPARK_UP_BIAS:Q16 = 9830
+const SPARK_GRAVITY:Q16 = 1310
+const SPARK_TAIL_Q:Q16 = 49152
+const SPARK_IMPULSE_THRESHOLD:Q16 = 6553
+const SPARK_IMPULSE_PER_PARTICLE:Q16 = 16384
+const SPARK_MAX_BURST:int = 24
+
+# ---------- Speed lines -----------------------------------------------------
+
+const SPEED_LINES_N:int = 0x100
+const SPEED_LINE_RATE_Q:Q16 = 4915
+const SPEED_LINE_THRESHOLD:Q16 = 25000
+const SPEED_LINE_PEAK_ALPHA_Q:Q16 = 52428
+const SPEED_LINE_SHAKE_PX:int = 4
+const SPEED_LINE_OVERSHOOT_PX:int = 24
+
+const SPEED_LINE_STRIDE:int = 0x18
+const SPEED_LINE_STATE_BYTES:int = 0x1E00
+
+# ---------- HUD / UI --------------------------------------------------------
+
+const HUD_MARGIN_PX:int = 20
+const HUD_BAR_W_PX:int = 220
+const HUD_BAR_H_PX:int = 18
+const HUD_BAR_BORDER_PX:int = 2
+const HUD_KMH_PER_FRAME:int = 216
+
+const SHOW_FPS_DEFAULT:int = 1
+const HUD_FPS_SAMPLE_FRAMES:int = 30
+
+# Font cell geometry (5x7 glyphs in 6x8 cells, scaled by integer factors).
+const FONT_CELL_W:int = 6
+const FONT_CELL_H:int = 8
+const FONT_ATLAS_COLS:int = 16
+const FONT_ATLAS_ROWS:int = 4            # chars 32..95 (lowercase folds to upper)
+const FONT_ATLAS_W:int = 96              # FONT_ATLAS_COLS * FONT_CELL_W
+const FONT_ATLAS_H:int = 32              # FONT_ATLAS_ROWS * FONT_CELL_H
+const FONT_ATLAS_BYTES:int = 12288       # FONT_ATLAS_W * FONT_ATLAS_H * 4
+
+# ---------- Sky / colors ----------------------------------------------------
+
+const COL_SKY_R:Q16 = 4915
+const COL_SKY_G:Q16 = 7864
+const COL_SKY_B:Q16 = 13107
+
+const COL_GROUND_A_R:Q16 = 6553
+const COL_GROUND_A_G:Q16 = 9830
+const COL_GROUND_A_B:Q16 = 13107
+const COL_GROUND_B_R:Q16 = 9830
+const COL_GROUND_B_G:Q16 = 13107
+const COL_GROUND_B_B:Q16 = 19660
+
+const COL_TRACK_A_R:Q16 = 16384
+const COL_TRACK_A_G:Q16 = 19660
+const COL_TRACK_A_B:Q16 = 26214
+const COL_TRACK_B_R:Q16 = 26214
+const COL_TRACK_B_G:Q16 = 32768
+const COL_TRACK_B_B:Q16 = 39321
+
+const COL_BOOST_A_R:Q16 = 65535
+const COL_BOOST_A_G:Q16 = 32768
+const COL_BOOST_A_B:Q16 = 6553
+const COL_BOOST_B_R:Q16 = 65535
+const COL_BOOST_B_G:Q16 = 13107
+const COL_BOOST_B_B:Q16 = 0
+
+const COL_RECHARGE_A_R:Q16 = 13107
+const COL_RECHARGE_A_G:Q16 = 58982
+const COL_RECHARGE_A_B:Q16 = 19660
+const COL_RECHARGE_B_R:Q16 = 6553
+const COL_RECHARGE_B_G:Q16 = 39321
+const COL_RECHARGE_B_B:Q16 = 13107
+
+const COL_WALL_A_R:Q16 = 39321
+const COL_WALL_A_G:Q16 = 13107
+const COL_WALL_A_B:Q16 = 13107
+const COL_WALL_B_R:Q16 = 52428
+const COL_WALL_B_G:Q16 = 19660
+const COL_WALL_B_B:Q16 = 19660
+
+const COL_GRID_A_R:Q16 = 60293
+const COL_GRID_A_G:Q16 = 60293
+const COL_GRID_A_B:Q16 = 60293
+const COL_GRID_B_R:Q16 = 13107
+const COL_GRID_B_G:Q16 = 13107
+const COL_GRID_B_B:Q16 = 13107
+
+const COL_LOOP_A_R:Q16 = 26214           # purple
+const COL_LOOP_A_G:Q16 = 13107
+const COL_LOOP_A_B:Q16 = 39321
+const COL_LOOP_B_R:Q16 = 39321
+const COL_LOOP_B_G:Q16 = 19660
+const COL_LOOP_B_B:Q16 = 52428
+
+const COL_CORK_A_R:Q16 = 52428           # pink / magenta
+const COL_CORK_A_G:Q16 = 19660
+const COL_CORK_A_B:Q16 = 26214
+const COL_CORK_B_R:Q16 = 58982
+const COL_CORK_B_G:Q16 = 32768
+const COL_CORK_B_B:Q16 = 39321
+
+const COL_RAMP_A_R:Q16 = 58982           # amber
+const COL_RAMP_A_G:Q16 = 39321
+const COL_RAMP_A_B:Q16 = 6553
+const COL_RAMP_B_R:Q16 = 39321
+const COL_RAMP_B_G:Q16 = 26214
+const COL_RAMP_B_B:Q16 = 3276
+
+const COL_HORIZON_R:Q16 = 1638
+const COL_HORIZON_G:Q16 = 2621
+const COL_HORIZON_B:Q16 = 5243
+
+# ---------- Track representation --------------------------------------------
+
+# Surface kind tags. Affect physics (boost / recharge) and the draw texture.
+const SURF_NORMAL:SurfKind = 0
+const SURF_BOOST:SurfKind = 1
+const SURF_RECHARGE:SurfKind = 2
+const SURF_GRID:SurfKind = 3
+const SURF_LOOP:SurfKind = 4             # purple tint (visual only)
+const SURF_CORK:SurfKind = 5             # pink tint (visual only)
+const SURF_RAMP:SurfKind = 6             # amber tint (visual only)
+const SURF_KIND_COUNT:int = 7
+
+const RAIL_LEFT:int = 1
+const RAIL_RIGHT:int = 2
+const RAIL_HEIGHT:Q16 = 196608           # 3 m
+
+# Lateral bailout: a probe this far beyond the track edge counts as fully off
+# the surface (no clamp / snap; the craft flies free).
+const OFF_TRACK_LAT:Q16 = 655360         # 10 m past the rail counts as off
+
+# Node record layout (arena allocated).
+const ND_PX:int = 0
+const ND_PY:int = 8
+const ND_PZ:int = 16
+const ND_TX:int = 24                     # unit tangent
+const ND_TY:int = 32
+const ND_TZ:int = 40
+const ND_TLEN:int = 48                   # Hermite tangent magnitude (0 = auto)
+const ND_UX:int = 56                     # unit up (perpendicular to tangent)
+const ND_UY:int = 64
+const ND_UZ:int = 72
+const ND_WL:int = 80                     # left half-width (Q16 m, surface arc length)
+const ND_WR:int = 88                     # right half-width
+const ND_XSECT:int = 96                  # cross-section angle, raw units (+-1024 = closed)
+const ND_LIFT:int = 104                  # Q16 0..1: arc center pulled onto the centerline
+const ND_SURF:int = 112
+const ND_ADJ:int = 120                   # vec of incident segment ids (built at bake)
+const ND_SIZE:int = 128
+
+# Segment record layout.
+const SG_N0:int = 0
+const SG_N1:int = 8
+const SG_FLIP0:int = 16                  # +1 / -1: sign of node tangent at this end
+const SG_FLIP1:int = 24
+const SG_TWIST:int = 32                  # extra roll across the segment (raw; 1024 = full corkscrew)
+const SG_SURF:int = 40                   # -1 = use node kinds
+const SG_RAILS:int = 48                  # RAIL_LEFT | RAIL_RIGHT bits
+const SG_NSAMP:int = 56                  # baked frame count
+const SG_FRAMES:int = 64                 # ptr to frame array
+const SG_FRAME_CAP:int = 72              # allocated frame slots
+const SG_MESH:int = 80                   # ptr to baked vertex grid
+const SG_MESH_CAP:int = 88               # allocated mesh bytes
+const SG_MESH_ROWS:int = 96
+const SG_MESH_COLS:int = 104
+const SG_LEN:int = 112                   # arc length (Q16 m)
+const SG_PROG0:int = 120                 # progress at segment start
+const SG_PROG1:int = 128                 # progress at segment end
+const SG_MINX:int = 136                  # AABB (already expanded by track width)
+const SG_MINY:int = 144
+const SG_MINZ:int = 152
+const SG_MAXX:int = 160
+const SG_MAXY:int = 168
+const SG_MAXZ:int = 176
+const SG_ROUTE_IDX:int = 184             # index on the main route, -1 if off-route
+const SG_BAKE_STAMP:int = 192            # unique id of the latest bake (render cache key)
+const SG_SIZE:int = 200
+
+# Baked frame layout (one sample along a segment).
+const FR_PX:int = 0
+const FR_PY:int = 8
+const FR_PZ:int = 16
+const FR_FX:int = 24                     # unit forward (centerline tangent)
+const FR_FY:int = 32
+const FR_FZ:int = 40
+const FR_UX:int = 48                     # unit up at the lateral center
+const FR_UY:int = 56
+const FR_UZ:int = 64
+const FR_WL:int = 72
+const FR_WR:int = 80
+const FR_XSECT:int = 88                  # raw angle units
+const FR_LIFT:int = 96                   # Q16
+const FR_KIND:int = 104
+const FR_CUMARC:int = 112                # arc length from segment start (Q16 m)
+const FR_PROG:int = 120                  # global lap progress at this frame (Q16)
+const FR_STRIDE:int = 128
+
+const MAX_FRAMES_PER_SEG:int = 224
+const SAMPLE_SPACING:Q16 = 393216        # 6 m between baked frames
+const XSECT_FLAT_EPS:int = 4             # |xsect| below this (raw) = flat ribbon
+const XSECT_CLOSED_MIN:int = 1010        # |xsect| above this = closed pipe (no edges)
+
+# Mesh vertex: x, y, z, u, v, shade (Q16 each).
+const MV_STRIDE:int = 48
+const MESH_MAX_COLS:int = 16
+
+# Track query tuning.
+const QUERY_WINDOW:int = 8
+const QUERY_END_MARGIN:int = 2
+const BROADPHASE_MARGIN:Q16 = 3276800    # 50 m AABB expansion for re-acquire
+
+# Progress per route segment (Q16). Lap length = route_len * PROG_PER_SEG.
+const PROG_PER_SEG:Q16 = 65536
+
+# ---------- Rendering -------------------------------------------------------
+
+const CHECKER_TILE:Q16 = 327680          # 5 m texture tile
+const GROUND_HALF_EXTENT:Q16 = 327680000
+const APRON_MARGIN:Q16 = 19660800        # apron extends 300 m past the track bounds
+const GROUND_TEX_BYTES:int = 16
+const GROUND_Y:Q16 = -32768000           # distant horizon plane
+
+const RENDER_CULL_NEAR_ROWS:int = 32     # mesh rows per draw batch (wasm vertex budget)
+const RENDER_CULL_DIST:Q16 = 262144000   # 4000 m segment cull distance (= far plane)
+
+# ---------- Cars ------------------------------------------------------------
+
+const MAX_CARS:int = 16
+const CAR_STRIDE:int = 320
+const CAR_BUF_BYTES:int = 5120           # MAX_CARS * CAR_STRIDE
+
+const CARF_CX:int = 0
+const CARF_CY:int = 8
+const CARF_CZ:int = 16
+const CARF_CVX:int = 24
+const CARF_CVY:int = 32
+const CARF_CVZ:int = 40
+const CARF_FX:int = 48
+const CARF_FY:int = 56
+const CARF_FZ:int = 64
+const CARF_UX:int = 72
+const CARF_UY:int = 80
+const CARF_UZ:int = 88
+const CARF_RX:int = 96
+const CARF_RY:int = 104
+const CARF_RZ:int = 112
+const CARF_ENERGY:int = 120
+const CARF_OVERCAP:int = 128
+const CARF_BOOST_FRAMES:int = 136
+const CARF_SEG:int = 144                 # current segment hint
+const CARF_SI:int = 152                  # current frame hint
+const CARF_LAP:int = 160
+const CARF_PROGRESS:int = 168            # lap * lap_len + surf progress
+const CARF_STATUS:int = 176              # 0=alive 1=exploded 2=finished
+const CARF_PREV_FX:int = 184
+const CARF_PREV_FY:int = 192
+const CARF_PREV_FZ:int = 200
+const CARF_BANK:int = 208
+const CARF_HUE:int = 216
+const CARF_AIRBORNE:int = 224
+const CARF_WALL_CONTACT:int = 232
+const CARF_BOOST_PREV:int = 240
+const CARF_TOP_SPEED_MULT:int = 248
+const CARF_AI_AIM:int = 256
+const CARF_AI_AIM_TIMER:int = 264
+const CARF_AI_BOOST_THRESH:int = 272
+const CARF_AI_BRANCH:int = 280           # random branch preference seed
+const CARF_LG_SEG:int = 288              # last grounded segment
+const CARF_LG_SI:int = 296               # last grounded frame
+const CARF_RESPAWN_TIMER:int = 304
+const CARF_WRONGWAY:int = 312
+
+const TOTAL_LAPS_DEFAULT:int = 3
+
+# ---------- Audio -----------------------------------------------------------
+
+const AUDIO_SAMPLE_RATE:int = 44100
+const AUDIO_FRAME_SAMPLES:int = 800
+const AUDIO_FRAME_BYTES:int = 1600
+const AUDIO_QUEUE_TARGET_BYTES:int = 8000        # keep ~90 ms queued at the device
+const AUDIO_MAX_CHUNKS_PER_STEP:int = 8
+const MUSIC_LOOP_SAMPLES:int = 88200
+const MUSIC_LOOP_BYTES:int = 176400
+
+const SFX_SLOTS:int = 8
+const SFX_SLOT_STRIDE:int = 40
+const SFX_BUF_BYTES:int = 320
+
+const SFX_KIND_BOOST:int = 0
+const SFX_KIND_WALL:int = 1
+const SFX_KIND_RECHARGE:int = 2
+const SFX_KIND_LAP:int = 3
+const SFX_KIND_EXPLODE:int = 4
+const SFX_KIND_MENU:int = 5
+const SFX_KIND_COUNT:int = 6
+
+const SFX_LEN_BOOST:int = 13230
+const SFX_LEN_WALL:int = 6615
+const SFX_LEN_RECHARGE:int = 17640
+const SFX_LEN_LAP:int = 22050
+const SFX_LEN_EXPLODE:int = 35280
+const SFX_LEN_MENU:int = 4410
+
+const SFX_MAX_LEN:int = 35280
+const SFX_TABLE_BYTES:int = 423360       # SFX_KIND_COUNT * SFX_MAX_LEN * 2
+
+# ---------- Editor ----------------------------------------------------------
+
+const ED_MOVE_STEP:Q16 = 32768           # 0.5 m per frame while a move key is held
+const ED_MOVE_FAST:Q16 = 393216          # 6 m with shift
+const ED_ANGLE_STEP:Angle = 4            # tangent / roll adjust per frame
+const ED_WIDTH_STEP:Q16 = 32768          # 0.5 m
+const ED_XSECT_STEP:int = 8              # raw units per frame
+const ED_CAM_SPEED:Q16 = 131072          # 2 m / frame
+const ED_CAM_FAST:Q16 = 655360           # 10 m / frame with shift
+const ED_CAM_TURN:Angle = 6
+const ED_NEW_SEG_LEN:Q16 = 9830400       # 150 m default appended segment
+const ED_GRID_STEP:Q16 = 327680          # 5 m mouse-drag snap grid (hold LCTRL)
+const ED_MOUSE_ORBIT_FINE:int = 40       # fine angle units per pixel of orbit drag
+const ED_PICK_RADIUS_PX:int = 24

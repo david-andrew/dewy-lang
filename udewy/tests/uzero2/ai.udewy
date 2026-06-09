@@ -1,0 +1,216 @@
+# ============================================================================
+# uZero2 AI: lookahead steering over the baked frames, with per-car random
+# branch preference at forks.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+
+const AI_LOOKAHEAD_MIN:int = 5
+const AI_LOOKAHEAD_MAX:int = 24
+const AI_ANTICIPATE_STEPS:int = 14       # aim ~this many physics frames ahead
+const AI_DEADEND_PROBE:int = 333         # far probe (~2 km): brake distance from boost speed
+const AI_BOOST_ENERGY_Q:Q16 = 36044      # don't boost below 0.55 energy
+const AI_OMEGA_MAX:Q16 = 3000            # ~rad/frame of steering at high speed
+
+# Lookahead in baked-frame steps, scaled with speed so fast cars anticipate
+# curves early enough to hold the racing line.
+let ai_lookahead = ():>int => {
+    let spd:Q16 = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let la:int = AI_LOOKAHEAD_MIN + (spd * AI_ANTICIPATE_STEPS) // SAMPLE_SPACING
+    return clamp_i(la AI_LOOKAHEAD_MIN AI_LOOKAHEAD_MAX)
+}
+
+# Branch choice at a fork node: deterministic per car (CARF_AI_BRANCH seed)
+# and per node, so each AI commits to a consistent line every lap.
+let ai_pick_next_seg = (node:NodeId):>SegId => {
+    let oc:int = node_out_count(node)
+    if oc <=? 0 { return -1 }
+    if oc =? 1 { return node_out_seg(node 0) }
+    let h:int = (ai_branch + node * 2654435761) % oc
+    if h <? 0 { h += oc }
+    return node_out_seg(node h)
+}
+
+# Set when a lookahead walk ran into an open chain end (no outgoing segment).
+let ai_dead_end:bool = false
+# Set when the lookahead crossed a route gap (jump): line up with the centre.
+let ai_gap_jump:bool = false
+
+# Resolve the frame `ahead` steps past the car's hint, following the graph
+# across segment ends (multiple hops if needed). Returns the frame pointer.
+let ai_target_frame = (ahead:int):>Ptr => {
+    let sg:Ptr = seg_p(cur_seg)
+    let n:int = seg_nsamp(sg)
+    let ti:int = cur_si + ahead
+    let guard:int = 0
+    loop (ti >=? n) and (guard <? 6) {
+        let nxt:SegId = ai_pick_next_seg(__load__(sg + SG_N1))
+        if nxt <? 0 {
+            # No connected segment. If we're on the route, the route's next
+            # segment is the jump target across the gap; otherwise dead end.
+            # Only wrap last->first when the route is actually a closed lap.
+            let ridx:int = __load__(sg + SG_ROUTE_IDX)
+            if ridx >=? 0 {
+                let rn:int = vec_len(g_route)
+                if (ridx <? rn - 1) or g_route_closed {
+                    nxt = vec_get(g_route (ridx + 1) % rn)
+                    ai_gap_jump = true
+                }
+            }
+        }
+        if nxt <? 0 {
+            ai_dead_end = true
+            return fr_p(sg n - 1)
+        }
+        ti -= n - 1
+        sg = seg_p(nxt)
+        n = seg_nsamp(sg)
+        guard += 1
+    }
+    return fr_p(sg clamp_i(ti 0 n - 1))
+}
+
+let ai_compute_input = (idx:int):>void => {
+    let ahead:int = ai_lookahead()
+    ai_dead_end = false
+    ai_gap_jump = false
+    ai_aim_timer -= 1
+    if ai_aim_timer <=? 0 {
+        let tf0:Ptr = ai_target_frame(ahead)
+        let hw_q:Q16 = min_i(__load__(tf0 + FR_WL) __load__(tf0 + FR_WR))
+        let span:Q16 = hw_q - CRAFT_HALF_W - 131072
+        if span <? 0 { span = 0 }
+        ai_aim = xs_range(span * 2) - span
+        ai_aim_timer = 60 + xs_range(180)
+    }
+
+    let tf:Ptr = ai_target_frame(ahead)
+    # Re-clamp the persistent aim against the width where we're headed, so an
+    # aim chosen on a wide section never points off a narrow one.
+    let span_now:Q16 = min_i(__load__(tf + FR_WL) __load__(tf + FR_WR)) - CRAFT_HALF_W - 131072
+    if span_now <? 0 { span_now = 0 }
+    if ai_gap_jump { span_now = 0 }      # aim dead centre across jumps
+    ai_aim = clamp_i(ai_aim (-span_now) span_now)
+    let tx:Q16 = __load__(tf + FR_PX)
+    let ty:Q16 = __load__(tf + FR_PY)
+    let tz:Q16 = __load__(tf + FR_PZ)
+    let tfx:Q16 = __load__(tf + FR_FX)
+    let tfy:Q16 = __load__(tf + FR_FY)
+    let tfz:Q16 = __load__(tf + FR_FZ)
+    let tux:Q16 = __load__(tf + FR_UX)
+    let tuy:Q16 = __load__(tf + FR_UY)
+    let tuz:Q16 = __load__(tf + FR_UZ)
+    let trx:Q16 = fp_mul(tfy tuz) - fp_mul(tfz tuy)
+    let try_:Q16 = fp_mul(tfz tux) - fp_mul(tfx tuz)
+    let trz:Q16 = fp_mul(tfx tuy) - fp_mul(tfy tux)
+    tx += fp_mul(trx ai_aim) + fp_mul(tux HOVER_HEIGHT)
+    ty += fp_mul(try_ ai_aim) + fp_mul(tuy HOVER_HEIGHT)
+    tz += fp_mul(trz ai_aim) + fp_mul(tuz HOVER_HEIGHT)
+
+    in_thrust = 1
+    in_brake = 0
+    in_strafe_l = 0
+    in_strafe_r = 0
+    in_respawn = 0
+    in_steer_l = 0
+    in_steer_r = 0
+    in_boost = 0
+
+    let dx:Q16 = tx - cx
+    let dy:Q16 = ty - cy
+    let dz:Q16 = tz - cz
+    let dm:Q16 = fp_sqrt((dx * dx) + (dy * dy) + (dz * dz))
+    if dm <? 1024 {
+        return void
+    }
+    let side:Q16 = fp_mul(fp_div(dx dm) rx) + fp_mul(fp_div(dy dm) ry) + fp_mul(fp_div(dz dm) rz)
+    if side >? 1311 {
+        in_steer_r = 1
+    }
+    if side <? (-1311) {
+        in_steer_l = 1
+    }
+
+    # Hard edge avoidance: lateral position on the current frame; steer away
+    # from a rail before scraping starts.
+    let csg:Ptr = seg_p(cur_seg)
+    let cf:Ptr = fr_p(csg clamp_i(cur_si 0 seg_nsamp(csg) - 1))
+    let cffx:Q16 = __load__(cf + FR_FX)
+    let cffy:Q16 = __load__(cf + FR_FY)
+    let cffz:Q16 = __load__(cf + FR_FZ)
+    let cfux:Q16 = __load__(cf + FR_UX)
+    let cfuy:Q16 = __load__(cf + FR_UY)
+    let cfuz:Q16 = __load__(cf + FR_UZ)
+    let crx:Q16 = fp_mul(cffy cfuz) - fp_mul(cffz cfuy)
+    let cry:Q16 = fp_mul(cffz cfux) - fp_mul(cffx cfuz)
+    let crz:Q16 = fp_mul(cffx cfuy) - fp_mul(cffy cfux)
+    let lat:Q16 = fp_mul(cx - __load__(cf + FR_PX) crx) + fp_mul(cy - __load__(cf + FR_PY) cry) + fp_mul(cz - __load__(cf + FR_PZ) crz)
+    let lim_l:Q16 = __load__(cf + FR_WL) - CRAFT_HALF_W - 98304
+    let lim_r:Q16 = __load__(cf + FR_WR) - CRAFT_HALF_W - 98304
+    if lat <? (-lim_l) {
+        in_steer_r = 1
+        in_steer_l = 0
+    }
+    if lat >? lim_r {
+        in_steer_l = 1
+        in_steer_r = 0
+    }
+
+    # Corner speed management: at probes of increasing distance, compare the
+    # heading change needed against the steering authority available at the
+    # current speed; the worst probe decides throttle.
+    let fdot:Q16 = fp_mul(fx tfx) + fp_mul(fy tfy) + fp_mul(fz tfz)
+    let spd:Q16 = fp_sqrt((cvx * cvx) + (cvy * cvy) + (cvz * cvz))
+    let worst:Q16 = 0
+    if spd >? FP_ONE {
+        let k:int = 1
+        loop k <=? 3 {
+            let pf:Ptr = ai_target_frame(ahead * k)
+            let pdot:Q16 = fp_mul(fx __load__(pf + FR_FX)) + fp_mul(fy __load__(pf + FR_FY)) + fp_mul(fz __load__(pf + FR_FZ))
+            let one_m:Q16 = FP_ONE - pdot
+            if one_m <? 0 { one_m = 0 }
+            let theta:Q16 = fp_sqrt((2 * one_m) << 16)     # ~heading change, rad
+            let allow:Q16 = fp_mul(AI_OMEGA_MAX fp_div(ahead * k * SAMPLE_SPACING spd))
+            if allow <? 1 { allow = 1 }
+            let demand:Q16 = fp_div(theta allow)
+            if demand >? worst { worst = demand }
+            k += 1
+        }
+        if worst >? 55705 {                  # 85% of authority: coast
+            in_thrust = 0
+        }
+        if worst >? 85196 {                  # 130%: actively brake
+            in_brake = 1
+        }
+    }
+    # Severe misalignment (e.g. post-landing recovery): scrub speed.
+    let aside:Q16 = side
+    if aside <? 0 { aside = -aside }
+    if aside >? 39321 {
+        in_brake = 1
+    }
+
+    # Far probe purely for dead-end detection (the gap-jump flag from a probe
+    # this distant must not affect aiming, so it is saved and restored).
+    let saved_gap:bool = ai_gap_jump
+    ai_target_frame(AI_DEADEND_PROBE)
+    ai_gap_jump = saved_gap
+
+    # Open chain end ahead: stop instead of sailing off into the void.
+    if ai_dead_end {
+        in_thrust = 0
+        in_brake = 1
+        in_boost = 0
+    }
+
+    # Boost only when the road ahead is straight enough to spend the speed.
+    if (cur_status =? 0) and (energy >? AI_BOOST_ENERGY_Q) and ((in_brake =? 0) and (worst <? 32768)) {
+        if (fdot >? ai_boost_thresh) and (speed_overcap =? 0) {
+            in_boost = 1
+        }
+    }
+    return void
+}

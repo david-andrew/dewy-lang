@@ -1,0 +1,470 @@
+# ============================================================================
+# uZero2 HUD / text rendering.
+#
+# At init the 5x7 glyph set is baked into a small RGBA atlas texture
+# (16 cols x 4 rows of 6x8 cells, chars 32..95). Text renders as textured
+# quads in the pixel-space overlay; panels are translucent bordered quads.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./font5x7.udewy"
+import p"./physics.udewy"
+
+# ---------- Font atlas ------------------------------------------------------------
+
+let init_font_atlas = ():>void => {
+    let i:int = 0
+    loop i <? FONT_ATLAS_BYTES {
+        __store_u8__(0 FONT_ATLAS_PIXELS + i)
+        i += 1
+    }
+    let ch:int = GLYPH_FIRST
+    loop ch <=? GLYPH_LAST {
+        let cell:int = ch - GLYPH_FIRST
+        let cell_x:int = (cell % FONT_ATLAS_COLS) * FONT_CELL_W
+        let cell_y:int = (cell // FONT_ATLAS_COLS) * FONT_CELL_H
+        let row:int = 0
+        loop row <? 7 {
+            let mask:int = glyph_row(ch row)
+            let col:int = 0
+            loop col <? 5 {
+                if (mask and (16 >> col)) not=? 0 {
+                    let px:int = cell_x + col
+                    let py:int = cell_y + row
+                    let off:int = (py * FONT_ATLAS_W + px) * 4
+                    __store_u8__(255 FONT_ATLAS_PIXELS + off)
+                    __store_u8__(255 FONT_ATLAS_PIXELS + off + 1)
+                    __store_u8__(255 FONT_ATLAS_PIXELS + off + 2)
+                    __store_u8__(255 FONT_ATLAS_PIXELS + off + 3)
+                }
+                col += 1
+            }
+            row += 1
+        }
+        ch += 1
+    }
+    gpu_texture_create(FONT_TEXID FONT_ATLAS_W FONT_ATLAS_H FONT_ATLAS_PIXELS 0 1)
+    return void
+}
+
+# ---------- Text drawing -----------------------------------------------------------
+# All text calls happen inside an overlay batch. scale is an integer pixel
+# multiplier (cell advance = 6 * scale).
+
+# UV extents of one glyph cell in the atlas (Q16 fractions).
+let font_cell_u = (cell:int):>Q16 => {
+    return ((cell % FONT_ATLAS_COLS) * FONT_CELL_W << 16) // FONT_ATLAS_W
+}
+
+let font_cell_v = (cell:int):>Q16 => {
+    return ((cell // FONT_ATLAS_COLS) * FONT_CELL_H << 16) // FONT_ATLAS_H
+}
+
+const FONT_DU:Q16 = 4096                 # FONT_CELL_W / FONT_ATLAS_W in Q16 (6/96)
+const FONT_DV:Q16 = 16384                # FONT_CELL_H / FONT_ATLAS_H in Q16 (8/32)
+
+# Draw a single char; assumes font texture bound + quads batch open.
+let text_char = (x:int y:int ch:int scale:int):>void => {
+    let c:int = ch
+    if (c >=? 97) and (c <=? 122) { c -= 32 }
+    if (c <? GLYPH_FIRST) or (c >? GLYPH_LAST) { return void }
+    let cell:int = c - GLYPH_FIRST
+    let u0:Q16 = font_cell_u(cell)
+    let v0:Q16 = font_cell_v(cell)
+    let u1:Q16 = u0 + FONT_DU
+    let v1:Q16 = v0 + FONT_DV
+    let w:int = FONT_CELL_W * scale
+    let h:int = FONT_CELL_H * scale
+    gpu_vertex_px_uv(x y u0 v0)
+    gpu_vertex_px_uv(x y + h u0 v1)
+    gpu_vertex_px_uv(x + w y + h u1 v1)
+    gpu_vertex_px_uv(x + w y u1 v0)
+    return void
+}
+
+# Draw a string; opens its own texture + batch. Returns the end x.
+let text_draw = (x:int y:int s:Cstr scale:int):>int => {
+    gpu_set_texture(__load_u32__(FONT_TEXID))
+    gpu_quads_begin()
+    let cur_x:int = x
+    let i:int = 0
+    loop __load_u8__(s + i) not=? 0 {
+        text_char(cur_x y __load_u8__(s + i) scale)
+        cur_x += FONT_CELL_W * scale
+        i += 1
+    }
+    gpu_end()
+    gpu_set_texture(0)
+    return cur_x
+}
+
+let text_width = (s:Cstr scale:int):>int => {
+    return cstr_len(s) * FONT_CELL_W * scale
+}
+
+let text_draw_centered = (cx_px:int y:int s:Cstr scale:int):>void => {
+    text_draw(cx_px - (text_width(s scale) // 2) y s scale)
+    return void
+}
+
+let text_draw_right = (right_x:int y:int s:Cstr scale:int):>void => {
+    text_draw(right_x - text_width(s scale) y s scale)
+    return void
+}
+
+# ---------- Number formatting --------------------------------------------------------
+
+const NUM_BUF:Ptr = __static_alloca__(24)
+
+# Render value as decimal into NUM_BUF (no padding) and return the pointer.
+let fmt_int = (value:int):>Cstr => {
+    let v:int = value
+    let neg:bool = false
+    if v <? 0 { neg = true v = -v }
+    let end:int = 23
+    __store_u8__(0 NUM_BUF + end)
+    loop true {
+        end -= 1
+        __store_u8__(48 + (v % 10) NUM_BUF + end)
+        v = v // 10
+        if v =? 0 {
+            if neg {
+                end -= 1
+                __store_u8__(45 NUM_BUF + end)
+            }
+            return NUM_BUF + end
+        }
+    }
+    return NUM_BUF + end
+}
+
+# value rendered with exactly width digits (zero padded, no sign).
+let fmt_int_pad = (value:int width:int):>Cstr => {
+    let v:int = value
+    if v <? 0 { v = 0 }
+    let end:int = 23
+    __store_u8__(0 NUM_BUF + end)
+    let i:int = 0
+    loop i <? width {
+        end -= 1
+        __store_u8__(48 + (v % 10) NUM_BUF + end)
+        v = v // 10
+        i += 1
+    }
+    return NUM_BUF + end
+}
+
+# ---------- Panels ----------------------------------------------------------------------
+
+let hud_quad = (x0:int y0:int x1:int y1:int):>void => {
+    gpu_vertex_px(x0 y0)
+    gpu_vertex_px(x0 y1)
+    gpu_vertex_px(x1 y1)
+    gpu_vertex_px(x1 y0)
+    return void
+}
+
+# Translucent dark panel with a light border.
+let draw_panel = (x0:int y0:int x1:int y1:int):>void => {
+    gpu_set_texture(0)
+    gpu_set_color4(1638 3276 8192 49151)
+    gpu_quads_begin()
+    hud_quad(x0 y0 x1 y1)
+    gpu_end()
+    gpu_set_color4(26214 45875 65535 45875)
+    gpu_quads_begin()
+    hud_quad(x0 y0 x1 y0 + 2)
+    hud_quad(x0 y1 - 2 x1 y1)
+    hud_quad(x0 y0 x0 + 2 y1)
+    hud_quad(x1 - 2 y0 x1 y1)
+    gpu_end()
+    return void
+}
+
+# ---------- HUD widgets -------------------------------------------------------------------
+
+let draw_energy_bar = (sw:int sh:int):>void => {
+    let bar_x:int = sw - HUD_MARGIN_PX - HUD_BAR_W_PX
+    let bar_y:int = HUD_MARGIN_PX
+    let bw:int = HUD_BAR_W_PX
+    let bh:int = HUD_BAR_H_PX
+    let bdr:int = HUD_BAR_BORDER_PX
+
+    gpu_set_texture(0)
+    gpu_set_color4(0 0 0 45875)
+    gpu_quads_begin()
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y + bh + bdr)
+    gpu_end()
+
+    let fill_w:int = (bw * energy) // ENERGY_FULL
+    if fill_w >? 0 {
+        let r_right:Q16 = FP_ONE
+        let g_right:Q16 = 0
+        if energy >=? FP_HALF {
+            r_right = FP_ONE - ((energy - FP_HALF) << 1)
+            if r_right <? 0 { r_right = 0 }
+            g_right = FP_ONE
+        } else {
+            r_right = FP_ONE
+            g_right = energy << 1
+            if g_right >? FP_ONE { g_right = FP_ONE }
+        }
+
+        let alpha_q:Q16 = 60293
+        if boost_active_frames >? 0 {
+            let phase:Angle = (boost_active_frames * 64) % ANG_TURN
+            let s:Q16 = sin_fp(phase)
+            alpha_q = 52428 + (s // 8)
+            if alpha_q >? FP_ONE { alpha_q = FP_ONE }
+            if alpha_q <? 0 { alpha_q = 0 }
+        }
+
+        gpu_quads_begin()
+        gpu_set_color4(FP_ONE 0 0 alpha_q)
+        gpu_vertex_px(bar_x bar_y)
+        gpu_vertex_px(bar_x bar_y + bh)
+        gpu_set_color4(r_right g_right 0 alpha_q)
+        gpu_vertex_px(bar_x + fill_w bar_y + bh)
+        gpu_vertex_px(bar_x + fill_w bar_y)
+        gpu_end()
+    }
+
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 45875)
+    gpu_quads_begin()
+    hud_quad(bar_x - bdr bar_y - bdr bar_x + bw + bdr bar_y)
+    hud_quad(bar_x - bdr bar_y + bh bar_x + bw + bdr bar_y + bh + bdr)
+    hud_quad(bar_x - bdr bar_y bar_x bar_y + bh)
+    hud_quad(bar_x + bw bar_y bar_x + bw + bdr bar_y + bh)
+    gpu_end()
+    return void
+}
+
+const HUD_KMH_LABEL:Cstr = "KM/H\0"
+
+let draw_speedometer = (sw:int sh:int):>void => {
+    let kmh:int = (vis_speed * HUD_KMH_PER_FRAME) // FP_ONE
+    let y:int = sh - HUD_MARGIN_PX - (FONT_CELL_H * 5)
+    if boost_active_frames >? 0 {
+        gpu_set_color4(FP_ONE 45875 13107 60293)
+    } else {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+    }
+    text_draw_right(sw - HUD_MARGIN_PX y fmt_int(kmh) 5)
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 39321)
+    text_draw_right(sw - HUD_MARGIN_PX y + (FONT_CELL_H * 5) + 4 HUD_KMH_LABEL 2)
+    return void
+}
+
+const HUD_LAP_LABEL:Cstr = "LAP \0"
+const HUD_SLASH:Cstr = "/\0"
+
+let draw_lap = (sw:int sh:int):>void => {
+    let lap_show:int = cur_lap + 1
+    if lap_show >? g_track_laps { lap_show = g_track_laps }
+    if lap_show <? 1 { lap_show = 1 }
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+    let x:int = (sw // 2) - (FONT_CELL_W * 3 * 8 // 2)
+    x = text_draw(x HUD_MARGIN_PX HUD_LAP_LABEL 3)
+    x = text_draw(x HUD_MARGIN_PX fmt_int(lap_show) 3)
+    x = text_draw(x HUD_MARGIN_PX HUD_SLASH 3)
+    text_draw(x HUD_MARGIN_PX fmt_int(g_track_laps) 3)
+    return void
+}
+
+const HUD_POS_SUFFIX:Cstr = " OF \0"
+
+let draw_position = (sw:int sh:int):>void => {
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+    let y:int = HUD_MARGIN_PX
+    let x:int = HUD_MARGIN_PX
+    x = text_draw(x y fmt_int(player_position) 4)
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE 39321)
+    x = text_draw(x y + 8 HUD_POS_SUFFIX 2)
+    text_draw(x y + 8 fmt_int(active_cars) 2)
+    return void
+}
+
+const HUD_FPS_LABEL:Cstr = " FPS\0"
+
+let draw_fps = (sw:int sh:int):>void => {
+    let y:int = sh - HUD_MARGIN_PX - (FONT_CELL_H * 2)
+    if fps_value <? 50 {
+        gpu_set_color4(FP_ONE 39321 39321 60293)
+        if fps_value <? 30 {
+            gpu_set_color4(FP_ONE 13107 13107 60293)
+        }
+    } else {
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 60293)
+    }
+    let x:int = text_draw(HUD_MARGIN_PX y fmt_int(fps_value) 2)
+    text_draw(x y HUD_FPS_LABEL 2)
+    return void
+}
+
+const HUD_WRONGWAY:Cstr = "WRONG WAY\0"
+
+let draw_wrongway = (sw:int sh:int):>void => {
+    if wrongway_frames <? 45 { return void }
+    if (frame_count % 30) >=? 20 { return void }
+    gpu_set_color4(FP_ONE 13107 6553 FP_ONE)
+    text_draw_centered(sw // 2 sh // 3 HUD_WRONGWAY 4)
+    return void
+}
+
+let draw_race_hud = (sw:int sh:int):>void => {
+    gpu_overlay_begin(sw sh)
+    draw_energy_bar(sw sh)
+    draw_speedometer(sw sh)
+    if play_mode =? MODE_RACE {
+        draw_lap(sw sh)
+        draw_position(sw sh)
+        draw_wrongway(sw sh)
+    }
+    if show_fps not=? 0 {
+        draw_fps(sw sh)
+    }
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Speed lines -----------------------------------------------------------------------
+
+let speed_lines_init = ():>void => {
+    xs_seed(0xC0FFEE)
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:Ptr = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        __store__(xs_range(FP_ONE) slot)
+        __store__(xs_range(ANG_TURN) (slot + 8))
+        __store__(xs_range(FP_ONE) (slot + 16))
+        i += 1
+    }
+    return void
+}
+
+let draw_speed_lines = (sw:int sh:int):>void => {
+    if vis_boost_norm <=? SPEED_LINE_THRESHOLD {
+        return void
+    }
+    let above:Q16 = vis_boost_norm - SPEED_LINE_THRESHOLD
+    let intensity:Q16 = (above << 16) // (FP_ONE - SPEED_LINE_THRESHOLD)
+    if intensity >? FP_ONE { intensity = FP_ONE }
+
+    gpu_overlay_begin(sw sh)
+    gpu_lines_begin(FP_ONE * 2)
+
+    let cx_px:int = sw // 2
+    let cy_px:int = sh // 2
+    let max_r_px:int = fp_sqrt((cx_px * cx_px) + (cy_px * cy_px))
+
+    let rate:Q16 = SPEED_LINE_RATE_Q
+    let peak_a:Q16 = SPEED_LINE_PEAK_ALPHA_Q
+    let density:Q16 = fp_mul(intensity intensity)
+    let active_count:int = (SPEED_LINES_N * density) // FP_ONE
+    let shake_px:int = (SPEED_LINE_SHAKE_PX * intensity) // FP_ONE
+
+    let i:int = 0
+    loop i <? SPEED_LINES_N {
+        let slot:Ptr = SPEED_LINE_STATE + (i * SPEED_LINE_STRIDE)
+        let phase:Q16 = __load__(slot) + rate
+        let angle_idx:Angle = __load__(slot + 8)
+        let r_seed:Q16 = __load__(slot + 16)
+        if phase >=? FP_ONE {
+            phase -= FP_ONE
+            angle_idx = xs_range(ANG_TURN)
+            r_seed = xs_range(FP_ONE)
+        }
+        __store__(phase slot)
+        __store__(angle_idx (slot + 8))
+        __store__(r_seed (slot + 16))
+
+        if i >=? active_count {
+            i += 1
+            continue
+        }
+
+        let cos_a:Q16 = cos_fp(angle_idx)
+        let sin_a:Q16 = sin_fp(angle_idx)
+
+        let abs_cos:Q16 = abs_i(cos_a)
+        let abs_sin:Q16 = abs_i(sin_a)
+        let edge_r:int = max_r_px
+        if abs_cos >? 1024 {
+            let d:int = (cx_px * FP_ONE) // abs_cos
+            if d <? edge_r { edge_r = d }
+        }
+        if abs_sin >? 1024 {
+            let d:int = (cy_px * FP_ONE) // abs_sin
+            if d <? edge_r { edge_r = d }
+        }
+
+        let start_r:int = (r_seed * edge_r) // FP_ONE
+        let end_r:int = edge_r + SPEED_LINE_OVERSHOOT_PX
+
+        let dx0:int = __signed_shr__(start_r * cos_a FP_SHIFT)
+        let dy0:int = __signed_shr__(start_r * sin_a FP_SHIFT)
+        let dx1:int = __signed_shr__(end_r * cos_a FP_SHIFT)
+        let dy1:int = __signed_shr__(end_r * sin_a FP_SHIFT)
+
+        let jx_phase:Angle = ((frame_count * 71) + (i * 197)) % ANG_TURN
+        let jy_phase:Angle = ((frame_count * 53) + (i * 311)) % ANG_TURN
+        let jx_px:int = __signed_shr__(sin_fp(jx_phase) * shake_px FP_SHIFT)
+        let jy_px:int = __signed_shr__(sin_fp(jy_phase) * shake_px FP_SHIFT)
+
+        let fade_q:Q16 = sin_fp((phase * ANG_HALF_TURN) // FP_ONE)
+        let alpha_q:Q16 = fp_mul(peak_a fade_q)
+
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE 0)
+        gpu_vertex_px(cx_px + dx0 + jx_px cy_px + dy0 + jy_px)
+        gpu_set_color4(FP_ONE FP_ONE FP_ONE alpha_q)
+        gpu_vertex_px(cx_px + dx1 + jx_px cy_px + dy1 + jy_px)
+        i += 1
+    }
+    gpu_end()
+    gpu_overlay_end()
+    return void
+}
+
+# ---------- Race standings ---------------------------------------------------------------------
+
+let recompute_player_position = ():>void => {
+    let my_progress:int = car_get_progress(0)
+    let pos:int = 1
+    let i:int = 1
+    loop i <? active_cars {
+        if car_get_progress(i) >? my_progress {
+            pos += 1
+        }
+        i += 1
+    }
+    player_position = pos
+    return void
+}
+
+const RESULTS_SORTED:Ptr = __static_alloca__(128)      # MAX_CARS i64 cells
+
+let sort_cars_by_progress = ():>void => {
+    let i:int = 0
+    loop i <? active_cars {
+        __store__(i (RESULTS_SORTED + (i * 8)))
+        i += 1
+    }
+    let j:int = 1
+    loop j <? active_cars {
+        let key:int = __load__(RESULTS_SORTED + (j * 8))
+        let key_p:int = car_get_progress(key)
+        let k:int = j - 1
+        loop (k >=? 0) and (car_get_progress(__load__(RESULTS_SORTED + (k * 8))) <? key_p) {
+            __store__(__load__(RESULTS_SORTED + (k * 8)) (RESULTS_SORTED + ((k + 1) * 8)))
+            k -= 1
+        }
+        __store__(key (RESULTS_SORTED + ((k + 1) * 8)))
+        j += 1
+    }
+    return void
+}
+
+let results_sorted_car = (rank:int):>int => {
+    return __load__(RESULTS_SORTED + rank * 8)
+}

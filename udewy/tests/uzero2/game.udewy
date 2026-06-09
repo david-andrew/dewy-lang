@@ -1,0 +1,374 @@
+# ============================================================================
+# uZero2 top-level game state machine.
+#
+# TITLE -> MENU (Race / Playground / Editor) -> TRACKSEL -> RACE
+#   RACE -> PAUSE (resume / restart / quit) | RESULTS | GAMEOVER
+#   MENU -> EDITOR (test drive inside)
+#
+# Backend-agnostic; the entry module imports a platform first.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_format.udewy"
+import p"./tracks_builtin.udewy"
+import p"./input.udewy"
+import p"./physics.udewy"
+import p"./camera.udewy"
+import p"./ai.udewy"
+import p"./audio.udewy"
+import p"./render_world.udewy"
+import p"./render_hud.udewy"
+import p"./menu.udewy"
+import p"./editor.udewy"
+
+# ---------- Track loading ----------------------------------------------------
+
+let load_builtin_track = (idx:int):>void => {
+    current_track = idx
+    if track_parse(builtin_track_text(idx)) =? false {
+        print("track parse error, line ")
+        print_int(fmt_error_line)
+        print("\n")
+        track_parse(builtin_track_text(0))
+        current_track = 0
+    }
+    track_bake()
+    return void
+}
+
+# ---------- Race setup ----------------------------------------------------------
+
+let reset_race = (mode:int):>void => {
+    play_mode = mode
+    let count:int = MAX_CARS
+    if mode not=? MODE_RACE { count = 1 }
+    init_cars(count)
+    trail_head = 0
+    trail_count = 0
+    spark_head = 0
+    let i:int = 0
+    loop i <? SPARK_MAX {
+        __store__(0 (SPARK_BUF + (i * SPARK_STRIDE) + 48))
+        i += 1
+    }
+    let v:int = 0
+    loop v <? SFX_SLOTS {
+        __store__(0 (SFX_VOICES + (v * SFX_SLOT_STRIDE)))
+        v += 1
+    }
+    pending_sfx = -1
+    pending_explode_player = 0
+    player_position = 1
+    player_finish_frame = 0
+    game_over_frames = 0
+    results_camera_frames = 0
+    race_start_frame = frame_count
+    car_load(0)
+    camera_snap_behind_craft()
+    update_chase()
+    car_store(0)
+    return void
+}
+
+# ---------- Per-frame race driver --------------------------------------------------
+
+let step_all_cars = ():>void => {
+    car_load(0)
+    current_car_is_player = 1
+    gather_player_input()
+    physics_step()
+    if cur_status =? 0 {
+        trail_push()
+    }
+    car_store(0)
+    drain_pending_sfx(FP_ONE)
+
+    current_car_is_player = 0
+    let i:int = 1
+    loop i <? active_cars {
+        car_load(i)
+        ai_compute_input(i)
+        physics_step()
+        car_store(i)
+        drain_pending_sfx(13107)
+        i += 1
+    }
+    car_load(0)
+    update_chase()
+    return void
+}
+
+# ---------- Rendering ----------------------------------------------------------------
+
+let render_race = (sw:int sh:int):>void => {
+    render_world_common(sw sh)
+    draw_all_cars()
+    draw_trail()
+    draw_sparks()
+    draw_race_hud(sw sh)
+    draw_speed_lines(sw sh)
+    return void
+}
+
+# ---------- Per-state updates ----------------------------------------------------------
+
+let update_title = ():>void => {
+    title_blink_phase = (title_blink_phase + 1) % 120
+    if nav_confirm_pressed() {
+        sfx_play(SFX_KIND_MENU 32768)
+        menu_cursor = 0
+        game_state = ST_MENU
+    }
+    return void
+}
+
+let update_menu = ():>void => {
+    if nav_up_pressed() {
+        menu_cursor = (menu_cursor + MENU_ITEM_COUNT - 1) % MENU_ITEM_COUNT
+        sfx_play(SFX_KIND_MENU 26214)
+    }
+    if nav_down_pressed() {
+        menu_cursor = (menu_cursor + 1) % MENU_ITEM_COUNT
+        sfx_play(SFX_KIND_MENU 26214)
+    }
+    if nav_back_pressed() {
+        game_state = ST_TITLE
+    }
+    if nav_confirm_pressed() {
+        sfx_play(SFX_KIND_MENU 32768)
+        if menu_cursor =? 0 {
+            tracksel_cursor = current_track % TRACK_COUNT
+            game_state = ST_TRACKSEL
+        }
+        if menu_cursor =? 1 {
+            load_builtin_track(2)
+            reset_race(MODE_PLAYGROUND)
+            game_state = ST_RACE
+        }
+        if menu_cursor =? 2 {
+            editor_enter()
+            game_state = ST_EDITOR
+        }
+    }
+    return void
+}
+
+let update_tracksel = ():>void => {
+    if nav_up_pressed() {
+        tracksel_cursor = (tracksel_cursor + TRACK_COUNT - 1) % TRACK_COUNT
+        load_builtin_track(tracksel_cursor)
+        sfx_play(SFX_KIND_MENU 26214)
+    }
+    if nav_down_pressed() {
+        tracksel_cursor = (tracksel_cursor + 1) % TRACK_COUNT
+        load_builtin_track(tracksel_cursor)
+        sfx_play(SFX_KIND_MENU 26214)
+    }
+    if nav_back_pressed() {
+        game_state = ST_MENU
+    }
+    if nav_confirm_pressed() {
+        sfx_play(SFX_KIND_MENU 32768)
+        reset_race(MODE_RACE)
+        game_state = ST_RACE
+    }
+    return void
+}
+
+let update_race = ():>void => {
+    if key_pressed(KEY_ESC) {
+        pause_cursor = 0
+        prev_state = ST_RACE
+        game_state = ST_PAUSE
+        return void
+    }
+    if key_pressed(KEY_F) {
+        show_fps = 1 - show_fps
+    }
+    step_all_cars()
+    spark_step()
+    recompute_player_position()
+    if pending_explode_player not=? 0 {
+        pending_explode_player = 0
+        sfx_play(SFX_KIND_EXPLODE FP_ONE)
+        game_over_frames = 0
+        game_state = ST_GAMEOVER
+        return void
+    }
+    if (play_mode =? MODE_RACE) and (car_get_lap(0) >=? g_track_laps) {
+        player_finish_frame = frame_count
+        sort_cars_by_progress()
+        results_camera_frames = 0
+        game_state = ST_RESULTS
+    }
+    return void
+}
+
+let update_pause = ():>void => {
+    if nav_up_pressed() {
+        pause_cursor = (pause_cursor + PAUSE_ITEM_COUNT - 1) % PAUSE_ITEM_COUNT
+        sfx_play(SFX_KIND_MENU 26214)
+    }
+    if nav_down_pressed() {
+        pause_cursor = (pause_cursor + 1) % PAUSE_ITEM_COUNT
+        sfx_play(SFX_KIND_MENU 26214)
+    }
+    if nav_back_pressed() {
+        game_state = prev_state
+        return void
+    }
+    if nav_confirm_pressed() {
+        sfx_play(SFX_KIND_MENU 32768)
+        if pause_cursor =? 0 {
+            game_state = prev_state
+        }
+        if pause_cursor =? 1 {
+            reset_race(play_mode)
+            game_state = ST_RACE
+        }
+        if pause_cursor =? 2 {
+            game_state = ST_MENU
+        }
+    }
+    return void
+}
+
+let update_results = ():>void => {
+    results_camera_frames += 1
+    if nav_confirm_pressed() {
+        sfx_play(SFX_KIND_MENU 32768)
+        game_state = ST_MENU
+    }
+    return void
+}
+
+let update_gameover = ():>void => {
+    game_over_frames += 1
+    # the dead car keeps tumbling; AI keeps racing in the background
+    let i:int = 0
+    loop i <? active_cars {
+        car_load(i)
+        if i =? 0 {
+            current_car_is_player = 1
+            in_thrust = 0
+            in_brake = 0
+            in_steer_l = 0
+            in_steer_r = 0
+            in_strafe_l = 0
+            in_strafe_r = 0
+            in_boost = 0
+            in_respawn = 0
+        } else {
+            current_car_is_player = 0
+            ai_compute_input(i)
+        }
+        physics_step()
+        car_store(i)
+        i += 1
+    }
+    car_load(0)
+    update_chase()
+    spark_step()
+    if nav_confirm_pressed() or key_pressed(KEY_R) {
+        reset_race(play_mode)
+        game_state = ST_RACE
+    }
+    if nav_back_pressed() {
+        game_state = ST_MENU
+    }
+    return void
+}
+
+# ---------- One-time initialisation ------------------------------------------------------
+
+let game_init = ():>void => {
+    init_textures()
+    init_font_atlas()
+    speed_lines_init()
+    audio_engine_init()
+    load_builtin_track(0)
+    reset_race(MODE_RACE)
+    game_state = ST_TITLE
+    fps_last_ticks = time_ms()
+    return void
+}
+
+# ---------- Per-frame entry point ----------------------------------------------------------
+
+const GAME_SIZE_BUF:Ptr = __static_alloca__(8)
+
+let frame_step = (dt_ms:int):>int => {
+    backend_poll()
+    input_update()
+    if plat_quit_requested() {
+        running = false
+        return 1
+    }
+
+    backend_get_size(GAME_SIZE_BUF GAME_SIZE_BUF + 4)
+    let sw:int = __load_u32__(GAME_SIZE_BUF)
+    let sh:int = __load_u32__(GAME_SIZE_BUF + 4)
+    if sw <? 64 { sw = 64 }
+    if sh <? 64 { sh = 64 }
+    scr_w = sw
+    scr_h = sh
+
+    if game_state =? ST_TITLE {
+        update_title()
+        audio_step(FP_ONE 0)
+        render_title(sw sh)
+    } else { if game_state =? ST_MENU {
+        update_menu()
+        audio_step(FP_ONE 0)
+        render_menu(sw sh)
+    } else { if game_state =? ST_TRACKSEL {
+        update_tracksel()
+        audio_step(FP_ONE 0)
+        render_tracksel(sw sh TRACK_COUNT)
+    } else { if game_state =? ST_RACE {
+        update_race()
+        audio_step(32768 49152)
+        render_race(sw sh)
+    } else { if game_state =? ST_PAUSE {
+        update_pause()
+        audio_step(26214 0)
+        render_race(sw sh)
+        render_pause_overlay(sw sh)
+    } else { if game_state =? ST_RESULTS {
+        update_results()
+        audio_step(FP_ONE 0)
+        render_results(sw sh)
+    } else { if game_state =? ST_GAMEOVER {
+        update_gameover()
+        audio_step(26214 13107)
+        render_gameover(sw sh)
+    } else {
+        # ST_EDITOR
+        if editor_update() =? false {
+            game_state = ST_MENU
+        }
+        drain_pending_sfx(FP_ONE)
+        let engine_vol:Q16 = 0
+        if ed_testdrive { engine_vol = 49152 }
+        audio_step(26214 engine_vol)
+        editor_render(sw sh)
+    } } } } } } }
+
+    backend_present()
+    frame_count += 1
+
+    fps_sample_count += 1
+    if fps_sample_count >=? HUD_FPS_SAMPLE_FRAMES {
+        let now_ticks:int = time_ms()
+        let elapsed_ms:int = now_ticks - fps_last_ticks
+        if elapsed_ms >? 0 {
+            fps_value = (fps_sample_count * 1000) // elapsed_ms
+        }
+        fps_last_ticks = now_ticks
+        fps_sample_count = 0
+    }
+    return 0
+}

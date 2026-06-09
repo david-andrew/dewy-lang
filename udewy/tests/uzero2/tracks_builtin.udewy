@@ -1,0 +1,168 @@
+# ============================================================================
+# uZero2 built-in tracks, stored as .uztrack text and run through the real
+# parser at load (the format is exercised on every launch).
+#
+#   0  VELOCITY RING  - GX-style circuit: banked turns, vertical loop,
+#                       fork/merge shortcut with boost pads.
+#   1  PIPE DREAM     - flat -> half-pipe -> closed pipe morph, a ramp jump
+#                       over a gap onto a disconnected section, and an
+#                       exterior cylinder run.
+#   2  PLAYGROUND     - open non-race layout with one of every feature on a
+#                       drivable ground apron: pipe morph chain, exterior
+#                       sphere bulb, exterior cylinder, corkscrew, jump
+#                       island. Editor canvas.
+# ============================================================================
+
+import p"./prelude.udewy"
+
+const TRACK_COUNT:int = 3
+
+const TRACK_VELOCITY_RING:Cstr = "
+uztrack 1
+name VELOCITY RING
+laps 3
+# start straight, heading -z
+node n0 pos 0 10 0 tan 0 0 -1 roll 0 width 36 36 xsect 0 surf grid
+node n1 pos 0 10 -750 tan 0 0 -1 width 36 36 xsect 0 surf normal
+# banked right turn onto the +x straight
+node n2 pos 250 10 -1000 tan 1 0 0 roll 14 width 36 36 xsect 0 surf normal
+node n3 pos 625 10 -1000 tan 1 0 0 width 36 36 xsect 0 surf boost
+# vertical loop (circle r=100 in the xy plane, drifting -25 z per quarter)
+node n4 pos 750 10 -1000 tan 1 0 0 up 0 1 0 width 36 36 xsect 0 surf loop
+node n5 pos 850 110 -1025 tan 0 1 0 up -1 0 0 width 36 36 xsect 0 surf loop
+node n6 pos 750 210 -1050 tan -1 0 0 up 0 -1 0 width 36 36 xsect 0 surf loop
+node n7 pos 650 110 -1075 tan 0 -1 0 up 1 0 0 width 36 36 xsect 0 surf loop
+node n8 pos 750 10 -1100 tan 1 0 0 up 0 1 0 width 36 36 xsect 0 surf loop
+node n9 pos 1125 10 -1100 tan 1 0 0 width 36 36 xsect 0 surf normal
+# banked turn onto the return straight (+z)
+node n10 pos 1375 10 -850 tan 0 0 1 roll 14 width 36 36 xsect 0 surf normal
+# fork point
+node n11 pos 1375 10 -375 tan 0 0 1 width 36 36 xsect 0 surf normal
+# main (outer) path: banked 90-degree sweeper onto the return straight
+node n12 pos 1375 10 125 tan 0 0 1 roll 14 width 42 42 xsect 0 surf normal
+node n13 pos 1125 10 375 tan -1 0 0 roll 8 width 42 42 xsect 0 surf normal
+node n14 pos 250 10 375 tan -1 0 0 width 42 42 xsect 0 surf recharge
+node n15 pos 0 10 150 tan 0 0 -1 roll 12 width 36 36 xsect 0 surf normal
+# shortcut branch (narrow, boosted entry, no rails)
+node na pos 1237 11 -25 tan -0.55 0 0.84 width 24 24 xsect 0 surf normal
+seg s0 from n0 to n1
+seg s1 from n1 to n2
+seg s2 from n2 to n3
+seg s3 from n3 to n4 surf loop
+seg s4 from n4 to n5 surf loop
+seg s5 from n5 to n6 surf loop
+seg s6 from n6 to n7 surf loop
+seg s7 from n7 to n8 surf loop
+seg s8 from n8 to n9
+seg s9 from n9 to n10
+seg s10 from n10 to n11
+seg s11 from n11 to n12
+seg s12 from n12 to n13
+seg s13 from n13 to n14 surf recharge
+seg s14 from n14 to n15
+seg s15 from n15 to n0
+seg s16 from n11 to na surf boost rails none
+seg s17 from na to n13 rails none
+start s0 0.5
+route s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15
+\0"
+
+const TRACK_PIPE_DREAM:Cstr = "
+uztrack 1
+name PIPE DREAM
+laps 3
+# flat start morphing into a half-pipe then a closed pipe
+node n0 pos 0 10 0 tan 0 0 -1 width 40 40 xsect 0 surf grid
+node n1 pos 0 10 -500 tan 0 0 -1 width 60 60 xsect 180 surf normal
+node n2 pos 0 10 -1000 tan 0 0 -1 width 75 75 xsect 360 surf normal
+node n3 pos 0 12 -1400 tan 0 0 -1 width 75 75 xsect 360 surf normal
+node n4 pos 0 10 -1800 tan 0 0 -1 width 40 40 xsect 0 surf normal
+# swing toward +x and launch off a ramp over a gap
+node n5 pos 250 10 -2075 tan 1 0 0 roll 12 width 48 48 xsect 0 surf normal
+node n6 pos 600 16 -2075 tan 1 0.18 0 width 48 48 xsect 0 surf ramp
+# disconnected landing section (200 m gap)
+node n7 pos 800 6 -2075 tan 1 -0.06 0 width 60 60 xsect 0 surf recharge
+node n8 pos 1350 10 -1875 tan 0.3 0 1 width 42 42 xsect 0 surf normal
+# exterior cylinder run back along +z
+node n9 pos 1400 14 -1450 tan 0 0 1 width 70 70 xsect -360 lift 1 surf normal
+node n10 pos 1400 14 -750 tan 0 0 1 width 70 70 xsect -360 lift 1 surf cork
+node n11 pos 1400 10 -300 tan 0 0 1 width 40 40 xsect 0 surf normal
+# return straight sits behind the start line, then a banked sweeper home
+node n12 pos 1150 10 200 tan -1 0 0 roll 12 width 42 42 xsect 0 surf boost
+node n13 pos 275 10 200 tan -1 0 0 roll 10 width 42 42 xsect 0 surf recharge
+seg s0 from n0 to n1
+seg s1 from n1 to n2
+seg s2 from n2 to n3
+seg s3 from n3 to n4
+seg s4 from n4 to n5
+seg s5 from n5 to n6 rails none surf ramp
+seg s6 from n7 to n8 rails none
+seg s7 from n8 to n9
+seg s8 from n9 to n10
+seg s9 from n10 to n11
+seg s10 from n11 to n12
+seg s11 from n12 to n13
+seg s12 from n13 to n0
+start s0 0.5
+route s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12
+\0"
+
+const TRACK_PLAYGROUND:Cstr = "
+uztrack 1
+name PLAYGROUND
+laps 1
+apron 10
+# main chain: flat -> half-pipe -> closed pipe -> flat (open ends)
+node p0 pos 0 10 0 tan 0 0 -1 width 42 42 xsect 0 surf grid
+node p1 pos 0 10 -375 tan 0 0 -1 width 60 60 xsect 180 surf normal
+node p2 pos 0 10 -750 tan 0 0 -1 width 75 75 xsect 360 surf boost
+node p3 pos 0 10 -1125 tan 0 0 -1 width 60 60 xsect 180 surf normal
+node p4 pos 0 10 -1500 tan 0 0 -1 width 42 42 xsect 0 surf recharge
+# exterior sphere bulb planted in the apron (surface of revolution)
+node q0 pos 375 50 -250 tan 0 0 -1 width 8 8 xsect -360 lift 1 surf normal
+node q1 pos 375 50 -425 tan 0 0 -1 width 150 150 xsect -360 lift 1 surf normal
+node q2 pos 375 50 -600 tan 0 0 -1 width 8 8 xsect -360 lift 1 surf normal
+# exterior cylinder run, resting on the apron
+node r0 pos -375 32 0 tan 0 0 -1 width 70 70 xsect -360 lift 1 surf normal
+node r1 pos -375 32 -550 tan 0 0 -1 width 70 70 xsect -360 lift 1 surf normal
+# ramp jump onto a floating island
+node t0 pos 750 10 0 tan 0 0 -1 width 36 36 xsect 0 surf grid
+node t1 pos 750 15 -225 tan 0 0.2 -1 width 36 36 xsect 0 surf ramp
+node t2 pos 750 8 -425 tan 0 0 -1 width 48 48 xsect 0 surf recharge
+node t3 pos 750 8 -700 tan 0 0 -1 width 48 48 xsect 0 surf normal
+# corkscrew alley with ground-level on/off ramps
+node c9 pos -750 10 150 tan 0 0 -1 width 36 36 xsect 0 surf grid
+node c0 pos -750 20 0 tan 0 0 -1 width 36 36 xsect 0 surf normal
+node c1 pos -750 20 -550 tan 0 0 -1 width 36 36 xsect 0 surf normal
+node c2 pos -750 10 -700 tan 0 0 -1 width 36 36 xsect 0 surf normal
+seg s0 from p0 to p1
+seg s1 from p1 to p2
+seg s2 from p2 to p3
+seg s3 from p3 to p4
+seg s4 from q0 to q1
+seg s5 from q1 to q2
+seg s6 from r0 to r1
+seg s7 from t0 to t1 rails none surf ramp
+seg s8 from t2 to t3 rails none
+seg s9 from c9 to c0 rails none
+seg s10 from c0 to c1 twist 1 surf cork
+seg s11 from c1 to c2 rails none
+start s0 0.5
+route s0 s1 s2 s3
+\0"
+
+let builtin_track_text = (idx:int):>Cstr => {
+    if idx =? 1 { return TRACK_PIPE_DREAM }
+    if idx =? 2 { return TRACK_PLAYGROUND }
+    return TRACK_VELOCITY_RING
+}
+
+const TRACK_NAME_0:Cstr = "VELOCITY RING\0"
+const TRACK_NAME_1:Cstr = "PIPE DREAM\0"
+const TRACK_NAME_2:Cstr = "PLAYGROUND\0"
+
+let builtin_track_name = (idx:int):>Cstr => {
+    if idx =? 1 { return TRACK_NAME_1 }
+    if idx =? 2 { return TRACK_NAME_2 }
+    return TRACK_NAME_0
+}

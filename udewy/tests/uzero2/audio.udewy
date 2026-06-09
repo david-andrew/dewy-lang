@@ -1,0 +1,234 @@
+# ============================================================================
+# uZero2 audio: procedural SFX/music tables + per-frame mixer. Uses the
+# audio_init / audio_push_pcm_s16 / audio_queued_bytes backend surface.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./physics.udewy"
+
+# ---------- SFX table layout ---------------------------------------------------
+# SFX_TABLE_BUF holds SFX_KIND_COUNT * SFX_MAX_LEN signed 16-bit samples.
+# SFX_VOICES holds SFX_SLOTS concurrent oneshots: (active, pos, len, kind,
+# vol_q) at SFX_SLOT_STRIDE bytes.
+
+let sfx_kind_len = (k:int):>int => {
+    if k =? SFX_KIND_BOOST { return SFX_LEN_BOOST }
+    if k =? SFX_KIND_WALL { return SFX_LEN_WALL }
+    if k =? SFX_KIND_RECHARGE { return SFX_LEN_RECHARGE }
+    if k =? SFX_KIND_LAP { return SFX_LEN_LAP }
+    if k =? SFX_KIND_EXPLODE { return SFX_LEN_EXPLODE }
+    if k =? SFX_KIND_MENU { return SFX_LEN_MENU }
+    return 0
+}
+
+let sfx_kind_offset = (k:int):>int => {
+    return k * SFX_MAX_LEN * 2
+}
+
+# Bake one SFX into the table. shape selects the envelope:
+#   0 = ascending sweep (boost)    1 = noise burst (wall)
+#   2 = bright chord (recharge)    3 = chime (lap)
+#   4 = noise + low sine (explode) 5 = short blip (menu)
+let build_sfx = (k:int shape:int base_freq:int):>void => {
+    let len:int = sfx_kind_len(k)
+    let buf:Ptr = SFX_TABLE_BUF + sfx_kind_offset(k)
+    let i:int = 0
+    let rng_state:int = 0x9E3779B97F4A7C15 + k * 1234567
+    loop i <? len {
+        let env:Q16 = (FP_ONE * (len - i)) // len
+        let s:Q16 = 0
+        if shape =? 0 {
+            let f:int = base_freq + (i * 80) // len
+            let phase:int = (i * f * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = sin_fp(phase % ANG_TURN)
+            let phase2:int = (i * (f + 100) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (s + sin_fp(phase2 % ANG_TURN)) // 2
+        }
+        if shape =? 1 {
+            rng_state = rng_state * 6364136223846793005 + 1442695040888963407
+            s = ((rng_state >> 49) and 0xFFFF) - 32768
+            let env2:Q16 = (env * env) // FP_ONE
+            s = (s * env2) // FP_ONE
+        }
+        if shape =? 2 {
+            let p1:int = (i * base_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+            let p2:int = (i * (base_freq * 5 // 4) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            let p3:int = (i * (base_freq * 3 // 2) * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (sin_fp(p1 % ANG_TURN) + sin_fp(p2 % ANG_TURN) + sin_fp(p3 % ANG_TURN)) // 3
+        }
+        if shape =? 3 {
+            let p1:int = (i * base_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+            let p2:int = (i * base_freq * 2 * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (sin_fp(p1 % ANG_TURN) * 7 + sin_fp(p2 % ANG_TURN) * 3) // 10
+        }
+        if shape =? 4 {
+            rng_state = rng_state * 6364136223846793005 + 1442695040888963407
+            let n:int = ((rng_state >> 49) and 0xFFFF) - 32768
+            let p1:int = (i * 80 * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = (n + sin_fp(p1 % ANG_TURN) * 2) // 3
+        }
+        if shape =? 5 {
+            let p1:int = (i * base_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+            s = sin_fp(p1 % ANG_TURN)
+        }
+        let sample:int = (s * env * 28000) // (FP_ONE * FP_ONE)
+        if sample >? 32767 { sample = 32767 }
+        if sample <? -32768 { sample = -32768 }
+        __store_u16__(sample (buf + i * 2))
+        i += 1
+    }
+    return void
+}
+
+let build_all_sfx = ():>void => {
+    build_sfx(SFX_KIND_BOOST 0 220)
+    build_sfx(SFX_KIND_WALL 1 0)
+    build_sfx(SFX_KIND_RECHARGE 2 440)
+    build_sfx(SFX_KIND_LAP 3 660)
+    build_sfx(SFX_KIND_EXPLODE 4 110)
+    build_sfx(SFX_KIND_MENU 5 880)
+    return void
+}
+
+# 2-second music loop: arpeggio of four notes over a bass drone.
+let build_music_loop = ():>void => {
+    let i:int = 0
+    let bass_freq:int = 80
+    loop i <? MUSIC_LOOP_SAMPLES {
+        let beat:int = (i * 4) // MUSIC_LOOP_SAMPLES
+        let mel_freq:int = 220
+        if beat =? 1 { mel_freq = 277 }
+        if beat =? 2 { mel_freq = 330 }
+        if beat =? 3 { mel_freq = 247 }
+        let pm:int = (i * mel_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+        let pb:int = (i * bass_freq * ANG_TURN) // AUDIO_SAMPLE_RATE
+        let beat_len:int = MUSIC_LOOP_SAMPLES // 4
+        let beat_env:Q16 = (FP_ONE * (beat_len - (i % beat_len))) // beat_len
+        let mel:Q16 = (sin_fp(pm % ANG_TURN) * beat_env) // FP_ONE
+        let bass:Q16 = sin_fp(pb % ANG_TURN)
+        let mix:Q16 = (mel * 6 + bass * 4) // 10
+        let sample:int = (mix * 14000) // FP_ONE
+        if sample >? 32767 { sample = 32767 }
+        if sample <? -32768 { sample = -32768 }
+        __store_u16__(sample (AUDIO_MUSIC_BUF + i * 2))
+        i += 1
+    }
+    return void
+}
+
+# ---------- Voices --------------------------------------------------------------
+
+let sfx_voice_alloc = ():>Ptr => {
+    let i:int = 0
+    loop i <? SFX_SLOTS {
+        let slot:Ptr = SFX_VOICES + i * SFX_SLOT_STRIDE
+        if __load__(slot) =? 0 {
+            return slot
+        }
+        i += 1
+    }
+    return SFX_VOICES
+}
+
+let sfx_play = (k:int vol_q:Q16):>void => {
+    if audio_enabled =? 0 { return void }
+    let slot:Ptr = sfx_voice_alloc()
+    __store__(1 slot)
+    __store__(0 (slot + 8))
+    __store__(sfx_kind_len(k) (slot + 16))
+    __store__(k (slot + 24))
+    __store__(vol_q (slot + 32))
+    return void
+}
+
+let audio_engine_init = ():>void => {
+    audio_enabled = audio_init(AUDIO_SAMPLE_RATE 1)
+    if audio_enabled =? 0 { return void }
+    build_all_sfx()
+    build_music_loop()
+    return void
+}
+
+# ---------- Mixer ----------------------------------------------------------------
+
+# Mix and push one AUDIO_FRAME_SAMPLES chunk.
+let audio_mix_chunk = (music_volume_q:Q16 engine_volume_q:Q16):>void => {
+    let speed_n:Q16 = clamp_i(vis_speed_norm 0 FP_ONE)
+    let engine_freq:int = 60 + (300 * speed_n) // FP_ONE
+
+    let i:int = 0
+    loop i <? AUDIO_FRAME_SAMPLES {
+        let mpos:int = (music_play_pos + i) % MUSIC_LOOP_SAMPLES
+        let mraw:int = __load_u16__(AUDIO_MUSIC_BUF + mpos * 2)
+        if mraw >=? 32768 { mraw -= 65536 }
+        let m_part:int = (mraw * music_volume_q) // FP_ONE
+
+        let phase:int = ((engine_phase + i * engine_freq) * ANG_TURN) // AUDIO_SAMPLE_RATE
+        let e_raw:Q16 = sin_fp(phase % ANG_TURN)
+        let e_part:int = (((e_raw * 12000) // FP_ONE) * engine_volume_q) // FP_ONE
+
+        let sfx_part:int = 0
+        let v:int = 0
+        loop v <? SFX_SLOTS {
+            let slot:Ptr = SFX_VOICES + v * SFX_SLOT_STRIDE
+            if __load__(slot) not=? 0 {
+                let pos:int = __load__(slot + 8) + i
+                if pos <? __load__(slot + 16) {
+                    let sraw:int = __load_u16__(SFX_TABLE_BUF + sfx_kind_offset(__load__(slot + 24)) + pos * 2)
+                    if sraw >=? 32768 { sraw -= 65536 }
+                    sfx_part += (sraw * __load__(slot + 32)) // FP_ONE
+                }
+            }
+            v += 1
+        }
+
+        let total:int = m_part + e_part + sfx_part
+        if total >? 32767 { total = 32767 }
+        if total <? -32768 { total = -32768 }
+        __store_u16__(total (AUDIO_MIX_BUF + i * 2))
+        i += 1
+    }
+
+    music_play_pos = (music_play_pos + AUDIO_FRAME_SAMPLES) % MUSIC_LOOP_SAMPLES
+    engine_phase = (engine_phase + AUDIO_FRAME_SAMPLES * engine_freq) % AUDIO_SAMPLE_RATE
+    let v:int = 0
+    loop v <? SFX_SLOTS {
+        let slot:Ptr = SFX_VOICES + v * SFX_SLOT_STRIDE
+        if __load__(slot) not=? 0 {
+            let pos:int = __load__(slot + 8) + AUDIO_FRAME_SAMPLES
+            if pos >=? __load__(slot + 16) {
+                __store__(0 slot)
+            } else {
+                __store__(pos (slot + 8))
+            }
+        }
+        v += 1
+    }
+
+    audio_push_pcm_s16(AUDIO_MIX_BUF AUDIO_FRAME_BYTES)
+    return void
+}
+
+# Per-frame entry: top the device queue back up to the target backlog. Pushing
+# however many chunks it takes (instead of at most one) keeps the stream fed
+# across slow frames, which is what made playback choppy before.
+let audio_step = (music_volume_q:Q16 engine_volume_q:Q16):>void => {
+    if audio_enabled =? 0 { return void }
+    let chunks:int = 0
+    loop (audio_queued_bytes() <? AUDIO_QUEUE_TARGET_BYTES) and (chunks <? AUDIO_MAX_CHUNKS_PER_STEP) {
+        audio_mix_chunk(music_volume_q engine_volume_q)
+        chunks += 1
+    }
+    return void
+}
+
+# Drain the pending_sfx slot set by trigger_sfx during physics. At most one
+# SFX is queued per frame (the most-recent kind wins).
+let drain_pending_sfx = (vol_q:Q16):>void => {
+    if pending_sfx >=? 0 {
+        sfx_play(pending_sfx vol_q)
+        pending_sfx = -1
+    }
+    return void
+}

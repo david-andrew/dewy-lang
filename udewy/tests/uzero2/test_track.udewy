@@ -1,0 +1,215 @@
+# ============================================================================
+# uZero2 headless track test: parse -> bake -> query -> serialize round-trip.
+# Run natively: python -m udewy udewy/tests/uzero2/test_track.udewy
+# ============================================================================
+
+$supported_targets = ["x86_64" "c"]
+
+import p"./prelude.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_query.udewy"
+import p"./track_format.udewy"
+
+# Simple 8-node circular circuit (radius 200 m), one half-pipe node and one
+# exterior dip to exercise the cross-section math.
+const TEST_TRACK:Cstr = "
+uztrack 1
+name Test Ring
+laps 3
+node n0 pos 0 0 -200 tan 1 0 0 roll 0 width 12 12 xsect 0 surf grid
+node n1 pos 141.42 0 -141.42 tan 0.7071 0 0.7071 width 12 12 xsect 0 surf normal
+node n2 pos 200 0 0 tan 0 0 1 width 12 12 xsect 180 surf normal
+node n3 pos 141.42 0 141.42 tan -0.7071 0 0.7071 width 12 12 xsect 180 surf boost
+node n4 pos 0 0 200 tan -1 0 0 width 12 12 xsect 0 surf normal
+node n5 pos -141.42 0 141.42 tan -0.7071 0 -0.7071 width 12 12 xsect -90 surf normal
+node n6 pos -200 0 0 tan 0 0 -1 width 12 12 xsect 0 surf recharge
+node n7 pos -141.42 0 -141.42 tan 0.7071 0 -0.7071 width 12 12 xsect 0 surf normal
+seg s0 from n0 to n1
+seg s1 from n1 to n2
+seg s2 from n2 to n3
+seg s3 from n3 to n4
+seg s4 from n4 to n5
+seg s5 from n5 to n6
+seg s6 from n6 to n7
+seg s7 from n7 to n0
+start s0 0.5
+route s0 s1 s2 s3 s4 s5 s6 s7
+\0"
+
+let fails:int = 0
+
+let check = (label:Cstr ok:bool):>void => {
+    if ok {
+        print("PASS ")
+    } else {
+        print("FAIL ")
+        fails += 1
+    }
+    let i:int = 0
+    loop __load_u8__(label + i) not=? 0 {
+        host_write(STDOUT label + i 1)
+        i += 1
+    }
+    print("\n")
+    return void
+}
+
+let approx = (a:int b:int tol:int):>bool => {
+    return abs_i(a - b) <=? tol
+}
+
+const SAVE_BUF:Ptr = __static_alloca__(512)
+
+let main = ():>int => {
+    arena_init()
+
+    # ---- parse + bake -----------------------------------------------------
+    let ok:bool = track_parse(TEST_TRACK)
+    check("parse\0" ok)
+    if ok =? false {
+        print("error line: ")
+        print_int(fmt_error_line)
+        print("\n")
+        return 1
+    }
+    check("counts\0" (node_count() =? 8) and (seg_count() =? 8) and (vec_len(g_route) =? 8))
+
+    track_bake()
+    check("lap_len\0" g_lap_len =? 8 * PROG_PER_SEG)
+
+    # ---- frame sanity -----------------------------------------------------
+    let frames_ok:bool = true
+    let arc_ok:bool = true
+    let total_len:Q16 = 0
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        let n:int = seg_nsamp(sg)
+        if n <? 8 { frames_ok = false }
+        let prev_arc:Q16 = -1
+        let i:int = 0
+        loop i <? n {
+            let fp:Ptr = fr_p(sg i)
+            let fm:Q16 = v3_mag(fp + FR_FX)
+            let um:Q16 = v3_mag(fp + FR_UX)
+            if approx(fm FP_ONE 2000) =? false { frames_ok = false }
+            if approx(um FP_ONE 2000) =? false { frames_ok = false }
+            let fu:Q16 = v3_dot(fp + FR_FX fp + FR_UX)
+            if abs_i(fu) >? 2000 { frames_ok = false }
+            if __load__(fp + FR_CUMARC) <=? prev_arc { arc_ok = false }
+            prev_arc = __load__(fp + FR_CUMARC)
+            i += 1
+        }
+        total_len += __load__(sg + SG_LEN)
+        s += 1
+    }
+    check("frame_units\0" frames_ok)
+    check("arc_monotonic\0" arc_ok)
+    # Circle circumference 2*pi*200 = 1256 m; Hermite approximation should be close.
+    check("total_len\0" approx(total_len 1256 * FP_ONE 40 * FP_ONE))
+
+    # ---- progress ---------------------------------------------------------
+    let prog_ok:bool = true
+    s = 0
+    loop s <? 8 {
+        let sg:Ptr = seg_p(vec_get(g_route s))
+        if __load__(sg + SG_PROG0) not=? s * PROG_PER_SEG { prog_ok = false }
+        s += 1
+    }
+    check("progress\0" prog_ok)
+
+    # ---- queries ------------------------------------------------------------
+    # Probe 2 m above the first frame of s0: expect segment 0, centred, up normal.
+    let f0:Ptr = fr_p(seg_p(0) 0)
+    track_query(__load__(f0 + FR_PX)
+                __load__(f0 + FR_PY) + (2 * FP_ONE)
+                __load__(f0 + FR_PZ) 0 0)
+    check("q_flat_seg\0" surf_seg =? 0)
+    check("q_flat_t\0" abs_i(surf_t) <? FP_ONE)
+    check("q_flat_n\0" surf_ny >? 64000)
+    check("q_flat_gap\0" approx(normal_gap(__load__(f0 + FR_PX) __load__(f0 + FR_PY) + (2 * FP_ONE) __load__(f0 + FR_PZ)) FP_HALF 3000))
+    check("q_flat_kind\0" surf_kind =? SURF_GRID)
+
+    # Probe near the half-pipe node n2/n3 (mid segment s2), offset to the right:
+    # the cross-section should curl the surface up and tilt the normal inward.
+    let sg2:Ptr = seg_p(2)
+    let mid:Ptr = fr_p(sg2 seg_nsamp(sg2) // 2)
+    xse_setup(mid)
+    # lateral 8 m to the right on the arc
+    track_query(__load__(mid + FR_PX) + fp_mul(v3_x(XSE_R) 8 * FP_ONE)
+                __load__(mid + FR_PY) + (2 * FP_ONE)
+                __load__(mid + FR_PZ) + fp_mul(v3_z(XSE_R) 8 * FP_ONE)
+                2 seg_nsamp(sg2) // 2)
+    check("q_pipe_seg\0" surf_seg =? 2)
+    check("q_pipe_t\0" (surf_t >? 4 * FP_ONE) and (surf_t <? 12 * FP_ONE))
+    # Normal should lean away from +r (toward the pipe center).
+    let lean:Q16 = fp_mul(surf_nx v3_x(XSE_R)) + fp_mul(surf_ny v3_y(XSE_R)) + fp_mul(surf_nz v3_z(XSE_R))
+    check("q_pipe_lean\0" lean <? (-6000))
+
+    # Global re-acquire: probe above segment 5 without a hint.
+    let sg5:Ptr = seg_p(5)
+    let f5:Ptr = fr_p(sg5 seg_nsamp(sg5) // 2)
+    track_query_global(__load__(f5 + FR_PX)
+                       __load__(f5 + FR_PY) + (3 * FP_ONE)
+                       __load__(f5 + FR_PZ))
+    check("q_global_seg\0" (surf_seg =? 5) or (surf_seg =? 4) or (surf_seg =? 6))
+
+    # ---- serialize round-trip --------------------------------------------------
+    # Save original node positions, serialize, re-parse, compare.
+    let i2:int = 0
+    loop i2 <? 8 {
+        let nd:Ptr = node_p(i2)
+        __store__(__load__(nd + ND_PX) SAVE_BUF + i2 * 48)
+        __store__(__load__(nd + ND_PY) SAVE_BUF + i2 * 48 + 8)
+        __store__(__load__(nd + ND_PZ) SAVE_BUF + i2 * 48 + 16)
+        __store__(__load__(nd + ND_UX) SAVE_BUF + i2 * 48 + 24)
+        __store__(__load__(nd + ND_XSECT) SAVE_BUF + i2 * 48 + 32)
+        __store__(__load__(nd + ND_WL) SAVE_BUF + i2 * 48 + 40)
+        i2 += 1
+    }
+    let old_len:Q16 = total_len
+
+    let bb:int = track_serialize()
+    let text:Cstr = bb_finalize_as_string(bb)
+    let ok2:bool = track_parse(text)
+    check("reparse\0" ok2)
+    if ok2 =? false {
+        print("error line: ")
+        print_int(fmt_error_line)
+        print("\n")
+        return 1
+    }
+    check("re_counts\0" (node_count() =? 8) and (seg_count() =? 8) and (vec_len(g_route) =? 8))
+    track_bake()
+
+    let rt_ok:bool = true
+    i2 = 0
+    loop i2 <? 8 {
+        let nd:Ptr = node_p(i2)
+        if approx(__load__(nd + ND_PX) __load__(SAVE_BUF + i2 * 48) 30) =? false { rt_ok = false }
+        if approx(__load__(nd + ND_PY) __load__(SAVE_BUF + i2 * 48 + 8) 30) =? false { rt_ok = false }
+        if approx(__load__(nd + ND_PZ) __load__(SAVE_BUF + i2 * 48 + 16) 30) =? false { rt_ok = false }
+        if approx(__load__(nd + ND_UX) __load__(SAVE_BUF + i2 * 48 + 24) 300) =? false { rt_ok = false }
+        if approx(__load__(nd + ND_XSECT) __load__(SAVE_BUF + i2 * 48 + 32) 2) =? false { rt_ok = false }
+        if approx(__load__(nd + ND_WL) __load__(SAVE_BUF + i2 * 48 + 40) 30) =? false { rt_ok = false }
+        i2 += 1
+    }
+    check("roundtrip_nodes\0" rt_ok)
+
+    let new_len:Q16 = 0
+    s = 0
+    loop s <? seg_count() {
+        new_len += __load__(seg_p(s) + SG_LEN)
+        s += 1
+    }
+    check("roundtrip_len\0" approx(new_len old_len FP_ONE))
+
+    print("\nfailures: ")
+    print_int(fails)
+    print("\n")
+    if fails >? 0 {
+        return 1
+    }
+    return 0
+}

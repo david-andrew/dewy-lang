@@ -1,0 +1,369 @@
+# ============================================================================
+# uZero2 math: Q16 fixed point, angles, trig, vec3, RNG.
+#
+# Conventions:
+#   - Q16 fixed point everywhere (FP_ONE = 65536). 1.0 = 1 metre in world space.
+#   - Coarse angles use 1024 units / turn (ANG_TURN); fine angles use
+#     65536 units / turn (ANG_FINE_TURN) for cross-section / frame math.
+#   - vec3 values are pointers to 3 consecutive Q16 cells (24 bytes).
+# ============================================================================
+
+import p"./types.udewy"
+
+# ---------- Float bit constants ----------------------------------------------
+
+const F32_ZERO:F32Bits = 0
+const F32_ONE:F32Bits = 0x3f800000
+const F32_NEG_ONE:F32Bits = 0xbf800000
+const F32_HALF:F32Bits = 0x3f000000
+
+# ---------- Fixed-point ------------------------------------------------------
+
+const FP_SHIFT:int = 16
+const FP_ONE:Q16 = 65536
+const FP_HALF:Q16 = 32768
+const FP_QUARTER:Q16 = 16384
+
+const ANG_TURN:Angle = 1024
+const ANG_HALF_TURN:Angle = 512
+const ANG_QTR:Angle = 256
+const ANG_FINE_TURN:AngleFine = 65536
+const ANG_FINE_HALF:AngleFine = 32768
+const ANG_FINE_QTR:AngleFine = 16384
+const ANG_FINE_PER_RAW:int = 64          # fine units per coarse unit
+
+# 2*pi in Q16 (used to convert fine angle units <-> Q16 radians).
+const TWO_PI_Q16:Q16 = 411775
+
+# ---------- Scalar helpers ---------------------------------------------------
+
+let abs_i = (v:int):>int => {
+    if v <? 0 {
+        return -v
+    }
+    return v
+}
+
+let min_i = (a:int b:int):>int => {
+    if a <? b { return a }
+    return b
+}
+
+let max_i = (a:int b:int):>int => {
+    if a >? b { return a }
+    return b
+}
+
+let clamp_i = (v:int lo:int hi:int):>int => {
+    if v <? lo { return lo }
+    if v >? hi { return hi }
+    return v
+}
+
+let fp_mul = (a:Q16 b:Q16):>Q16 => {
+    return __signed_shr__(a * b 16)
+}
+
+let fp_div = (a:Q16 b:Q16):>Q16 => {
+    if b =? 0 {
+        return 0
+    }
+    return (a << 16) // b
+}
+
+# Integer sqrt: for a Q32 input (product of two Q16 values) the result is Q16.
+let fp_sqrt = (n:int):>int => {
+    if n <=? 0 {
+        return 0
+    }
+    let bit:int = 1
+    let value:int = n
+    loop value >=? 4 {
+        value = value >> 2
+        bit = bit << 1
+    }
+    let x:int = bit << 1
+    let i:int = 0
+    loop i <? 16 {
+        if x =? 0 {
+            return 0
+        }
+        let y:int = x + n // x >> 1
+        if y >=? x {
+            return x
+        }
+        x = y
+        i += 1
+    }
+    return x
+}
+
+# Smoothstep ease: 3t^2 - 2t^3 for t in [0, FP_ONE].
+let fp_smooth = (t:Q16):>Q16 => {
+    let tc:Q16 = clamp_i(t 0 FP_ONE)
+    let t2:Q16 = fp_mul(tc tc)
+    return fp_mul(t2 (3 * FP_ONE) - (2 * tc))
+}
+
+# ---------- Trig (coarse: 1024 units / turn) ---------------------------------
+
+# Bhaskara I sine approximation. Returns Q16.
+let sin_fp = (angle:Angle):>Q16 => {
+    let a:int = angle % ANG_TURN
+    if a <? 0 {
+        a += ANG_TURN
+    }
+    let sign:int = 1
+    if a >=? ANG_HALF_TURN {
+        a -= ANG_HALF_TURN
+        sign = -1
+    }
+    let u:int = a * (ANG_HALF_TURN - a)
+    let num:int = (16 * u) * FP_ONE
+    let denom:int = (5 * 262144) - (4 * u)
+    return sign * (num // denom)
+}
+
+let cos_fp = (angle:Angle):>Q16 => {
+    return sin_fp(angle + ANG_QTR)
+}
+
+# ---------- Trig (fine: 65536 units / turn) -----------------------------------
+
+let sin_fine = (angle:AngleFine):>Q16 => {
+    let a:int = angle % ANG_FINE_TURN
+    if a <? 0 {
+        a += ANG_FINE_TURN
+    }
+    let sign:int = 1
+    if a >=? ANG_FINE_HALF {
+        a -= ANG_FINE_HALF
+        sign = -1
+    }
+    let u:int = a * (ANG_FINE_HALF - a)        # <= 2.7e8
+    let num:int = u << 20                      # 16 * u * FP_ONE
+    let denom:int = 5368709120 - (4 * u)       # 5 * 32768^2 - 4u
+    return sign * (num // denom)
+}
+
+let cos_fine = (angle:AngleFine):>Q16 => {
+    return sin_fine(angle + ANG_FINE_QTR)
+}
+
+# atan for z in [0, FP_ONE]; returns fine units in [0, 8192].
+# atan(z) ~= z * (pi/4 + 0.273 * (1 - z))
+let atan_unit_fine = (z:Q16):>AngleFine => {
+    let rad_q:Q16 = fp_mul(z 51472 + fp_mul(17891 FP_ONE - z))
+    return __signed_shr__(rad_q * 10430 16)
+}
+
+# Angle of vector (x, y), fine units in (-32768, 32768].
+let atan2_fine = (y:Q16 x:Q16):>AngleFine => {
+    if (x =? 0) and (y =? 0) {
+        return 0
+    }
+    let ax:int = abs_i(x)
+    let ay:int = abs_i(y)
+    let base:AngleFine = 0
+    if ax >=? ay {
+        base = atan_unit_fine(fp_div(ay ax))
+    } else {
+        base = ANG_FINE_QTR - atan_unit_fine(fp_div(ax ay))
+    }
+    if x <? 0 {
+        base = ANG_FINE_HALF - base
+    }
+    if y <? 0 {
+        base = -base
+    }
+    return base
+}
+
+# Convert a fine angle to Q16 radians.
+let fine_to_rad_q16 = (a:AngleFine):>Q16 => {
+    return __signed_shr__(a * TWO_PI_Q16 16)
+}
+
+# ---------- xorshift128+ PRNG ------------------------------------------------
+
+let xs_state0:int = 0x9E3779B97F4A7C15
+let xs_state1:int = 0xBF58476D1CE4E5B9
+
+let xs_seed = (seed:int):>void => {
+    let z:int = seed + 0x9E3779B97F4A7C15
+    z = (z xor (z >> 30)) * 0xBF58476D1CE4E5B9
+    z = (z xor (z >> 27)) * 0x94D049BB133111EB
+    xs_state0 = z xor (z >> 31)
+    if xs_state0 =? 0 {
+        xs_state0 = 1
+    }
+    z = xs_state0 + 0x9E3779B97F4A7C15
+    z = (z xor (z >> 30)) * 0xBF58476D1CE4E5B9
+    z = (z xor (z >> 27)) * 0x94D049BB133111EB
+    xs_state1 = z xor (z >> 31)
+    if xs_state1 =? 0 {
+        xs_state1 = 1
+    }
+    return void
+}
+
+let xs_next = ():>int => {
+    let x:int = xs_state0
+    let y:int = xs_state1
+    xs_state0 = y
+    x = x xor (x << 23)
+    xs_state1 = x xor y xor (x >> 17) xor (y >> 26)
+    return xs_state1 + y
+}
+
+let xs_range = (n:int):>int => {
+    let r:int = xs_next() >> 1
+    return r % n
+}
+
+# ---------- vec3 (pointer to 3 Q16 cells) ------------------------------------
+
+let v3_x = (v:Vec3):>Q16 => { return __load__(v) }
+let v3_y = (v:Vec3):>Q16 => { return __load__(v + 8) }
+let v3_z = (v:Vec3):>Q16 => { return __load__(v + 16) }
+
+let v3_set = (v:Vec3 x:Q16 y:Q16 z:Q16):>void => {
+    __store__(x v)
+    __store__(y (v + 8))
+    __store__(z (v + 16))
+    return void
+}
+
+let v3_copy = (dst:Vec3 src:Vec3):>void => {
+    __store__(__load__(src) dst)
+    __store__(__load__(src + 8) (dst + 8))
+    __store__(__load__(src + 16) (dst + 16))
+    return void
+}
+
+let v3_add = (dst:Vec3 a:Vec3 b:Vec3):>void => {
+    v3_set(dst v3_x(a) + v3_x(b) v3_y(a) + v3_y(b) v3_z(a) + v3_z(b))
+    return void
+}
+
+let v3_sub = (dst:Vec3 a:Vec3 b:Vec3):>void => {
+    v3_set(dst v3_x(a) - v3_x(b) v3_y(a) - v3_y(b) v3_z(a) - v3_z(b))
+    return void
+}
+
+let v3_scale = (dst:Vec3 a:Vec3 s:Q16):>void => {
+    v3_set(dst fp_mul(v3_x(a) s) fp_mul(v3_y(a) s) fp_mul(v3_z(a) s))
+    return void
+}
+
+# dst = a + b * s
+let v3_addscaled = (dst:Vec3 a:Vec3 b:Vec3 s:Q16):>void => {
+    v3_set(dst
+           v3_x(a) + fp_mul(v3_x(b) s)
+           v3_y(a) + fp_mul(v3_y(b) s)
+           v3_z(a) + fp_mul(v3_z(b) s))
+    return void
+}
+
+let v3_dot = (a:Vec3 b:Vec3):>Q16 => {
+    return fp_mul(v3_x(a) v3_x(b)) + fp_mul(v3_y(a) v3_y(b)) + fp_mul(v3_z(a) v3_z(b))
+}
+
+# dst must not alias a or b.
+let v3_cross = (dst:Vec3 a:Vec3 b:Vec3):>void => {
+    let ax:Q16 = v3_x(a)
+    let ay:Q16 = v3_y(a)
+    let az:Q16 = v3_z(a)
+    let bx:Q16 = v3_x(b)
+    let by:Q16 = v3_y(b)
+    let bz:Q16 = v3_z(b)
+    v3_set(dst
+           fp_mul(ay bz) - fp_mul(az by)
+           fp_mul(az bx) - fp_mul(ax bz)
+           fp_mul(ax by) - fp_mul(ay bx))
+    return void
+}
+
+let v3_mag = (v:Vec3):>Q16 => {
+    let x:Q16 = v3_x(v)
+    let y:Q16 = v3_y(v)
+    let z:Q16 = v3_z(v)
+    return fp_sqrt((x * x) + (y * y) + (z * z))
+}
+
+# Normalize in place. Leaves the vector untouched if it is near zero;
+# returns the original magnitude.
+let v3_norm = (v:Vec3):>Q16 => {
+    let m:Q16 = v3_mag(v)
+    if m >? 256 {
+        v3_set(v fp_div(v3_x(v) m) fp_div(v3_y(v) m) fp_div(v3_z(v) m))
+    }
+    return m
+}
+
+let v3_lerp = (dst:Vec3 a:Vec3 b:Vec3 t:Q16):>void => {
+    v3_set(dst
+           v3_x(a) + fp_mul(v3_x(b) - v3_x(a) t)
+           v3_y(a) + fp_mul(v3_y(b) - v3_y(a) t)
+           v3_z(a) + fp_mul(v3_z(b) - v3_z(a) t))
+    return void
+}
+
+# Remove the component of v along unit vector n (in place).
+let v3_reject = (v:Vec3 n:Vec3):>void => {
+    let d:Q16 = v3_dot(v n)
+    v3_set(v
+           v3_x(v) - fp_mul(v3_x(n) d)
+           v3_y(v) - fp_mul(v3_y(n) d)
+           v3_z(v) - fp_mul(v3_z(n) d))
+    return void
+}
+
+# Rotate unit vector v around unit axis t by a fine angle (assumes v _|_ t):
+# v' = v cos(a) + (t x v) sin(a). dst may alias v.
+const V3_ROT_TMP:Vec3 = __static_alloca__(24)
+
+let v3_rotate_about = (v:Vec3 t:Vec3 a:AngleFine):>void => {
+    let c:Q16 = cos_fine(a)
+    let s:Q16 = sin_fine(a)
+    v3_cross(V3_ROT_TMP t v)
+    v3_set(v
+           fp_mul(v3_x(v) c) + fp_mul(v3_x(V3_ROT_TMP) s)
+           fp_mul(v3_y(v) c) + fp_mul(v3_y(V3_ROT_TMP) s)
+           fp_mul(v3_z(v) c) + fp_mul(v3_z(V3_ROT_TMP) s))
+    return void
+}
+
+# ---------- Q16 -> float bit-pattern (GL boundary) ----------------------------
+
+let q16_to_f32 = (val:Q16):>F32Bits => {
+    if val =? 0 {
+        return 0
+    }
+    let raw:int = __i64_to_f32_bits__(val)
+    return raw - (16 << 23)
+}
+
+let q16_to_f64 = (val:Q16):>F64Bits => {
+    if val =? 0 {
+        return 0
+    }
+    let raw:int = __i64_to_f64_bits__(val)
+    return raw - (16 << 52)
+}
+
+let f32_from_int = (value:int):>F32Bits => {
+    return __i64_to_f32_bits__(value)
+}
+
+let f32_to_int = (bits:F32Bits):>int => {
+    return __f32_bits_to_i64__(bits)
+}
+
+# f32 bit-pattern -> Q16 (value * 65536) via an exponent bump.
+let f32_to_q16 = (bits:F32Bits):>Q16 => {
+    if (bits and 0x7FFFFFFF) =? 0 {
+        return 0
+    }
+    return __f32_bits_to_i64__(bits + (16 << 23))
+}

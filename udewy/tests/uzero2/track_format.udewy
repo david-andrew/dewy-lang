@@ -1,0 +1,593 @@
+# ============================================================================
+# uZero2 track format: parse / serialize the `.uztrack` text format.
+#
+# Line-oriented, `#` comments, whitespace-separated tokens. Decimal numbers
+# (optionally fractional) parse straight into Q16. Angles are written in
+# degrees, twists in turns. Example:
+#
+#   uztrack 1
+#   name Velocity Ring
+#   laps 3
+#   node n0 pos 0 0 0 tan 0 0 -1 roll 0 width 24 24 xsect 0 surf normal
+#   node n1 pos 0 0 -120 tan 0 0 -1 width 24 24 xsect 180 surf normal
+#   seg s0 from n0 to n1 rails both
+#   seg s1 from n1 to n2 twist 1 surf cork rails none
+#   start s0 0.5
+#   route s0 s1
+#
+# Built-in tracks are stored in this exact format and run through this
+# parser at load, so the format is exercised on every launch.
+# ============================================================================
+
+import p"./prelude.udewy"
+import p"./track_model.udewy"
+
+# ---------- Parser state ------------------------------------------------------
+
+let fmt_src:Cstr = 0
+let fmt_pos:int = 0
+let fmt_line:int = 1
+let fmt_error_line:int = 0               # 0 = no error
+const FMT_TOK_CAP:int = 96
+const FMT_TOK:Ptr = __static_alloca__(96)
+
+let fmt_node_names:VecHandle = 0         # cstr per node id
+let fmt_seg_names:VecHandle = 0          # cstr per segment id
+
+let fmt_peek = ():>int => {
+    return __load_u8__(fmt_src + fmt_pos)
+}
+
+let fmt_fail = ():>void => {
+    if fmt_error_line =? 0 {
+        fmt_error_line = fmt_line
+    }
+    return void
+}
+
+# Skip spaces / tabs / CR and comments, but not newlines.
+let fmt_skip_blanks = ():>void => {
+    loop true {
+        let c:int = fmt_peek()
+        if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_CR) {
+            fmt_pos += 1
+        } else {
+            if c =? 35 {                 # '#': comment to end of line
+                loop (fmt_peek() not=? CH_LF) and (fmt_peek() not=? 0) {
+                    fmt_pos += 1
+                }
+            }
+            return void
+        }
+    }
+    return void
+}
+
+let fmt_at_eol = ():>bool => {
+    fmt_skip_blanks()
+    let c:int = fmt_peek()
+    if (c =? CH_LF) or (c =? 0) {
+        return true
+    }
+    return false
+}
+
+# Advance past the end of the current line.
+let fmt_next_line = ():>void => {
+    loop (fmt_peek() not=? CH_LF) and (fmt_peek() not=? 0) {
+        fmt_pos += 1
+    }
+    if fmt_peek() =? CH_LF {
+        fmt_pos += 1
+        fmt_line += 1
+    }
+    return void
+}
+
+# Read the next whitespace-delimited token on this line into FMT_TOK.
+# Returns its length (0 at end of line / end of input).
+let fmt_token = ():>int => {
+    fmt_skip_blanks()
+    let n:int = 0
+    loop true {
+        let c:int = fmt_peek()
+        if (c =? 0) or (c =? CH_LF) or (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_CR) or (c =? 35) {
+            __store_u8__(0 FMT_TOK + n)
+            return n
+        }
+        if n <? FMT_TOK_CAP - 1 {
+            __store_u8__(c FMT_TOK + n)
+            n += 1
+        }
+        fmt_pos += 1
+    }
+    return 0
+}
+
+let fmt_tok_is = (s:Cstr):>bool => {
+    return cstr_eq(FMT_TOK s)
+}
+
+# Parse the current token as a decimal Q16 (optional sign, optional fraction).
+let fmt_tok_q16 = ():>Q16 => {
+    let i:int = 0
+    let neg:bool = false
+    if __load_u8__(FMT_TOK) =? CH_MINUS {
+        neg = true
+        i = 1
+    }
+    let int_part:int = 0
+    loop (__load_u8__(FMT_TOK + i) >=? CH_0) and (__load_u8__(FMT_TOK + i) <=? CH_0 + 9) {
+        int_part = int_part * 10 + (__load_u8__(FMT_TOK + i) - CH_0)
+        i += 1
+    }
+    let frac_q:int = 0
+    if __load_u8__(FMT_TOK + i) =? 46 {  # '.'
+        i += 1
+        let num:int = 0
+        let den:int = 1
+        loop (__load_u8__(FMT_TOK + i) >=? CH_0) and (__load_u8__(FMT_TOK + i) <=? CH_0 + 9) {
+            if den <? 1000000 {
+                num = num * 10 + (__load_u8__(FMT_TOK + i) - CH_0)
+                den = den * 10
+            }
+            i += 1
+        }
+        frac_q = (num * FP_ONE) // den
+    }
+    let v:Q16 = (int_part * FP_ONE) + frac_q
+    if neg {
+        return -v
+    }
+    return v
+}
+
+let fmt_next_q16 = ():>Q16 => {
+    if fmt_token() =? 0 {
+        fmt_fail()
+        return 0
+    }
+    return fmt_tok_q16()
+}
+
+let fmt_next_int = ():>int => {
+    return fmt_next_q16() // FP_ONE
+}
+
+# Degrees (decimal) -> raw angle units (1024 per turn).
+let fmt_next_deg_raw = ():>Angle => {
+    let deg_q:Q16 = fmt_next_q16()
+    return (deg_q * 1024) // 23592960
+}
+
+# Turns (decimal) -> raw angle units.
+let fmt_next_turns_raw = ():>Angle => {
+    let t_q:Q16 = fmt_next_q16()
+    return (t_q * 1024) // FP_ONE
+}
+
+# ---------- Surface kind names --------------------------------------------------
+
+const SURF_NAME_NORMAL:Cstr = "normal\0"
+const SURF_NAME_BOOST:Cstr = "boost\0"
+const SURF_NAME_RECHARGE:Cstr = "recharge\0"
+const SURF_NAME_GRID:Cstr = "grid\0"
+const SURF_NAME_LOOP:Cstr = "loop\0"
+const SURF_NAME_CORK:Cstr = "cork\0"
+const SURF_NAME_RAMP:Cstr = "ramp\0"
+
+let surf_kind_name = (kind:SurfKind):>Cstr => {
+    if kind =? SURF_BOOST { return SURF_NAME_BOOST }
+    if kind =? SURF_RECHARGE { return SURF_NAME_RECHARGE }
+    if kind =? SURF_GRID { return SURF_NAME_GRID }
+    if kind =? SURF_LOOP { return SURF_NAME_LOOP }
+    if kind =? SURF_CORK { return SURF_NAME_CORK }
+    if kind =? SURF_RAMP { return SURF_NAME_RAMP }
+    return SURF_NAME_NORMAL
+}
+
+let surf_kind_from_tok = ():>SurfKind => {
+    if fmt_tok_is(SURF_NAME_BOOST) { return SURF_BOOST }
+    if fmt_tok_is(SURF_NAME_RECHARGE) { return SURF_RECHARGE }
+    if fmt_tok_is(SURF_NAME_GRID) { return SURF_GRID }
+    if fmt_tok_is(SURF_NAME_LOOP) { return SURF_LOOP }
+    if fmt_tok_is(SURF_NAME_CORK) { return SURF_CORK }
+    if fmt_tok_is(SURF_NAME_RAMP) { return SURF_RAMP }
+    return SURF_NORMAL
+}
+
+# ---------- Name registries ------------------------------------------------------
+
+let fmt_intern_tok = ():>Cstr => {
+    let n:int = cstr_len(FMT_TOK)
+    let buf:Ptr = arena_alloc(n + 1)
+    copy_bytes(buf FMT_TOK n)
+    __store_u8__(0 buf + n)
+    return buf
+}
+
+let fmt_find_name = (names:VecHandle):>int => {
+    let i:int = 0
+    loop i <? vec_len(names) {
+        if cstr_eq(vec_get(names i) FMT_TOK) {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+# ---------- Line parsers ----------------------------------------------------------
+
+let fmt_parse_node = ():>void => {
+    if fmt_token() =? 0 { fmt_fail() return void }
+    vec_push(fmt_node_names fmt_intern_tok())
+
+    let px:Q16 = 0
+    let py:Q16 = 0
+    let pz:Q16 = 0
+    let tx:Q16 = 0
+    let ty:Q16 = 0
+    let tz:Q16 = -FP_ONE
+    let tlen:Q16 = 0
+    let ux:Q16 = 0
+    let uy:Q16 = FP_ONE
+    let uz:Q16 = 0
+    let have_up:bool = false
+    let roll:Angle = 0
+    let wl:Q16 = 12 * FP_ONE
+    let wr:Q16 = 12 * FP_ONE
+    let xs:Angle = 0
+    let lift:Q16 = 0
+    let surf:SurfKind = SURF_NORMAL
+
+    loop fmt_at_eol() =? false {
+        if fmt_token() =? 0 {
+            fmt_fail()
+            return void
+        }
+        if fmt_tok_is("pos\0") {
+            px = fmt_next_q16()
+            py = fmt_next_q16()
+            pz = fmt_next_q16()
+        } else { if fmt_tok_is("tan\0") {
+            tx = fmt_next_q16()
+            ty = fmt_next_q16()
+            tz = fmt_next_q16()
+        } else { if fmt_tok_is("tlen\0") {
+            tlen = fmt_next_q16()
+        } else { if fmt_tok_is("up\0") {
+            ux = fmt_next_q16()
+            uy = fmt_next_q16()
+            uz = fmt_next_q16()
+            have_up = true
+        } else { if fmt_tok_is("roll\0") {
+            roll = fmt_next_deg_raw()
+        } else { if fmt_tok_is("width\0") {
+            wl = fmt_next_q16()
+            wr = fmt_next_q16()
+        } else { if fmt_tok_is("xsect\0") {
+            xs = fmt_next_deg_raw()
+        } else { if fmt_tok_is("lift\0") {
+            lift = fmt_next_q16()
+        } else { if fmt_tok_is("surf\0") {
+            if fmt_token() =? 0 { fmt_fail() return void }
+            surf = surf_kind_from_tok()
+        } else {
+            fmt_fail()
+            return void
+        } } } } } } } } }
+    }
+
+    let id:NodeId = node_new(px py pz tx ty tz tlen ux uy uz wl wr xs lift surf)
+    if have_up =? false {
+        node_set_roll(id roll)
+    }
+    return void
+}
+
+let fmt_parse_seg = ():>void => {
+    if fmt_token() =? 0 { fmt_fail() return void }
+    vec_push(fmt_seg_names fmt_intern_tok())
+
+    let n0:NodeId = -1
+    let n1:NodeId = -1
+    let flip0:int = 1
+    let flip1:int = 1
+    let twist:Angle = 0
+    let surf:int = -1
+    let rails:int = RAIL_LEFT + RAIL_RIGHT
+
+    loop fmt_at_eol() =? false {
+        if fmt_token() =? 0 {
+            fmt_fail()
+            return void
+        }
+        if fmt_tok_is("from\0") {
+            if fmt_token() =? 0 { fmt_fail() return void }
+            n0 = fmt_find_name(fmt_node_names)
+        } else { if fmt_tok_is("to\0") {
+            if fmt_token() =? 0 { fmt_fail() return void }
+            n1 = fmt_find_name(fmt_node_names)
+        } else { if fmt_tok_is("flip0\0") {
+            flip0 = -1
+        } else { if fmt_tok_is("flip1\0") {
+            flip1 = -1
+        } else { if fmt_tok_is("twist\0") {
+            twist = fmt_next_turns_raw()
+        } else { if fmt_tok_is("surf\0") {
+            if fmt_token() =? 0 { fmt_fail() return void }
+            surf = surf_kind_from_tok()
+        } else { if fmt_tok_is("rails\0") {
+            if fmt_token() =? 0 { fmt_fail() return void }
+            rails = 0
+            if fmt_tok_is("both\0") { rails = RAIL_LEFT + RAIL_RIGHT }
+            if fmt_tok_is("left\0") { rails = RAIL_LEFT }
+            if fmt_tok_is("right\0") { rails = RAIL_RIGHT }
+        } else {
+            fmt_fail()
+            return void
+        } } } } } } }
+    }
+
+    if (n0 <? 0) or (n1 <? 0) {
+        fmt_fail()
+        return void
+    }
+    let sid:SegId = seg_new(n0 n1)
+    let sg:Ptr = seg_p(sid)
+    __store__(flip0 sg + SG_FLIP0)
+    __store__(flip1 sg + SG_FLIP1)
+    __store__(twist sg + SG_TWIST)
+    __store__(surf sg + SG_SURF)
+    __store__(rails sg + SG_RAILS)
+    return void
+}
+
+let fmt_parse_name_line = ():>void => {
+    fmt_skip_blanks()
+    let i:int = 0
+    loop (fmt_peek() not=? CH_LF) and (fmt_peek() not=? 0) and (fmt_peek() not=? 35) {
+        if i <? TRACK_NAME_CAP - 1 {
+            __store_u8__(fmt_peek() TRACK_NAME_BUF + i)
+            i += 1
+        }
+        fmt_pos += 1
+    }
+    loop (i >? 0) and (__load_u8__(TRACK_NAME_BUF + i - 1) =? CH_SPACE) {
+        i -= 1
+    }
+    __store_u8__(0 TRACK_NAME_BUF + i)
+    return void
+}
+
+# ---------- Top-level parse ---------------------------------------------------------
+
+# Parse track text into the global graph. Returns true on success; on failure
+# fmt_error_line holds the offending line and the graph may be partial (the
+# caller should reload a known-good track).
+let track_parse = (text:Cstr):>bool => {
+    track_clear()
+    fmt_src = text
+    fmt_pos = 0
+    fmt_line = 1
+    fmt_error_line = 0
+    fmt_node_names = vec_new(32)
+    fmt_seg_names = vec_new(32)
+
+    loop fmt_peek() not=? 0 {
+        if fmt_at_eol() {
+            fmt_next_line()
+        } else {
+            fmt_token()
+            if fmt_tok_is("uztrack\0") {
+                fmt_next_int()
+            } else { if fmt_tok_is("name\0") {
+                fmt_parse_name_line()
+            } else { if fmt_tok_is("laps\0") {
+                g_track_laps = fmt_next_int()
+            } else { if fmt_tok_is("apron\0") {
+                g_apron_y = fmt_next_q16()
+                g_has_apron = true
+            } else { if fmt_tok_is("node\0") {
+                fmt_parse_node()
+            } else { if fmt_tok_is("seg\0") {
+                fmt_parse_seg()
+            } else { if fmt_tok_is("start\0") {
+                if fmt_token() not=? 0 {
+                    g_start_seg = fmt_find_name(fmt_seg_names)
+                    if g_start_seg <? 0 { fmt_fail() }
+                    g_start_t = fmt_next_q16()
+                } else {
+                    fmt_fail()
+                }
+            } else { if fmt_tok_is("route\0") {
+                loop fmt_at_eol() =? false {
+                    if fmt_token() not=? 0 {
+                        let sid:SegId = fmt_find_name(fmt_seg_names)
+                        if sid <? 0 {
+                            fmt_fail()
+                        } else {
+                            vec_push(g_route sid)
+                        }
+                    }
+                }
+            } else {
+                fmt_fail()
+            } } } } } } } }
+            fmt_next_line()
+        }
+        if fmt_error_line not=? 0 {
+            return false
+        }
+    }
+
+    if seg_count() =? 0 {
+        fmt_fail()
+        return false
+    }
+    if g_start_seg >=? seg_count() {
+        g_start_seg = 0
+    }
+    return true
+}
+
+# ---------- Serializer ----------------------------------------------------------------
+
+let fmt_push_q16 = (bb:int v:Q16):>void => {
+    if v <? 0 {
+        bb_push_byte(bb CH_MINUS)
+        v = -v
+    }
+    bb_push_int(bb v >> 16)
+    let frac:int = ((v and 65535) * 10000 + 32768) >> 16
+    if frac >=? 10000 {
+        # Rounded up to the next integer; rewrite is not worth it, clamp.
+        frac = 9999
+    }
+    if frac >? 0 {
+        bb_push_byte(bb 46)
+        bb_push_byte(bb CH_0 + frac // 1000)
+        bb_push_byte(bb CH_0 + (frac // 100) % 10)
+        bb_push_byte(bb CH_0 + (frac // 10) % 10)
+        bb_push_byte(bb CH_0 + frac % 10)
+    }
+    return void
+}
+
+let fmt_push_raw_as_deg = (bb:int raw:Angle):>void => {
+    fmt_push_q16(bb raw * 23040)         # 1 raw unit = 0.3515625 deg = 23040 Q16
+    return void
+}
+
+let fmt_push_sp = (bb:int):>void => {
+    bb_push_byte(bb CH_SPACE)
+    return void
+}
+
+let fmt_push_node_ref = (bb:int id:NodeId):>void => {
+    bb_push_cstr(bb "n\0")
+    bb_push_int(bb id)
+    return void
+}
+
+let fmt_push_seg_ref = (bb:int id:SegId):>void => {
+    bb_push_cstr(bb "s\0")
+    bb_push_int(bb id)
+    return void
+}
+
+# Serialize the current track graph; returns a bytebuf handle.
+let track_serialize = ():>int => {
+    let bb:int = bb_new(4096)
+    bb_push_cstr(bb "uztrack 1\n\0")
+    bb_push_cstr(bb "name \0")
+    bb_push_cstr(bb TRACK_NAME_BUF)
+    bb_push_cstr(bb "\nlaps \0")
+    bb_push_int(bb g_track_laps)
+    bb_push_byte(bb CH_LF)
+    if g_has_apron {
+        bb_push_cstr(bb "apron \0")
+        fmt_push_q16(bb g_apron_y)
+        bb_push_byte(bb CH_LF)
+    }
+
+    let i:int = 0
+    loop i <? node_count() {
+        let nd:Ptr = node_p(i)
+        bb_push_cstr(bb "node \0")
+        fmt_push_node_ref(bb i)
+        bb_push_cstr(bb " pos \0")
+        fmt_push_q16(bb __load__(nd + ND_PX))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_PY))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_PZ))
+        bb_push_cstr(bb " tan \0")
+        fmt_push_q16(bb __load__(nd + ND_TX))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_TY))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_TZ))
+        if __load__(nd + ND_TLEN) >? 0 {
+            bb_push_cstr(bb " tlen \0")
+            fmt_push_q16(bb __load__(nd + ND_TLEN))
+        }
+        bb_push_cstr(bb " up \0")
+        fmt_push_q16(bb __load__(nd + ND_UX))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_UY))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_UZ))
+        bb_push_cstr(bb " width \0")
+        fmt_push_q16(bb __load__(nd + ND_WL))
+        fmt_push_sp(bb)
+        fmt_push_q16(bb __load__(nd + ND_WR))
+        bb_push_cstr(bb " xsect \0")
+        fmt_push_raw_as_deg(bb __load__(nd + ND_XSECT))
+        if __load__(nd + ND_LIFT) not=? 0 {
+            bb_push_cstr(bb " lift \0")
+            fmt_push_q16(bb __load__(nd + ND_LIFT))
+        }
+        bb_push_cstr(bb " surf \0")
+        bb_push_cstr(bb surf_kind_name(__load__(nd + ND_SURF)))
+        bb_push_byte(bb CH_LF)
+        i += 1
+    }
+
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        bb_push_cstr(bb "seg \0")
+        fmt_push_seg_ref(bb s)
+        bb_push_cstr(bb " from \0")
+        fmt_push_node_ref(bb __load__(sg + SG_N0))
+        bb_push_cstr(bb " to \0")
+        fmt_push_node_ref(bb __load__(sg + SG_N1))
+        if __load__(sg + SG_FLIP0) <? 0 {
+            bb_push_cstr(bb " flip0\0")
+        }
+        if __load__(sg + SG_FLIP1) <? 0 {
+            bb_push_cstr(bb " flip1\0")
+        }
+        if __load__(sg + SG_TWIST) not=? 0 {
+            bb_push_cstr(bb " twist \0")
+            fmt_push_q16(bb __load__(sg + SG_TWIST) * 64)
+        }
+        if __load__(sg + SG_SURF) >=? 0 {
+            bb_push_cstr(bb " surf \0")
+            bb_push_cstr(bb surf_kind_name(__load__(sg + SG_SURF)))
+        }
+        bb_push_cstr(bb " rails \0")
+        let rails:int = __load__(sg + SG_RAILS)
+        if rails =? RAIL_LEFT + RAIL_RIGHT {
+            bb_push_cstr(bb "both\0")
+        } else { if rails =? RAIL_LEFT {
+            bb_push_cstr(bb "left\0")
+        } else { if rails =? RAIL_RIGHT {
+            bb_push_cstr(bb "right\0")
+        } else {
+            bb_push_cstr(bb "none\0")
+        } } }
+        bb_push_byte(bb CH_LF)
+        s += 1
+    }
+
+    bb_push_cstr(bb "start \0")
+    fmt_push_seg_ref(bb g_start_seg)
+    fmt_push_sp(bb)
+    fmt_push_q16(bb g_start_t)
+    bb_push_byte(bb CH_LF)
+
+    if vec_len(g_route) >? 0 {
+        bb_push_cstr(bb "route\0")
+        let r:int = 0
+        loop r <? vec_len(g_route) {
+            fmt_push_sp(bb)
+            fmt_push_seg_ref(bb vec_get(g_route r))
+            r += 1
+        }
+        bb_push_byte(bb CH_LF)
+    }
+    return bb
+}

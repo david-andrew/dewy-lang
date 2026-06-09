@@ -1,0 +1,258 @@
+# ============================================================================
+# uZero2 track model: a directed graph of nodes and segments.
+#
+# A node is a junction / control point: position, unit tangent, unit up,
+# half-widths, cross-section angle, lift and surface kind. A segment is a
+# cubic Hermite curve between two nodes plus per-segment parameters (twist,
+# rails, surface override). Forks and merges are just nodes with more than
+# one incident segment on a side; nothing else in the engine special-cases
+# them.
+#
+# All records live in the arena. The graph is mutable (the editor works on
+# it directly); track_bake.udewy turns it into sampled frames + meshes.
+# ============================================================================
+
+import p"./prelude.udewy"
+
+# ---------- Track-wide state -------------------------------------------------
+
+let g_nodes:VecHandle = 0                # vec of node record pointers
+let g_segs:VecHandle = 0                 # vec of segment record pointers
+let g_route:VecHandle = 0                # vec of segment ids forming the main lap
+
+const TRACK_NAME_CAP:int = 64
+const TRACK_NAME_BUF:Ptr = __static_alloca__(64)
+let g_track_laps:int = 3
+let g_start_seg:SegId = 0
+let g_start_t:Q16 = 0
+let g_has_apron:bool = false             # drivable flat ground plane (playgrounds)
+let g_apron_y:Q16 = 0
+
+# Filled in by track_bake.
+let g_lap_len:Q16 = 0                    # total progress per lap (route_len * PROG_PER_SEG)
+let g_route_closed:bool = false          # route ends where it starts (laps make sense)
+let g_track_min_x:Q16 = 0
+let g_track_min_y:Q16 = 0
+let g_track_min_z:Q16 = 0
+let g_track_max_x:Q16 = 0
+let g_track_max_y:Q16 = 0
+let g_track_max_z:Q16 = 0
+let g_kill_y:Q16 = -13107200
+
+let node_count = ():>int => {
+    if g_nodes =? 0 { return 0 }
+    return vec_len(g_nodes)
+}
+
+let seg_count = ():>int => {
+    if g_segs =? 0 { return 0 }
+    return vec_len(g_segs)
+}
+
+let node_p = (i:NodeId):>Ptr => {
+    return vec_get(g_nodes i)
+}
+
+let seg_p = (i:SegId):>Ptr => {
+    return vec_get(g_segs i)
+}
+
+let track_set_name = (s:Cstr):>void => {
+    let i:int = 0
+    loop (__load_u8__(s + i) not=? 0) and (i <? TRACK_NAME_CAP - 1) {
+        __store_u8__(__load_u8__(s + i) TRACK_NAME_BUF + i)
+        i += 1
+    }
+    __store_u8__(0 TRACK_NAME_BUF + i)
+    return void
+}
+
+# Reset to an empty track. Old records are simply leaked into the arena.
+let track_clear = ():>void => {
+    g_nodes = vec_new(32)
+    g_segs = vec_new(32)
+    g_route = vec_new(32)
+    g_track_laps = TOTAL_LAPS_DEFAULT
+    g_start_seg = 0
+    g_start_t = 0
+    g_has_apron = false
+    g_apron_y = 0
+    g_lap_len = 0
+    __store_u8__(0 TRACK_NAME_BUF)
+    return void
+}
+
+# ---------- Node construction -------------------------------------------------
+
+# Create a node from raw fields. Tangent and up are normalized; up is made
+# perpendicular to the tangent. Returns the new node id.
+let node_new = (px:Q16 py:Q16 pz:Q16
+                tx:Q16 ty:Q16 tz:Q16 tlen:Q16
+                ux:Q16 uy:Q16 uz:Q16
+                wl:Q16 wr:Q16 xsect:Angle lift:Q16 surf:SurfKind):>NodeId => {
+    let nd:Ptr = arena_alloc(ND_SIZE)
+    __store__(px nd + ND_PX)
+    __store__(py nd + ND_PY)
+    __store__(pz nd + ND_PZ)
+    __store__(tx nd + ND_TX)
+    __store__(ty nd + ND_TY)
+    __store__(tz nd + ND_TZ)
+    __store__(tlen nd + ND_TLEN)
+    __store__(ux nd + ND_UX)
+    __store__(uy nd + ND_UY)
+    __store__(uz nd + ND_UZ)
+    __store__(wl nd + ND_WL)
+    __store__(wr nd + ND_WR)
+    __store__(xsect nd + ND_XSECT)
+    __store__(lift nd + ND_LIFT)
+    __store__(surf nd + ND_SURF)
+    __store__(0 nd + ND_ADJ)
+    v3_norm(nd + ND_TX)
+    v3_reject(nd + ND_UX nd + ND_TX)
+    v3_norm(nd + ND_UX)
+    let id:NodeId = vec_len(g_nodes)
+    vec_push(g_nodes nd)
+    return id
+}
+
+# Canonical "reference up" for a tangent: world up projected off the tangent,
+# falling back to world X for near-vertical tangents. Result written to out.
+let node_ref_up = (out:Vec3 t:Vec3):>void => {
+    if abs_i(v3_y(t)) >? 64225 {         # |t.y| > 0.98: tangent nearly vertical
+        v3_set(out FP_ONE 0 0)
+    } else {
+        v3_set(out 0 FP_ONE 0)
+    }
+    v3_reject(out t)
+    v3_norm(out)
+    return void
+}
+
+# Set a node's up from a roll angle (raw units) around its tangent, measured
+# from the canonical reference up.
+let node_set_roll = (id:NodeId roll:Angle):>void => {
+    let nd:Ptr = node_p(id)
+    node_ref_up(nd + ND_UX nd + ND_TX)
+    v3_rotate_about(nd + ND_UX nd + ND_TX roll * ANG_FINE_PER_RAW)
+    return void
+}
+
+# Current roll of a node relative to the canonical reference up (raw units).
+const ND_ROLL_TMP:Vec3 = __static_alloca__(24)
+const ND_ROLL_TMP2:Vec3 = __static_alloca__(24)
+
+let node_get_roll = (id:NodeId):>Angle => {
+    let nd:Ptr = node_p(id)
+    node_ref_up(ND_ROLL_TMP nd + ND_TX)
+    let c:Q16 = v3_dot(ND_ROLL_TMP nd + ND_UX)
+    v3_cross(ND_ROLL_TMP2 ND_ROLL_TMP nd + ND_UX)
+    let s:Q16 = v3_dot(ND_ROLL_TMP2 nd + ND_TX)
+    return atan2_fine(s c) // ANG_FINE_PER_RAW
+}
+
+# ---------- Segment construction ----------------------------------------------
+
+let seg_new = (n0:NodeId n1:NodeId):>SegId => {
+    let sg:Ptr = arena_alloc(SG_SIZE)
+    __store__(n0 sg + SG_N0)
+    __store__(n1 sg + SG_N1)
+    __store__(1 sg + SG_FLIP0)
+    __store__(1 sg + SG_FLIP1)
+    __store__(0 sg + SG_TWIST)
+    __store__(-1 sg + SG_SURF)
+    __store__((RAIL_LEFT or RAIL_RIGHT) sg + SG_RAILS)
+    __store__(0 sg + SG_NSAMP)
+    __store__(0 sg + SG_FRAMES)
+    __store__(0 sg + SG_FRAME_CAP)
+    __store__(0 sg + SG_MESH)
+    __store__(0 sg + SG_MESH_CAP)
+    __store__(0 sg + SG_MESH_ROWS)
+    __store__(0 sg + SG_MESH_COLS)
+    __store__(0 sg + SG_LEN)
+    __store__(0 sg + SG_PROG0)
+    __store__(PROG_PER_SEG sg + SG_PROG1)
+    __store__(-1 sg + SG_ROUTE_IDX)
+    __store__(0 sg + SG_BAKE_STAMP)
+    let id:SegId = vec_len(g_segs)
+    vec_push(g_segs sg)
+    return id
+}
+
+# Remove a segment by id (swap-remove; the moved segment keeps its record).
+# Route / start references are the caller's responsibility (editor fixes them).
+let seg_remove = (id:SegId):>void => {
+    let last:int = vec_len(g_segs) - 1
+    if id <? last {
+        vec_set(g_segs id vec_get(g_segs last))
+    }
+    vec_set_len(g_segs last)
+    return void
+}
+
+# Find the segment connecting nodes a -> b (or -1).
+let seg_find = (a:NodeId b:NodeId):>SegId => {
+    let i:int = 0
+    loop i <? seg_count() {
+        let sg:Ptr = seg_p(i)
+        if (__load__(sg + SG_N0) =? a) and (__load__(sg + SG_N1) =? b) {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+# ---------- Adjacency (rebuilt by track_bake) ----------------------------------
+
+let track_build_adjacency = ():>void => {
+    let i:int = 0
+    loop i <? node_count() {
+        __store__(vec_new(4) node_p(i) + ND_ADJ)
+        i += 1
+    }
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        vec_push(__load__(node_p(__load__(sg + SG_N0)) + ND_ADJ) s)
+        let n1:NodeId = __load__(sg + SG_N1)
+        if n1 not=? __load__(sg + SG_N0) {
+            vec_push(__load__(node_p(n1) + ND_ADJ) s)
+        }
+        s += 1
+    }
+    return void
+}
+
+# Number of segments leaving node n (segments with SG_N0 == n).
+let node_out_count = (n:NodeId):>int => {
+    let adj:VecHandle = __load__(node_p(n) + ND_ADJ)
+    if adj =? 0 { return 0 }
+    let count:int = 0
+    let i:int = 0
+    loop i <? vec_len(adj) {
+        if __load__(seg_p(vec_get(adj i)) + SG_N0) =? n {
+            count += 1
+        }
+        i += 1
+    }
+    return count
+}
+
+# k-th segment leaving node n (or -1).
+let node_out_seg = (n:NodeId k:int):>SegId => {
+    let adj:VecHandle = __load__(node_p(n) + ND_ADJ)
+    if adj =? 0 { return -1 }
+    let count:int = 0
+    let i:int = 0
+    loop i <? vec_len(adj) {
+        let s:SegId = vec_get(adj i)
+        if __load__(seg_p(s) + SG_N0) =? n {
+            if count =? k {
+                return s
+            }
+            count += 1
+        }
+        i += 1
+    }
+    return -1
+}
