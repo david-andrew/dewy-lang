@@ -1,0 +1,34 @@
+# Non-ASCII string literal bytes pass through from the (UTF-8) source verbatim:
+# "μ" contributes its two UTF-8 bytes 0xCE 0xBC, the length prefix counts bytes,
+# and a backslash before a multi-byte character passes its bytes through too.
+# Both the python and bootstrap compilers must agree on this.
+import p"../stdlib/stdlib.udewy"
+
+let s:int = "μZero"
+let e:int = "\μ"
+
+let fails:int = 0
+
+let check = (label:int ok:int):>void => {
+    if ok {
+        print("PASS ")
+    } else {
+        print("FAIL ")
+        fails += 1
+    }
+    printl(label)
+    return void
+}
+
+let main = (argc:int argv:int):>int => {
+    check("mu literal length counts bytes" __load__(s - 8) =? 6)
+    check("mu byte 0" __load_u8__(s) =? 206)
+    check("mu byte 1" __load_u8__(s + 1) =? 188)
+    check("ascii tail intact" __load_u8__(s + 2) =? 90)
+    check("escaped mu byte 0" __load_u8__(e) =? 206)
+    check("escaped mu byte 1" __load_u8__(e + 1) =? 188)
+    print("failures: ")
+    print_int(fails)
+    printl("")
+    return fails
+}
