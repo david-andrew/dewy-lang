@@ -1,5 +1,5 @@
 # ============================================================================
-# uZero2 WebAssembly / WebGL platform layer.
+# μZero2 WebAssembly / WebGL platform layer.
 #
 # Exposes the same backend surface as platform_sdl.udewy on top of the WASM
 # host intrinsics (udewy/backend/wasm.py): batched WebGL renderer, keyboard
@@ -95,8 +95,11 @@ let keymap_init = ():>void => {
 
 # ---------- Lifecycle ------------------------------------------------------------
 
+let ud_dom_set_title = (title:int title_len:int):>int => extern
+
 let backend_init = (width:int height:int title_ptr:Cstr):>int => {
     keymap_init()
+    ud_dom_set_title(title_ptr cstr_len(title_ptr))
     return __gpu_init__(width height)
 }
 

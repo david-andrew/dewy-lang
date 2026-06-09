@@ -1,5 +1,6 @@
 # ============================================================================
-# uZero2 font: complete 5x7 bitmap glyphs for ASCII 32..95, with lowercase
+# μZero2 font: complete 5x7 bitmap glyphs for ASCII 32..95 plus Greek mu,
+# with lowercase
 # letters mapped onto uppercase. Each glyph is 7 rows of 5-bit masks
 # (bit 4 = leftmost pixel). render_hud bakes these into a texture atlas.
 # ============================================================================
@@ -7,7 +8,7 @@
 import p"./types.udewy"
 
 const GLYPH_FIRST:int = 32
-const GLYPH_LAST:int = 95
+const GLYPH_LAST:int = 96                # 96 is the Greek mu (drawn for UTF-8 0xCE 0xBC)
 const GLYPH_ROW_COUNT:int = 7
 
 let glyph_rows:Ptr = [
@@ -586,6 +587,15 @@ let glyph_rows:Ptr = [
     0b00000
     0b00000
     0b11111
+
+    # 96: Greek mu
+    0b00000
+    0b00000
+    0b10010
+    0b10010
+    0b10010
+    0b11101
+    0b10000
 ]
 
 # Row mask (5 bits) of one glyph row. Lowercase letters fold to uppercase;

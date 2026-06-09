@@ -1,9 +1,11 @@
 # ============================================================================
-# uZero2 HUD / text rendering.
+# μZero2 HUD / text rendering.
 #
 # At init the 5x7 glyph set is baked into a small RGBA atlas texture
-# (16 cols x 4 rows of 6x8 cells, chars 32..95). Text renders as textured
-# quads in the pixel-space overlay; panels are translucent bordered quads.
+# (16 cols x 8 rows of 6x8 cells, chars 32..96 where 96 = Greek mu). Text
+# renders as textured quads in the pixel-space overlay; panels are
+# translucent bordered quads. Strings are ASCII except the UTF-8 pair
+# 0xCE 0xBC, which renders as the mu glyph.
 # ============================================================================
 
 import p"./prelude.udewy"
@@ -62,7 +64,7 @@ let font_cell_v = (cell:int):>Q16 => {
 }
 
 const FONT_DU:Q16 = 4096                 # FONT_CELL_W / FONT_ATLAS_W in Q16 (6/96)
-const FONT_DV:Q16 = 16384                # FONT_CELL_H / FONT_ATLAS_H in Q16 (8/32)
+const FONT_DV:Q16 = 8192                 # FONT_CELL_H / FONT_ATLAS_H in Q16 (8/64)
 
 # Draw a single char; assumes font texture bound + quads batch open.
 let text_char = (x:int y:int ch:int scale:int):>void => {
@@ -90,17 +92,31 @@ let text_draw = (x:int y:int s:Cstr scale:int):>int => {
     let cur_x:int = x
     let i:int = 0
     loop __load_u8__(s + i) not=? 0 {
-        text_char(cur_x y __load_u8__(s + i) scale)
+        let b:int = __load_u8__(s + i)
+        if (b =? 206) and (__load_u8__(s + i + 1) =? 188) {
+            text_char(cur_x y 96 scale)
+            i += 2
+        } else {
+            text_char(cur_x y b scale)
+            i += 1
+        }
         cur_x += FONT_CELL_W * scale
-        i += 1
     }
     gpu_end()
     gpu_set_texture(0)
     return cur_x
 }
 
+# Glyph count: every byte advances except UTF-8 continuation bytes.
 let text_width = (s:Cstr scale:int):>int => {
-    return cstr_len(s) * FONT_CELL_W * scale
+    let n:int = 0
+    let i:int = 0
+    loop __load_u8__(s + i) not=? 0 {
+        let b:int = __load_u8__(s + i)
+        if (b <? 128) or (b >=? 192) { n += 1 }
+        i += 1
+    }
+    return n * FONT_CELL_W * scale
 }
 
 let text_draw_centered = (cx_px:int y:int s:Cstr scale:int):>void => {

@@ -1,5 +1,5 @@
 # ============================================================================
-# uZero2: WebAssembly entry point. The host's animation loop calls main()
+# μZero2: WebAssembly entry point. The host's animation loop calls main()
 # once at startup and then once per requestAnimationFrame; a one-shot flag
 # splits boot from per-frame stepping.
 # ============================================================================
@@ -14,7 +14,7 @@ let wasm_initialised:bool = false
 let main = ():>int => {
     if wasm_initialised =? false {
         arena_init()
-        let rc:int = backend_init(1280 720 "uZero2\0")
+        let rc:int = backend_init(1280 720 "μZero2\0")
         if rc not=? 0 { return rc }
         game_init()
         wasm_initialised = true
