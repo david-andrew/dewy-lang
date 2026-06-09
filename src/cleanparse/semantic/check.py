@@ -111,18 +111,20 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context) -> hir.AST:
 
     match ast.parts:
         case [
-            t1.Keyword(name='let'|'const'), 
+            t1.Keyword(name='let'|'const' as keyword), 
             p0.BinOp(
                 left=p0.Atom(item=t1.Identifier(name=name)), 
                 op=t1.Operator(symbol='='|'::'|':=' as op),
                 right=p0.AST() as right)
             ]:
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
-            # decl assign
-            # declare the name in the context
-            # note that this name is untyped since no type was provided
-            # depending on the op, may need to register as compiletime work, etc. etc.
-            pdb.set_trace()
+            #TODO: perhaps special handling if expr.type is VOID_TYPE.
+            #      also it shouldn't be possible for it to be inferred type, but may need to check/handle...
+            
+            # use the type directly from the expression since no type annotation was provided
+            ctx.declarations[name] = expr.type
+
+            return hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, expr)
         
         case [
             t1.Keyword(name='let'|'const'),
@@ -285,11 +287,112 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLitera
     """
     function literal: `args => body`
     """
-    signature = binop.left
     body = typecheck_and_resolve_inner(binop.right, ctx=ctx)
-    #TODO: some sort of extraction of the signature into something...
+
+    #analyze the signature
+    signature = binop.left
+    rettype:ty.Type = ty.INFERRED_TYPE
+    params: list[hir.Param] = []
+    match signature:
+        case p0.BinOp(op=t1.Operator(symbol=':>')):
+            rettype = ast_to_type(signature.right, ctx=ctx)
+            pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature.left, ctx=ctx)
+        #TODO: e.g. no annotated return type
+        #      e.g. single arg not in a block
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'extract_function_signature not implemented for {type(signature)}')
+
+    #TODO: have a better type annotation for function literals...
+    #      basically when we have TypeParam(), probably it would be TypeParam('function', signature=self), where self is the hir.FunctionLiteral
+    return hir.FunctionLiteral(binop.loc, 'function', pos_or_kw_args, kw_only_args, rest_args, rettype, body)
 
     pdb.set_trace()
+
+def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
+    """convert an AST from a position that is expected to be a type into a type"""
+    match ast:
+        case p0.Atom(item=t1.Identifier(name=name)):
+            return name
+        
+        case p0.BinOp(op=t1.Operator(symbol='or'|'|')):
+            left = ast_to_type(ast.left, ctx=ctx)
+            right = ast_to_type(ast.right, ctx=ctx)
+            if isinstance(left, ty.TypeOr) and isinstance(right, ty.TypeOr):
+                return ty.TypeOr(left.items + right.items)
+            elif isinstance(left, ty.TypeOr):
+                return ty.TypeOr(left.items + [right])
+            elif isinstance(right, ty.TypeOr):
+                return ty.TypeOr([left] + right.items)
+            return ty.TypeOr([left, right])
+        
+        case p0.BinOp(op=t1.Operator(symbol='and'|'&')):
+            left = ast_to_type(ast.left, ctx=ctx)
+            right = ast_to_type(ast.right, ctx=ctx)
+            if isinstance(left, ty.TypeAnd) and isinstance(right, ty.TypeAnd):
+                return ty.TypeAnd(left.items + right.items)
+            elif isinstance(left, ty.TypeAnd):
+                return ty.TypeAnd(left.items + [right])
+            elif isinstance(right, ty.TypeAnd):
+                return ty.TypeAnd([left] + right.items)
+            return ty.TypeAnd([left, right])
+        
+        case p0.Prefix(op=t1.Operator(symbol='not'|'~')):
+            item = ast_to_type(ast.item, ctx=ctx)
+            return ty.TypeNot(item)
+        
+        # e.g. probably parameterizations (type jux), types wrapped in blocks, etc. other type expressions...
+        # also catch all probably involves typecheck_and_resolve_inner(ast, ctx=ctx, type_block=True)
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'ast_to_type not implemented for {type(ast)}')
+    
+    pdb.set_trace()
+
+def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple[list[hir.Param], list[hir.Param|hir.BoundParam], hir.Param|hir.BoundParam|None]:
+    """
+    collect the parameters from a function signature
+    
+    Returns:
+        list of positional or keyword parameters (all unbound)
+        list of keyword only parameters (bound or unbound)
+        ...rest parameter (if any) or None (bound or unbound)
+    """
+
+    # make sure we are operating on a block at the top level
+    if not isinstance(signature, p0.Block): return collect_function_signature_args(p0.Block(signature.loc, [signature], kind='()'))
+
+    pos_or_kw_args: list[hir.Param] = []
+    kw_only_args: list[hir.Param|hir.BoundParam] = []
+    saw_rest: bool = False
+    rest_args: hir.Param|hir.BoundParam|None = None
+    for item in signature.inner:
+        match item:
+            case p0.Atom(item=t1.Identifier(name='...')):
+                if saw_rest: raise ValueError(f'USER ERROR: ellipsis (...) may only appear once in a function signature, got {item=}. {signature=}')
+                saw_rest = True
+            case p0.Atom(item=t1.Identifier(name=name)):
+                (kw_only_args if saw_rest else pos_or_kw_args).append(hir.Param(name, type=ty.INFERRED_TYPE))
+            case p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name))):
+                (kw_only_args if saw_rest else pos_or_kw_args).append(hir.Param(name, type=ast_to_type(item.right, ctx=ctx)))
+            case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
+                kw_only_args.append(hir.BoundParam(name, type=ty.INFERRED_TYPE, value=typecheck_and_resolve_inner(right, ctx=ctx)))
+            case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as right):
+                kw_only_args.append(hir.BoundParam(name, type=ast_to_type(typeexpr, ctx=ctx), value=typecheck_and_resolve_inner(right, ctx=ctx)))
+            case p0.BinOp(op=t2.EllipsisJuxtapose(), left=p0.Atom(item=t1.Identifier(name='...')), right=p0.Atom(item=t1.Identifier(name=name))):
+                if saw_rest: raise ValueError(f'USER ERROR: ellipsis (...) may only appear once in a function signature, got {item=}. {signature=}')
+                saw_rest = True
+                rest_args = hir.Param(name, type=ty.INFERRED_TYPE)
+            # case ...name:type
+            # case ...name=value
+            # case ...name:type=value
+            # etc. etc. many other cases... namely dict/object/array unpacking
+            case _:
+                pdb.set_trace()
+                raise NotImplementedError(f'collect_function_signature_args not implemented for {type(item)}')
+
+    return pos_or_kw_args, kw_only_args, rest_args
+
 
 def tcr_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
     if not isinstance(left.type, ty.TypeFunc):
