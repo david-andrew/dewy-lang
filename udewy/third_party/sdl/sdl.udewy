@@ -7,6 +7,7 @@ import p"artifacts/default_window_icon.udewy"
 const SDL_INIT_AUDIO:int = 0x00000010
 const SDL_INIT_VIDEO:int = 0x00000020
 const SDL_EVENT_QUIT:int = 0x00000100
+const SDL_EVENT_MOUSE_WHEEL:int = 0x00000403
 const SDL_WINDOW_OPENGL:int = 0x00000002
 const SDL_WINDOW_RESIZABLE:int = 0x00000020
 const SDL_EVENT_SIZE:int = 128
@@ -61,6 +62,7 @@ const GL_TEXTURE_MIN_FILTER:int = 0x2801
 const GL_TEXTURE_MAG_FILTER:int = 0x2800
 const GL_TEXTURE_WRAP_S:int = 0x2802
 const GL_TEXTURE_WRAP_T:int = 0x2803
+const GL_COMPILE:int = 0x1300
 const GL_NEAREST:int = 0x2600
 const GL_LINEAR:int = 0x2601
 const GL_REPEAT:int = 0x2901
@@ -143,6 +145,11 @@ let glTexImage2D = (target:int level:int internalformat:int width:int height:int
 let glTexParameteri = (target:int pname:int param:int):>void => extern
 let glTexCoord2f = (s:int t:int):>void => extern
 let glPixelStorei = (pname:int param:int):>void => extern
+let glGenLists = (range:int):>int => extern
+let glNewList = (list:int mode:int):>void => extern
+let glEndList = ():>void => extern
+let glCallList = (list:int):>void => extern
+let glDeleteLists = (list:int range:int):>void => extern
 
 let sdl_icon_endian_mode:int = 0
 

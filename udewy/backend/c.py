@@ -39,6 +39,8 @@ _KNOWN_EXTERN_CAPABILITIES: dict[str, str] = {
     "mkdir": "posix",
     "unlink": "posix",
     "chdir": "posix",
+    "getcwd": "posix",
+    "setsid": "posix",
     "fork": "posix",
     "execve": "posix",
     "waitpid": "posix",
@@ -745,6 +747,16 @@ class CBackend(Backend):
             "chdir": [
                 f"static udewy_word {wrapper}(udewy_word arg0) {{",
                 "    return (udewy_word)(int64_t)chdir((const char *)(uintptr_t)arg0);",
+                "}",
+            ],
+            "getcwd": [
+                f"static udewy_word {wrapper}(udewy_word arg0, udewy_word arg1) {{",
+                "    return (udewy_word)(uintptr_t)getcwd((char *)(uintptr_t)arg0, (size_t)arg1);",
+                "}",
+            ],
+            "setsid": [
+                f"static udewy_word {wrapper}(void) {{",
+                "    return (udewy_word)(int64_t)setsid();",
                 "}",
             ],
             "fork": [
