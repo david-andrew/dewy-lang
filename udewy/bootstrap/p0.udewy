@@ -241,6 +241,13 @@ let escape_code_to_value = (c:int):>int => {
     return c
 }
 
+# Keep bootstrap behavior aligned with the Python compiler until udewy grows
+# real unicode-escape support.
+let reject_unicode_escape = (loc:int):>void => {
+    diag_error(loc "unicode escapes are not supported in udewy")
+    return void
+}
+
 # Decode a TK_STRING into raw bytes. start is the byte index of the opening
 # quote in src, length is the token length (including both quotes). Returns
 # a length-prefixed udewy string holding the decoded bytes.
@@ -252,7 +259,11 @@ let decode_string_literal = (src:int start:int length:int):>int => {
     loop i <? content_len {
         let c:int = __load_u8__(src + content_start + i)
         if (c =? 92) and (i + 1 <? content_len) {
-            let val:int = escape_code_to_value(__load_u8__(src + content_start + i + 1))
+            let esc:int = __load_u8__(src + content_start + i + 1)
+            if (esc =? 117) or (esc =? 85) {
+                reject_unicode_escape(content_start + i)
+            }
+            let val:int = escape_code_to_value(esc)
             if val not=? -1 {
                 bb_push_byte(bb val)
             }

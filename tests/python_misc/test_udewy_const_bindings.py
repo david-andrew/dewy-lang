@@ -120,6 +120,18 @@ let main = ():>void => {
     parse_udewy(src)
 
 
+@pytest.mark.parametrize("escape_prefix", ["u", "U"])
+def test_unicode_string_escapes_are_rejected(escape_prefix: str) -> None:
+    src = f"""
+let main = ():>int => {{
+    return "\\{escape_prefix}0041"
+}}
+"""
+
+    with pytest.raises(SyntaxError, match=r"unicode escapes are not supported in udewy"):
+        parse_udewy(src)
+
+
 def test_array_literal_accepts_const_array_aliases() -> None:
     src = """
 let main = ():>void => {

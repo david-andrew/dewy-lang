@@ -120,6 +120,10 @@ def escape_code_to_value(c: str) -> int:
     return ord(c)
 
 
+def error_unsupported_unicode_escape(src: str, location: int) -> None:
+    error(src, location, "unicode escapes are not supported in udewy")
+
+
 def decode_string_literal(src: str, start: int, length: int) -> bytes:
     """Content bytes are copied verbatim except for escape sequences; the
     compiler does no encoding validation or conversion."""
@@ -129,6 +133,8 @@ def decode_string_literal(src: str, start: int, length: int) -> bytes:
     while i < len(str_content):
         if str_content[i] == '\\' and i + 1 < len(str_content):
             esc = str_content[i + 1]
+            if esc in ('u', 'U'):
+                error_unsupported_unicode_escape(src, start + 1 + i)
             if ord(esc) > 127:
                 processed.extend(esc.encode("utf-8", "surrogateescape"))
             else:
