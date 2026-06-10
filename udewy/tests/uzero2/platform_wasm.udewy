@@ -140,14 +140,11 @@ let plat_quit_requested = ():>bool => {
     return bk_quit
 }
 
-# Browser pointer: position + primary button only (no wheel intrinsic).
+# Browser pointer: position, full button mask (L/M/R), and wheel steps.
 let plat_mouse_x = ():>int => { return __pointer_x__() }
 let plat_mouse_y = ():>int => { return __pointer_y__() }
-let plat_mouse_buttons = ():>int => {
-    if __pointer_down__() not=? 0 { return MOUSE_L }
-    return 0
-}
-let plat_mouse_wheel = ():>int => { return 0 }
+let plat_mouse_buttons = ():>int => { return __pointer_buttons__() }
+let plat_mouse_wheel = ():>int => { return __pointer_wheel__() }
 
 # ---------- GPU: per-frame state ------------------------------------------------------
 

@@ -110,6 +110,8 @@ class Wasm32Backend(Backend):
             '(import "env" "host_pointer_x" (func $__host_pointer_x__ (result i64)))',
             '(import "env" "host_pointer_y" (func $__host_pointer_y__ (result i64)))',
             '(import "env" "host_pointer_down" (func $__host_pointer_down__ (result i64)))',
+            '(import "env" "host_pointer_buttons" (func $__host_pointer_buttons__ (result i64)))',
+            '(import "env" "host_pointer_wheel" (func $__host_pointer_wheel__ (result i64)))',
             # Keyboard input
             '(import "env" "host_key_down" (func $__host_key_down__ (param i64 i64) (result i64)))',
             '(import "env" "host_key_pressed" (func $__host_key_pressed__ (param i64 i64) (result i64)))',
@@ -987,6 +989,14 @@ class Wasm32Backend(Backend):
         """Emit a call to host_pointer_down(). Stack: [] -> [down]"""
         self._emit("call $__host_pointer_down__")
     
+    def emit_pointer_buttons(self) -> None:
+        """Emit a call to host_pointer_buttons(). Stack: [] -> [mask]"""
+        self._emit("call $__host_pointer_buttons__")
+    
+    def emit_pointer_wheel(self) -> None:
+        """Emit a call to host_pointer_wheel(). Stack: [] -> [steps]"""
+        self._emit("call $__host_pointer_wheel__")
+    
     def emit_key_down(self) -> None:
         """Emit a call to host_key_down(code_ptr, code_len). Stack: [ptr len] -> [down]"""
         self._emit("call $__host_key_down__")
@@ -1218,6 +1228,8 @@ class Wasm32Backend(Backend):
         "__pointer_x__": 0,
         "__pointer_y__": 0,
         "__pointer_down__": 0,
+        "__pointer_buttons__": 0,
+        "__pointer_wheel__": 0,
         "__key_down__": 2,
         "__key_pressed__": 2,
         "__key_released__": 2,
@@ -1360,6 +1372,10 @@ class Wasm32Backend(Backend):
             self.emit_pointer_y()
         elif name == "__pointer_down__":
             self.emit_pointer_down()
+        elif name == "__pointer_buttons__":
+            self.emit_pointer_buttons()
+        elif name == "__pointer_wheel__":
+            self.emit_pointer_wheel()
         elif name == "__key_down__":
             self.emit_key_down()
         elif name == "__key_pressed__":
@@ -1684,6 +1700,8 @@ let keyboardInstalled = false;
 let pointerX = 0;
 let pointerY = 0;
 let pointerDown = false;
+let pointerButtons = 0;
+let pointerWheelAccum = 0;
 const keysDown = new Set();
 const keysPressedFrame = new Set();
 const keysReleasedFrame = new Set();
@@ -1744,6 +1762,7 @@ let gpuCurrentTex = 0;
 let gpuOverlayActive = false;
 let gpuSavedDepthTest = true;
 let gpuSavedDepthWrite = true;
+let gpuSavedBlend = false;
 let gpuLocPos = -1;
 let gpuLocUV = -1;
 let gpuLocColor = -1;
@@ -1894,7 +1913,23 @@ function updateCanvasLayout() {
     }
 }
 
-window.addEventListener('resize', updateCanvasLayout);
+// Keep the GPU canvas backing buffer matched to the window so the rendered
+// aspect ratio tracks the window instead of being stretched to fit.
+function resizeGpuCanvasToWindow() {
+    if (!gpuCanvas) return;
+    const w = Math.max(1, Math.floor(window.innerWidth));
+    const h = Math.max(1, Math.floor(window.innerHeight));
+    if (gpuCanvas.width !== w || gpuCanvas.height !== h) {
+        gpuCanvas.width = w;
+        gpuCanvas.height = h;
+        if (gpuGL) gpuGL.viewport(0, 0, w, h);
+    }
+}
+
+window.addEventListener('resize', () => {
+    resizeGpuCanvasToWindow();
+    updateCanvasLayout();
+});
 
 function lockCanvasAspect() {
     const displayCanvas = getDisplayCanvas();
@@ -2044,7 +2079,21 @@ function clampPointer(value, limit) {
     return value;
 }
 
+// Map the DOM `buttons` bitmask (1=left, 2=right, 4=middle) onto the game's
+// MOUSE_L=1 / MOUSE_M=2 / MOUSE_R=4 convention.
+function domButtonsToMask(buttons) {
+    let mask = 0;
+    if (buttons & 1) mask |= 1;
+    if (buttons & 2) mask |= 4;
+    if (buttons & 4) mask |= 2;
+    return mask;
+}
+
 function updatePointerFromEvent(event) {
+    if (typeof event.buttons === 'number') {
+        pointerButtons = domButtonsToMask(event.buttons);
+        pointerDown = (pointerButtons & 1) !== 0;
+    }
     const targetCanvas = getInputCanvas();
     if (!targetCanvas) {
         pointerX = Math.floor(event.clientX);
@@ -2083,6 +2132,24 @@ function ensurePointerHandlers() {
 
     window.addEventListener('pointercancel', () => {
         pointerDown = false;
+        pointerButtons = 0;
+    });
+
+    // Accumulate wheel notches; the game reads/clears this once per frame.
+    window.addEventListener('wheel', (event) => {
+        if (canvasMode || webglMode || gpuMode) {
+            event.preventDefault();
+        }
+        // deltaY > 0 is scroll-down; report negative steps so up = positive,
+        // matching the SDL backend's wheel sign.
+        pointerWheelAccum += (event.deltaY > 0) ? -1 : ((event.deltaY < 0) ? 1 : 0);
+    }, { passive: false });
+
+    // Suppress the browser context menu so right-button drag works.
+    window.addEventListener('contextmenu', (event) => {
+        if (canvasMode || webglMode || gpuMode) {
+            event.preventDefault();
+        }
     });
 }
 
@@ -2547,6 +2614,12 @@ const imports = {
         host_pointer_x: () => BigInt(pointerX),
         host_pointer_y: () => BigInt(pointerY),
         host_pointer_down: () => (pointerDown ? 1n : 0n),
+        host_pointer_buttons: () => BigInt(pointerButtons),
+        host_pointer_wheel: () => {
+            const steps = pointerWheelAccum;
+            pointerWheelAccum = 0;
+            return BigInt(steps);
+        },
         host_key_down: (ptr, len) => {
             ensureKeyboardHandlers();
             return keysDown.has(decodeString(ptr, len)) ? 1n : 0n;
@@ -2798,8 +2871,11 @@ const imports = {
                 gpuCanvas.id = 'canvas';
                 document.body.insertBefore(gpuCanvas, document.body.firstChild);
             }
-            gpuCanvas.width = w;
-            gpuCanvas.height = h;
+            // Back the canvas at the window's real pixel size so the game's
+            // per-frame aspect/viewport math matches the display and the
+            // content is never stretched. The requested w/h is only a fallback.
+            gpuCanvas.width = Math.max(1, Math.floor(window.innerWidth || w));
+            gpuCanvas.height = Math.max(1, Math.floor(window.innerHeight || h));
             gpuCanvas.style.display = 'block';
             webglCanvas = gpuCanvas;
             webglMode = true;
@@ -2959,8 +3035,13 @@ const imports = {
             gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
             gpuSavedDepthTest = gpuGL.getParameter(gpuGL.DEPTH_TEST);
             gpuSavedDepthWrite = gpuGL.getParameter(gpuGL.DEPTH_WRITEMASK);
+            gpuSavedBlend = gpuGL.getParameter(gpuGL.BLEND);
             gpuGL.disable(gpuGL.DEPTH_TEST);
             gpuGL.depthMask(false);
+            // Overlay content (HUD text, panels, speed lines) is alpha-keyed,
+            // so blend must be on or transparent texels render as opaque black.
+            gpuGL.enable(gpuGL.BLEND);
+            gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
             gpuOverlayActive = true;
             return 0n;
         },
@@ -2971,6 +3052,7 @@ const imports = {
             gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
             if (gpuSavedDepthTest) gpuGL.enable(gpuGL.DEPTH_TEST);
             gpuGL.depthMask(!!gpuSavedDepthWrite);
+            if (!gpuSavedBlend) gpuGL.disable(gpuGL.BLEND);
             gpuOverlayActive = false;
             return 0n;
         },

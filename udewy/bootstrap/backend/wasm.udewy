@@ -118,6 +118,8 @@ let w_add_host_imports = ():>void => {
     w_add_import_line("(import \"env\" \"host_pointer_x\" (func $__host_pointer_x__ (result i64)))")
     w_add_import_line("(import \"env\" \"host_pointer_y\" (func $__host_pointer_y__ (result i64)))")
     w_add_import_line("(import \"env\" \"host_pointer_down\" (func $__host_pointer_down__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_buttons\" (func $__host_pointer_buttons__ (result i64)))")
+    w_add_import_line("(import \"env\" \"host_pointer_wheel\" (func $__host_pointer_wheel__ (result i64)))")
     w_add_import_line("(import \"env\" \"host_key_down\" (func $__host_key_down__ (param i64 i64) (result i64)))")
     w_add_import_line("(import \"env\" \"host_key_pressed\" (func $__host_key_pressed__ (param i64 i64) (result i64)))")
     w_add_import_line("(import \"env\" \"host_key_released\" (func $__host_key_released__ (param i64 i64) (result i64)))")
@@ -913,6 +915,8 @@ let w_init_intrinsics = ():>void => {
     map_put_str(m "__pointer_x__" 0)
     map_put_str(m "__pointer_y__" 0)
     map_put_str(m "__pointer_down__" 0)
+    map_put_str(m "__pointer_buttons__" 0)
+    map_put_str(m "__pointer_wheel__" 0)
     map_put_str(m "__key_down__" 2)
     map_put_str(m "__key_pressed__" 2)
     map_put_str(m "__key_released__" 2)
@@ -1036,6 +1040,8 @@ let w_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__pointer_x__") { w_emit_host_call(name "$__host_pointer_x__") }
     else if str_eq(name "__pointer_y__") { w_emit_host_call(name "$__host_pointer_y__") }
     else if str_eq(name "__pointer_down__") { w_emit_host_call(name "$__host_pointer_down__") }
+    else if str_eq(name "__pointer_buttons__") { w_emit_host_call(name "$__host_pointer_buttons__") }
+    else if str_eq(name "__pointer_wheel__") { w_emit_host_call(name "$__host_pointer_wheel__") }
     else if str_eq(name "__key_down__") { w_emit_host_call(name "$__host_key_down__") }
     else if str_eq(name "__key_pressed__") { w_emit_host_call(name "$__host_key_pressed__") }
     else if str_eq(name "__key_released__") { w_emit_host_call(name "$__host_key_released__") }
@@ -1381,6 +1387,8 @@ let keyboardInstalled = false;
 let pointerX = 0;
 let pointerY = 0;
 let pointerDown = false;
+let pointerButtons = 0;
+let pointerWheelAccum = 0;
 const keysDown = new Set();
 const keysPressedFrame = new Set();
 const keysReleasedFrame = new Set();
@@ -1441,6 +1449,7 @@ let gpuCurrentTex = 0;
 let gpuOverlayActive = false;
 let gpuSavedDepthTest = true;
 let gpuSavedDepthWrite = true;
+let gpuSavedBlend = false;
 let gpuLocPos = -1;
 let gpuLocUV = -1;
 let gpuLocColor = -1;
@@ -1591,7 +1600,21 @@ function updateCanvasLayout() \{
     \}
 \}
 
-window.addEventListener('resize', updateCanvasLayout);
+function resizeGpuCanvasToWindow() \{
+    if (!gpuCanvas) return;
+    const w = Math.max(1, Math.floor(window.innerWidth));
+    const h = Math.max(1, Math.floor(window.innerHeight));
+    if (gpuCanvas.width !== w || gpuCanvas.height !== h) \{
+        gpuCanvas.width = w;
+        gpuCanvas.height = h;
+        if (gpuGL) gpuGL.viewport(0, 0, w, h);
+    \}
+\}
+
+window.addEventListener('resize', () => \{
+    resizeGpuCanvasToWindow();
+    updateCanvasLayout();
+\});
 
 function lockCanvasAspect() \{
     const displayCanvas = getDisplayCanvas();
@@ -1741,7 +1764,19 @@ function clampPointer(value, limit) \{
     return value;
 \}
 
+function domButtonsToMask(buttons) \{
+    let mask = 0;
+    if (buttons & 1) mask |= 1;
+    if (buttons & 2) mask |= 4;
+    if (buttons & 4) mask |= 2;
+    return mask;
+\}
+
 function updatePointerFromEvent(event) \{
+    if (typeof event.buttons === 'number') \{
+        pointerButtons = domButtonsToMask(event.buttons);
+        pointerDown = (pointerButtons & 1) !== 0;
+    \}
     const targetCanvas = getInputCanvas();
     if (!targetCanvas) \{
         pointerX = Math.floor(event.clientX);
@@ -1780,6 +1815,20 @@ function ensurePointerHandlers() \{
 
     window.addEventListener('pointercancel', () => \{
         pointerDown = false;
+        pointerButtons = 0;
+    \});
+
+    window.addEventListener('wheel', (event) => \{
+        if (canvasMode || webglMode || gpuMode) \{
+            event.preventDefault();
+        \}
+        pointerWheelAccum += (event.deltaY > 0) ? -1 : ((event.deltaY < 0) ? 1 : 0);
+    \}, \{ passive: false \});
+
+    window.addEventListener('contextmenu', (event) => \{
+        if (canvasMode || webglMode || gpuMode) \{
+            event.preventDefault();
+        \}
     \});
 \}
 
@@ -2244,6 +2293,12 @@ const imports = \{
         host_pointer_x: () => BigInt(pointerX),
         host_pointer_y: () => BigInt(pointerY),
         host_pointer_down: () => (pointerDown ? 1n : 0n),
+        host_pointer_buttons: () => BigInt(pointerButtons),
+        host_pointer_wheel: () => \{
+            const steps = pointerWheelAccum;
+            pointerWheelAccum = 0;
+            return BigInt(steps);
+        \},
         host_key_down: (ptr, len) => \{
             ensureKeyboardHandlers();
             return keysDown.has(decodeString(ptr, len)) ? 1n : 0n;
@@ -2496,8 +2551,8 @@ $\{String(err)\}`;
                 gpuCanvas.id = 'canvas';
                 document.body.insertBefore(gpuCanvas, document.body.firstChild);
             \}
-            gpuCanvas.width = w;
-            gpuCanvas.height = h;
+            gpuCanvas.width = Math.max(1, Math.floor(window.innerWidth || w));
+            gpuCanvas.height = Math.max(1, Math.floor(window.innerHeight || h));
             gpuCanvas.style.display = 'block';
             webglCanvas = gpuCanvas;
             webglMode = true;
@@ -2657,8 +2712,11 @@ $\{String(err)\}`;
             gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
             gpuSavedDepthTest = gpuGL.getParameter(gpuGL.DEPTH_TEST);
             gpuSavedDepthWrite = gpuGL.getParameter(gpuGL.DEPTH_WRITEMASK);
+            gpuSavedBlend = gpuGL.getParameter(gpuGL.BLEND);
             gpuGL.disable(gpuGL.DEPTH_TEST);
             gpuGL.depthMask(false);
+            gpuGL.enable(gpuGL.BLEND);
+            gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
             gpuOverlayActive = true;
             return 0n;
         \},
@@ -2669,6 +2727,7 @@ $\{String(err)\}`;
             gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
             if (gpuSavedDepthTest) gpuGL.enable(gpuGL.DEPTH_TEST);
             gpuGL.depthMask(!!gpuSavedDepthWrite);
+            if (!gpuSavedBlend) gpuGL.disable(gpuGL.BLEND);
             gpuOverlayActive = false;
             return 0n;
         \},
