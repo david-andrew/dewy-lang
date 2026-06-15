@@ -1,0 +1,26 @@
+import p"../stdlib/stdlib.udewy"
+
+let s:int = "\x41\Xce\xbc"
+let fails:int = 0
+
+let check = (label:int ok:int):>void => {
+    if ok {
+        print("PASS ")
+    } else {
+        print("FAIL ")
+        fails += 1
+    }
+    printl(label)
+    return void
+}
+
+let main = (argc:int argv:int):>int => {
+    check("length" __load__(s - 8) =? 3)
+    check("A" __load_u8__(s) =? 65)
+    check("ce" __load_u8__(s + 1) =? 206)
+    check("bc" __load_u8__(s + 2) =? 188)
+    print("failures: ")
+    print_int(fails)
+    printl("")
+    return fails
+}

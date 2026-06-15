@@ -158,10 +158,11 @@ spans multiple lines"
 | `\t` | 9 | Horizontal tab |
 | `\r` | 13 | Carriage return |
 | `\0` | 0 | Null byte |
+| `\xHH` / `\XHH` | `0xHH` | Hex byte escape (`x` and the two hex digits are case-insensitive) |
 | `\<newline>` | (none) | Line continuation - the newline is skipped |
 | `\<other>` | `<other>` | Any other character produces that character literally |
 
-The last rule means `\"` produces a double-quote character and `\\` produces a backslash.
+The last rule means `\"` produces a double-quote character and `\\` produces a backslash. Hex byte escapes insert a single raw byte; for example, `"\x41"` is the byte `0x41` (`'A'`), and `"\xce\xbc"` is the UTF-8 encoding of `μ`.
 
 **Line continuation:** A backslash immediately before a newline causes that newline to be skipped:
 
@@ -172,7 +173,9 @@ long string that appears \
 on one line"
 ```
 
-**Non-ASCII content:** Aside from escape sequences, the bytes between the quotes are copied into the literal **verbatim**. The compiler performs no encoding validation, conversion, or normalization, so a literal contains exactly the bytes of the source file. Since source files are conventionally UTF-8, `"μZero"` produces the UTF-8 encoding of `μ` (`0xCE 0xBC`) followed by `Zero` — 6 bytes. A source file saved in another encoding would pass its raw bytes through just the same. The length prefix counts **bytes**, not characters or codepoints; all text-encoding interpretation is left to the program. A backslash followed by a non-ASCII character passes that character's bytes through unchanged.
+**Non-ASCII content:** Aside from escape sequences, the bytes between the quotes are copied into the literal **verbatim**. The compiler performs no encoding validation, conversion, or normalization, so a literal contains exactly the bytes of the source file. Since source files are conventionally UTF-8, `"μZero"` produces the UTF-8 encoding of (`0xCE 0xBC 0x5A 0x65 0x72 0x6F`) -- 2 initial bytes for `μ` followed by ascii `Zero`. A source file saved in another encoding would pass its raw bytes through just the same in that encoding rather than UTF-8. The length prefix counts **bytes**, not characters or codepoints; all text-encoding interpretation is left to the program. A backslash followed by a non-ASCII character passes that character's bytes through unchanged.
+
+> NOTE: for an explicit byte-stable version with a fixed encoding regardless of the underlying file encoding, use byte literals for any non-ascii, e.g. `'\xce\xbcZero'`.
 
 **Memory layout:** String literals are stored in static memory with an 8-byte length prefix. The variable holds a pointer to the first character (after the length). See [Memory Layout](#16-memory-layout).
 

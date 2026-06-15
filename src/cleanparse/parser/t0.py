@@ -765,6 +765,7 @@ class StringEscape(Token[StringBody|TemplateStringBody]):
         - \a alert
         - \0 null
         - \u#### or \U#### for a unicode codepoints. Must be four hex digits [0-9a-fA-F]
+        - \x or \X hex byte escapes are not supported (error)
 
         Catch-all case:
         - \ followed by any character not mentioned above converts to just the literal character itself without the backslash
@@ -798,9 +799,23 @@ class StringEscape(Token[StringBody|TemplateStringBody]):
                 StringEscape.error_invalid_width_hex_escape(src, ctx, expected_digits, actual_digits)
             return prefix_len + actual_digits
 
+        if src[1].lower() == 'x':
+            StringEscape.error_unsupported_hex_byte_escape(src, ctx)
+
         # all other escape sequences (known or catch all) are just a single escape code
         return 2
     
+    @staticmethod
+    def error_unsupported_hex_byte_escape(src: str, ctx: StringBody|TemplateStringBody) -> NoReturn:
+        offset = ctx.current_tokenization_position()
+        error = Error(
+            srcfile=ctx.srcfile,
+            title="Hex byte escapes are not supported in Dewy strings",
+            pointer_messages=Pointer(span=Span(offset, offset+2), message="hex byte escape"),
+            hint="Use `\\u00HH`, `\\u{HH}`, or a `0x\"...\"` byte literal instead of `\\xHH`.",
+        )
+        error.throw()
+
     @staticmethod
     def error_incomplete_string_escape(src: str, ctx: StringBody|TemplateStringBody) -> NoReturn:
         """Helper for when a string escape is incomplete"""

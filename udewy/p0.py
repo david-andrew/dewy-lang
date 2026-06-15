@@ -120,8 +120,7 @@ def escape_code_to_value(c: str) -> int:
     return ord(c)
 
 
-def error_unsupported_unicode_escape(src: str, location: int) -> None:
-    error(src, location, "unicode escapes are not supported in udewy")
+_HEX_DIGITS = frozenset('0123456789abcdefABCDEF')
 
 
 def decode_string_literal(src: str, start: int, length: int) -> bytes:
@@ -134,7 +133,16 @@ def decode_string_literal(src: str, start: int, length: int) -> bytes:
         if str_content[i] == '\\' and i + 1 < len(str_content):
             esc = str_content[i + 1]
             if esc in ('u', 'U'):
-                error_unsupported_unicode_escape(src, start + 1 + i)
+                error(src, start + 1 + i, "unicode escapes are not supported in udewy. use either \\xHH for a raw byte sequence, or paste a literal unicode character instead")
+            if esc.lower() == 'x':
+                if i + 3 >= len(str_content):
+                    error(src, start + 1 + i, "incomplete hex byte escape")
+                d1, d2 = str_content[i + 2], str_content[i + 3]
+                if d1 not in _HEX_DIGITS or d2 not in _HEX_DIGITS:
+                    error(src, start + 1 + i, "invalid hex byte escape")
+                processed.append(int(d1 + d2, 16))
+                i += 4
+                continue
             if ord(esc) > 127:
                 processed.extend(esc.encode("utf-8", "surrogateescape"))
             else:

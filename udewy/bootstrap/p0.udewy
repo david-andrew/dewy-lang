@@ -244,7 +244,7 @@ let escape_code_to_value = (c:int):>int => {
 # Keep bootstrap behavior aligned with the Python compiler until udewy grows
 # real unicode-escape support.
 let reject_unicode_escape = (loc:int):>void => {
-    diag_error(loc "unicode escapes are not supported in udewy")
+    diag_error(loc "unicode escapes are not supported in udewy. use either \\xHH for a raw byte sequence, or paste a literal unicode character instead")
     return void
 }
 
@@ -262,6 +262,26 @@ let decode_string_literal = (src:int start:int length:int):>int => {
             let esc:int = __load_u8__(src + content_start + i + 1)
             if (esc =? 117) or (esc =? 85) {
                 reject_unicode_escape(content_start + i)
+            }
+            if (esc =? 120) or (esc =? 88) {
+                if i + 3 >=? content_len {
+                    diag_error(content_start + i "incomplete hex byte escape")
+                }
+                let d1:int = __load_u8__(src + content_start + i + 2)
+                let d2:int = __load_u8__(src + content_start + i + 3)
+                let hi:int = 0
+                if (d1 >=? 48) and (d1 <=? 57) { hi = d1 - 48 }
+                else if (d1 >=? 97) and (d1 <=? 102) { hi = d1 - 97 + 10 }
+                else if (d1 >=? 65) and (d1 <=? 70) { hi = d1 - 65 + 10 }
+                else { diag_error(content_start + i "invalid hex byte escape") }
+                let lo:int = 0
+                if (d2 >=? 48) and (d2 <=? 57) { lo = d2 - 48 }
+                else if (d2 >=? 97) and (d2 <=? 102) { lo = d2 - 97 + 10 }
+                else if (d2 >=? 65) and (d2 <=? 70) { lo = d2 - 65 + 10 }
+                else { diag_error(content_start + i "invalid hex byte escape") }
+                bb_push_byte(bb (hi << 4) or lo)
+                i = i + 4
+                continue
             }
             let val:int = escape_code_to_value(esc)
             if val not=? -1 {

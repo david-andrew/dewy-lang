@@ -37,13 +37,22 @@
       },
       "name": "string.quoted.double.udewy",
       "patterns": [
-        {
-          "name": "constant.character.escape.udewy",
-          "match": "\\\\(?:[ntr0\"\\\\]|.)"
-        },
+        { "include": "#string-escape" },
         {
           "name": "invalid.illegal.unescaped-brace.udewy",
           "match": "[{}]"
+        }
+      ]
+    },
+    "string-escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.udewy",
+          "match": "\\\\[xX][0-9A-Fa-f]{2}"
+        },
+        {
+          "name": "constant.character.escape.udewy",
+          "match": "\\\\(?:[ntr0\"\\\\]|.)"
         }
       ]
     },
@@ -52,10 +61,7 @@
       "begin": "\"",
       "end": "\"",
       "patterns": [
-        {
-          "name": "constant.character.escape.udewy",
-          "match": "\\\\(?:[ntr0\"\\\\]|.)"
-        },
+        { "include": "#string-escape" },
         {
           "name": "invalid.illegal.unescaped-brace.udewy",
           "match": "[{}]"
