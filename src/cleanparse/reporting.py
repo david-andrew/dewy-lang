@@ -199,6 +199,11 @@ class SrcFile:
     @classmethod
     def from_text(cls, body:str, path:PathLike[str]|None=None) -> SrcFile:
         return cls(path=path, body=body)
+    
+    @classmethod
+    def from_path(cls, path:PathLike[str]) -> SrcFile:
+        path = Path(path)
+        return cls(path=path, body=path.read_text())
 
     def offset_to_row_col(self, index:int) -> tuple[int, int]:
         index = max(0, min(index, len(self.body)))

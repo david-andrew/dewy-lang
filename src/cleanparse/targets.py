@@ -5,11 +5,21 @@ from typing import TypeAlias, Literal
 # not specifying a target targets the current machine
 # (TODO: uncomment ones in here as we support them)
 target:TypeAlias = Literal[
-    # target the current machine (current machine must be compatible)
+    # currently just use the verbatim list udewy supports
+    # TODO: expand support to this fuller list
     'x86_64',
-    'riscv64',
-    'aarch64',
+    'riscv',
+    'arm',
     'c',
+    'wasm32',
+
+
+    
+    # target the current machine (current machine must be compatible)
+    # 'x86_64',
+    # 'riscv64',
+    # 'aarch64',
+    # 'c',
 
     # # freestanding / baremetal
     # 'x86_64-freestanding',
@@ -36,7 +46,7 @@ target:TypeAlias = Literal[
     # # portable-ish
     # 'c-posix',
     # 'c89',
-    'wasm32',
+    # 'wasm32',
 
     # Others TBD
 ]
