@@ -2,11 +2,28 @@
 udewy backend for dewy compiler
 
 for now, HIR->udewy src
+
+
+
+features
+- handle imports
+
+- collect non-udewy constructs
+
 """
 from ..reporting import SrcFile
 from ..semantic import hir, check
+from dataclasses import dataclass
 
 import pdb
+
+
+@dataclass
+class Context:
+    srcfile: SrcFile
+    imports: list #TBD type here. maybe hir.AST
+
+
 
 def codegen(srcfile:SrcFile) -> str:
     ast = check.typecheck_and_resolve(srcfile)
@@ -16,6 +33,11 @@ def codegen_inner(ast: hir.AST) -> str:
     pdb.set_trace()
     ...
 
+
+# def emit_expr(expr: hir.AST. ctx: Context) -> str:
+
+def emit_bool(expr: hir.Bool, ctx: Context) -> str:
+    pdb.set_trace()
 
 
 
