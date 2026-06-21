@@ -136,7 +136,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.left, ['+', '-']),
     (Associativity.left, ['<<', '>>', '<<<', '>>>', '<<!', '!>>']),
     (Associativity.flat,  [',']),
-    (Associativity.fail, [t2.RangeJuxtapose]),  # jux-range 1..2..3
+    (Associativity.flat, [t2.RangeJuxtapose]),  # jux-range 1..2 ok. 1..2..3 not ok
     (Associativity.fail, ['in']),    # A in B
     (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'has?', 'of?', 'isnt?', 'in?', '@?']),
     (Associativity.left, ['and', 'nand', '&']),

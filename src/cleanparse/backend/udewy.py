@@ -30,6 +30,8 @@ def codegen(srcfile:SrcFile) -> str:
     return codegen_inner(ast)
 
 def codegen_inner(ast: hir.AST) -> str:
+    functions: dict[str, hir.FunctionLiteral] = {}
+
     pdb.set_trace()
     ...
 

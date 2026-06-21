@@ -68,6 +68,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
 
         case p0.Block(): return tcr_block(ast, ctx=ctx)
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block)
+        case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
         case p0.Atom(item=t1.String(content=content)): return hir.String(ast.item.loc, 'string', content)
         case p0.Atom(item=t1.Integer(value=value)): return hir.Integer(ast.item.loc, 'int', value.prefix, t0.parse_integer(value.src, value.prefix))
@@ -79,6 +80,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Bool(value=value)): return hir.Bool(ast.item.loc, 'bool', value)
         # case p0.Atom(item=t2.OpFn()): ...
         # case p0.Atom(item=t2.Placeholder()): ...
+        case p0.Flat(op=t2.RangeJuxtapose()): return tcr_bare_range(ast, ctx=ctx)
         case _:
             pdb.set_trace()
             raise NotImplementedError(f'typecheck_and_resolve_inner not implemented for {type(ast)}')
@@ -281,6 +283,29 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
 
     # more specialized structures (e.g. assignment, spread, collect, parameterization, etc.)
     pdb.set_trace()
+
+
+def tcr_bare_range(ast: p0.Flat, *, ctx: Context) -> hir.Range:
+    """
+    typecheck and resolve a bare range expression, e.g. `1..2`
+    """
+    # collect the left and right items
+    match ast.items:
+        case [left, p0.Atom(item=t1.Identifier(name='..')), right]: ...
+        case [p0.Atom(item=t1.Identifier(name='..')), right]:
+            left = None #hir.Void(Span(ast.loc.start, ast.loc.start), type=ty.VOID_TYPE)
+        case [left, p0.Atom(item=t1.Identifier(name='..'))]:
+            right = None #hir.Void(Span(ast.loc.stop, ast.loc.stop), type=ty.VOID_TYPE)
+        case _:
+            pdb.set_trace()
+            #TODO: raise full error. this shouldn't be possible to reach.
+    
+    left = typecheck_and_resolve_inner(left, ctx=ctx) if left is not None else None
+    right = typecheck_and_resolve_inner(right, ctx=ctx) if right is not None else None
+    #TODO: handle if left or right have comma, split out step pair
+    pdb.set_trace()
+    return hir.Range(ast.loc, bounds=None, step_pair=None, left=left, right=right)
+
 
 
 def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLiteral:
