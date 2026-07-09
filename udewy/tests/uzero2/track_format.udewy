@@ -8,6 +8,7 @@
 #   uztrack 1
 #   name Velocity Ring
 #   laps 3
+#   space                (optional: starfield space skybox instead of horizon)
 #   node n0 pos 0 0 0 tan 0 0 -1 roll 0 width 24 24 xsect 0 surf normal
 #   node n1 pos 0 0 -120 tan 0 0 -1 width 24 24 xsect 180 surf normal
 #   seg s0 from n0 to n1 rails both
@@ -389,6 +390,8 @@ let track_parse = (text:Cstr):>bool => {
             } else { if fmt_tok_is("apron\0") {
                 g_apron_y = fmt_next_q16()
                 g_has_apron = true
+            } else { if fmt_tok_is("space\0") {
+                g_is_space = true
             } else { if fmt_tok_is("node\0") {
                 fmt_parse_node()
             } else { if fmt_tok_is("seg\0") {
@@ -414,7 +417,7 @@ let track_parse = (text:Cstr):>bool => {
                 }
             } else {
                 fmt_fail()
-            } } } } } } } }
+            } } } } } } } } }
             fmt_next_line()
         }
         if fmt_error_line not=? 0 {
@@ -490,6 +493,9 @@ let track_serialize = ():>int => {
         bb_push_cstr(bb "apron \0")
         fmt_push_q16(bb g_apron_y)
         bb_push_byte(bb CH_LF)
+    }
+    if g_is_space {
+        bb_push_cstr(bb "space\n\0")
     }
 
     let i:int = 0

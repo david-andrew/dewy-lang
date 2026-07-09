@@ -11,11 +11,24 @@
 #                       drivable ground apron: pipe morph chain, exterior
 #                       sphere bulb, exterior cylinder, corkscrew, jump
 #                       island. Editor canvas.
+#   3  SERPENT KNOT   - the 5_2 "three-twist" knot traced as a Lissajous curve
+#                       x = 1250 cos(3t + 1.5), y = 420 cos(5t) + 480,
+#                       z = 1250 cos(2t + 0.2); 46 spine nodes at uniform arc
+#                       length (~21.5 km base lap, never self intersects, min
+#                       surface-to-surface strand gap ~190 m). The bulk of the
+#                       lap is ridden on the OUTSIDE of a fat tube, Fire Field
+#                       cylinder-knot style, broken up by: a flat start/finish
+#                       ribbon, an interior-pipe wall climb, a barrel-rolling
+#                       interior-pipe plunge, flat funnel breathers and a
+#                       waist pinch.
+#                       Off the north crest a tower spur leaves the knot: dead
+#                       vertical 2.4 km into the sky, a 180-degree half-loop
+#                       at the apex (y = 3580 m), and straight back down.
 # ============================================================================
 
 import p"./prelude.udewy"
 
-const TRACK_COUNT:int = 3
+const TRACK_COUNT:int = 4
 
 const TRACK_VELOCITY_RING:Cstr = "
 uztrack 1
@@ -115,7 +128,7 @@ apron 10
 # main chain: flat -> half-pipe -> closed pipe -> flat (open ends)
 node p0 pos 0 10 0 tan 0 0 -1 width 42 42 xsect 0 surf grid
 node p1 pos 0 10 -375 tan 0 0 -1 width 60 60 xsect 180 surf normal
-node p2 pos 0 10 -750 tan 0 0 -1 width 75 75 xsect 360 surf boost
+node p2 pos 0 10 -750 tan 0 0 -1 width 75 75 xsect 360 surf normal
 node p3 pos 0 10 -1125 tan 0 0 -1 width 60 60 xsect 180 surf normal
 node p4 pos 0 10 -1500 tan 0 0 -1 width 42 42 xsect 0 surf recharge
 # exterior sphere bulb planted in the apron (surface of revolution)
@@ -151,18 +164,162 @@ start s0 0.5
 route s0 s1 s2 s3
 \0"
 
+const TRACK_SERPENT_KNOT:Cstr = "
+uztrack 1
+name SERPENT KNOT
+laps 3
+space
+# spine: the 5_2 three-twist knot as a Lissajous curve (see file header),
+# sampled at uniform arc length with exact curve-derivative tangents, plus
+# a vertical tower spur. Profiles vary along the
+# knot: flat ribbons, interior pipes and (mostly) the OUTSIDE of the tube.
+# flat start/finish ribbon on the straightest stretch (rails hold the edges)
+node n0 pos 501.6 499.6 -594.3 tan -0.7489 -0.4574 -0.4795 width 170 170 xsect 0 surf grid
+node n1 pos 137.6 294.4 -802.7 tan -0.8112 -0.41 -0.4171 width 80 80 xsect 0 surf boost
+# tube through the valley floor, necking to a flat funnel before the pipe
+node n2 pos -258.3 129.2 -986.5 tan -0.8859 -0.2788 -0.3707 width 160 160 xsect -360 lift 1 surf normal
+node n3 pos -689.8 60.4 -1146.2 tan -0.9523 0.0288 -0.3037 width 80 80 xsect 0 surf recharge
+# seal into an interior pipe and barrel-roll up the steep wall climb
+node n4 pos -1107.7 214.2 -1246.6 tan -0.728 0.6812 -0.0775 width 200 200 xsect 360 surf normal
+node n5 pos -1236.3 629.7 -1176 tan 0.2504 0.8888 0.3839 width 200 200 xsect 360 surf normal
+node n6 pos -950.2 884.3 -940.8 tan 0.8136 0.1898 0.5496 width 200 200 xsect 360 surf loop
+# pipe opens to a narrow flat neck, then everts onto the OUTSIDE of the tube
+node n7 pos -559.3 868.1 -691 tan 0.8324 -0.1991 0.5171 width 70 70 xsect 0 surf normal
+node n8 pos -180 733 -455.2 tan 0.7911 -0.3574 0.4964 width 160 160 xsect -360 lift 1 surf normal
+# long exterior dive through the middle of the knot
+node n9 pos 180.9 548.4 -223.2 tan 0.7556 -0.422 0.5009 width 160 160 xsect -360 lift 1 surf boost
+node n10 pos 527.4 347.8 17.5 tan 0.7285 -0.4271 0.5356 width 160 160 xsect -360 lift 1 surf normal
+node n11 pos 861.3 161.4 285.4 tan 0.6975 -0.3511 0.6247 width 160 160 xsect -360 lift 1 surf loop
+node n12 pos 1163.1 60.1 621.9 tan 0.5351 0.0135 0.8447 width 160 160 xsect -360 lift 1 surf loop
+# hard pull out of the valley, sweeping up to the east crest
+node n13 pos 1215.4 265.4 1000.5 tan -0.3497 0.7208 0.5984 width 160 160 xsect -360 lift 1 surf normal
+node n14 pos 943.5 589.2 1185.3 tan -0.7488 0.6173 0.2416 width 160 160 xsect -360 lift 1 surf normal
+node n15 pos 544.8 818.5 1248.2 tan -0.9377 0.3454 0.0371 width 160 160 xsect -360 lift 1 surf boost
+node n16 pos 88.4 900 1225.1 tan -0.9913 0 -0.1316 width 160 160 xsect -360 lift 1 surf normal
+# long exterior sweep along the crest
+node n17 pos -359.9 825.5 1129.9 tan -0.9132 -0.3036 -0.2719 width 160 160 xsect -360 lift 1 surf normal
+node n18 pos -754.3 633.1 972.7 tan -0.7662 -0.5011 -0.4023 width 160 160 xsect -360 lift 1 surf boost
+# waist pinch on the steep 3-axis diagonal drop
+node n19 pos -1068.3 373.9 746.8 tan -0.5635 -0.5881 -0.5802 width 120 120 xsect -360 lift 1 surf cork
+node n20 pos -1245.9 120.1 405.9 tan -0.1165 -0.4133 -0.9031 width 160 160 xsect -360 lift 1 surf normal
+node n21 pos -1128.3 83.5 -25.3 tan 0.5284 0.2267 -0.8182 width 160 160 xsect -360 lift 1 surf boost
+# flat recharge ribbon up the long diagonal (crosses under the start)
+node n22 pos -837 249.4 -347.5 tan 0.6835 0.4307 -0.5893 width 180 180 xsect 0 surf recharge
+node n23 pos -501.6 460.4 -594.3 tan 0.7489 0.4574 -0.4795 width 180 180 xsect 0 surf recharge
+node n24 pos -137.6 665.6 -802.7 tan 0.8112 0.41 -0.4171 width 80 80 xsect 0 surf normal
+# over the north crest to the tower turn-off
+node n25 pos 258.3 830.8 -986.5 tan 0.8859 0.2788 -0.3707 width 160 160 xsect -360 lift 1 surf normal
+node n26 pos 689.8 899.6 -1146.2 tan 0.9523 -0.0288 -0.3037 width 160 160 xsect -360 lift 1 surf normal
+# TOWER: leave the knot, bend to dead vertical and climb 2430 m into the
+# sky, 180-degree half-loop at the apex (y = 3580), then straight back down
+node t0 pos 960 1150 -1235 tan 0 1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf normal
+node t1 pos 960 1900 -1235 tan 0 1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf boost
+node t2 pos 960 2650 -1235 tan 0 1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf normal
+node t3 pos 960 3400 -1235 tan 0 1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf normal
+node a0 pos 960 3580 -1415 tan 0 0 -1 up -1 0 0 width 160 160 xsect -360 lift 1 surf loop
+node t4 pos 960 3400 -1595 tan 0 -1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf normal
+node t5 pos 960 2650 -1595 tan 0 -1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf boost
+node t6 pos 960 1900 -1595 tan 0 -1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf normal
+node t7 pos 960 1150 -1595 tan 0 -1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf normal
+# rejoin the knot into the steepest plunge on the course
+node n27 pos 1107.7 745.8 -1246.6 tan 0.728 -0.6812 -0.0775 width 160 160 xsect -360 lift 1 surf boost
+node n28 pos 1236.3 330.3 -1176 tan -0.2504 -0.8888 0.3839 width 160 160 xsect -360 lift 1 surf normal
+node n29 pos 950.2 75.7 -940.8 tan -0.8136 -0.1898 0.5496 width 160 160 xsect -360 lift 1 surf normal
+# corkscrew twist along the valley floor, climbing back through the middle
+node n30 pos 559.3 91.9 -691 tan -0.8324 0.1991 0.5171 width 130 130 xsect -360 lift 1 surf cork
+node n31 pos 180 227 -455.2 tan -0.7911 0.3574 0.4964 width 160 160 xsect -360 lift 1 surf normal
+node n32 pos -180.9 411.6 -223.2 tan -0.7556 0.422 0.5009 width 160 160 xsect -360 lift 1 surf boost
+# flat crest breather, then plunge INSIDE a barrel-rolling pipe
+node n33 pos -527.4 612.2 17.5 tan -0.7285 0.4271 0.5356 width 170 170 xsect 0 surf normal
+node n34 pos -861.3 798.6 285.4 tan -0.6975 0.3511 0.6247 width 200 200 xsect 360 surf loop
+node n35 pos -1163.1 899.9 621.9 tan -0.5351 -0.0135 0.8447 width 200 200 xsect 360 surf loop
+node n36 pos -1215.4 694.6 1000.5 tan 0.3497 -0.7208 0.5984 width 200 200 xsect 360 surf normal
+# narrow flat funnel through the south valley, everting back onto the tube
+node n37 pos -943.5 370.8 1185.3 tan 0.7488 -0.6173 0.2416 width 80 80 xsect 0 surf normal
+node n38 pos -544.8 141.5 1248.2 tan 0.9377 -0.3454 0.0371 width 160 160 xsect -360 lift 1 surf normal
+node n39 pos -88.4 60 1225.1 tan 0.9913 0 -0.1316 width 160 160 xsect -360 lift 1 surf normal
+# gentle second bulge swinging out of the valley
+node n40 pos 360.4 134.6 1129.8 tan 0.9131 0.3039 -0.272 width 240 240 xsect -360 lift 1 surf normal
+node n41 pos 754.3 326.9 972.7 tan 0.7662 0.5011 -0.4023 width 160 160 xsect -360 lift 1 surf normal
+node n42 pos 1068.3 586.1 746.8 tan 0.5635 0.5881 -0.5802 width 160 160 xsect -360 lift 1 surf normal
+# fat recharge tube around the tight east-crest hook, then flatten home
+node n43 pos 1245.9 839.9 405.9 tan 0.1165 0.4133 -0.9031 width 180 180 xsect -360 lift 1 surf recharge
+node n44 pos 1128.3 876.5 -25.3 tan -0.5284 -0.2267 -0.8182 width 180 180 xsect -360 lift 1 surf recharge
+node n45 pos 837 710.6 -347.5 tan -0.6835 -0.4307 -0.5893 width 170 170 xsect 0 surf normal
+seg s0 from n0 to n1
+seg s1 from n1 to n2
+seg s2 from n2 to n3
+seg s3 from n3 to n4
+seg s4 from n4 to n5
+seg s5 from n5 to n6 twist 1
+seg s6 from n6 to n7
+seg s7 from n7 to n8
+seg s8 from n8 to n9
+seg s9 from n9 to n10
+seg s10 from n10 to n11
+seg s11 from n11 to n12
+seg s12 from n12 to n13
+seg s13 from n13 to n14
+seg s14 from n14 to n15
+seg s15 from n15 to n16
+seg s16 from n16 to n17
+seg s17 from n17 to n18
+seg s18 from n18 to n19
+seg s19 from n19 to n20
+seg s20 from n20 to n21
+seg s21 from n21 to n22
+seg s22 from n22 to n23
+seg s23 from n23 to n24
+seg s24 from n24 to n25
+seg s25 from n25 to n26
+seg s26 from n26 to t0
+seg s27 from t0 to t1
+seg s28 from t1 to t2
+seg s29 from t2 to t3
+seg s30 from t3 to a0
+seg s31 from a0 to t4
+seg s32 from t4 to t5
+seg s33 from t5 to t6
+seg s34 from t6 to t7
+seg s35 from t7 to n27
+seg s36 from n27 to n28
+seg s37 from n28 to n29
+seg s38 from n29 to n30
+seg s39 from n30 to n31 twist 1
+seg s40 from n31 to n32
+seg s41 from n32 to n33
+seg s42 from n33 to n34
+seg s43 from n34 to n35
+seg s44 from n35 to n36 twist 1
+seg s45 from n36 to n37
+seg s46 from n37 to n38
+seg s47 from n38 to n39
+seg s48 from n39 to n40
+seg s49 from n40 to n41
+seg s50 from n41 to n42
+seg s51 from n42 to n43
+seg s52 from n43 to n44
+seg s53 from n44 to n45
+seg s54 from n45 to n0
+start s0 0.5
+route s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29 s30 s31 s32 s33 s34 s35 s36 s37 s38 s39 s40 s41 s42 s43 s44 s45 s46 s47 s48 s49 s50 s51 s52 s53 s54
+\0"
+
 let builtin_track_text = (idx:int):>Cstr => {
     if idx =? 1 { return TRACK_PIPE_DREAM }
     if idx =? 2 { return TRACK_PLAYGROUND }
+    if idx =? 3 { return TRACK_SERPENT_KNOT }
     return TRACK_VELOCITY_RING
 }
 
 const TRACK_NAME_0:Cstr = "VELOCITY RING\0"
 const TRACK_NAME_1:Cstr = "PIPE DREAM\0"
 const TRACK_NAME_2:Cstr = "PLAYGROUND\0"
+const TRACK_NAME_3:Cstr = "SERPENT KNOT\0"
 
 let builtin_track_name = (idx:int):>Cstr => {
     if idx =? 1 { return TRACK_NAME_1 }
     if idx =? 2 { return TRACK_NAME_2 }
+    if idx =? 3 { return TRACK_NAME_3 }
     return TRACK_NAME_0
 }

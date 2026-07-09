@@ -143,12 +143,18 @@ let render_tracksel = (sw:int sh:int track_count:int):>void => {
 const PAUSE_TITLE:Cstr = "PAUSED\0"
 const PAUSE_RESUME:Cstr = "RESUME\0"
 const PAUSE_RESTART:Cstr = "RESTART\0"
+const PAUSE_FPS_LOCK_ON:Cstr = "60 FPS LOCK: ON\0"
+const PAUSE_FPS_LOCK_OFF:Cstr = "60 FPS LOCK: OFF\0"
 const PAUSE_QUIT:Cstr = "QUIT TO MENU\0"
-const PAUSE_ITEM_COUNT:int = 3
+const PAUSE_ITEM_COUNT:int = 4
 
 let pause_item_text = (i:int):>Cstr => {
     if i =? 1 { return PAUSE_RESTART }
-    if i =? 2 { return PAUSE_QUIT }
+    if i =? 2 {
+        if fps_lock not=? 0 { return PAUSE_FPS_LOCK_ON }
+        return PAUSE_FPS_LOCK_OFF
+    }
+    if i =? 3 { return PAUSE_QUIT }
     return PAUSE_RESUME
 }
 
@@ -163,8 +169,8 @@ let render_pause_overlay = (sw:int sh:int):>void => {
 
     let panel_w:int = 380
     let x0:int = (sw - panel_w) // 2
-    let y0:int = sh // 2 - 140
-    draw_panel(x0 y0 x0 + panel_w y0 + 280)
+    let y0:int = sh // 2 - 160
+    draw_panel(x0 y0 x0 + panel_w y0 + 320)
     gpu_set_color4(FP_ONE 58982 13107 FP_ONE)
     text_draw_centered(sw // 2 y0 + 24 PAUSE_TITLE 4)
 

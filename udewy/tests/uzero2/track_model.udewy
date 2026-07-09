@@ -27,6 +27,7 @@ let g_start_seg:SegId = 0
 let g_start_t:Q16 = 0
 let g_has_apron:bool = false             # drivable flat ground plane (playgrounds)
 let g_apron_y:Q16 = 0
+let g_is_space:bool = false              # space skybox: starfield, no horizon plane
 
 # Filled in by track_bake.
 let g_lap_len:Q16 = 0                    # total progress per lap (route_len * PROG_PER_SEG)
@@ -77,6 +78,7 @@ let track_clear = ():>void => {
     g_start_t = 0
     g_has_apron = false
     g_apron_y = 0
+    g_is_space = false
     g_lap_len = 0
     __store_u8__(0 TRACK_NAME_BUF)
     return void

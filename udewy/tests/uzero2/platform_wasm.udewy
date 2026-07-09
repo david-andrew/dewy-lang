@@ -122,6 +122,29 @@ let backend_get_size = (out_w_ptr:Ptr out_h_ptr:Ptr):>void => {
     return void
 }
 
+let bk_fps_cap:bool = true
+let bk_gate_prev_ms:int = 0
+
+let backend_set_fps_cap = (on:bool):>void => {
+    bk_fps_cap = on
+    return void
+}
+
+# The browser drives frames via requestAnimationFrame, which follows the
+# display refresh rate. With the 60 fps cap on, skip callbacks that arrive
+# early so the fixed-step simulation stays at 60 Hz on high-refresh displays.
+let backend_frame_gate = ():>bool => {
+    if bk_fps_cap =? false {
+        return true
+    }
+    let now:int = __host_time__()
+    if now - bk_gate_prev_ms <? 15 {
+        return false
+    }
+    bk_gate_prev_ms = now
+    return true
+}
+
 # ---------- Time / input -----------------------------------------------------------
 
 let time_ms = ():>int => {

@@ -36,6 +36,7 @@ let surf_seg:SegId = 0
 let surf_si:FrameId = 0
 let surf_prog:Q16 = 0                    # lap progress in [0, g_lap_len)
 let surf_past_end:bool = false           # probe overshot an open chain end
+let surf_taper:Q16 = 0                   # radial surface velocity per metre travelled
 
 const TQ_POS:Vec3 = __static_alloca__(24)
 const TQ_NRM:Vec3 = __static_alloca__(24)
@@ -141,6 +142,7 @@ let tq_refine = (px:Q16 py:Q16 pz:Q16):>void => {
     surf_wl = xse_wl
     surf_wr = xse_wr
     surf_closed = xse_closed
+    surf_taper = xse_taper
     surf_kind = __load__(fa + FR_KIND)
     if t >? FP_HALF {
         surf_kind = __load__(fb + FR_KIND)
@@ -151,9 +153,13 @@ let tq_refine = (px:Q16 py:Q16 pz:Q16):>void => {
     # Longitudinal sanity: the cross-section solve assumes the probe sits in
     # the plane of the chord. A large offset along track-forward means the
     # probe is past an open chain end (or over a gap), not over this frame.
+    # On fat surfaces (spheres, wide tubes) the cross-section planes fan out
+    # with centerline curvature, so a probe riding far from the centerline
+    # picks up a legitimate along-offset: scale the limit with the arc size.
     surf_past_end = false
     let along:Q16 = fp_mul(px - surf_x v3_x(XSE_F)) + fp_mul(py - surf_y v3_y(XSE_F)) + fp_mul(pz - surf_z v3_z(XSE_F))
-    if (along >? SAMPLE_SPACING * 2) or (along <? SAMPLE_SPACING * (-2)) {
+    let along_lim:Q16 = SAMPLE_SPACING * 2 + ((xse_wl + xse_wr) >> 3)
+    if (along >? along_lim) or (along <? -along_lim) {
         surf_past_end = true
     }
     let pa:Q16 = __load__(fa + FR_PROG)

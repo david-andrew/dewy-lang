@@ -136,6 +136,13 @@ const TEX_WALL:int = 8
 const FONT_ATLAS_PIXELS:Ptr = __static_alloca__(24576) # FONT_ATLAS_BYTES
 const FONT_TEXID:Ptr = __static_alloca__(8)
 
+# Starfield: (STAR_COUNT + STAR_BAND_COUNT) * STAR_STRIDE and
+# NEBULA_COUNT * STAR_STRIDE, plus the radial-falloff blob texture.
+const STAR_BUF:Ptr = __static_alloca__(67200)
+const NEBULA_BUF:Ptr = __static_alloca__(1568)
+const NEBULA_PIXELS:Ptr = __static_alloca__(1024)      # 16*16*4
+const NEBULA_TEXID:Ptr = __static_alloca__(8)
+
 # ---------- Audio buffers --------------------------------------------------------------------
 
 const AUDIO_MIX_BUF:Ptr = __static_alloca__(1600)      # AUDIO_FRAME_BYTES
@@ -161,6 +168,7 @@ let in_respawn:int = 0
 # ---------- FPS counter -------------------------------------------------------------------------
 
 let show_fps:int = SHOW_FPS_DEFAULT
+let fps_lock:int = FPS_LOCK_DEFAULT      # 1 = cap at 60 fps
 let fps_last_ticks:int = 0
 let fps_sample_count:int = 0
 let fps_value:int = 0

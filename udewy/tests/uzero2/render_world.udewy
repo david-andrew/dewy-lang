@@ -78,6 +78,184 @@ let kind_texid = (kind:SurfKind):>int => {
     return __load_u32__(CHECKER_TEXIDS + slot * 8)
 }
 
+# ---------- Starfield (space skybox) -------------------------------------------------
+# Stars and nebula blobs live on a camera-centered dome just inside the far
+# plane: they translate with the camera (no parallax, like a real sky) but
+# rotate with the view. Everything is generated once from a fixed seed.
+
+const STAR_TMP:Vec3 = __static_alloca__(24)
+const STAR_BAND_N:Vec3 = __static_alloca__(24)         # galaxy band normal
+
+# Uniform random unit vector (rejection sampling inside the unit ball).
+let star_rand_dir = (out:Vec3):>void => {
+    loop true {
+        let x:Q16 = xs_range(131072) - FP_ONE
+        let y:Q16 = xs_range(131072) - FP_ONE
+        let z:Q16 = xs_range(131072) - FP_ONE
+        let m2:int = (x * x) + (y * y) + (z * z)
+        if (m2 <? FP_ONE * FP_ONE) and (m2 >? 1 << 26) {
+            v3_set(out x y z)
+            v3_norm(out)
+            return void
+        }
+    }
+    return void
+}
+
+# Pull a direction toward the galaxy band plane: shrink its component along
+# the band normal to k (Q16), then renormalize.
+let star_squash_to_band = (out:Vec3 k:Q16):>void => {
+    let d:Q16 = v3_dot(out STAR_BAND_N)
+    let pull:Q16 = fp_mul(d FP_ONE - k)
+    v3_addscaled(out out STAR_BAND_N (-pull))
+    v3_norm(out)
+    return void
+}
+
+# Star tint palette: mostly white, some blue-white, warm and rare red-orange.
+let star_write_color = (slot:Ptr bright:Q16):>void => {
+    let roll:int = xs_range(100)
+    let r:Q16 = FP_ONE
+    let g:Q16 = FP_ONE
+    let b:Q16 = 62259
+    if roll <? 22 { r = 49152  g = 55705  b = FP_ONE }       # blue-white
+    else { if roll <? 34 { g = 58982  b = 45875 }            # warm yellow
+    else { if roll <? 40 { g = 49152  b = 32768 }            # orange
+    else { if roll <? 43 { g = 36044  b = 29491 } } } }      # red
+    __store__(fp_mul(r bright) slot + 32)
+    __store__(fp_mul(g bright) slot + 40)
+    __store__(fp_mul(b bright) slot + 48)
+    return void
+}
+
+let init_starfield = ():>void => {
+    xs_seed(0x5747A2F1E1D)
+    v3_set(STAR_BAND_N 20971 55050 28835)                    # tilted band plane
+    v3_norm(STAR_BAND_N)
+
+    let i:int = 0
+    loop i <? STAR_COUNT + STAR_BAND_COUNT {
+        let slot:Ptr = STAR_BUF + i * STAR_STRIDE
+        star_rand_dir(STAR_TMP)
+        let bright:Q16 = 26214 + xs_range(39322)             # 0.4 .. 1.0
+        if i >=? STAR_COUNT {
+            # band stars: packed near the plane, a touch dimmer on average
+            star_squash_to_band(STAR_TMP 11796 + xs_range(9830))
+            bright = 19660 + xs_range(39322)
+        }
+        v3_copy(slot STAR_TMP)
+        __store__(STAR_SIZE_MIN + xs_range(STAR_SIZE_VAR) slot + 24)
+        star_write_color(slot bright)
+        i += 1
+    }
+
+    # nebula blobs: big soft additive patches hugging the band, cool hues
+    # with a few warm ones for a galactic-core glow
+    let j:int = 0
+    loop j <? NEBULA_COUNT {
+        let slot:Ptr = NEBULA_BUF + j * STAR_STRIDE
+        star_rand_dir(STAR_TMP)
+        star_squash_to_band(STAR_TMP 5243 + xs_range(6553))
+        v3_copy(slot STAR_TMP)
+        __store__((FP_ONE * 500) + xs_range(FP_ONE * 700) slot + 24)
+        let roll:int = xs_range(100)
+        let r:Q16 = 11796
+        let g:Q16 = 8519
+        let b:Q16 = 22937                                    # violet
+        if roll <? 30 { r = 6553   g = 11140  b = 24903 }    # deep blue
+        else { if roll <? 50 { r = 5898  g = 14417  b = 18350 }   # teal
+        else { if roll <? 65 { r = 16384  g = 13107  b = 9830 } } } # core amber
+        __store__(r slot + 32)
+        __store__(g slot + 40)
+        __store__(b slot + 48)
+        j += 1
+    }
+
+    # radial falloff texture for the blobs
+    let py:int = 0
+    loop py <? NEBULA_TEX_SIZE {
+        let px:int = 0
+        loop px <? NEBULA_TEX_SIZE {
+            let dx:int = px * 2 - (NEBULA_TEX_SIZE - 1)
+            let dy:int = py * 2 - (NEBULA_TEX_SIZE - 1)
+            let d2:int = (dx * dx) + (dy * dy)               # 0 .. ~450
+            let fall:int = 255 - (d2 * 255) // 225
+            if fall <? 0 { fall = 0 }
+            fall = (fall * fall) // 255                      # quadratic falloff
+            let o:Ptr = NEBULA_PIXELS + (py * NEBULA_TEX_SIZE + px) * 4
+            __store_u8__(255 o)
+            __store_u8__(255 o + 1)
+            __store_u8__(255 o + 2)
+            __store_u8__(fall o + 3)
+            px += 1
+        }
+        py += 1
+    }
+    gpu_texture_create(NEBULA_TEXID NEBULA_TEX_SIZE NEBULA_TEX_SIZE NEBULA_PIXELS 0 0)
+    return void
+}
+
+# Emit one camera-facing quad at cam + dir * STAR_DIST.
+let star_emit_quad = (slot:Ptr rx:Q16 ry:Q16 rz:Q16 half:Q16):>void => {
+    let px:Q16 = cam_x + fp_mul(__load__(slot) STAR_DIST)
+    let py:Q16 = cam_y + fp_mul(__load__(slot + 8) STAR_DIST)
+    let pz:Q16 = cam_z + fp_mul(__load__(slot + 16) STAR_DIST)
+    let ux:Q16 = fp_mul(cam_ux half)
+    let uy:Q16 = fp_mul(cam_uy half)
+    let uz:Q16 = fp_mul(cam_uz half)
+    let sx:Q16 = fp_mul(rx half)
+    let sy:Q16 = fp_mul(ry half)
+    let sz:Q16 = fp_mul(rz half)
+    gpu_vertex3_uv(px - sx - ux py - sy - uy pz - sz - uz 0 0)
+    gpu_vertex3_uv(px + sx - ux py + sy - uy pz + sz - uz FP_ONE 0)
+    gpu_vertex3_uv(px + sx + ux py + sy + uy pz + sz + uz FP_ONE FP_ONE)
+    gpu_vertex3_uv(px - sx + ux py - sy + uy pz - sz + uz 0 FP_ONE)
+    return void
+}
+
+let draw_starfield = ():>void => {
+    let rx:Q16 = fp_mul(cam_fy cam_uz) - fp_mul(cam_fz cam_uy)
+    let ry:Q16 = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
+    let rz:Q16 = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
+
+    gpu_enable_depth_test(0)
+    gpu_enable_depth_write(0)
+    gpu_enable_blend_additive(1)
+
+    gpu_set_texture(__load_u32__(NEBULA_TEXID))
+    gpu_quads_begin()
+    let j:int = 0
+    loop j <? NEBULA_COUNT {
+        let nslot:Ptr = NEBULA_BUF + j * STAR_STRIDE
+        gpu_set_color4(__load__(nslot + 32) __load__(nslot + 40) __load__(nslot + 48) FP_ONE)
+        star_emit_quad(nslot rx ry rz __load__(nslot + 24))
+        j += 1
+    }
+    gpu_end()
+
+    gpu_set_texture(__load_u32__(NEBULA_TEXID))
+    gpu_quads_begin()
+    let i:int = 0
+    loop i <? STAR_COUNT + STAR_BAND_COUNT {
+        let slot:Ptr = STAR_BUF + i * STAR_STRIDE
+        # subtle twinkle: 0.72 .. 1.0 brightness wobble, phase spread per star
+        let tw:Q16 = 56360 + fp_mul(9175 sin_fine(frame_count * STAR_TWINKLE_SPEED + i * 2731))
+        gpu_set_color4(fp_mul(__load__(slot + 32) tw)
+                       fp_mul(__load__(slot + 40) tw)
+                       fp_mul(__load__(slot + 48) tw)
+                       FP_ONE)
+        star_emit_quad(slot rx ry rz __load__(slot + 24))
+        i += 1
+    }
+    gpu_end()
+
+    gpu_set_texture(0)
+    gpu_enable_blend_additive(0)
+    gpu_enable_depth_write(1)
+    gpu_enable_depth_test(1)
+    return void
+}
+
 # ---------- Camera / projection ----------------------------------------------------
 
 let set_perspective = (sw:int sh:int):>void => {
@@ -122,17 +300,20 @@ let apply_camera = ():>void => {
 # ---------- Ground -------------------------------------------------------------------
 
 let draw_ground = ():>void => {
-    let half_q:Q16 = GROUND_HALF_EXTENT
-    let neg_q:Q16 = -half_q
-    let y_q:Q16 = GROUND_Y
-    gpu_set_texture(0)
-    gpu_set_color3(COL_HORIZON_R COL_HORIZON_G COL_HORIZON_B)
-    gpu_quads_begin()
-    gpu_vertex3(neg_q y_q neg_q)
-    gpu_vertex3(half_q y_q neg_q)
-    gpu_vertex3(half_q y_q half_q)
-    gpu_vertex3(neg_q y_q half_q)
-    gpu_end()
+    # in space there is no horizon plane - the starfield is the backdrop
+    if g_is_space =? false {
+        let half_q:Q16 = GROUND_HALF_EXTENT
+        let neg_q:Q16 = -half_q
+        let y_q:Q16 = GROUND_Y
+        gpu_set_texture(0)
+        gpu_set_color3(COL_HORIZON_R COL_HORIZON_G COL_HORIZON_B)
+        gpu_quads_begin()
+        gpu_vertex3(neg_q y_q neg_q)
+        gpu_vertex3(half_q y_q neg_q)
+        gpu_vertex3(half_q y_q half_q)
+        gpu_vertex3(neg_q y_q half_q)
+        gpu_end()
+    }
 
     # Drivable apron: a checkered plane spanning the track plus margin.
     if g_has_apron {
@@ -616,10 +797,17 @@ let draw_all_cars = ():>void => {
 
 let render_world_common = (sw:int sh:int):>void => {
     gpu_set_viewport(sw sh)
-    gpu_clear(COL_SKY_R COL_SKY_G COL_SKY_B)
-    gpu_enable_depth_test(1)
+    if g_is_space {
+        gpu_clear(COL_SPACE_R COL_SPACE_G COL_SPACE_B)
+    } else {
+        gpu_clear(COL_SKY_R COL_SKY_G COL_SKY_B)
+    }
     set_perspective(sw sh)
     apply_camera()
+    if g_is_space {
+        draw_starfield()
+    }
+    gpu_enable_depth_test(1)
     draw_ground()
     draw_track()
     return void

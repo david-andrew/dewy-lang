@@ -104,6 +104,7 @@ let xse_lift:Q16 = 0
 let xse_radius:Q16 = 0                   # signed; 0 = flat
 let xse_lift_off:Q16 = 0                 # arc center shift toward the centerline
 let xse_closed:bool = false
+let xse_taper:Q16 = 0                    # d(radius)/d(arclength): tapering tube
 
 # Derive the cached cross-section values from the loaded frame fields.
 let xse_finish = ():>void => {
@@ -137,6 +138,7 @@ let xse_setup = (fp:Ptr):>void => {
     xse_wr = __load__(fp + FR_WR)
     xse_xs = __load__(fp + FR_XSECT)
     xse_lift = __load__(fp + FR_LIFT)
+    xse_taper = 0
     xse_finish()
     return void
 }
@@ -153,6 +155,26 @@ let xse_setup_interp = (fa:Ptr fb:Ptr t:Q16):>void => {
     xse_wr = __load__(fa + FR_WR) + fp_mul(__load__(fb + FR_WR) - __load__(fa + FR_WR) t)
     xse_xs = __load__(fa + FR_XSECT) + fp_mul(__load__(fb + FR_XSECT) - __load__(fa + FR_XSECT) t)
     xse_lift = __load__(fa + FR_LIFT) + fp_mul(__load__(fb + FR_LIFT) - __load__(fa + FR_LIFT) t)
+    # Taper of an exterior surface of revolution: how fast the tube radius
+    # changes per metre of centerline (spheres, bulges, waist pinches). The
+    # surface moves radially - along its own normal - at this rate, and the
+    # physics feeds it back so a grounded craft tracks the swelling surface.
+    xse_taper = 0
+    let xsa:Angle = __load__(fa + FR_XSECT)
+    let xsb:Angle = __load__(fb + FR_XSECT)
+    if (xsa <=? -XSECT_CLOSED_MIN) and (xsb <=? -XSECT_CLOSED_MIN) {
+        let ra:Q16 = ((__load__(fa + FR_WL) + __load__(fa + FR_WR)) * 16297) // ((-xsa) * 100)
+        let rb:Q16 = ((__load__(fb + FR_WL) + __load__(fb + FR_WR)) * 16297) // ((-xsb) * 100)
+        if ra not=? rb {
+            let ddx:Q16 = __load__(fb + FR_PX) - __load__(fa + FR_PX)
+            let ddy:Q16 = __load__(fb + FR_PY) - __load__(fa + FR_PY)
+            let ddz:Q16 = __load__(fb + FR_PZ) - __load__(fa + FR_PZ)
+            let dist:Q16 = fp_sqrt((ddx * ddx) + (ddy * ddy) + (ddz * ddz))
+            if dist >? 6553 {
+                xse_taper = fp_div(rb - ra dist)
+            }
+        }
+    }
     xse_finish()
     return void
 }

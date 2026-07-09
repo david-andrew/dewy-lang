@@ -230,6 +230,10 @@ let update_pause = ():>void => {
             game_state = ST_RACE
         }
         if pause_cursor =? 2 {
+            fps_lock = 1 - fps_lock
+            backend_set_fps_cap(fps_lock)
+        }
+        if pause_cursor =? 3 {
             game_state = ST_MENU
         }
     }
@@ -286,9 +290,11 @@ let update_gameover = ():>void => {
 
 let game_init = ():>void => {
     init_textures()
+    init_starfield()
     init_font_atlas()
     speed_lines_init()
     audio_engine_init()
+    backend_set_fps_cap(fps_lock)
     load_builtin_track(0)
     reset_race(MODE_RACE)
     game_state = ST_TITLE
@@ -301,6 +307,9 @@ let game_init = ():>void => {
 const GAME_SIZE_BUF:Ptr = __static_alloca__(8)
 
 let frame_step = (dt_ms:int):>int => {
+    if backend_frame_gate() =? false {
+        return 0
+    }
     backend_poll()
     input_update()
     if plat_quit_requested() {

@@ -590,10 +590,21 @@ let physics_step = ():>void => {
     if airborne not=? 0 {
         cvy -= GRAVITY
     } else {
+        # Project velocity onto the surface, then give it back the surface's
+        # own radial rate on tapering tubes (sphere bulges, waist pinches):
+        # the point under the craft moves along the normal at taper * v_along,
+        # so a grounded craft follows the swell instead of launching off it.
         let cv_dot_n:Q16 = fp_mul(cvx surf_nx) + fp_mul(cvy surf_ny) + fp_mul(cvz surf_nz)
         cvx -= fp_mul(surf_nx cv_dot_n)
         cvy -= fp_mul(surf_ny cv_dot_n)
         cvz -= fp_mul(surf_nz cv_dot_n)
+        if surf_taper not=? 0 {
+            let v_along:Q16 = fp_mul(cvx surf_fx) + fp_mul(cvy surf_fy) + fp_mul(cvz surf_fz)
+            let radial:Q16 = fp_mul(surf_taper v_along)
+            cvx += fp_mul(surf_nx radial)
+            cvy += fp_mul(surf_ny radial)
+            cvz += fp_mul(surf_nz radial)
+        }
         let proj:Q16 = fp_mul(SLOPE_GRAVITY surf_ny)
         cvx += fp_mul(surf_nx proj)
         cvy += fp_mul(surf_ny proj) - SLOPE_GRAVITY

@@ -176,14 +176,29 @@ let backend_poll = ():>void => {
 }
 
 let bk_frame_prev_ms:int = 0
+let bk_fps_cap:bool = true
+
+# Toggle the 60 fps cap: with the cap on, present vsyncs and tops the frame
+# up to ~16 ms; with it off, vsync is disabled and frames run uncapped.
+let backend_set_fps_cap = (on:bool):>void => {
+    bk_fps_cap = on
+    if on {
+        SDL_GL_SetSwapInterval(1)
+    } else {
+        SDL_GL_SetSwapInterval(0)
+    }
+    return void
+}
 
 # Swap (vsync) and top the frame up to ~16 ms so the simulation runs at
 # 60 Hz on any refresh rate, without stacking a fixed delay on top of vsync.
 let backend_present = ():>void => {
     SDL_GL_SwapWindow(bk_window)
-    let elapsed:int = SDL_GetTicks() - bk_frame_prev_ms
-    if (elapsed >=? 0) and (elapsed <? 16) {
-        SDL_Delay(16 - elapsed)
+    if bk_fps_cap {
+        let elapsed:int = SDL_GetTicks() - bk_frame_prev_ms
+        if (elapsed >=? 0) and (elapsed <? 16) {
+            SDL_Delay(16 - elapsed)
+        }
     }
     bk_frame_prev_ms = SDL_GetTicks()
     return void
@@ -192,6 +207,12 @@ let backend_present = ():>void => {
 let backend_get_size = (out_w_ptr:Ptr out_h_ptr:Ptr):>void => {
     SDL_GetWindowSizeInPixels(bk_window out_w_ptr out_h_ptr)
     return void
+}
+
+# Whether the game should run a frame right now. On SDL the pacing happens
+# in backend_present, so every loop iteration is a frame.
+let backend_frame_gate = ():>bool => {
+    return true
 }
 
 # ---------- Time / input ------------------------------------------------------

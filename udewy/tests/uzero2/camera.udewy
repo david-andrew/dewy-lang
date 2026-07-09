@@ -5,6 +5,9 @@
 
 import p"./prelude.udewy"
 import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_query.udewy"
 
 # ---------- Player chase camera ------------------------------------------------
 
@@ -76,8 +79,36 @@ let update_chase = ():>void => {
     cam_y += fp_mul(target_cam_y - cam_y POS_ALPHA)
     cam_z += fp_mul(target_cam_z - cam_z POS_ALPHA)
 
+    camera_keep_above_surface()
+
     let scale:Q16 = FP_ONE + fp_mul(sn FOV_PUNCH)
     cur_fov_top_q16 = fp_mul(131072 scale)
+    return void
+}
+
+# Keep the chase camera out of the surface the craft is riding on: on curved
+# sections (exterior cylinders / spheres, pipe walls, crests) the lagged
+# camera can sink below the local surface. Query the track at the camera
+# position and push it out along the surface normal to a minimum clearance.
+# Skipped while airborne: the craft may legitimately be far off any surface
+# (falls, jumps), and snapping the camera to a road it isn't on looks worse
+# than the clip.
+let camera_keep_above_surface = ():>void => {
+    if was_airborne { return void }
+    let clearance:Q16 = CAM_MIN_CLEARANCE + fp_mul(vis_speed_norm CAM_CLEARANCE_SPEED)
+    track_query(cam_x cam_y cam_z cur_seg cur_si)
+    let gap:Q16 = fp_mul(cam_x - surf_x surf_nx)
+                + fp_mul(cam_y - surf_y surf_ny)
+                + fp_mul(cam_z - surf_z surf_nz)
+    if gap <? clearance {
+        let push:Q16 = clearance - gap
+        cam_x += fp_mul(surf_nx push)
+        cam_y += fp_mul(surf_ny push)
+        cam_z += fp_mul(surf_nz push)
+    }
+    if g_has_apron and (cam_y <? g_apron_y + clearance) {
+        cam_y = g_apron_y + clearance
+    }
     return void
 }
 

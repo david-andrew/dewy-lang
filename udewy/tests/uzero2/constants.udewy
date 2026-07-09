@@ -130,6 +130,9 @@ const PAD_IMPULSE:Q16 = 32768
 
 const CAM_BACK:Q16 = 983040              # 15 m behind craft
 const CAM_LIFT:Q16 = 262144              # 4 m above craft
+const CAM_MIN_CLEARANCE:Q16 = 229376     # 3.5 m: camera never sinks closer to the surface
+const CAM_CLEARANCE_SPEED:Q16 = 229376   # extra clearance at top speed (FOV widens with speed,
+                                         # dropping the near-plane bottom edge further below the camera)
 const POS_ALPHA:Q16 = 7864               # 0.12
 const ORIENT_ALPHA:Q16 = 6553            # 0.10
 const FOV_PUNCH:Q16 = 26214
@@ -189,6 +192,7 @@ const HUD_BAR_BORDER_PX:int = 2
 const HUD_KMH_PER_FRAME:int = 216
 
 const SHOW_FPS_DEFAULT:int = 1
+const FPS_LOCK_DEFAULT:int = 1           # cap the game at 60 fps (menu toggle)
 const HUD_FPS_SAMPLE_FRAMES:int = 30
 
 # Font cell geometry (5x7 glyphs in 6x8 cells, scaled by integer factors).
@@ -205,6 +209,25 @@ const FONT_ATLAS_BYTES:int = 24576       # FONT_ATLAS_W * FONT_ATLAS_H * 4
 const COL_SKY_R:Q16 = 4915
 const COL_SKY_G:Q16 = 7864
 const COL_SKY_B:Q16 = 13107
+
+# near-black space clear color (high-altitude tracks with a starfield)
+const COL_SPACE_R:Q16 = 786
+const COL_SPACE_G:Q16 = 786
+const COL_SPACE_B:Q16 = 2949
+
+# ---------- Starfield (space background) -------------------------------------
+# Stars are billboarded quads on a camera-centered dome just inside the far
+# plane, so they never parallax and never clip. A band of them plus soft
+# additive blobs forms a milky-way streak across the sky.
+const STAR_COUNT:int = 700               # stars scattered over the whole sky
+const STAR_BAND_COUNT:int = 500          # extra stars packed into the galaxy band
+const STAR_DIST:Q16 = 222822400          # 3400 m (far plane is 4000 m)
+const STAR_SIZE_MIN:Q16 = 393216         # 6 m half-size at 3400 m ~ 1-2 px
+const STAR_SIZE_VAR:Q16 = 786432         # + up to 12 m
+const STAR_STRIDE:int = 56               # dir xyz, size, r, g, b (Q16 each)
+const NEBULA_COUNT:int = 28              # soft blobs along the band
+const NEBULA_TEX_SIZE:int = 16           # radial falloff texture
+const STAR_TWINKLE_SPEED:int = 37        # fine-angle units per frame
 
 const COL_GROUND_A_R:Q16 = 6553
 const COL_GROUND_A_G:Q16 = 9830
