@@ -520,7 +520,14 @@ let physics_step = ():>void => {
             speed_overcap = PAD_BOOST_OVERCAP
         }
     }
-    if surf_kind =? SURF_RECHARGE {
+    let on_recharge:bool = surf_kind =? SURF_RECHARGE
+    if current_car_is_player not=? 0 {
+        if on_recharge and (player_recharging =? false) and (energy <? ENERGY_FULL) {
+            trigger_sfx(SFX_KIND_RECHARGE)
+        }
+        player_recharging = on_recharge
+    }
+    if on_recharge {
         if energy <? ENERGY_FULL {
             energy += RECHARGE_RATE
             if energy >? ENERGY_FULL { energy = ENERGY_FULL }

@@ -319,12 +319,40 @@ let draw_fps = (sw:int sh:int):>void => {
 }
 
 const HUD_WRONGWAY:Cstr = "WRONG WAY\0"
+const HUD_CONTROLS_1:Cstr = "WASD/ARROWS DRIVE  Q/E STRAFE  SPACE BOOST\0"
+const HUD_CONTROLS_2:Cstr = "R RESPAWN  ESC PAUSE\0"
+const HUD_GO:Cstr = "GO!\0"
 
 let draw_wrongway = (sw:int sh:int):>void => {
     if wrongway_frames <? 45 { return void }
     if (frame_count % 30) >=? 20 { return void }
     gpu_set_color4(FP_ONE 13107 6553 FP_ONE)
     text_draw_centered(sw // 2 sh // 3 HUD_WRONGWAY 4)
+    return void
+}
+
+let draw_race_controls = (sw:int sh:int):>void => {
+    let remaining:int = RACE_HINT_FRAMES - race_elapsed_frames
+    if remaining <=? 0 { return void }
+    let alpha:Q16 = 45875
+    if remaining <? RACE_HINT_FADE_FRAMES {
+        alpha = (alpha * remaining) // RACE_HINT_FADE_FRAMES
+    }
+    gpu_set_color4(FP_ONE FP_ONE FP_ONE alpha)
+    text_draw_centered(sw // 2 sh - 60 HUD_CONTROLS_1 2)
+    text_draw_centered(sw // 2 sh - 36 HUD_CONTROLS_2 2)
+    return void
+}
+
+let draw_race_countdown = (sw:int sh:int):>void => {
+    if race_countdown_frames >? 0 {
+        let count:int = (race_countdown_frames + 59) // 60
+        gpu_set_color4(FP_ONE FP_ONE 13107 FP_ONE)
+        text_draw_centered(sw // 2 sh // 3 fmt_int(count) 8)
+    } else { if race_elapsed_frames <=? RACE_GO_FRAMES {
+        gpu_set_color4(13107 FP_ONE 26214 FP_ONE)
+        text_draw_centered(sw // 2 sh // 3 HUD_GO 8)
+    } }
     return void
 }
 
@@ -336,6 +364,8 @@ let draw_race_hud = (sw:int sh:int):>void => {
         draw_lap(sw sh)
         draw_position(sw sh)
         draw_wrongway(sw sh)
+        draw_race_controls(sw sh)
+        draw_race_countdown(sw sh)
     }
     if show_fps not=? 0 {
         draw_fps(sw sh)

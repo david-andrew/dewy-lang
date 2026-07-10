@@ -24,16 +24,23 @@
 #                       Off the north crest a tower spur leaves the knot: dead
 #                       vertical 2.4 km into the sky, a 180-degree half-loop
 #                       at the apex (y = 3580 m), and straight back down.
+#   4  AETHER DIVIDE  - long-form space circuit: climbing banked esses, an
+#                       interior-pipe barrel roll, a drifting vertical loop,
+#                       a broad exterior-tube sky arc, a corkscrew plunge,
+#                       forked high/low racing lines, and a technical exterior
+#                       tube return into the start straight.
 # ============================================================================
 
 import p"./prelude.udewy"
 
-const TRACK_COUNT:int = 4
+const TRACK_COUNT:int = 5
+const RACE_TRACK_COUNT:int = 4
 
 const TRACK_VELOCITY_RING:Cstr = "
 uztrack 1
 name VELOCITY RING
 laps 3
+space
 # start straight, heading -z
 node n0 pos 0 10 0 tan 0 0 -1 roll 0 width 36 36 xsect 0 surf grid
 node n1 pos 0 10 -750 tan 0 0 -1 width 36 36 xsect 0 surf normal
@@ -84,6 +91,7 @@ const TRACK_PIPE_DREAM:Cstr = "
 uztrack 1
 name PIPE DREAM
 laps 3
+space
 # flat start morphing into a half-pipe then a closed pipe
 node n0 pos 0 10 0 tan 0 0 -1 width 40 40 xsect 0 surf grid
 node n1 pos 0 10 -500 tan 0 0 -1 width 60 60 xsect 180 surf normal
@@ -124,6 +132,7 @@ const TRACK_PLAYGROUND:Cstr = "
 uztrack 1
 name PLAYGROUND
 laps 1
+space
 apron 10
 # main chain: flat -> half-pipe -> closed pipe -> flat (open ends)
 node p0 pos 0 10 0 tan 0 0 -1 width 42 42 xsect 0 surf grid
@@ -305,10 +314,141 @@ start s0 0.5
 route s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29 s30 s31 s32 s33 s34 s35 s36 s37 s38 s39 s40 s41 s42 s43 s44 s45 s46 s47 s48 s49 s50 s51 s52 s53 s54
 \0"
 
+const TRACK_AETHER_DIVIDE:Cstr = "
+uztrack 1
+name AETHER DIVIDE
+laps 3
+space
+# Launch through a long grid straight into climbing, heavily banked esses.
+node n0 pos 0 120 0 tan 0 0 -1 width 58 58 xsect 0 surf grid
+node n1 pos 0 120 -700 tan -0.2424 0.0291 -0.9697 roll -6 width 64 64 xsect 0 surf normal
+node n2 pos -250 150 -1000 tan -0.8339 0.131 -0.5361 roll -18 width 68 68 xsect 0 surf normal
+node n3 pos -700 230 -1150 tan -0.9724 0.2269 0.054 roll -28 width 76 76 xsect 0 surf normal
+node n4 pos -1150 360 -950 tan -0.7028 0.2919 0.6487 roll -22 width 72 72 xsect 0 surf normal
+node n5 pos -1350 500 -550 tan -0.1125 0.27 0.9563 roll 18 width 66 66 xsect 0 surf normal
+node n6 pos -1250 600 -100 tan 0.4643 0.1238 0.877 roll 24 width 74 74 xsect 0 surf recharge
+# Crest funnel: half-pipe closes around a full barrel roll, then opens again.
+node n7 pos -900 620 300 tan 0.776 -0.0194 0.6305 roll 12 width 100 100 xsect 180 surf normal
+node n8 pos -450 580 550 tan 0.9357 -0.131 0.3275 width 125 125 xsect 360 surf normal
+node n9 pos 100 480 650 tan 0.9696 -0.2401 0.0462 width 125 125 xsect 360 surf cork
+node n10 pos 600 320 600 tan 0.9269 -0.3053 -0.2181 width 125 125 xsect 360 surf normal
+node n11 pos 950 200 450 tan 0.5962 -0.2385 -0.7666 width 100 100 xsect 180 surf normal
+# Drifting vertical loop: the x offset keeps the two sides visually separate.
+node n12 pos 950 180 150 tan 0 0 -1 up 0 1 0 width 58 58 xsect 0 surf loop
+node n13 pos 1010 340 -10 tan 0 1 0 up 0 0 -1 width 58 58 xsect 0 surf loop
+node n14 pos 1070 500 150 tan 0 0 1 up 0 -1 0 width 58 58 xsect 0 surf loop
+node n15 pos 1130 340 310 tan 0 -1 0 up 0 0 1 width 58 58 xsect 0 surf loop
+node n16 pos 1190 180 150 tan 0 0 -1 up 0 1 0 width 58 58 xsect 0 surf loop
+node n17 pos 1210 140 -300 tan 0.184 -0.092 -0.9786 width 64 64 xsect 0 surf normal
+# The road everts onto a broad tube and climbs around the outside of the arena.
+node n18 pos 1350 100 -700 tan 0.4869 -0.025 -0.8731 roll 8 width 105 105 xsect -180 lift 1 surf normal
+node n19 pos 1600 120 -1000 tan 0.8785 0.1882 -0.4392 width 145 145 xsect -360 lift 1 surf normal
+node n20 pos 2050 250 -1050 tan 0.8926 0.399 0.21 width 145 145 xsect -360 lift 1 surf normal
+node n21 pos 2450 500 -800 tan 0.5361 0.4971 0.6823 width 145 145 xsect -360 lift 1 surf normal
+node n22 pos 2600 760 -350 tan 0 0.4281 0.9037 width 160 160 xsect -360 lift 1 surf loop
+node n23 pos 2450 950 150 tan -0.5222 0.2754 0.8071 width 160 160 xsect -360 lift 1 surf normal
+node n24 pos 2050 1050 500 tan -0.8731 0.0485 0.4851 width 145 145 xsect -360 lift 1 surf recharge
+node n25 pos 1550 1000 650 tan -0.9734 -0.2049 0.1025 width 145 145 xsect -360 lift 1 surf normal
+node n26 pos 1100 850 600 tan -0.8768 -0.3507 -0.3288 width 145 145 xsect -360 lift 1 surf normal
+node n27 pos 750 680 350 tan -0.5492 -0.4027 -0.7323 width 105 105 xsect -180 lift 1 surf normal
+node n28 pos 650 520 0 tan -0.0609 -0.402 -0.9136 width 72 72 xsect 0 surf recharge
+# A second pipe tightens around the steep corkscrew plunge.
+node n29 pos 700 350 -400 tan 0.2017 -0.4739 -0.8571 width 105 105 xsect 180 surf normal
+node n30 pos 850 50 -850 tan 0.4621 -0.4898 -0.7393 width 125 125 xsect 360 surf cork
+node n31 pos 1200 -180 -1200 tan 0.8197 -0.2562 -0.5123 width 125 125 xsect 360 surf normal
+node n32 pos 1650 -200 -1350 tan 0.9888 0.0931 0.1163 width 105 105 xsect 180 surf normal
+node n33 pos 2050 -100 -1100 tan 0.5803 0.3675 0.7254 roll 10 width 72 72 xsect 0 surf normal
+# Main line takes the wide outside sweeper; a narrow pipe cuts inside.
+node n34 pos 2250 180 -600 tan 0.1414 0.3017 0.9429 roll 24 width 78 78 xsect 0 surf normal
+node n35 pos 2200 220 -100 tan -0.3009 0.0401 0.9528 roll 28 width 88 88 xsect 0 surf normal
+node n36 pos 1950 220 350 tan -0.6544 -0.0403 0.7551 roll 20 width 88 88 xsect 0 surf normal
+node n37 pos 1550 180 650 tan -0.8701 -0.0967 0.4834 roll 12 width 82 82 xsect 0 surf recharge
+node n38 pos 1050 120 850 tan -0.9448 -0.09 0.3149 roll -8 width 78 78 xsect 0 surf normal
+node q0 pos 2350 500 -100 tan -0.3193 0.3832 0.8666 width 48 48 xsect 180 surf normal
+node q1 pos 1900 600 350 tan -0.727 0 0.6866 width 72 72 xsect 360 surf normal
+node q2 pos 1450 500 750 tan -0.7746 -0.4374 0.4556 width 48 48 xsect 180 surf normal
+# Long descending switchback opens into another outside-tube technical sector.
+node n39 pos 500 80 1000 tan -0.9846 -0.0342 0.1712 roll -12 width 82 82 xsect 0 surf normal
+node n40 pos -100 80 1050 tan -0.9988 0.0479 0 roll -20 width 88 88 xsect 0 surf normal
+node n41 pos -750 140 1000 tan -0.9663 0.1701 -0.1933 roll -26 width 82 82 xsect 0 surf normal
+node n42 pos -1350 300 800 tan -0.8543 0.2951 -0.4271 roll -16 width 105 105 xsect -180 lift 1 surf normal
+node n43 pos -1850 520 450 tan -0.6239 0.3328 -0.7071 width 135 135 xsect -360 lift 1 surf normal
+node n44 pos -2100 700 -50 tan -0.0924 0.2219 -0.9707 width 135 135 xsect -360 lift 1 surf cork
+node n45 pos -1950 760 -600 tan 0.5137 0.0343 -0.8562 width 135 135 xsect -360 lift 1 surf normal
+node n46 pos -1500 740 -1050 tan 0.8126 -0.0619 -0.5805 width 105 105 xsect -180 lift 1 surf recharge
+# Flatten onto a high return arc, then descend east of the start straight.
+node n47 pos -900 680 -1350 tan 0.9711 -0.1398 -0.1942 roll 16 width 64 64 xsect 0 surf normal
+node n48 pos -250 560 -1300 tan 0.9314 -0.1863 0.3105 roll 28 width 58 58 xsect 0 surf normal
+node n49 pos 300 440 -950 tan 0.3682 -0.2525 0.8942 roll 24 width 58 58 xsect 0 surf normal
+node n50 pos 100 320 -450 tan -0.0888 -0.1953 0.9767 roll 14 width 64 64 xsect 0 surf normal
+node n51 pos 200 220 150 tan 0.2018 -0.2018 0.9584 roll 18 width 68 68 xsect 0 surf recharge
+node n52 pos 300 120 500 tan -0.7428 -0.3714 -0.5571 roll 12 width 64 64 xsect 0 surf normal
+seg s0 from n0 to n1
+seg s1 from n1 to n2
+seg s2 from n2 to n3
+seg s3 from n3 to n4
+seg s4 from n4 to n5
+seg s5 from n5 to n6
+seg s6 from n6 to n7
+seg s7 from n7 to n8
+seg s8 from n8 to n9 twist 1 surf cork
+seg s9 from n9 to n10
+seg s10 from n10 to n11
+seg s11 from n11 to n12
+seg s12 from n12 to n13 surf loop
+seg s13 from n13 to n14 surf loop
+seg s14 from n14 to n15 surf loop
+seg s15 from n15 to n16 surf loop
+seg s16 from n16 to n17 surf loop
+seg s17 from n17 to n18
+seg s18 from n18 to n19
+seg s19 from n19 to n20
+seg s20 from n20 to n21
+seg s21 from n21 to n22
+seg s22 from n22 to n23
+seg s23 from n23 to n24 twist 1 surf cork
+seg s24 from n24 to n25
+seg s25 from n25 to n26
+seg s26 from n26 to n27
+seg s27 from n27 to n28
+seg s28 from n28 to n29
+seg s29 from n29 to n30
+seg s30 from n30 to n31 twist 1 surf cork
+seg s31 from n31 to n32
+seg s32 from n32 to n33
+seg s33 from n33 to n34
+seg s34 from n34 to n35
+seg s35 from n35 to n36
+seg s36 from n36 to n37
+seg s37 from n37 to n38
+seg s38 from n38 to n39
+seg s39 from n39 to n40
+seg s40 from n40 to n41
+seg s41 from n41 to n42
+seg s42 from n42 to n43
+seg s43 from n43 to n44
+seg s44 from n44 to n45 twist 1 surf cork
+seg s45 from n45 to n46
+seg s46 from n46 to n47
+seg s47 from n47 to n48
+seg s48 from n48 to n49
+seg s49 from n49 to n50
+seg s50 from n50 to n51
+seg s51 from n51 to n52
+seg s52 from n52 to n0
+seg b0 from n34 to q0 rails none
+seg b1 from q0 to q1
+seg b2 from q1 to q2 twist 1 surf cork
+seg b3 from q2 to n38 rails none
+start s0 0.5
+route s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29 s30 s31 s32 s33 s34 s35 s36 s37 s38 s39 s40 s41 s42 s43 s44 s45 s46 s47 s48 s49 s50 s51 s52
+\0"
+
 let builtin_track_text = (idx:int):>Cstr => {
     if idx =? 1 { return TRACK_PIPE_DREAM }
     if idx =? 2 { return TRACK_PLAYGROUND }
     if idx =? 3 { return TRACK_SERPENT_KNOT }
+    if idx =? 4 { return TRACK_AETHER_DIVIDE }
     return TRACK_VELOCITY_RING
 }
 
@@ -316,10 +456,24 @@ const TRACK_NAME_0:Cstr = "VELOCITY RING\0"
 const TRACK_NAME_1:Cstr = "PIPE DREAM\0"
 const TRACK_NAME_2:Cstr = "PLAYGROUND\0"
 const TRACK_NAME_3:Cstr = "SERPENT KNOT\0"
+const TRACK_NAME_4:Cstr = "AETHER DIVIDE\0"
 
 let builtin_track_name = (idx:int):>Cstr => {
     if idx =? 1 { return TRACK_NAME_1 }
     if idx =? 2 { return TRACK_NAME_2 }
     if idx =? 3 { return TRACK_NAME_3 }
+    if idx =? 4 { return TRACK_NAME_4 }
     return TRACK_NAME_0
+}
+
+let builtin_race_track_index = (cursor:int):>int => {
+    if cursor >=? 2 { return cursor + 1 }
+    return cursor
+}
+
+let builtin_race_track_cursor = (idx:int):>int => {
+    if idx =? 1 { return 1 }
+    if idx =? 3 { return 2 }
+    if idx =? 4 { return 3 }
+    return 0
 }

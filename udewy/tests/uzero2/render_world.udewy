@@ -195,11 +195,11 @@ let init_starfield = ():>void => {
     return void
 }
 
-# Emit one camera-facing quad at cam + dir * STAR_DIST.
-let star_emit_quad = (slot:Ptr rx:Q16 ry:Q16 rz:Q16 half:Q16):>void => {
-    let px:Q16 = cam_x + fp_mul(__load__(slot) STAR_DIST)
-    let py:Q16 = cam_y + fp_mul(__load__(slot + 8) STAR_DIST)
-    let pz:Q16 = cam_z + fp_mul(__load__(slot + 16) STAR_DIST)
+# Emit one camera-facing quad at cam + dir * star_dist.
+let star_emit_quad = (slot:Ptr rx:Q16 ry:Q16 rz:Q16 half:Q16 star_dist:Q16):>void => {
+    let px:Q16 = cam_x + fp_mul(__load__(slot) star_dist)
+    let py:Q16 = cam_y + fp_mul(__load__(slot + 8) star_dist)
+    let pz:Q16 = cam_z + fp_mul(__load__(slot + 16) star_dist)
     let ux:Q16 = fp_mul(cam_ux half)
     let uy:Q16 = fp_mul(cam_uy half)
     let uz:Q16 = fp_mul(cam_uz half)
@@ -214,6 +214,8 @@ let star_emit_quad = (slot:Ptr rx:Q16 ry:Q16 rz:Q16 half:Q16):>void => {
 }
 
 let draw_starfield = ():>void => {
+    let star_dist:Q16 = STAR_DIST
+    if render_preview_far { star_dist = STAR_DIST_PREVIEW }
     let rx:Q16 = fp_mul(cam_fy cam_uz) - fp_mul(cam_fz cam_uy)
     let ry:Q16 = fp_mul(cam_fz cam_ux) - fp_mul(cam_fx cam_uz)
     let rz:Q16 = fp_mul(cam_fx cam_uy) - fp_mul(cam_fy cam_ux)
@@ -228,7 +230,7 @@ let draw_starfield = ():>void => {
     loop j <? NEBULA_COUNT {
         let nslot:Ptr = NEBULA_BUF + j * STAR_STRIDE
         gpu_set_color4(__load__(nslot + 32) __load__(nslot + 40) __load__(nslot + 48) FP_ONE)
-        star_emit_quad(nslot rx ry rz __load__(nslot + 24))
+        star_emit_quad(nslot rx ry rz __load__(nslot + 24) star_dist)
         j += 1
     }
     gpu_end()
@@ -244,7 +246,7 @@ let draw_starfield = ():>void => {
                        fp_mul(__load__(slot + 40) tw)
                        fp_mul(__load__(slot + 48) tw)
                        FP_ONE)
-        star_emit_quad(slot rx ry rz __load__(slot + 24))
+        star_emit_quad(slot rx ry rz __load__(slot + 24) star_dist)
         i += 1
     }
     gpu_end()
@@ -263,7 +265,8 @@ let set_perspective = (sw:int sh:int):>void => {
     let top_q16:Q16 = cur_fov_top_q16
     let right_q16:Q16 = fp_mul(top_q16 aspect_q16)
     let near_q:Q16 = 131072              # 2 m
-    let far_q:Q16 = 262144000            # 4000 m
+    let far_q:Q16 = RENDER_FAR_DIST
+    if render_preview_far { far_q = RENDER_FAR_PREVIEW }
     gpu_set_perspective_frustum(-right_q16 right_q16 (-top_q16) top_q16 near_q far_q)
     return void
 }
@@ -344,6 +347,8 @@ let draw_ground = ():>void => {
 
 # Segment visibility: AABB distance check against the camera.
 let seg_visible = (sg:Ptr):>bool => {
+    let cull_dist:Q16 = RENDER_CULL_DIST
+    if render_preview_far { cull_dist = RENDER_FAR_PREVIEW }
     let dx:Q16 = 0
     if cam_x <? __load__(sg + SG_MINX) { dx = __load__(sg + SG_MINX) - cam_x }
     if cam_x >? __load__(sg + SG_MAXX) { dx = cam_x - __load__(sg + SG_MAXX) }
@@ -353,9 +358,9 @@ let seg_visible = (sg:Ptr):>bool => {
     let dz:Q16 = 0
     if cam_z <? __load__(sg + SG_MINZ) { dz = __load__(sg + SG_MINZ) - cam_z }
     if cam_z >? __load__(sg + SG_MAXZ) { dz = cam_z - __load__(sg + SG_MAXZ) }
-    if dx >? RENDER_CULL_DIST { return false }
-    if dy >? RENDER_CULL_DIST { return false }
-    if dz >? RENDER_CULL_DIST { return false }
+    if dx >? cull_dist { return false }
+    if dy >? cull_dist { return false }
+    if dz >? cull_dist { return false }
     return true
 }
 

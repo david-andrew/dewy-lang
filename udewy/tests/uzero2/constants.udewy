@@ -191,9 +191,13 @@ const HUD_BAR_H_PX:int = 18
 const HUD_BAR_BORDER_PX:int = 2
 const HUD_KMH_PER_FRAME:int = 216
 
-const SHOW_FPS_DEFAULT:int = 1
+const SHOW_FPS_DEFAULT:int = 0
 const FPS_LOCK_DEFAULT:int = 1           # cap the game at 60 fps (menu toggle)
 const HUD_FPS_SAMPLE_FRAMES:int = 30
+const RACE_COUNTDOWN_FRAMES:int = 180
+const RACE_GO_FRAMES:int = 45
+const RACE_HINT_FRAMES:int = 600
+const RACE_HINT_FADE_FRAMES:int = 120
 
 # Font cell geometry (5x7 glyphs in 6x8 cells, scaled by integer factors).
 const FONT_CELL_W:int = 6
@@ -222,6 +226,9 @@ const COL_SPACE_B:Q16 = 2949
 const STAR_COUNT:int = 700               # stars scattered over the whole sky
 const STAR_BAND_COUNT:int = 500          # extra stars packed into the galaxy band
 const STAR_DIST:Q16 = 222822400          # 3400 m (far plane is 4000 m)
+const RENDER_FAR_DIST:Q16 = 262144000    # 4000 m gameplay far plane / cull
+const RENDER_FAR_PREVIEW:Q16 = 786432000 # 12000 m menu flyover far plane / cull
+const STAR_DIST_PREVIEW:Q16 = 668467200   # 10200 m star dome for preview camera
 const STAR_SIZE_MIN:Q16 = 393216         # 6 m half-size at 3400 m ~ 1-2 px
 const STAR_SIZE_VAR:Q16 = 786432         # + up to 12 m
 const STAR_STRIDE:int = 56               # dir xyz, size, r, g, b (Q16 each)
@@ -408,7 +415,7 @@ const GROUND_TEX_BYTES:int = 16
 const GROUND_Y:Q16 = -32768000           # distant horizon plane
 
 const RENDER_CULL_NEAR_ROWS:int = 32     # mesh rows per draw batch (wasm vertex budget)
-const RENDER_CULL_DIST:Q16 = 262144000   # 4000 m segment cull distance (= far plane)
+const RENDER_CULL_DIST:Q16 = RENDER_FAR_DIST
 
 # ---------- Cars ------------------------------------------------------------
 

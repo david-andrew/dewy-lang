@@ -65,7 +65,12 @@ let reset_race = (mode:int):>void => {
     player_finish_frame = 0
     game_over_frames = 0
     results_camera_frames = 0
-    race_start_frame = frame_count
+    race_countdown_frames = 0
+    if mode =? MODE_RACE { race_countdown_frames = RACE_COUNTDOWN_FRAMES }
+    race_elapsed_frames = 0
+    race_start_frame = frame_count + race_countdown_frames
+    player_recharging = false
+    race_camera_needs_snap = true
     car_load(0)
     camera_snap_behind_craft()
     update_chase()
@@ -140,7 +145,8 @@ let update_menu = ():>void => {
     if nav_confirm_pressed() {
         sfx_play(SFX_KIND_MENU 32768)
         if menu_cursor =? 0 {
-            tracksel_cursor = current_track % TRACK_COUNT
+            tracksel_cursor = builtin_race_track_cursor(current_track)
+            load_builtin_track(builtin_race_track_index(tracksel_cursor))
             game_state = ST_TRACKSEL
         }
         if menu_cursor =? 1 {
@@ -158,13 +164,13 @@ let update_menu = ():>void => {
 
 let update_tracksel = ():>void => {
     if nav_up_pressed() {
-        tracksel_cursor = (tracksel_cursor + TRACK_COUNT - 1) % TRACK_COUNT
-        load_builtin_track(tracksel_cursor)
+        tracksel_cursor = (tracksel_cursor + RACE_TRACK_COUNT - 1) % RACE_TRACK_COUNT
+        load_builtin_track(builtin_race_track_index(tracksel_cursor))
         sfx_play(SFX_KIND_MENU 26214)
     }
     if nav_down_pressed() {
-        tracksel_cursor = (tracksel_cursor + 1) % TRACK_COUNT
-        load_builtin_track(tracksel_cursor)
+        tracksel_cursor = (tracksel_cursor + 1) % RACE_TRACK_COUNT
+        load_builtin_track(builtin_race_track_index(tracksel_cursor))
         sfx_play(SFX_KIND_MENU 26214)
     }
     if nav_back_pressed() {
@@ -188,6 +194,16 @@ let update_race = ():>void => {
     if key_pressed(KEY_F) {
         show_fps = 1 - show_fps
     }
+    if race_camera_needs_snap {
+        car_load(0)
+        camera_snap_behind_craft()
+        race_camera_needs_snap = false
+    }
+    if race_countdown_frames >? 0 {
+        race_countdown_frames -= 1
+        return void
+    }
+    race_elapsed_frames += 1
     step_all_cars()
     spark_step()
     recompute_player_position()
@@ -199,7 +215,7 @@ let update_race = ():>void => {
         return void
     }
     if (play_mode =? MODE_RACE) and (car_get_lap(0) >=? g_track_laps) {
-        player_finish_frame = frame_count
+        player_finish_frame = race_elapsed_frames
         sort_cars_by_progress()
         results_camera_frames = 0
         game_state = ST_RESULTS
@@ -336,7 +352,7 @@ let frame_step = (dt_ms:int):>int => {
     } else { if game_state =? ST_TRACKSEL {
         update_tracksel()
         audio_step(FP_ONE 0)
-        render_tracksel(sw sh TRACK_COUNT)
+        render_tracksel(sw sh RACE_TRACK_COUNT)
     } else { if game_state =? ST_RACE {
         update_race()
         audio_step(32768 49152)
