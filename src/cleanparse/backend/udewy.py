@@ -136,5 +136,7 @@ if __name__ == '__main__':
     udewy = codegen(srcfile)
     
     # would run the udewy src through the udewy compiler at this point...
+    from udewy.frontend import entry_point, EntryPointOptions
+    
     pdb.set_trace()
     ...

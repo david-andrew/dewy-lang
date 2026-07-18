@@ -1,4 +1,6 @@
 from typing import TypeAlias, Literal
+from platform import machine
+from sys import platform
 
 # supported target triples
 # (TODO: port this back down to udewy)
@@ -53,6 +55,27 @@ target:TypeAlias = Literal[
 
 TARGETS: list[target] = [*target.__args__]
 
+# platform.machine() names -> supported host backends
+_HOST_TARGET_MAP: dict[str, target] = {
+    'x86_64': 'x86_64',
+    'amd64': 'x86_64',
+    'aarch64': 'arm',
+    'arm64': 'arm',
+    'riscv64': 'riscv',
+    'riscv32': 'riscv',
+    'wasm32': 'wasm32',
+    'wasm64': 'wasm32',
+}
+
+def identify_host_target() -> target:
+    """Identify the backend target for the current machine (including wasm hosts)."""
+    # browser / wasi python (pyodide, etc.) — machine() is often wasm32 already
+    if platform in ('emscripten', 'wasi'):
+        return 'wasm32'
+    host = machine().lower()
+    if host in _HOST_TARGET_MAP:
+        return _HOST_TARGET_MAP[host]
+    raise ValueError(f'unsupported host architecture: {host!r}')
 
 
 
