@@ -256,34 +256,81 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
     e.g. `true | false` -> `true` vs `<true | false>` -> `literal<true>|literal<false>`
     most other operators are unaffected by this flag.
     """
-    # TODO: how to handle the fact that `and` and `or` might have inner elements that need type_block? for now just pass in to left and right
-    # full expression
-    if isinstance(binop.op, (t2.QJuxtapose, t2.CallJuxtapose, t2.IndexJuxtapose, t2.MultiplyJuxtapose)): #TODO: other binops that also just do both sides
-        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
-        right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
-        match binop.op:
-            case t2.QJuxtapose():
-                pdb.set_trace()
-            case t2.CallJuxtapose():
-                # if isinstance(left, hir.AtHandle): return typecheck_partial_eval(left, right)
-                return tcr_function_call(left, right)
-            case t2.IndexJuxtapose():
-                pdb.set_trace()
-            case t2.MultiplyJuxtapose():
-                # TODO: need table for binop compatibility
-                pdb.set_trace()
-            case _:
-                pdb.set_trace()
-                raise NotImplementedError(f'tcr_binop not implemented for {type(binop.op)}')
+
+    # Special cases that don't just typecheck both sides
+    if binop.op.symbol == '=>': return tcr_function_literal(binop, ctx=ctx)
+
+    if binop.op.symbol in ('=','::',':='):
+        #TODO: determine if assignment or declaration based on if the right already declared
+        right = typecheck_and_resolve_inner(binop.right, ctx=ctx)
+        target = tcr_assignment_target(binop.left, right, ctx=ctx)
         pdb.set_trace()
 
 
-    if binop.op.symbol == '=>': return tcr_function_literal(binop, ctx=ctx)
+    # TODO: other more specialized structures (e.g. assignment, spread, collect, parameterization, etc.)
 
 
-    # more specialized structures (e.g. assignment, spread, collect, parameterization, etc.)
+    # regular cases where left and right are both normal expressions
+    # TODO: how to handle the fact that `and` and `or` might have inner elements that need type_block? for now just pass in to left and right
+    # full expression
+    left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
+    right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
+    
+    match binop.op:
+        case t2.QJuxtapose():
+            pdb.set_trace()
+        case t2.CallJuxtapose():
+            # if isinstance(left, hir.AtHandle): return typecheck_partial_eval(left, right)
+            return tcr_function_call(left, right)
+        case t2.IndexJuxtapose():
+            pdb.set_trace()
+        case t2.MultiplyJuxtapose():
+            # TODO: need table for binop compatibility
+            pdb.set_trace()
+        case t2.RangeJuxtapose(): pdb.set_trace()
+        case t2.EllipsisJuxtapose(): pdb.set_trace()
+        case t2.TypeParamJuxtapose(): pdb.set_trace()
+        case t2.SemicolonJuxtapose(): pdb.set_trace()
+        case t2.CombinedAssignmentOp(): pdb.set_trace()
+        case t2.InvertedComparisonOp(): pdb.set_trace()
+        case t2.BroadcastOp(): pdb.set_trace()
+    
+    # TODO: eventually should be able to remove this check once all the arms of the above match are implemented
+    assert isinstance(binop.op, t1.Operator), f'INTERNAL ERROR: unexpected operator type: {binop.op}'
+
+
+
+    match binop.op.symbol:
+        case '+': return tcr_add(left, right)
+        # case '-': return tcr_sub(left, right)
+        # case '*': return tcr_mul(left, right)
+        # case '/': return tcr_div(left, right)
+        # case '%': return tcr_mod(left, right)
+        # case '//': return tcr_floordiv(left, right)
+        # case '^': return tcr_pow(left, right)
+        # case '<<': return tcr_lshift(left, right)
+        # case '>>': return tcr_rshift(left, right)
+        
+        
+        
+        case _:
+            pdb.set_trace()
+            raise NotImplementedError(f'tcr_binop not implemented for {type(binop.op)}')
+
+
+
+
+
+
+
+
     pdb.set_trace()
 
+def tcr_assignment_target(target: p0.AST, right: hir.AST, *, ctx: Context):  # -> UndeclaredIdentifier|Identifier|Unpack|ArrayRangeTarget|etc.
+    """
+    verify that the assignment target is valid and can receive the right-hand side expression
+    """
+    pdb.set_trace()
 
 def tcr_bare_range(ast: p0.Flat, *, ctx: Context) -> hir.Range:
     """
@@ -448,10 +495,22 @@ def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:
 
 def tcr_identifier(id: t1.Identifier, *, ctx: Context) -> hir.AST:
     if id.name in ctx.declarations:
-        return hir.Identifier(id.loc, ctx.declarations[id.name], id.name)
+        return hir.ExpressedIdentifier(id.loc, ctx.declarations[id.name], id.name)
     
     pdb.set_trace()
     raise NotImplementedError(f'Identifier "{id.name}" not found in context')
+
+
+
+
+
+def tcr_add(left: hir.AST, right: hir.AST) -> hir.AST:
+    # check that left and right can be added together 
+    # [ ] TODO: needs to be based on the binop type compatibility table
+    pdb.set_trace()
+
+
+
 
 
 def test():

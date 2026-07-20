@@ -49,9 +49,9 @@ class Declare(AST):
     type: ty.Type
     expr: AST
 
-# @dataclass
-# class Identifier(AST):
-#     name: str
+@dataclass
+class ExpressedIdentifier(AST):
+    name: str
 
 @dataclass
 class Bool(AST):
