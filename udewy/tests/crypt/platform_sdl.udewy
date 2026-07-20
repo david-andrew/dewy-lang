@@ -1,0 +1,217 @@
+# ============================================================================
+# μCrypt SDL3 + OpenGL platform: software framebuffer uploaded as a GL texture.
+# ============================================================================
+
+$supported_targets = ["x86_64" "c"]
+
+import p"../../third_party/sdl/sdl.udewy"
+
+const SCREEN_W:int = 320
+const SCREEN_H:int = 180
+const FB_BYTES:int = 230400
+const WINDOW_W:int = 960
+const WINDOW_H:int = 540
+const AUDIO_SAMPLE_RATE:int = 22050
+const AUDIO_CHUNK_SAMPLES:int = 1024
+const AUDIO_CHUNK_BYTES:int = 2048
+
+const F32_ZERO:int = __i64_to_f32_bits__(0)
+const F32_ONE:int = __i64_to_f32_bits__(1)
+const F64_ZERO:int = __i64_to_f64_bits__(0)
+const F64_ONE:int = __i64_to_f64_bits__(1)
+const F64_NEG_ONE:int = __i64_to_f64_bits__(-1)
+
+let bk_window:int = 0
+let bk_gl:int = 0
+let bk_tex:int = 0
+let bk_tex_slot:int = __static_alloca__(4)
+let bk_fb:int = __static_alloca__(230400)
+let bk_keyboard:int = 0
+let bk_audio:int = 0
+let bk_audio_buf:int = __static_alloca__(2048)
+let bk_quit:int = 0
+let running:int = 1
+
+let bk_press_confirm:int = 0
+let bk_press_back:int = 0
+let bk_press_fire:int = 0
+let bk_prev_confirm:int = 0
+let bk_prev_back:int = 0
+let bk_prev_fire:int = 0
+
+let backend_init = (title_ptr:int):>int => {
+    SDL_SetMainReady()
+    if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 { return 1 }
+    if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 { SDL_Quit() return 2 }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION 2) =? 0 { SDL_Quit() return 3 }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION 1) =? 0 { SDL_Quit() return 4 }
+    if SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) =? 0 {
+        SDL_Quit()
+        return 5
+    }
+
+    bk_window = SDL_CreateWindow(title_ptr WINDOW_W WINDOW_H SDL_WINDOW_OPENGL + SDL_WINDOW_RESIZABLE)
+    if bk_window =? 0 { SDL_Quit() return 6 }
+    SDL_SetWindowIconFromUdewyData(bk_window SDL_DEFAULT_WINDOW_ICON_DATA)
+
+    bk_gl = SDL_GL_CreateContext(bk_window)
+    if bk_gl =? 0 { SDL_DestroyWindow(bk_window) SDL_Quit() return 7 }
+    if SDL_GL_MakeCurrent(bk_window bk_gl) =? 0 {
+        SDL_GL_DestroyContext(bk_gl)
+        SDL_DestroyWindow(bk_window)
+        SDL_Quit()
+        return 8
+    }
+    SDL_GL_SetSwapInterval(1)
+
+    glPixelStorei(0x0CF5 1)
+    glGenTextures(1 bk_tex_slot)
+    bk_tex = __load_u32__(bk_tex_slot)
+    glBindTexture(GL_TEXTURE_2D bk_tex)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_S 0x812F)
+    glTexParameteri(GL_TEXTURE_2D GL_TEXTURE_WRAP_T 0x812F)
+    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA SCREEN_W SCREEN_H 0 GL_RGBA GL_UNSIGNED_BYTE bk_fb)
+
+    let spec:int = __static_alloca__(SDL_AUDIO_SPEC_SIZE)
+    SDL_SetAudioSpec(spec SDL_AUDIO_S16LE 1 AUDIO_SAMPLE_RATE)
+    bk_audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec 0 0)
+    if bk_audio not=? 0 {
+        SDL_ResumeAudioStreamDevice(bk_audio)
+    }
+
+    running = 1
+    bk_quit = 0
+    return 0
+}
+
+let backend_shutdown = ():>void => {
+    if bk_audio not=? 0 {
+        SDL_DestroyAudioStream(bk_audio)
+        bk_audio = 0
+    }
+    if bk_gl not=? 0 {
+        SDL_GL_DestroyContext(bk_gl)
+        bk_gl = 0
+    }
+    if bk_window not=? 0 {
+        SDL_DestroyWindow(bk_window)
+        bk_window = 0
+    }
+    SDL_Quit()
+    return 0
+}
+
+let backend_framebuffer = ():>int => {
+    return bk_fb
+}
+
+let backend_poll = ():>void => {
+    let event:int = __static_alloca__(SDL_EVENT_SIZE)
+    let has_event:int = SDL_PollEvent(event)
+    loop has_event not=? 0 {
+        if SDL_EventType(event) =? SDL_EVENT_QUIT {
+            bk_quit = 1
+            running = 0
+        }
+        has_event = SDL_PollEvent(event)
+    }
+    bk_keyboard = SDL_GetKeyboardState(0)
+    if SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_ESCAPE) not=? 0 {
+        # Escape is handled by game for menu; quit only via window close
+    }
+
+    let confirm_now:int = SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_RETURN) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_SPACE)
+    let back_now:int = SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_ESCAPE)
+    let fire_now:int = SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_SPACE)
+
+    bk_press_confirm = (confirm_now not=? 0) and (bk_prev_confirm =? 0)
+    bk_press_back = (back_now not=? 0) and (bk_prev_back =? 0)
+    bk_press_fire = (fire_now not=? 0) and (bk_prev_fire =? 0)
+    bk_prev_confirm = confirm_now
+    bk_prev_back = back_now
+    bk_prev_fire = fire_now
+    return 0
+}
+
+let backend_present = ():>void => {
+    let size_buf:int = __static_alloca__(8)
+    SDL_GetWindowSizeInPixels(bk_window size_buf size_buf + 4)
+    let ww:int = __load_u32__(size_buf)
+    let wh:int = __load_u32__(size_buf + 4)
+    if ww <? 1 { ww = 1 }
+    if wh <? 1 { wh = 1 }
+
+    glViewport(0 0 ww wh)
+    glClear(GL_COLOR_BUFFER_BIT)
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    GL_Ortho(F64_ZERO __i64_to_f64_bits__(1) F64_ONE F64_ZERO F64_NEG_ONE F64_ONE)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D bk_tex)
+    glTexImage2D(GL_TEXTURE_2D 0 GL_RGBA SCREEN_W SCREEN_H 0 GL_RGBA GL_UNSIGNED_BYTE bk_fb)
+    GL_Color3f(F32_ONE F32_ONE F32_ONE)
+    glBegin(GL_QUADS)
+    GL_TexCoord2f(F32_ZERO F32_ZERO)
+    GL_Vertex3f(F32_ZERO F32_ZERO F32_ZERO)
+    GL_TexCoord2f(F32_ONE F32_ZERO)
+    GL_Vertex3f(F32_ONE F32_ZERO F32_ZERO)
+    GL_TexCoord2f(F32_ONE F32_ONE)
+    GL_Vertex3f(F32_ONE F32_ONE F32_ZERO)
+    GL_TexCoord2f(F32_ZERO F32_ONE)
+    GL_Vertex3f(F32_ZERO F32_ONE F32_ZERO)
+    glEnd()
+    SDL_GL_SwapWindow(bk_window)
+    SDL_Delay(16)
+    return 0
+}
+
+let time_ms = ():>int => {
+    return SDL_GetTicks()
+}
+
+let input_forward = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_W) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_UP)
+}
+let input_back = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_S) or SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_DOWN)
+}
+let input_strafe_l = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_A)
+}
+let input_strafe_r = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_D)
+}
+let input_turn_l = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_LEFT) or SDL_ScancodeDown(bk_keyboard 20)
+}
+let input_turn_r = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_RIGHT) or SDL_ScancodeDown(bk_keyboard 8)
+}
+let input_confirm_pressed = ():>int => { return bk_press_confirm }
+let input_back_pressed = ():>int => { return bk_press_back }
+let input_fire_pressed = ():>int => { return bk_press_fire }
+let input_fire_held = ():>int => {
+    return SDL_ScancodeDown(bk_keyboard SDL_SCANCODE_SPACE)
+}
+let input_quit_requested = ():>int => { return bk_quit }
+
+let audio_push_s16 = (buf_ptr:int n_bytes:int):>void => {
+    if bk_audio not=? 0 {
+        SDL_PutAudioStreamData(bk_audio buf_ptr n_bytes)
+    }
+    return 0
+}
+
+let audio_queued_bytes = ():>int => {
+    if bk_audio =? 0 { return 0 }
+    return SDL_GetAudioStreamQueued(bk_audio)
+}
+
+let audio_scratch = ():>int => {
+    return bk_audio_buf
+}

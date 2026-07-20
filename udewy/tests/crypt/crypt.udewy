@@ -1,0 +1,29 @@
+# ============================================================================
+# μCrypt — neon dungeon raycasting FPS demo.
+#
+# A Wolfenstein-style first-person shooter showcasing udewy's fixed-point
+# math, software rendering, AI, combat, procedural audio, and dual native /
+# browser targets from one shared game core.
+#
+# Run:
+#   python -m udewy udewy/tests/crypt/crypt.udewy
+#   python -m udewy --target wasm32 --serve-wasm udewy/tests/crypt/crypt.udewy
+#
+# Controls:
+#   WASD       move / strafe
+#   Arrows/Q/E turn
+#   Space      fire (also start from title)
+#   Esc        return to title
+# ============================================================================
+
+$supported_targets = ["x86_64" "c" "wasm32"]
+
+if $target =? "x86_64" {
+    import p"./entry_sdl.udewy"
+}
+if $target =? "c" {
+    import p"./entry_sdl.udewy"
+}
+if $target =? "wasm32" {
+    import p"./entry_wasm.udewy"
+}

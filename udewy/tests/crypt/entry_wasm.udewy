@@ -1,0 +1,23 @@
+# ============================================================================
+# μCrypt: WebAssembly entry. Host calls main() at startup and every frame.
+# ============================================================================
+
+$supported_targets = ["wasm32"]
+
+import p"./platform_wasm.udewy"
+import p"./game.udewy"
+
+let wasm_ready:int = 0
+
+let main = ():>int => {
+    if wasm_ready =? 0 {
+        let title:int = "uCrypt\0"
+        let rc:int = backend_init(title)
+        if rc not=? 0 { return rc }
+        game_init()
+        wasm_ready = 1
+        return 0
+    }
+    frame_step(16)
+    return 0
+}

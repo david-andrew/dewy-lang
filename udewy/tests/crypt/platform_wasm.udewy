@@ -1,0 +1,110 @@
+# ============================================================================
+# μCrypt WebAssembly platform: canvas framebuffer + keyboard + audio queue.
+# ============================================================================
+
+$supported_targets = ["wasm32"]
+
+const SCREEN_W:int = 320
+const SCREEN_H:int = 180
+const AUDIO_SAMPLE_RATE:int = 22050
+const AUDIO_CHUNK_BYTES:int = 2048
+
+let bk_fb:int = 0
+let bk_ready:int = 0
+let bk_audio_buf:int = __static_alloca__(2048)
+let running:int = 1
+let bk_quit:int = 0
+
+let bk_press_confirm:int = 0
+let bk_press_back:int = 0
+let bk_press_fire:int = 0
+let bk_prev_confirm:int = 0
+let bk_prev_back:int = 0
+let bk_prev_fire:int = 0
+
+const KEY_W:int = "KeyW"
+const KEY_A:int = "KeyA"
+const KEY_S:int = "KeyS"
+const KEY_D:int = "KeyD"
+const KEY_Q:int = "KeyQ"
+const KEY_E:int = "KeyE"
+const KEY_UP:int = "ArrowUp"
+const KEY_DOWN:int = "ArrowDown"
+const KEY_LEFT:int = "ArrowLeft"
+const KEY_RIGHT:int = "ArrowRight"
+const KEY_SPACE:int = "Space"
+const KEY_ENTER:int = "Enter"
+const KEY_ESC:int = "Escape"
+
+let key_held = (s:int):>int => {
+    let n:int = 0
+    loop __load_u8__(s + n) not=? 0 {
+        n += 1
+    }
+    return __key_down__(s n)
+}
+
+let backend_init = (title_ptr:int):>int => {
+    bk_fb = __canvas_init__(SCREEN_W SCREEN_H)
+    __audio_queue_init__(AUDIO_SAMPLE_RATE 1)
+    bk_ready = 1
+    running = 1
+    bk_quit = 0
+    return 0
+}
+
+let backend_shutdown = ():>void => {
+    return 0
+}
+
+let backend_framebuffer = ():>int => {
+    return bk_fb
+}
+
+let backend_poll = ():>void => {
+    let confirm_now:int = key_held(KEY_ENTER) or key_held(KEY_SPACE)
+    let back_now:int = key_held(KEY_ESC)
+    let fire_now:int = key_held(KEY_SPACE)
+
+    bk_press_confirm = (confirm_now not=? 0) and (bk_prev_confirm =? 0)
+    bk_press_back = (back_now not=? 0) and (bk_prev_back =? 0)
+    bk_press_fire = (fire_now not=? 0) and (bk_prev_fire =? 0)
+    bk_prev_confirm = confirm_now
+    bk_prev_back = back_now
+    bk_prev_fire = fire_now
+    return 0
+}
+
+let backend_present = ():>void => {
+    __canvas_present__()
+    return 0
+}
+
+let time_ms = ():>int => {
+    return __host_time__()
+}
+
+let input_forward = ():>int => { return key_held(KEY_W) or key_held(KEY_UP) }
+let input_back = ():>int => { return key_held(KEY_S) or key_held(KEY_DOWN) }
+let input_strafe_l = ():>int => { return key_held(KEY_A) }
+let input_strafe_r = ():>int => { return key_held(KEY_D) }
+let input_turn_l = ():>int => { return key_held(KEY_LEFT) or key_held(KEY_Q) }
+let input_turn_r = ():>int => { return key_held(KEY_RIGHT) or key_held(KEY_E) }
+let input_confirm_pressed = ():>int => { return bk_press_confirm }
+let input_back_pressed = ():>int => { return bk_press_back }
+let input_fire_pressed = ():>int => { return bk_press_fire }
+let input_fire_held = ():>int => { return key_held(KEY_SPACE) }
+let input_quit_requested = ():>int => { return bk_quit }
+
+let audio_push_s16 = (buf_ptr:int n_bytes:int):>void => {
+    __audio_queue_push__(buf_ptr n_bytes)
+    return 0
+}
+
+let audio_queued_bytes = ():>int => {
+    return __audio_queue_size__()
+}
+
+let audio_scratch = ():>int => {
+    return bk_audio_buf
+}

@@ -1,0 +1,1335 @@
+# ============================================================================
+# μCrypt — Wolfenstein-style raycasting FPS demo for udewy.
+#
+# Features: fixed-point DDA raycaster, procedural wall textures, billboard
+# enemies with chase AI, hitscan combat, minimap HUD, procedural SFX.
+# Backend-agnostic; entry modules import a platform first.
+# ============================================================================
+
+const STATE_TITLE:int = 0
+const STATE_PLAY:int = 1
+const STATE_WIN:int = 2
+const STATE_DEAD:int = 3
+
+const MAP_W:int = 20
+const MAP_H:int = 20
+const TEX_SIZE:int = 64
+const TEX_COUNT:int = 4
+const MAX_ENEMIES:int = 8
+const MAX_PICKUPS:int = 6
+const FP:int = 256
+const FOV_PLANE:int = 168
+const MOVE_SPEED:int = 12
+const STRAFE_SPEED:int = 10
+const TURN_SPEED:int = 12
+const PLAYER_RADIUS:int = 48
+const FIRE_COOLDOWN:int = 14
+const ENEMY_SPEED:int = 5
+const ENEMY_RADIUS:int = 40
+const ENEMY_DAMAGE:int = 8
+const ENEMY_ATTACK_CD:int = 40
+const HUGE:int = 1000000
+
+const CELL_EMPTY:int = 0
+const CELL_BRICK:int = 1
+const CELL_TECH:int = 2
+const CELL_NEON:int = 3
+const CELL_PILLAR:int = 4
+const CELL_EXIT_LOCK:int = 5
+const CELL_EXIT:int = 6
+
+const SFX_NONE:int = 0
+const SFX_SHOOT:int = 1
+const SFX_HIT:int = 2
+const SFX_HURT:int = 3
+const SFX_PICKUP:int = 4
+const SFX_WIN:int = 5
+const SFX_DIE:int = 6
+const SFX_MENU:int = 7
+
+let game_state:int = 0
+let frame:int = 0
+let player_x:int = 0
+let player_y:int = 0
+let player_ang:int = 0
+let player_hp:int = 100
+let player_ammo:int = 30
+let fire_cd:int = 0
+let hurt_flash:int = 0
+let muzzle_flash:int = 0
+let enemies_alive:int = 0
+let exit_open:int = 0
+let kill_count:int = 0
+let start_ms:int = 0
+let pending_sfx:int = 0
+let sfx_phase:int = 0
+let sfx_timer:int = 0
+let sfx_kind:int = 0
+let title_pulse:int = 0
+
+# Map: 0 empty, 1-4 walls, 5 locked exit, 6 open exit. Row-major, y*MAP_W+x
+let map_cells:int = [
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 1
+    1 0 0 0 0 0 1 0 2 2 2 0 0 0 1 0 0 0 0 1
+    1 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0 0 3 0 1
+    1 0 0 4 0 0 1 0 0 0 2 0 0 0 1 0 0 3 0 1
+    1 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 1
+    1 1 0 1 1 1 1 1 1 0 1 1 1 1 1 1 0 1 1 1
+    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
+    1 0 2 0 0 0 3 3 3 0 3 3 3 0 0 0 2 0 0 1
+    1 0 2 0 0 0 3 0 0 0 0 0 3 0 0 0 2 0 0 1
+    1 0 2 0 4 0 3 0 0 0 0 0 3 0 4 0 2 0 0 1
+    1 0 2 0 0 0 3 0 0 5 0 0 3 0 0 0 2 0 0 1
+    1 0 0 0 0 0 3 3 3 0 3 3 3 0 0 0 0 0 0 1
+    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
+    1 1 1 0 1 1 1 1 0 1 1 0 1 1 1 1 0 1 1 1
+    1 0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0 0 1
+    1 0 3 3 0 0 1 0 0 4 0 0 0 1 0 0 2 2 0 1
+    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
+    1 0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0 0 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+]
+
+let zbuffer:int = __static_alloca__(2560)
+let tex_pixels:int = __static_alloca__(65536)
+let enemy_x:int = __static_alloca__(64)
+let enemy_y:int = __static_alloca__(64)
+let enemy_hp:int = __static_alloca__(64)
+let enemy_alive:int = __static_alloca__(64)
+let enemy_cd:int = __static_alloca__(64)
+let enemy_frame:int = __static_alloca__(64)
+let pickup_x:int = __static_alloca__(48)
+let pickup_y:int = __static_alloca__(48)
+let pickup_kind:int = __static_alloca__(48)
+let pickup_alive:int = __static_alloca__(48)
+
+let font_rows:int = [
+    0 0 0 0 0
+    7 5 5 5 7
+    2 6 2 2 7
+    7 1 7 4 7
+    7 1 7 1 7
+    5 5 7 1 1
+    7 4 7 1 7
+    7 4 7 5 7
+    7 1 1 1 1
+    7 5 7 5 7
+    7 5 7 1 7
+    2 5 7 5 5
+    6 5 6 5 6
+    3 4 4 4 3
+    6 5 5 5 6
+    7 4 6 4 7
+    7 4 6 4 4
+    3 4 5 5 3
+    5 5 7 5 5
+    7 2 2 2 7
+    1 1 1 5 2
+    5 5 6 5 5
+    4 4 4 4 7
+    5 7 7 5 5
+    5 7 7 7 5
+    2 5 5 5 2
+    6 5 6 4 4
+    2 5 5 2 1
+    6 5 6 5 5
+    3 4 2 1 6
+    7 2 2 2 2
+    5 5 5 5 7
+    5 5 5 5 2
+    5 5 7 7 5
+    5 5 2 5 5
+    5 5 2 2 2
+    7 1 2 4 7
+]
+
+let text_title:int = "uCRYPT"
+let text_sub:int = "NEON DUNGEON"
+let text_start:int = "SPACE TO ENTER"
+let text_controls:int = "WASD MOVE  ARROWS TURN  SPACE FIRE"
+let text_win:int = "CRYPT CLEARED"
+let text_dead:int = "YOU FELL"
+let text_again:int = "SPACE MENU"
+let text_locked:int = "EXIT LOCKED"
+let text_open:int = "EXIT OPEN"
+
+let abs_i = (v:int):>int => {
+    if v <? 0 { return -v }
+    return v
+}
+
+let clamp_i = (v:int lo:int hi:int):>int => {
+    if v <? lo { return lo }
+    if v >? hi { return hi }
+    return v
+}
+
+let clamp255 = (v:int):>int => {
+    return clamp_i(v 0 255)
+}
+
+let sin256 = (angle:int):>int => {
+    let a:int = angle % 1024
+    if a <? 0 { a += 1024 }
+    let quad:int = a // 256
+    let x:int = a % 256
+    if quad =? 0 { return (x * (512 - x)) // 256 }
+    if quad =? 1 { return ((256 - x) * (256 + x)) // 256 }
+    if quad =? 2 { return -((x * (512 - x)) // 256) }
+    return -(((256 - x) * (256 + x)) // 256)
+}
+
+let cos256 = (angle:int):>int => {
+    return sin256(angle + 256)
+}
+
+let str_len = (s:int):>int => {
+    let n:int = 0
+    loop __load_u8__(s + n) not=? 0 {
+        n += 1
+    }
+    return n
+}
+
+let map_at = (mx:int my:int):>int => {
+    if mx <? 0 { return 1 }
+    if my <? 0 { return 1 }
+    if mx >? (MAP_W - 1) { return 1 }
+    if my >? (MAP_H - 1) { return 1 }
+    return __load__(map_cells + ((my * MAP_W) + mx) * 8)
+}
+
+let map_set = (mx:int my:int v:int):>void => {
+    __store__(v map_cells + ((my * MAP_W) + mx) * 8)
+    return 0
+}
+
+let cell_solid = (c:int):>int => {
+    if c =? CELL_EMPTY { return 0 }
+    if c =? CELL_EXIT { return 0 }
+    return 1
+}
+
+let wall_tex_id = (c:int):>int => {
+    if c =? CELL_BRICK { return 0 }
+    if c =? CELL_TECH { return 1 }
+    if c =? CELL_NEON { return 2 }
+    if c =? CELL_PILLAR { return 3 }
+    if c =? CELL_EXIT_LOCK { return 2 }
+    return 0
+}
+
+let set_pixel = (fb:int x:int y:int r:int g:int b:int):>void => {
+    if x <? 0 { return 0 }
+    if y <? 0 { return 0 }
+    if x >? (SCREEN_W - 1) { return 0 }
+    if y >? (SCREEN_H - 1) { return 0 }
+    let addr:int = fb + (((y * SCREEN_W) + x) * 4)
+    __store_u8__(r addr)
+    __store_u8__(g addr + 1)
+    __store_u8__(b addr + 2)
+    __store_u8__(255 addr + 3)
+    return 0
+}
+
+let fill_rect = (fb:int x:int y:int w:int h:int r:int g:int b:int):>void => {
+    let yy:int = 0
+    loop yy <? h {
+        let xx:int = 0
+        loop xx <? w {
+            set_pixel(fb x + xx y + yy r g b)
+            xx += 1
+        }
+        yy += 1
+    }
+    return 0
+}
+
+let tex_addr = (tid:int tx:int ty:int):>int => {
+    let t:int = tid and 3
+    let x:int = tx and 63
+    let y:int = ty and 63
+    return tex_pixels + ((((t * TEX_SIZE) + y) * TEX_SIZE) + x) * 4
+}
+
+let tex_set = (tid:int tx:int ty:int r:int g:int b:int):>void => {
+    let a:int = tex_addr(tid tx ty)
+    __store_u8__(r a)
+    __store_u8__(g a + 1)
+    __store_u8__(b a + 2)
+    __store_u8__(255 a + 3)
+    return 0
+}
+
+let build_textures = ():>void => {
+    let tid:int = 0
+    loop tid <? TEX_COUNT {
+        let y:int = 0
+        loop y <? TEX_SIZE {
+            let x:int = 0
+            loop x <? TEX_SIZE {
+                let r:int = 0
+                let g:int = 0
+                let b:int = 0
+                if tid =? 0 {
+                    let brick_x:int = x % 16
+                    let brick_y:int = y % 8
+                    let row:int = y // 8
+                    let shift:int = 0
+                    if (row and 1) not=? 0 { shift = 8 }
+                    brick_x = (x + shift) % 16
+                    if (brick_x =? 0) or (brick_y =? 0) {
+                        r = 28 g = 18 b = 22
+                    } else {
+                        r = 140 + ((x * 3 + y) and 31)
+                        g = 52 + ((x + y * 2) and 15)
+                        b = 48 + ((x * 5) and 15)
+                    }
+                }
+                if tid =? 1 {
+                    let panel:int = ((x // 8) + (y // 8)) and 1
+                    if panel =? 0 {
+                        r = 24 g = 36 b = 48
+                    } else {
+                        r = 40 g = 58 b = 72
+                    }
+                    if ((x % 8) =? 0) or ((y % 8) =? 0) {
+                        r = 12 g = 18 b = 24
+                    }
+                    if ((x % 8) =? 4) and ((y % 8) =? 4) {
+                        r = 80 g = 220 b = 255
+                    }
+                }
+                if tid =? 2 {
+                    let d:int = abs_i(x - 32) + abs_i(y - 32)
+                    r = 10 g = 18 b = 28
+                    if (x =? 0) or (y =? 0) or (x =? 63) or (y =? 63) {
+                        r = 0 g = 220 b = 255
+                    }
+                    if (d <? 8) {
+                        r = 0 g = 255 b = 220
+                    }
+                    if ((x + y) % 16) =? 0 {
+                        r = 0 g = 120 b = 140
+                    }
+                }
+                if tid =? 3 {
+                    let dx:int = x - 32
+                    let dy:int = y - 32
+                    let rr:int = (dx * dx + dy * dy) // 32
+                    if rr <? 28 {
+                        r = 90 + rr g = 70 b = 110 + rr
+                    } else {
+                        r = 30 g = 22 b = 36
+                    }
+                    if (rr >? 26) and (rr <? 30) {
+                        r = 200 g = 120 b = 255
+                    }
+                }
+                tex_set(tid x y r g b)
+                x += 1
+            }
+            y += 1
+        }
+        tid += 1
+    }
+    return 0
+}
+
+let shade_rgb = (r:int g:int b:int dist:int side:int):>int => {
+    # returns packed: we apply shade by mutating via out pattern - use separate
+    let shade:int = 256 - (dist // 24)
+    if shade <? 64 { shade = 64 }
+    if shade >? 256 { shade = 256 }
+    if side not=? 0 { shade = (shade * 180) // 256 }
+    return shade
+}
+
+let apply_shade = (c:int shade:int):>int => {
+    return clamp255((c * shade) // 256)
+}
+
+let glyph_index = (ch:int):>int => {
+    if (ch >? 47) and (ch <? 58) { return ch - 47 }
+    if (ch >? 64) and (ch <? 91) { return ch - 54 }
+    if (ch >? 96) and (ch <? 123) { return ch - 86 }
+    return 0
+}
+
+let draw_char = (fb:int ch:int x:int y:int scale:int r:int g:int b:int):>void => {
+    let gi:int = glyph_index(ch)
+    let row:int = 0
+    loop row <? 5 {
+        let bits:int = __load__(font_rows + (gi * 5 + row) * 8)
+        let col:int = 0
+        loop col <? 3 {
+            if (bits and (4 >> col)) not=? 0 {
+                fill_rect(fb x + col * scale y + row * scale scale scale r g b)
+            }
+            col += 1
+        }
+        row += 1
+    }
+    return 0
+}
+
+let draw_text = (fb:int s:int x:int y:int scale:int r:int g:int b:int):>void => {
+    let i:int = 0
+    let cx:int = x
+    loop __load_u8__(s + i) not=? 0 {
+        draw_char(fb __load_u8__(s + i) cx y scale r g b)
+        cx += 4 * scale
+        i += 1
+    }
+    return 0
+}
+
+let draw_text_center = (fb:int s:int y:int scale:int r:int g:int b:int):>void => {
+    let w:int = str_len(s) * 4 * scale
+    draw_text(fb s (SCREEN_W - w) // 2 y scale r g b)
+    return 0
+}
+
+let draw_digit = (fb:int d:int x:int y:int scale:int r:int g:int b:int):>void => {
+    let ch:int = 48 + (d % 10)
+    draw_char(fb ch x y scale r g b)
+    return 0
+}
+
+let draw_number = (fb:int n:int x:int y:int scale:int digits:int r:int g:int b:int):>void => {
+    let v:int = n
+    if v <? 0 { v = 0 }
+    let i:int = digits - 1
+    loop i >? -1 {
+        draw_digit(fb v % 10 x + i * 4 * scale y scale r g b)
+        v = v // 10
+        i -= 1
+    }
+    return 0
+}
+
+let try_move = (nx:int ny:int):>int => {
+    let mx0:int = (nx - PLAYER_RADIUS) // FP
+    let mx1:int = (nx + PLAYER_RADIUS) // FP
+    let my0:int = (ny - PLAYER_RADIUS) // FP
+    let my1:int = (ny + PLAYER_RADIUS) // FP
+    let my:int = my0
+    loop my <? (my1 + 1) {
+        let mx:int = mx0
+        loop mx <? (mx1 + 1) {
+            if cell_solid(map_at(mx my)) not=? 0 {
+                return 0
+            }
+            mx += 1
+        }
+        my += 1
+    }
+    return 1
+}
+
+let enemy_store = (i:int x:int y:int hp:int alive:int cd:int):>void => {
+    __store__(x enemy_x + i * 8)
+    __store__(y enemy_y + i * 8)
+    __store__(hp enemy_hp + i * 8)
+    __store__(alive enemy_alive + i * 8)
+    __store__(cd enemy_cd + i * 8)
+    __store__(0 enemy_frame + i * 8)
+    return 0
+}
+
+let pickup_store = (i:int x:int y:int kind:int alive:int):>void => {
+    __store__(x pickup_x + i * 8)
+    __store__(y pickup_y + i * 8)
+    __store__(kind pickup_kind + i * 8)
+    __store__(alive pickup_alive + i * 8)
+    return 0
+}
+
+let count_alive_enemies = ():>int => {
+    let n:int = 0
+    let i:int = 0
+    loop i <? MAX_ENEMIES {
+        if __load__(enemy_alive + i * 8) not=? 0 {
+            n += 1
+        }
+        i += 1
+    }
+    return n
+}
+
+let open_exit_if_ready = ():>void => {
+    enemies_alive = count_alive_enemies()
+    if (enemies_alive =? 0) and (exit_open =? 0) {
+        exit_open = 1
+        let y:int = 0
+        loop y <? MAP_H {
+            let x:int = 0
+            loop x <? MAP_W {
+                if map_at(x y) =? CELL_EXIT_LOCK {
+                    map_set(x y CELL_EXIT)
+                }
+                x += 1
+            }
+            y += 1
+        }
+        pending_sfx = SFX_WIN
+    }
+    return 0
+}
+
+let reset_level = ():>void => {
+    # restore locked exit
+    let y:int = 0
+    loop y <? MAP_H {
+        let x:int = 0
+        loop x <? MAP_W {
+            if map_at(x y) =? CELL_EXIT {
+                map_set(x y CELL_EXIT_LOCK)
+            }
+            x += 1
+        }
+        y += 1
+    }
+
+    player_x = 2 * FP + 128
+    player_y = 2 * FP + 128
+    player_ang = 256
+    player_hp = 100
+    player_ammo = 30
+    fire_cd = 0
+    hurt_flash = 0
+    muzzle_flash = 0
+    exit_open = 0
+    kill_count = 0
+    start_ms = time_ms()
+
+    enemy_store(0 8 * FP + 128 3 * FP + 128 40 1 0)
+    enemy_store(1 15 * FP + 128 3 * FP + 128 40 1 0)
+    enemy_store(2 3 * FP + 128 9 * FP + 128 50 1 0)
+    enemy_store(3 16 * FP + 128 10 * FP + 128 50 1 0)
+    enemy_store(4 9 * FP + 128 17 * FP + 128 60 1 0)
+    enemy_store(5 14 * FP + 128 16 * FP + 128 45 1 0)
+    enemy_store(6 4 * FP + 128 16 * FP + 128 45 1 0)
+    enemy_store(7 11 * FP + 128 7 * FP + 128 55 1 0)
+
+    pickup_store(0 5 * FP + 128 2 * FP + 128 0 1)
+    pickup_store(1 17 * FP + 128 5 * FP + 128 1 1)
+    pickup_store(2 2 * FP + 128 12 * FP + 128 0 1)
+    pickup_store(3 17 * FP + 128 12 * FP + 128 1 1)
+    pickup_store(4 10 * FP + 128 13 * FP + 128 0 1)
+    pickup_store(5 7 * FP + 128 17 * FP + 128 1 1)
+
+    enemies_alive = count_alive_enemies()
+    return 0
+}
+
+let trigger_sfx = (kind:int):>void => {
+    pending_sfx = kind
+    return 0
+}
+
+let mix_audio = ():>void => {
+    if pending_sfx not=? SFX_NONE {
+        sfx_kind = pending_sfx
+        sfx_timer = 1800
+        sfx_phase = 0
+        pending_sfx = SFX_NONE
+    }
+    if sfx_timer =? 0 { return 0 }
+    if audio_queued_bytes() >? 4096 { return 0 }
+
+    let buf:int = audio_scratch()
+    let i:int = 0
+    let samples:int = 1024
+    loop i <? samples {
+        if sfx_timer =? 0 {
+            __store_u16__(0 buf + i * 2)
+        } else {
+            let env:int = sfx_timer
+            if env >? 256 { env = 256 }
+            let sample:int = 0
+            if sfx_kind =? SFX_SHOOT {
+                let f:int = 900 - ((1800 - sfx_timer) // 2)
+                sample = (sin256((sfx_phase * f) // 22) * env) // 4
+                sfx_phase += 1
+            }
+            if sfx_kind =? SFX_HIT {
+                sample = (((sfx_phase * 12347) and 255) - 128) * env // 6
+                sfx_phase += 1
+            }
+            if sfx_kind =? SFX_HURT {
+                sample = (sin256(sfx_phase * 3) * env) // 5
+                sfx_phase += 1
+            }
+            if sfx_kind =? SFX_PICKUP {
+                let f:int = 400 + ((1800 - sfx_timer) // 3)
+                sample = (sin256((sfx_phase * f) // 22) * env) // 5
+                sfx_phase += 1
+            }
+            if sfx_kind =? SFX_WIN {
+                let f:int = 300 + ((1800 - sfx_timer) // 4)
+                sample = ((sin256((sfx_phase * f) // 22) + sin256((sfx_phase * (f + 80)) // 22)) * env) // 8
+                sfx_phase += 1
+            }
+            if sfx_kind =? SFX_DIE {
+                sample = (sin256(sfx_phase) * env) // 8
+                sfx_phase += 2
+            }
+            if sfx_kind =? SFX_MENU {
+                sample = (sin256(sfx_phase * 5) * env) // 6
+                sfx_phase += 1
+            }
+            if sample >? 32767 { sample = 32767 }
+            if sample <? -32768 { sample = -32768 }
+            __store_u16__(sample buf + i * 2)
+            sfx_timer -= 1
+            if sfx_timer <? 0 { sfx_timer = 0 }
+        }
+        i += 1
+    }
+    audio_push_s16(buf samples * 2)
+    return 0
+}
+
+let cast_column = (fb:int x:int):>void => {
+    let dir_x:int = cos256(player_ang)
+    let dir_y:int = sin256(player_ang)
+    let plane_x:int = -(dir_y * FOV_PLANE) // FP
+    let plane_y:int = (dir_x * FOV_PLANE) // FP
+    let cam:int = ((x * 512) // SCREEN_W) - 256
+    let ray_x:int = dir_x + (plane_x * cam) // FP
+    let ray_y:int = dir_y + (plane_y * cam) // FP
+
+    let map_x:int = player_x // FP
+    let map_y:int = player_y // FP
+
+    let delta_x:int = HUGE
+    let delta_y:int = HUGE
+    if ray_x not=? 0 {
+        delta_x = abs_i((FP * FP) // ray_x)
+    }
+    if ray_y not=? 0 {
+        delta_y = abs_i((FP * FP) // ray_y)
+    }
+
+    let step_x:int = 0
+    let step_y:int = 0
+    let side_x:int = 0
+    let side_y:int = 0
+
+    if ray_x <? 0 {
+        step_x = -1
+        side_x = ((player_x - map_x * FP) * delta_x) // FP
+    } else {
+        step_x = 1
+        side_x = (((map_x + 1) * FP - player_x) * delta_x) // FP
+    }
+    if ray_y <? 0 {
+        step_y = -1
+        side_y = ((player_y - map_y * FP) * delta_y) // FP
+    } else {
+        step_y = 1
+        side_y = (((map_y + 1) * FP - player_y) * delta_y) // FP
+    }
+
+    let hit:int = 0
+    let side:int = 0
+    let cell:int = 0
+    let guard:int = 0
+    loop (hit =? 0) and (guard <? 64) {
+        if side_x <? side_y {
+            side_x += delta_x
+            map_x += step_x
+            side = 0
+        } else {
+            side_y += delta_y
+            map_y += step_y
+            side = 1
+        }
+        cell = map_at(map_x map_y)
+        if cell_solid(cell) not=? 0 {
+            hit = 1
+        }
+        guard += 1
+    }
+
+    let perp:int = HUGE
+    if hit not=? 0 {
+        if side =? 0 {
+            let num:int = map_x * FP - player_x + ((1 - step_x) * FP) // 2
+            if ray_x not=? 0 {
+                perp = abs_i((num * FP) // ray_x)
+            }
+        } else {
+            let num2:int = map_y * FP - player_y + ((1 - step_y) * FP) // 2
+            if ray_y not=? 0 {
+                perp = abs_i((num2 * FP) // ray_y)
+            }
+        }
+    }
+    if perp <? 16 { perp = 16 }
+
+    __store__(perp zbuffer + x * 8)
+
+    let line_h:int = (SCREEN_H * FP) // perp
+    if line_h >? 400 { line_h = 400 }
+    let draw_start:int = (-line_h // 2) + (SCREEN_H // 2)
+    let draw_end:int = (line_h // 2) + (SCREEN_H // 2)
+    if draw_start <? 0 { draw_start = 0 }
+    if draw_end >? SCREEN_H { draw_end = SCREEN_H }
+
+    # ceiling / floor
+    let y:int = 0
+    loop y <? draw_start {
+        let shade:int = 40 + (y * 20) // SCREEN_H
+        set_pixel(fb x y shade // 3 shade // 2 shade + 10)
+        y += 1
+    }
+    y = draw_end
+    loop y <? SCREEN_H {
+        let fy:int = y - SCREEN_H // 2
+        let shade2:int = 30 + (fy * 40) // (SCREEN_H // 2)
+        set_pixel(fb x y shade2 // 2 shade2 // 3 shade2 // 4)
+        y += 1
+    }
+
+    if hit =? 0 { return 0 }
+
+    # wallX for texturing
+    let wall_x:int = 0
+    if side =? 0 {
+        wall_x = player_y + (perp * ray_y) // FP
+    } else {
+        wall_x = player_x + (perp * ray_x) // FP
+    }
+    wall_x = wall_x % FP
+    if wall_x <? 0 { wall_x += FP }
+    let tex_x:int = (wall_x * TEX_SIZE) // FP
+    if (side =? 0) and (ray_x >? 0) { tex_x = TEX_SIZE - tex_x - 1 }
+    if (side =? 1) and (ray_y <? 0) { tex_x = TEX_SIZE - tex_x - 1 }
+
+    let tid:int = wall_tex_id(cell)
+    let shade:int = shade_rgb(0 0 0 perp side)
+    y = draw_start
+    loop y <? draw_end {
+        let d:int = y * 256 - SCREEN_H * 128 + line_h * 128
+        let tex_y:int = ((d * TEX_SIZE) // line_h) // 256
+        let ta:int = tex_addr(tid tex_x tex_y)
+        let r:int = apply_shade(__load_u8__(ta) shade)
+        let g:int = apply_shade(__load_u8__(ta + 1) shade)
+        let b:int = apply_shade(__load_u8__(ta + 2) shade)
+        if cell =? CELL_EXIT_LOCK {
+            r = apply_shade(255 shade)
+            g = apply_shade(60 shade)
+            b = apply_shade(40 shade)
+        }
+        set_pixel(fb x y r g b)
+        y += 1
+    }
+    return 0
+}
+
+let draw_sprite_column = (fb:int sx:int sy:int sw:int sh:int stripe:int transform_y:int kind:int):>void => {
+    # kind 0 enemy, 1 health, 2 ammo, 3 exit beacon
+    if stripe <? 0 { return 0 }
+    if stripe >? (SCREEN_W - 1) { return 0 }
+    if transform_y <? 16 { return 0 }
+    if transform_y >? __load__(zbuffer + stripe * 8) { return 0 }
+
+    let tex_x:int = ((stripe - sx) * 64) // sw
+    if tex_x <? 0 { return 0 }
+    if tex_x >? 63 { return 0 }
+
+    let draw_start_y:int = sy
+    let draw_end_y:int = sy + sh
+    if draw_start_y <? 0 { draw_start_y = 0 }
+    if draw_end_y >? SCREEN_H { draw_end_y = SCREEN_H }
+
+    let y:int = draw_start_y
+    loop y <? draw_end_y {
+        let tex_y:int = ((y - sy) * 64) // sh
+        let r:int = 0
+        let g:int = 0
+        let b:int = 0
+        let draw:int = 0
+        if kind =? 0 {
+            let dx:int = tex_x - 32
+            let dy:int = tex_y - 28
+            let body:int = dx * dx + dy * dy
+            if body <? 420 {
+                r = 220 g = 40 b = 70
+                draw = 1
+            }
+            if (tex_y >? 40) and (abs_i(tex_x - 22) <? 6) {
+                r = 180 g = 30 b = 50
+                draw = 1
+            }
+            if (tex_y >? 40) and (abs_i(tex_x - 42) <? 6) {
+                r = 180 g = 30 b = 50
+                draw = 1
+            }
+            if (tex_y >? 18) and (tex_y <? 28) and (abs_i(tex_x - 32) <? 10) {
+                r = 255 g = 220 b = 60
+                draw = 1
+            }
+            if (tex_y >? 8) and (tex_y <? 18) and (body <? 180) {
+                r = 40 g = 10 b = 20
+                draw = 1
+            }
+        }
+        if kind =? 1 {
+            if (abs_i(tex_x - 32) <? 10) and (abs_i(tex_y - 32) <? 14) {
+                r = 40 g = 220 b = 90
+                draw = 1
+            }
+            if (abs_i(tex_x - 32) <? 3) and (abs_i(tex_y - 32) <? 10) {
+                r = 255 g = 255 b = 255
+                draw = 1
+            }
+            if (abs_i(tex_y - 32) <? 3) and (abs_i(tex_x - 32) <? 10) {
+                r = 255 g = 255 b = 255
+                draw = 1
+            }
+        }
+        if kind =? 2 {
+            if (abs_i(tex_x - 32) <? 12) and (abs_i(tex_y - 32) <? 10) {
+                r = 255 g = 180 b = 40
+                draw = 1
+            }
+            if (tex_y >? 24) and (tex_y <? 40) and (abs_i(tex_x - 32) <? 6) {
+                r = 80 g = 50 b = 10
+                draw = 1
+            }
+        }
+        if kind =? 3 {
+            let dx2:int = tex_x - 32
+            let dy2:int = tex_y - 32
+            if dx2 * dx2 + dy2 * dy2 <? 280 {
+                r = 80 g = 255 b = 220
+                draw = 1
+            }
+        }
+        if draw not=? 0 {
+            let shade:int = 256 - (transform_y // 20)
+            if shade <? 80 { shade = 80 }
+            set_pixel(fb stripe y apply_shade(r shade) apply_shade(g shade) apply_shade(b shade))
+        }
+        y += 1
+    }
+    return 0
+}
+
+let project_and_draw_sprite = (fb:int spr_x:int spr_y:int kind:int):>void => {
+    let dir_x:int = cos256(player_ang)
+    let dir_y:int = sin256(player_ang)
+    let plane_x:int = -(dir_y * FOV_PLANE) // FP
+    let plane_y:int = (dir_x * FOV_PLANE) // FP
+
+    let rel_x:int = spr_x - player_x
+    let rel_y:int = spr_y - player_y
+    let inv_det:int = (plane_x * dir_y - dir_x * plane_y)
+    if abs_i(inv_det) <? 1 { return 0 }
+
+    let transform_x:int = (dir_y * rel_x - dir_x * rel_y) * FP // inv_det
+    let transform_y:int = (-plane_y * rel_x + plane_x * rel_y) * FP // inv_det
+    if transform_y <? 24 { return 0 }
+
+    let sprite_screen_x:int = (SCREEN_W // 2) * (FP + (transform_x * FP // transform_y)) // FP
+    let sprite_h:int = abs_i((SCREEN_H * FP) // transform_y)
+    if sprite_h <? 4 { return 0 }
+    if sprite_h >? 300 { sprite_h = 300 }
+    let sprite_w:int = sprite_h
+    let draw_start_x:int = -sprite_w // 2 + sprite_screen_x
+    let draw_end_x:int = sprite_w // 2 + sprite_screen_x
+    let draw_start_y:int = -sprite_h // 2 + SCREEN_H // 2
+
+    let stripe:int = draw_start_x
+    if stripe <? 0 { stripe = 0 }
+    let end:int = draw_end_x
+    if end >? SCREEN_W { end = SCREEN_W }
+    loop stripe <? end {
+        draw_sprite_column(fb draw_start_x draw_start_y sprite_w sprite_h stripe transform_y kind)
+        stripe += 1
+    }
+    return 0
+}
+
+let sprite_order:int = __static_alloca__(128)
+let sprite_dist:int = __static_alloca__(128)
+
+let draw_sprites = (fb:int):>void => {
+    # Collect enemies + pickups + exit beacon, sort far-to-near, then draw.
+    let count:int = 0
+    let i:int = 0
+    loop i <? MAX_ENEMIES {
+        if __load__(enemy_alive + i * 8) not=? 0 {
+            let ex:int = __load__(enemy_x + i * 8)
+            let ey:int = __load__(enemy_y + i * 8)
+            let d:int = abs_i(ex - player_x) + abs_i(ey - player_y)
+            __store__(i sprite_order + count * 8)
+            __store__(d sprite_dist + count * 8)
+            count += 1
+        }
+        i += 1
+    }
+    i = 0
+    loop i <? MAX_PICKUPS {
+        if __load__(pickup_alive + i * 8) not=? 0 {
+            let px:int = __load__(pickup_x + i * 8)
+            let py:int = __load__(pickup_y + i * 8)
+            let d2:int = abs_i(px - player_x) + abs_i(py - player_y)
+            __store__(100 + i sprite_order + count * 8)
+            __store__(d2 sprite_dist + count * 8)
+            count += 1
+        }
+        i += 1
+    }
+    if exit_open not=? 0 {
+        let d3:int = abs_i(9 * FP + 128 - player_x) + abs_i(11 * FP + 128 - player_y)
+        __store__(200 sprite_order + count * 8)
+        __store__(d3 sprite_dist + count * 8)
+        count += 1
+    }
+
+    # Simple bubble sort by distance descending
+    let a:int = 0
+    loop a <? count {
+        let b:int = 0
+        loop b <? (count - 1) {
+            let d_b:int = __load__(sprite_dist + b * 8)
+            let d_n:int = __load__(sprite_dist + (b + 1) * 8)
+            if d_b <? d_n {
+                let t0:int = __load__(sprite_order + b * 8)
+                let t1:int = __load__(sprite_dist + b * 8)
+                __store__(__load__(sprite_order + (b + 1) * 8) sprite_order + b * 8)
+                __store__(__load__(sprite_dist + (b + 1) * 8) sprite_dist + b * 8)
+                __store__(t0 sprite_order + (b + 1) * 8)
+                __store__(t1 sprite_dist + (b + 1) * 8)
+            }
+            b += 1
+        }
+        a += 1
+    }
+
+    i = 0
+    loop i <? count {
+        let id:int = __load__(sprite_order + i * 8)
+        if id <? 100 {
+            project_and_draw_sprite(fb __load__(enemy_x + id * 8) __load__(enemy_y + id * 8) 0)
+        } else if id <? 200 {
+            let pi:int = id - 100
+            let kind:int = __load__(pickup_kind + pi * 8) + 1
+            project_and_draw_sprite(fb __load__(pickup_x + pi * 8) __load__(pickup_y + pi * 8) kind)
+        } else {
+            project_and_draw_sprite(fb 9 * FP + 128 11 * FP + 128 3)
+        }
+        i += 1
+    }
+    return 0
+}
+
+let draw_weapon = (fb:int):>void => {
+    let bob:int = sin256(frame * 8) // 32
+    let base_x:int = SCREEN_W // 2 - 20
+    let base_y:int = SCREEN_H - 42 + bob
+    if muzzle_flash >? 0 {
+        fill_rect(fb base_x + 8 base_y - 18 16 14 255 240 120)
+        fill_rect(fb base_x + 12 base_y - 24 8 8 255 180 40)
+    }
+    fill_rect(fb base_x + 14 base_y 12 28 60 60 70)
+    fill_rect(fb base_x + 10 base_y + 20 20 16 40 40 48)
+    fill_rect(fb base_x + 16 base_y - 8 8 12 90 90 100)
+    return 0
+}
+
+let draw_minimap = (fb:int):>void => {
+    let ox:int = SCREEN_W - 46
+    let oy:int = 4
+    fill_rect(fb ox - 1 oy - 1 44 44 0 0 0)
+    let my:int = 0
+    loop my <? MAP_H {
+        let mx:int = 0
+        loop mx <? MAP_W {
+            let c:int = map_at(mx my)
+            let r:int = 12
+            let g:int = 16
+            let b:int = 22
+            if cell_solid(c) not=? 0 {
+                r = 70 g = 80 b = 100
+            }
+            if c =? CELL_EXIT_LOCK {
+                r = 180 g = 40 b = 40
+            }
+            if c =? CELL_EXIT {
+                r = 40 g = 220 b = 180
+            }
+            set_pixel(fb ox + mx * 2 oy + my * 2 r g b)
+            set_pixel(fb ox + mx * 2 + 1 oy + my * 2 r g b)
+            set_pixel(fb ox + mx * 2 oy + my * 2 + 1 r g b)
+            set_pixel(fb ox + mx * 2 + 1 oy + my * 2 + 1 r g b)
+            mx += 1
+        }
+        my += 1
+    }
+    let px:int = ox + (player_x // FP) * 2
+    let py:int = oy + (player_y // FP) * 2
+    set_pixel(fb px py 255 255 80)
+    set_pixel(fb px + 1 py 255 255 80)
+    let i:int = 0
+    loop i <? MAX_ENEMIES {
+        if __load__(enemy_alive + i * 8) not=? 0 {
+            let ex:int = ox + (__load__(enemy_x + i * 8) // FP) * 2
+            let ey:int = oy + (__load__(enemy_y + i * 8) // FP) * 2
+            set_pixel(fb ex ey 255 60 80)
+        }
+        i += 1
+    }
+    return 0
+}
+
+let draw_hud = (fb:int):>void => {
+    fill_rect(fb 4 4 70 22 0 0 0)
+    draw_text(fb "HP" 6 6 1 180 220 255)
+    draw_number(fb player_hp 20 6 1 3 80 255 140)
+    draw_text(fb "AM" 6 14 1 180 220 255)
+    draw_number(fb player_ammo 20 14 1 3 255 200 80)
+    draw_text(fb "K" 48 6 1 180 220 255)
+    draw_number(fb kill_count 56 6 1 2 255 100 120)
+
+    if exit_open =? 0 {
+        draw_text(fb text_locked 80 6 1 255 100 80)
+    } else {
+        draw_text(fb text_open 90 6 1 80 255 200)
+    }
+    draw_minimap(fb)
+
+    # crosshair
+    let cx:int = SCREEN_W // 2
+    let cy:int = SCREEN_H // 2
+    fill_rect(fb cx - 4 cy 9 1 255 255 255)
+    fill_rect(fb cx cy - 4 1 9 255 255 255)
+
+    if hurt_flash >? 0 {
+        let a:int = hurt_flash * 8
+        if a >? 120 { a = 120 }
+        let y:int = 0
+        loop y <? SCREEN_H {
+            let x:int = 0
+            loop x <? SCREEN_W {
+                if ((x + y) and 3) =? 0 {
+                    let addr:int = fb + (((y * SCREEN_W) + x) * 4)
+                    let r:int = clamp255(__load_u8__(addr) + a)
+                    __store_u8__(r addr)
+                }
+                x += 1
+            }
+            y += 1
+        }
+    }
+    return 0
+}
+
+let render_world = (fb:int):>void => {
+    let x:int = 0
+    loop x <? SCREEN_W {
+        cast_column(fb x)
+        x += 1
+    }
+    draw_sprites(fb)
+    draw_weapon(fb)
+    draw_hud(fb)
+    return 0
+}
+
+let render_title = (fb:int):>void => {
+    let y:int = 0
+    loop y <? SCREEN_H {
+        let x:int = 0
+        loop x <? SCREEN_W {
+            let v:int = sin256(x * 3 + title_pulse) + sin256(y * 5 + title_pulse * 2)
+            let r:int = 8 + (v + 400) // 40
+            let g:int = 12 + (v + 300) // 50
+            let b:int = 28 + (v + 500) // 30
+            set_pixel(fb x y clamp255(r) clamp255(g) clamp255(b))
+            x += 1
+        }
+        y += 1
+    }
+    fill_rect(fb 40 28 240 90 8 12 20)
+    fill_rect(fb 44 32 232 82 16 24 40)
+    draw_text_center(fb text_title 42 5 80 255 230)
+    draw_text_center(fb text_sub 72 2 120 200 255)
+    if ((frame // 20) % 2) =? 0 {
+        draw_text_center(fb text_start 100 2 255 255 255)
+    }
+    draw_text_center(fb text_controls 150 1 160 180 200)
+    draw_text_center(fb "CLEAR SENTINELS TO UNLOCK EXIT" 162 1 100 220 180)
+    return 0
+}
+
+let render_end = (fb:int won:int):>void => {
+    render_world(fb)
+    fill_rect(fb 50 50 220 70 0 0 0)
+    fill_rect(fb 54 54 212 62 255 255 255)
+    if won not=? 0 {
+        draw_text_center(fb text_win 62 3 20 40 60)
+        let elapsed:int = (time_ms() - start_ms) // 1000
+        draw_text(fb "TIME" 90 90 2 20 40 60)
+        draw_number(fb elapsed 130 90 2 3 20 40 60)
+    } else {
+        draw_text_center(fb text_dead 62 3 20 40 60)
+    }
+    draw_text_center(fb text_again 100 2 20 40 60)
+    return 0
+}
+
+let fire_weapon = ():>void => {
+    if fire_cd >? 0 { return 0 }
+    if player_ammo <? 1 { trigger_sfx(SFX_MENU) return 0 }
+    player_ammo -= 1
+    fire_cd = FIRE_COOLDOWN
+    muzzle_flash = 6
+    trigger_sfx(SFX_SHOOT)
+
+    let dir_x:int = cos256(player_ang)
+    let dir_y:int = sin256(player_ang)
+    let best_i:int = -1
+    let best_d:int = HUGE
+    let i:int = 0
+    loop i <? MAX_ENEMIES {
+        if __load__(enemy_alive + i * 8) not=? 0 {
+            let ex:int = __load__(enemy_x + i * 8)
+            let ey:int = __load__(enemy_y + i * 8)
+            let rel_x:int = ex - player_x
+            let rel_y:int = ey - player_y
+            let along:int = (rel_x * dir_x + rel_y * dir_y) // FP
+            if along >? 0 {
+                let px:int = player_x + (dir_x * along) // FP
+                let py:int = player_y + (dir_y * along) // FP
+                let lat:int = abs_i(ex - px) + abs_i(ey - py)
+                if (lat <? 70) and (along <? best_d) and (along <? 12 * FP) {
+                    best_d = along
+                    best_i = i
+                }
+            }
+        }
+        i += 1
+    }
+    if best_i >? -1 {
+        let hp:int = __load__(enemy_hp + best_i * 8) - 20
+        __store__(hp enemy_hp + best_i * 8)
+        trigger_sfx(SFX_HIT)
+        if hp <? 1 {
+            __store__(0 enemy_alive + best_i * 8)
+            kill_count += 1
+            open_exit_if_ready()
+        }
+    }
+    return 0
+}
+
+let update_player = ():>void => {
+    if input_turn_l() not=? 0 {
+        player_ang -= TURN_SPEED
+        if player_ang <? 0 { player_ang += 1024 }
+    }
+    if input_turn_r() not=? 0 {
+        player_ang += TURN_SPEED
+        if player_ang >? 1023 { player_ang -= 1024 }
+    }
+
+    let dir_x:int = cos256(player_ang)
+    let dir_y:int = sin256(player_ang)
+    let move_x:int = 0
+    let move_y:int = 0
+    if input_forward() not=? 0 {
+        move_x += (dir_x * MOVE_SPEED) // FP
+        move_y += (dir_y * MOVE_SPEED) // FP
+    }
+    if input_back() not=? 0 {
+        move_x -= (dir_x * MOVE_SPEED) // FP
+        move_y -= (dir_y * MOVE_SPEED) // FP
+    }
+    if input_strafe_l() not=? 0 {
+        move_x += (dir_y * STRAFE_SPEED) // FP
+        move_y -= (dir_x * STRAFE_SPEED) // FP
+    }
+    if input_strafe_r() not=? 0 {
+        move_x -= (dir_y * STRAFE_SPEED) // FP
+        move_y += (dir_x * STRAFE_SPEED) // FP
+    }
+
+    if move_x not=? 0 {
+        if try_move(player_x + move_x player_y) not=? 0 {
+            player_x += move_x
+        }
+    }
+    if move_y not=? 0 {
+        if try_move(player_x player_y + move_y) not=? 0 {
+            player_y += move_y
+        }
+    }
+
+    if input_fire_pressed() not=? 0 {
+        fire_weapon()
+    }
+    if fire_cd >? 0 { fire_cd -= 1 }
+    if muzzle_flash >? 0 { muzzle_flash -= 1 }
+    if hurt_flash >? 0 { hurt_flash -= 1 }
+
+    # pickups
+    let i:int = 0
+    loop i <? MAX_PICKUPS {
+        if __load__(pickup_alive + i * 8) not=? 0 {
+            let dx:int = __load__(pickup_x + i * 8) - player_x
+            let dy:int = __load__(pickup_y + i * 8) - player_y
+            if abs_i(dx) + abs_i(dy) <? 80 {
+                __store__(0 pickup_alive + i * 8)
+                trigger_sfx(SFX_PICKUP)
+                if __load__(pickup_kind + i * 8) =? 0 {
+                    player_hp = clamp_i(player_hp + 25 0 100)
+                } else {
+                    player_ammo += 12
+                }
+            }
+        }
+        i += 1
+    }
+
+    # exit
+    if map_at(player_x // FP player_y // FP) =? CELL_EXIT {
+        game_state = STATE_WIN
+        trigger_sfx(SFX_WIN)
+    }
+    return 0
+}
+
+let enemy_blocked = (x:int y:int):>int => {
+    let mx:int = x // FP
+    let my:int = y // FP
+    return cell_solid(map_at(mx my))
+}
+
+let update_enemies = ():>void => {
+    let i:int = 0
+    loop i <? MAX_ENEMIES {
+        if __load__(enemy_alive + i * 8) not=? 0 {
+            let ex:int = __load__(enemy_x + i * 8)
+            let ey:int = __load__(enemy_y + i * 8)
+            let dx:int = player_x - ex
+            let dy:int = player_y - ey
+            let adx:int = abs_i(dx)
+            let ady:int = abs_i(dy)
+            let dist:int = adx + ady
+
+            if dist >? 60 {
+                let step_x:int = 0
+                let step_y:int = 0
+                if adx >? ady {
+                    if dx >? 0 { step_x = ENEMY_SPEED } else { step_x = -ENEMY_SPEED }
+                } else {
+                    if dy >? 0 { step_y = ENEMY_SPEED } else { step_y = -ENEMY_SPEED }
+                }
+                # animate zigzag occasionally
+                if ((frame + i * 7) and 31) =? 0 {
+                    if step_x =? 0 {
+                        if dx >? 0 { step_x = ENEMY_SPEED } else { step_x = -ENEMY_SPEED }
+                        step_y = 0
+                    } else {
+                        if dy >? 0 { step_y = ENEMY_SPEED } else { step_y = -ENEMY_SPEED }
+                        step_x = 0
+                    }
+                }
+                if (step_x not=? 0) and (enemy_blocked(ex + step_x ey) =? 0) {
+                    ex += step_x
+                } else if (step_y not=? 0) and (enemy_blocked(ex ey + step_y) =? 0) {
+                    ey += step_y
+                } else if enemy_blocked(ex + step_y ey - step_x) =? 0 {
+                    ex += step_y
+                    ey -= step_x
+                }
+                __store__(ex enemy_x + i * 8)
+                __store__(ey enemy_y + i * 8)
+            }
+
+            let cd:int = __load__(enemy_cd + i * 8)
+            if cd >? 0 {
+                __store__(cd - 1 enemy_cd + i * 8)
+            } else if dist <? 110 {
+                player_hp -= ENEMY_DAMAGE
+                hurt_flash = 12
+                trigger_sfx(SFX_HURT)
+                __store__(ENEMY_ATTACK_CD enemy_cd + i * 8)
+                if player_hp <? 1 {
+                    player_hp = 0
+                    game_state = STATE_DEAD
+                    trigger_sfx(SFX_DIE)
+                }
+            }
+        }
+        i += 1
+    }
+    return 0
+}
+
+let update_title = ():>void => {
+    title_pulse += 3
+    if input_confirm_pressed() not=? 0 {
+        reset_level()
+        game_state = STATE_PLAY
+        trigger_sfx(SFX_MENU)
+    }
+    return 0
+}
+
+let game_init = ():>void => {
+    build_textures()
+    game_state = STATE_TITLE
+    frame = 0
+    return 0
+}
+
+let frame_step = (dt_ms:int):>void => {
+    backend_poll()
+    if input_quit_requested() not=? 0 {
+        running = 0
+        return 0
+    }
+
+    let fb:int = backend_framebuffer()
+    frame += 1
+
+    if game_state =? STATE_TITLE {
+        update_title()
+        render_title(fb)
+    }
+    if game_state =? STATE_PLAY {
+        if input_back_pressed() not=? 0 {
+            game_state = STATE_TITLE
+            render_title(fb)
+        } else {
+            update_player()
+            update_enemies()
+            render_world(fb)
+        }
+    }
+    if game_state =? STATE_WIN {
+        if input_confirm_pressed() not=? 0 {
+            game_state = STATE_TITLE
+            trigger_sfx(SFX_MENU)
+        }
+        render_end(fb 1)
+    }
+    if game_state =? STATE_DEAD {
+        if input_confirm_pressed() not=? 0 {
+            game_state = STATE_TITLE
+            trigger_sfx(SFX_MENU)
+        }
+        render_end(fb 0)
+    }
+
+    mix_audio()
+    backend_present()
+    return 0
+}

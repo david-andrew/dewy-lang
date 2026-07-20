@@ -1,0 +1,24 @@
+# ============================================================================
+# μCrypt: SDL entry (x86_64 / c).
+# ============================================================================
+
+$supported_targets = ["x86_64" "c"]
+
+import p"./platform_sdl.udewy"
+import p"./game.udewy"
+
+let main = ():>int => {
+    let title:int = "uCrypt\0"
+    let rc:int = backend_init(title)
+    if rc not=? 0 {
+        return rc
+    }
+    game_init()
+
+    loop running not=? 0 {
+        frame_step(16)
+    }
+
+    backend_shutdown()
+    return 0
+}
