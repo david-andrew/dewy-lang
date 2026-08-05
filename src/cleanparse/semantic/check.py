@@ -482,7 +482,7 @@ def tcr_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
     # verify the arguments given match that of the signature
     # TODO: more full type signature handling (named args, etc.)
     for call_arg, sig_arg in zip(args, left.type.args):
-        if not ty.satisfies(call_arg.type, sig_arg):
+        if not ty.is_subtype(call_arg.type, sig_arg):
             # TODO: full user error report
             pdb.set_trace()
             raise ValueError(f'USER ERROR: Argument {call_arg} does not match signature argument {sig_arg} for call expression {left=}, {right=}')
