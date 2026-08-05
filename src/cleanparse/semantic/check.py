@@ -266,6 +266,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
         target = tcr_assignment_target(binop.left, right, ctx=ctx)
         pdb.set_trace()
 
+    if isinstance(binop.op, t2.CallJuxtapose):
+        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
+        return tcr_function_call(left, binop.right, ctx=ctx)
 
     # TODO: other more specialized structures (e.g. assignment, spread, collect, parameterization, etc.)
 
@@ -279,9 +282,6 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
     match binop.op:
         case t2.QJuxtapose():
             pdb.set_trace()
-        case t2.CallJuxtapose():
-            # if isinstance(left, hir.AtHandle): return typecheck_partial_eval(left, right)
-            return tcr_function_call(left, right)
         case t2.IndexJuxtapose():
             pdb.set_trace()
         case t2.MultiplyJuxtapose():
@@ -302,6 +302,17 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
 
     match binop.op.symbol:
         case '+': return tcr_add(left, right)
+        case 'and' | '&':
+            # `and` and `&` are the same operator; meaning is selected by operand types
+            # (bitwise, logical, type intersect in type position, overload combine for callables, …).
+            # Full resolution should go through the dispatch system; handle callables here for now.
+            if isinstance(left.type, (ty.FunctionType, ty.OverloadType)) and isinstance(right.type, (ty.FunctionType, ty.OverloadType)):
+                combined = ty.overload_function(left.type, right.type)
+                # Reuse left as a carrier until a dedicated HIR Overload node exists.
+                return replace(left, loc=Span(left.loc.start, right.loc.stop), type=combined)
+            # TODO: dispatch __and__ for int/bool/etc. (same path as other binops)
+            pdb.set_trace()
+            raise NotImplementedError(f'tcr_binop and/& not yet implemented for operand types: {left.type=}, {right.type=}')
         # case '-': return tcr_sub(left, right)
         # case '*': return tcr_mul(left, right)
         # case '/': return tcr_div(left, right)
@@ -355,6 +366,23 @@ def tcr_bare_range(ast: p0.Flat, *, ctx: Context) -> hir.Range:
 
 
 
+def typefunc_from_hir_params(
+    pos_or_kw_args: list[hir.Param],
+    kw_only_args: list[hir.Param | hir.BoundParam],
+    rest_args: hir.Param | hir.BoundParam | None,
+    rettype: ty.Type,
+) -> ty.FunctionType:
+    pos = [ty.PosOrKwArg(p.name, p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE) for p in pos_or_kw_args]
+    kw: list[ty.KwOnlyArg] = []
+    for p in kw_only_args:
+        ptype = p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE
+        required = not isinstance(p, hir.BoundParam)
+        kw.append(ty.KwOnlyArg(p.name, ptype, required))
+    rest_name = rest_args.name if rest_args is not None else None
+    ret = rettype if rettype != ty.INFERRED_TYPE else ty.TOP_TYPE
+    return ty.FunctionType(pos, kw, rest_name, ret)
+
+
 def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLiteral:
     """
     function literal: `args => body`
@@ -363,8 +391,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLitera
 
     #analyze the signature
     signature = binop.left
-    rettype:ty.Type = ty.INFERRED_TYPE
-    params: list[hir.Param] = []
+    rettype: ty.Type = ty.INFERRED_TYPE
     match signature:
         case p0.BinOp(op=t1.Operator(symbol=':>')):
             rettype = ast_to_type(signature.right, ctx=ctx)
@@ -375,11 +402,8 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLitera
             pdb.set_trace()
             raise NotImplementedError(f'extract_function_signature not implemented for {type(signature)}')
 
-    #TODO: have a better type annotation for function literals...
-    #      basically when we have TypeParam(), probably it would be TypeParam('function', signature=self), where self is the hir.FunctionLiteral
-    return hir.FunctionLiteral(binop.loc, 'function', pos_or_kw_args, kw_only_args, rest_args, rettype, body)
-
-    pdb.set_trace()
+    ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
 
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
@@ -466,28 +490,50 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     return pos_or_kw_args, kw_only_args, rest_args
 
 
-def tcr_function_call(left: hir.AST, right: hir.AST) -> hir.Call:
-    if not isinstance(left.type, ty.TypeFunc):
-        # TODO: full user error report
-        # might have some early errors for things that are function-like, but different instances.
-        pdb.set_trace()
-        raise ValueError(f'USER ERROR: Expected a function, got {left.type} for call expression {left=}, {right=}')
-    
-    
-    if isinstance(right, hir.Block): 
-        args = right.items
+def parse_call_arguments(right: p0.AST, *, ctx: Context) -> tuple[list[hir.AST], dict[str, hir.AST]]:
+    """Typecheck call args from p0, splitting positional vs `name=value` keywords."""
+    if isinstance(right, p0.Block):
+        items = list(right.inner)
     else:
-        args = [right]
+        items = [right]
 
-    # verify the arguments given match that of the signature
-    # TODO: more full type signature handling (named args, etc.)
-    for call_arg, sig_arg in zip(args, left.type.args):
-        if not ty.is_subtype(call_arg.type, sig_arg):
-            # TODO: full user error report
-            pdb.set_trace()
-            raise ValueError(f'USER ERROR: Argument {call_arg} does not match signature argument {sig_arg} for call expression {left=}, {right=}')
+    pos_args: list[hir.AST] = []
+    kw_args: dict[str, hir.AST] = {}
+    for item in items:
+        match item:
+            case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=value):
+                if name in kw_args:
+                    raise ValueError(f'USER ERROR: duplicate keyword argument "{name}"')
+                kw_args[name] = typecheck_and_resolve_inner(value, ctx=ctx)
+            case _:
+                pos_args.append(typecheck_and_resolve_inner(item, ctx=ctx))
+    return pos_args, kw_args
 
-    return hir.Call(Span(left.loc.start, right.loc.stop), left.type.ret, left, args)
+
+def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context) -> hir.FunctionCall:
+    methods: list[ty.FunctionType]
+    if isinstance(left.type, ty.FunctionType):
+        methods = [left.type]
+    elif isinstance(left.type, ty.OverloadType):
+        methods = left.type.methods
+    else:
+        raise ValueError(f'USER ERROR: Expected a function, got {left.type} for call expression {left=}, {right=}')
+
+    pos_args, kw_args = parse_call_arguments(right, ctx=ctx)
+    pos_types = [a.type for a in pos_args]
+    kw_types = {k: v.type for k, v in kw_args.items()}
+    try:
+        chosen = ty.select(methods, pos_types, kw_types)
+    except ty.DispatchError as e:
+        raise ValueError(f'USER ERROR: {e} for call {left=}, {right=}') from e
+
+    return hir.FunctionCall(
+        Span(left.loc.start, right.loc.stop),
+        chosen.ret,
+        left,
+        pos_args,
+        kw_args,
+    )
 
 
 def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:

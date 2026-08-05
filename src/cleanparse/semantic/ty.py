@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import TypeAlias, Literal
 
@@ -18,6 +18,11 @@ Dynamic:
 - dyn
 
 I think noreturn will be a separate case from bottom
+
+
+
+
+
 """
 
 # TODO: probably convert most of this into a class so that you just make a fresh instance when type checking a program
@@ -90,29 +95,94 @@ for t in _system_types:
 
 @dataclass
 class TypeAnd:
+    """type intersection: T1 & T2"""
     items: list[TypeExpr]
     def __post_init__(self):
         assert len(self.items) > 1, f'TypeAnd must have at least two items, got {len(self.items)}'
 
 @dataclass
 class TypeOr:
+    """type union: T1 | T2"""
     items: list[TypeExpr]
     def __post_init__(self):
         assert len(self.items) > 1, f'TypeOr must have at least two items, got {len(self.items)}'
 
 @dataclass
 class TypeNot:
+    """type negation: ~T"""
     type: TypeExpr
 
 @dataclass
-class TypeParam:
+class TypeParameterize:
+    """type parameterization: T<A1 A2 ...>"""
     t: TypeExpr
     args: list[TypeExpr] #TODO: other stuff can be set here, though perhaps it doesn't affect the typing?
 
-# @dataclass
-# class TypeFunc:
-#     args: list[TypeExpr]
-#     ret: TypeExpr
+
+# Building blocks for FunctionType / OverloadType (not HIR params, not standalone types)
+
+@dataclass
+class PosOrKwArg:
+    """One positional-or-keyword slot in a FunctionType.
+
+    Part of the function-type representation: name + accepted argument type.
+    Always required (no default). May be filled by position or by name at a call.
+    """
+    name: str
+    type: TypeExpr
+
+@dataclass
+class KwOnlyArg:
+    """One keyword-only slot in a FunctionType.
+
+    Part of the function-type representation: name + accepted argument type +
+    whether a call must supply it. Optional when the surface param has a default;
+    required for bare post-`...` kwargs (e.g. forced overwrite via `=void`).
+    """
+    name: str
+    type: TypeExpr
+    required: bool
+
+@dataclass
+class GenericParam:
+    """A generic type variable declared on a FunctionType (e.g. T in `<T of number>`).
+
+    Part of the function-type representation, not a TypeExpr by itself and not
+    TypeParameterize (which is applying args like `array<int>`).
+    """
+    # TODO: Instantiation-at-call is not implemented yet.
+    name: str
+    bound: TypeExpr = 'any'
+
+@dataclass
+class FunctionType:
+    """Type of a single callable: signature shape + return type.
+
+    Built from PosOrKwArg / KwOnlyArg / GenericParam slots (and optional rest).
+    This is a TypeExpr atom used in subtyping and dispatch, not an HIR function value.
+    """
+    pos_or_kw: list[PosOrKwArg]
+    kw_only: list[KwOnlyArg]
+    rest: str | None  # rest param name, or None
+    ret: TypeExpr
+    type_params: list[GenericParam] = field(default_factory=list)
+
+@dataclass
+class OverloadType:
+    """Type of an overloaded callable: an ordered set of FunctionType alternatives.
+
+    Produced by combining callables with `and`/`&` (i.e. function overloading). Still a
+    TypeExpr atom; dispatch picks one method at each call site.
+    """
+    methods: list[FunctionType]
+    def __post_init__(self):
+        assert len(self.methods) >= 1, 'OverloadType must have at least one method'
+
+
+
+#######################################################################
+# Nominal Type Hierarchy
+#######################################################################
 
 Primitive: TypeAlias = str   # has to be in the _named_types set
 
@@ -123,8 +193,11 @@ NoReturnType: TypeAlias = Literal['noreturn']
 VOID_TYPE: VoidType = 'void'
 INFERRED_TYPE: InferredType = 'untyped'
 NORETURN_TYPE: NoReturnType = 'noreturn'
+# TODO: probably some sort of Error base type
+# TODO: probably some sort of Result base type
+# TODO: probably some sort of Forward type which Error and Missing descend from
 
-TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeParam #| TypeFunc | TypeParam | TKeyOf | TValueOf | TFieldOf | TContainer
+TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType
 Type: TypeAlias = TypeExpr | VoidType | InferredType | NoReturnType # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -148,11 +221,11 @@ Type: TypeAlias = TypeExpr | VoidType | InferredType | NoReturnType # probably w
 #######################################################################
 # Semantic Subtyping
 # is_subtype(S, T)  ⟺  is_empty(S & ~T)
-# TypeParam is covariant in all args.
+# TypeParameterize is covariant in all args.
 #######################################################################
 
 
-LiteralAtom: TypeAlias = Primitive | TypeParam
+LiteralAtom: TypeAlias = Primitive | TypeParameterize | FunctionType | OverloadType
 # (is_positive, atom)
 DnfClause: TypeAlias = tuple[tuple[bool, LiteralAtom], ...]
 Dnf: TypeAlias = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -184,7 +257,7 @@ def intersect(*xs: TypeExpr) -> TypeExpr:
         return TOP_TYPE
     if len(flat) == 1:
         return flat[0]
-    return TypeAnd(tuple(flat))
+    return TypeAnd(flat)
 
 
 def union(*xs: TypeExpr) -> TypeExpr:
@@ -209,7 +282,7 @@ def union(*xs: TypeExpr) -> TypeExpr:
         return BOTTOM_TYPE
     if len(flat) == 1:
         return flat[0]
-    return TypeOr(tuple(flat))
+    return TypeOr(flat)
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +300,8 @@ def negate(t: TypeExpr) -> TypeExpr:
         return intersect(*(negate(x) for x in t.items))
     if isinstance(t, TypeAnd):
         return union(*(negate(x) for x in t.items))
-    # Primitive | TypeParam: keep as Not(atom). Do NOT push not into TypeParam args.
+    # Primitive | TypeParameterize | FunctionType | OverloadType: keep as Not(atom).
+    # Do NOT push not into TypeParameterize args or function signatures.
     return TypeNot(t)
 
 
@@ -238,9 +312,9 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return union(*(to_nnf(x) for x in t.items))
     if isinstance(t, TypeAnd):
         return intersect(*(to_nnf(x) for x in t.items))
-    if isinstance(t, TypeParam):
-        return TypeParam(to_nnf(t.t), tuple(to_nnf(a) for a in t.args))
-    return t  # Primitive | top | bottom
+    if isinstance(t, TypeParameterize):
+        return TypeParameterize(to_nnf(t.t), [to_nnf(a) for a in t.args])
+    return t  # Primitive | TypeFunc | TypeOverload | top | bottom
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +333,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParam)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -318,11 +392,11 @@ def _meet_prim(a: Primitive, b: Primitive) -> Primitive | None:
 # ---------------------------------------------------------------------------
 
 def _head_of(atom: LiteralAtom) -> TypeExpr:
-    return atom.t if isinstance(atom, TypeParam) else atom
+    return atom.t if isinstance(atom, TypeParameterize) else atom
 
 
-def _args_of(atom: LiteralAtom) -> tuple[TypeExpr, ...]:
-    return atom.args if isinstance(atom, TypeParam) else ()
+def _args_of(atom: LiteralAtom) -> list[TypeExpr]:
+    return list(atom.args) if isinstance(atom, TypeParameterize) else []
 
 
 def _as_prim_head(head: TypeExpr) -> Primitive | None:
@@ -339,7 +413,11 @@ def _meet_atoms(a: LiteralAtom, b: LiteralAtom) -> LiteralAtom | None:
       unrelated heads          =>  None (empty)
     Bare prim meets param by treating bare as head with no arg constraint
       array & array<int> => array<int>   if heads meet to array
+    Function types only meet when equal; overload combination uses overload_and.
     """
+    if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
+        return a if a == b else None
+
     ha, hb = _head_of(a), _head_of(b)
     pa, pb = _as_prim_head(ha), _as_prim_head(hb)
     if pa is None or pb is None:
@@ -357,20 +435,20 @@ def _meet_atoms(a: LiteralAtom, b: LiteralAtom) -> LiteralAtom | None:
         return head_meet
     if not args_a:
         # bare F & G<B...> => head_meet<B...>  (e.g. collection & array<int> => array<int>)
-        return TypeParam(head_meet, args_b)
+        return TypeParameterize(head_meet, args_b)
     if not args_b:
-        return TypeParam(head_meet, args_a)
+        return TypeParameterize(head_meet, args_a)
 
     if len(args_a) != len(args_b):
         return None  # arity mismatch => empty
 
     # covariant: intersect args pointwise
-    meet_args = tuple(intersect(x, y) for x, y in zip(args_a, args_b))
+    meet_args = [intersect(x, y) for x, y in zip(args_a, args_b)]
     # if any arg intersect is never, whole param is never
     if any(is_empty(arg) for arg in meet_args):
         # array<never> — treat as empty type in v1 (no values)
         return None
-    return TypeParam(head_meet, meet_args)
+    return TypeParameterize(head_meet, meet_args)
 
 
 def _atom_implies_atom(a: LiteralAtom, b: LiteralAtom) -> bool:
@@ -381,6 +459,11 @@ def _atom_implies_atom(a: LiteralAtom, b: LiteralAtom) -> bool:
       F<A...> of? G        ⟺  F of? G
       F of? G<B...>        ⟺  false   (open world; can't invent args)
     """
+    if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
+        if isinstance(a, (FunctionType, OverloadType)) and isinstance(b, (FunctionType, OverloadType)):
+            return callable_subtype(a, b)
+        return False
+
     ha, hb = _head_of(a), _head_of(b)
     pa, pb = _as_prim_head(ha), _as_prim_head(hb)
     args_a, args_b = _args_of(a), _args_of(b)
@@ -455,77 +538,166 @@ def is_subtype(s: TypeExpr, t: TypeExpr) -> bool:
     return is_empty(intersect(s, negate(t)))
 
 
+# ---------------------------------------------------------------------------
+# Function types: call-shape subtyping
+# ---------------------------------------------------------------------------
+
+def _methods_of(t: FunctionType | OverloadType) -> list[FunctionType]:
+    return t.methods if isinstance(t, OverloadType) else [t]
 
 
+def function_subtype(f: FunctionType, g: FunctionType) -> bool:
+    """True if F is usable wherever G is expected (call-shape inclusion).
+
+    Parameter types are contravariant; return type is covariant.
+    Optional kwargs on G cannot be required on F; F may add optional extras.
+    """
+    if len(f.pos_or_kw) != len(g.pos_or_kw):
+        return False
+    for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
+        if fp.name != gp.name:
+            return False
+        if not is_subtype(gp.type, fp.type):
+            return False
+
+    f_kw = {k.name: k for k in f.kw_only}
+    g_kw = {k.name: k for k in g.kw_only}
+    g_pos_names = {p.name for p in g.pos_or_kw}
+
+    for name, gk in g_kw.items():
+        fk = f_kw.get(name)
+        if fk is not None:
+            if not is_subtype(gk.type, fk.type):
+                return False
+            if not gk.required and fk.required:
+                return False
+            continue
+
+        fp = next((p for p in f.pos_or_kw if p.name == name), None)
+        if fp is not None:
+            if not gk.required:
+                return False
+            if not is_subtype(gk.type, fp.type):
+                return False
+            continue
+
+        if f.rest is not None:
+            continue
+        return False
+
+    for fk in f.kw_only:
+        if not fk.required:
+            continue
+        if fk.name in g_kw or fk.name in g_pos_names:
+            continue
+        return False
+
+    return is_subtype(f.ret, g.ret)
 
 
+def callable_subtype(f: FunctionType | OverloadType, g: FunctionType | OverloadType) -> bool:
+    """Overload coverage: every method in G is covered by some method in F."""
+    fs = _methods_of(f)
+    gs = _methods_of(g)
+    return all(any(function_subtype(fm, gm) for fm in fs) for gm in gs)
 
 
+def overload_function(a: FunctionType | OverloadType, b: FunctionType | OverloadType) -> OverloadType:
+    """
+    Create an instance of an overloaded function
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# def is_nominal_subtype(t: Primitive, target: Primitive) -> bool:
-#     """Pure nominal subtype lookup. Check if `t` is a subtype of `target`"""
-#     if t == target: return True
-#     frontier = [t]
-#     while frontier:
-#         current = frontier.pop()
-#         if current == target: return True
-#         frontier.extend(_type_parents[current])
-#     return False
+    ```dewy
+    let f = (a:int) => {...}
+    let g = (a:string) => {...}
+    let h = f & g
     
+    h(1)       # calls f
+    h"hello"   # calls g
+    ```
 
-# # TODO: not quite correct. at least: `(int16 | int32) of? number` should be true but would be false right now...
-# #
-# def satisfies(t: TypeExpr, target: TypeExpr) -> bool:
-#     """Check if `t` satisfies the `target` type expression"""
-#     # TODO: t at the moment basically has to be primitive. but can't certain type expressions of t match certain targets?
-#     if not isinstance(t, Primitive): print(f'DEBUG WARNING: in `satisfies`, encountered `t` that is not a primitive type. {t=}')
+    > NOTE: this is only meant for combining functions. Other interpretations of the same operators (bitwise, logical, type intersection, etc.) are handled elsewhere.
+    """
+    return OverloadType(_methods_of(a) + _methods_of(b))
 
-#     if isinstance(target, Primitive):
-#         if not isinstance(t, Primitive): 
-#             pdb.set_trace() # actually not necessarily false
-#             return False
-#         return is_nominal_subtype(t, target)
-#     if isinstance(target, TypeOr):
-#         return any(satisfies(t, item) for item in target.items)
-#     if isinstance(target, TypeAnd):
-#         return all(satisfies(t, item) for item in target.items)
-#     if isinstance(target, TypeNot):
-#         return not satisfies(t, target.type)
-#     # if isinstance(target, TypeFunc):
-#     #     if isinstance(t, TypeFunc):
-#     #         return all(satisfies(t_arg, target_arg) for t_arg, target_arg in zip(t.args, target.args)) and satisfies(t.ret, target.ret)
-#     #     return False
 
-#     pdb.set_trace()
-#     # should be unreachable, but indicates unhandled case
-#     return False
+########################################################
+# Dispatch System
+########################################################
+
+
+def call_accepted(m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
+    """Whether a single method accepts this concrete call."""
+    if len(pos_types) < len(m.pos_or_kw):
+        return False
+    if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
+        return False
+
+    for i, pt in enumerate(pos_types):
+        if i < len(m.pos_or_kw):
+            if not is_subtype(pt, m.pos_or_kw[i].type):
+                return False
+
+    pos_names = {p.name for p in m.pos_or_kw}
+    kw_map = {k.name: k for k in m.kw_only}
+
+    for name, kt in kw_types.items():
+        if name in pos_names:
+            p = next(p for p in m.pos_or_kw if p.name == name)
+            if not is_subtype(kt, p.type):
+                return False
+            continue
+        if name in kw_map:
+            if not is_subtype(kt, kw_map[name].type):
+                return False
+            continue
+        if m.rest is None:
+            return False
+
+    for k in m.kw_only:
+        if k.required and k.name not in kw_types:
+            return False
+    return True
+
+
+def applicable(methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> list[FunctionType]:
+    """List of methods that are valid given the provided positional and keyword arguments at the call site."""
+    return [m for m in methods if call_accepted(m, pos_types, kw_types)]
+
+
+def more_specific(m1: FunctionType, m2: FunctionType) -> bool:
+    """True if m1 is strictly more specific than m2 (positional params only)."""
+    if len(m1.pos_or_kw) != len(m2.pos_or_kw):
+        return False
+    leq = all(is_subtype(a.type, b.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
+    geq = all(is_subtype(b.type, a.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
+    return leq and not geq
+
+
+class DispatchError(ValueError):
+    """No unique most-specific applicable method."""
+
+
+def select(methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr] | None = None) -> FunctionType:
+    """Julia-style: unique most-specific applicable method, or raise DispatchError."""
+    kw_types = kw_types or {}
+    apps = applicable(methods, pos_types, kw_types)
+    if not apps:
+        raise DispatchError(f'no matching method for pos={pos_types!r} kw={kw_types!r}')
+    winners = [m for m in apps if not any(more_specific(o, m) for o in apps if o is not m)]
+    if len(winners) != 1:
+        raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
+    return winners[0]
+
+
+def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> FunctionType:
+    """Instantiate generic type params on a method. Not implemented yet."""
+    if not m.type_params:
+        return m
+    raise NotImplementedError('generic function instantiation is not implemented yet')
+
+
+
+
 
 # TODO: this will be handled by the dispatch system
 # # TODO: come up with canonical names for each operator (e.g. division/mod)
@@ -563,16 +735,3 @@ def is_subtype(s: TypeExpr, t: TypeExpr) -> bool:
 #     ('__xor__', 'bool', 'bool'),
 #     ('__xnor__', 'bool', 'bool'),
 # ]
-
-
-# system_prefixops: list[tuple[str, TypeExpr]] = []
-# system_postfixops: list[tuple[str, TypeExpr]] = []
-
-
-
-
-########################################################
-# Dispatch System
-########################################################
-
-
