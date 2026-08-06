@@ -22,7 +22,12 @@ class Context:
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
-    ctx = Context(srcfile, declarations=ChainMap(builtins.builtin_types))
+    # set up the base type system/builtins
+    type_system = ty.TypeSystem()
+    builtins.apply_builtin_promote_rules(type_system)
+    declarations = ChainMap(builtins.builtin_types)
+    
+    ctx = Context(srcfile, declarations, type_system)
     block = p0.parse(srcfile)
     return tcr_block(block, ctx=ctx)
 
@@ -306,12 +311,21 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
         ftype = ctx.declarations[fname]
         assert isinstance(ftype, (ty.FunctionType, ty.OverloadType)), f'INTERNAL ERROR: builtin function type expected, got {type(ftype)}'
         methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
-        # pdb.set_trace()
-        best_match = ctx.type_system.match_best_function(methods, [left.type, right.type])
-        pdb.set_trace()
-    
+        try:
+            result = ctx.type_system.match_best_function(methods, [left.type, right.type])
+        except ty.DispatchError as e:
+            raise ValueError(f'USER ERROR: {e} for binop {binop.op.symbol!r}') from e
+        left_arg, right_arg = apply_promotions([left, right], result.promote_pos)
+        return hir.FunctionCall(
+            Span(left.loc.start, right.loc.stop),
+            result.method.ret,
+            hir.ExpressedIdentifier(binop.op.loc, result.method, fname),
+            [left_arg, right_arg],
+            {},
+        )
+
     match binop.op.symbol:
-        case '+': return tcr_add(left, right)
+        # case '+': return tcr_add(left, right)
         case 'and' | '&':
             # `and` and `&` are the same operator; meaning is selected by operand types
             # (bitwise, logical, type intersect in type position, overload combine for callables, …).
@@ -536,17 +550,28 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context) -> hir.Func
     pos_types = [a.type for a in pos_args]
     kw_types = {k: v.type for k, v in kw_args.items()}
     try:
-        chosen = ty.select(methods, pos_types, kw_types)
+        result = ctx.type_system.match_best_function(methods, pos_types, kw_types)
     except ty.DispatchError as e:
         raise ValueError(f'USER ERROR: {e} for call {left=}, {right=}') from e
 
     return hir.FunctionCall(
         Span(left.loc.start, right.loc.stop),
-        chosen.ret,
+        result.method.ret,
         left,
-        pos_args,
+        apply_promotions(pos_args, result.promote_pos),
         kw_args,
     )
+
+
+def apply_promotions(args: list[hir.AST], promote_pos: list[ty.TypeExpr | None]) -> list[hir.AST]:
+    """Wrap args that need promotion in Cast nodes. `promote_pos` is parallel to `args`."""
+    out: list[hir.AST] = []
+    for arg, target in zip(args, promote_pos):
+        if target is None:
+            out.append(arg)
+        else:
+            out.append(hir.ValueCast(arg.loc, target, arg))
+    return out
 
 
 def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:
@@ -558,15 +583,6 @@ def tcr_identifier(id: t1.Identifier, *, ctx: Context) -> hir.AST:
     
     pdb.set_trace()
     raise NotImplementedError(f'Identifier "{id.name}" not found in context')
-
-
-
-
-
-def tcr_add(left: hir.AST, right: hir.AST) -> hir.AST:
-    # check that left and right can be added together 
-    # [ ] TODO: needs to be based on the binop type compatibility table
-    pdb.set_trace()
 
 
 

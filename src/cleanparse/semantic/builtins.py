@@ -80,3 +80,15 @@ builtin_types: dict[str, ty.TypeExpr] = {
         ),
     ])
 }
+
+# Explicit cross-branch promote rules (a, b, result). Along-edge cases use the subtype graph.
+builtin_promote_rules: list[tuple[str, str, str]] = [
+    ('int', 'float', 'float'),
+    ('int', 'float32', 'float32'),
+    ('int', 'float64', 'float64'),
+]
+
+
+def apply_builtin_promote_rules(ts: ty.TypeSystem) -> None:
+    for a, b, result in builtin_promote_rules:
+        ts.add_promote_rule(a, b, result)

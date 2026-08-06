@@ -69,6 +69,12 @@ class String(AST):
 
 
 @dataclass
+class ValueCast(AST):
+    """Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target."""
+    expr: AST
+
+
+@dataclass
 class Param:
     name: str  #TODO: list/dict/obj unpack might go here too? also multi-arg collections could go here
     type: ty.Type

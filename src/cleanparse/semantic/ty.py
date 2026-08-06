@@ -111,10 +111,10 @@ class GenericParam:
 
     Part of the function-type representation, not a TypeExpr by itself and not
     TypeParameterize (which is applying args like `array<int>`).
+    Bound at call sites via infer_type_args / instantiate_method.
     """
-    # TODO: Instantiation-at-call is not implemented yet.
     name: str
-    bound: TypeExpr = 'any'
+    bound: TypeExpr = TOP_TYPE
 
 @dataclass
 class FunctionType:
@@ -212,6 +212,8 @@ class TypeSystem:
         self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE} # void and inferred don't participate in type expressions
         self._type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: {TOP_TYPE}, EXCEPTION_TYPE: {TOP_TYPE}, TYPE_TYPE: {TOP_TYPE}})
         self._type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE}})
+        # order-independent keys via sorted (a, b); separate from the subtype graph
+        self._promote_rules: dict[tuple[str, str], str] = {}
 
         for t in system_types:
             if isinstance(t, tuple): self.add_type(*t) 
@@ -230,6 +232,32 @@ class TypeSystem:
             raise ValueError(f'Type {parent} not defined')
         self._type_parents[child].add(parent)
         self._type_children[parent].add(child)
+
+    def add_promote_rule(self, a: str, b: str, result: str) -> None:
+        """Register promote_type(a, b) == result (order-independent). Extensible for user types."""
+        if a not in self._named_types:
+            raise ValueError(f'Type {a} not defined')
+        if b not in self._named_types:
+            raise ValueError(f'Type {b} not defined')
+        if result not in self._named_types:
+            raise ValueError(f'Type {result} not defined')
+        self._promote_rules[tuple(sorted((a, b)))] = result
+
+    def promote_type(self, a: TypeExpr, b: TypeExpr) -> Primitive | None:
+        """Common concrete type for heterogeneous arithmetic, or None if none exists.
+
+        Along-edge: if one is a nominal subtype of the other, return the wider.
+        Cross-branch: look up an explicit promote rule. Not a lub in the type graph.
+        """
+        if not isinstance(a, str) or not isinstance(b, str):
+            return None
+        if a == b:
+            return a
+        if self._is_nom_subtype(a, b):
+            return b
+        if self._is_nom_subtype(b, a):
+            return a
+        return self._promote_rules.get(tuple(sorted((a, b))))
     
     # ---------------------------------------------------------------------------
     # Nominal type theory
@@ -458,10 +486,78 @@ class TypeSystem:
     # Dispatch System
     ########################################################
 
+    def infer_type_args(
+        self,
+        m: FunctionType,
+        pos_types: list[TypeExpr],
+        kw_types: dict[str, TypeExpr],
+    ) -> dict[str, TypeExpr] | None:
+        """Bind generic params from a call. Exact equality for repeated vars; None if impossible."""
+        type_vars = {gp.name for gp in m.type_params}
+        bindings: dict[str, TypeExpr] = {}
 
-    def call_accepted(self, m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
-        """Whether a single method accepts this concrete call."""
-        pdb.set_trace()
+        def match_param(param_t: TypeExpr, arg_t: TypeExpr) -> bool:
+            if isinstance(param_t, str) and param_t in type_vars:
+                if param_t in bindings:
+                    return bindings[param_t] == arg_t
+                bindings[param_t] = arg_t
+                return True
+            return self.is_subtype(arg_t, param_t)
+
+        if len(pos_types) < len(m.pos_or_kw):
+            return None
+        if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
+            return None
+
+        for i, pt in enumerate(pos_types):
+            if i < len(m.pos_or_kw) and not match_param(m.pos_or_kw[i].type, pt):
+                return None
+
+        pos_names = {p.name for p in m.pos_or_kw}
+        kw_map = {k.name: k for k in m.kw_only}
+
+        for name, kt in kw_types.items():
+            if name in pos_names:
+                p = next(p for p in m.pos_or_kw if p.name == name)
+                if not match_param(p.type, kt):
+                    return None
+                continue
+            if name in kw_map:
+                if not match_param(kw_map[name].type, kt):
+                    return None
+                continue
+            if m.rest is None:
+                return None
+
+        for k in m.kw_only:
+            if k.required and k.name not in kw_types:
+                return None
+
+        for gp in m.type_params:
+            if gp.name not in bindings:
+                return None
+            if not self.is_subtype(bindings[gp.name], gp.bound):
+                return None
+
+        return bindings
+
+    def try_instantiate_for_call(
+        self,
+        m: FunctionType,
+        pos_types: list[TypeExpr],
+        kw_types: dict[str, TypeExpr],
+    ) -> FunctionType | None:
+        """Instantiate generics for this call (if any) and check concrete acceptance."""
+        if not m.type_params:
+            return m if self.call_accepted_concrete(m, pos_types, kw_types) else None
+        bindings = self.infer_type_args(m, pos_types, kw_types)
+        if bindings is None:
+            return None
+        inst = instantiate_method(m, bindings)
+        return inst if self.call_accepted_concrete(inst, pos_types, kw_types) else None
+
+    def call_accepted_concrete(self, m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
+        """Whether a fully concrete method accepts this call (no free type params)."""
         if len(pos_types) < len(m.pos_or_kw):
             return False
         if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
@@ -492,11 +588,18 @@ class TypeSystem:
                 return False
         return True
 
+    def call_accepted(self, m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
+        """Whether a single method accepts this call (instantiating generics if needed)."""
+        return self.try_instantiate_for_call(m, pos_types, kw_types) is not None
 
     def applicable(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> list[FunctionType]:
-        """List of methods that are valid given the provided positional and keyword arguments at the call site."""
-        return [m for m in methods if self.call_accepted(m, pos_types, kw_types)]
-
+        """Instantiated methods that accept the call-site argument types."""
+        out: list[FunctionType] = []
+        for m in methods:
+            inst = self.try_instantiate_for_call(m, pos_types, kw_types)
+            if inst is not None:
+                out.append(inst)
+        return out
 
     def more_specific(self, m1: FunctionType, m2: FunctionType) -> bool:
         """True if m1 is strictly more specific than m2 (positional params only)."""
@@ -506,17 +609,36 @@ class TypeSystem:
         geq = all(self.is_subtype(b.type, a.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
         return leq and not geq
 
-
-    def match_best_function(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr] | None = None) -> FunctionType:
-        """Julia-style: unique most-specific applicable method, or raise DispatchError."""
+    def match_best_function(
+        self,
+        methods: list[FunctionType],
+        pos_types: list[TypeExpr],
+        kw_types: dict[str, TypeExpr] | None = None,
+    ) -> 'DispatchResult':
+        """Julia-style: unique most-specific applicable method, with promote-and-redispatch fallback."""
         kw_types = kw_types or {}
         apps = self.applicable(methods, pos_types, kw_types)
+        promote_pos: list[TypeExpr | None] = [None] * len(pos_types)
+
+        if not apps and pos_types and all(isinstance(t, str) for t in pos_types):
+            common: Primitive | None = pos_types[0]  # type: ignore[assignment]
+            for t in pos_types[1:]:
+                assert common is not None
+                common = self.promote_type(common, t)
+                if common is None:
+                    break
+            if common is not None:
+                promoted_pos = [common] * len(pos_types)
+                apps = self.applicable(methods, promoted_pos, kw_types)
+                if apps:
+                    promote_pos = [None if t == common else common for t in pos_types]
+
         if not apps:
             raise DispatchError(f'no matching method for pos={pos_types!r} kw={kw_types!r}')
         winners = [m for m in apps if not any(self.more_specific(o, m) for o in apps if o is not m)]
         if len(winners) != 1:
             raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
-        return winners[0]
+        return DispatchResult(winners[0], promote_pos)
 
 
 
@@ -745,12 +867,56 @@ class DispatchError(ValueError):
     """No unique most-specific applicable method."""
 
 
+@dataclass
+class DispatchResult:
+    """Winning method after dispatch, plus any per-arg promotions to apply before the call."""
+    method: FunctionType
+    promote_pos: list[TypeExpr | None]  # parallel to call pos_types; None = no promote
+
+
+def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
+    """Replace free type-param names in a type expression."""
+    if isinstance(t, str):
+        return bindings.get(t, t)
+    if isinstance(t, TypeAnd):
+        return TypeAnd([substitute_type(x, bindings) for x in t.items])
+    if isinstance(t, TypeOr):
+        return TypeOr([substitute_type(x, bindings) for x in t.items])
+    if isinstance(t, TypeNot):
+        return TypeNot(substitute_type(t.type, bindings))
+    if isinstance(t, TypeParameterize):
+        return TypeParameterize(substitute_type(t.t, bindings), [substitute_type(a, bindings) for a in t.args])
+    if isinstance(t, FunctionType):
+        nested_shadow = {gp.name for gp in t.type_params}
+        inner = {k: v for k, v in bindings.items() if k not in nested_shadow}
+        return FunctionType(
+            [PosOrKwArg(p.name, substitute_type(p.type, inner)) for p in t.pos_or_kw],
+            [KwOnlyArg(k.name, substitute_type(k.type, inner), k.required) for k in t.kw_only],
+            t.rest,
+            substitute_type(t.ret, inner),
+            list(t.type_params),
+        )
+    if isinstance(t, OverloadType):
+        methods: list[FunctionType] = []
+        for m in t.methods:
+            sm = substitute_type(m, bindings)
+            assert isinstance(sm, FunctionType)
+            methods.append(sm)
+        return OverloadType(methods)
+    raise TypeError(f'substitute_type: unhandled {t!r}')
+
 
 def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> FunctionType:
-    """Instantiate generic type params on a method. Not implemented yet."""
+    """Substitute generic type params, returning a concrete FunctionType."""
     if not m.type_params:
         return m
-    raise NotImplementedError('generic function instantiation is not implemented yet')
+    return FunctionType(
+        [PosOrKwArg(p.name, substitute_type(p.type, type_args)) for p in m.pos_or_kw],
+        [KwOnlyArg(k.name, substitute_type(k.type, type_args), k.required) for k in m.kw_only],
+        m.rest,
+        substitute_type(m.ret, type_args),
+        [],
+    )
 
 
 
