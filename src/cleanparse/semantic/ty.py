@@ -26,23 +26,25 @@ I think noreturn will be a separate case from bottom
 """
 
 # Pillars of the type hierarchy
-TopType: TypeAlias = Literal['any']
+type TopType = Literal['any']
 TOP_TYPE: TopType = 'any'
-BottomType: TypeAlias = Literal['never']
+type BottomType = Literal['never']
 BOTTOM_TYPE: BottomType = 'never'
-ExceptionType: TypeAlias = Literal['exception']
+type ExceptionType = Literal['exception']
 EXCEPTION_TYPE: ExceptionType = 'exception' # parent of all things skipped/forwarded by safe navigation
+type TypeType = Literal['type']
+TYPE_TYPE: TypeType = 'type'
 
 
 # Special Types that don't participate in type expressions or the type hierarchy.
-VoidType: TypeAlias = Literal['void']  # things cannot be partially void. e.g. `T | void` will always be an error
+type VoidType = Literal['void']  # things cannot be partially void. e.g. `T | void` will always be an error
 VOID_TYPE: VoidType = 'void'
-InferredType: TypeAlias = Literal['untyped']  # untyped if you want to explicitly indicate it should be inferred, but unannotated things are inferred by default
+type InferredType = Literal['untyped']  # untyped if you want to explicitly indicate it should be inferred, but unannotated things are inferred by default
 INFERRED_TYPE: InferredType = 'untyped'
 
 
 # TODO: probably some sort of Effect base type for the effect system
-# NoReturnEffect: TypeAlias = Literal['noreturn']
+# type NoReturnEffect = Literal['noreturn']
 # NORETURN_EFFECT: NoReturnEffect = 'noreturn'  # NOTE: noreturn is an effect, not a type!
 
 
@@ -50,7 +52,7 @@ INFERRED_TYPE: InferredType = 'untyped'
 
 # Dataclasses for type expressions
 
-Primitive: TypeAlias = str   # has to be in the _named_types set
+type Primitive = str   # has to be in the _named_types set
 
 
 @dataclass
@@ -141,8 +143,8 @@ class OverloadType:
 
 
 
-TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType
-Type: TypeAlias = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType
+type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
 
@@ -156,6 +158,10 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     ('undefined', EXCEPTION_TYPE),
     ('error', EXCEPTION_TYPE),
 
+    # basic types
+    'ellipsis',
+    'end',
+    'new',
     'bool',
 
     # numbers
@@ -168,15 +174,18 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     ('uint16', 'uint'),
     ('uint32', 'uint'),
     ('uint64', 'uint'),
-    ('uint128', 'uint'),
+    # ('uint128', 'uint'),
     ('int8', 'int'),
     ('int16', 'int'),
     ('int32', 'int'),
     ('int64', 'int'),
+    # ('int128', 'int'),
     ('float', 'number'),
-    ('float16', 'float'),
+    # ('float8', 'float'),
+    # ('float16', 'float'),
     ('float32', 'float'),
     ('float64', 'float'),
+    # ('float80', 'float'),
     # ('float128', 'float'),
     ('complex', 'number'),   # note: parameterized by the type of its internal representation
     ('quaternion', 'number'), # note: parameterized by the type of its internal representation
@@ -185,6 +194,7 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
     'grapheme', 
     'string',   # array<unicode_scalar> | array<grapheme>
+    'istring',  # string with interpolated values
     
     # container types
     'array',
@@ -199,9 +209,9 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
 
 class TypeSystem:
     def __init__(self, system_types: list[Primitive|tuple[Primitive, Primitive]] = _default_system_types):
-        self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE} # void and inferred don't participate in type expressions
-        self._type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: {TOP_TYPE}, EXCEPTION_TYPE: {TOP_TYPE}})
-        self._type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE, EXCEPTION_TYPE}})
+        self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE} # void and inferred don't participate in type expressions
+        self._type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: {TOP_TYPE}, EXCEPTION_TYPE: {TOP_TYPE}, TYPE_TYPE: {TOP_TYPE}})
+        self._type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE}})
 
         for t in system_types:
             if isinstance(t, tuple): self.add_type(*t) 
@@ -438,8 +448,8 @@ class TypeSystem:
 
     def callable_subtype(self, f: FunctionType | OverloadType, g: FunctionType | OverloadType) -> bool:
         """Overload coverage: every method in G is covered by some method in F."""
-        fs = _methods_of(f)
-        gs = _methods_of(g)
+        fs = f.methods if isinstance(f, OverloadType) else [f]
+        gs = g.methods if isinstance(g, OverloadType) else [g]
         return all(any(self.function_subtype(fm, gm) for fm in fs) for gm in gs)
 
 
@@ -451,15 +461,15 @@ class TypeSystem:
 
     def call_accepted(self, m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
         """Whether a single method accepts this concrete call."""
+        pdb.set_trace()
         if len(pos_types) < len(m.pos_or_kw):
             return False
         if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
             return False
 
         for i, pt in enumerate(pos_types):
-            if i < len(m.pos_or_kw):
-                if not self.is_subtype(pt, m.pos_or_kw[i].type):
-                    return False
+            if i < len(m.pos_or_kw) and not self.is_subtype(pt, m.pos_or_kw[i].type):
+                return False
 
         pos_names = {p.name for p in m.pos_or_kw}
         kw_map = {k.name: k for k in m.kw_only}
@@ -497,7 +507,7 @@ class TypeSystem:
         return leq and not geq
 
 
-    def select(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr] | None = None) -> FunctionType:
+    def match_best_function(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr] | None = None) -> FunctionType:
         """Julia-style: unique most-specific applicable method, or raise DispatchError."""
         kw_types = kw_types or {}
         apps = self.applicable(methods, pos_types, kw_types)
@@ -548,10 +558,10 @@ class TypeSystem:
 #######################################################################
 
 
-LiteralAtom: TypeAlias = Primitive | TypeParameterize | FunctionType | OverloadType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType
 # (is_positive, atom)
-DnfClause: TypeAlias = tuple[tuple[bool, LiteralAtom], ...]
-Dnf: TypeAlias = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
+type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
+type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
 
 
 # ---------------------------------------------------------------------------
@@ -707,26 +717,26 @@ def _as_prim_head(head: TypeExpr) -> Primitive | None:
 # Function types: call-shape subtyping
 # ---------------------------------------------------------------------------
 
-def _methods_of(t: FunctionType | OverloadType) -> list[FunctionType]:
-    return t.methods if isinstance(t, OverloadType) else [t]
+# def _methods_of(t: FunctionType | OverloadType) -> list[FunctionType]:
+#     return t.methods if isinstance(t, OverloadType) else [t]
 
 
-def overload_function(a: FunctionType | OverloadType, b: FunctionType | OverloadType) -> OverloadType:
-    """
-    Create an instance of an overloaded function
+# def overload_function(a: FunctionType | OverloadType, b: FunctionType | OverloadType) -> OverloadType:
+#     """
+#     Create an instance of an overloaded function
 
-    ```dewy
-    let f = (a:int) => {...}
-    let g = (a:string) => {...}
-    let h = f & g
+#     ```dewy
+#     let f = (a:int) => {...}
+#     let g = (a:string) => {...}
+#     let h = f & g
     
-    h(1)       # calls f
-    h"hello"   # calls g
-    ```
+#     h(1)       # calls f
+#     h"hello"   # calls g
+#     ```
 
-    > NOTE: this is only meant for combining functions. Other interpretations of the same operators (bitwise, logical, type intersection, etc.) are handled elsewhere.
-    """
-    return OverloadType(_methods_of(a) + _methods_of(b))
+#     > NOTE: this is only meant for combining functions. Other interpretations of the same operators (bitwise, logical, type intersection, etc.) are handled elsewhere.
+#     """
+#     return OverloadType(_methods_of(a) + _methods_of(b))
 
 
 

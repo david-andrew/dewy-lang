@@ -87,6 +87,10 @@ class FunctionLiteral(AST):
 
 #TODO: partial eval is basically like a stack of function calls (though need to be careful about eager vs lazy evaluation of parameters (since they probably should be eager))
 
+@dataclass
+class OverloadedFunction(AST):
+    alternates: list[FunctionLiteral]
+
 
 """
 syntax for various types of function signature arguments:

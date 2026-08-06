@@ -6,7 +6,7 @@ semantic analysis pass 0:
 from dataclasses import dataclass, replace, field
 from collections import ChainMap
 from ..parser import p0, t2, t1, t0
-from . import hir, ty
+from . import hir, ty, builtins
 from ..reporting import SrcFile, ReportException, Error, Pointer, Span
 from typing import Callable, Literal
 
@@ -22,7 +22,7 @@ class Context:
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
-    ctx = Context(srcfile)
+    ctx = Context(srcfile, declarations=ChainMap(builtins.builtin_types))
     block = p0.parse(srcfile)
     return tcr_block(block, ctx=ctx)
 
@@ -301,6 +301,15 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
 
 
 
+    if binop.op.symbol in builtins.BINOP_DUNDER_MAP:
+        fname = builtins.BINOP_DUNDER_MAP[binop.op.symbol]
+        ftype = ctx.declarations[fname]
+        assert isinstance(ftype, (ty.FunctionType, ty.OverloadType)), f'INTERNAL ERROR: builtin function type expected, got {type(ftype)}'
+        methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
+        # pdb.set_trace()
+        best_match = ctx.type_system.match_best_function(methods, [left.type, right.type])
+        pdb.set_trace()
+    
     match binop.op.symbol:
         case '+': return tcr_add(left, right)
         case 'and' | '&':
@@ -308,7 +317,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
             # (bitwise, logical, type intersect in type position, overload combine for callables, …).
             # Full resolution should go through the dispatch system; handle callables here for now.
             if isinstance(left.type, (ty.FunctionType, ty.OverloadType)) and isinstance(right.type, (ty.FunctionType, ty.OverloadType)):
-                combined = ty.overload_function(left.type, right.type)
+                left_methods = left.type.methods if isinstance(left.type, ty.OverloadType) else [left.type]
+                right_methods = right.type.methods if isinstance(right.type, ty.OverloadType) else [right.type]
+                combined = ty.OverloadType(left_methods + right_methods)
                 # Reuse left as a carrier until a dedicated HIR Overload node exists.
                 return replace(left, loc=Span(left.loc.start, right.loc.stop), type=combined)
             # TODO: dispatch __and__ for int/bool/etc. (same path as other binops)
@@ -393,17 +404,18 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLitera
     #analyze the signature
     signature = binop.left
     rettype: ty.Type = ty.INFERRED_TYPE
-    match signature:
-        case p0.BinOp(op=t1.Operator(symbol=':>')):
-            rettype = ast_to_type(signature.right, ctx=ctx)
-            pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature.left, ctx=ctx)
-        #TODO: e.g. no annotated return type
-        #      e.g. single arg not in a block
-        case _:
-            pdb.set_trace()
-            raise NotImplementedError(f'extract_function_signature not implemented for {type(signature)}')
+    
+    # if the return type was annotated, capture it
+    if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
+        rettype = ast_to_type(signature.right, ctx=ctx)
+        signature = signature.left
+    
+    # collect function signature parameters
+    pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature, ctx=ctx)
 
+    # TODO: probably inline this helper since it's only used once here
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
 
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:

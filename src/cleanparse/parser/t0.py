@@ -38,7 +38,7 @@ import pdb
 ##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
 whitespace = {' ', '\t', '\n', '\r'}
-ascii_control_chars = set(chr(i) for i in range(0x20) if i not in whitespace) | {'\x7F'} # most ascii<0x20 are ignored for security reasons
+ascii_control_chars = {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
 line_comment_start: Literal['#'] = '#'
 block_comment_start: Literal['#{'] = '#{'
 block_comment_end: Literal['}#'] = '}#'
@@ -114,7 +114,7 @@ def parse_integer(s:str, prefix:BasePrefix) -> int:
     """Parse an integer from a string, handling base prefixes and underscores"""
     digit_values = base_digit_values[prefix]
     skip_underscores = '_' not in digit_values
-    if s.startswith(prefix): s = s[len(prefix):]
+    if s.startswith(prefix): s = s.removeprefix(prefix)
     radix = base_radixes[prefix]
     value = 0
     for c in s:
