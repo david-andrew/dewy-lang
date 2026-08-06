@@ -18,6 +18,7 @@ class Context:
     """global context for the typechecker"""
     srcfile: SrcFile
     declarations: ChainMap[str, ty.Type] = field(default_factory=ChainMap) #TODO: handling different scopes...
+    type_system: ty.TypeSystem = field(default_factory=ty.TypeSystem)
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:

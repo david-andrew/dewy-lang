@@ -25,72 +25,32 @@ I think noreturn will be a separate case from bottom
 
 """
 
-# TODO: probably convert most of this into a class so that you just make a fresh instance when type checking a program
-# rather than assuming that we will only type-check a single program
+# Pillars of the type hierarchy
+TopType: TypeAlias = Literal['any']
+TOP_TYPE: TopType = 'any'
+BottomType: TypeAlias = Literal['never']
+BOTTOM_TYPE: BottomType = 'never'
+ExceptionType: TypeAlias = Literal['exception']
+EXCEPTION_TYPE: ExceptionType = 'exception' # parent of all things skipped/forwarded by safe navigation
 
 
-TOP_TYPE: str = 'any'
-BOTTOM_TYPE: str = 'never'  # don't use `never`, as we are separating control flow/effects from actual types
-_named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE} # void and inferred don't participate in type expressions
-_type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: {TOP_TYPE}})
-_type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE}})
+# Special Types that don't participate in type expressions or the type hierarchy.
+VoidType: TypeAlias = Literal['void']  # things cannot be partially void. e.g. `T | void` will always be an error
+VOID_TYPE: VoidType = 'void'
+InferredType: TypeAlias = Literal['untyped']  # untyped if you want to explicitly indicate it should be inferred, but unannotated things are inferred by default
+INFERRED_TYPE: InferredType = 'untyped'
 
-def add_type(name: str, parent: str = TOP_TYPE) -> None:
-    if name in _named_types:
-        raise ValueError(f'Type {name} already defined')
-    _named_types.add(name)
-    # _type_parents[name].add(parent)
-    # _type_children[parent].add(name)
-    add_type_link(name, parent)
 
-def add_type_link(child: str, parent: str) -> None:
-    if child not in _named_types:
-        raise ValueError(f'Type {child} not defined')
-    if parent not in _named_types:
-        raise ValueError(f'Type {parent} not defined')
-    _type_parents[child].add(parent)
-    _type_children[parent].add(child)
+# TODO: probably some sort of Effect base type for the effect system
+# NoReturnEffect: TypeAlias = Literal['noreturn']
+# NORETURN_EFFECT: NoReturnEffect = 'noreturn'  # NOTE: noreturn is an effect, not a type!
 
-# TODO: want an arbitrary DAG renderer. should draw dags with unicode box drawing characters, no repeated nodes
 
-# some types to add:
-# insert basic types into the system
-# note, things like partial order, comparable, etc. will be represented in the structural type system, not the type graph
-_system_types: list[str|tuple[str, str]] = [
-    'undefined',
-    'bool',
-    'number',
-    ('real', 'number'),
-    ('rational', 'real'),
-    ('int', 'rational'),
-    ('uint', 'int'),
-    ('uint8', 'uint'),
-    ('uint16', 'uint'),
-    ('uint32', 'uint'),
-    ('uint64', 'uint'),
-    ('uint128', 'uint'),
-    ('int8', 'int'),
-    ('int16', 'int'),
-    ('int32', 'int'),
-    ('int64', 'int'),
 
-    # tbd string stuff
-    'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
-    'grapheme', 
-    'string',   # array<unicode_scalar> | array<grapheme>
-    
-    # container types
-    'array',
-    'dict',
-    'set',
-    'object',
 
-    # tbd misc stuff
-    'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
-]
-for t in _system_types:
-    if isinstance(t, tuple): add_type(*t) 
-    else: add_type(t)
+# Dataclasses for type expressions
+
+Primitive: TypeAlias = str   # has to be in the _named_types set
 
 
 @dataclass
@@ -180,25 +140,388 @@ class OverloadType:
 
 
 
+
+TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType
+Type: TypeAlias = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
+
+
+
+
+# some types to add:
+# insert basic types into the system
+# note, things like partial order, comparable, etc. will be represented in the structural type system, not the type graph
+# TODO: do we support multiple inheritance? probably but TBD
+_default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
+    # exceptions
+    ('undefined', EXCEPTION_TYPE),
+    ('error', EXCEPTION_TYPE),
+
+    'bool',
+
+    # numbers
+    'number',
+    ('real', 'number'),
+    ('rational', 'real'),
+    ('int', 'rational'),
+    ('uint', 'int'),
+    ('uint8', 'uint'),
+    ('uint16', 'uint'),
+    ('uint32', 'uint'),
+    ('uint64', 'uint'),
+    ('uint128', 'uint'),
+    ('int8', 'int'),
+    ('int16', 'int'),
+    ('int32', 'int'),
+    ('int64', 'int'),
+    ('float', 'number'),
+    ('float16', 'float'),
+    ('float32', 'float'),
+    ('float64', 'float'),
+    # ('float128', 'float'),
+    ('complex', 'number'),   # note: parameterized by the type of its internal representation
+    ('quaternion', 'number'), # note: parameterized by the type of its internal representation
+
+    # tbd string stuff
+    'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
+    'grapheme', 
+    'string',   # array<unicode_scalar> | array<grapheme>
+    
+    # container types
+    'array',
+    'dict',
+    'set',
+    'object',
+
+    # tbd misc stuff
+    'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
+]
+
+
+class TypeSystem:
+    def __init__(self, system_types: list[Primitive|tuple[Primitive, Primitive]] = _default_system_types):
+        self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE} # void and inferred don't participate in type expressions
+        self._type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: {TOP_TYPE}, EXCEPTION_TYPE: {TOP_TYPE}})
+        self._type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE, EXCEPTION_TYPE}})
+
+        for t in system_types:
+            if isinstance(t, tuple): self.add_type(*t) 
+            else: self.add_type(t)
+
+    def add_type(self, name: str, parent: str = TOP_TYPE) -> None:
+        if name in self._named_types:
+            raise ValueError(f'Type {name} already defined')
+        self._named_types.add(name)
+        self.add_type_link(name, parent)
+
+    def add_type_link(self, child: str, parent: str) -> None:
+        if child not in self._named_types:
+            raise ValueError(f'Type {child} not defined')
+        if parent not in self._named_types:
+            raise ValueError(f'Type {parent} not defined')
+        self._type_parents[child].add(parent)
+        self._type_children[parent].add(child)
+    
+    # ---------------------------------------------------------------------------
+    # Nominal type theory
+    # ---------------------------------------------------------------------------
+
+    def is_subtype(self, s: TypeExpr, t: TypeExpr) -> bool:
+        """Top-level type checking function. `s of? t` => `is_empty(s & ~t)`"""
+        return self.is_empty(intersect(s, negate(t)))
+
+
+    def _is_nom_subtype(self, a: Primitive, b: Primitive) -> bool:
+        if a == b:
+            return True
+        frontier = [a]
+        seen = {a}
+        while frontier:
+            cur = frontier.pop()
+            for parent in self._type_parents[cur]:
+                if parent == b:
+                    return True
+                if parent not in seen:
+                    seen.add(parent)
+                    frontier.append(parent)
+        return False
+
+
+    def _meet_prim(self, a: Primitive, b: Primitive) -> Primitive | None:
+        """GLB for tree-ish nominal DAG. None => disjoint / uninhabited."""
+        if self._is_nom_subtype(a, b):
+            return a
+        if self._is_nom_subtype(b, a):
+            return b
+        return None  # unrelated => empty (v1)
+
+
+    def _meet_atoms(self, a: LiteralAtom, b: LiteralAtom) -> LiteralAtom | None:
+        """
+        Positive meet of two atoms.
+        Covariant TypeParam:
+        F<A> & G<B>  (F of? G)  =>  F<A & B>
+        F<A> & G<B>  (G of? F)  =>  G<A & B>
+        unrelated heads          =>  None (empty)
+        Bare prim meets param by treating bare as head with no arg constraint
+        array & array<int> => array<int>   if heads meet to array
+        Function types only meet when equal; overload combination uses overload_and.
+        """
+        if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
+            return a if a == b else None
+
+        ha, hb = _head_of(a), _head_of(b)
+        pa, pb = _as_prim_head(ha), _as_prim_head(hb)
+        if pa is None or pb is None:
+            # v1: non-primitive heads unsupported / only equal opaque heads
+            if ha == hb and _args_of(a) == _args_of(b):
+                return a
+            return None
+
+        head_meet = self._meet_prim(pa, pb)
+        if head_meet is None:
+            return None
+
+        args_a, args_b = _args_of(a), _args_of(b)
+        if not args_a and not args_b:
+            return head_meet
+        if not args_a:
+            # bare F & G<B...> => head_meet<B...>  (e.g. collection & array<int> => array<int>)
+            return TypeParameterize(head_meet, args_b)
+        if not args_b:
+            return TypeParameterize(head_meet, args_a)
+
+        if len(args_a) != len(args_b):
+            return None  # arity mismatch => empty
+
+        # covariant: intersect args pointwise
+        meet_args = [intersect(x, y) for x, y in zip(args_a, args_b)]
+        # if any arg intersect is never, whole param is never
+        if any(self.is_empty(arg) for arg in meet_args):
+            # array<never> — treat as empty type in v1 (no values)
+            return None
+        return TypeParameterize(head_meet, meet_args)
+
+
+    def _atom_implies_atom(self, a: LiteralAtom, b: LiteralAtom) -> bool:
+        """
+        Positive atom a is subtype of positive atom b.
+        Covariant:
+        F<A...> of? G<B...>  ⟺  (F of? G) and all (Ai of? Bi)
+        F<A...> of? G        ⟺  F of? G
+        F of? G<B...>        ⟺  false   (open world; can't invent args)
+        """
+        if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
+            if isinstance(a, (FunctionType, OverloadType)) and isinstance(b, (FunctionType, OverloadType)):
+                return self.callable_subtype(a, b)
+            return False
+
+        ha, hb = _head_of(a), _head_of(b)
+        pa, pb = _as_prim_head(ha), _as_prim_head(hb)
+        args_a, args_b = _args_of(a), _args_of(b)
+
+        if pa is None or pb is None:
+            return a == b
+
+        if not self._is_nom_subtype(pa, pb):
+            return False
+
+        if not args_b:
+            # F<A> of? G  or  F of? G
+            return True
+        if not args_a:
+            # F of? G<B> — open world
+            return False
+        if len(args_a) != len(args_b):
+            return False
+
+        # covariance
+        return all(self.is_subtype(ai, bi) for ai, bi in zip(args_a, args_b))
+
+
+    def clause_is_empty(self, clause: DnfClause) -> bool:
+        """
+        Clause = P1 & P2 & … & ~N1 & ~N2 & …
+        Empty iff the positive meet is uninhabited, or it is implied by some ~Ni
+        (i.e. meet of? Ni).
+        """
+        pos = [atom for pol, atom in clause if pol]
+        neg = [atom for pol, atom in clause if not pol]
+
+        # reduce positives by successive meet
+        meet: LiteralAtom | None
+        if not pos:
+            meet = TOP_TYPE  # only negatives: ~N1 & ~N2 & … usually non-empty
+        else:
+            meet = pos[0]
+            for atom in pos[1:]:
+                meet = self._meet_atoms(meet, atom)
+                if meet is None:
+                    return True
+
+        if meet == BOTTOM_TYPE:
+            return True
+
+        # top with only negatives → non-empty (open world)
+        if meet == TOP_TYPE:
+            return False
+
+        # P & ~N empty iff P of? N
+        for n in neg:
+            if self._atom_implies_atom(meet, n):
+                return True
+
+        return False
+
+
+    def is_empty(self, t: TypeExpr) -> bool:
+        """True iff t is uninhabited."""
+        dnf = normalize(t)
+        # prune as we go; all clauses empty => empty type
+        return all(self.clause_is_empty(c) for c in dnf)
+
+
+
+
+    ########################################################
+    # Function Subtyping
+    ########################################################
+
+
+    def function_subtype(self, f: FunctionType, g: FunctionType) -> bool:
+        """True if F is usable wherever G is expected (call-shape inclusion).
+
+        Parameter types are contravariant; return type is covariant.
+        Optional kwargs on G cannot be required on F; F may add optional extras.
+        """
+        if len(f.pos_or_kw) != len(g.pos_or_kw):
+            return False
+        for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
+            if fp.name != gp.name:
+                return False
+            if not self.is_subtype(gp.type, fp.type):
+                return False
+
+        f_kw = {k.name: k for k in f.kw_only}
+        g_kw = {k.name: k for k in g.kw_only}
+        g_pos_names = {p.name for p in g.pos_or_kw}
+
+        for name, gk in g_kw.items():
+            fk = f_kw.get(name)
+            if fk is not None:
+                if not self.is_subtype(gk.type, fk.type):
+                    return False
+                if not gk.required and fk.required:
+                    return False
+                continue
+
+            fp = next((p for p in f.pos_or_kw if p.name == name), None)
+            if fp is not None:
+                if not gk.required:
+                    return False
+                if not self.is_subtype(gk.type, fp.type):
+                    return False
+                continue
+
+            if f.rest is not None:
+                continue
+            return False
+
+        for fk in f.kw_only:
+            if not fk.required:
+                continue
+            if fk.name in g_kw or fk.name in g_pos_names:
+                continue
+            return False
+
+        return self.is_subtype(f.ret, g.ret)
+
+
+    def callable_subtype(self, f: FunctionType | OverloadType, g: FunctionType | OverloadType) -> bool:
+        """Overload coverage: every method in G is covered by some method in F."""
+        fs = _methods_of(f)
+        gs = _methods_of(g)
+        return all(any(self.function_subtype(fm, gm) for fm in fs) for gm in gs)
+
+
+
+    ########################################################
+    # Dispatch System
+    ########################################################
+
+
+    def call_accepted(self, m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
+        """Whether a single method accepts this concrete call."""
+        if len(pos_types) < len(m.pos_or_kw):
+            return False
+        if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
+            return False
+
+        for i, pt in enumerate(pos_types):
+            if i < len(m.pos_or_kw):
+                if not self.is_subtype(pt, m.pos_or_kw[i].type):
+                    return False
+
+        pos_names = {p.name for p in m.pos_or_kw}
+        kw_map = {k.name: k for k in m.kw_only}
+
+        for name, kt in kw_types.items():
+            if name in pos_names:
+                p = next(p for p in m.pos_or_kw if p.name == name)
+                if not self.is_subtype(kt, p.type):
+                    return False
+                continue
+            if name in kw_map:
+                if not self.is_subtype(kt, kw_map[name].type):
+                    return False
+                continue
+            if m.rest is None:
+                return False
+
+        for k in m.kw_only:
+            if k.required and k.name not in kw_types:
+                return False
+        return True
+
+
+    def applicable(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> list[FunctionType]:
+        """List of methods that are valid given the provided positional and keyword arguments at the call site."""
+        return [m for m in methods if self.call_accepted(m, pos_types, kw_types)]
+
+
+    def more_specific(self, m1: FunctionType, m2: FunctionType) -> bool:
+        """True if m1 is strictly more specific than m2 (positional params only)."""
+        if len(m1.pos_or_kw) != len(m2.pos_or_kw):
+            return False
+        leq = all(self.is_subtype(a.type, b.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
+        geq = all(self.is_subtype(b.type, a.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
+        return leq and not geq
+
+
+    def select(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr] | None = None) -> FunctionType:
+        """Julia-style: unique most-specific applicable method, or raise DispatchError."""
+        kw_types = kw_types or {}
+        apps = self.applicable(methods, pos_types, kw_types)
+        if not apps:
+            raise DispatchError(f'no matching method for pos={pos_types!r} kw={kw_types!r}')
+        winners = [m for m in apps if not any(self.more_specific(o, m) for o in apps if o is not m)]
+        if len(winners) != 1:
+            raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
+        return winners[0]
+
+
+
+
+
+# TODO: want an arbitrary DAG renderer. should draw dags with unicode box drawing characters, no repeated nodes
+
+
+
+
 #######################################################################
 # Nominal Type Hierarchy
 #######################################################################
 
-Primitive: TypeAlias = str   # has to be in the _named_types set
 
-# Special Types that don't participate in type expressions or the type hierarchy
-VoidType: TypeAlias = Literal['void']
-InferredType: TypeAlias = Literal['untyped']
-NoReturnType: TypeAlias = Literal['noreturn']
-VOID_TYPE: VoidType = 'void'
-INFERRED_TYPE: InferredType = 'untyped'
-NORETURN_TYPE: NoReturnType = 'noreturn'
-# TODO: probably some sort of Error base type
-# TODO: probably some sort of Result base type
-# TODO: probably some sort of Forward type which Error and Missing descend from
-
-TypeExpr: TypeAlias = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType
-Type: TypeAlias = TypeExpr | VoidType | InferredType | NoReturnType # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
 # Type algebra is driven by: is_subtype(t, target) => is_empty(t & ~target) for arbitrary type expressions t and target.
@@ -358,33 +681,7 @@ def _distribute(left: Dnf, right: Dnf) -> Dnf:
     return tuple(out)
 
 
-# ---------------------------------------------------------------------------
-# Nominal atom theory
-# ---------------------------------------------------------------------------
 
-def _is_nom_subtype(a: Primitive, b: Primitive) -> bool:
-    if a == b:
-        return True
-    frontier = [a]
-    seen = {a}
-    while frontier:
-        cur = frontier.pop()
-        for parent in _type_parents[cur]:
-            if parent == b:
-                return True
-            if parent not in seen:
-                seen.add(parent)
-                frontier.append(parent)
-    return False
-
-
-def _meet_prim(a: Primitive, b: Primitive) -> Primitive | None:
-    """GLB for tree-ish nominal DAG. None => disjoint / uninhabited."""
-    if _is_nom_subtype(a, b):
-        return a
-    if _is_nom_subtype(b, a):
-        return b
-    return None  # unrelated => empty (v1)
 
 
 # ---------------------------------------------------------------------------
@@ -404,138 +701,6 @@ def _as_prim_head(head: TypeExpr) -> Primitive | None:
     return head if isinstance(head, str) else None
 
 
-def _meet_atoms(a: LiteralAtom, b: LiteralAtom) -> LiteralAtom | None:
-    """
-    Positive meet of two atoms.
-    Covariant TypeParam:
-      F<A> & G<B>  (F of? G)  =>  F<A & B>
-      F<A> & G<B>  (G of? F)  =>  G<A & B>
-      unrelated heads          =>  None (empty)
-    Bare prim meets param by treating bare as head with no arg constraint
-      array & array<int> => array<int>   if heads meet to array
-    Function types only meet when equal; overload combination uses overload_and.
-    """
-    if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
-        return a if a == b else None
-
-    ha, hb = _head_of(a), _head_of(b)
-    pa, pb = _as_prim_head(ha), _as_prim_head(hb)
-    if pa is None or pb is None:
-        # v1: non-primitive heads unsupported / only equal opaque heads
-        if ha == hb and _args_of(a) == _args_of(b):
-            return a
-        return None
-
-    head_meet = _meet_prim(pa, pb)
-    if head_meet is None:
-        return None
-
-    args_a, args_b = _args_of(a), _args_of(b)
-    if not args_a and not args_b:
-        return head_meet
-    if not args_a:
-        # bare F & G<B...> => head_meet<B...>  (e.g. collection & array<int> => array<int>)
-        return TypeParameterize(head_meet, args_b)
-    if not args_b:
-        return TypeParameterize(head_meet, args_a)
-
-    if len(args_a) != len(args_b):
-        return None  # arity mismatch => empty
-
-    # covariant: intersect args pointwise
-    meet_args = [intersect(x, y) for x, y in zip(args_a, args_b)]
-    # if any arg intersect is never, whole param is never
-    if any(is_empty(arg) for arg in meet_args):
-        # array<never> — treat as empty type in v1 (no values)
-        return None
-    return TypeParameterize(head_meet, meet_args)
-
-
-def _atom_implies_atom(a: LiteralAtom, b: LiteralAtom) -> bool:
-    """
-    Positive atom a is subtype of positive atom b.
-    Covariant:
-      F<A...> of? G<B...>  ⟺  (F of? G) and all (Ai of? Bi)
-      F<A...> of? G        ⟺  F of? G
-      F of? G<B...>        ⟺  false   (open world; can't invent args)
-    """
-    if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
-        if isinstance(a, (FunctionType, OverloadType)) and isinstance(b, (FunctionType, OverloadType)):
-            return callable_subtype(a, b)
-        return False
-
-    ha, hb = _head_of(a), _head_of(b)
-    pa, pb = _as_prim_head(ha), _as_prim_head(hb)
-    args_a, args_b = _args_of(a), _args_of(b)
-
-    if pa is None or pb is None:
-        return a == b
-
-    if not _is_nom_subtype(pa, pb):
-        return False
-
-    if not args_b:
-        # F<A> of? G  or  F of? G
-        return True
-    if not args_a:
-        # F of? G<B> — open world
-        return False
-    if len(args_a) != len(args_b):
-        return False
-
-    # covariance
-    return all(is_subtype(ai, bi) for ai, bi in zip(args_a, args_b))
-
-
-# ---------------------------------------------------------------------------
-# Clause emptiness
-# ---------------------------------------------------------------------------
-
-def clause_is_empty(clause: DnfClause) -> bool:
-    """
-    Clause = P1 & P2 & … & ~N1 & ~N2 & …
-    Empty iff the positive meet is uninhabited, or it is implied by some ~Ni
-    (i.e. meet of? Ni).
-    """
-    pos = [atom for pol, atom in clause if pol]
-    neg = [atom for pol, atom in clause if not pol]
-
-    # reduce positives by successive meet
-    meet: LiteralAtom | None
-    if not pos:
-        meet = TOP_TYPE  # only negatives: ~N1 & ~N2 & … usually non-empty
-    else:
-        meet = pos[0]
-        for atom in pos[1:]:
-            meet = _meet_atoms(meet, atom)
-            if meet is None:
-                return True
-
-    if meet == BOTTOM_TYPE:
-        return True
-
-    # top with only negatives → non-empty (open world)
-    if meet == TOP_TYPE:
-        return False
-
-    # P & ~N empty iff P of? N
-    for n in neg:
-        if _atom_implies_atom(meet, n):
-            return True
-
-    return False
-
-
-def is_empty(t: TypeExpr) -> bool:
-    """True iff t is uninhabited."""
-    dnf = normalize(t)
-    # prune as we go; all clauses empty => empty type
-    return all(clause_is_empty(c) for c in dnf)
-
-
-def is_subtype(s: TypeExpr, t: TypeExpr) -> bool:
-    """Top-level type checking function. `s of? t` => `is_empty(s & ~t)`"""
-    return is_empty(intersect(s, negate(t)))
 
 
 # ---------------------------------------------------------------------------
@@ -544,62 +709,6 @@ def is_subtype(s: TypeExpr, t: TypeExpr) -> bool:
 
 def _methods_of(t: FunctionType | OverloadType) -> list[FunctionType]:
     return t.methods if isinstance(t, OverloadType) else [t]
-
-
-def function_subtype(f: FunctionType, g: FunctionType) -> bool:
-    """True if F is usable wherever G is expected (call-shape inclusion).
-
-    Parameter types are contravariant; return type is covariant.
-    Optional kwargs on G cannot be required on F; F may add optional extras.
-    """
-    if len(f.pos_or_kw) != len(g.pos_or_kw):
-        return False
-    for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
-        if fp.name != gp.name:
-            return False
-        if not is_subtype(gp.type, fp.type):
-            return False
-
-    f_kw = {k.name: k for k in f.kw_only}
-    g_kw = {k.name: k for k in g.kw_only}
-    g_pos_names = {p.name for p in g.pos_or_kw}
-
-    for name, gk in g_kw.items():
-        fk = f_kw.get(name)
-        if fk is not None:
-            if not is_subtype(gk.type, fk.type):
-                return False
-            if not gk.required and fk.required:
-                return False
-            continue
-
-        fp = next((p for p in f.pos_or_kw if p.name == name), None)
-        if fp is not None:
-            if not gk.required:
-                return False
-            if not is_subtype(gk.type, fp.type):
-                return False
-            continue
-
-        if f.rest is not None:
-            continue
-        return False
-
-    for fk in f.kw_only:
-        if not fk.required:
-            continue
-        if fk.name in g_kw or fk.name in g_pos_names:
-            continue
-        return False
-
-    return is_subtype(f.ret, g.ret)
-
-
-def callable_subtype(f: FunctionType | OverloadType, g: FunctionType | OverloadType) -> bool:
-    """Overload coverage: every method in G is covered by some method in F."""
-    fs = _methods_of(f)
-    gs = _methods_of(g)
-    return all(any(function_subtype(fm, gm) for fm in fs) for gm in gs)
 
 
 def overload_function(a: FunctionType | OverloadType, b: FunctionType | OverloadType) -> OverloadType:
@@ -620,73 +729,11 @@ def overload_function(a: FunctionType | OverloadType, b: FunctionType | Overload
     return OverloadType(_methods_of(a) + _methods_of(b))
 
 
-########################################################
-# Dispatch System
-########################################################
-
-
-def call_accepted(m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
-    """Whether a single method accepts this concrete call."""
-    if len(pos_types) < len(m.pos_or_kw):
-        return False
-    if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
-        return False
-
-    for i, pt in enumerate(pos_types):
-        if i < len(m.pos_or_kw):
-            if not is_subtype(pt, m.pos_or_kw[i].type):
-                return False
-
-    pos_names = {p.name for p in m.pos_or_kw}
-    kw_map = {k.name: k for k in m.kw_only}
-
-    for name, kt in kw_types.items():
-        if name in pos_names:
-            p = next(p for p in m.pos_or_kw if p.name == name)
-            if not is_subtype(kt, p.type):
-                return False
-            continue
-        if name in kw_map:
-            if not is_subtype(kt, kw_map[name].type):
-                return False
-            continue
-        if m.rest is None:
-            return False
-
-    for k in m.kw_only:
-        if k.required and k.name not in kw_types:
-            return False
-    return True
-
-
-def applicable(methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> list[FunctionType]:
-    """List of methods that are valid given the provided positional and keyword arguments at the call site."""
-    return [m for m in methods if call_accepted(m, pos_types, kw_types)]
-
-
-def more_specific(m1: FunctionType, m2: FunctionType) -> bool:
-    """True if m1 is strictly more specific than m2 (positional params only)."""
-    if len(m1.pos_or_kw) != len(m2.pos_or_kw):
-        return False
-    leq = all(is_subtype(a.type, b.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
-    geq = all(is_subtype(b.type, a.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
-    return leq and not geq
 
 
 class DispatchError(ValueError):
     """No unique most-specific applicable method."""
 
-
-def select(methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr] | None = None) -> FunctionType:
-    """Julia-style: unique most-specific applicable method, or raise DispatchError."""
-    kw_types = kw_types or {}
-    apps = applicable(methods, pos_types, kw_types)
-    if not apps:
-        raise DispatchError(f'no matching method for pos={pos_types!r} kw={kw_types!r}')
-    winners = [m for m in apps if not any(more_specific(o, m) for o in apps if o is not m)]
-    if len(winners) != 1:
-        raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
-    return winners[0]
 
 
 def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> FunctionType:
