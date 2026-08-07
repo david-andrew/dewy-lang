@@ -57,13 +57,48 @@ UNARY_POSTFIX_DUNDER_MAP = {
 """
 __add__ = ( <T of number>(left:T right:T):>T => builtin )
         & ( (left:string right:string):>string => builtin )
+        & ( <T>(left:range<T>|multirange<T> right:range<T>|multirange<T>):>multirange<T> => builtin )
+
+__sub__ = ( <T of number>(left:T right:T):>T => builtin )
+        & ( (left:string right:string):>string => builtin )
+        & ( <T>(left:range<T>|multirange<T> right:range<T>|multirange<T>):>multirange<T> => builtin )
+
+__mul__ = ( <T of number>(left:T right:T):>T => builtin )
+
+
+# TODO: note actually this isn't quite correct for truediv. 3/4 does not return int even though 3 is? int and 4 is? int is true.
+__div__ = ( <T of number>(left:T right:T & ~0):>T => builtin )
+        & ( <T of number>(left:T right:T & 0):>error => builtin )
+
+__floordiv__ = ( <T of number>(left:T right:T & ~0):>T => builtin )
+             & ( <T of number>(left:T right:T & 0):>error => builtin )
+
 
 __and__ = ( <T of int>(left:T right:T):>T => builtin )   # bitwise
         & ( (left:bool right:bool):>bool => builtin )    # logical
-        & ( (left:iterator|compounditerator right:iterator|compounditerator):>compounditerator => builtin )
-        & ( (left:function|overloadedfunction right:function|overloadedfunction):>overloadedfunction => builtin )
+        & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
+        & ( (left:function|multifunction right:function|multifunction):>multifunction => builtin )
 
 __or__ = ( <T of int>(left:T right:T):>T => builtin )
+       & ( (left:bool right:bool):>bool => builtin )
+       & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
+
+__xor__ = ( <T of int>(left:T right:T):>T => builtin )
+        & ( (left:bool right:bool):>bool => builtin )
+        & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
+
+__nand__ = ( <T of int>(left:T right:T):>T => builtin )
+         & ( (left:bool right:bool):>bool => builtin )
+         & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
+
+__nor__ = ( <T of int>(left:T right:T):>T => builtin )
+        & ( (left:bool right:bool):>bool => builtin )
+        & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
+
+__xnor__ = ( <T of int>(left:T right:T):>T => builtin )
+         & ( (left:bool right:bool):>bool => builtin )
+         & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
+
 """
 # TODO: dealing with type promotions.
 # probably the dispatch system would be able to track promotions that need to happen
@@ -88,6 +123,13 @@ builtin_types: dict[str, ty.TypeExpr] = {
             [],
             None,
             'bool',
+            []
+        ),
+        ty.FunctionType(
+            [ty.PosOrKwArg('left', ty.TypeOr(['function', 'multifunction'])), ty.PosOrKwArg('right', ty.TypeOr(['function', 'multifunction']))],
+            [],
+            None,
+            'multifunction',
             []
         ),
         # ty.FunctionType(

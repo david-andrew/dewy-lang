@@ -190,21 +190,42 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     ('complex', 'number'),   # note: parameterized by the type of its internal representation
     ('quaternion', 'number'), # note: parameterized by the type of its internal representation
 
-    # tbd string stuff
-    'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
-    'grapheme', 
-    'string',   # array<unicode_scalar> | array<grapheme>
-    # 'istring',  # string with interpolated values. istring probably isn't a separate type? since it should be interchangable with strings
-    
+    'function',
+    'multifunction',
+    'iterator',
+    'multiiterator',
+    'range',
+    'multirange',
+
     # container types
     'array',
     'dict',
     'set',
     'object',
 
+    # tbd string stuff
+    'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
+    'grapheme', 
+    'string',   # array<unicode_scalar> | array<grapheme>
+    # 'istring',  # string with interpolated values. istring probably isn't a separate type? since it should be interchangable with strings
+    
     # tbd misc stuff
     'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
 ]
+
+# map from structural python types to their nominal position in the type graph 
+STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
+    FunctionType: 'function',
+    OverloadType: 'multifunction',
+
+    # TBD about these
+    # IteratorType: 'iterator',
+    # MultiIteratorType: 'multiiterator',
+    # RangeType: 'range',
+    # MultiRangeType: 'multirange',
+
+    # also TBD about if the container types also go in here?
+}
 
 
 class TypeSystem:
@@ -293,6 +314,11 @@ class TypeSystem:
         return None  # unrelated => empty (v1)
 
 
+    def _structural_nominal(self, atom: LiteralAtom) -> Primitive | None:
+        """Nominal umbrella for a structural TypeExpr atom, if any."""
+        return STRUCTURAL_NOMINAL_MAP.get(type(atom))
+
+
     def _meet_atoms(self, a: LiteralAtom, b: LiteralAtom) -> LiteralAtom | None:
         """
         Positive meet of two atoms.
@@ -302,10 +328,21 @@ class TypeSystem:
         unrelated heads          =>  None (empty)
         Bare prim meets param by treating bare as head with no arg constraint
         array & array<int> => array<int>   if heads meet to array
-        Function types only meet when equal; overload combination uses overload_and.
+        Structural & its nominal (or ancestor) => structural; two structurals only if equal.
         """
-        if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
-            return a if a == b else None
+        a_nom = self._structural_nominal(a)
+        b_nom = self._structural_nominal(b)
+
+        # FunctionType & function (or any) => FunctionType; siblings => empty
+        if a_nom is not None and isinstance(b, str):
+            return a if self._is_nom_subtype(a_nom, b) else None
+        if b_nom is not None and isinstance(a, str):
+            return b if self._is_nom_subtype(b_nom, a) else None
+        if a_nom is not None or b_nom is not None:
+            # two structural atoms, or structural & TypeParameterize
+            if a_nom is not None and b_nom is not None:
+                return a if a == b else None
+            return None
 
         ha, hb = _head_of(a), _head_of(b)
         pa, pb = _as_prim_head(ha), _as_prim_head(hb)
@@ -347,10 +384,20 @@ class TypeSystem:
         F<A...> of? G<B...>  ⟺  (F of? G) and all (Ai of? Bi)
         F<A...> of? G        ⟺  F of? G
         F of? G<B...>        ⟺  false   (open world; can't invent args)
+        Structural atoms also imply their STRUCTURAL_NOMINAL_MAP umbrella (and ancestors).
         """
-        if isinstance(a, (FunctionType, OverloadType)) or isinstance(b, (FunctionType, OverloadType)):
+        a_nom = self._structural_nominal(a)
+        if a_nom is not None and isinstance(b, str):
+            if self._is_nom_subtype(a_nom, b):
+                return True
+
+        if a_nom is not None and self._structural_nominal(b) is not None:
             if isinstance(a, (FunctionType, OverloadType)) and isinstance(b, (FunctionType, OverloadType)):
                 return self.callable_subtype(a, b)
+            return a == b
+
+        if a_nom is not None or self._structural_nominal(b) is not None:
+            # e.g. 'function' of? FunctionType, or FunctionType of? TypeParameterize
             return False
 
         ha, hb = _head_of(a), _head_of(b)

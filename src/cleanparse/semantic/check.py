@@ -413,8 +413,6 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLitera
     """
     function literal: `args => body`
     """
-    body = typecheck_and_resolve_inner(binop.right, ctx=ctx)
-
     #analyze the signature
     signature = binop.left
     rettype: ty.Type = ty.INFERRED_TYPE
@@ -429,6 +427,17 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context) -> hir.FunctionLitera
 
     # TODO: probably inline this helper since it's only used once here
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+
+    # insert the arguments from the signature into the body
+    inner_scope = ctx.declarations.new_child()
+    for param in pos_or_kw_args:
+        inner_scope[param.name] = param.type
+    for param in kw_only_args:
+        inner_scope[param.name] = param.type
+    if rest_args is not None:
+        inner_scope[rest_args.name] = rest_args.type
+    inner_ctx = replace(ctx, declarations=inner_scope)
+    body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx)
 
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
 
