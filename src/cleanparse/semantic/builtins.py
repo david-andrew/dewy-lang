@@ -52,7 +52,19 @@ UNARY_POSTFIX_DUNDER_MAP = {
 
 }
 
+# TODO: would be much nicer if all of these could just be written out in dewy
+#       eventually we will close this loop
+"""
+__add__ = ( <T of number>(left:T right:T):>T => builtin )
+        & ( (left:string right:string):>string => builtin )
 
+__and__ = ( <T of int>(left:T right:T):>T => builtin )   # bitwise
+        & ( (left:bool right:bool):>bool => builtin )    # logical
+        & ( (left:iterator|compounditerator right:iterator|compounditerator):>compounditerator => builtin )
+        & ( (left:function|overloadedfunction right:function|overloadedfunction):>overloadedfunction => builtin )
+
+__or__ = ( <T of int>(left:T right:T):>T => builtin )
+"""
 # TODO: dealing with type promotions.
 # probably the dispatch system would be able to track promotions that need to happen
 builtin_types: dict[str, ty.TypeExpr] = {
@@ -78,6 +90,13 @@ builtin_types: dict[str, ty.TypeExpr] = {
             'bool',
             []
         ),
+        # ty.FunctionType(
+        #     [ty.PosOrKwArg('left', ty.TypeOr(['iterator', 'multiiterator'])), ty.PosOrKwArg('right', ty.TypeOr(['iterator', 'multiiterator']))],
+        #     [],
+        #     None,
+        #     'multiiterator',
+        #     []
+        # ),
     ])
 }
 

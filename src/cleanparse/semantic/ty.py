@@ -194,7 +194,7 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
     'grapheme', 
     'string',   # array<unicode_scalar> | array<grapheme>
-    'istring',  # string with interpolated values
+    # 'istring',  # string with interpolated values. istring probably isn't a separate type? since it should be interchangable with strings
     
     # container types
     'array',
