@@ -132,7 +132,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context) -> hir.AST:
             # use the type directly from the expression since no type annotation was provided
             ctx.declarations[name] = expr.type
 
-            return hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, expr)
+            return hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr)
         
         case [
             t1.Keyword(name='let'|'const'),
@@ -252,6 +252,14 @@ def tcr_block(block: p0.Block, *, ctx: Context) -> hir.AST:
     # unreachable 
     pdb.set_trace()
 
+def _function_alternates(node: hir.AST) -> list[hir.FunctionLiteral]:
+    if isinstance(node, hir.OverloadedFunction):
+        return list(node.alternates)
+    if isinstance(node, hir.FunctionLiteral):
+        return [node]
+    raise ValueError(f'INTERNAL ERROR: expected function literal/overload for &, got {type(node)}')
+
+
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
@@ -305,7 +313,20 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
     assert isinstance(binop.op, t1.Operator), f'INTERNAL ERROR: unexpected operator type: {binop.op}'
 
 
+    # special cases
+    # function overloading
+    # if binop.op.symbol in ('and', '&') and (isinstance(left.type, (ty.FunctionType, ty.OverloadType)) and isinstance(right.type, (ty.FunctionType, ty.OverloadType))):
+    #     left_methods = left.type.methods if isinstance(left.type, ty.OverloadType) else [left.type]
+    #     right_methods = right.type.methods if isinstance(right.type, ty.OverloadType) else [right.type]
+    #     combined = ty.OverloadType(left_methods + right_methods)
+    #     return hir.OverloadedFunction(
+    #         Span(left.loc.start, right.loc.stop),
+    #         combined,
+    #         _function_alternates(left) + _function_alternates(right),
+    #     )
+    # etc. special cases...
 
+    # general case, delegate to the builtin __dunder__ method
     if binop.op.symbol in builtins.BINOP_DUNDER_MAP:
         fname = builtins.BINOP_DUNDER_MAP[binop.op.symbol]
         ftype = ctx.declarations[fname]
@@ -323,36 +344,44 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False) -> hir.AS
             [left_arg, right_arg],
             {},
         )
+    
 
-    match binop.op.symbol:
-        # case '+': return tcr_add(left, right)
-        case 'and' | '&':
-            # `and` and `&` are the same operator; meaning is selected by operand types
-            # (bitwise, logical, type intersect in type position, overload combine for callables, …).
-            # Full resolution should go through the dispatch system; handle callables here for now.
-            if isinstance(left.type, (ty.FunctionType, ty.OverloadType)) and isinstance(right.type, (ty.FunctionType, ty.OverloadType)):
-                left_methods = left.type.methods if isinstance(left.type, ty.OverloadType) else [left.type]
-                right_methods = right.type.methods if isinstance(right.type, ty.OverloadType) else [right.type]
-                combined = ty.OverloadType(left_methods + right_methods)
-                # Reuse left as a carrier until a dedicated HIR Overload node exists.
-                return replace(left, loc=Span(left.loc.start, right.loc.stop), type=combined)
-            # TODO: dispatch __and__ for int/bool/etc. (same path as other binops)
-            pdb.set_trace()
-            raise NotImplementedError(f'tcr_binop and/& not yet implemented for operand types: {left.type=}, {right.type=}')
-        # case '-': return tcr_sub(left, right)
-        # case '*': return tcr_mul(left, right)
-        # case '/': return tcr_div(left, right)
-        # case '%': return tcr_mod(left, right)
-        # case '//': return tcr_floordiv(left, right)
-        # case '^': return tcr_pow(left, right)
-        # case '<<': return tcr_lshift(left, right)
-        # case '>>': return tcr_rshift(left, right)
+    raise NotImplementedError(f'tcr_binop not implemented for {binop.op.symbol}')
+
+    # # TODO: BINOP_DUNDER_MAP is mostly commented out
+    # #       as soon as `&` is uncommented, the handling here will never be reached..
+    # match binop.op.symbol:
+    #     # case '+': return tcr_add(left, right)
+    #     case 'and' | '&':
+    #         # `and` and `&` are the same operator; meaning is selected by operand types
+    #         # (bitwise, logical, type intersect in type position, overload combine for callables, …).
+    #         # Full resolution should go through the dispatch system; handle callables here for now.
+    #         if isinstance(left.type, (ty.FunctionType, ty.OverloadType)) and isinstance(right.type, (ty.FunctionType, ty.OverloadType)):
+    #             left_methods = left.type.methods if isinstance(left.type, ty.OverloadType) else [left.type]
+    #             right_methods = right.type.methods if isinstance(right.type, ty.OverloadType) else [right.type]
+    #             combined = ty.OverloadType(left_methods + right_methods)
+    #             return hir.OverloadedFunction(
+    #                 Span(left.loc.start, right.loc.stop),
+    #                 combined,
+    #                 _function_alternates(left) + _function_alternates(right),
+    #             )
+    #         # TODO: dispatch __and__ for int/bool/etc. (same path as other binops)
+    #         pdb.set_trace()
+    #         raise NotImplementedError(f'tcr_binop and/& not yet implemented for operand types: {left.type=}, {right.type=}')
+    #     # case '-': return tcr_sub(left, right)
+    #     # case '*': return tcr_mul(left, right)
+    #     # case '/': return tcr_div(left, right)
+    #     # case '%': return tcr_mod(left, right)
+    #     # case '//': return tcr_floordiv(left, right)
+    #     # case '^': return tcr_pow(left, right)
+    #     # case '<<': return tcr_lshift(left, right)
+    #     # case '>>': return tcr_rshift(left, right)
         
         
         
-        case _:
-            pdb.set_trace()
-            raise NotImplementedError(f'tcr_binop not implemented for {type(binop.op)}')
+    #     case _:
+    #         pdb.set_trace()
+    #         raise NotImplementedError(f'tcr_binop not implemented for {type(binop.op)}')
 
 
 
@@ -612,8 +641,9 @@ def test():
         print(e.report)
         exit(1)
     
-    # TODO: some sort of tree print for HIR
-    print(ast)
+    print(repr(ast))
+    print()
+    print(str(ast))
     
 if __name__ == '__main__':
     test()

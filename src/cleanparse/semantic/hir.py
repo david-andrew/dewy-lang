@@ -34,10 +34,24 @@ class AST:
     loc: Span
     type: ty.Type # All ASTs have a type. typechecking involves propogating the type upward through expressions
 
+    def __repr__(self) -> str:
+        from .hir_display import hir_to_tree_str
+        return hir_to_tree_str(self)
+
+    def __str__(self) -> str:
+        from .hir_display import hir_to_dewy
+        return hir_to_dewy(self)
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # @dataclass would otherwise generate a field repr that hides these.
+        cls.__repr__ = AST.__repr__  # type: ignore[method-assign]
+        cls.__str__ = AST.__str__  # type: ignore[method-assign]
+
 @dataclass
 class Void(AST): ...
 
-@dataclass 
+@dataclass
 class Return(AST):
     item: AST|None = None
 
@@ -46,7 +60,7 @@ class Return(AST):
 class Declare(AST):
     decltype: Literal['let', 'const'] # others tbd
     name: str                         #TBD future handling of unpacking assignment
-    type: ty.Type
+    annotation: ty.Type | None        # explicit `:T` on the binding, if any; AST.type is still void
     expr: AST
 
 @dataclass
@@ -78,6 +92,19 @@ class ValueCast(AST):
 class Param:
     name: str  #TODO: list/dict/obj unpack might go here too? also multi-arg collections could go here
     type: ty.Type
+
+    def __repr__(self) -> str:
+        from .hir_display import hir_to_tree_str
+        return hir_to_tree_str(self)
+
+    def __str__(self) -> str:
+        from .hir_display import hir_to_dewy
+        return hir_to_dewy(self)
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.__repr__ = Param.__repr__  # type: ignore[method-assign]
+        cls.__str__ = Param.__str__  # type: ignore[method-assign]
 
 @dataclass
 class BoundParam(Param):
