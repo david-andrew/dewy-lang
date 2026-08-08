@@ -208,23 +208,44 @@ def tcr_block(block: p0.Block, *, ctx: Context) -> hir.AST:
     results = [typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block) for item in block.inner]
 
     match block.kind:
-        case '()':
-            if len(results) > 1:
-                return hir.Block(block.loc, results, scoped=False)
-            if len(results) == 1:
-                item = results[0]
-                if isinstance(item, hir.Range) and item.bounds is None:
-                    return replace(item, loc=block.loc, bounds=block.kind)
-                return item
-            return hir.Void(block.loc)
+        case '()'|'{}':
+
+    
+            # if len(results) > 1:
+            #     return hir.Block(block.loc, results, scoped=False)
+            # if len(results) == 1:
+            #     item = results[0]
+            #     if isinstance(item, hir.Range) and item.bounds is None:
+            #         return replace(item, loc=block.loc, bounds=block.kind)
+            #     return item
+            # return hir.Void(block.loc)
         
-        case '{}':
-            if len(results) > 1:
-                pdb.set_trace()
-                return hir.Block(block.loc, ty.BlockType, results, scoped=True) #TODO: parameterize block type based on inner content... e.g. tuple of types
+        # case '{}':
+
+
+            scoped = block.kind == '{}'  # only difference between () and {} is the scoped flag  (or possibly a non-inclusive range)
+            if len(results) == 0:
+                return hir.Void(block.loc)
             if len(results) == 1:
-                return hir.Block(block.loc, results[0].type, results, scoped=True)
+                if not scoped and isinstance(results[0], hir.Range) and results[0].bounds is None:
+                    return replace(results[0], loc=block.loc, bounds=block.kind)
+                return hir.Block(block.loc, results[0].type, results, scoped=scoped)
+            
+            returns = [r for r in results if isinstance(r, hir.Return)]
+            if len(returns) > 0:
+                # TODO: probably need better handling on this
+                # for now just union over all the return types
+                t = ty.TypeOr([r.item.type for r in returns]) if len(returns) > 1 else returns[0].item.type  #TODO: also would be nice if there was a way to dedup. perhaps via any of the TypeSystem methods?
+                t = ty.ReturnType(t)
+                return hir.Block(block.loc, t, results, scoped=scoped)
+            #TODO: what about inferred types? need to handle them
+            non_voids = [r.type for r in results if r.type != ty.VOID_TYPE]
+            if len(non_voids) > 0:
+                t = ty.SequenceType(non_voids)
+                return hir.Block(block.loc, t, results, scoped=scoped)
             return hir.Void(block.loc)
+            # return hir.Block(block.loc, ty.BlockType, results, scoped=scoped) #TODO: parameterize block type based on inner content... e.g. tuple of types
+
 
         case '[]':
             if len(results) == 1 and isinstance(results[0], hir.Range) and results[0].bounds is None:

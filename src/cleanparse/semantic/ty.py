@@ -137,13 +137,24 @@ class OverloadType:
     TypeExpr atom; dispatch picks one method at each call site.
     """
     methods: list[FunctionType]
-    def __post_init__(self):
-        assert len(self.methods) >= 1, 'OverloadType must have at least one method'
+    # def __post_init__(self):
+    #     assert len(self.methods) >= 1, 'OverloadType must have at least one method'
 
 
+@dataclass
+class SequenceType:
+    """Multiple values in a sequence: (T1 T2 ... Tn)"""
+    items: list[TypeExpr]
+    # def __post_init__(self):
+    #     assert len(self.items) >= 1, 'SequenceType must have at least one item'
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType
+@dataclass
+class ReturnType:
+    """The type when some block returns one or more values."""
+    rettype: TypeExpr
+
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | ReturnType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
