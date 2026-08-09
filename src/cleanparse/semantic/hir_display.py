@@ -31,6 +31,8 @@ def type_to_dewy(t: ty.Type) -> str:
         return _function_type_to_dewy(t)
     if isinstance(t, ty.OverloadType):
         return ' & '.join(_type_atom_parens(m) for m in t.methods)
+    if isinstance(t, ty.SequenceType):
+        return f'<{" ".join(type_to_dewy(x) for x in t.items)}>'
     raise TypeError(f'unexpected type for type_to_dewy: {t!r}')
 
 

@@ -122,7 +122,8 @@ class FunctionLiteral(AST):
 
 @dataclass
 class OverloadedFunction(AST):
-    alternates: list[FunctionLiteral]
+    """A callable value formed by combining callable operands with `&`."""
+    alternates: list[AST]
 
 
 """

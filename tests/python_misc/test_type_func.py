@@ -3,23 +3,32 @@
 import pytest
 
 from src.cleanparse.semantic.ty import (
-    BOTTOM_TYPE,
-    TOP_TYPE,
     DispatchError,
     KwOnlyArg,
     PosOrKwArg,
     FunctionType,
     OverloadType,
-    applicable,
-    call_accepted,
-    callable_subtype,
-    function_subtype,
+    TypeSystem,
     instantiate_method,
-    is_subtype,
-    more_specific,
-    overload_function,
-    select,
 )
+
+TS = TypeSystem()
+is_subtype = TS.is_subtype
+function_subtype = TS.function_subtype
+callable_subtype = TS.callable_subtype
+call_accepted = TS.call_accepted
+applicable = TS.applicable
+more_specific = TS.more_specific
+
+
+def select(methods: list[FunctionType], pos_types: list[str]) -> FunctionType:
+    return TS.match_best_function(methods, pos_types).method
+
+
+def overload_function(a: FunctionType | OverloadType, b: FunctionType | OverloadType) -> OverloadType:
+    def methods(t: FunctionType | OverloadType) -> list[FunctionType]:
+        return t.methods if isinstance(t, OverloadType) else [t]
+    return OverloadType(methods(a) + methods(b))
 
 
 def F(
@@ -203,7 +212,7 @@ def test_instantiate_method_noop_without_params():
     assert instantiate_method(m, {}) is m
 
 
-def test_instantiate_method_not_implemented_with_params():
+def test_instantiate_method_substitutes_params():
     from src.cleanparse.semantic.ty import GenericParam
     m = FunctionType(
         [PosOrKwArg('x', 'T')],
@@ -212,5 +221,7 @@ def test_instantiate_method_not_implemented_with_params():
         'T',
         [GenericParam('T', 'number')],
     )
-    with pytest.raises(NotImplementedError):
-        instantiate_method(m, {'T': 'int'})
+    inst = instantiate_method(m, {'T': 'int'})
+    assert inst.pos_or_kw[0].type == 'int'
+    assert inst.ret == 'int'
+    assert inst.type_params == []

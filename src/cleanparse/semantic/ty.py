@@ -143,18 +143,12 @@ class OverloadType:
 
 @dataclass
 class SequenceType:
-    """Multiple values in a sequence: (T1 T2 ... Tn)"""
+    """Multiple values in a sequence: (T1 T2 ... Tn). Use the sequence() smart constructor to build these."""
     items: list[TypeExpr]
-    # def __post_init__(self):
-    #     assert len(self.items) >= 1, 'SequenceType must have at least one item'
+    def __post_init__(self):
+        assert len(self.items) > 1, f'SequenceType must have at least two items, got {len(self.items)}. 0/1-item sequences collapse to void/the item via sequence()'
 
-
-@dataclass
-class ReturnType:
-    """The type when some block returns one or more values."""
-    rettype: TypeExpr
-
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | ReturnType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -203,6 +197,7 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
 
     'function',
     'multifunction',
+    'generator',
     'iterator',
     'multiiterator',
     'range',
@@ -228,6 +223,7 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
 STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     FunctionType: 'function',
     OverloadType: 'multifunction',
+    SequenceType: 'generator',  # a group of expressed values is consumable like a generator; only the bare umbrella, `<int int> of? generator<int>` is TBD
 
     # TBD about these
     # IteratorType: 'iterator',
@@ -344,6 +340,15 @@ class TypeSystem:
         a_nom = self._structural_nominal(a)
         b_nom = self._structural_nominal(b)
 
+        # two sequences meet pointwise iff same arity; must come before the structural-equality fallback
+        if isinstance(a, SequenceType) and isinstance(b, SequenceType):
+            if len(a.items) != len(b.items):
+                return None
+            met = [intersect(x, y) for x, y in zip(a.items, b.items)]
+            if any(self.is_empty(m) for m in met):
+                return None
+            return SequenceType(met)
+
         # FunctionType & function (or any) => FunctionType; siblings => empty
         if a_nom is not None and isinstance(b, str):
             return a if self._is_nom_subtype(a_nom, b) else None
@@ -401,6 +406,10 @@ class TypeSystem:
         if a_nom is not None and isinstance(b, str):
             if self._is_nom_subtype(a_nom, b):
                 return True
+
+        # sequences relate pointwise; must come before the structural-equality fallback
+        if isinstance(a, SequenceType) and isinstance(b, SequenceType):
+            return len(a.items) == len(b.items) and all(self.is_subtype(x, y) for x, y in zip(a.items, b.items))
 
         if a_nom is not None and self._structural_nominal(b) is not None:
             if isinstance(a, (FunctionType, OverloadType)) and isinstance(b, (FunctionType, OverloadType)):
@@ -738,7 +747,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -751,21 +760,25 @@ type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
 def intersect(*xs: TypeExpr) -> TypeExpr:
     """Build the intersection of type expressions.
 
-    Flattens nested TypeAnd nodes and absorbs identities/annihilators:
+    Flattens nested TypeAnd nodes, drops duplicate members, and absorbs identities/annihilators:
     - `any` is dropped (T & any = T)
     - `never` short-circuits to `never` (T & never = never)
     - no conjuncts left → `any`; a single conjunct → that type alone
     """
     flat: list[TypeExpr] = []
+    def add(x: TypeExpr) -> None:
+        if x not in flat:
+            flat.append(x)
     for x in xs:
         if x == TOP_TYPE:
             continue
         if x == BOTTOM_TYPE:
             return BOTTOM_TYPE
         if isinstance(x, TypeAnd):
-            flat.extend(x.items)
+            for item in x.items:
+                add(item)
         else:
-            flat.append(x)
+            add(x)
     if not flat:
         return TOP_TYPE
     if len(flat) == 1:
@@ -776,26 +789,49 @@ def intersect(*xs: TypeExpr) -> TypeExpr:
 def union(*xs: TypeExpr) -> TypeExpr:
     """Build the union of type expressions.
 
-    Flattens nested TypeOr nodes and absorbs identities/annihilators:
+    Flattens nested TypeOr nodes, drops duplicate members, and absorbs identities/annihilators:
     - `never` is dropped (T | never = T)
     - `any` short-circuits to `any` (T | any = any)
     - no disjuncts left → `never`; a single disjunct → that type alone
     """
     flat: list[TypeExpr] = []
+    def add(x: TypeExpr) -> None:
+        if x not in flat:
+            flat.append(x)
     for x in xs:
         if x == BOTTOM_TYPE:
             continue
         if x == TOP_TYPE:
             return TOP_TYPE
         if isinstance(x, TypeOr):
-            flat.extend(x.items)
+            for item in x.items:
+                add(item)
         else:
-            flat.append(x)
+            add(x)
     if not flat:
         return BOTTOM_TYPE
     if len(flat) == 1:
         return flat[0]
     return TypeOr(flat)
+
+
+def sequence(*items: TypeExpr) -> Type:
+    """Collapse expressed-value types: 0 items -> void, 1 -> that item, n -> SequenceType.
+
+    Nested SequenceTypes are flattened since () groups are non-semantic: `(1 (2 3))` expresses
+    three values. Flattening applies only to sequences — a generator<...> value is one value.
+    """
+    flat: list[TypeExpr] = []
+    for x in items:
+        if isinstance(x, SequenceType):
+            flat.extend(x.items)
+        else:
+            flat.append(x)
+    if not flat:
+        return VOID_TYPE
+    if len(flat) == 1:
+        return flat[0]
+    return SequenceType(flat)
 
 
 # ---------------------------------------------------------------------------
@@ -827,6 +863,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return intersect(*(to_nnf(x) for x in t.items))
     if isinstance(t, TypeParameterize):
         return TypeParameterize(to_nnf(t.t), [to_nnf(a) for a in t.args])
+    if isinstance(t, SequenceType):
+        return SequenceType([to_nnf(x) for x in t.items])
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
 
 
@@ -846,7 +884,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -944,6 +982,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return TypeNot(substitute_type(t.type, bindings))
     if isinstance(t, TypeParameterize):
         return TypeParameterize(substitute_type(t.t, bindings), [substitute_type(a, bindings) for a in t.args])
+    if isinstance(t, SequenceType):
+        return SequenceType([substitute_type(x, bindings) for x in t.items])
     if isinstance(t, FunctionType):
         nested_shadow = {gp.name for gp in t.type_params}
         inner = {k: v for k, v in bindings.items() if k not in nested_shadow}

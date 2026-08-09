@@ -14,6 +14,7 @@ features
 from textwrap import indent
 from ..reporting import SrcFile
 from ..semantic import hir, check, ty
+from ..semantic.hir_display import type_to_dewy
 from dataclasses import dataclass
 
 import pdb
@@ -66,8 +67,15 @@ def codegen_inner(ast: hir.AST) -> str:
     return '\n'.join(code)
 def emit_arg(arg: hir.Param | hir.BoundParam) -> str:
     if isinstance(arg, hir.BoundParam):
-        return f'{arg.name}:{arg.type}={arg.value}'
-    return f'{arg.name}:{arg.type}'
+        return f'{arg.name}:{type_to_dewy(arg.type)}={arg.value}'
+    return f'{arg.name}:{type_to_dewy(arg.type)}'
+
+def _contains_return(node: hir.AST) -> bool:
+    if isinstance(node, hir.Return):
+        return True
+    if isinstance(node, hir.Block):
+        return any(_contains_return(item) for item in node.items)
+    return False
 
 def emit_function_decl(name: str, func: hir.FunctionLiteral) -> str:
     code: list[str] = []
@@ -76,7 +84,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral) -> str:
     # build the argument list
     args: list[str] = []
     for arg in func.pos_or_kw_args:
-        args.append(f'{arg.name}:{arg.type}')
+        args.append(emit_arg(arg))
     if func.rest_args is not None:
         args.append(f'...{emit_arg(func.rest_args)}')
     if func.kw_only_args:
@@ -85,9 +93,18 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral) -> str:
             args.append(emit_arg(arg))
 
     code.append(' '.join(args))
-    code.append(f'):>{func.rettype} => ')
-    code.append(emit_ast(func.body))
-    # code.append('}')
+    code.append(f'):>{type_to_dewy(func.rettype)} => ')
+
+    # udewy function bodies must return explicitly, so expression bodies get wrapped in a
+    # return. NOTE: this lowering's real home is MIR (see the terminator sketch in mir.py)
+    body = func.body
+    if _contains_return(body):
+        code.append(emit_ast(body))
+    elif func.rettype == ty.VOID_TYPE:
+        stmts = [emit_ast(item) for item in body.items] if isinstance(body, hir.Block) else [emit_ast(body)]
+        code.append('{\n' + indent('\n'.join([*stmts, 'return void']), TAB) + '\n}')
+    else:
+        code.append('{\n' + indent(f'return {emit_ast(body)}', TAB) + '\n}')
     return ''.join(code)
 
 def emit_ast(ast: hir.AST) -> str:
@@ -105,15 +122,10 @@ def emit_integer(i: hir.Integer) -> str:
     pdb.set_trace()
 
 def emit_block(block: hir.Block) -> str:
-    
-    code: list[str] = []
-    for item in block.items:
-        code.append(emit_ast(item))
-
-    inner_str = ''.join(code)
+    inner = indent('\n'.join(emit_ast(item) for item in block.items), TAB)
     if block.scoped:
-        return f'{{{inner_str}}}'
-    return f'({inner_str})'
+        return f'{{\n{inner}\n}}'
+    return f'(\n{inner}\n)'
 # def emit_expr(expr: hir.AST. ctx: Context) -> str:
 
 def emit_bool(expr: hir.Bool, ctx: Context) -> str:
@@ -122,6 +134,8 @@ def emit_bool(expr: hir.Bool, ctx: Context) -> str:
 
 def emit_return(expr: hir.Return) -> str:
     #TODO: check is this type returnable?
+    if expr.item is None:
+        return 'return void'  # udewy requires an explicit value
     return f'return {emit_ast(expr.item)}'
 
 
