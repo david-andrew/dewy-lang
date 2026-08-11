@@ -67,6 +67,15 @@ class Declare(AST):
 class ExpressedIdentifier(AST):
     name: str
 
+
+@dataclass
+class Assign(AST):
+    """Assignment statement; compound operators remain explicit until MIR lowering."""
+    target: ExpressedIdentifier
+    op: str
+    value: AST
+
+
 @dataclass
 class Bool(AST):
     value: bool
@@ -85,6 +94,12 @@ class String(AST):
 @dataclass
 class ValueCast(AST):
     """Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target."""
+    expr: AST
+
+
+@dataclass
+class Transmute(AST):
+    """Bit-preserving reinterpretation. `type` is the target type."""
     expr: AST
 
 

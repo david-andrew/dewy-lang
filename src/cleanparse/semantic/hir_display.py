@@ -16,6 +16,8 @@ def type_to_dewy(t: ty.Type) -> str:
     """Render a type as Dewy source syntax."""
     if isinstance(t, str):
         return t
+    if isinstance(t, ty.IntegerLiteralType):
+        return str(t.value)
     if isinstance(t, ty.TypeAnd):
         return ' & '.join(_type_atom_parens(x) for x in t.items)
     if isinstance(t, ty.TypeOr):
@@ -102,6 +104,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     if isinstance(node, hir.Declare):
         ann = f':{type_to_dewy(node.annotation)}' if node.annotation is not None else ''
         return f'Declare({node.decltype} {node.name}{ann})'
+    if isinstance(node, hir.Assign):
+        return f'Assign({node.op})'
     if isinstance(node, hir.ExpressedIdentifier):
         return f'ExpressedIdentifier({node.name})'
     if isinstance(node, hir.Bool):
@@ -112,6 +116,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'String({node.content!r})'
     if isinstance(node, hir.ValueCast):
         return f'ValueCast(as {type_to_dewy(node.type)})'
+    if isinstance(node, hir.Transmute):
+        return f'Transmute({type_to_dewy(node.type)})'
     if isinstance(node, hir.BoundParam):
         return f'BoundParam({node.name}:{type_to_dewy(node.type)})'
     if isinstance(node, hir.Param):
@@ -146,7 +152,11 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('item', node.item)] if node.item is not None else []
     if isinstance(node, hir.Declare):
         return [('expr', node.expr)]
+    if isinstance(node, hir.Assign):
+        return [('target', node.target), ('value', node.value)]
     if isinstance(node, hir.ValueCast):
+        return [('expr', node.expr)]
+    if isinstance(node, hir.Transmute):
         return [('expr', node.expr)]
     if isinstance(node, hir.BoundParam):
         return [('value', node.value)]
@@ -348,6 +358,12 @@ _DUNDER_TO_BINOP: dict[str, str] = {
     '__xnor__': 'xnor',
     '__lshift__': '<<',
     '__rshift__': '>>',
+    '__eq__': '=?',
+    '__ne__': 'not=?',
+    '__gt__': '>?',
+    '__lt__': '<?',
+    '__ge__': '>=?',
+    '__le__': '<=?',
 }
 for _sym, _dunder in builtins.BINOP_DUNDER_MAP.items():
     _DUNDER_TO_BINOP[_dunder] = _sym
@@ -364,7 +380,8 @@ for _sym, _dunder in builtins.UNARY_PREFIX_DUNDER_MAP.items():
 
 def _op_prec(sym: str | type) -> int:
     """Precedence level for an operator symbol (or quantum juxtapose type)."""
-    p = p0.precedence_table[sym]
+    lookup = sym[3:] if isinstance(sym, str) and sym.startswith('not') and sym[3:] in p0.precedence_table else sym
+    p = p0.precedence_table[lookup]
     if not isinstance(p, int):
         # quantum prec — take minimum (weakest) for parenthesizing safety
         return min(p.values.keys())
@@ -372,6 +389,7 @@ def _op_prec(sym: str | type) -> int:
 
 
 _AS_PREC = _op_prec('as')
+_TRANSMUTE_PREC = _op_prec('transmute')
 _AND_PREC = _op_prec('&')
 _RANGE_PREC = _op_prec(t2.RangeJuxtapose)
 _ARROW_PREC = _op_prec('=>')
@@ -410,7 +428,7 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _param_doc(node, indent)
     assert isinstance(node, hir.AST)
     if isinstance(node, hir.Void):
-        return _text('')
+        return _text('void')
     if isinstance(node, hir.Integer):
         return _text(_format_integer(node))
     if isinstance(node, hir.Bool):
@@ -431,6 +449,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
             _text(f'{node.decltype} {node.name}{ann} ='),
             _seq(_SOFT, _to_doc(node.expr, 0, indent)),
         ))
+    if isinstance(node, hir.Assign):
+        return _group(_seq(
+            _to_doc(node.target, 0, indent),
+            _text(f' {node.op}'),
+            _seq(_SOFT, _to_doc(node.value, 0, indent)),
+        ))
     if isinstance(node, hir.ValueCast):
         # `ValueCast.type` is the cast target (the value's expressed type).
         inner = _seq(
@@ -439,6 +463,15 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
             _text(type_to_dewy(node.type)),
         )
         if _AS_PREC < min_prec:
+            return _seq(_text('('), inner, _text(')'))
+        return inner
+    if isinstance(node, hir.Transmute):
+        inner = _seq(
+            _to_doc(node.expr, _TRANSMUTE_PREC + 1, indent),
+            _text(' transmute '),
+            _text(type_to_dewy(node.type)),
+        )
+        if _TRANSMUTE_PREC < min_prec:
             return _seq(_text('('), inner, _text(')'))
         return inner
     if isinstance(node, hir.FunctionCall):
@@ -532,7 +565,8 @@ def _call_doc(node: hir.FunctionCall, min_prec: int, indent: int) -> Doc:
     if (unary := _prefix_call(node)) is not None:
         sym, arg = unary
         prec = _op_prec(sym)
-        doc = _seq(_text(sym), _to_doc(arg, prec, indent))
+        prefix = f'{sym} ' if sym.isalpha() else sym
+        doc = _seq(_text(prefix), _to_doc(arg, prec, indent))
         if prec < min_prec:
             return _seq(_text('('), doc, _text(')'))
         return doc

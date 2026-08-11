@@ -82,6 +82,26 @@ def test_dewy_value_cast():
     assert hir_to_dewy(node) == '1 as float'
 
 
+def test_dewy_assign_and_transmute():
+    assignment = hir.Assign(LOC, 'void', _id('x', 'int'), '+=', _int(1))
+    transmute = hir.Transmute(LOC, 'int', hir.Bool(LOC, 'bool', True))
+
+    assert hir_to_tree_str(assignment).startswith('Assign(+=)')
+    assert hir_to_dewy(assignment) == 'x += 1'
+    assert hir_to_tree_str(transmute) == 'Transmute(int)\n└── expr: Bool(True)'
+    assert hir_to_dewy(transmute) == 'true transmute int'
+
+
+def test_dewy_prefix_comparison_and_void():
+    prefix = _call('__not__', hir.Bool(LOC, 'bool', True), typ='bool')
+    comparison = _call('__ne__', _int(1), _int(2), typ='bool')
+    returned = hir.Return(LOC, 'never', hir.Void(LOC, 'void'))
+
+    assert hir_to_dewy(prefix) == 'not true'
+    assert hir_to_dewy(comparison) == '1 not=? 2'
+    assert hir_to_dewy(returned) == 'return void'
+
+
 def test_dewy_function_literal():
     body = _int(0)
     node = hir.FunctionLiteral(

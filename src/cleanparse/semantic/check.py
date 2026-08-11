@@ -96,17 +96,15 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return tcr_assign(ast, ctx=ctx)
 
         case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected)
+        case p0.Prefix(): return tcr_prefix(ast, ctx=ctx, expected=expected)
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected)
         case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
+        case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
         case p0.Atom(item=t1.String(content=content)): return hir.String(ast.item.loc, 'string', content)
         case p0.Atom(item=t1.Integer(value=value)):
-            # integer literals adopt a compatible expected numeric type directly
-            # (e.g. `let x:float = 1` makes a float literal, not a cast on an int literal)
-            t = 'int'
-            if isinstance(expected, str) and expected != 'int' and ctx.type_system.is_subtype(expected, 'number'):
-                t = expected
-            return hir.Integer(ast.item.loc, t, value.prefix, t0.parse_integer(value.src, value.prefix))
+            parsed = t0.parse_integer(value.src, value.prefix)
+            return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
         # case p0.Atom(item=t1.Real()): ...
         # case p0.Atom(item=t1.BasedString()): ...
         # case p0.Atom(item=t1.Semicolon()): ...
@@ -211,7 +209,39 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     compiletime assignments, e.g. `name::value`
     implicit declarations, e.g. `name:=value`
     """
-    not_implemented(ctx.srcfile, ast.loc, 'assignment')
+    assert isinstance(ast.op, t1.Operator)
+    if ast.op.symbol != '=':
+        not_implemented(ctx.srcfile, ast.op.loc, f'assignment operator `{ast.op.symbol}`')
+
+    target = tcr_assignment_target(ast.left, ctx=ctx)
+    value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
+    value = check_against(value, target.type, ctx=ctx)
+    return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
+
+
+def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
+    """Typecheck a simple compound assignment while retaining its source operator."""
+    assert isinstance(ast.op, t2.CombinedAssignmentOp)
+    if not isinstance(ast.op.op, t1.Operator):
+        not_implemented(ctx.srcfile, ast.op.loc, 'broadcast compound assignment')
+    symbol = ast.op.op.symbol
+    if symbol not in builtins.BINOP_DUNDER_MAP:
+        not_implemented(ctx.srcfile, ast.op.loc, f'compound assignment operator `{symbol}=`')
+
+    target = tcr_assignment_target(ast.left, ctx=ctx)
+    value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
+    result = _dispatch_builtin(
+        builtins.BINOP_DUNDER_MAP[symbol],
+        [target, value],
+        loc=ast.loc,
+        op_loc=ast.op.loc,
+        source_name=symbol,
+        ctx=ctx,
+        expected=target.type,
+    )
+    check_against(result, target.type, ctx=ctx)
+    return hir.Assign(ast.loc, ty.VOID_TYPE, target, f'{symbol}=', value)
+
 
 def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     not_implemented(ctx.srcfile, ast.loc, 'import')
@@ -333,6 +363,77 @@ def _is_overload_constructor(fname: str, method: ty.FunctionType) -> bool:
     return fname == '__and__' and method.ret == 'multifunction'
 
 
+def _dispatch_builtin(
+    fname: str,
+    args: list[hir.AST],
+    *,
+    loc: Span,
+    op_loc: Span,
+    source_name: str,
+    ctx: Context,
+    expected: ty.Type | None = None,
+) -> hir.AST:
+    """Resolve a builtin dunder call and apply any selected promotions."""
+    ftype = ctx.declarations[fname]
+    assert isinstance(ftype, (ty.FunctionType, ty.OverloadType)), (
+        f'INTERNAL ERROR: builtin function type expected, got {type(ftype)}'
+    )
+    methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
+    arg_types = [require_valued(arg.type, ctx.srcfile, arg.loc, f'operand of `{source_name}`') for arg in args]
+    try:
+        expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
+        result = ctx.type_system.match_best_function(methods, arg_types, expected_return=expected_return)
+    except ty.DispatchError as e:
+        pointers = [Pointer(span=op_loc, message=str(e))]
+        pointers.extend(
+            Pointer(span=arg.loc, message=f'operand has type `{type_to_dewy(arg.type)}`')
+            for arg in args
+        )
+        type_error(ctx.srcfile, f'no matching overload for operator `{source_name}`', *pointers)
+
+    if len(args) == 2 and _is_overload_constructor(fname, result.method):
+        left, right = args
+        combined = ty.OverloadType(_function_methods(left.type) + _function_methods(right.type))
+        return hir.OverloadedFunction(
+            loc,
+            combined,
+            _function_alternates(left) + _function_alternates(right),
+        )
+
+    return hir.FunctionCall(
+        loc,
+        result.method.ret,
+        hir.ExpressedIdentifier(op_loc, result.method, fname),
+        apply_promotions(args, result.promote_pos),
+        {},
+    )
+
+
+def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = None) -> hir.AST:
+    """Typecheck a prefix operator through its builtin dunder."""
+    if not isinstance(prefix.op, t1.Operator):
+        not_implemented(ctx.srcfile, prefix.op.loc, 'broadcast prefix operator')
+    if prefix.op.symbol not in builtins.UNARY_PREFIX_DUNDER_MAP:
+        not_implemented(ctx.srcfile, prefix.op.loc, f'prefix operator `{prefix.op.symbol}`')
+
+    item = typecheck_and_resolve_inner(prefix.item, ctx=ctx)
+    result = _dispatch_builtin(
+        builtins.UNARY_PREFIX_DUNDER_MAP[prefix.op.symbol],
+        [item],
+        loc=prefix.loc,
+        op_loc=prefix.op.loc,
+        source_name=prefix.op.symbol,
+        ctx=ctx,
+        expected=expected,
+    )
+    if isinstance(item, hir.Integer) and isinstance(result, hir.FunctionCall):
+        if prefix.op.symbol == '-':
+            return replace(result, type=ty.IntegerLiteralType(-item.value))
+        if prefix.op.symbol in ('not', '~'):
+            return replace(result, type=ty.IntegerLiteralType(~item.value))
+    return result
+
+
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
@@ -352,17 +453,42 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     if isinstance(binop.op, t2.CallJuxtapose):
         left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
-        return tcr_function_call(left, binop.right, ctx=ctx)
+        return tcr_function_call(left, binop.right, ctx=ctx, expected=expected)
+
+    if isinstance(binop.op, t2.CombinedAssignmentOp):
+        return tcr_combined_assign(binop, ctx=ctx)
 
     # Special cases that don't just typecheck both sides
     symbol = binop.op.symbol if isinstance(binop.op, t1.Operator) else None
     if symbol == '=>': return tcr_function_literal(binop, ctx=ctx, expected=expected)
 
+    if symbol == 'transmute':
+        item = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        require_valued(item.type, ctx.srcfile, item.loc, 'transmute operand')
+        target = ast_to_type(binop.right, ctx=ctx)
+        return hir.Transmute(binop.loc, target, item)
+
+    if symbol == 'as':
+        not_implemented(ctx.srcfile, binop.op.loc, 'value conversion with `as`')
+
     if symbol in ('=','::',':='):
-        #TODO: determine if assignment or declaration based on if the right already declared
-        right = typecheck_and_resolve_inner(binop.right, ctx=ctx)
-        target = tcr_assignment_target(binop.left, right, ctx=ctx)
-        not_implemented(ctx.srcfile, binop.loc, 'bare assignment')
+        return tcr_assign(binop, ctx=ctx, expected=expected)
+
+    if isinstance(binop.op, t2.InvertedComparisonOp):
+        fname = builtins.INVERTED_COMPARISON_DUNDER_MAP.get(binop.op.op)
+        if fname is None:
+            not_implemented(ctx.srcfile, binop.op.loc, f'inverted comparison `not{binop.op.op}`')
+        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
+        right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
+        return _dispatch_builtin(
+            fname,
+            [left, right],
+            loc=binop.loc,
+            op_loc=binop.op.loc,
+            source_name=f'not{binop.op.op}',
+            ctx=ctx,
+            expected=expected,
+        )
 
     # TODO: other more specialized structures (e.g. assignment, spread, collect, parameterization, etc.)
 
@@ -385,8 +511,6 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         case t2.EllipsisJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'ellipsis juxtapose')
         case t2.TypeParamJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'type parameterization')
         case t2.SemicolonJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'semicolon juxtapose')
-        case t2.CombinedAssignmentOp(): not_implemented(ctx.srcfile, binop.loc, 'combined assignment operator')
-        case t2.InvertedComparisonOp(): not_implemented(ctx.srcfile, binop.loc, 'inverted comparison operator')
         case t2.BroadcastOp(): not_implemented(ctx.srcfile, binop.loc, 'broadcast operator')
     
     # TODO: eventually should be able to remove this check once all the arms of the above match are implemented
@@ -395,36 +519,14 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     # general case, delegate to the builtin __dunder__ method
     if binop.op.symbol in builtins.BINOP_DUNDER_MAP:
-        fname = builtins.BINOP_DUNDER_MAP[binop.op.symbol]
-        ftype = ctx.declarations[fname]
-        assert isinstance(ftype, (ty.FunctionType, ty.OverloadType)), f'INTERNAL ERROR: builtin function type expected, got {type(ftype)}'
-        methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
-        try:
-            result = ctx.type_system.match_best_function(methods, [left.type, right.type])
-        except ty.DispatchError as e:
-            type_error(ctx.srcfile, f'no matching overload for operator `{binop.op.symbol}`',
-                Pointer(span=binop.op.loc, message=str(e)),
-                Pointer(span=left.loc, message=f'left operand is `{type_to_dewy(left.type)}`'),
-                Pointer(span=right.loc, message=f'right operand is `{type_to_dewy(right.type)}`'))
-
-        # special case for `&`/`and` function overloading
-        # preserve the operands and their precise methods instead of emitting a runtime __and__ call.
-        # TODO: eventually have a more general path for similar cases
-        if _is_overload_constructor(fname, result.method):
-            combined = ty.OverloadType(_function_methods(left.type) + _function_methods(right.type))
-            return hir.OverloadedFunction(
-                Span(left.loc.start, right.loc.stop),
-                combined,
-                _function_alternates(left) + _function_alternates(right),
-            )
-
-        left_arg, right_arg = apply_promotions([left, right], result.promote_pos)
-        return hir.FunctionCall(
-            Span(left.loc.start, right.loc.stop),
-            result.method.ret,
-            hir.ExpressedIdentifier(binop.op.loc, result.method, fname),
-            [left_arg, right_arg],
-            {},
+        return _dispatch_builtin(
+            builtins.BINOP_DUNDER_MAP[binop.op.symbol],
+            [left, right],
+            loc=Span(left.loc.start, right.loc.stop),
+            op_loc=binop.op.loc,
+            source_name=binop.op.symbol,
+            ctx=ctx,
+            expected=expected,
         )
     
 
@@ -467,11 +569,13 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
 
 
-def tcr_assignment_target(target: p0.AST, right: hir.AST, *, ctx: Context):  # -> UndeclaredIdentifier|Identifier|Unpack|ArrayRangeTarget|etc.
-    """
-    verify that the assignment target is valid and can receive the right-hand side expression
-    """
-    not_implemented(ctx.srcfile, target.loc, 'assignment target')
+def tcr_assignment_target(target: p0.AST, *, ctx: Context) -> hir.ExpressedIdentifier:
+    """Resolve a Stage 1 assignment target, currently limited to declared identifiers."""
+    if not isinstance(target, p0.Atom) or not isinstance(target.item, t1.Identifier):
+        not_implemented(ctx.srcfile, target.loc, 'non-identifier assignment target')
+    resolved = tcr_identifier(target.item, ctx=ctx)
+    assert isinstance(resolved, hir.ExpressedIdentifier)
+    return resolved
 
 def tcr_bare_range(ast: p0.Flat, *, ctx: Context, expected: ty.Type|None=None) -> hir.Range:
     """
@@ -723,7 +827,12 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     return pos_or_kw_args, kw_only_args, rest_args
 
 
-def parse_call_arguments(right: p0.AST, *, ctx: Context) -> tuple[list[hir.AST], dict[str, hir.AST]]:
+def parse_call_arguments(
+    right: p0.AST,
+    *,
+    ctx: Context,
+    method: ty.FunctionType | None = None,
+) -> tuple[list[hir.AST], dict[str, hir.AST]]:
     """Typecheck call args from p0, splitting positional vs `name=value` keywords."""
     if isinstance(right, p0.Block):
         items = list(right.inner)
@@ -738,9 +847,17 @@ def parse_call_arguments(right: p0.AST, *, ctx: Context) -> tuple[list[hir.AST],
                 if name in kw_args:
                     user_error(ctx.srcfile, f'duplicate keyword argument `{name}`',
                         Pointer(span=target.loc, message='already given earlier in this call'))
-                kw_args[name] = typecheck_and_resolve_inner(value, ctx=ctx)
+                param = next((p for p in method.pos_or_kw if p.name == name), None) if method is not None else None
+                if param is None and method is not None:
+                    param = next((p for p in method.kw_only if p.name == name), None)
+                expected_arg = param.type if param is not None else None
+                arg = typecheck_and_resolve_inner(value, ctx=ctx, expected=expected_arg)
+                kw_args[name] = check_against(arg, expected_arg, ctx=ctx) if expected_arg is not None else arg
             case _:
-                pos_args.append(typecheck_and_resolve_inner(item, ctx=ctx))
+                index = len(pos_args)
+                expected_arg = method.pos_or_kw[index].type if method is not None and index < len(method.pos_or_kw) else None
+                arg = typecheck_and_resolve_inner(item, ctx=ctx, expected=expected_arg)
+                pos_args.append(check_against(arg, expected_arg, ctx=ctx) if expected_arg is not None else arg)
     return pos_args, kw_args
 
 
@@ -754,11 +871,18 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         type_error(ctx.srcfile, 'call target is not a function',
             Pointer(span=left.loc, message=f'this has type `{type_to_dewy(left.type)}`, which is not callable'))
 
-    pos_args, kw_args = parse_call_arguments(right, ctx=ctx)
+    contextual_method = methods[0] if len(methods) == 1 and not methods[0].type_params else None
+    pos_args, kw_args = parse_call_arguments(right, ctx=ctx, method=contextual_method)
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:
-        result = ctx.type_system.match_best_function(methods, pos_types, kw_types)
+        expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
+        result = ctx.type_system.match_best_function(
+            methods,
+            pos_types,
+            kw_types,
+            expected_return=expected_return,
+        )
     except ty.DispatchError as e:
         type_error(ctx.srcfile, 'no matching method for call',
             Pointer(span=left.loc, message='calling this'),

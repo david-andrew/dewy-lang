@@ -1,0 +1,15 @@
+let main = ():>int64 => {
+    let truth:bool = true
+    let inverted:bool = not truth
+    let hex:int64 = 0x20
+    let bits:int64 = 0b100
+    let shifted:int64 = bits << 2
+    let lowered:int64 = __signed_shr__(shifted 4)
+    let logical:uint64 = 0xffffffffffffffff >> 63
+    let product:int64 = shifted * 3
+    let quotient:int64 = product // 4
+    let remainder:int64 = 11 % 3
+    let adjusted:int64 = quotient - remainder
+    let negative:int64 = -2
+    return (((hex + adjusted) + lowered) + (logical transmute int64)) + negative
+}

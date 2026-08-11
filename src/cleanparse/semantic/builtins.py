@@ -9,24 +9,37 @@ from . import ty
 BINOP_DUNDER_MAP = {
     # binary operators
     '+': '__add__',
-    # '-': '__sub__',
-    # '*': '__mul__',
+    '-': '__sub__',
+    '*': '__mul__',
     # '/': '__truediv__',
-    # '//': '__floordiv__',
+    '//': '__floordiv__',
     # '\\': '__solve__',
-    # '%': '__mod__',
+    '%': '__mod__',
     # '^': '__pow__',
     # '.': '__access__',
-    # 'and': '__and__',
+    '=?': '__eq__',
+    '>?': '__gt__',
+    '<?': '__lt__',
+    '>=?': '__ge__',
+    '<=?': '__le__',
+    'and': '__and__',
     '&': '__and__',
-    # 'or': '__or__',
-    # '|': '__or__',
-    # 'xor': '__xor__',
+    'or': '__or__',
+    '|': '__or__',
+    'xor': '__xor__',
     # 'nand': '__nand__',
     # 'nor': '__nor__',
     # 'xnor': '__xnor__',
-    # '>>': '__rshift__',
-    # '<<': '__lshift__',
+    '>>': '__rshift__',
+    '<<': '__lshift__',
+}
+
+INVERTED_COMPARISON_DUNDER_MAP = {
+    '=?': '__ne__',
+    '>?': '__le__',
+    '<?': '__ge__',
+    '>=?': '__lt__',
+    '<=?': '__gt__',
 }
 
 """
@@ -36,13 +49,13 @@ indexing: `x[y]` -> `__index__(x y)`
 
 UNARY_PREFIX_DUNDER_MAP = {
     # unary prefix operators
-    # '~': '__not__',
-    # 'not': '__not__',
+    '~': '__not__',
+    'not': '__not__',
     # '`': '__cycle_left__',
     # '*': '__unary_multiply__',
     # '/': '__unary_divide__',
     # '+': '__unary_add__',
-    # '-': '__unary_sub__',
+    '-': '__unary_sub__',
 
 }
 
@@ -100,46 +113,107 @@ __xnor__ = ( <T of int>(left:T right:T):>T => builtin )
          & ( (left:iterator|multiiterator right:iterator|multiiterator):>multiiterator => builtin )
 
 """
-# TODO: dealing with type promotions.
-# probably the dispatch system would be able to track promotions that need to happen
-builtin_types: dict[str, ty.TypeExpr] = {
-    '__add__': ty.FunctionType(
+def _binary_generic(bound: ty.TypeExpr, ret: ty.TypeExpr = 'T') -> ty.FunctionType:
+    return ty.FunctionType(
         [ty.PosOrKwArg('left', 'T'), ty.PosOrKwArg('right', 'T')],
         [],
         None,
+        ret,
+        [ty.GenericParam('T', bound)],
+    )
+
+
+def _binary_concrete(arg: ty.TypeExpr, ret: ty.TypeExpr = 'int') -> ty.FunctionType:
+    return ty.FunctionType(
+        [ty.PosOrKwArg('left', arg), ty.PosOrKwArg('right', arg)],
+        [],
+        None,
+        ret,
+        [],
+    )
+
+
+def _bitwise_overload(*, callable_overload: bool = False) -> ty.OverloadType:
+    methods = [
+        _binary_generic('int'),
+        _binary_concrete('bool', 'bool'),
+    ]
+    if callable_overload:
+        methods.append(
+            ty.FunctionType(
+                [
+                    ty.PosOrKwArg('left', ty.TypeOr(['function', 'multifunction'])),
+                    ty.PosOrKwArg('right', ty.TypeOr(['function', 'multifunction'])),
+                ],
+                [],
+                None,
+                'multifunction',
+                [],
+            )
+        )
+    return ty.OverloadType(methods)
+
+
+def _unary_generic(bound: ty.TypeExpr) -> ty.FunctionType:
+    return ty.FunctionType(
+        [ty.PosOrKwArg('item', 'T')],
+        [],
+        None,
         'T',
-        [ty.GenericParam('T', 'number')]
-    ),
-    '__and__': ty.OverloadType([
+        [ty.GenericParam('T', bound)],
+    )
+
+
+def _shift_generic() -> ty.FunctionType:
+    return ty.FunctionType(
+        [ty.PosOrKwArg('left', 'T'), ty.PosOrKwArg('right', 'int')],
+        [],
+        None,
+        'T',
+        [ty.GenericParam('T', 'int')],
+    )
+
+
+def _signed_shift_intrinsic() -> ty.FunctionType:
+    return ty.FunctionType(
+        [ty.PosOrKwArg('left', 'int64'), ty.PosOrKwArg('right', 'int')],
+        [],
+        None,
+        'int64',
+    )
+
+
+# TODO: dealing with type promotions.
+# probably the dispatch system would be able to track promotions that need to happen
+builtin_types: dict[str, ty.TypeExpr] = {
+    '__add__': _binary_generic('number'),
+    '__sub__': _binary_generic('number'),
+    '__mul__': _binary_generic('number'),
+    '__floordiv__': _binary_generic('int'),
+    '__mod__': _binary_generic('int'),
+    '__lshift__': _shift_generic(),
+    '__rshift__': _shift_generic(),
+    '__signed_shr__': _signed_shift_intrinsic(),
+    '__eq__': _binary_generic(ty.TOP_TYPE, 'bool'),
+    '__ne__': _binary_generic(ty.TOP_TYPE, 'bool'),
+    '__gt__': _binary_generic('number', 'bool'),
+    '__lt__': _binary_generic('number', 'bool'),
+    '__ge__': _binary_generic('number', 'bool'),
+    '__le__': _binary_generic('number', 'bool'),
+    '__and__': _bitwise_overload(callable_overload=True),
+    '__or__': _bitwise_overload(),
+    '__xor__': _bitwise_overload(),
+    '__unary_sub__': _unary_generic('number'),
+    '__not__': ty.OverloadType([
+        _unary_generic('int'),
         ty.FunctionType(
-            [ty.PosOrKwArg('left', 'T'), ty.PosOrKwArg('right', 'T')],
-            [],
-            None,
-            'T',
-            [ty.GenericParam('T', 'int')]
-        ),
-        ty.FunctionType(
-            [ty.PosOrKwArg('left', 'bool'), ty.PosOrKwArg('right', 'bool')],
+            [ty.PosOrKwArg('item', 'bool')],
             [],
             None,
             'bool',
-            []
-        ),
-        ty.FunctionType(
-            [ty.PosOrKwArg('left', ty.TypeOr(['function', 'multifunction'])), ty.PosOrKwArg('right', ty.TypeOr(['function', 'multifunction']))],
             [],
-            None,
-            'multifunction',
-            []
         ),
-        # ty.FunctionType(
-        #     [ty.PosOrKwArg('left', ty.TypeOr(['iterator', 'multiiterator'])), ty.PosOrKwArg('right', ty.TypeOr(['iterator', 'multiiterator']))],
-        #     [],
-        #     None,
-        #     'multiiterator',
-        #     []
-        # ),
-    ])
+    ]),
 }
 
 # Explicit cross-branch promote rules (a, b, result). Along-edge cases use the subtype graph.

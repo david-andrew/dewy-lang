@@ -14,10 +14,48 @@ features
 from textwrap import indent
 from ..reporting import SrcFile
 from ..semantic import hir, check, ty
-from ..semantic.hir_display import type_to_dewy, _binop_call
+from ..semantic.hir_display import type_to_dewy
 from dataclasses import dataclass
 
 TAB = '    '
+
+UDEWY_BINOP_DUNDERS = {
+    '__add__': '+',
+    '__sub__': '-',
+    '__mul__': '*',
+    '__floordiv__': '//',
+    '__mod__': '%',
+    '__lshift__': '<<',
+    '__rshift__': '>>',
+    '__eq__': '=?',
+    '__ne__': 'not=?',
+    '__gt__': '>?',
+    '__lt__': '<?',
+    '__ge__': '>=?',
+    '__le__': '<=?',
+    '__and__': 'and',
+    '__or__': 'or',
+    '__xor__': 'xor',
+}
+
+UDEWY_PREFIX_DUNDERS = {
+    '__unary_sub__': '-',
+    '__not__': 'not',
+}
+
+SIGNED_FIXED_INTS = {'int8', 'int16', 'int32', 'int64'}
+UNSIGNED_FIXED_INTS = {'uint8', 'uint16', 'uint32', 'uint64'}
+NARROW_FIXED_INTS = {'int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32'}
+UNSUPPORTED_NARROW_DUNDERS = {
+    '__add__',
+    '__sub__',
+    '__mul__',
+    '__floordiv__',
+    '__mod__',
+    '__lshift__',
+    '__rshift__',
+}
+SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
 
 @dataclass
 class Context:
@@ -109,7 +147,11 @@ def emit_ast(ast: hir.AST) -> str:
         case hir.Block(): return emit_block(ast)
         case hir.Return(): return emit_return(ast)
         case hir.Integer(): return emit_integer(ast)
+        case hir.Bool(): return 'true' if ast.value else 'false'
+        case hir.Void(): return 'void'
         case hir.Declare(): return emit_declare(ast)
+        case hir.Assign(): return emit_assign(ast)
+        case hir.Transmute(): return emit_transmute(ast)
         case hir.ExpressedIdentifier(): return ast.name
         case hir.FunctionCall(): return emit_function_call(ast)
         case _:
@@ -121,10 +163,87 @@ def emit_declare(decl: hir.Declare) -> str:
     annotation = decl.annotation if decl.annotation is not None else decl.expr.type
     return f'{decl.decltype} {decl.name}:{type_to_dewy(annotation)} = {emit_ast(decl.expr)}'
 
+
+def emit_assign(assign: hir.Assign) -> str:
+    return f'{emit_ast(assign.target)} {assign.op} {emit_ast(assign.value)}'
+
+
+def emit_transmute(transmute: hir.Transmute) -> str:
+    return f'{emit_ast(transmute.expr)} transmute {type_to_dewy(transmute.type)}'
+
+
+def _binop_call(call: hir.FunctionCall) -> tuple[str, hir.AST, hir.AST] | None:
+    if len(call.pos_args) != 2 or call.kw_args or not isinstance(call.func, hir.ExpressedIdentifier):
+        return None
+    symbol = UDEWY_BINOP_DUNDERS.get(call.func.name)
+    if symbol is None:
+        return None
+    return symbol, call.pos_args[0], call.pos_args[1]
+
+
+def _prefix_call(call: hir.FunctionCall) -> tuple[str, hir.AST] | None:
+    if len(call.pos_args) != 1 or call.kw_args or not isinstance(call.func, hir.ExpressedIdentifier):
+        return None
+    symbol = UDEWY_PREFIX_DUNDERS.get(call.func.name)
+    if symbol is None:
+        return None
+    return symbol, call.pos_args[0]
+
+
+def _selected_first_parameter(call: hir.FunctionCall) -> ty.TypeExpr | None:
+    if not isinstance(call.func, hir.ExpressedIdentifier):
+        return None
+    if not isinstance(call.func.type, ty.FunctionType) or not call.func.type.pos_or_kw:
+        return None
+    return call.func.type.pos_or_kw[0].type
+
+
+def _check_supported_integer_operation(call: hir.FunctionCall) -> None:
+    if not isinstance(call.func, hir.ExpressedIdentifier):
+        return
+    name = call.func.name
+    if name not in UDEWY_BINOP_DUNDERS and name not in UDEWY_PREFIX_DUNDERS:
+        return
+    operand_type = _selected_first_parameter(call)
+    if operand_type == 'int':
+        raise NotImplementedError(
+            f'udewy codegen for abstract `int` operation `{name}` requires range-based lowering'
+        )
+    if operand_type in NARROW_FIXED_INTS and (
+        name in UNSUPPORTED_NARROW_DUNDERS or name in {'__unary_sub__', '__not__'}
+    ):
+        raise NotImplementedError(
+            f'udewy codegen for rollover operation `{name}` on `{operand_type}`'
+        )
+    if operand_type in UNSIGNED_FIXED_INTS and name in SIGNED_ONLY_DUNDERS:
+        raise NotImplementedError(
+            f'udewy codegen for unsigned operation `{name}` on `{operand_type}`'
+        )
+
+
 def emit_function_call(call: hir.FunctionCall) -> str:
+    _check_supported_integer_operation(call)
+    if (
+        isinstance(call.func, hir.ExpressedIdentifier)
+        and call.func.name == '__rshift__'
+        and len(call.pos_args) == 2
+        and not call.kw_args
+    ):
+        left, right = call.pos_args
+        operand_type = _selected_first_parameter(call)
+        if operand_type in SIGNED_FIXED_INTS:
+            return f'__signed_shr__({emit_ast(left)} {emit_ast(right)})'
+        if operand_type not in UNSIGNED_FIXED_INTS:
+            raise NotImplementedError(
+                f'udewy codegen for right shift of `{type_to_dewy(operand_type)}`'
+            )
     if (binop := _binop_call(call)) is not None:
         sym, left, right = binop
         return f'{emit_operand(left)} {sym} {emit_operand(right)}'
+    if (prefix := _prefix_call(call)) is not None:
+        sym, item = prefix
+        separator = ' ' if sym.isalpha() else ''
+        return f'{sym}{separator}{emit_operand(item)}'
     if call.kw_args:
         raise NotImplementedError('udewy codegen for keyword arguments')
     args = ' '.join(emit_ast(arg) for arg in call.pos_args)
@@ -137,10 +256,15 @@ def emit_operand(node: hir.AST) -> str:
     return emit_ast(node)
 
 def emit_integer(i: hir.Integer) -> str:
-    if i.prefix == '0d': return f'{i.value}'
-    raise NotImplementedError(f'udewy codegen for integer literals with prefix {i.prefix!r}')
+    if i.prefix == '0x':
+        return f'0x{i.value:x}'
+    if i.prefix == '0b':
+        return f'0b{i.value:b}'
+    return str(i.value)
 
 def emit_block(block: hir.Block) -> str:
+    if not block.scoped and len(block.items) == 1:
+        return f'({emit_ast(block.items[0])})'
     inner = indent('\n'.join(emit_ast(item) for item in block.items), TAB)
     if block.scoped:
         return f'{{\n{inner}\n}}'

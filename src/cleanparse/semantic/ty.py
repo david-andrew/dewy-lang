@@ -148,7 +148,14 @@ class SequenceType:
     def __post_init__(self):
         assert len(self.items) > 1, f'SequenceType must have at least two items, got {len(self.items)}. 0/1-item sequences collapse to void/the item via sequence()'
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType
+
+@dataclass(frozen=True)
+class IntegerLiteralType:
+    """The singleton type inhabited by exactly one mathematical integer value."""
+    value: int
+
+
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -224,6 +231,7 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     FunctionType: 'function',
     OverloadType: 'multifunction',
     SequenceType: 'generator',  # a group of expressed values is consumable like a generator; only the bare umbrella, `<int int> of? generator<int>` is TBD
+    IntegerLiteralType: 'int',
 
     # TBD about these
     # IteratorType: 'iterator',
@@ -233,6 +241,33 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
 
     # also TBD about if the container types also go in here?
 }
+
+
+_fixed_integer_widths: dict[str, tuple[int, bool]] = {
+    'uint8': (8, False),
+    'uint16': (16, False),
+    'uint32': (32, False),
+    'uint64': (64, False),
+    'int8': (8, True),
+    'int16': (16, True),
+    'int32': (32, True),
+    'int64': (64, True),
+}
+
+
+def integer_literal_fits(value: int, target: Primitive) -> bool:
+    """Whether `value` is a valid mathematical instance of an integer type."""
+    if target == 'int':
+        return True
+    if target == 'uint':
+        return value >= 0
+    spec = _fixed_integer_widths.get(target)
+    if spec is None:
+        return False
+    width, signed = spec
+    if signed:
+        return -(1 << (width - 1)) <= value < (1 << (width - 1))
+    return 0 <= value < (1 << width)
 
 
 class TypeSystem:
@@ -337,6 +372,13 @@ class TypeSystem:
         array & array<int> => array<int>   if heads meet to array
         Structural & its nominal (or ancestor) => structural; two structurals only if equal.
         """
+        if isinstance(a, IntegerLiteralType) and isinstance(b, IntegerLiteralType):
+            return a if a == b else None
+        if isinstance(a, IntegerLiteralType) and isinstance(b, str):
+            return a if self._integer_literal_implies(a, b) else None
+        if isinstance(b, IntegerLiteralType) and isinstance(a, str):
+            return b if self._integer_literal_implies(b, a) else None
+
         a_nom = self._structural_nominal(a)
         b_nom = self._structural_nominal(b)
 
@@ -402,10 +444,15 @@ class TypeSystem:
         F of? G<B...>        ⟺  false   (open world; can't invent args)
         Structural atoms also imply their STRUCTURAL_NOMINAL_MAP umbrella (and ancestors).
         """
+        if isinstance(a, IntegerLiteralType):
+            if isinstance(b, IntegerLiteralType):
+                return a == b
+            if isinstance(b, str):
+                return self._integer_literal_implies(a, b)
+
         a_nom = self._structural_nominal(a)
-        if a_nom is not None and isinstance(b, str):
-            if self._is_nom_subtype(a_nom, b):
-                return True
+        if a_nom is not None and isinstance(b, str) and self._is_nom_subtype(a_nom, b):
+            return True
 
         # sequences relate pointwise; must come before the structural-equality fallback
         if isinstance(a, SequenceType) and isinstance(b, SequenceType):
@@ -441,6 +488,13 @@ class TypeSystem:
 
         # covariance
         return all(self.is_subtype(ai, bi) for ai, bi in zip(args_a, args_b))
+
+
+    def _integer_literal_implies(self, literal: IntegerLiteralType, target: Primitive) -> bool:
+        """Whether an exact integer value inhabits a nominal numeric target."""
+        if integer_literal_fits(literal.value, target):
+            return True
+        return self._is_nom_subtype('int', target)
 
 
     def clause_is_empty(self, clause: DnfClause) -> bool:
@@ -558,18 +612,45 @@ class TypeSystem:
         m: FunctionType,
         pos_types: list[TypeExpr],
         kw_types: dict[str, TypeExpr],
+        expected_return: TypeExpr | None = None,
     ) -> dict[str, TypeExpr] | None:
-        """Bind generic params from a call. Exact equality for repeated vars; None if impossible."""
+        """Bind generic params from arguments and an optional contextual return type."""
         type_vars = {gp.name for gp in m.type_params}
         bindings: dict[str, TypeExpr] = {}
+        contextual_type_vars: set[str] = set()
+
+        def bind_type_var(name: str, actual: TypeExpr) -> bool:
+            if name not in bindings:
+                bindings[name] = actual
+                return True
+
+            current = bindings[name]
+            if name in contextual_type_vars:
+                return self.is_subtype(actual, current)
+            if current == actual:
+                return True
+            if isinstance(current, IntegerLiteralType) and isinstance(actual, IntegerLiteralType):
+                bindings[name] = 'int'
+                return True
+            if isinstance(current, IntegerLiteralType) and self.is_subtype(current, actual):
+                bindings[name] = actual
+                return True
+            if isinstance(actual, IntegerLiteralType) and self.is_subtype(actual, current):
+                return True
+            promoted = self.promote_type(current, actual)
+            if promoted is None:
+                return False
+            bindings[name] = promoted
+            return True
 
         def match_param(param_t: TypeExpr, arg_t: TypeExpr) -> bool:
             if isinstance(param_t, str) and param_t in type_vars:
-                if param_t in bindings:
-                    return bindings[param_t] == arg_t
-                bindings[param_t] = arg_t
-                return True
+                return bind_type_var(param_t, arg_t)
             return self.is_subtype(arg_t, param_t)
+
+        if expected_return is not None and isinstance(m.ret, str) and m.ret in type_vars:
+            bindings[m.ret] = expected_return
+            contextual_type_vars.add(m.ret)
 
         if len(pos_types) < len(m.pos_or_kw):
             return None
@@ -613,11 +694,12 @@ class TypeSystem:
         m: FunctionType,
         pos_types: list[TypeExpr],
         kw_types: dict[str, TypeExpr],
+        expected_return: TypeExpr | None = None,
     ) -> FunctionType | None:
         """Instantiate generics for this call (if any) and check concrete acceptance."""
         if not m.type_params:
             return m if self.call_accepted_concrete(m, pos_types, kw_types) else None
-        bindings = self.infer_type_args(m, pos_types, kw_types)
+        bindings = self.infer_type_args(m, pos_types, kw_types, expected_return)
         if bindings is None:
             return None
         inst = instantiate_method(m, bindings)
@@ -659,11 +741,17 @@ class TypeSystem:
         """Whether a single method accepts this call (instantiating generics if needed)."""
         return self.try_instantiate_for_call(m, pos_types, kw_types) is not None
 
-    def applicable(self, methods: list[FunctionType], pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> list[FunctionType]:
+    def applicable(
+        self,
+        methods: list[FunctionType],
+        pos_types: list[TypeExpr],
+        kw_types: dict[str, TypeExpr],
+        expected_return: TypeExpr | None = None,
+    ) -> list[FunctionType]:
         """Instantiated methods that accept the call-site argument types."""
         out: list[FunctionType] = []
         for m in methods:
-            inst = self.try_instantiate_for_call(m, pos_types, kw_types)
+            inst = self.try_instantiate_for_call(m, pos_types, kw_types, expected_return)
             if inst is not None:
                 out.append(inst)
         return out
@@ -681,10 +769,11 @@ class TypeSystem:
         methods: list[FunctionType],
         pos_types: list[TypeExpr],
         kw_types: dict[str, TypeExpr] | None = None,
+        expected_return: TypeExpr | None = None,
     ) -> 'DispatchResult':
         """Julia-style: unique most-specific applicable method, with promote-and-redispatch fallback."""
         kw_types = kw_types or {}
-        apps = self.applicable(methods, pos_types, kw_types)
+        apps = self.applicable(methods, pos_types, kw_types, expected_return)
         promote_pos: list[TypeExpr | None] = [None] * len(pos_types)
 
         if not apps and pos_types and all(isinstance(t, str) for t in pos_types):
@@ -696,7 +785,7 @@ class TypeSystem:
                     break
             if common is not None:
                 promoted_pos = [common] * len(pos_types)
-                apps = self.applicable(methods, promoted_pos, kw_types)
+                apps = self.applicable(methods, promoted_pos, kw_types, expected_return)
                 if apps:
                     promote_pos = [None if t == common else common for t in pos_types]
 
@@ -747,7 +836,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -884,7 +973,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -974,6 +1063,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
     """Replace free type-param names in a type expression."""
     if isinstance(t, str):
         return bindings.get(t, t)
+    if isinstance(t, IntegerLiteralType):
+        return t
     if isinstance(t, TypeAnd):
         return TypeAnd([substitute_type(x, bindings) for x in t.items])
     if isinstance(t, TypeOr):
