@@ -441,6 +441,8 @@ let fn_ptr:int = get_handler()
 
 Arguments are space-separated (no commas).
 
+> NOTE: Indirect calls require parentheses around the callee. Bare `fn_ptr(arg1 arg2)` is always a named call: it looks up a top-level function `fn_ptr` and ignores any local or global binding of that name. Use `(fn_ptr)(arg1 arg2)` or `arg1 |> fn_ptr` to call through a value. Consequently, binding a local or global with the same name as an existing top-level function is ill-formed — `name(...)` will still call the function, not the binding.
+
 ---
 
 ## 1.4 Statements
@@ -777,7 +779,7 @@ Variables declared in an inner scope shadow variables with the same name in oute
 
 ### Name Resolution
 
-When an identifier is referenced, it is resolved by searching:
+When a bare identifier is referenced (not followed by `(`), it is resolved by searching:
 1. Current block scope
 2. Enclosing block scopes (innermost to outermost)
 3. Function parameters
@@ -786,6 +788,8 @@ When an identifier is referenced, it is resolved by searching:
 Ignored type declarations participate only in type annotations and other ignored type declarations. If a name resolves to an ignored type declaration and is used as a runtime value, compilation fails.
 
 If not found in any runtime scope, it is treated as a forward reference to a function.
+
+Named calls (`name(...)`) skip this search and always resolve `name` as a top-level function (or intrinsic). A local or global binding does not intercept them. Binding a name that already names a top-level function is therefore ill-formed.
 
 ### Global Scope
 
