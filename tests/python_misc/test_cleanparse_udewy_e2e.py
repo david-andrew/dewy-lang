@@ -9,7 +9,8 @@ from src.cleanparse.semantic import check
 from udewy.frontend import entry_point
 
 here = Path(__file__).parent
-fixtures = here.parent.parent / 'src' / 'cleanparse' / 'tests'
+repo = here.parent.parent
+fixtures = repo / 'src' / 'cleanparse' / 'tests'
 
 
 def x86_64_toolchain_available() -> bool:
@@ -22,6 +23,8 @@ CASES = [
     ('direct_calls.udewy', 42),
     ('assign_basic.udewy', 42),
     ('div_mod_scalar.udewy', 0),
+    ('forward_calls.udewy', 42),
+    ('recursive_symbol.udewy', 42),
 ]
 FIXTURE_NAMES = [fixture_name for fixture_name, _ in CASES]
 
@@ -50,6 +53,34 @@ def test_udewy_fixture_compiles_and_runs(
     monkeypatch.chdir(tmp_path)
     exit_code = entry_point(udewy_path, [])
     assert exit_code == expected_exit
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_function_values_lower_to_udewy_indirect_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = repo / 'udewy' / 'tests' / 'test_indirect_call.udewy'
+    emitted = codegen(SrcFile.from_path(source_path))
+
+    assert 'let choose = ():><int64:>int64>' in emitted
+    assert 'let fn_ptr:<int64:>int64> = choose()' in emitted
+    assert 'let indirect:int64 = (fn_ptr)(5)' in emitted
+    assert 'let piped:int64 = (fn_ptr)(6)' in emitted
+
+    udewy_path = tmp_path / 'indirect_calls.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 22
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_reference_udewy_indirect_call_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(repo / 'udewy' / 'tests' / 'test_indirect_call.udewy', []) == 22
 
 
 def test_source_suffix_does_not_affect_typing(tmp_path: Path) -> None:

@@ -462,6 +462,10 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     symbol = binop.op.symbol if isinstance(binop.op, t1.Operator) else None
     if symbol == '=>': return tcr_function_literal(binop, ctx=ctx, expected=expected)
 
+    if symbol == '|>':
+        callable_value = typecheck_and_resolve_inner(binop.right, ctx=ctx)
+        return tcr_function_call(callable_value, binop.left, ctx=ctx, expected=expected)
+
     if symbol == 'transmute':
         item = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         require_valued(item.type, ctx.srcfile, item.loc, 'transmute operand')
@@ -740,11 +744,40 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
 
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
 
+def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
+    """Parse the required positional slots to the left of a function type's `:>`."""
+    items = ast.inner if isinstance(ast, p0.Block) and ast.kind == '()' else [ast]
+    args: list[ty.PosOrKwArg] = []
+    for item in items:
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == ':'
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Identifier)
+        ):
+            args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=ctx)))
+        else:
+            args.append(ty.PosOrKwArg(None, ast_to_type(item, ctx=ctx)))
+    return args
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
     match ast:
         case p0.Atom(item=t1.Identifier(name=name)):
             return name
+
+        case p0.Block(kind='<>'|'()', inner=[inner]):
+            return ast_to_type(inner, ctx=ctx)
+
+        case p0.BinOp(op=t1.Operator(symbol=':>')):
+            return ty.FunctionType(
+                _function_type_args(ast.left, ctx=ctx),
+                [],
+                None,
+                ast_to_type(ast.right, ctx=ctx),
+            )
         
         case p0.BinOp(op=t1.Operator(symbol='or'|'|')):
             left = ast_to_type(ast.left, ctx=ctx)
@@ -862,6 +895,9 @@ def parse_call_arguments(
 
 
 def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.FunctionCall:
+    if isinstance(left, hir.Block) and not left.scoped and len(left.items) == 1:
+        left = left.items[0]
+
     methods: list[ty.FunctionType]
     if isinstance(left.type, ty.FunctionType):
         methods = [left.type]

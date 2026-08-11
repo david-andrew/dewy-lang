@@ -11,11 +11,12 @@ features
 - collect non-udewy constructs
 
 """
-from textwrap import indent
-from ..reporting import SrcFile
-from ..semantic import hir, check, ty
-from ..semantic.hir_display import type_to_dewy
 from dataclasses import dataclass
+from textwrap import indent
+
+from ..reporting import SrcFile
+from ..semantic import builtins, check, hir, ty
+from ..semantic.hir_display import type_to_dewy
 
 TAB = '    '
 
@@ -58,9 +59,9 @@ UNSUPPORTED_NARROW_DUNDERS = {
 SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
 
 @dataclass
-class Context:
-    srcfile: SrcFile
-    imports: list #TBD type here. maybe hir.AST
+class EmitContext:
+    direct_function_names: set[str]
+    local_names: set[str]
 
 
 
@@ -75,7 +76,7 @@ def codegen_inner(ast: hir.AST) -> str:
     code: list[str] = []
 
     if not isinstance(ast, hir.Block):
-        raise ValueError(f"Expected Block, got {type(ast)}")
+        raise TypeError(f"Expected Block, got {type(ast)}")
 
     for item in ast.items:
         if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral):
@@ -95,15 +96,23 @@ def codegen_inner(ast: hir.AST) -> str:
             rettype=ty.VOID_TYPE,
             body=ast,
         )
-    
+
+    ctx = EmitContext(set(functions) | set(builtins.builtin_types), set())
     for name, func in functions.items():
-        code.append(emit_function_decl(name, func))
+        code.append(emit_function_decl(name, func, ctx))
 
     return '\n'.join(code) + '\n'
+
+
+def emit_type(t: ty.Type) -> str:
+    """Render a semantic type in the annotation syntax accepted by udewy."""
+    return type_to_dewy(t)
+
+
 def emit_arg(arg: hir.Param | hir.BoundParam) -> str:
     if isinstance(arg, hir.BoundParam):
-        return f'{arg.name}:{type_to_dewy(arg.type)}={arg.value}'
-    return f'{arg.name}:{type_to_dewy(arg.type)}'
+        return f'{arg.name}:{emit_type(arg.type)}={arg.value}'
+    return f'{arg.name}:{emit_type(arg.type)}'
 
 def _contains_return(node: hir.AST) -> bool:
     if isinstance(node, hir.Return):
@@ -112,7 +121,7 @@ def _contains_return(node: hir.AST) -> bool:
         return any(_contains_return(item) for item in node.items)
     return False
 
-def emit_function_decl(name: str, func: hir.FunctionLiteral) -> str:
+def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -> str:
     code: list[str] = []
     code.append(f'let {name} = (')
 
@@ -128,48 +137,57 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral) -> str:
             args.append(emit_arg(arg))
 
     code.append(' '.join(args))
-    code.append(f'):>{type_to_dewy(func.rettype)} => ')
+    code.append(f'):>{emit_type(func.rettype)} => ')
 
     # udewy function bodies must return explicitly, so expression bodies get wrapped in a
     # return. NOTE: this lowering's real home is MIR (see the terminator sketch in mir.py)
+    local_names = {arg.name for arg in func.pos_or_kw_args}
+    local_names.update(arg.name for arg in func.kw_only_args)
+    if func.rest_args is not None:
+        local_names.add(func.rest_args.name)
+    func_ctx = EmitContext(ctx.direct_function_names, local_names)
     body = func.body
     if _contains_return(body):
-        code.append(emit_ast(body))
+        code.append(emit_ast(body, func_ctx))
     elif func.rettype == ty.VOID_TYPE:
-        stmts = [emit_ast(item) for item in body.items] if isinstance(body, hir.Block) else [emit_ast(body)]
+        stmts = [emit_ast(item, func_ctx) for item in body.items] if isinstance(body, hir.Block) else [emit_ast(body, func_ctx)]
         code.append('{\n' + indent('\n'.join([*stmts, 'return void']), TAB) + '\n}')
     else:
-        code.append('{\n' + indent(f'return {emit_ast(body)}', TAB) + '\n}')
+        code.append('{\n' + indent(f'return {emit_ast(body, func_ctx)}', TAB) + '\n}')
     return ''.join(code)
 
-def emit_ast(ast: hir.AST) -> str:
+def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
     match ast:
-        case hir.Block(): return emit_block(ast)
-        case hir.Return(): return emit_return(ast)
+        case hir.Block(): return emit_block(ast, ctx)
+        case hir.Return(): return emit_return(ast, ctx)
         case hir.Integer(): return emit_integer(ast)
         case hir.Bool(): return 'true' if ast.value else 'false'
         case hir.Void(): return 'void'
-        case hir.Declare(): return emit_declare(ast)
-        case hir.Assign(): return emit_assign(ast)
-        case hir.Transmute(): return emit_transmute(ast)
+        case hir.Declare(): return emit_declare(ast, ctx)
+        case hir.Assign(): return emit_assign(ast, ctx)
+        case hir.Transmute(): return emit_transmute(ast, ctx)
         case hir.ExpressedIdentifier(): return ast.name
-        case hir.FunctionCall(): return emit_function_call(ast)
+        case hir.FunctionCall(): return emit_function_call(ast, ctx)
         case _:
             raise NotImplementedError(f'emit_ast not implemented for AST type: {type(ast).__name__}')
 
-def emit_declare(decl: hir.Declare) -> str:
+def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:
     # udewy requires a type annotation on every binding; derive one from the
     # checked expression when the source didn't provide it explicitly
+    if isinstance(decl.expr, hir.FunctionLiteral):
+        raise NotImplementedError(
+            'udewy target does not support local function literals or closures'
+        )
     annotation = decl.annotation if decl.annotation is not None else decl.expr.type
-    return f'{decl.decltype} {decl.name}:{type_to_dewy(annotation)} = {emit_ast(decl.expr)}'
+    return f'{decl.decltype} {decl.name}:{emit_type(annotation)} = {emit_ast(decl.expr, ctx)}'
 
 
-def emit_assign(assign: hir.Assign) -> str:
-    return f'{emit_ast(assign.target)} {assign.op} {emit_ast(assign.value)}'
+def emit_assign(assign: hir.Assign, ctx: EmitContext) -> str:
+    return f'{emit_ast(assign.target, ctx)} {assign.op} {emit_ast(assign.value, ctx)}'
 
 
-def emit_transmute(transmute: hir.Transmute) -> str:
-    return f'{emit_ast(transmute.expr)} transmute {type_to_dewy(transmute.type)}'
+def emit_transmute(transmute: hir.Transmute, ctx: EmitContext) -> str:
+    return f'{emit_ast(transmute.expr, ctx)} transmute {emit_type(transmute.type)}'
 
 
 def _binop_call(call: hir.FunctionCall) -> tuple[str, hir.AST, hir.AST] | None:
@@ -221,7 +239,7 @@ def _check_supported_integer_operation(call: hir.FunctionCall) -> None:
         )
 
 
-def emit_function_call(call: hir.FunctionCall) -> str:
+def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
     _check_supported_integer_operation(call)
     if (
         isinstance(call.func, hir.ExpressedIdentifier)
@@ -232,28 +250,38 @@ def emit_function_call(call: hir.FunctionCall) -> str:
         left, right = call.pos_args
         operand_type = _selected_first_parameter(call)
         if operand_type in SIGNED_FIXED_INTS:
-            return f'__signed_shr__({emit_ast(left)} {emit_ast(right)})'
+            return f'__signed_shr__({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
         if operand_type not in UNSIGNED_FIXED_INTS:
             raise NotImplementedError(
                 f'udewy codegen for right shift of `{type_to_dewy(operand_type)}`'
             )
     if (binop := _binop_call(call)) is not None:
         sym, left, right = binop
-        return f'{emit_operand(left)} {sym} {emit_operand(right)}'
+        return f'{emit_operand(left, ctx)} {sym} {emit_operand(right, ctx)}'
     if (prefix := _prefix_call(call)) is not None:
         sym, item = prefix
         separator = ' ' if sym.isalpha() else ''
-        return f'{sym}{separator}{emit_operand(item)}'
+        return f'{sym}{separator}{emit_operand(item, ctx)}'
     if call.kw_args:
         raise NotImplementedError('udewy codegen for keyword arguments')
-    args = ' '.join(emit_ast(arg) for arg in call.pos_args)
-    return f'{emit_ast(call.func)}({args})'
+    args = ' '.join(emit_ast(arg, ctx) for arg in call.pos_args)
+    callee = emit_ast(call.func, ctx)
+    if (
+        isinstance(call.func, hir.ExpressedIdentifier)
+        and call.func.name in ctx.direct_function_names
+        and call.func.name not in ctx.local_names
+    ):
+        return f'{callee}({args})'
+    if isinstance(call.func, hir.Block) and not call.func.scoped:
+        return f'{callee}({args})'
+    return f'({callee})({args})'
 
-def emit_operand(node: hir.AST) -> str:
+
+def emit_operand(node: hir.AST, ctx: EmitContext) -> str:
     # TODO: precedence-aware parenthesization; for now always wrap nested infix calls
     if isinstance(node, hir.FunctionCall) and _binop_call(node) is not None:
-        return f'({emit_ast(node)})'
-    return emit_ast(node)
+        return f'({emit_ast(node, ctx)})'
+    return emit_ast(node, ctx)
 
 def emit_integer(i: hir.Integer) -> str:
     if i.prefix == '0x':
@@ -262,25 +290,32 @@ def emit_integer(i: hir.Integer) -> str:
         return f'0b{i.value:b}'
     return str(i.value)
 
-def emit_block(block: hir.Block) -> str:
+def emit_block(block: hir.Block, ctx: EmitContext) -> str:
     if not block.scoped and len(block.items) == 1:
-        return f'({emit_ast(block.items[0])})'
-    inner = indent('\n'.join(emit_ast(item) for item in block.items), TAB)
+        return f'({emit_ast(block.items[0], ctx)})'
+    block_ctx = EmitContext(ctx.direct_function_names, set(ctx.local_names)) if block.scoped else ctx
+    items: list[str] = []
+    for item in block.items:
+        items.append(emit_ast(item, block_ctx))
+        if isinstance(item, hir.Declare):
+            block_ctx.local_names.add(item.name)
+    inner = indent('\n'.join(items), TAB)
     if block.scoped:
         return f'{{\n{inner}\n}}'
     return f'(\n{inner}\n)'
 # def emit_expr(expr: hir.AST. ctx: Context) -> str:
 
-def emit_return(expr: hir.Return) -> str:
+def emit_return(expr: hir.Return, ctx: EmitContext) -> str:
     #TODO: check is this type returnable?
     if expr.item is None:
         return 'return void'  # udewy requires an explicit value
-    return f'return {emit_ast(expr.item)}'
+    return f'return {emit_ast(expr.item, ctx)}'
 
 
 if __name__ == '__main__':
-    from ...myargparse import ArgumentParser
     from pathlib import Path
+
+    from ...myargparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('path', type=Path, required=True, help='path to file to compile')
     args = parser.parse_args()

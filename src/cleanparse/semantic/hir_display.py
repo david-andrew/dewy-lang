@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from ..parser import p0, t0, t2
 from . import builtins, hir, ty
@@ -48,7 +48,7 @@ def _type_atom_parens(t: ty.Type) -> str:
 
 
 def _function_type_to_dewy(t: ty.FunctionType) -> str:
-    """Render a function type as `(args):>ret`, including generics when present."""
+    """Render a structural function type, preserving named argument contracts."""
     parts: list[str] = []
     if t.type_params:
         gens = ' '.join(
@@ -58,13 +58,26 @@ def _function_type_to_dewy(t: ty.FunctionType) -> str:
         parts.append(f'<{gens}>')
     args: list[str] = []
     for a in t.pos_or_kw:
-        args.append(f'{a.name}:{type_to_dewy(a.type)}')
+        args.append(
+            type_to_dewy(a.type)
+            if a.name is None
+            else f'{a.name}:{type_to_dewy(a.type)}'
+        )
     if t.rest is not None or t.kw_only:
         args.append(f'...{t.rest}' if t.rest else '...')
     for a in t.kw_only:
         args.append(f'{a.name}:{type_to_dewy(a.type)}')
-    parts.append(f'({" ".join(args)}):>{type_to_dewy(t.ret)}')
-    return ''.join(parts)
+    if (
+        len(t.pos_or_kw) == 1
+        and t.pos_or_kw[0].name is None
+        and not t.kw_only
+        and t.rest is None
+    ):
+        signature = args[0]
+    else:
+        signature = f'({" ".join(args)})'
+    parts.append(f'{signature}:>{type_to_dewy(t.ret)}')
+    return f'<{"".join(parts)}>'
 
 
 # ---------------------------------------------------------------------------

@@ -85,12 +85,12 @@ class TypeParameterize:
 
 @dataclass
 class PosOrKwArg:
-    """One positional-or-keyword slot in a FunctionType.
+    """One positional slot in a FunctionType, optionally addressable by name.
 
-    Part of the function-type representation: name + accepted argument type.
-    Always required (no default). May be filled by position or by name at a call.
+    Always required (no default). An absent name makes the slot positional-only;
+    otherwise the name is part of the callable contract and permits keyword calls.
     """
-    name: str
+    name: str | None
     type: TypeExpr
 
 @dataclass
@@ -555,14 +555,14 @@ class TypeSystem:
         if len(f.pos_or_kw) != len(g.pos_or_kw):
             return False
         for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
-            if fp.name != gp.name:
+            if gp.name is not None and fp.name != gp.name:
                 return False
             if not self.is_subtype(gp.type, fp.type):
                 return False
 
         f_kw = {k.name: k for k in f.kw_only}
         g_kw = {k.name: k for k in g.kw_only}
-        g_pos_names = {p.name for p in g.pos_or_kw}
+        g_pos_names = {p.name for p in g.pos_or_kw if p.name is not None}
 
         for name, gk in g_kw.items():
             fk = f_kw.get(name)
@@ -661,7 +661,7 @@ class TypeSystem:
             if i < len(m.pos_or_kw) and not match_param(m.pos_or_kw[i].type, pt):
                 return None
 
-        pos_names = {p.name for p in m.pos_or_kw}
+        pos_names = {p.name for p in m.pos_or_kw if p.name is not None}
         kw_map = {k.name: k for k in m.kw_only}
 
         for name, kt in kw_types.items():
@@ -716,7 +716,7 @@ class TypeSystem:
             if i < len(m.pos_or_kw) and not self.is_subtype(pt, m.pos_or_kw[i].type):
                 return False
 
-        pos_names = {p.name for p in m.pos_or_kw}
+        pos_names = {p.name for p in m.pos_or_kw if p.name is not None}
         kw_map = {k.name: k for k in m.kw_only}
 
         for name, kt in kw_types.items():
