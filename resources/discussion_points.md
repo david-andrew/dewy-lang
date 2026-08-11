@@ -1347,6 +1347,16 @@ myfunc = @myfunc & (a:int b:int) => 'second version'
 
 Basically in place operators are aware of the type being assigned to, and will apply any special rules needed for the assignment to make sense.
 
+### Name mangling for functions / overloads
+
+Default policy: do not mangle function names unless necessary.
+
+- If a binding has only one function, emit/link it under that source name directly.
+- Mangling is only required when a single name has multiple overload alternatives that need distinct concrete symbols.
+- When mangling is required, prefer a readable / intuitive encoding (signature-based, human-inspectable), not an opaque C++-style scheme. TODO: come up with dewy mangling scheme
+
+Separately, compilation should support selectable name-mangling modes/flags for interop with other languages' ABIs (so Dewy binaries can talk natively to e.g. C++/Rust binaries when desired). That interop mode is orthogonal to the default "mangle only when needed" Dewy policy.
+
 ## Type syntax just forwards to type function
 
 ```

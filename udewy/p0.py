@@ -562,15 +562,12 @@ def looks_like_fn_decl(toks: list[t1.Token], idx: int) -> bool:
 def require_type_annotation(toks: list[t1.Token], idx: int, subject: str, state: ParseState) -> int:
     if idx >= len(toks):
         error(state.src, len(state.src), f"Expected type annotation for {subject} before end of input")
-    kind = toks[idx].kind
-    if kind == t1.Kind.TK_TYPE:
+    if toks[idx].kind != t1.Kind.TK_TYPE:
+        error(state.src, toks[idx].location, f"Expected type annotation for {subject}")
+    idx = idx + 1
+    if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
         idx = idx + 1
-        if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
-            idx = idx + 1
-        return idx
-    if kind == t1.Kind.TK_TYPE_PARAM:
-        return idx + 1
-    error(state.src, toks[idx].location, f"Expected type annotation for {subject}")
+    return idx
 
 
 def require_fn_type_annotation(toks: list[t1.Token], idx: int, fn_name: str, state: ParseState) -> int:
@@ -975,13 +972,10 @@ def _parse_expr(
 def skip_type_annotation(toks: list[t1.Token], idx: int) -> int:
     if idx >= len(toks):
         return idx
-    kind = toks[idx].kind
-    if kind == t1.Kind.TK_TYPE:
+    if toks[idx].kind == t1.Kind.TK_TYPE:
         idx = idx + 1
         if idx < len(toks) and toks[idx].kind == t1.Kind.TK_TYPE_PARAM:
             idx = idx + 1
-    elif kind == t1.Kind.TK_TYPE_PARAM:
-        idx = idx + 1
     return idx
 
 

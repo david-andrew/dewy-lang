@@ -6,6 +6,7 @@
     { "include": "#comment" },
     { "include": "#path-string" },
     { "include": "#string" },
+    { "include": "#type-parameter" },
     { "include": "#number" },
     { "include": "#constant" },
     { "include": "#intrinsic" },
@@ -222,6 +223,15 @@
           "patterns": [{ "include": "#type-parameter" }]
         },
         {
+          "begin": "(:>)\\s*(?=<)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.separator.return-type.udewy" }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [{ "include": "#type-parameter" }]
+        },
+        {
           "begin": "(:)\\s*(?=\\[)",
           "beginCaptures": {
             "1": { "name": "punctuation.separator.type.udewy" }
@@ -232,6 +242,15 @@
             { "include": "#bracketed-type" },
             { "include": "#type-parameter" }
           ]
+        },
+        {
+          "begin": "(:)\\s*(?=<)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.separator.type.udewy" }
+          },
+          "end": "(?!\\s*<)",
+          "applyEndPatternLast": true,
+          "patterns": [{ "include": "#type-parameter" }]
         },
         {
           "begin": "(:)\\s*([A-Za-z_][A-Za-z0-9_]*)",

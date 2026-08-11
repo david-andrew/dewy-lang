@@ -330,7 +330,7 @@ def tokenize(src:str)->list[Token]:
         if matched_symbol:
             continue
     
-        # type parameter
+        # type parameter / colon-wrapped <> type (same shape as :[...])
         if src[i] == '<':
             stack = 1
             start = i
@@ -349,7 +349,15 @@ def tokenize(src:str)->list[Token]:
                 i += 1
             if stack != 0:
                 error(src, start, "unterminated type parameter")
-            toks.append(Token(i - start, start, Kind.TK_TYPE_PARAM))
+            length = i - start
+            if toks and toks[-1].kind == Kind._TK_FN_COLON:
+                toks.pop()
+                toks.append(Token(length, start, Kind.TK_FN_TYPE))
+            elif toks and toks[-1].kind == Kind._TK_COLON:
+                toks.pop()
+                toks.append(Token(length, start, Kind.TK_TYPE))
+            else:
+                toks.append(Token(length, start, Kind.TK_TYPE_PARAM))
             continue
 
         error(src, i, f"Unrecognized token {src[i]!r}")

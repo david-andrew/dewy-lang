@@ -617,7 +617,7 @@ let t1_tokenize = (src:int):>int => {
             continue
         }
 
-        # bracketed type parameter starting with '<'
+        # type parameter / colon-wrapped <> type (same shape as :[...])
         if c =? T1_CH_LANGLE {
             let stack_depth:int = 1
             let tp_start:int = i
@@ -639,7 +639,19 @@ let t1_tokenize = (src:int):>int => {
             if stack_depth not=? 0 {
                 diag_error(tp_start "unterminated type parameter")
             }
-            ts_push(ts i - tp_start tp_start TK_TYPE_PARAM)
+            let tp_len:int = i - tp_start
+            let prev_count:int = ts_count(ts)
+            let prev_top_kind:int = 0
+            if prev_count >? 0 { prev_top_kind = ts_kind(ts prev_count - 1) }
+            if (prev_count >? 0) and (prev_top_kind =? TK_FN_COLON_TMP) {
+                ts_pop(ts)
+                ts_push(ts tp_len tp_start TK_FN_TYPE)
+            } else if (prev_count >? 0) and (prev_top_kind =? TK_COLON_TMP) {
+                ts_pop(ts)
+                ts_push(ts tp_len tp_start TK_TYPE)
+            } else {
+                ts_push(ts tp_len tp_start TK_TYPE_PARAM)
+            }
             continue
         }
 
