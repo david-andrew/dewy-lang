@@ -13,6 +13,7 @@ from . import builtins, hir, ty
 # ---------------------------------------------------------------------------
 
 def type_to_dewy(t: ty.Type) -> str:
+    """Render a type as Dewy source syntax."""
     if isinstance(t, str):
         return t
     if isinstance(t, ty.TypeAnd):
@@ -37,6 +38,7 @@ def type_to_dewy(t: ty.Type) -> str:
 
 
 def _type_atom_parens(t: ty.Type) -> str:
+    """Parenthesize a type when it needs grouping inside a larger type expression."""
     s = type_to_dewy(t)
     if isinstance(t, (ty.TypeAnd, ty.TypeOr, ty.OverloadType)):
         return f'({s})'
@@ -44,6 +46,7 @@ def _type_atom_parens(t: ty.Type) -> str:
 
 
 def _function_type_to_dewy(t: ty.FunctionType) -> str:
+    """Render a function type as `(args):>ret`, including generics when present."""
     parts: list[str] = []
     if t.type_params:
         gens = ' '.join(
@@ -67,6 +70,7 @@ def _function_type_to_dewy(t: ty.FunctionType) -> str:
 # ---------------------------------------------------------------------------
 
 def hir_to_tree_str(node: hir.AST | hir.Param) -> str:
+    """Pretty-print an HIR node as an indented tree for debugging/`repr`."""
     space = '    '
     branch = '│   '
     tee = '├── '
@@ -89,6 +93,7 @@ def hir_to_tree_str(node: hir.AST | hir.Param) -> str:
 
 
 def _node_label(node: hir.AST | hir.Param) -> str:
+    """Short structural label for a node in the tree dump."""
     # Prefer structural/annotated info over inferred AST.type (except ValueCast).
     if isinstance(node, hir.Void):
         return 'Void'
@@ -136,6 +141,7 @@ def _node_label(node: hir.AST | hir.Param) -> str:
 
 
 def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.Param]]:
+    """Named child edges for tree dumping; binops/unaries are flattened for readability."""
     if isinstance(node, hir.Return):
         return [('item', node.item)] if node.item is not None else []
     if isinstance(node, hir.Declare):
@@ -224,10 +230,12 @@ _HARD = HardLine()
 
 
 def _text(s: str) -> Doc:
+    """Literal text fragment in the Doc algebra."""
     return Text(s)
 
 
 def _seq(*docs: Doc) -> Doc:
+    """Concatenate docs, flattening nested Seq nodes."""
     flat: list[Doc] = []
     for d in docs:
         if isinstance(d, Seq):
@@ -240,14 +248,17 @@ def _seq(*docs: Doc) -> Doc:
 
 
 def _group(doc: Doc) -> Doc:
+    """Mark a region that should stay flat if it fits the line width."""
     return Group(doc)
 
 
 def _nest(n: int, doc: Doc) -> Doc:
+    """Increase indentation for broken lines inside `doc`."""
     return Nest(n, doc)
 
 
 def _join(sep: Doc, docs: Sequence[Doc]) -> Doc:
+    """Join docs with a separator between each pair."""
     if not docs:
         return _text('')
     out: list[Doc] = [docs[0]]
@@ -258,6 +269,7 @@ def _join(sep: Doc, docs: Sequence[Doc]) -> Doc:
 
 
 def _render(doc: Doc, width: int) -> str:
+    """Layout a Doc to a string, breaking Groups that exceed `width`."""
     # Two-mode Wadler-ish: try each Group flat; if any line would exceed width, break it.
     def fits(remaining: int, docs: list[tuple[int, bool, Doc]]) -> bool:
         rem = remaining
@@ -351,6 +363,7 @@ for _sym, _dunder in builtins.UNARY_PREFIX_DUNDER_MAP.items():
     _DUNDER_TO_PREFIX[_dunder] = _sym
 
 def _op_prec(sym: str | type) -> int:
+    """Precedence level for an operator symbol (or quantum juxtapose type)."""
     p = p0.precedence_table[sym]
     if not isinstance(p, int):
         # quantum prec — take minimum (weakest) for parenthesizing safety
@@ -366,6 +379,7 @@ _CALL_PREC = _op_prec(t2.CallJuxtapose)
 
 
 def _assoc(prec: int) -> p0.Associativity:
+    """Associativity for a given precedence level."""
     return p0.associativity_table[prec]
 
 
@@ -385,11 +399,13 @@ def _child_min_prec(op_prec: int, side: str) -> int:
 # ---------------------------------------------------------------------------
 
 def hir_to_dewy(node: hir.AST | hir.Param, *, width: int = 80, indent: int = 4) -> str:
+    """Pretty-print an HIR node as Dewy source, wrapping to `width`."""
     doc = _to_doc(node, 0, indent)
     return _render(doc, width)
 
 
 def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
+    """Convert an HIR node to a Doc, parenthesizing when below `min_prec`."""
     if isinstance(node, hir.Param):
         return _param_doc(node, indent)
     assert isinstance(node, hir.AST)
@@ -449,6 +465,7 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
 
 
 def _param_doc(p: hir.Param, indent: int) -> Doc:
+    """Render a parameter as `name:type` or `name:type=default`."""
     base = _text(f'{p.name}:{type_to_dewy(p.type)}')
     if isinstance(p, hir.BoundParam):
         return _seq(base, _text('='), _to_doc(p.value, 0, indent))
@@ -456,6 +473,7 @@ def _param_doc(p: hir.Param, indent: int) -> Doc:
 
 
 def _format_integer(node: hir.Integer) -> str:
+    """Format an integer literal with its original base prefix."""
     if node.prefix == t0.base10:
         return str(node.value)
     digits, casefold, _extra = t0.BASE_SPECS[node.prefix]
@@ -475,6 +493,7 @@ def _format_integer(node: hir.Integer) -> str:
 
 
 def _binop_call(node: hir.FunctionCall) -> tuple[str, hir.AST, hir.AST] | None:
+    """If this call is a binary dunder, return `(op_symbol, left, right)`."""
     if len(node.pos_args) != 2 or node.kw_args:
         return None
     if not isinstance(node.func, hir.ExpressedIdentifier):
@@ -486,6 +505,7 @@ def _binop_call(node: hir.FunctionCall) -> tuple[str, hir.AST, hir.AST] | None:
 
 
 def _prefix_call(node: hir.FunctionCall) -> tuple[str, hir.AST] | None:
+    """If this call is a unary prefix dunder, return `(op_symbol, arg)`."""
     if len(node.pos_args) != 1 or node.kw_args:
         return None
     if not isinstance(node.func, hir.ExpressedIdentifier):
@@ -497,6 +517,7 @@ def _prefix_call(node: hir.FunctionCall) -> tuple[str, hir.AST] | None:
 
 
 def _call_doc(node: hir.FunctionCall, min_prec: int, indent: int) -> Doc:
+    """Render a call as infix/prefix when possible, otherwise as `f(args)`."""
     if (binop := _binop_call(node)) is not None:
         sym, left, right = binop
         prec = _op_prec(sym)
@@ -528,6 +549,7 @@ def _call_doc(node: hir.FunctionCall, min_prec: int, indent: int) -> Doc:
 
 
 def _function_literal_doc(node: hir.FunctionLiteral, min_prec: int, indent: int) -> Doc:
+    """Render a function literal as `(args):>ret => body`."""
     args: list[Doc] = [_param_doc(p, indent) for p in node.pos_or_kw_args]
     if node.rest_args is not None or node.kw_only_args:
         if node.rest_args is not None:
@@ -553,6 +575,7 @@ def _function_literal_doc(node: hir.FunctionLiteral, min_prec: int, indent: int)
 
 
 def _overload_doc(node: hir.OverloadedFunction, min_prec: int, indent: int) -> Doc:
+    """Render an overloaded function as a chain of `a & b & ...` alternates."""
     if not node.alternates:
         return _text('()')
     prec = _AND_PREC
@@ -570,6 +593,7 @@ def _overload_doc(node: hir.OverloadedFunction, min_prec: int, indent: int) -> D
 
 
 def _block_doc(node: hir.Block, min_prec: int, indent: int) -> Doc:
+    """Render a block as `{...}` / `(...)`, omitting delimiters for a single unscoped item."""
     items = [it for it in node.items if not isinstance(it, hir.Void)]
     open_b, close_b = ('{', '}') if node.scoped else ('(', ')')
     if not items:
@@ -587,6 +611,7 @@ def _block_doc(node: hir.Block, min_prec: int, indent: int) -> Doc:
 
 
 def _range_doc(node: hir.Range, min_prec: int, indent: int) -> Doc:
+    """Render a range as `left..right` with optional step and bounds markers."""
     left = _to_doc(node.left, _RANGE_PREC + 1, indent) if node.left is not None else _text('')
     right = _to_doc(node.right, _RANGE_PREC + 1, indent) if node.right is not None else _text('')
     core = _seq(left, _text('..'), right)

@@ -14,10 +14,8 @@ features
 from textwrap import indent
 from ..reporting import SrcFile
 from ..semantic import hir, check, ty
-from ..semantic.hir_display import type_to_dewy
+from ..semantic.hir_display import type_to_dewy, _binop_call
 from dataclasses import dataclass
-
-import pdb
 
 TAB = '    '
 
@@ -39,7 +37,6 @@ def codegen_inner(ast: hir.AST) -> str:
     code: list[str] = []
 
     if not isinstance(ast, hir.Block):
-        pdb.set_trace()
         raise ValueError(f"Expected Block, got {type(ast)}")
 
     for item in ast.items:
@@ -47,7 +44,7 @@ def codegen_inner(ast: hir.AST) -> str:
             functions[item.name] = item.expr
         else:
             #TODO: handling of all other stuff
-            pdb.set_trace()
+            raise NotImplementedError(f'udewy codegen not implemented for top-level item: {type(item).__name__}')
 
     # if main not declared, use the whole top level block as the main function
     if 'main' not in functions:
@@ -64,7 +61,7 @@ def codegen_inner(ast: hir.AST) -> str:
     for name, func in functions.items():
         code.append(emit_function_decl(name, func))
 
-    return '\n'.join(code)
+    return '\n'.join(code) + '\n'
 def emit_arg(arg: hir.Param | hir.BoundParam) -> str:
     if isinstance(arg, hir.BoundParam):
         return f'{arg.name}:{type_to_dewy(arg.type)}={arg.value}'
@@ -112,14 +109,36 @@ def emit_ast(ast: hir.AST) -> str:
         case hir.Block(): return emit_block(ast)
         case hir.Return(): return emit_return(ast)
         case hir.Integer(): return emit_integer(ast)
-        case _: 
-            pdb.set_trace()
-            raise NotImplementedError(f'emit_ast not implemented for AST type: {type(ast)}')
+        case hir.Declare(): return emit_declare(ast)
+        case hir.ExpressedIdentifier(): return ast.name
+        case hir.FunctionCall(): return emit_function_call(ast)
+        case _:
+            raise NotImplementedError(f'emit_ast not implemented for AST type: {type(ast).__name__}')
+
+def emit_declare(decl: hir.Declare) -> str:
+    # udewy requires a type annotation on every binding; derive one from the
+    # checked expression when the source didn't provide it explicitly
+    annotation = decl.annotation if decl.annotation is not None else decl.expr.type
+    return f'{decl.decltype} {decl.name}:{type_to_dewy(annotation)} = {emit_ast(decl.expr)}'
+
+def emit_function_call(call: hir.FunctionCall) -> str:
+    if (binop := _binop_call(call)) is not None:
+        sym, left, right = binop
+        return f'{emit_operand(left)} {sym} {emit_operand(right)}'
+    if call.kw_args:
+        raise NotImplementedError('udewy codegen for keyword arguments')
+    args = ' '.join(emit_ast(arg) for arg in call.pos_args)
+    return f'{emit_ast(call.func)}({args})'
+
+def emit_operand(node: hir.AST) -> str:
+    # TODO: precedence-aware parenthesization; for now always wrap nested infix calls
+    if isinstance(node, hir.FunctionCall) and _binop_call(node) is not None:
+        return f'({emit_ast(node)})'
+    return emit_ast(node)
 
 def emit_integer(i: hir.Integer) -> str:
     if i.prefix == '0d': return f'{i.value}'
-
-    pdb.set_trace()
+    raise NotImplementedError(f'udewy codegen for integer literals with prefix {i.prefix!r}')
 
 def emit_block(block: hir.Block) -> str:
     inner = indent('\n'.join(emit_ast(item) for item in block.items), TAB)
@@ -127,10 +146,6 @@ def emit_block(block: hir.Block) -> str:
         return f'{{\n{inner}\n}}'
     return f'(\n{inner}\n)'
 # def emit_expr(expr: hir.AST. ctx: Context) -> str:
-
-def emit_bool(expr: hir.Bool, ctx: Context) -> str:
-    pdb.set_trace()
-
 
 def emit_return(expr: hir.Return) -> str:
     #TODO: check is this type returnable?
@@ -148,9 +163,4 @@ if __name__ == '__main__':
     path: Path = args.path
     srcfile = SrcFile.from_path(path)
     udewy = codegen(srcfile)
-    
-    # would run the udewy src through the udewy compiler at this point...
-    from udewy.frontend import entry_point, EntryPointOptions
-    
-    pdb.set_trace()
-    ...
+    print(udewy, end='')
