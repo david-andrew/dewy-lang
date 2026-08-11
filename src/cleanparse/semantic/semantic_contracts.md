@@ -13,3 +13,4 @@ Z:uint32 = 30  # z:uint32 = 30
 There shall be an optimization pass that analyzes the possible range any given variable could take on, and when that range fits within a fixed width size, the compiler will make use of that fixed-width int instead of the more general bigint.
 
 > note that explicitly annotated int widths will rollover and behave as that width. the semantic contract is anything else not explicitly specified will behave as if it was infinite precision, even if that precision was not needed under the hood
+> For udewy, use of `int` is unidiomatic and will produce not-well-formed code (since all udewy ints are 64-bits wide). Idiomatic udewy will explicitly annotate the width for integer types
