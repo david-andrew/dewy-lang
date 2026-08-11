@@ -234,9 +234,18 @@ let F = {
 
 @dataclass
 class FunctionCall(AST):
+    """A checked call to a function value or overload set.
+
+    ``selected_method_index`` is populated only when ``func`` has
+    ``OverloadType``. It indexes the original ordered method set, allowing
+    target lowering to select the matching concrete function without repeating
+    generic instantiation or dispatch.
+    """
+
     func: AST
     pos_args: list[AST]
     kw_args: dict[str, AST]
+    selected_method_index: int | None = None
     #TODO: spread args
 
 @dataclass

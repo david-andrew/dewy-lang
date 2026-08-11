@@ -1353,7 +1353,9 @@ Default policy: do not mangle function names unless necessary.
 
 - If a binding has only one function, emit/link it under that source name directly.
 - Mangling is only required when a single name has multiple overload alternatives that need distinct concrete symbols.
-- When mangling is required, prefer a readable / intuitive encoding (signature-based, human-inspectable), not an opaque C++-style scheme. TODO: come up with dewy mangling scheme
+- Overload alternatives use a readable signature suffix, including named parameters because names are part of their contract: e.g. `parse__int64_to_string` or `parse__value_int64_to_string`.
+- Hoisted local functions only gain an `__in_<scope path>` suffix when their source name collides, with anonymous block scopes represented by source-order `scope_N` segments.
+- If those readable forms still collide, append a source-order `__overload_N` or `__local_N` suffix. Never use hashes in default Dewy symbols.
 
 Separately, compilation should support selectable name-mangling modes/flags for interop with other languages' ABIs (so Dewy binaries can talk natively to e.g. C++/Rust binaries when desired). That interop mode is orthogonal to the default "mangle only when needed" Dewy policy.
 

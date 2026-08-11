@@ -1,22 +1,12 @@
-"""
-udewy backend for dewy compiler
+"""Emit udewy source from HIR prepared by the udewy lowering pass."""
 
-for now, HIR->udewy src
-
-
-
-features
-- handle imports
-
-- collect non-udewy constructs
-
-"""
 from dataclasses import dataclass
 from textwrap import indent
 
-from ..reporting import SrcFile
-from ..semantic import builtins, check, hir, ty
-from ..semantic.hir_display import type_to_dewy
+from ...reporting import SrcFile
+from ...semantic import builtins, check, hir, ty
+from ...semantic.hir_display import type_to_dewy
+from . import lower
 
 TAB = '    '
 
@@ -60,16 +50,31 @@ SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', 
 
 @dataclass
 class EmitContext:
+    """Names needed to choose udewy's direct versus indirect call syntax.
+
+    ``direct_function_names`` contains module-level symbols produced by
+    callable legalization. ``local_names`` tracks runtime bindings that shadow
+    those symbols in the current lexical block.
+    """
+
     direct_function_names: set[str]
     local_names: set[str]
 
 
 
 def codegen(srcfile:SrcFile) -> str:
+    """Type-check Dewy source and emit equivalent udewy source."""
     ast = check.typecheck_and_resolve(srcfile)
-    return codegen_inner(ast)
+    return codegen_inner(ast, srcfile)
 
-def codegen_inner(ast: hir.AST) -> str:
+def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
+    """Emit checked HIR after legalizing Dewy callable constructs.
+
+    ``lower_for_udewy`` supplies concrete module-level function units: ordinary
+    top-level functions, hoisted non-capturing locals, and inline overload
+    alternatives. Any remaining top-level item still belongs to a later
+    backend stage.
+    """
     functions: dict[str, hir.FunctionLiteral] = {}
     # imports
     # etc.
@@ -78,12 +83,16 @@ def codegen_inner(ast: hir.AST) -> str:
     if not isinstance(ast, hir.Block):
         raise TypeError(f"Expected Block, got {type(ast)}")
 
-    for item in ast.items:
-        if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral):
-            functions[item.name] = item.expr
-        else:
-            #TODO: handling of all other stuff
-            raise NotImplementedError(f'udewy codegen not implemented for top-level item: {type(item).__name__}')
+    if srcfile is None:
+        srcfile = SrcFile(None, ' ' * ast.loc.stop)
+    program = lower.lower_for_udewy(ast, srcfile)
+    for function in program.functions:
+        functions[function.symbol] = function.literal
+    if program.remaining_items:
+        item = program.remaining_items[0]
+        raise NotImplementedError(
+            f'udewy codegen not implemented for top-level item: {type(item).__name__}'
+        )
 
     # if main not declared, use the whole top level block as the main function
     if 'main' not in functions:
@@ -252,6 +261,7 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
         if operand_type in SIGNED_FIXED_INTS:
             return f'__signed_shr__({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
         if operand_type not in UNSIGNED_FIXED_INTS:
+            assert operand_type is not None
             raise NotImplementedError(
                 f'udewy codegen for right shift of `{type_to_dewy(operand_type)}`'
             )
@@ -310,16 +320,3 @@ def emit_return(expr: hir.Return, ctx: EmitContext) -> str:
     if expr.item is None:
         return 'return void'  # udewy requires an explicit value
     return f'return {emit_ast(expr.item, ctx)}'
-
-
-if __name__ == '__main__':
-    from pathlib import Path
-
-    from ...myargparse import ArgumentParser
-    parser = ArgumentParser()
-    parser.add_argument('path', type=Path, required=True, help='path to file to compile')
-    args = parser.parse_args()
-    path: Path = args.path
-    srcfile = SrcFile.from_path(path)
-    udewy = codegen(srcfile)
-    print(udewy, end='')

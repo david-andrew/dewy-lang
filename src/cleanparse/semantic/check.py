@@ -930,6 +930,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         left,
         apply_promotions(pos_args, result.promote_pos),
         kw_args,
+        result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
 
 

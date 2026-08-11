@@ -3,6 +3,7 @@ import pytest
 from src.cleanparse.backend.udewy import codegen
 from src.cleanparse.reporting import SrcFile
 from src.cleanparse.semantic import check, hir, ty
+from src.cleanparse.semantic.errors import NotImplementedYet
 from src.cleanparse.semantic.hir_display import type_to_dewy
 
 
@@ -82,15 +83,24 @@ let main = ():>int64 => {
         assert call.func.name == 'fn_ptr'
 
 
-def test_udewy_backend_rejects_local_function_literals() -> None:
+def test_udewy_backend_hoists_non_capturing_local_functions() -> None:
     source = """
 let main = ():>int64 => {
     let local = (value:int64):>int64 => value
-    return 42
+    return local(42)
 }
 """
-    with pytest.raises(
-        NotImplementedError,
-        match='local function literals or closures',
-    ):
+    emitted = codegen(SrcFile(None, source))
+    assert 'let local = (value:int64):>int64' in emitted
+    assert 'return local(42)' in emitted
+
+
+def test_udewy_backend_rejects_captured_local_values() -> None:
+    source = """
+let main = (value:int64):>int64 => {
+    let local = ():>int64 => value
+    return local()
+}
+"""
+    with pytest.raises(NotImplementedYet, match='captures `value`'):
         codegen(SrcFile(None, source))

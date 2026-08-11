@@ -756,6 +756,27 @@ class TypeSystem:
                 out.append(inst)
         return out
 
+    def _applicable_indexed(
+        self,
+        methods: list[FunctionType],
+        pos_types: list[TypeExpr],
+        kw_types: dict[str, TypeExpr],
+        expected_return: TypeExpr | None = None,
+    ) -> list[tuple[int, FunctionType]]:
+        """Applicable instantiated methods paired with their declaration index.
+
+        Instantiation may create a new ``FunctionType``, so identity or
+        structural equality cannot reliably recover the selected source
+        alternative after dispatch. Preserving the original index gives HIR
+        lowering an unambiguous link to that alternative.
+        """
+        out: list[tuple[int, FunctionType]] = []
+        for index, method in enumerate(methods):
+            inst = self.try_instantiate_for_call(method, pos_types, kw_types, expected_return)
+            if inst is not None:
+                out.append((index, inst))
+        return out
+
     def more_specific(self, m1: FunctionType, m2: FunctionType) -> bool:
         """True if m1 is strictly more specific than m2 (positional params only)."""
         if len(m1.pos_or_kw) != len(m2.pos_or_kw):
@@ -773,7 +794,7 @@ class TypeSystem:
     ) -> 'DispatchResult':
         """Julia-style: unique most-specific applicable method, with promote-and-redispatch fallback."""
         kw_types = kw_types or {}
-        apps = self.applicable(methods, pos_types, kw_types, expected_return)
+        apps = self._applicable_indexed(methods, pos_types, kw_types, expected_return)
         promote_pos: list[TypeExpr | None] = [None] * len(pos_types)
 
         if not apps and pos_types and all(isinstance(t, str) for t in pos_types):
@@ -785,16 +806,25 @@ class TypeSystem:
                     break
             if common is not None:
                 promoted_pos = [common] * len(pos_types)
-                apps = self.applicable(methods, promoted_pos, kw_types, expected_return)
+                apps = self._applicable_indexed(methods, promoted_pos, kw_types, expected_return)
                 if apps:
                     promote_pos = [None if t == common else common for t in pos_types]
 
         if not apps:
             raise DispatchError(f'no matching method for pos={pos_types!r} kw={kw_types!r}')
-        winners = [m for m in apps if not any(self.more_specific(o, m) for o in apps if o is not m)]
+        winners = [
+            (index, method)
+            for index, method in apps
+            if not any(
+                self.more_specific(other, method)
+                for other_index, other in apps
+                if other_index != index
+            )
+        ]
         if len(winners) != 1:
             raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
-        return DispatchResult(winners[0], promote_pos)
+        method_index, method = winners[0]
+        return DispatchResult(method, method_index, promote_pos)
 
 
 
@@ -1054,8 +1084,15 @@ class DispatchError(ValueError):
 
 @dataclass
 class DispatchResult:
-    """Winning method after dispatch, plus any per-arg promotions to apply before the call."""
+    """Dispatch winner, its source-list index, and required argument promotions.
+
+    ``method`` may be a freshly instantiated generic signature. The stable
+    ``method_index`` therefore provides the semantic-to-HIR link to the
+    original alternative.
+    """
+
     method: FunctionType
+    method_index: int
     promote_pos: list[TypeExpr | None]  # parallel to call pos_types; None = no promote
 
 

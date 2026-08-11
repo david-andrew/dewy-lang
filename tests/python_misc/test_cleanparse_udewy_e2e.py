@@ -3,8 +3,8 @@ from shutil import which
 
 import pytest
 
-from src.cleanparse.reporting import SrcFile
 from src.cleanparse.backend.udewy import codegen
+from src.cleanparse.reporting import SrcFile
 from src.cleanparse.semantic import check
 from udewy.frontend import entry_point
 
@@ -17,7 +17,7 @@ def x86_64_toolchain_available() -> bool:
     return which('as') is not None and which('ld') is not None
 
 
-CASES = [
+ROUNDTRIP_CASES = [
     ('minimal2.udewy', 42),
     ('arith_locals.udewy', 42),
     ('direct_calls.udewy', 42),
@@ -26,10 +26,16 @@ CASES = [
     ('forward_calls.udewy', 42),
     ('recursive_symbol.udewy', 42),
 ]
-FIXTURE_NAMES = [fixture_name for fixture_name, _ in CASES]
+LOWERED_CASES = [
+    ('overload_calls.dewy', 42),
+    ('inline_overloads.dewy', 42),
+    ('local_functions.dewy', 42),
+]
+CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
+ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]
 
 
-@pytest.mark.parametrize('fixture_name', FIXTURE_NAMES)
+@pytest.mark.parametrize('fixture_name', ROUNDTRIP_FIXTURE_NAMES)
 def test_udewy_fixture_roundtrip(fixture_name: str) -> None:
     path = fixtures / fixture_name
     source = path.read_text()
