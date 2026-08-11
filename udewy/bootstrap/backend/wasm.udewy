@@ -1600,6 +1600,8 @@ function updateCanvasLayout() \{
     \}
 \}
 
+// Keep the GPU canvas backing buffer matched to the window so the rendered
+// aspect ratio tracks the window instead of being stretched to fit.
 function resizeGpuCanvasToWindow() \{
     if (!gpuCanvas) return;
     const w = Math.max(1, Math.floor(window.innerWidth));
@@ -1764,6 +1766,8 @@ function clampPointer(value, limit) \{
     return value;
 \}
 
+// Map the DOM `buttons` bitmask (1=left, 2=right, 4=middle) onto the game's
+// MOUSE_L=1 / MOUSE_M=2 / MOUSE_R=4 convention.
 function domButtonsToMask(buttons) \{
     let mask = 0;
     if (buttons & 1) mask |= 1;
@@ -1818,13 +1822,17 @@ function ensurePointerHandlers() \{
         pointerButtons = 0;
     \});
 
+    // Accumulate wheel notches; the game reads/clears this once per frame.
     window.addEventListener('wheel', (event) => \{
         if (canvasMode || webglMode || gpuMode) \{
             event.preventDefault();
         \}
+        // deltaY > 0 is scroll-down; report negative steps so up = positive,
+        // matching the SDL backend's wheel sign.
         pointerWheelAccum += (event.deltaY > 0) ? -1 : ((event.deltaY < 0) ? 1 : 0);
     \}, \{ passive: false \});
 
+    // Suppress the browser context menu so right-button drag works.
     window.addEventListener('contextmenu', (event) => \{
         if (canvasMode || webglMode || gpuMode) \{
             event.preventDefault();
@@ -2551,6 +2559,9 @@ $\{String(err)\}`;
                 gpuCanvas.id = 'canvas';
                 document.body.insertBefore(gpuCanvas, document.body.firstChild);
             \}
+            // Back the canvas at the window's real pixel size so the game's
+            // per-frame aspect/viewport math matches the display and the
+            // content is never stretched. The requested w/h is only a fallback.
             gpuCanvas.width = Math.max(1, Math.floor(window.innerWidth || w));
             gpuCanvas.height = Math.max(1, Math.floor(window.innerHeight || h));
             gpuCanvas.style.display = 'block';
@@ -2715,6 +2726,8 @@ $\{String(err)\}`;
             gpuSavedBlend = gpuGL.getParameter(gpuGL.BLEND);
             gpuGL.disable(gpuGL.DEPTH_TEST);
             gpuGL.depthMask(false);
+            // Overlay content (HUD text, panels, speed lines) is alpha-keyed,
+            // so blend must be on or transparent texels render as opaque black.
             gpuGL.enable(gpuGL.BLEND);
             gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
             gpuOverlayActive = true;

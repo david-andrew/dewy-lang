@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from udewy import p0, t0, t1
-from udewy.backend.sdl_desktop import SDL_APP_ID_ENV, SDL_X11_WMCLASS_ENV, default_sdl_icon_source, prepare_sdl_desktop_launch
+from udewy.third_party.sdl.desktop_launch import SDL_APP_ID_ENV, SDL_X11_WMCLASS_ENV, default_sdl_icon_source, prepare_sdl_desktop_launch
 from udewy.backend import get_backend
 
 

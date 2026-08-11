@@ -67,7 +67,7 @@ let main = ():>int => {
 
 
 def test_wasm_rejects_extern_declarations() -> None:
-    with pytest.raises(RuntimeError, match=r"extern functions are not supported on the wasm32 backend"):
+    with pytest.raises(RuntimeError, match=r"extern globals are not supported on the wasm32 backend"):
         parse_udewy(EXTERN_SOURCE, get_backend("wasm32"))
 
 
