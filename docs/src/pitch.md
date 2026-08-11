@@ -12,7 +12,7 @@ phase = if temperature <? freezing
         else
             'gas'
 
-squares = [loop n in [1..10] n^2]
+squares = [loop n in 1..10 n^2]
 
 circumference = {
     diameter = 2 * radius
@@ -42,6 +42,8 @@ my_array = [1 2 3 4 5]
 ratings = [
     'star trek' -> 89
     'star wars' -> 73
+    'battlestar galactica' -> 92
+    'stargate' -> 98
 ]
 
 add = (a b) => a + b
@@ -73,9 +75,16 @@ identity = sin(x)^2 + cos(x)^2                # juxtaposition calls
 
 primes = [2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97]
 mods = 20 .% primes                           # .op broadcasts elementwise
+
+A = [
+    1 2
+    3 4
+]
+B = [0 1 ; 1 0]
+C = A * B                                     # matrix multiplication
 ```
 
-## Ranges are values
+## Ranges are nice
 
 ```dewy
 [1..5]      # 1 2 3 4 5     inclusive bounds
@@ -86,6 +95,7 @@ mods = 20 .% primes                           # .op broadcasts elementwise
 [1,3..9]    # 1 3 5 7 9     step comes from the first pair
 [5,4..0]    # 5 4 3 2 1 0   count down
 0..         # 0 to infinity
+..-10       # -infinity to -10
 'a'..'z'    # any ordered type
 
 5 in? (1..5)                # false
