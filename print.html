@@ -1376,7 +1376,12 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <h2 id="match-expressions"><a class="header" href="#match-expressions">Match Expressions</a></h2>
 <p>(TODO) switch statement equivalent</p>
 <h2 id="break-continue-return"><a class="header" href="#break-continue-return">Break, Continue, Return, <expr-return></a></h2>
-<p>(TODO) branch inside body of conditional</p>
+<p><code>break</code> and <code>continue</code> can select an enclosing loop through a scope metatag,
+such as <code>break $outer</code>. See
+<a href="ch03/loops.html#break-continue-return-inside-loops">Break, Continue, Return inside Loops</a>
+for the target and visibility rules.</p>
+<p><code>return</code> exits the containing function and may be used from inside conditional
+or loop bodies.</p>
 <h2 id="advanced-flow-control"><a class="header" href="#advanced-flow-control">Advanced Flow Control</a></h2>
 <p>(TODO) combining conditionals
 (TODO) list and dictionary generators</p>
@@ -1547,54 +1552,84 @@ this is a do-for loop. i=5
 ></iframe>
 <p>In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.</p>
 <h2 id="break-continue-return-inside-loops"><a class="header" href="#break-continue-return-inside-loops">Break, Continue, Return inside Loops</a></h2>
-<p>TODO-&gt;write this. follows basic principles of other languages. extra is that you can use <code>#hashtags</code> to break/continue from inside nested loops</p>
+<p><code>break</code> exits the nearest enclosing loop, while <code>continue</code> begins that loop's
+next iteration. <code>return</code> leaves the containing function.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20running%0A%7B%0A%20%20%20%20if%20should_skip%20%7B%20continue%20%7D%0A%20%20%20%20if%20finished%20%7B%20break%20%7D%0A%20%20%20%20process%28%29%0A%7D&id=DewyIframe98"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe98"
+    frameBorder="0"
+></iframe>
+<p>A scope metatag can select an outer loop from nested control flow. A bare
+<code>$name</code> declares a generic metatag for its entire lexical scope. A labeled
+<code>break</code> or <code>continue</code> targets the nearest enclosing loop whose parent scope
+declares that name:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%24rows%0Aloop%20next_row%28%29%0A%7B%0A%20%20%20%20loop%20next_column%28%29%0A%20%20%20%20%7B%0A%20%20%20%20%20%20%20%20if%20retry_row%28%29%20%7B%20continue%20%24rows%20%7D%0A%20%20%20%20%20%20%20%20if%20table_complete%28%29%20%7B%20break%20%24rows%20%7D%0A%20%20%20%20%20%20%20%20process_cell%28%29%0A%20%20%20%20%7D%0A%7D&id=DewyIframe99"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe99"
+    frameBorder="0"
+></iframe>
+<p>The metatag is not syntactically attached to the following loop. It is a scope
+marker that labels every loop directly contained by that scope, so multiple
+sibling loops may share it. Placing the metatag immediately before the first
+loop that uses it is the conventional style.</p>
+<p>Scope metatags are visible throughout their scope, including before their
+source position. Declaring the same name twice in one scope is an error, as is
+shadowing an active metatag in a nested scope. The same name may be reused in
+disjoint sibling scopes after the first declaration is no longer visible.
+Labels never cross function boundaries.</p>
+<p>The compiler reports an error when a labeled exit names an unknown metatag, or
+when the metatag is visible but its scope is not the parent of an enclosing
+loop. The latter commonly means the marker was placed inside the loop body
+instead of in the loop's parent scope.</p>
 <h2 id="loop-generators"><a class="header" href="#loop-generators">Loop Generators</a></h2>
 <p>Let's look at this example</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..10%5D%20%7Bi%7D&id=DewyIframe98"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..10%5D%20%7Bi%7D&id=DewyIframe100"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe98"
+    id="DewyIframe100"
     frameBorder="0"
 ></iframe>
 <p>Every iteration of the loop, the current value of <code>i</code> is &quot;expressed&quot;, that is to say, the value could be stored in a variable or a container.</p>
 <p>Lets capture the expressed value in a container by wrapping the loop in <code>[]</code> brackets</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D&id=DewyIframe99"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D&id=DewyIframe101"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe99"
+    id="DewyIframe101"
     frameBorder="0"
 ></iframe>
 <p>This &quot;generates&quot; the array <code>[1 2 3 4 5 6 7 8 9 10]</code>, which we can then store into a variable</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D%0A%0A%25optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20i%5D&id=DewyIframe100"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D%0A%0A%25optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20i%5D&id=DewyIframe102"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe100"
+    id="DewyIframe102"
     frameBorder="0"
 ></iframe>
 <p>And thus we have created the simplest list generator.</p>
 <h3 id="multiple-expressions-per-iteration"><a class="header" href="#multiple-expressions-per-iteration">Multiple Expressions per Iteration</a></h3>
 <p>Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe101"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe103"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe101"
+    id="DewyIframe103"
     frameBorder="0"
 ></iframe>
 <p>producing the array <code>[1 1 2 4 3 9 4 16 5 25]</code>.</p>
 <p>We can also construct a dictionary by expressing with a <code>-&gt;</code> between two values</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe102"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe104"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe102"
+    id="DewyIframe104"
     frameBorder="0"
 ></iframe>
 <p>which produces the dictionary <code>[1-&gt;1 2-&gt;4 3-&gt;9 4-&gt;16 5-&gt;25]</code> which points from values to their squares.</p>
 <h3 id="multidimensional-generators"><a class="header" href="#multidimensional-generators">Multidimensional Generators</a></h3>
 <p>You can generate a multidimensional array using multiple nested loops. For example</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%20%5B1..5%5D%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%20%5B1..5%5D%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe103"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%20%5B1..5%5D%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%20%5B1..5%5D%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe105"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe103"
+    id="DewyIframe105"
     frameBorder="0"
 ></iframe>
 <p>which produces the following 3D array representing the indices of a 5x5 matrix as tuples</p>
@@ -1614,9 +1649,9 @@ this is a do-for loop. i=5
 </blockquote>
 <p>Examples of imports</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%0A%25%20import%20an%20item%20from%20a%20local%20file%0Afrom%20p%22stuff.dewy%22%20import%20myfun%0A%0A%25%20import%20an%20item%20from%20a%20local%20file%2C%20and%20rename%20it%0Afrom%20p%22../some/other/path/to/stuff.dewy%22%20import%20myfun%20as%20myfun2%0A%0A%25%20import%20a%20whole%20file%20as%20an%20object%20with%20a%20given%20name.%0A%25%20tbd%20if%20you%20can%20omit%20the%20name%20since%20not%20an%20installed%20library%0Aimport%20p%22../../mylib3.dewy%22%20as%20mylib3%0A%0A%25%20import%20all%20the%20contents%20of%20a%20file%20into%20the%20current%20scope%0Afrom%20p%22mylib4.dewy%22%20import%20...%0A%0A%25%20import%20several%20functions%20from%20a%20local%20file%2C%20unpacking%20some%20from%20nested%20objects%0Afrom%20p%22stuff2.dewy%22%20import%20myfun2%2C%20myfun3%20as%20f1%2C%20mymodule%20as%20%5Bf2%20f3%20mod3%20as%20%5Bf4%20f5%5D%5D%0A%0A%25importing%20from%20a%20whole%20folder%0Afrom%20p%22myproject%22%20import%20mod1%2C%20mod2%2C%20mod3%0A%0A%25TODO%3A%20what%20about%20glob%20patterns%20in%20the%20import%20path%3F%0Afrom%20p%22myproject/%2A.dewy%22%20import%20...%0A%0A%25%20import%20a%20whole%20installed%20library%0Aimport%20IO%0A%0A%25%20import%20items%20from%20an%20installed%20library%0Afrom%20Math%20import%20sin%2C%20cos%2C%20tan%0A%0A%25%20import%20and%20rename%20a%20whole%20installed%20library%0Aimport%20seaborn%20as%20sns%0A%0A%25%20import%20and%20rename%20items%20from%20an%20installed%20library%0Afrom%20sklearn%20import%20RandomForest%20as%20RF%2C%20LinearRegression%20as%20LR&id=DewyIframe104"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%0A%25%20import%20an%20item%20from%20a%20local%20file%0Afrom%20p%22stuff.dewy%22%20import%20myfun%0A%0A%25%20import%20an%20item%20from%20a%20local%20file%2C%20and%20rename%20it%0Afrom%20p%22../some/other/path/to/stuff.dewy%22%20import%20myfun%20as%20myfun2%0A%0A%25%20import%20a%20whole%20file%20as%20an%20object%20with%20a%20given%20name.%0A%25%20tbd%20if%20you%20can%20omit%20the%20name%20since%20not%20an%20installed%20library%0Aimport%20p%22../../mylib3.dewy%22%20as%20mylib3%0A%0A%25%20import%20all%20the%20contents%20of%20a%20file%20into%20the%20current%20scope%0Afrom%20p%22mylib4.dewy%22%20import%20...%0A%0A%25%20import%20several%20functions%20from%20a%20local%20file%2C%20unpacking%20some%20from%20nested%20objects%0Afrom%20p%22stuff2.dewy%22%20import%20myfun2%2C%20myfun3%20as%20f1%2C%20mymodule%20as%20%5Bf2%20f3%20mod3%20as%20%5Bf4%20f5%5D%5D%0A%0A%25importing%20from%20a%20whole%20folder%0Afrom%20p%22myproject%22%20import%20mod1%2C%20mod2%2C%20mod3%0A%0A%25TODO%3A%20what%20about%20glob%20patterns%20in%20the%20import%20path%3F%0Afrom%20p%22myproject/%2A.dewy%22%20import%20...%0A%0A%25%20import%20a%20whole%20installed%20library%0Aimport%20IO%0A%0A%25%20import%20items%20from%20an%20installed%20library%0Afrom%20Math%20import%20sin%2C%20cos%2C%20tan%0A%0A%25%20import%20and%20rename%20a%20whole%20installed%20library%0Aimport%20seaborn%20as%20sns%0A%0A%25%20import%20and%20rename%20items%20from%20an%20installed%20library%0Afrom%20sklearn%20import%20RandomForest%20as%20RF%2C%20LinearRegression%20as%20LR&id=DewyIframe106"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe104"
+    id="DewyIframe106"
     frameBorder="0"
 ></iframe>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="standard-library"><a class="header" href="#standard-library">Standard Library</a></h1>
