@@ -155,7 +155,15 @@ class IntegerLiteralType:
     value: int
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType
+@dataclass(frozen=True)
+class ArrayType:
+    """A homogeneous mutable array, optionally refined to an exact length."""
+
+    element: 'TypeExpr'
+    length: int | None = None
+
+
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -232,6 +240,7 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     OverloadType: 'multifunction',
     SequenceType: 'generator',  # a group of expressed values is consumable like a generator; only the bare umbrella, `<int int> of? generator<int>` is TBD
     IntegerLiteralType: 'int',
+    ArrayType: 'array',
 
     # TBD about these
     # IteratorType: 'iterator',
@@ -253,6 +262,14 @@ _fixed_integer_widths: dict[str, tuple[int, bool]] = {
     'int32': (32, True),
     'int64': (64, True),
 }
+
+FIXED_INTEGER_TYPES = frozenset(_fixed_integer_widths)
+
+
+def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
+    """Return `(bit_width, signed)` for a concrete fixed-width integer."""
+
+    return _fixed_integer_widths.get(type_) if isinstance(type_, str) else None
 
 
 def integer_literal_fits(value: int, target: Primitive) -> bool:
@@ -378,6 +395,14 @@ class TypeSystem:
             return a if self._integer_literal_implies(a, b) else None
         if isinstance(b, IntegerLiteralType) and isinstance(a, str):
             return b if self._integer_literal_implies(b, a) else None
+        if isinstance(a, ArrayType) and isinstance(b, ArrayType):
+            if a.element != b.element:
+                return None
+            if a.length is None:
+                return b
+            if b.length is None:
+                return a
+            return a if a.length == b.length else None
 
         a_nom = self._structural_nominal(a)
         b_nom = self._structural_nominal(b)
@@ -449,6 +474,11 @@ class TypeSystem:
                 return a == b
             if isinstance(b, str):
                 return self._integer_literal_implies(a, b)
+        if isinstance(a, ArrayType) and isinstance(b, ArrayType):
+            return (
+                a.element == b.element
+                and (b.length is None or a.length == b.length)
+            )
 
         a_nom = self._structural_nominal(a)
         if a_nom is not None and isinstance(b, str) and self._is_nom_subtype(a_nom, b):
@@ -866,7 +896,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -984,6 +1014,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return TypeParameterize(to_nnf(t.t), [to_nnf(a) for a in t.args])
     if isinstance(t, SequenceType):
         return SequenceType([to_nnf(x) for x in t.items])
+    if isinstance(t, ArrayType):
+        return ArrayType(to_nnf(t.element), t.length)
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
 
 
@@ -1003,7 +1035,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, ArrayType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1102,6 +1134,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return bindings.get(t, t)
     if isinstance(t, IntegerLiteralType):
         return t
+    if isinstance(t, ArrayType):
+        return ArrayType(substitute_type(t.element, bindings), t.length)
     if isinstance(t, TypeAnd):
         return TypeAnd([substitute_type(x, bindings) for x in t.items])
     if isinstance(t, TypeOr):

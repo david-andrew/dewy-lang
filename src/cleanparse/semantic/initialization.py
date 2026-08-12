@@ -233,6 +233,49 @@ class _InitializationChecker:
                     call_stack,
                 )
             return current
+        if isinstance(node, hir.ArrayLiteral):
+            current = initialized
+            for item in node.items:
+                current = self._check_eager(
+                    item,
+                    current,
+                    parameters,
+                    call_stack,
+                )
+            return current
+        if isinstance(node, hir.ArrayLength):
+            return self._check_eager(
+                node.array,
+                initialized,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.Index):
+            current = self._check_eager(
+                node.array,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.index,
+                current,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.IndexAssign):
+            current = self._check_eager(
+                node.target,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.value,
+                current,
+                parameters,
+                call_stack,
+            )
         if isinstance(node, hir.Assign):
             current = self._check_eager(
                 node.target,

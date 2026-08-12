@@ -1,0 +1,12 @@
+let probe = (depth:int64):>int64 => {
+    let values:array<int64> = [0]
+    if depth =? 0 {
+        values[0] = 40
+        let ignored:int64 = probe(1)
+        return values[0]
+    }
+    values[0] = 2
+    return 0
+}
+
+let main = ():>int64 => probe(0) + 2

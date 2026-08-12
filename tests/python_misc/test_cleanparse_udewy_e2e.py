@@ -45,6 +45,10 @@ LOWERED_CASES = [
     ('explicit_and_implicit_main.dewy', 2),
     ('top_level_inferred_global.dewy', 42),
     ('top_level_callback.dewy', 42),
+    ('array_local_sum.dewy', 42),
+    ('array_narrow.dewy', 42),
+    ('array_module_lookup.dewy', 42),
+    ('array_fresh_local.dewy', 42),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]

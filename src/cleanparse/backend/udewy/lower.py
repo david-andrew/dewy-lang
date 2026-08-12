@@ -13,7 +13,10 @@ but cannot be represented directly by udewy:
 - udewy control flow is statement-only, so scalar control-flow expressions
   are extracted into typed temporaries and branch assignments;
 - labeled exits are translated into integer signals propagated through nested
-  structured loops.
+  structured loops;
+- fresh local arrays become stack allocations with width-specific stores, while
+  module arrays receive static backing and indexed operations become memory
+  intrinsics.
 
 Lowering has two phases. Discovery replays lexical scope resolution, records
 function units and captures, and preserves the type checker's forward-function
@@ -147,10 +150,12 @@ class _Lowerer:
         self.source_names: set[str] = set()
         self.next_flow_temp = 1
         self.next_eager_temp = 1
+        self.next_array_temp = 1
         self.next_loop_signal = 1
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
         self.lower_loop_depth = 0
+        self.lowering_module_startup = False
         self.needs_startup = False
         self.startup_symbol = '__dewy_top_level'
         self.user_main_base = '__dewy_user_main'
@@ -211,6 +216,7 @@ class _Lowerer:
                 startup_sources.append(transformed)
         startup_items: list[hir.AST] = []
         if startup_sources:
+            self.lowering_module_startup = True
             startup = self._lower_function_body(
                 hir.Block(
                     self.root.loc,
@@ -220,6 +226,7 @@ class _Lowerer:
                 ),
                 ty.VOID_TYPE,
             )
+            self.lowering_module_startup = False
             if not isinstance(startup, hir.Block):
                 raise TypeError('INTERNAL ERROR: top-level startup did not lower to a block')
             startup_items = startup.items
@@ -271,6 +278,8 @@ class _Lowerer:
         )
 
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
+        if isinstance(type_, ty.ArrayType):
+            self._target_error(node, 'array return values are not supported by udewy')
         if not isinstance(type_, ty.IntegerLiteralType):
             return type_
         if ty.integer_literal_fits(type_.value, 'int64'):
@@ -310,6 +319,8 @@ class _Lowerer:
                         )
                     ],
                 ))
+            annotation = 'int64'
+        if isinstance(annotation, ty.ArrayType):
             annotation = 'int64'
         if annotation == 'bool':
             initializer: hir.AST = hir.Bool(declaration.loc, 'bool', False)
@@ -645,6 +656,21 @@ class _Lowerer:
             self._discover_node(node.left, scope, current_function)
             self._discover_node(node.right, scope, current_function)
             return
+        if isinstance(node, hir.ArrayLiteral):
+            for item in node.items:
+                self._discover_node(item, scope, current_function)
+            return
+        if isinstance(node, hir.ArrayLength):
+            self._discover_node(node.array, scope, current_function)
+            return
+        if isinstance(node, hir.Index):
+            self._discover_node(node.array, scope, current_function)
+            self._discover_node(node.index, scope, current_function)
+            return
+        if isinstance(node, hir.IndexAssign):
+            self._discover_node(node.target, scope, current_function)
+            self._discover_node(node.value, scope, current_function)
+            return
         if isinstance(node, hir.FunctionCall):
             self._discover_node(node.func, scope, current_function)
             for arg in node.pos_args:
@@ -655,6 +681,17 @@ class _Lowerer:
         if isinstance(node, hir.Assign):
             self._discover_node(node.target, scope, current_function)
             self._discover_node(node.value, scope, current_function)
+            target_binding = self.identifier_bindings.get(id(node.target))
+            if (
+                isinstance(node.value.type, ty.ArrayType)
+                and current_function is not None
+                and target_binding is not None
+                and target_binding.owner_function is None
+            ):
+                self._target_error(
+                    node,
+                    'a function-local array cannot escape into module storage',
+                )
             return
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
             self._discover_node(node.expr, scope, current_function)
@@ -855,6 +892,34 @@ class _Lowerer:
             return hir.ExpressedIdentifier(node.loc, node.type, function.symbol)
         if isinstance(node, hir.OverloadedFunction):
             self._target_error(node, 'runtime multifunction values are not supported by udewy')
+        if isinstance(node, hir.ArrayLiteral):
+            return replace(
+                node,
+                items=[
+                    self._require_node(self._transform_node(item))
+                    for item in node.items
+                ],
+            )
+        if isinstance(node, hir.ArrayLength):
+            return replace(
+                node,
+                array=self._require_node(self._transform_node(node.array)),
+            )
+        if isinstance(node, hir.Index):
+            return replace(
+                node,
+                array=self._require_node(self._transform_node(node.array)),
+                index=self._require_node(self._transform_node(node.index)),
+            )
+        if isinstance(node, hir.IndexAssign):
+            target = self._transform_node(node.target)
+            if not isinstance(target, hir.Index):
+                raise TypeError('INTERNAL ERROR: indexed assignment target was not an index')
+            return replace(
+                node,
+                target=target,
+                value=self._require_node(self._transform_node(node.value)),
+            )
         if isinstance(node, hir.FunctionCall):
             if isinstance(node.func.type, ty.OverloadType):
                 if node.selected_method_index is None:
@@ -1103,7 +1168,41 @@ class _Lowerer:
             return statements
         if isinstance(node, hir.Declare):
             prelude, expr = self._extract_expression(node.expr)
-            return [*prelude, replace(node, expr=expr)]
+            annotation = (
+                'int64'
+                if isinstance(node.annotation or node.expr.type, ty.ArrayType)
+                else node.annotation
+            )
+            return [
+                *prelude,
+                replace(
+                    node,
+                    decltype=(
+                        'let'
+                        if isinstance(node.expr.type, ty.ArrayType)
+                        else node.decltype
+                    ),
+                    annotation=annotation,
+                    expr=expr,
+                ),
+            ]
+        if isinstance(node, hir.IndexAssign):
+            target_prelude, target = self._extract_expression(node.target.array)
+            value_prelude, value = self._array_storage_value(
+                node.value,
+                node.target.type,
+            )
+            address = self._array_element_address(
+                target,
+                node.target.constant_index,
+                node.target.type,
+                node.loc,
+            )
+            return [
+                *target_prelude,
+                *value_prelude,
+                self._array_store(value, address, node.target.type, node.loc),
+            ]
         if isinstance(node, hir.Assign):
             prelude, value = self._extract_expression(node.value)
             return [*prelude, replace(node, value=value)]
@@ -1145,13 +1244,40 @@ class _Lowerer:
                 ty.VOID_TYPE,
                 'let',
                 target.name,
-                node.type,
+                'int64' if isinstance(node.type, ty.ArrayType) else node.type,
                 self._placeholder(node),
             )
             flow_prelude, flow = self._lower_flow(node, target=target)
             return [declaration, *flow_prelude, flow], target
         if isinstance(node, hir.ShortCircuit):
             return self._extract_expression(self._short_circuit_flow(node))
+        if isinstance(node, hir.ArrayLiteral):
+            return self._extract_array_literal(node)
+        if isinstance(node, hir.ArrayLength):
+            prelude, array = self._extract_expression(node.array)
+            if isinstance(node.type, ty.IntegerLiteralType):
+                return prelude, self._int64_literal(node.loc, node.type.value)
+            address = self._int64_binary(
+                '__sub__',
+                array,
+                self._int64_literal(node.loc, 8),
+                node.loc,
+            )
+            return prelude, self._intrinsic_call(
+                '__load_i64__',
+                [address],
+                'int64',
+                node.loc,
+            )
+        if isinstance(node, hir.Index):
+            prelude, array = self._extract_expression(node.array)
+            address = self._array_element_address(
+                array,
+                node.constant_index,
+                node.type,
+                node.loc,
+            )
+            return prelude, self._array_load(address, node.type, node.loc)
         if isinstance(node, hir.FunctionCall):
             prelude: list[hir.AST] = []
             func_prelude, func = self._extract_expression(node.func)
@@ -1189,6 +1315,269 @@ class _Lowerer:
             prelude, item = self._extract_expression(node.items[0])
             return prelude, replace(node, items=[item])
         return [], node
+
+    def _extract_array_literal(
+        self,
+        node: hir.ArrayLiteral,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Allocate fresh backing storage and initialize one array value."""
+
+        if not isinstance(node.type, ty.ArrayType) or node.type.length is None:
+            self._target_error(node, 'array literal does not have an exact layout')
+        if self.lowering_module_startup and not all(
+            self._module_array_item_is_stable(item, set())
+            for item in node.items
+        ):
+            self._target_error(
+                node,
+                'top-level arrays currently require compile-time-stable elements',
+            )
+        layout = ty.fixed_integer_layout(node.type.element)
+        if layout is None:
+            self._target_error(
+                node,
+                f'array element layout `{type_to_dewy(node.type.element)}`',
+            )
+        width, _signed = layout
+        element_bytes = width // 8
+        total_bytes = 8 + node.type.length * element_bytes
+        target = self._new_array_temp(node)
+        allocator = (
+            '__static_alloca__'
+            if self.lowering_module_startup
+            else '__alloca__'
+        )
+        allocation = self._intrinsic_call(
+            allocator,
+            [self._int64_literal(node.loc, total_bytes)],
+            'int64',
+            node.loc,
+        )
+        data_pointer = self._int64_binary(
+            '__add__',
+            allocation,
+            self._int64_literal(node.loc, 8),
+            node.loc,
+        )
+        statements: list[hir.AST] = [
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                'int64',
+                data_pointer,
+            ),
+        ]
+        header = self._int64_binary(
+            '__sub__',
+            replace(target, type='int64'),
+            self._int64_literal(node.loc, 8),
+            node.loc,
+        )
+        statements.append(
+            self._intrinsic_call(
+                '__store_i64__',
+                [self._int64_literal(node.loc, node.type.length), header],
+                ty.VOID_TYPE,
+                node.loc,
+            )
+        )
+        for index, item in enumerate(node.items):
+            item_prelude, value = self._array_storage_value(
+                item,
+                node.type.element,
+            )
+            statements.extend(item_prelude)
+            address = self._array_element_address(
+                replace(target, type='int64'),
+                index,
+                node.type.element,
+                item.loc,
+            )
+            statements.append(
+                self._array_store(value, address, node.type.element, item.loc)
+            )
+        return statements, target
+
+    def _array_storage_value(
+        self,
+        node: hir.AST,
+        element_type: ty.Type,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        if isinstance(node.type, ty.IntegerLiteralType):
+            return [], hir.Integer(
+                node.loc,
+                element_type,
+                t0.base10,
+                node.type.value,
+            )
+        return self._extract_expression(node)
+
+    def _module_array_item_is_stable(
+        self,
+        node: hir.AST,
+        seen: set[int],
+    ) -> bool:
+        """Whether a top-level array element is a compile-time integer value."""
+
+        if isinstance(node, hir.Integer):
+            return True
+        if isinstance(node, (hir.ValueCast, hir.Transmute)):
+            return self._module_array_item_is_stable(node.expr, seen)
+        if isinstance(node, hir.ExpressedIdentifier):
+            binding = self.identifier_bindings.get(id(node))
+            if (
+                binding is None
+                or binding.order in seen
+                or binding.expr is None
+            ):
+                return False
+            return self._module_array_item_is_stable(
+                binding.expr,
+                {*seen, binding.order},
+            )
+        if (
+            isinstance(node, hir.FunctionCall)
+            and isinstance(node.func, hir.ExpressedIdentifier)
+            and node.func.name in {
+                '__unary_sub__',
+                '__not__',
+                '__add__',
+                '__sub__',
+                '__mul__',
+                '__floordiv__',
+                '__mod__',
+                '__lshift__',
+                '__rshift__',
+            }
+        ):
+            return all(
+                self._module_array_item_is_stable(arg, seen)
+                for arg in node.pos_args
+            )
+        return False
+
+    def _new_array_temp(self, node: hir.ArrayLiteral) -> hir.ExpressedIdentifier:
+        while True:
+            name = f'__dewy_array_{self.next_array_temp}'
+            self.next_array_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(node.loc, node.type, name)
+
+    @staticmethod
+    def _intrinsic_call(
+        name: str,
+        args: list[hir.AST],
+        rettype: ty.Type,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        function_type = ty.FunctionType(
+            [ty.PosOrKwArg(None, arg.type) for arg in args],
+            [],
+            None,
+            rettype,
+        )
+        return hir.FunctionCall(
+            loc,
+            rettype,
+            hir.ExpressedIdentifier(loc, function_type, name),
+            args,
+            {},
+        )
+
+    @classmethod
+    def _int64_binary(
+        cls,
+        name: Literal['__add__', '__sub__'],
+        left: hir.AST,
+        right: hir.AST,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        function_type = ty.FunctionType(
+            [
+                ty.PosOrKwArg('left', 'int64'),
+                ty.PosOrKwArg('right', 'int64'),
+            ],
+            [],
+            None,
+            'int64',
+        )
+        return hir.FunctionCall(
+            loc,
+            'int64',
+            hir.ExpressedIdentifier(loc, function_type, name),
+            [left, right],
+            {},
+        )
+
+    def _array_element_address(
+        self,
+        array: hir.AST,
+        index: int,
+        element_type: ty.Type,
+        loc: Span,
+    ) -> hir.AST:
+        layout = ty.fixed_integer_layout(element_type)
+        if layout is None:
+            self._target_error(
+                array,
+                f'array element layout `{type_to_dewy(element_type)}`',
+            )
+        width, _signed = layout
+        offset = index * (width // 8)
+        if offset == 0:
+            return array
+        return self._int64_binary(
+            '__add__',
+            array,
+            self._int64_literal(loc, offset),
+            loc,
+        )
+
+    def _array_load(
+        self,
+        address: hir.AST,
+        element_type: ty.Type,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        layout = ty.fixed_integer_layout(element_type)
+        if layout is None:
+            self._target_error(
+                address,
+                f'array element layout `{type_to_dewy(element_type)}`',
+            )
+        width, signed = layout
+        prefix = 'i' if signed else 'u'
+        return self._intrinsic_call(
+            f'__load_{prefix}{width}__',
+            [address],
+            element_type,
+            loc,
+        )
+
+    def _array_store(
+        self,
+        value: hir.AST,
+        address: hir.AST,
+        element_type: ty.Type,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        layout = ty.fixed_integer_layout(element_type)
+        if layout is None:
+            self._target_error(
+                value,
+                f'array element layout `{type_to_dewy(element_type)}`',
+            )
+        width, signed = layout
+        prefix = 'i' if signed else 'u'
+        return self._intrinsic_call(
+            f'__store_{prefix}{width}__',
+            [value, address],
+            ty.VOID_TYPE,
+            loc,
+        )
 
     def _lower_flow(
         self,
@@ -1517,6 +1906,8 @@ class _Lowerer:
             'uint64',
         }:
             return hir.Integer(node.loc, node.type, t0.base10, 0)
+        if isinstance(node.type, ty.ArrayType):
+            return hir.Integer(node.loc, 'int64', t0.base10, 0)
         self._target_error(
             node,
             f'no udewy flow temporary representation for `{type_to_dewy(node.type)}`',

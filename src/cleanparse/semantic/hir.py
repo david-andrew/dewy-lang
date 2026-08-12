@@ -9,7 +9,7 @@ Features (i.e. each should probably get an AST node)
 - strings
 - string interpolations
 - numbers
-- arrays/dicts/objects
+- dicts/objects
 - ranges
 - complex ranges, multiple spans, etc.
 - iterators
@@ -142,6 +142,37 @@ class Bool(AST):
 class Integer(AST):
     prefix: t0.BasePrefix
     value: int
+
+
+@dataclass
+class ArrayLiteral(AST):
+    """A one-dimensional homogeneous array value."""
+
+    items: list[AST]
+
+
+@dataclass
+class ArrayLength(AST):
+    """The element count of an array value."""
+
+    array: AST
+
+
+@dataclass
+class Index(AST):
+    """A scalar array read whose bounds were proven during semantic checking."""
+
+    array: AST
+    index: AST
+    constant_index: int
+
+
+@dataclass
+class IndexAssign(AST):
+    """Mutation of one statically proven array element."""
+
+    target: Index
+    value: AST
 
 
 @dataclass

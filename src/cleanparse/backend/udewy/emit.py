@@ -50,6 +50,16 @@ UNSUPPORTED_NARROW_DUNDERS = {
     '__rshift__',
 }
 SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
+UDEWY_MEMORY_INTRINSICS = {
+    '__alloca__',
+    '__static_alloca__',
+    *{
+        f'__{operation}_{prefix}{width}__'
+        for operation in ('load', 'store')
+        for prefix in ('i', 'u')
+        for width in (8, 16, 32, 64)
+    },
+}
 
 @dataclass
 class EmitContext:
@@ -254,6 +264,7 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
         case hir.Void(): return 'void'
         case hir.Declare(): return emit_declare(ast, ctx)
         case hir.Assign(): return emit_assign(ast, ctx)
+        case hir.ValueCast(): return emit_ast(ast.expr, ctx)
         case hir.Transmute(): return emit_transmute(ast, ctx)
         case hir.ExpressedIdentifier(): return ast.name
         case hir.FunctionCall(): return emit_function_call(ast, ctx)
@@ -400,7 +411,10 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
     callee = emit_ast(call.func, ctx)
     if (
         isinstance(call.func, hir.ExpressedIdentifier)
-        and call.func.name in ctx.direct_function_names
+        and (
+            call.func.name in ctx.direct_function_names
+            or call.func.name in UDEWY_MEMORY_INTRINSICS
+        )
         and call.func.name not in ctx.local_names
     ):
         return f'{callee}({args})'

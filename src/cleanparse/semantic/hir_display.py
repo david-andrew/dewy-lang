@@ -30,6 +30,9 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.TypeParameterize):
         args = ' '.join(type_to_dewy(a) for a in t.args)
         return f'{_type_atom_parens(t.t)}<{args}>'
+    if isinstance(t, ty.ArrayType):
+        length = f' length={t.length}' if t.length is not None else ''
+        return f'array<{type_to_dewy(t.element)}{length}>'
     if isinstance(t, ty.FunctionType):
         return _function_type_to_dewy(t)
     if isinstance(t, ty.OverloadType):
@@ -145,6 +148,14 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'Bool({node.value})'
     if isinstance(node, hir.Integer):
         return f'Integer({_format_integer(node)})'
+    if isinstance(node, hir.ArrayLiteral):
+        return f'ArrayLiteral({len(node.items)} items)'
+    if isinstance(node, hir.ArrayLength):
+        return 'ArrayLength'
+    if isinstance(node, hir.Index):
+        return f'Index(constant={node.constant_index})'
+    if isinstance(node, hir.IndexAssign):
+        return 'IndexAssign'
     if isinstance(node, hir.String):
         return f'String({node.content!r})'
     if isinstance(node, hir.ValueCast):
@@ -200,6 +211,14 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.Declare):
         return [('expr', node.expr)]
     if isinstance(node, hir.Assign):
+        return [('target', node.target), ('value', node.value)]
+    if isinstance(node, hir.ArrayLiteral):
+        return [(f'items[{i}]', item) for i, item in enumerate(node.items)]
+    if isinstance(node, hir.ArrayLength):
+        return [('array', node.array)]
+    if isinstance(node, hir.Index):
+        return [('array', node.array), ('index', node.index)]
+    if isinstance(node, hir.IndexAssign):
         return [('target', node.target), ('value', node.value)]
     if isinstance(node, hir.ValueCast):
         return [('expr', node.expr)]
@@ -482,6 +501,22 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _text('true' if node.value else 'false')
     if isinstance(node, hir.String):
         return _text(repr(node.content))
+    if isinstance(node, hir.ArrayLiteral):
+        items = [_to_doc(item, 0, indent) for item in node.items]
+        return _group(_seq(
+            _text('['),
+            _nest(indent, _join(_SOFT, items)),
+            _text(']'),
+        ))
+    if isinstance(node, hir.ArrayLength):
+        return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
+    if isinstance(node, hir.Index):
+        return _seq(
+            _to_doc(node.array, _CALL_PREC, indent),
+            _text('['),
+            _to_doc(node.index, 0, indent),
+            _text(']'),
+        )
     if isinstance(node, hir.ExpressedIdentifier):
         return _text(node.name)
     if isinstance(node, hir.Return):
@@ -514,6 +549,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _group(_seq(
             _to_doc(node.target, 0, indent),
             _text(f' {node.op}'),
+            _seq(_SOFT, _to_doc(node.value, 0, indent)),
+        ))
+    if isinstance(node, hir.IndexAssign):
+        return _group(_seq(
+            _to_doc(node.target, 0, indent),
+            _text(' ='),
             _seq(_SOFT, _to_doc(node.value, 0, indent)),
         ))
     if isinstance(node, hir.ValueCast):

@@ -255,7 +255,12 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             annotation = ast_to_type(typeexpr, ctx=ctx)
             expr = typecheck_and_resolve_inner(right, ctx=ctx, expected=annotation)
             expr = check_against(expr, annotation, ctx=ctx)
-            ctx.declarations[name] = annotation
+            ctx.declarations[name] = (
+                expr.type
+                if isinstance(annotation, ty.ArrayType)
+                and isinstance(expr.type, ty.ArrayType)
+                else annotation
+            )
             return _complete_binding(
                 ast,
                 hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
@@ -294,6 +299,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     target = tcr_assignment_target(ast.left, ctx=ctx)
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
     value = check_against(value, target.type, ctx=ctx)
+    if isinstance(target, hir.Index):
+        return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
 
 
@@ -307,6 +314,12 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
         not_implemented(ctx.srcfile, ast.op.loc, f'compound assignment operator `{symbol}=`')
 
     target = tcr_assignment_target(ast.left, ctx=ctx)
+    if isinstance(target, hir.Index):
+        not_implemented(
+            ctx.srcfile,
+            ast.left.loc,
+            'compound indexed assignment',
+        )
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
     result = _dispatch_builtin(
         builtins.BINOP_DUNDER_MAP[symbol],
@@ -651,6 +664,96 @@ def _collect_block_bindings(block: p0.Block, *, ctx: Context) -> None:
         ctx.binding_registry.allocate(item, name, kind, item.loc)
 
 
+def _tcr_array_literal(
+    block: p0.Block,
+    items: list[hir.AST],
+    *,
+    expected: ty.Type | None,
+    ctx: Context,
+) -> hir.ArrayLiteral:
+    """Check a one-dimensional homogeneous fixed-width integer array."""
+
+    expected_array = expected if isinstance(expected, ty.ArrayType) else None
+    if expected is not None and expected_array is None:
+        type_error(
+            ctx.srcfile,
+            'type mismatch',
+            Pointer(
+                span=block.loc,
+                message=f'expected `{type_to_dewy(expected)}`, got an array literal',
+            ),
+        )
+    if expected_array is not None and expected_array.length not in (None, len(items)):
+        type_error(
+            ctx.srcfile,
+            'array length mismatch',
+            Pointer(
+                span=block.loc,
+                message=(
+                    f'expected length {expected_array.length}, '
+                    f'got {len(items)} elements'
+                ),
+            ),
+        )
+
+    if expected_array is not None:
+        element_type = expected_array.element
+    else:
+        concrete_types = {
+            item.type
+            for item in items
+            if not isinstance(item.type, ty.IntegerLiteralType)
+        }
+        if not items:
+            type_error(
+                ctx.srcfile,
+                'cannot infer empty array element type',
+                Pointer(
+                    span=block.loc,
+                    message='add an annotation such as `array<int64>`',
+                ),
+            )
+        if not concrete_types:
+            element_type = 'int64'
+        elif len(concrete_types) == 1:
+            element_type = concrete_types.pop()
+        else:
+            type_error(
+                ctx.srcfile,
+                'array elements are not homogeneous',
+                *[
+                    Pointer(
+                        span=item.loc,
+                        message=f'element has type `{type_to_dewy(item.type)}`',
+                    )
+                    for item in items
+                ],
+            )
+
+    if (
+        not isinstance(element_type, str)
+        or element_type not in ty.FIXED_INTEGER_TYPES
+    ):
+        type_error(
+            ctx.srcfile,
+            'unsupported array element type',
+            Pointer(
+                span=block.loc,
+                message=(
+                    'Stage 4a arrays require a fixed-width integer element type, '
+                    f'got `{type_to_dewy(element_type)}`'
+                ),
+            ),
+        )
+
+    checked_items: list[hir.AST] = []
+    for item in items:
+        require_valued(item.type, ctx.srcfile, item.loc, 'array element')
+        checked_items.append(check_against(item, element_type, ctx=ctx))
+    array_type = ty.ArrayType(element_type, len(checked_items))
+    return hir.ArrayLiteral(block.loc, array_type, checked_items)
+
+
 def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
 
@@ -705,7 +808,13 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     for index, item in enumerate(block.inner):
         if id(item) in deferred_functions:
             continue
-        item_expected = expected if expected is not None and len(block.inner) == 1 else None
+        item_expected = (
+            expected.element
+            if block.kind == '[]' and isinstance(expected, ty.ArrayType)
+            else expected
+            if expected is not None and len(block.inner) == 1
+            else None
+        )
         results[index] = typecheck_and_resolve_inner(
             item,
             ctx=ctx,
@@ -743,9 +852,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         case '[]':
             if len(results) == 1 and isinstance(results[0], hir.Range) and results[0].bounds is None:
                 return replace(results[0], loc=block.loc, bounds=block.kind)
-            # otherwise it may be an array. also arrays should handle multi-dimensions via spacing, nested arrays, ;, etc.
-            # might also be a generator...
-            not_implemented(ctx.srcfile, block.loc, 'array literal')
+            return _tcr_array_literal(block, results, expected=expected, ctx=ctx)
         case '[)' | '(]':
             if len(results) != 1 or not isinstance(results[0], hir.Range) or results[0].bounds is not None:
                 user_error(ctx.srcfile, f'invalid contents for `{block.kind}` range delimiters',
@@ -836,6 +943,24 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
         not_implemented(ctx.srcfile, prefix.op.loc, 'broadcast prefix operator')
     if prefix.op.symbol not in builtins.UNARY_PREFIX_DUNDER_MAP:
         not_implemented(ctx.srcfile, prefix.op.loc, f'prefix operator `{prefix.op.symbol}`')
+    if (
+        prefix.op.symbol == '-'
+        and isinstance(expected, str)
+        and expected in ty.FIXED_INTEGER_TYPES
+        and isinstance(prefix.item, p0.Atom)
+        and isinstance(prefix.item.item, t1.Integer)
+    ):
+        parsed = t0.parse_integer(
+            prefix.item.item.value.src,
+            prefix.item.item.value.prefix,
+        )
+        value = -parsed
+        return hir.Integer(
+            prefix.loc,
+            ty.IntegerLiteralType(value),
+            t0.base10,
+            value,
+        )
 
     item = typecheck_and_resolve_inner(prefix.item, ctx=ctx)
     result = _dispatch_builtin(
@@ -853,6 +978,180 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
         if prefix.op.symbol in ('not', '~'):
             return replace(result, type=ty.IntegerLiteralType(~item.value))
     return result
+
+
+def _constant_integer(
+    node: hir.AST,
+    *,
+    ctx: Context,
+    seen_bindings: set[int] | None = None,
+) -> int | None:
+    """Evaluate the small pure integer subset accepted for Stage 4a indices."""
+
+    if isinstance(node.type, ty.IntegerLiteralType):
+        return node.type.value
+    if isinstance(node, hir.Integer):
+        return node.value
+    if isinstance(node, hir.ValueCast):
+        return _constant_integer(node.expr, ctx=ctx, seen_bindings=seen_bindings)
+    if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):
+        return node.array.type.length
+    if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+        seen = set() if seen_bindings is None else seen_bindings
+        if node.binding_id in seen:
+            return None
+        binding = ctx.binding_registry.by_id.get(node.binding_id)
+        if (
+            binding is None
+            or binding.declaration is None
+            or binding.declaration.decltype != 'const'
+        ):
+            return None
+        seen.add(node.binding_id)
+        return _constant_integer(
+            binding.declaration.expr,
+            ctx=ctx,
+            seen_bindings=seen,
+        )
+    if not isinstance(node, hir.FunctionCall):
+        return None
+    if not isinstance(node.func, hir.ExpressedIdentifier):
+        return None
+    values = [
+        _constant_integer(arg, ctx=ctx, seen_bindings=seen_bindings)
+        for arg in node.pos_args
+    ]
+    if any(value is None for value in values):
+        return None
+    integers = cast(list[int], values)
+    name = node.func.name
+    if len(integers) == 1:
+        if name == '__unary_sub__':
+            return -integers[0]
+        if name == '__not__':
+            return ~integers[0]
+        return None
+    if len(integers) != 2:
+        return None
+    left, right = integers
+    if name == '__add__':
+        return left + right
+    if name == '__sub__':
+        return left - right
+    if name == '__mul__':
+        return left * right
+    if name == '__floordiv__' and right != 0:
+        return left // right
+    if name == '__mod__' and right != 0:
+        return left % right
+    if name == '__lshift__' and right >= 0:
+        return left << right
+    if name == '__rshift__' and right >= 0:
+        return left >> right
+    return None
+
+
+def _tcr_array_length(binop: p0.BinOp, *, ctx: Context) -> hir.ArrayLength:
+    if not (
+        isinstance(binop.right, p0.Atom)
+        and isinstance(binop.right.item, t1.Identifier)
+        and binop.right.item.name == 'length'
+    ):
+        not_implemented(ctx.srcfile, binop.loc, 'member access other than array `.length`')
+    array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    if not isinstance(array.type, ty.ArrayType):
+        type_error(
+            ctx.srcfile,
+            '`.length` requires an array',
+            Pointer(
+                span=array.loc,
+                message=f'this has type `{type_to_dewy(array.type)}`',
+            ),
+        )
+    result_type: ty.Type = (
+        ty.IntegerLiteralType(array.type.length)
+        if array.type.length is not None
+        else 'int64'
+    )
+    return hir.ArrayLength(binop.loc, result_type, array)
+
+
+def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
+    array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    if not isinstance(array.type, ty.ArrayType):
+        type_error(
+            ctx.srcfile,
+            'index target is not an array',
+            Pointer(
+                span=array.loc,
+                message=f'this has type `{type_to_dewy(array.type)}`',
+            ),
+        )
+    if not (
+        isinstance(binop.right, p0.Block)
+        and binop.right.kind == '[]'
+        and len(binop.right.inner) == 1
+    ):
+        user_error(
+            ctx.srcfile,
+            'Stage 4a indexing requires one scalar index',
+            Pointer(span=binop.right.loc, message='expected exactly one index expression'),
+        )
+    index = typecheck_and_resolve_inner(binop.right.inner[0], ctx=ctx)
+    if not (
+        isinstance(index.type, ty.IntegerLiteralType)
+        or (
+            isinstance(index.type, str)
+            and ctx.type_system.is_subtype(index.type, 'int')
+        )
+    ):
+        type_error(
+            ctx.srcfile,
+            'array index must be an integer',
+            Pointer(
+                span=index.loc,
+                message=f'this has type `{type_to_dewy(index.type)}`',
+            ),
+        )
+    constant_index = _constant_integer(index, ctx=ctx)
+    if constant_index is None:
+        user_error(
+            ctx.srcfile,
+            'array index is not proven in bounds',
+            Pointer(
+                span=index.loc,
+                message='this index is not a compile-time integer constant',
+            ),
+            hint='use a literal or a constant expression derived from an exact array length',
+        )
+    if array.type.length is None:
+        user_error(
+            ctx.srcfile,
+            'array index is not proven in bounds',
+            Pointer(
+                span=array.loc,
+                message='this array does not have an exact compile-time length',
+            ),
+        )
+    if not 0 <= constant_index < array.type.length:
+        user_error(
+            ctx.srcfile,
+            'array index is out of bounds',
+            Pointer(
+                span=index.loc,
+                message=(
+                    f'index {constant_index} is outside '
+                    f'`0..{array.type.length - 1}`'
+                ),
+            ),
+        )
+    return hir.Index(
+        binop.loc,
+        array.type.element,
+        array,
+        index,
+        constant_index,
+    )
 
 
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None) -> hir.AST:
@@ -881,6 +1180,10 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     # Special cases that don't just typecheck both sides
     symbol = binop.op.symbol if isinstance(binop.op, t1.Operator) else None
+    if isinstance(binop.op, t2.IndexJuxtapose):
+        return _tcr_index(binop, ctx=ctx)
+    if symbol == '.':
+        return _tcr_array_length(binop, ctx=ctx)
     if symbol == '=>': return tcr_function_literal(binop, ctx=ctx, expected=expected)
 
     if symbol == '|>':
@@ -1019,13 +1322,69 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
 
 
-def tcr_assignment_target(target: p0.AST, *, ctx: Context) -> hir.ExpressedIdentifier:
-    """Resolve a Stage 1 assignment target, currently limited to declared identifiers."""
-    if not isinstance(target, p0.Atom) or not isinstance(target.item, t1.Identifier):
-        not_implemented(ctx.srcfile, target.loc, 'non-identifier assignment target')
-    resolved = tcr_identifier(target.item, ctx=ctx)
-    assert isinstance(resolved, hir.ExpressedIdentifier)
-    return resolved
+def tcr_assignment_target(
+    target: p0.AST,
+    *,
+    ctx: Context,
+) -> hir.ExpressedIdentifier | hir.Index:
+    """Resolve an identifier or statically proven array-element assignment target."""
+
+    if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
+        resolved = tcr_identifier(target.item, ctx=ctx)
+        assert isinstance(resolved, hir.ExpressedIdentifier)
+        return resolved
+
+    if isinstance(target, p0.BinOp):
+        if isinstance(target.op, t2.QJuxtapose):
+            index_op = next(
+                (
+                    option
+                    for option in target.op.options
+                    if isinstance(option, t2.IndexJuxtapose)
+                ),
+                None,
+            )
+            if index_op is not None:
+                target = replace(target, op=index_op)
+        if isinstance(target.op, t2.IndexJuxtapose):
+            resolved = _tcr_index(target, ctx=ctx)
+            root = resolved.array
+            while True:
+                if isinstance(root, hir.Index):
+                    root = root.array
+                    continue
+                if (
+                    isinstance(root, hir.Block)
+                    and not root.scoped
+                    and len(root.items) == 1
+                ):
+                    root = root.items[0]
+                    continue
+                if isinstance(root, (hir.ValueCast, hir.Transmute)):
+                    root = root.expr
+                    continue
+                break
+            if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
+                binding = ctx.binding_registry.by_id[root.binding_id]
+                if (
+                    binding.declaration is not None
+                    and binding.declaration.decltype == 'const'
+                ):
+                    user_error(
+                        ctx.srcfile,
+                        'cannot mutate an element of a const array',
+                        Pointer(
+                            span=root.loc,
+                            message=f'`{root.name}` is declared const',
+                        ),
+                        Pointer(
+                            span=binding.declaration.loc,
+                            message='const declaration is here',
+                        ),
+                    )
+            return resolved
+
+    not_implemented(ctx.srcfile, target.loc, 'this assignment target')
 
 def tcr_bare_range(ast: p0.Flat, *, ctx: Context, expected: ty.Type|None=None) -> hir.Range:
     """
@@ -1239,6 +1598,79 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     match ast:
         case p0.Atom(item=t1.Identifier(name=name)):
             return name
+
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
+            left=p0.Atom(item=t1.Identifier(name='array')),
+            right=p0.Block(kind='<>', inner=items),
+        ):
+            element_ast: p0.AST | None = None
+            length: int | None = None
+            for item in items:
+                if (
+                    isinstance(item, p0.BinOp)
+                    and isinstance(item.op, t1.Operator)
+                    and item.op.symbol == '='
+                    and isinstance(item.left, p0.Atom)
+                    and isinstance(item.left.item, t1.Identifier)
+                    and item.left.item.name == 'length'
+                ):
+                    if length is not None:
+                        user_error(
+                            ctx.srcfile,
+                            'duplicate array length parameter',
+                            Pointer(span=item.loc, message='`length` was already specified'),
+                        )
+                    if not (
+                        isinstance(item.right, p0.Atom)
+                        and isinstance(item.right.item, t1.Integer)
+                    ):
+                        user_error(
+                            ctx.srcfile,
+                            'array length must be an integer literal',
+                            Pointer(span=item.right.loc, message='expected a non-negative integer'),
+                        )
+                    length = t0.parse_integer(
+                        item.right.item.value.src,
+                        item.right.item.value.prefix,
+                    )
+                    if length < 0:
+                        user_error(
+                            ctx.srcfile,
+                            'array length cannot be negative',
+                            Pointer(span=item.right.loc, message=f'got {length}'),
+                        )
+                    continue
+                if element_ast is not None:
+                    user_error(
+                        ctx.srcfile,
+                        'invalid array type parameters',
+                        Pointer(
+                            span=item.loc,
+                            message='expected one element type and optional `length=N`',
+                        ),
+                    )
+                element_ast = item
+            if element_ast is None:
+                user_error(
+                    ctx.srcfile,
+                    'array type requires an element type',
+                    Pointer(span=ast.loc, message='use `array<T>`'),
+                )
+            element = ast_to_type(element_ast, ctx=ctx)
+            if not isinstance(element, str) or element not in ty.FIXED_INTEGER_TYPES:
+                type_error(
+                    ctx.srcfile,
+                    'unsupported array element type',
+                    Pointer(
+                        span=element_ast.loc,
+                        message=(
+                            'Stage 4a arrays require a fixed-width integer type, '
+                            f'got `{type_to_dewy(element)}`'
+                        ),
+                    ),
+                )
+            return ty.ArrayType(element, length)
 
         case p0.Block(kind='<>'|'()', inner=[inner]):
             return ast_to_type(inner, ctx=ctx)
