@@ -73,35 +73,23 @@ def codegen(srcfile:SrcFile) -> str:
 def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
     """Emit checked HIR after legalizing Dewy callable constructs.
 
-    ``lower_for_udewy`` supplies concrete module-level function units: ordinary
-    top-level functions, hoisted non-capturing locals, and inline overload
-    alternatives. Any remaining top-level item still belongs to a later
-    backend stage.
+    ``lower_for_udewy`` supplies concrete module-level function units, global
+    storage, and the ordered items for module startup.
     """
-    functions: dict[str, hir.FunctionLiteral] = {}
-    # imports
-    # etc.
-    code: list[str] = []
-
     if not isinstance(ast, hir.Block):
         raise TypeError(f"Expected Block, got {type(ast)}")
 
     if srcfile is None:
         srcfile = SrcFile(None, ' ' * ast.loc.stop)
     program = lower.lower_for_udewy(ast, srcfile)
+    functions: dict[str, hir.FunctionLiteral] = {}
     for function in program.functions:
         functions[function.symbol] = function.literal
-    if program.remaining_items:
-        item = program.remaining_items[0]
-        raise NotImplementedError(
-            f'udewy codegen not implemented for top-level item: {type(item).__name__}'
-        )
 
-    # if main not declared, use the whole top level block as the main function
-    if 'main' not in functions:
-        functions['main'] = hir.FunctionLiteral(
+    if program.needs_startup:
+        functions[program.startup_symbol] = hir.FunctionLiteral(
             loc=ast.loc,
-            type='function',
+            type=ty.FunctionType([], [], None, ty.VOID_TYPE),
             pos_or_kw_args=[],
             kw_only_args=[],
             rest_args=None,
@@ -109,16 +97,91 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
             body=hir.Block(
                 ast.loc,
                 ty.VOID_TYPE,
-                program.remaining_items,
+                program.startup_items,
+                True,
+            ),
+        )
+        functions['main'] = _entrypoint_wrapper(
+            ast,
+            program.startup_symbol,
+            program.user_main_symbol,
+            functions,
+        )
+    elif 'main' not in functions:
+        functions['main'] = hir.FunctionLiteral(
+            loc=ast.loc,
+            type=ty.FunctionType([], [], None, ty.VOID_TYPE),
+            pos_or_kw_args=[],
+            kw_only_args=[],
+            rest_args=None,
+            rettype=ty.VOID_TYPE,
+            body=hir.Block(
+                ast.loc,
+                ty.VOID_TYPE,
+                [],
                 ast.scoped,
             ),
         )
 
-    ctx = EmitContext(set(functions) | set(builtins.builtin_types), set())
+    code: list[str] = []
+    global_names = {declaration.name for declaration in program.globals}
+    ctx = EmitContext(
+        set(functions) | set(builtins.builtin_types),
+        global_names,
+    )
+    for declaration in program.globals:
+        code.append(emit_declare(declaration, ctx))
     for name, func in functions.items():
         code.append(emit_function_decl(name, func, ctx))
 
     return '\n'.join(code) + '\n'
+
+
+def _entrypoint_wrapper(
+    root: hir.Block,
+    startup_symbol: str,
+    user_main_symbol: str | None,
+    functions: dict[str, hir.FunctionLiteral],
+) -> hir.FunctionLiteral:
+    """Call module startup before the optional source-defined entrypoint."""
+    startup_call = hir.FunctionCall(
+        root.loc,
+        ty.VOID_TYPE,
+        hir.ExpressedIdentifier(
+            root.loc,
+            ty.FunctionType([], [], None, ty.VOID_TYPE),
+            startup_symbol,
+        ),
+        [],
+        {},
+    )
+    items: list[hir.AST] = [startup_call]
+    rettype: ty.Type = ty.VOID_TYPE
+    if user_main_symbol is None:
+        items.append(hir.Return(root.loc, ty.BOTTOM_TYPE, None))
+    else:
+        user_main = functions[user_main_symbol]
+        rettype = user_main.rettype
+        call = hir.FunctionCall(
+            root.loc,
+            rettype,
+            hir.ExpressedIdentifier(root.loc, user_main.type, user_main_symbol),
+            [],
+            {},
+        )
+        if rettype == ty.VOID_TYPE:
+            items.extend([call, hir.Return(root.loc, ty.BOTTOM_TYPE, None)])
+        else:
+            items.append(hir.Return(root.loc, ty.BOTTOM_TYPE, call))
+    return hir.FunctionLiteral(
+        root.loc,
+        ty.FunctionType([], [], None, rettype),
+        [],
+        [],
+        None,
+        rettype,
+        hir.Block(root.loc, ty.BOTTOM_TYPE, items, True),
+    )
 
 
 def emit_type(t: ty.Type) -> str:

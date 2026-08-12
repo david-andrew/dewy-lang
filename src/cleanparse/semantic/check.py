@@ -7,7 +7,8 @@ from dataclasses import dataclass, replace, field
 from collections import ChainMap
 from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
-from . import hir, ty, builtins
+from . import bindings as sb
+from . import builtins, hir, initialization, ty
 from .errors import TypeCheckError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span
@@ -41,6 +42,8 @@ class Context:
     srcfile: SrcFile
     declarations: ChainMap[str, ty.Type] = field(default_factory=ChainMap) #TODO: handling different scopes...
     type_system: ty.TypeSystem = field(default_factory=ty.TypeSystem)
+    binding_scopes: ChainMap[str, sb.Binding] = field(default_factory=ChainMap)
+    binding_registry: sb.BindingRegistry = field(default_factory=sb.BindingRegistry)
     catcher: Catcher | None = None  # installed by the nearest enclosing return boundary
     label_scopes: tuple[LabelScope, ...] = ()
     loop_boundaries: tuple[LoopBoundary, ...] = ()
@@ -55,7 +58,9 @@ def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
     
     ctx = Context(srcfile, declarations, type_system)
     block = p0.parse(srcfile)
-    return tcr_block(block, ctx=ctx)
+    checked = tcr_block(block, ctx=ctx)
+    initialization.validate_initialization(checked, ctx.binding_registry, srcfile)
+    return checked
 
 def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None) -> hir.AST:
     match ast:
@@ -67,6 +72,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             for candidate in candidates:
                 fork = replace(ctx,
                     declarations=ctx.declarations.new_child(),
+                    binding_scopes=ctx.binding_scopes.new_child(),
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
                     passes.append((typecheck_and_resolve_inner(candidate, ctx=fork, type_block=type_block, expected=expected), fork))
@@ -90,6 +96,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             result, fork = passes[0]
             # merge the winning candidate's effects back into the enclosing context
             ctx.declarations.maps[0].update(fork.declarations.maps[0])
+            ctx.binding_scopes.maps[0].update(fork.binding_scopes.maps[0])
             if ctx.catcher is not None:
                 assert fork.catcher is not None
                 ctx.catcher.returns[:] = fork.catcher.returns
@@ -145,6 +152,43 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             not_implemented(ctx.srcfile, ast.loc, f'{type(ast).__name__} expression')
 
 
+def _complete_binding(
+    ast: p0.KeywordExpr,
+    declaration: hir.Declare,
+    *,
+    ctx: Context,
+) -> hir.Declare:
+    binding = ctx.binding_registry.by_syntax.get(id(ast))
+    if binding is None:
+        kind: sb.BindingKind = (
+            'function'
+            if isinstance(declaration.expr, hir.FunctionLiteral)
+            else 'overload'
+            if isinstance(declaration.expr.type, ty.OverloadType)
+            else 'value'
+        )
+        binding = ctx.binding_registry.allocate(
+            ast,
+            declaration.name,
+            kind,
+            declaration.loc,
+        )
+    binding.kind = (
+        'function'
+        if isinstance(declaration.expr, hir.FunctionLiteral)
+        else 'overload'
+        if isinstance(declaration.expr.type, ty.OverloadType)
+        else 'value'
+    )
+    binding.type = declaration.expr.type
+    declaration = replace(declaration, binding_id=binding.id)
+    binding.declaration = declaration
+    if isinstance(declaration.expr, hir.FunctionLiteral):
+        binding.function = declaration.expr
+    ctx.binding_scopes[declaration.name] = binding
+    return declaration
+
+
 def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     """
     let|const <id>
@@ -191,7 +235,11 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             # use the type directly from the expression since no type annotation was provided
             ctx.declarations[name] = expr.type
 
-            return hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr)
+            return _complete_binding(
+                ast,
+                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr),
+                ctx=ctx,
+            )
         
         case [
             t1.Keyword(name='let'|'const' as keyword),
@@ -208,7 +256,11 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             expr = typecheck_and_resolve_inner(right, ctx=ctx, expected=annotation)
             expr = check_against(expr, annotation, ctx=ctx)
             ctx.declarations[name] = annotation
-            return hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr)
+            return _complete_binding(
+                ast,
+                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
+                ctx=ctx,
+            )
         
         case [
             t1.Keyword(name='let'|'const'),
@@ -559,6 +611,46 @@ def tcr_scope_metatag(ast: p0.Atom, *, name: str, ctx: Context) -> hir.ScopeMeta
     return hir.ScopeMetatag(ast.loc, ty.VOID_TYPE, name)
 
 
+def _declaration_parts(
+    item: p0.AST,
+) -> tuple[str, p0.AST] | None:
+    if not isinstance(item, p0.KeywordExpr) or len(item.parts) != 2:
+        return None
+    expression = item.parts[1]
+    if not isinstance(expression, p0.BinOp):
+        return None
+    target = expression.left
+    if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
+        return target.item.name, expression.right
+    if (
+        isinstance(target, p0.BinOp)
+        and isinstance(target.op, t1.Operator)
+        and target.op.symbol == ':'
+        and isinstance(target.left, p0.Atom)
+        and isinstance(target.left.item, t1.Identifier)
+    ):
+        return target.left.item.name, expression.right
+    return None
+
+
+def _collect_block_bindings(block: p0.Block, *, ctx: Context) -> None:
+    for item in block.inner:
+        declaration = _declaration_parts(item)
+        if declaration is None:
+            continue
+        if id(item) in ctx.binding_registry.by_syntax:
+            continue
+        name, expression = declaration
+        kind: sb.BindingKind = (
+            'function'
+            if isinstance(expression, p0.BinOp)
+            and isinstance(expression.op, t1.Operator)
+            and expression.op.symbol == '=>'
+            else 'value'
+        )
+        ctx.binding_registry.allocate(item, name, kind, item.loc)
+
+
 def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
 
@@ -568,28 +660,40 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         ctx = replace(
             ctx,
             declarations=ctx.declarations.new_child(),
+            binding_scopes=ctx.binding_scopes.new_child(),
             label_scopes=(*ctx.label_scopes, _collect_label_scope(block, ctx=ctx)),
         )
 
-    # pass 1: pre-bind fully annotated function declarations before checking anything,
-    # so bodies checked in pass 2 can refer to them (buys mutual and self recursion)
+    _collect_block_bindings(block, ctx=ctx)
+
+    deferred_functions: set[int] = set()
     if not type_block:
         for item in block.inner:
-            match item:
-                case p0.KeywordExpr(parts=[
-                        t1.Keyword(name='let'|'const'),
-                        p0.BinOp(
-                            left=p0.Atom(item=t1.Identifier(name=name)),
-                            op=t1.Operator(symbol='='|'::'|':='),
-                            right=p0.BinOp(op=t1.Operator(symbol='=>')) as fn_ast)]):
-                    try:
-                        sig = signature_of(fn_ast, ctx=ctx)
-                    except ReportException:
-                        continue  # pass 2 will report the problem with full context
-                    if sig is not None:
-                        ctx.declarations[name] = sig
+            declaration = _declaration_parts(item)
+            if declaration is None:
+                continue
+            name, expression = declaration
+            if not (
+                isinstance(expression, p0.BinOp)
+                and isinstance(expression.op, t1.Operator)
+                and expression.op.symbol == '=>'
+            ):
+                continue
+            deferred_functions.add(id(item))
+            try:
+                signature = signature_of(expression, ctx=ctx)
+            except ReportException:
+                continue
+            if signature is None:
+                continue
+            binding = ctx.binding_registry.by_syntax[id(item)]
+            binding.type = signature
+            ctx.declarations[name] = signature
+            ctx.binding_scopes[name] = binding
 
-    # pass 2: typecheck and resolve the inner items.
+    # Check eager source items in order, postponing only functions whose complete
+    # signatures are already known. Their bodies use the scope after sequential
+    # declarations have supplied the remaining value types.
     # `()` / `{}` are non-semantic (aside from `{}` opening a scope), so an expected type
     # must flow through them. For now only the single-item wrapper case forwards it —
     # enough for `():>float => {1}` / `(1)` to match bare `1`.
@@ -597,10 +701,25 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     # block (skipping void/never items like declarations), and when expected is a
     # SequenceType distribute it pointwise across those slots. Can't forward expected to
     # every item blindly: `{ let x = 1; x }` must not shove the outer expected into the decl.
-    if expected is not None and len(block.inner) == 1:
-        results = [typecheck_and_resolve_inner(block.inner[0], ctx=ctx, type_block=type_block, expected=expected)]
-    else:
-        results = [typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block) for item in block.inner]
+    results: list[hir.AST | None] = [None] * len(block.inner)
+    for index, item in enumerate(block.inner):
+        if id(item) in deferred_functions:
+            continue
+        item_expected = expected if expected is not None and len(block.inner) == 1 else None
+        results[index] = typecheck_and_resolve_inner(
+            item,
+            ctx=ctx,
+            type_block=type_block,
+            expected=item_expected,
+        )
+    for index, item in enumerate(block.inner):
+        if id(item) not in deferred_functions:
+            continue
+        results[index] = typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block)
+    checked_results = [result for result in results if result is not None]
+    if len(checked_results) != len(results):
+        raise ValueError('INTERNAL ERROR: block item was not checked')
+    results = checked_results
 
     match block.kind:
         case '()'|'{}':
@@ -1007,6 +1126,16 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # insert the arguments from the signature into the body, and install a fresh catcher
     # for this function's returns
     inner_scope = ctx.declarations.new_child()
+    inner_bindings = ctx.binding_scopes.new_child()
+
+    def bind_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
+        binding = ctx.binding_registry.allocate_param(param.name, param.type, binop.loc)
+        inner_bindings[param.name] = binding
+        return replace(param, binding_id=binding.id)
+
+    pos_or_kw_args = [bind_param(param) for param in pos_or_kw_args]
+    kw_only_args = [bind_param(param) for param in kw_only_args]
+    rest_args = bind_param(rest_args) if rest_args is not None else None
     for param in pos_or_kw_args:
         inner_scope[param.name] = param.type
     for param in kw_only_args:
@@ -1021,6 +1150,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     inner_ctx = replace(
         ctx,
         declarations=inner_scope,
+        binding_scopes=inner_bindings,
         catcher=catcher,
         label_scopes=(LabelScope({}),),
         loop_boundaries=(),
@@ -1347,7 +1477,13 @@ def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:
 
 def tcr_identifier(id: t1.Identifier, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     if id.name in ctx.declarations:
-        return hir.ExpressedIdentifier(id.loc, ctx.declarations[id.name], id.name)
+        binding = ctx.binding_scopes.get(id.name)
+        return hir.ExpressedIdentifier(
+            id.loc,
+            ctx.declarations[id.name],
+            id.name,
+            binding_id=binding.id if binding is not None else None,
+        )
 
     user_error(ctx.srcfile, f'undefined identifier `{id.name}`',
         Pointer(span=id.loc, message='not found in this scope'))

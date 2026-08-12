@@ -97,10 +97,11 @@ let main = ():>int64 => {
 
 def test_udewy_backend_rejects_captured_local_values() -> None:
     source = """
-let main = (value:int64):>int64 => {
+let outer = (value:int64):>int64 => {
     let local = ():>int64 => value
     return local()
 }
+let main = ():>int64 => outer(42)
 """
     with pytest.raises(NotImplementedYet, match='captures `value`'):
         codegen(SrcFile(None, source))

@@ -51,12 +51,17 @@ class LoweredProgram:
     """Result of callable legalization.
 
     ``functions`` contains every original top-level function plus hoisted local
-    and inline alternatives. ``remaining_items`` contains non-callable
-    top-level HIR that this pass deliberately leaves for the backend to handle.
+    and inline alternatives. ``globals`` contains module storage declarations,
+    while ``startup_items`` initializes that storage and executes other
+    top-level code in source order.
     """
 
     functions: list[LoweredFunction]
-    remaining_items: list[hir.AST]
+    globals: list[hir.Declare]
+    startup_items: list[hir.AST]
+    user_main_symbol: str | None
+    startup_symbol: str
+    needs_startup: bool
 
 
 @dataclass
@@ -136,6 +141,7 @@ class _Lowerer:
         self.functions: list[_FunctionDef] = []
         self.function_by_literal: dict[int, _FunctionDef] = {}
         self.declare_bindings: dict[int, _Binding] = {}
+        self.binding_by_semantic_id: dict[int, _Binding] = {}
         self.identifier_bindings: dict[int, _Binding | None] = {}
         self.captures: dict[int, list[tuple[hir.ExpressedIdentifier, _Binding]]] = defaultdict(list)
         self.source_names: set[str] = set()
@@ -145,6 +151,9 @@ class _Lowerer:
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
         self.lower_loop_depth = 0
+        self.needs_startup = False
+        self.startup_symbol = '__dewy_top_level'
+        self.user_main_base = '__dewy_user_main'
 
     def lower(self) -> LoweredProgram:
         """Run discovery, validation, symbol allocation, and HIR rewriting."""
@@ -156,44 +165,195 @@ class _Lowerer:
             function_body=False,
         )
         self._check_captures()
+        self.needs_startup = any(
+            not (
+                isinstance(item, hir.Declare)
+                and (binding := self.declare_bindings.get(id(item))) is not None
+                and binding.kind in {'function', 'overload'}
+            )
+            and not isinstance(item, hir.ScopeMetatag)
+            for item in self.root.items
+        )
+        if self.needs_startup:
+            self.startup_symbol = self._internal_symbol('__dewy_top_level')
+            self.user_main_base = self._internal_symbol('__dewy_user_main')
         self._allocate_symbols()
 
         lowered_functions = [
-            LoweredFunction(
-                function.symbol,
-                replace(
-                    function.literal,
-                    pos_or_kw_args=[
-                        self._transform_param(param)
-                        for param in function.literal.pos_or_kw_args
-                    ],
-                    kw_only_args=[
-                        self._transform_param(param)
-                        for param in function.literal.kw_only_args
-                    ],
-                    rest_args=(
-                        self._transform_param(function.literal.rest_args)
-                        if function.literal.rest_args is not None
-                        else None
-                    ),
-                    body=self._lower_function_body(
-                        self._require_node(self._transform_node(function.literal.body)),
-                        function.literal.rettype,
-                    ),
-                ),
-            )
+            self._lower_function(function)
             for function in sorted(self.functions, key=lambda item: item.order)
         ]
 
-        remaining_items: list[hir.AST] = []
+        globals_: list[hir.Declare] = []
+        startup_sources: list[hir.AST] = []
         for item in self.root.items:
             binding = self.declare_bindings.get(id(item))
             if binding is not None and binding.kind in {'function', 'overload'}:
                 continue
             transformed = self._transform_node(item)
-            if transformed is not None:
-                remaining_items.extend(self._lower_statement(transformed))
-        return LoweredProgram(lowered_functions, remaining_items)
+            if transformed is None:
+                continue
+            if isinstance(transformed, hir.Declare):
+                globals_.append(self._global_storage(transformed))
+                assignment = hir.Assign(
+                    transformed.loc,
+                    ty.VOID_TYPE,
+                    hir.ExpressedIdentifier(
+                        transformed.loc,
+                        transformed.expr.type,
+                        transformed.name,
+                    ),
+                    '=',
+                    transformed.expr,
+                )
+                startup_sources.append(assignment)
+            else:
+                startup_sources.append(transformed)
+        startup_items: list[hir.AST] = []
+        if startup_sources:
+            startup = self._lower_function_body(
+                hir.Block(
+                    self.root.loc,
+                    ty.VOID_TYPE,
+                    startup_sources,
+                    True,
+                ),
+                ty.VOID_TYPE,
+            )
+            if not isinstance(startup, hir.Block):
+                raise TypeError('INTERNAL ERROR: top-level startup did not lower to a block')
+            startup_items = startup.items
+        main = self.module_scope.bindings.get('main')
+        user_main_symbol = (
+            main.function.symbol
+            if main is not None and main.function is not None
+            else None
+        )
+        return LoweredProgram(
+            lowered_functions,
+            globals_,
+            startup_items,
+            user_main_symbol,
+            self.startup_symbol,
+            self.needs_startup,
+        )
+
+    def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
+        literal = function.literal
+        rettype = self._target_scalar_type(literal.rettype, literal)
+        function_type = literal.type
+        if isinstance(function_type, ty.FunctionType):
+            function_type = replace(function_type, ret=rettype)
+        return LoweredFunction(
+            function.symbol,
+            replace(
+                literal,
+                type=function_type,
+                pos_or_kw_args=[
+                    self._transform_param(param)
+                    for param in literal.pos_or_kw_args
+                ],
+                kw_only_args=[
+                    self._transform_param(param)
+                    for param in literal.kw_only_args
+                ],
+                rest_args=(
+                    self._transform_param(literal.rest_args)
+                    if literal.rest_args is not None
+                    else None
+                ),
+                rettype=rettype,
+                body=self._lower_function_body(
+                    self._require_node(self._transform_node(literal.body)),
+                    literal.rettype,
+                ),
+            ),
+        )
+
+    def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
+        if not isinstance(type_, ty.IntegerLiteralType):
+            return type_
+        if ty.integer_literal_fits(type_.value, 'int64'):
+            return 'int64'
+        raise NotImplementedYet(Error(
+            srcfile=self.srcfile,
+            title='udewy scalar representation requires bigint lowering',
+            pointer_messages=[
+                Pointer(
+                    span=node.loc,
+                    message=f'`{type_.value}` does not fit in `int64`',
+                )
+            ],
+        ))
+
+    def _internal_symbol(self, base: str) -> str:
+        """Choose a generated module symbol outside the source namespace."""
+        if base not in self.source_names:
+            return base
+        ordinal = 2
+        while f'{base}_{ordinal}' in self.source_names:
+            ordinal += 1
+        return f'{base}_{ordinal}'
+
+    def _global_storage(self, declaration: hir.Declare) -> hir.Declare:
+        """Create inert udewy storage initialized later by module startup."""
+        annotation = declaration.annotation or declaration.expr.type
+        if isinstance(annotation, ty.IntegerLiteralType):
+            if not ty.integer_literal_fits(annotation.value, 'int64'):
+                raise NotImplementedYet(Error(
+                    srcfile=self.srcfile,
+                    title='udewy top-level storage requires bigint lowering',
+                    pointer_messages=[
+                        Pointer(
+                            span=declaration.loc,
+                            message=f'`{declaration.name}` does not fit in `int64`',
+                        )
+                    ],
+                ))
+            annotation = 'int64'
+        if annotation == 'bool':
+            initializer: hir.AST = hir.Bool(declaration.loc, 'bool', False)
+        elif (
+            isinstance(annotation, str)
+            and annotation in {
+                'int',
+                'uint',
+                'uint8',
+                'uint16',
+                'uint32',
+                'uint64',
+                'int8',
+                'int16',
+                'int32',
+                'int64',
+            }
+        ):
+            initializer = hir.Integer(
+                declaration.loc,
+                annotation,
+                '',
+                0,
+            )
+        else:
+            raise NotImplementedYet(Error(
+                srcfile=self.srcfile,
+                title='udewy top-level storage is not implemented for this type',
+                pointer_messages=[
+                    Pointer(
+                        span=declaration.loc,
+                        message=(
+                            f'`{declaration.name}` has type '
+                            f'`{type_to_dewy(annotation)}`'
+                        ),
+                    )
+                ],
+            ))
+        return replace(
+            declaration,
+            decltype='let',
+            annotation=annotation,
+            expr=initializer,
+        )
 
     def _new_binding(
         self,
@@ -202,6 +362,7 @@ class _Lowerer:
         kind: str,
         owner_function: _FunctionDef | None,
         expr: hir.AST | None,
+        semantic_id: int | None = None,
     ) -> _Binding:
         """Register a deterministic binding in the current lexical scope."""
         binding = _Binding(
@@ -213,6 +374,8 @@ class _Lowerer:
         )
         self.next_binding_order += 1
         scope.bindings[name] = binding
+        if semantic_id is not None:
+            self.binding_by_semantic_id[semantic_id] = binding
         self.source_names.add(name)
         return binding
 
@@ -244,9 +407,8 @@ class _Lowerer:
     ) -> None:
         """Discover a block using the type checker's two-pass function binding.
 
-        Fully checked function literals are pre-bound before any item is
-        visited. This preserves forward references, self-recursion, and mutual
-        recursion. Other declarations remain source-order dependent.
+        Checked declarations are pre-bound before any item is visited. Binding
+        IDs preserve semantic resolution even for deferred function bodies.
         """
         if block.scoped and create_scope:
             scope = self._new_block_scope(
@@ -254,15 +416,22 @@ class _Lowerer:
                 current_function,
                 function_body=function_body,
             )
-
         for item in block.items:
-            if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral):
+            if isinstance(item, hir.Declare):
+                kind = (
+                    'function'
+                    if isinstance(item.expr, hir.FunctionLiteral)
+                    else 'overload'
+                    if isinstance(item.expr.type, ty.OverloadType)
+                    else 'value'
+                )
                 binding = self._new_binding(
                     scope,
                     item.name,
-                    'function',
+                    kind,
                     current_function,
                     item.expr,
+                    item.binding_id,
                 )
                 self.declare_bindings[id(item)] = binding
 
@@ -286,15 +455,22 @@ class _Lowerer:
         """
         binding = self.declare_bindings.get(id(declare))
         if binding is not None:
-            if not isinstance(declare.expr, hir.FunctionLiteral):
-                raise TypeError('INTERNAL ERROR: pre-bound declaration is not a function')
-            function = self._new_function(
-                declare.expr,
-                declare.name,
-                scope,
-                overload_member=False,
-            )
-            binding.function = function
+            if isinstance(declare.expr, hir.FunctionLiteral):
+                function = self._new_function(
+                    declare.expr,
+                    declare.name,
+                    scope,
+                    overload_member=False,
+                )
+                binding.function = function
+            else:
+                self._discover_node(
+                    declare.expr,
+                    scope,
+                    current_function,
+                    suggested_name=declare.name if binding.kind == 'overload' else None,
+                    overload_member=binding.kind == 'overload',
+                )
             return
 
         overload = isinstance(declare.expr.type, ty.OverloadType)
@@ -312,6 +488,7 @@ class _Lowerer:
             kind,
             current_function,
             declare.expr,
+            declare.binding_id,
         )
         self.declare_bindings[id(declare)] = binding
 
@@ -357,9 +534,23 @@ class _Lowerer:
             {},
         )
         for param in literal.pos_or_kw_args:
-            self._new_binding(function_scope, param.name, 'param', function, None)
+            self._new_binding(
+                function_scope,
+                param.name,
+                'param',
+                function,
+                None,
+                param.binding_id,
+            )
         for param in literal.kw_only_args:
-            self._new_binding(function_scope, param.name, 'param', function, None)
+            self._new_binding(
+                function_scope,
+                param.name,
+                'param',
+                function,
+                None,
+                param.binding_id,
+            )
         if literal.rest_args is not None:
             self._new_binding(
                 function_scope,
@@ -367,6 +558,7 @@ class _Lowerer:
                 'param',
                 function,
                 None,
+                literal.rest_args.binding_id,
             )
         if isinstance(literal.body, hir.Block):
             self._discover_block(
@@ -390,7 +582,11 @@ class _Lowerer:
     ) -> None:
         """Resolve names and recursively collect callable constructs in ``node``."""
         if isinstance(node, hir.ExpressedIdentifier):
-            binding = scope.resolve(node.name)
+            binding = (
+                self.binding_by_semantic_id.get(node.binding_id)
+                if node.binding_id is not None
+                else scope.resolve(node.name)
+            )
             self.identifier_bindings[id(node)] = binding
             if (
                 current_function is not None
@@ -510,6 +706,8 @@ class _Lowerer:
             by_base[self._symbol_base(function)].append(function)
 
         assigned = set(builtins.builtin_types)
+        if self.needs_startup:
+            assigned.update({'main', self.startup_symbol})
         for base, group in by_base.items():
             if len(group) == 1 and group[0].logical_name != 'anon':
                 group[0].symbol = self._unique_symbol(base, assigned, 'local')
@@ -552,6 +750,8 @@ class _Lowerer:
 
     def _symbol_base(self, function: _FunctionDef) -> str:
         """Return a function's preferred symbol before collision handling."""
+        if self.needs_startup and function.logical_name == 'main':
+            return self.user_main_base
         if function.logical_name == 'anon':
             return f'anon__{self._signature_slug(function.literal.type)}'
         if function.overload_member:

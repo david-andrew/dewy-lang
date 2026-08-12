@@ -134,11 +134,13 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'ShortCircuit({node.op})'
     if isinstance(node, hir.Declare):
         ann = f':{type_to_dewy(node.annotation)}' if node.annotation is not None else ''
-        return f'Declare({node.decltype} {node.name}{ann})'
+        binding = f' #{node.binding_id}' if node.binding_id is not None else ''
+        return f'Declare({node.decltype} {node.name}{ann}){binding}'
     if isinstance(node, hir.Assign):
         return f'Assign({node.op})'
     if isinstance(node, hir.ExpressedIdentifier):
-        return f'ExpressedIdentifier({node.name})'
+        binding = f' #{node.binding_id}' if node.binding_id is not None else ''
+        return f'ExpressedIdentifier({node.name}){binding}'
     if isinstance(node, hir.Bool):
         return f'Bool({node.value})'
     if isinstance(node, hir.Integer):
@@ -150,9 +152,11 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     if isinstance(node, hir.Transmute):
         return f'Transmute({type_to_dewy(node.type)})'
     if isinstance(node, hir.BoundParam):
-        return f'BoundParam({node.name}:{type_to_dewy(node.type)})'
+        binding = f' #{node.binding_id}' if node.binding_id is not None else ''
+        return f'BoundParam({node.name}:{type_to_dewy(node.type)}){binding}'
     if isinstance(node, hir.Param):
-        return f'Param({node.name}:{type_to_dewy(node.type)})'
+        binding = f' #{node.binding_id}' if node.binding_id is not None else ''
+        return f'Param({node.name}:{type_to_dewy(node.type)}){binding}'
     if isinstance(node, hir.FunctionLiteral):
         ret = type_to_dewy(node.rettype)
         return f'FunctionLiteral(:>{ret})'

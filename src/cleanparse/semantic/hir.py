@@ -21,7 +21,7 @@ Features (i.e. each should probably get an AST node)
 perhaps after this phase theres a second typechecking phase making use of all the rich type information built at this phase?
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from ..parser import t0
 from ..reporting import Span
@@ -118,10 +118,12 @@ class Declare(AST):
     name: str                         #TBD future handling of unpacking assignment
     annotation: ty.Type | None        # explicit `:T` on the binding, if any; AST.type is still void
     expr: AST
+    binding_id: int | None = field(default=None, kw_only=True)
 
 @dataclass
 class ExpressedIdentifier(AST):
     name: str
+    binding_id: int | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -163,6 +165,7 @@ class Transmute(AST):
 class Param:
     name: str  #TODO: list/dict/obj unpack might go here too? also multi-arg collections could go here
     type: ty.Type
+    binding_id: int | None = field(default=None, kw_only=True)
 
     def __repr__(self) -> str:
         from .hir_display import hir_to_tree_str

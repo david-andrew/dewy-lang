@@ -35,6 +35,30 @@ $ dewy hello.dewy
 
 Which should print `Hello, World!` in the terminal. 
 
+## Top-Level Execution and `main`
+
+Dewy executes top-level code in source order. A program does not need a
+`main` function, as the example above demonstrates.
+
+When a module declares `main`, Dewy runs the complete top level first and then
+automatically invokes `main`. For now, an automatically invoked `main` takes no
+arguments and returns either an integer exit code or `void`; its return type may
+be inferred.
+
+```dewy
+let message = 'Hello'
+printl'{message} from the top level'
+
+let main = () => {
+    printl'Hello from main'
+    return 0
+}
+```
+
+An explicit `main()` at the top level is an ordinary call. It does not suppress
+the automatic invocation, so that program calls `main` once in sequence and
+once again after top-level execution finishes.
+
 
 ## How it Works
 
