@@ -394,3 +394,49 @@ def test_scope_metatags_are_elided_from_udewy_output() -> None:
 
     assert '$setting' not in emitted
     assert 'let main = ():>void' in emitted
+
+
+def test_range_iterator_continue_advances_once_before_the_body() -> None:
+    emitted = codegen(SrcFile(None, """
+let main = ():>int64 => {
+    let result:int64 = 0
+    loop i in [0..2] {
+        if i =? 1 { continue }
+        result += i
+    }
+    return result
+}
+"""))
+
+    increment = emitted.index('__dewy_iterator_1 += 1')
+    source_continue = emitted.index('continue', increment)
+    assert increment < source_continue
+    assert emitted.count('__dewy_iterator_1 += 1') == 1
+
+
+def test_labeled_exits_preserve_depth_through_range_iterators() -> None:
+    source = """
+let main = ():>void => {
+    $outer
+    loop i in [0..2] {
+        loop true {
+            if i =? 1 { continue $outer }
+            break $outer
+        }
+    }
+}
+"""
+    body = _main_body(source)
+    outer = body.items[1]
+    assert isinstance(outer, hir.Flow)
+    inner = cast(hir.Block, outer.arms[0].body).items[0]
+    assert isinstance(inner, hir.Flow)
+    conditional = cast(hir.Block, inner.arms[0].body).items[0]
+    assert isinstance(conditional, hir.Flow)
+    continued = cast(hir.Block, conditional.arms[0].body).items[0]
+    assert isinstance(continued, hir.Continue)
+    assert continued.loop_levels == 1
+
+    emitted = codegen(SrcFile(None, source))
+    assert '__dewy_loop_levels_1 = 1' in emitted
+    assert '$outer' not in emitted

@@ -152,8 +152,17 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'ArrayLiteral({len(node.items)} items)'
     if isinstance(node, hir.ArrayLength):
         return 'ArrayLength'
+    if isinstance(node, hir.IteratorExpression):
+        return (
+            f'IteratorExpression({node.target.name}, '
+            f'first={node.first}, last={node.last}, count={node.count})'
+        )
     if isinstance(node, hir.Index):
-        return f'Index(constant={node.constant_index})'
+        return (
+            f'Index(constant={node.constant_index})'
+            if node.constant_index is not None
+            else 'Index(dynamic)'
+        )
     if isinstance(node, hir.IndexAssign):
         return 'IndexAssign'
     if isinstance(node, hir.String):
@@ -216,6 +225,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [(f'items[{i}]', item) for i, item in enumerate(node.items)]
     if isinstance(node, hir.ArrayLength):
         return [('array', node.array)]
+    if isinstance(node, hir.IteratorExpression):
+        return [('target', node.target), ('iterable', node.iterable)]
     if isinstance(node, hir.Index):
         return [('array', node.array), ('index', node.index)]
     if isinstance(node, hir.IndexAssign):
@@ -510,6 +521,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         ))
     if isinstance(node, hir.ArrayLength):
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
+    if isinstance(node, hir.IteratorExpression):
+        return _seq(
+            _to_doc(node.target, 0, indent),
+            _text(' in '),
+            _to_doc(node.iterable, 0, indent),
+        )
     if isinstance(node, hir.Index):
         return _seq(
             _to_doc(node.array, _CALL_PREC, indent),

@@ -238,3 +238,203 @@ let replace_saved = ():>void => {
     saved = local
 }
 """))
+
+
+def test_dynamic_index_uses_precise_source_position_facts() -> None:
+    body = _function_body("""
+let f = ():>int64 => {
+    let values:array<int64> = [10 20 30]
+    let i:int64 = 0
+    let result:int64 = values[i]
+    i = 3
+    return result
+}
+""")
+
+    declaration = body.items[2]
+    assert isinstance(declaration, hir.Declare)
+    assert isinstance(declaration.expr, hir.Index)
+    assert declaration.expr.constant_index == 0
+
+
+def test_comparison_guards_and_arithmetic_prove_dynamic_indices() -> None:
+    _check("""
+let get = (i:int64):>int64 => {
+    let values:array<int64> = [10 20 30]
+    if 0 <=? i and i <? values.length - 1 {
+        return values[i + 1]
+    } else {
+        return 0
+    }
+}
+""")
+
+
+def test_branch_merge_preserves_union_of_finite_bounds() -> None:
+    _check("""
+let get = (choose_first:bool):>int64 => {
+    let values:array<int64> = [10 20 30]
+    let i:int64 = 0
+    if choose_first { i = 1 } else { i = 2 }
+    return values[i]
+}
+""")
+
+
+def test_loop_widening_reapplies_the_true_edge_bound() -> None:
+    _check("""
+let sum = ():>int64 => {
+    let values:array<int64> = [10 20 12]
+    let i:int64 = 0
+    let total:int64 = 0
+    loop i <? values.length {
+        total += values[i]
+        i += 1
+    }
+    return total
+}
+""")
+
+
+def test_break_and_continue_paths_do_not_pollute_loop_backedges() -> None:
+    _check("""
+let sum = ():>int64 => {
+    let values:array<int64> = [10 20 12]
+    let i:int64 = 0
+    let total:int64 = 0
+    loop i <? values.length {
+        if i =? 1 {
+            i += 1
+            continue
+        }
+        if i =? 2 {
+            i = -1
+            break
+        }
+        total += values[i]
+        i += 1
+    }
+    return total
+}
+""")
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        """
+let get = (i:int64):>int64 => {
+    let values:array<int64> = [10 20 30]
+    return values[i]
+}
+""",
+        """
+let get = (i:int64):>int64 => {
+    let values:array<int64> = [10 20 30]
+    if i <? values.length { return values[i] } else { return 0 }
+}
+""",
+        """
+let get = ():>int64 => {
+    let values:array<int64> = [10 20 30]
+    let i:int64 = 0
+    i = -1
+    return values[i]
+}
+""",
+    ],
+)
+def test_unproven_dynamic_indices_remain_hard_errors(source: str) -> None:
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check(source)
+
+
+@pytest.mark.parametrize(
+    ('range_source', 'first', 'last', 'count'),
+    [
+        ('[0..2]', 0, 2, 3),
+        ('[0..3)', 0, 2, 3),
+        ('(0..2]', 1, 2, 2),
+        ('(0..3)', 1, 2, 2),
+        ('0..2', 0, 2, 3),
+        ('[2..1]', 2, 1, 0),
+    ],
+)
+def test_static_range_iterator_normalization(
+    range_source: str,
+    first: int,
+    last: int,
+    count: int,
+) -> None:
+    body = _function_body(f"""
+let f = ():>int64 => {{
+    let result:int64 = 0
+    loop i in {range_source} {{ result += i }}
+    return result
+}}
+""")
+    flow = body.items[1]
+    assert isinstance(flow, hir.Flow)
+    condition = flow.arms[0].condition
+    assert isinstance(condition, hir.IteratorExpression)
+    assert (condition.first, condition.last, condition.count) == (
+        first,
+        last,
+        count,
+    )
+
+
+def test_range_target_proves_indices_and_is_scoped_to_the_loop() -> None:
+    _check("""
+let sum = ():>int64 => {
+    let values:array<int64> = [10 20 12]
+    let total:int64 = 0
+    loop i in [0..values.length) { total += values[i] }
+    return total
+}
+""")
+
+    with pytest.raises(UserError, match='undefined identifier `i`'):
+        _check("""
+let f = ():>int64 => {
+    loop i in [0..1] {}
+    return i
+}
+""")
+
+
+def test_dynamic_index_codegen_keeps_width_aware_addressing() -> None:
+    emitted = codegen(SrcFile(None, """
+let f = ():>uint16 => {
+    let values:array<uint16> = [1 2 3]
+    let i:int64 = 0
+    let result:uint16 = 0
+    loop i <? values.length {
+        values[i] = 42
+        result = values[i]
+        i += 1
+    }
+    return result
+}
+"""))
+
+    assert '__store_u16__(42 values + (i * 2))' in emitted
+    assert 'result = __load_u16__(values + (i * 2))' in emitted
+
+
+def test_range_iterator_codegen_is_a_counted_loop() -> None:
+    emitted = codegen(SrcFile(None, """
+let f = ():>int64 => {
+    let total:int64 = 0
+    loop i in (0..3) {
+        total += i
+        continue
+    }
+    return total
+}
+"""))
+
+    assert 'let __dewy_iterator_1:int64 = 0' in emitted
+    assert 'loop __dewy_iterator_1 <? 2' in emitted
+    assert '__dewy_iterator_value_1 = 1 + __dewy_iterator_1' in emitted
+    assert '__dewy_iterator_1 += 1' in emitted

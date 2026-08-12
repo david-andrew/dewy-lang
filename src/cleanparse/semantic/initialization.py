@@ -189,6 +189,23 @@ class _InitializationChecker:
             current = initialized
             reached_known_arm = False
             for arm in node.arms:
+                if isinstance(arm.condition, hir.IteratorExpression):
+                    current = self._check_eager(
+                        arm.condition.iterable,
+                        current,
+                        parameters,
+                        call_stack,
+                    )
+                    body_initialized = set(current)
+                    if arm.condition.target.binding_id is not None:
+                        body_initialized.add(arm.condition.target.binding_id)
+                    self._check_eager(
+                        arm.body,
+                        body_initialized,
+                        parameters,
+                        call_stack,
+                    )
+                    continue
                 current = self._check_eager(
                     arm.condition,
                     current,
@@ -246,6 +263,13 @@ class _InitializationChecker:
         if isinstance(node, hir.ArrayLength):
             return self._check_eager(
                 node.array,
+                initialized,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.IteratorExpression):
+            return self._check_eager(
+                node.iterable,
                 initialized,
                 parameters,
                 call_stack,

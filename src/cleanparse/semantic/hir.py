@@ -66,7 +66,7 @@ class IfArm(AST):
 
 @dataclass
 class LoopArm(AST):
-    """One while-style loop arm in an ordered flow chain."""
+    """One loop arm whose condition is boolean or a stateful iterator."""
 
     condition: AST
     body: AST
@@ -159,12 +159,23 @@ class ArrayLength(AST):
 
 
 @dataclass
+class IteratorExpression(AST):
+    """A scoped `name in iterable` expression advanced by an enclosing loop."""
+
+    target: ExpressedIdentifier
+    iterable: AST
+    first: int
+    last: int
+    count: int
+
+
+@dataclass
 class Index(AST):
-    """A scalar array read whose bounds were proven during semantic checking."""
+    """A scalar array read validated by the semantic bounds pass."""
 
     array: AST
     index: AST
-    constant_index: int
+    constant_index: int | None
 
 
 @dataclass

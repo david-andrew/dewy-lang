@@ -8,7 +8,7 @@ from collections import ChainMap
 from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
-from . import builtins, hir, initialization, ty
+from . import bounds, builtins, hir, initialization, ty
 from .errors import TypeCheckError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span
@@ -59,6 +59,7 @@ def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
     ctx = Context(srcfile, declarations, type_system)
     block = p0.parse(srcfile)
     checked = tcr_block(block, ctx=ctx)
+    bounds.validate_bounds(checked, ctx.binding_registry, srcfile)
     initialization.validate_initialization(checked, ctx.binding_registry, srcfile)
     return checked
 
@@ -493,6 +494,87 @@ def _flow_value_type(
     return ty.union(*values)
 
 
+def _tcr_range_iterator(
+    condition_ast: p0.AST,
+    *,
+    ctx: Context,
+) -> tuple[hir.IteratorExpression, Context] | None:
+    """Check the Stage 4b `name in static_integer_range` iterator form."""
+
+    if not (
+        isinstance(condition_ast, p0.BinOp)
+        and isinstance(condition_ast.op, t1.Operator)
+        and condition_ast.op.symbol == 'in'
+        and isinstance(condition_ast.left, p0.Atom)
+        and isinstance(condition_ast.left.item, t1.Identifier)
+    ):
+        return None
+
+    identifier = condition_ast.left.item
+    binding = ctx.binding_registry.allocate_param(
+        identifier.name,
+        'int64',
+        identifier.loc,
+    )
+    iterator_ctx = replace(
+        ctx,
+        declarations=ctx.declarations.new_child({identifier.name: 'int64'}),
+        binding_scopes=ctx.binding_scopes.new_child({identifier.name: binding}),
+    )
+    iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=iterator_ctx)
+    if not isinstance(iterable, hir.Range):
+        not_implemented(
+            ctx.srcfile,
+            condition_ast.right.loc,
+            'iteration over a non-range value',
+        )
+    if iterable.step_pair is not None:
+        not_implemented(ctx.srcfile, iterable.loc, 'stepped range iteration')
+    if iterable.left is None or iterable.right is None:
+        not_implemented(ctx.srcfile, iterable.loc, 'unbounded range iteration')
+    left = _constant_integer(iterable.left, ctx=iterator_ctx)
+    right = _constant_integer(iterable.right, ctx=iterator_ctx)
+    if left is None or right is None:
+        user_error(
+            ctx.srcfile,
+            'range iterator bounds must be compile-time integers',
+            Pointer(
+                span=iterable.loc,
+                message='both range endpoints must have exact integer values',
+            ),
+        )
+    bounds_kind = iterable.bounds or '[]'
+    first = left + (1 if bounds_kind[0] == '(' else 0)
+    last = right - (1 if bounds_kind[1] == ')' else 0)
+    count = max(0, last - first + 1)
+    for value, label in [(first, 'first'), (last, 'last'), (count, 'count')]:
+        if not ty.integer_literal_fits(value, 'int64'):
+            user_error(
+                ctx.srcfile,
+                'range iterator does not fit the udewy integer representation',
+                Pointer(
+                    span=iterable.loc,
+                    message=f'normalized {label} value `{value}` does not fit in `int64`',
+                ),
+            )
+    target = hir.ExpressedIdentifier(
+        identifier.loc,
+        'int64',
+        identifier.name,
+        binding_id=binding.id,
+    )
+    iterator = hir.IteratorExpression(
+        condition_ast.loc,
+        ty.TypeParameterize('iterator', ['int64']),
+        target,
+        iterable,
+        first,
+        last,
+        count,
+    )
+    return iterator, iterator_ctx
+
+
 def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.Flow:
     """Typecheck supported structured `if` and while-style `loop` flows."""
     if not ast.arms:
@@ -567,15 +649,20 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         _, condition_ast, body_ast = arm.parts
         assert isinstance(condition_ast, p0.AST)
         assert isinstance(body_ast, p0.AST)
-        condition = _check_flow_condition(condition_ast, ctx=ctx)
+        iterator_result = _tcr_range_iterator(condition_ast, ctx=ctx)
+        if iterator_result is None:
+            condition = _check_flow_condition(condition_ast, ctx=ctx)
+            body_ctx = ctx
+        else:
+            condition, body_ctx = iterator_result
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
         body = typecheck_and_resolve_inner(
             body_ast,
             ctx=replace(
-                ctx,
-                loop_boundaries=(*ctx.loop_boundaries, boundary),
+                body_ctx,
+                loop_boundaries=(*body_ctx.loop_boundaries, boundary),
             ),
         )
         loop_arm = hir.LoopArm(arm.loc, ty.VOID_TYPE, condition, body)
@@ -1114,16 +1201,6 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
             ),
         )
     constant_index = _constant_integer(index, ctx=ctx)
-    if constant_index is None:
-        user_error(
-            ctx.srcfile,
-            'array index is not proven in bounds',
-            Pointer(
-                span=index.loc,
-                message='this index is not a compile-time integer constant',
-            ),
-            hint='use a literal or a constant expression derived from an exact array length',
-        )
     if array.type.length is None:
         user_error(
             ctx.srcfile,
@@ -1133,7 +1210,10 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
                 message='this array does not have an exact compile-time length',
             ),
         )
-    if not 0 <= constant_index < array.type.length:
+    if (
+        constant_index is not None
+        and not 0 <= constant_index < array.type.length
+    ):
         user_error(
             ctx.srcfile,
             'array index is out of bounds',

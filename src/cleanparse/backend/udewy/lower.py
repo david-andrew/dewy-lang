@@ -111,6 +111,7 @@ class _Binding:
     owner_function: _FunctionDef | None
     expr: hir.AST | None
     function: _FunctionDef | None = None
+    emitted_name: str | None = None
 
 
 @dataclass
@@ -151,6 +152,8 @@ class _Lowerer:
         self.next_flow_temp = 1
         self.next_eager_temp = 1
         self.next_array_temp = 1
+        self.next_iterator_temp = 1
+        self.next_iterator_value = 1
         self.next_loop_signal = 1
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
@@ -647,7 +650,27 @@ class _Lowerer:
             return
         if isinstance(node, hir.Flow):
             for arm in node.arms:
-                self._discover_node(arm.condition, scope, current_function)
+                if isinstance(arm.condition, hir.IteratorExpression):
+                    iterator = arm.condition
+                    binding = self._new_binding(
+                        scope,
+                        iterator.target.name,
+                        'value',
+                        current_function,
+                        None,
+                        iterator.target.binding_id,
+                    )
+                    binding.emitted_name = self._new_iterator_name(
+                        'value'
+                    )
+                    self.identifier_bindings[id(iterator.target)] = binding
+                    self._discover_node(
+                        iterator.iterable,
+                        scope,
+                        current_function,
+                    )
+                else:
+                    self._discover_node(arm.condition, scope, current_function)
                 self._discover_node(arm.body, scope, current_function)
             if node.default is not None:
                 self._discover_node(node.default, scope, current_function)
@@ -886,6 +909,8 @@ class _Lowerer:
                 return replace(node, name=binding.function.symbol)
             if binding.kind == 'overload':
                 self._target_error(node, 'runtime multifunction values are not supported by udewy')
+            if binding.emitted_name is not None:
+                return replace(node, name=binding.emitted_name)
             return node
         if isinstance(node, hir.FunctionLiteral):
             function = self.function_by_literal[id(node)]
@@ -904,6 +929,16 @@ class _Lowerer:
             return replace(
                 node,
                 array=self._require_node(self._transform_node(node.array)),
+            )
+        if isinstance(node, hir.IteratorExpression):
+            return replace(
+                node,
+                target=self._require_identifier(
+                    self._transform_node(node.target)
+                ),
+                iterable=self._require_node(
+                    self._transform_node(node.iterable)
+                ),
             )
         if isinstance(node, hir.Index):
             return replace(
@@ -1157,8 +1192,18 @@ class _Lowerer:
             return [self._lower_statement_body(node)]
         if isinstance(node, hir.Flow):
             is_loop = any(isinstance(arm, hir.LoopArm) for arm in node.arms)
-            prelude, flow = self._lower_flow(node)
-            statements: list[hir.AST] = [*prelude, flow]
+            if (
+                len(node.arms) == 1
+                and isinstance(node.arms[0], hir.LoopArm)
+                and isinstance(
+                    node.arms[0].condition,
+                    hir.IteratorExpression,
+                )
+            ):
+                statements = self._lower_iterator_flow(node, node.arms[0])
+            else:
+                prelude, flow = self._lower_flow(node)
+                statements = [*prelude, flow]
             if (
                 is_loop
                 and self.lower_loop_depth > 0
@@ -1188,18 +1233,25 @@ class _Lowerer:
             ]
         if isinstance(node, hir.IndexAssign):
             target_prelude, target = self._extract_expression(node.target.array)
+            index_prelude: list[hir.AST] = []
+            index: int | hir.AST = node.target.constant_index
+            if index is None:
+                index_prelude, index = self._extract_expression(
+                    node.target.index
+                )
             value_prelude, value = self._array_storage_value(
                 node.value,
                 node.target.type,
             )
             address = self._array_element_address(
                 target,
-                node.target.constant_index,
+                index,
                 node.target.type,
                 node.loc,
             )
             return [
                 *target_prelude,
+                *index_prelude,
                 *value_prelude,
                 self._array_store(value, address, node.target.type, node.loc),
             ]
@@ -1271,9 +1323,13 @@ class _Lowerer:
             )
         if isinstance(node, hir.Index):
             prelude, array = self._extract_expression(node.array)
+            index: int | hir.AST = node.constant_index
+            if index is None:
+                index_prelude, index = self._extract_expression(node.index)
+                prelude.extend(index_prelude)
             address = self._array_element_address(
                 array,
-                node.constant_index,
+                index,
                 node.type,
                 node.loc,
             )
@@ -1466,6 +1522,25 @@ class _Lowerer:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, node.type, name)
 
+    def _new_iterator_temp(
+        self,
+        node: hir.IteratorExpression,
+    ) -> hir.ExpressedIdentifier:
+        while True:
+            name = f'__dewy_iterator_{self.next_iterator_temp}'
+            self.next_iterator_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(node.loc, 'int64', name)
+
+    def _new_iterator_name(self, role: str) -> str:
+        while True:
+            name = f'__dewy_iterator_{role}_{self.next_iterator_value}'
+            self.next_iterator_value += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return name
+
     @staticmethod
     def _intrinsic_call(
         name: str,
@@ -1490,7 +1565,7 @@ class _Lowerer:
     @classmethod
     def _int64_binary(
         cls,
-        name: Literal['__add__', '__sub__'],
+        name: Literal['__add__', '__sub__', '__mul__'],
         left: hir.AST,
         right: hir.AST,
         loc: Span,
@@ -1515,7 +1590,7 @@ class _Lowerer:
     def _array_element_address(
         self,
         array: hir.AST,
-        index: int,
+        index: int | hir.AST,
         element_type: ty.Type,
         loc: Span,
     ) -> hir.AST:
@@ -1526,13 +1601,25 @@ class _Lowerer:
                 f'array element layout `{type_to_dewy(element_type)}`',
             )
         width, _signed = layout
-        offset = index * (width // 8)
-        if offset == 0:
-            return array
+        element_bytes = width // 8
+        if isinstance(index, int):
+            offset: hir.AST | int = index * element_bytes
+            if offset == 0:
+                return array
+            offset = self._int64_literal(loc, offset)
+        else:
+            offset = index
+            if element_bytes != 1:
+                offset = self._int64_binary(
+                    '__mul__',
+                    offset,
+                    self._int64_literal(loc, element_bytes),
+                    loc,
+                )
         return self._int64_binary(
             '__add__',
             array,
-            self._int64_literal(loc, offset),
+            offset,
             loc,
         )
 
@@ -1579,6 +1666,82 @@ class _Lowerer:
             loc,
         )
 
+    def _lower_iterator_flow(
+        self,
+        node: hir.Flow,
+        arm: hir.LoopArm,
+    ) -> list[hir.AST]:
+        """Lower one range iterator to declarations and a counted udewy loop."""
+
+        iterator = arm.condition
+        if not isinstance(iterator, hir.IteratorExpression):
+            raise TypeError('INTERNAL ERROR: iterator loop has no iterator condition')
+        offset = self._new_iterator_temp(iterator)
+        offset_declaration = hir.Declare(
+            iterator.loc,
+            ty.VOID_TYPE,
+            'let',
+            offset.name,
+            'int64',
+            self._int64_literal(iterator.loc, 0),
+        )
+        target_declaration = hir.Declare(
+            iterator.target.loc,
+            ty.VOID_TYPE,
+            'let',
+            iterator.target.name,
+            'int64',
+            self._int64_literal(iterator.loc, iterator.first),
+            binding_id=iterator.target.binding_id,
+        )
+        target_value = self._int64_binary(
+            '__add__',
+            self._int64_literal(iterator.loc, iterator.first),
+            replace(offset, loc=iterator.loc),
+            iterator.loc,
+        )
+        target_assignment = hir.Assign(
+            iterator.loc,
+            ty.VOID_TYPE,
+            replace(iterator.target, loc=iterator.loc),
+            '=',
+            target_value,
+        )
+        increment = hir.Assign(
+            iterator.loc,
+            ty.VOID_TYPE,
+            replace(offset, loc=iterator.loc),
+            '+=',
+            self._int64_literal(iterator.loc, 1),
+        )
+        self.lower_loop_depth += 1
+        lowered_body = self._lower_statement_body(arm.body)
+        self.lower_loop_depth -= 1
+        body_items = (
+            lowered_body.items
+            if isinstance(lowered_body, hir.Block)
+            else [lowered_body]
+        )
+        body = hir.Block(
+            arm.body.loc,
+            ty.VOID_TYPE,
+            [target_assignment, increment, *body_items],
+            True,
+        )
+        condition = self._int64_comparison(
+            '__lt__',
+            replace(offset, loc=iterator.loc),
+            self._int64_literal(iterator.loc, iterator.count),
+            iterator.loc,
+        )
+        loop = hir.Flow(
+            node.loc,
+            ty.VOID_TYPE,
+            [hir.LoopArm(arm.loc, ty.VOID_TYPE, condition, body)],
+            None,
+        )
+        return [offset_declaration, target_declaration, loop]
+
     def _lower_flow(
         self,
         node: hir.Flow,
@@ -1615,6 +1778,31 @@ class _Lowerer:
                 else self._lower_statement_body(node.default)
             )
         return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
+
+    @staticmethod
+    def _int64_comparison(
+        name: Literal['__lt__'],
+        left: hir.AST,
+        right: hir.AST,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        function_type = ty.FunctionType(
+            [
+                ty.PosOrKwArg('left', 'int64'),
+                ty.PosOrKwArg('right', 'int64'),
+            ],
+            [],
+            None,
+            'bool',
+            [],
+        )
+        return hir.FunctionCall(
+            loc,
+            'bool',
+            hir.ExpressedIdentifier(loc, function_type, name),
+            [left, right],
+            {},
+        )
 
     def _prepare_condition(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         """Preserve lazy boolean operators while lowering their operands."""
