@@ -57,6 +57,62 @@ class Return(AST):
 
 
 @dataclass
+class IfArm(AST):
+    """One boolean conditional arm in an ordered flow chain."""
+
+    condition: AST
+    body: AST
+
+
+@dataclass
+class LoopArm(AST):
+    """One while-style loop arm in an ordered flow chain."""
+
+    condition: AST
+    body: AST
+
+
+@dataclass
+class Flow(AST):
+    """An ordered `if`/`loop` chain with an optional final default body."""
+
+    arms: list[IfArm | LoopArm]
+    default: AST | None = None
+
+
+@dataclass
+class ScopeMetatag(AST):
+    """A generic metatag declared throughout its containing lexical scope."""
+
+    name: str = ''
+
+
+@dataclass
+class Break(AST):
+    """Exit an enclosing loop, optionally selected through a scope metatag."""
+
+    label: str | None = None
+    loop_levels: int = 0
+
+
+@dataclass
+class Continue(AST):
+    """Continue an enclosing loop, optionally selected through a scope metatag."""
+
+    label: str | None = None
+    loop_levels: int = 0
+
+
+@dataclass
+class ShortCircuit(AST):
+    """A lazy boolean logical operator selected through operator dispatch."""
+
+    op: Literal['and', 'or', 'nand', 'nor']
+    left: AST
+    right: AST
+
+
+@dataclass
 class Declare(AST):
     decltype: Literal['let', 'const'] # others tbd
     name: str                         #TBD future handling of unpacking assignment

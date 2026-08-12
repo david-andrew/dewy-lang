@@ -1,0 +1,13 @@
+let diverge = ():>never => diverge()
+
+let main = ():>int64 => {
+    let conjunction:bool = false and diverge()
+    let disjunction:bool = true or diverge()
+    let negated_conjunction:bool = false nand diverge()
+    let negated_disjunction:bool = true nor diverge()
+    if (not conjunction) and disjunction and negated_conjunction and (not negated_disjunction) {
+        return 42
+    } else {
+        return 0
+    }
+}

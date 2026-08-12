@@ -31,4 +31,4 @@ let b = true & false
     assert len(k.type.methods) == 3
     assert [a.name for a in k.alternates if isinstance(a, hir.ExpressedIdentifier)] == ['h', 'f']
 
-    assert isinstance(declarations['b'], hir.FunctionCall)
+    assert isinstance(declarations['b'], hir.ShortCircuit)

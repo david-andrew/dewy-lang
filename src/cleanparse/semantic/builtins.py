@@ -27,9 +27,9 @@ BINOP_DUNDER_MAP = {
     'or': '__or__',
     '|': '__or__',
     'xor': '__xor__',
-    # 'nand': '__nand__',
-    # 'nor': '__nor__',
-    # 'xnor': '__xnor__',
+    'nand': '__nand__',
+    'nor': '__nor__',
+    'xnor': '__xnor__',
     '>>': '__rshift__',
     '<<': '__lshift__',
 }
@@ -203,6 +203,9 @@ builtin_types: dict[str, ty.TypeExpr] = {
     '__and__': _bitwise_overload(callable_overload=True),
     '__or__': _bitwise_overload(),
     '__xor__': _bitwise_overload(),
+    '__nand__': _bitwise_overload(),
+    '__nor__': _bitwise_overload(),
+    '__xnor__': _bitwise_overload(),
     '__unary_sub__': _unary_generic('number'),
     '__not__': ty.OverloadType([
         _unary_generic('int'),

@@ -5,6 +5,7 @@ semantic analysis pass 0:
 """
 from dataclasses import dataclass, replace, field
 from collections import ChainMap
+from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
 from . import hir, ty, builtins
 from .errors import TypeCheckError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
@@ -19,6 +20,21 @@ class Catcher:
     returns: list[tuple[Span, ty.Type]] = field(default_factory=list)
     expected: ty.Type | None = None  # the boundary's annotated `:>` type, checked at each return site
 
+
+@dataclass(eq=False)
+class LabelScope:
+    """Scope-wide metatag declarations for one lexical block."""
+
+    labels: dict[str, Span]
+
+
+@dataclass(frozen=True)
+class LoopBoundary:
+    """An active loop and the lexical scope containing it."""
+
+    parent_label_scope: LabelScope
+
+
 @dataclass
 class Context:
     """global context for the typechecker"""
@@ -26,6 +42,9 @@ class Context:
     declarations: ChainMap[str, ty.Type] = field(default_factory=ChainMap) #TODO: handling different scopes...
     type_system: ty.TypeSystem = field(default_factory=ty.TypeSystem)
     catcher: Catcher | None = None  # installed by the nearest enclosing return boundary
+    label_scopes: tuple[LabelScope, ...] = ()
+    loop_boundaries: tuple[LoopBoundary, ...] = ()
+    function_boundary_labels: dict[str, Span] = field(default_factory=dict)
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
@@ -76,6 +95,9 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                 ctx.catcher.returns[:] = fork.catcher.returns
             return result
 
+        case p0.Flow():
+            return tcr_flow(ast, ctx=ctx, expected=expected)
+
         
         case p0.KeywordExpr(parts=[t1.Keyword(name='let'|'const'), *_]):
             return tcr_declare(ast, ctx=ctx)
@@ -85,6 +107,9 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         
         case p0.KeywordExpr(parts=[t1.Keyword(name='return'), *_]):
             return tcr_return(ast, ctx=ctx, expected=expected)
+
+        case p0.KeywordExpr(parts=[t1.Keyword(name='break'|'continue'), *_]):
+            return tcr_loop_exit(ast, ctx=ctx)
 
         # etc. keyword cases as outlined in t2
         case p0.KeywordExpr(parts=[t1.Keyword(name=name), *_]):
@@ -105,6 +130,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Integer(value=value)):
             parsed = t0.parse_integer(value.src, value.prefix)
             return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
+        case p0.Atom(item=t1.Metatag(name=name)):
+            return tcr_scope_metatag(ast, name=name, ctx=ctx)
         # case p0.Atom(item=t1.Real()): ...
         # case p0.Atom(item=t1.BasedString()): ...
         # case p0.Atom(item=t1.Semicolon()): ...
@@ -148,12 +175,11 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             t1.Keyword(name='let'|'const' as keyword), 
             p0.BinOp(
                 left=p0.Atom(item=t1.Identifier(name=name)), 
-                op=t1.Operator(symbol='='|'::'|':=' as op),
+                op=t1.Operator(symbol='='|'::'|':='),
                 right=p0.AST() as right)
             ]:
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
-            #TODO: perhaps special handling if expr.type is VOID_TYPE.
-            #      also it shouldn't be possible for it to be inferred type, but may need to check/handle...
+            require_valued(expr.type, ctx.srcfile, expr.loc, 'declaration initializer')
 
             # if this declaration was pre-bound by the two-phase pass, verify the checked
             # type matches the pre-bound signature rather than silently overwriting it
@@ -174,7 +200,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                     left=p0.Atom(item=t1.Identifier(name=name)),
                     op=t1.Operator(symbol=':'),
                     right=p0.AST() as typeexpr),
-                op=t1.Operator(symbol='='|'::'|':=' as op),
+                op=t1.Operator(symbol='='|'::'|':='),
                 right=p0.AST() as right)
             ]:
             # decl assign + type annotation: check the expression against the annotation
@@ -266,12 +292,284 @@ def tcr_return(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
     ctx.catcher.returns.append((kw_loc, item.type))
     return hir.Return(kw_loc, ty.BOTTOM_TYPE, item)
 
+
+def _loop_exit_metatag(ast: p0.KeywordExpr, *, ctx: Context) -> t1.Metatag | None:
+    """Decode the parser's optional one-metatag keyword payload."""
+    parts = cast(list[object], ast.parts)
+    if len(parts) == 1:
+        return None
+    if (
+        len(parts) == 2
+        and isinstance(parts[1], list)
+        and len(parts[1]) == 1
+        and isinstance(parts[1][0], t1.Metatag)
+    ):
+        return parts[1][0]
+    user_error(
+        ctx.srcfile,
+        'invalid labeled loop exit',
+        Pointer(span=ast.loc, message='expected exactly one `$name` label'),
+        hint='use `break $name` or `continue $name`',
+    )
+
+
+def _visible_label_scope(name: str, *, ctx: Context) -> LabelScope | None:
+    return next(
+        (scope for scope in reversed(ctx.label_scopes) if name in scope.labels),
+        None,
+    )
+
+
+def tcr_loop_exit(ast: p0.KeywordExpr, *, ctx: Context) -> hir.Break | hir.Continue:
+    """Resolve an unlabeled or scope-metatag-targeted loop exit."""
+    keyword = ast.parts[0]
+    assert isinstance(keyword, t1.Keyword)
+    metatag = _loop_exit_metatag(ast, ctx=ctx)
+
+    loop_levels = 0
+    label = None
+    label_scope = None
+    if metatag is not None:
+        label = metatag.name
+        label_scope = _visible_label_scope(label, ctx=ctx)
+        if label_scope is None:
+            inaccessible = ctx.function_boundary_labels.get(label)
+            if inaccessible is not None:
+                user_error(
+                    ctx.srcfile,
+                    f'loop label `${label}` cannot cross a function boundary',
+                    Pointer(span=metatag.loc, message='this exit is in a nested function'),
+                    Pointer(span=inaccessible, message='the label is declared outside that function'),
+                )
+            user_error(
+                ctx.srcfile,
+                f'unknown loop label `${label}`',
+                Pointer(span=metatag.loc, message='no visible scope declares this metatag'),
+            )
+
+    if not ctx.loop_boundaries:
+        user_error(
+            ctx.srcfile,
+            f'`{keyword.name}` outside a loop',
+            Pointer(span=keyword.loc, message='there is no enclosing loop to exit'),
+        )
+
+    if metatag is not None:
+        assert label_scope is not None
+        target_index = next(
+            (
+                index
+                for index in range(len(ctx.loop_boundaries) - 1, -1, -1)
+                if ctx.loop_boundaries[index].parent_label_scope is label_scope
+            ),
+            None,
+        )
+        if target_index is None:
+            user_error(
+                ctx.srcfile,
+                f'`${label}` does not label an enclosing loop',
+                Pointer(span=metatag.loc, message='this metatag is visible, but its scope contains no active target loop'),
+                Pointer(span=label_scope.labels[label], message='the metatag is declared in this scope'),
+                hint='a labeled exit targets a loop whose parent lexical scope declares the metatag',
+            )
+        loop_levels = len(ctx.loop_boundaries) - 1 - target_index
+
+    if keyword.name == 'break':
+        return hir.Break(ast.loc, ty.BOTTOM_TYPE, label, loop_levels)
+    assert keyword.name == 'continue'
+    return hir.Continue(ast.loc, ty.BOTTOM_TYPE, label, loop_levels)
+
+
+def _flow_expected(expected: ty.Type | None) -> ty.Type | None:
+    """Expected scalar branch type, excluding statement/inference sentinels."""
+    if expected in (None, ty.VOID_TYPE, ty.INFERRED_TYPE):
+        return None
+    return expected
+
+
+def _check_flow_condition(condition_ast: p0.AST, *, ctx: Context) -> hir.AST:
+    """Typecheck one Dewy flow condition as a strict boolean."""
+    condition = typecheck_and_resolve_inner(condition_ast, ctx=ctx, expected='bool')
+    return check_against(condition, 'bool', ctx=ctx)
+
+
+def _flow_value_type(
+    bodies: list[hir.AST],
+    *,
+    exhaustive: bool,
+    ctx: Context,
+    loc: Span,
+) -> ty.Type:
+    """Synthesize a scalar conditional result from its continuing branches."""
+    continuing = [body.type for body in bodies if body.type != ty.BOTTOM_TYPE]
+    if not exhaustive:
+        return ty.VOID_TYPE
+    if not continuing:
+        return ty.BOTTOM_TYPE
+    if any(isinstance(result, ty.SequenceType) for result in continuing):
+        not_implemented(ctx.srcfile, loc, 'multi-value conditional result')
+    has_void = any(result == ty.VOID_TYPE for result in continuing)
+    has_value = any(result != ty.VOID_TYPE for result in continuing)
+    if has_void and has_value:
+        user_error(
+            ctx.srcfile,
+            'conditional branches disagree on whether they produce a value',
+            Pointer(span=loc, message='some continuing branches produce values and others do not'),
+        )
+    if has_void:
+        return ty.VOID_TYPE
+    values = [
+        require_valued(result, ctx.srcfile, body.loc, 'conditional branch')
+        for body, result in zip(
+            [body for body in bodies if body.type != ty.BOTTOM_TYPE],
+            continuing,
+        )
+    ]
+    return ty.union(*values)
+
+
+def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.Flow:
+    """Typecheck supported structured `if` and while-style `loop` flows."""
+    if not ast.arms:
+        raise ValueError('INTERNAL ERROR: Flow has no arms')
+
+    keywords: list[str] = []
+    for arm in ast.arms:
+        if not arm.parts or not isinstance(arm.parts[0], t1.Keyword):
+            raise ValueError(f'INTERNAL ERROR: malformed flow arm: {arm.parts!r}')
+        keywords.append(arm.parts[0].name)
+
+    unsupported = next(
+        (keyword for keyword in keywords if keyword not in {'if', 'loop'}),
+        None,
+    )
+    if unsupported is not None:
+        not_implemented(ctx.srcfile, ast.loc, f'`{unsupported}` flow')
+
+    if all(keyword == 'if' for keyword in keywords):
+        branch_expected = _flow_expected(expected)
+        if isinstance(branch_expected, ty.SequenceType):
+            not_implemented(ctx.srcfile, ast.loc, 'multi-value conditional result')
+        arms: list[hir.IfArm | hir.LoopArm] = []
+        bodies: list[hir.AST] = []
+        for arm in ast.arms:
+            if len(arm.parts) != 3:
+                raise ValueError(f'INTERNAL ERROR: malformed if arm: {arm.parts!r}')
+            _, condition_ast, body_ast = arm.parts
+            assert isinstance(condition_ast, p0.AST)
+            assert isinstance(body_ast, p0.AST)
+            condition = _check_flow_condition(condition_ast, ctx=ctx)
+            body = typecheck_and_resolve_inner(body_ast, ctx=ctx, expected=branch_expected)
+            if branch_expected is not None:
+                body = check_against(body, branch_expected, ctx=ctx)
+            arms.append(hir.IfArm(arm.loc, body.type, condition, body))
+            bodies.append(body)
+
+        default = None
+        if ast.default is not None:
+            default = typecheck_and_resolve_inner(ast.default, ctx=ctx, expected=branch_expected)
+            if branch_expected is not None:
+                default = check_against(default, branch_expected, ctx=ctx)
+            bodies.append(default)
+        elif (
+            branch_expected is not None
+            and any(body.type != ty.BOTTOM_TYPE for body in bodies)
+        ):
+            user_error(
+                ctx.srcfile,
+                'value-producing conditional requires a default branch',
+                Pointer(span=ast.loc, message='this conditional is not exhaustive'),
+                hint='add an `else` branch that produces the missing value',
+            )
+
+        result_type = _flow_value_type(
+            bodies,
+            exhaustive=default is not None,
+            ctx=ctx,
+            loc=ast.loc,
+        )
+        if (
+            branch_expected is not None
+            and result_type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
+        ):
+            result_type = branch_expected
+        return hir.Flow(ast.loc, result_type, arms, default)
+
+    if len(ast.arms) == 1 and keywords == ['loop'] and ast.default is None:
+        arm = ast.arms[0]
+        if len(arm.parts) != 3:
+            not_implemented(ctx.srcfile, arm.loc, 'iterator or generator loop form')
+        _, condition_ast, body_ast = arm.parts
+        assert isinstance(condition_ast, p0.AST)
+        assert isinstance(body_ast, p0.AST)
+        condition = _check_flow_condition(condition_ast, ctx=ctx)
+        if not ctx.label_scopes:
+            raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
+        boundary = LoopBoundary(ctx.label_scopes[-1])
+        body = typecheck_and_resolve_inner(
+            body_ast,
+            ctx=replace(
+                ctx,
+                loop_boundaries=(*ctx.loop_boundaries, boundary),
+            ),
+        )
+        loop_arm = hir.LoopArm(arm.loc, ty.VOID_TYPE, condition, body)
+        return hir.Flow(ast.loc, ty.VOID_TYPE, [loop_arm], None)
+
+    not_implemented(ctx.srcfile, ast.loc, 'mixed or advanced flow chain')
+
+def _direct_scope_metatag(item: p0.AST) -> t1.Metatag | None:
+    if isinstance(item, p0.Atom) and isinstance(item.item, t1.Metatag):
+        return item.item
+    return None
+
+
+def _collect_label_scope(block: p0.Block, *, ctx: Context) -> LabelScope:
+    labels: dict[str, Span] = {}
+    for item in block.inner:
+        metatag = _direct_scope_metatag(item)
+        if metatag is None:
+            continue
+        previous = labels.get(metatag.name)
+        duplicate = previous is not None
+        if not duplicate:
+            ancestor = _visible_label_scope(metatag.name, ctx=ctx)
+            if ancestor is not None:
+                previous = ancestor.labels[metatag.name]
+        if previous is not None:
+            user_error(
+                ctx.srcfile,
+                (
+                    f'duplicate scope metatag `${metatag.name}`'
+                    if duplicate
+                    else f'scope metatag `${metatag.name}` shadows an active declaration'
+                ),
+                Pointer(span=metatag.loc, message='this declaration repeats an active metatag name'),
+                Pointer(span=previous, message='the active declaration is here'),
+                hint='metatag names may be reused only in disjoint sibling scopes',
+            )
+        labels[metatag.name] = metatag.loc
+    return LabelScope(labels)
+
+
+def tcr_scope_metatag(ast: p0.Atom, *, name: str, ctx: Context) -> hir.ScopeMetatag:
+    """Extract a direct bare metatag previously collected for this scope."""
+    if not ctx.label_scopes or ctx.label_scopes[-1].labels.get(name) != ast.loc:
+        not_implemented(ctx.srcfile, ast.loc, 'metatag expression outside a direct scoped-block declaration')
+    return hir.ScopeMetatag(ast.loc, ty.VOID_TYPE, name)
+
+
 def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
 
     # open a new scope if the block is a scoped block
     type_block = block.kind == '<>'
-    if block.kind == '{}': ctx = replace(ctx, declarations=ctx.declarations.new_child())
+    if block.kind == '{}':
+        ctx = replace(
+            ctx,
+            declarations=ctx.declarations.new_child(),
+            label_scopes=(*ctx.label_scopes, _collect_label_scope(block, ctx=ctx)),
+        )
 
     # pass 1: pre-bind fully annotated function declarations before checking anything,
     # so bodies checked in pass 2 can refer to them (buys mutual and self recursion)
@@ -400,11 +698,15 @@ def _dispatch_builtin(
             _function_alternates(left) + _function_alternates(right),
         )
 
+    contextual_args = [
+        _contextualize_flow_result(arg, param.type, ctx=ctx)
+        for arg, param in zip(args, result.method.pos_or_kw)
+    ]
     return hir.FunctionCall(
         loc,
         result.method.ret,
         hir.ExpressedIdentifier(op_loc, result.method, fname),
-        apply_promotions(args, result.promote_pos),
+        apply_promotions(contextual_args, result.promote_pos),
         {},
     )
 
@@ -523,7 +825,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     # general case, delegate to the builtin __dunder__ method
     if binop.op.symbol in builtins.BINOP_DUNDER_MAP:
-        return _dispatch_builtin(
+        result = _dispatch_builtin(
             builtins.BINOP_DUNDER_MAP[binop.op.symbol],
             [left, right],
             loc=Span(left.loc.start, right.loc.stop),
@@ -532,6 +834,31 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             ctx=ctx,
             expected=expected,
         )
+        short_circuit_ops: dict[str, Literal['and', 'or', 'nand', 'nor']] = {
+            'and': 'and',
+            '&': 'and',
+            'or': 'or',
+            '|': 'or',
+            'nand': 'nand',
+            'nor': 'nor',
+        }
+        if (
+            binop.op.symbol in short_circuit_ops
+            and isinstance(result, hir.FunctionCall)
+            and result.type == 'bool'
+            and isinstance(result.func, hir.ExpressedIdentifier)
+            and isinstance(result.func.type, ty.FunctionType)
+            and len(result.func.type.pos_or_kw) == 2
+            and all(param.type == 'bool' for param in result.func.type.pos_or_kw)
+        ):
+            return hir.ShortCircuit(
+                result.loc,
+                result.type,
+                short_circuit_ops[binop.op.symbol],
+                left,
+                right,
+            )
+        return result
     
 
     not_implemented(ctx.srcfile, binop.op.loc, f'operator `{binop.op.symbol}`')
@@ -647,6 +974,11 @@ def _discarded_expressed_sites(body: hir.AST) -> list[hir.AST]:
         if isinstance(node, hir.Block):
             for item in node.items:
                 walk(item)
+        elif isinstance(node, hir.Flow):
+            for arm in node.arms:
+                walk(arm.body)
+            if node.default is not None:
+                walk(node.default)
         elif node.type != ty.VOID_TYPE and node.type != ty.BOTTOM_TYPE:
             sites.append(node)
     if isinstance(body, hir.Block):
@@ -683,7 +1015,17 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         inner_scope[rest_args.name] = rest_args.type
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
     catcher = Catcher(expected=annotated)
-    inner_ctx = replace(ctx, declarations=inner_scope, catcher=catcher)
+    function_boundary_labels = dict(ctx.function_boundary_labels)
+    for label_scope in ctx.label_scopes:
+        function_boundary_labels.update(label_scope.labels)
+    inner_ctx = replace(
+        ctx,
+        declarations=inner_scope,
+        catcher=catcher,
+        label_scopes=(LabelScope({}),),
+        loop_boundaries=(),
+        function_boundary_labels=function_boundary_labels,
+    )
     body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
 
     # resolve the return type from the caught returns and the fall-through value
@@ -894,6 +1236,27 @@ def parse_call_arguments(
     return pos_args, kw_args
 
 
+def _contextualize_flow_result(
+    node: hir.AST,
+    expected: ty.TypeExpr,
+    *,
+    ctx: Context,
+) -> hir.AST:
+    """Record the concrete representation selected for a scalar flow value."""
+    if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+        item = _contextualize_flow_result(node.items[0], expected, ctx=ctx)
+        if item is not node.items[0]:
+            return replace(node, type=item.type, items=[item])
+        return node
+    if (
+        isinstance(node, hir.Flow)
+        and node.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
+        and ctx.type_system.is_subtype(node.type, expected)
+    ):
+        return replace(node, type=expected)
+    return node
+
+
 def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.FunctionCall:
     if isinstance(left, hir.Block) and not left.scoped and len(left.items) == 1:
         left = left.items[0]
@@ -924,12 +1287,24 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
             Pointer(span=left.loc, message='calling this'),
             Pointer(span=right.loc, message=str(e)))
 
+    contextual_pos_args = [
+        _contextualize_flow_result(arg, param.type, ctx=ctx)
+        for arg, param in zip(pos_args, result.method.pos_or_kw)
+    ]
+    parameter_types = {
+        param.name: param.type
+        for param in [*result.method.pos_or_kw, *result.method.kw_only]
+    }
+    contextual_kw_args = {
+        name: _contextualize_flow_result(arg, parameter_types[name], ctx=ctx)
+        for name, arg in kw_args.items()
+    }
     return hir.FunctionCall(
         Span(left.loc.start, right.loc.stop),
         result.method.ret,
         left,
-        apply_promotions(pos_args, result.promote_pos),
-        kw_args,
+        apply_promotions(contextual_pos_args, result.promote_pos),
+        contextual_kw_args,
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
 

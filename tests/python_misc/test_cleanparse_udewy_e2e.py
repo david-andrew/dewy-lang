@@ -30,6 +30,15 @@ LOWERED_CASES = [
     ('overload_calls.dewy', 42),
     ('inline_overloads.dewy', 42),
     ('local_functions.dewy', 42),
+    ('if_else.dewy', 42),
+    ('if_value.dewy', 42),
+    ('if_else_if.dewy', 42),
+    ('loop_count.dewy', 42),
+    ('loop_break.dewy', 42),
+    ('loop_continue.dewy', 42),
+    ('labeled_loop_exits.dewy', 42),
+    ('cond_short_circuit.dewy', 42),
+    ('fib_if.dewy', 55),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]

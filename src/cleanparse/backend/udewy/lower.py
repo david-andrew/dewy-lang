@@ -1,4 +1,4 @@
-"""Legalize checked HIR for targets with udewy's function model.
+"""Prepare checked HIR for udewy's callable and structured-flow model.
 
 This module sits between semantic checking and source emission. It is not the
 general HIR-to-MIR pass: it handles callable constructs that are valid Dewy HIR
@@ -9,7 +9,11 @@ but cannot be represented directly by udewy:
 - udewy has no runtime overload sets, so statically selected overload calls are
   rewritten to their concrete function alternatives;
 - udewy has no closures, so references to enclosing function values are
-  diagnosed before emission.
+  diagnosed before emission;
+- udewy control flow is statement-only, so scalar control-flow expressions
+  are extracted into typed temporaries and branch assignments;
+- labeled exits are translated into integer signals propagated through nested
+  structured loops.
 
 Lowering has two phases. Discovery replays lexical scope resolution, records
 function units and captures, and preserves the type checker's forward-function
@@ -25,9 +29,10 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import NoReturn
+from typing import Literal, NoReturn
 
-from ...reporting import Error, Pointer, SrcFile
+from ...parser import t0
+from ...reporting import Error, Pointer, Span, SrcFile
 from ...semantic import builtins, hir, ty
 from ...semantic.errors import NotImplementedYet
 from ...semantic.hir_display import type_to_dewy
@@ -133,6 +138,13 @@ class _Lowerer:
         self.declare_bindings: dict[int, _Binding] = {}
         self.identifier_bindings: dict[int, _Binding | None] = {}
         self.captures: dict[int, list[tuple[hir.ExpressedIdentifier, _Binding]]] = defaultdict(list)
+        self.source_names: set[str] = set()
+        self.next_flow_temp = 1
+        self.next_eager_temp = 1
+        self.next_loop_signal = 1
+        self.loop_signal_levels: hir.ExpressedIdentifier | None = None
+        self.loop_signal_kind: hir.ExpressedIdentifier | None = None
+        self.lower_loop_depth = 0
 
     def lower(self) -> LoweredProgram:
         """Run discovery, validation, symbol allocation, and HIR rewriting."""
@@ -164,7 +176,10 @@ class _Lowerer:
                         if function.literal.rest_args is not None
                         else None
                     ),
-                    body=self._require_node(self._transform_node(function.literal.body)),
+                    body=self._lower_function_body(
+                        self._require_node(self._transform_node(function.literal.body)),
+                        function.literal.rettype,
+                    ),
                 ),
             )
             for function in sorted(self.functions, key=lambda item: item.order)
@@ -177,7 +192,7 @@ class _Lowerer:
                 continue
             transformed = self._transform_node(item)
             if transformed is not None:
-                remaining_items.append(transformed)
+                remaining_items.extend(self._lower_statement(transformed))
         return LoweredProgram(lowered_functions, remaining_items)
 
     def _new_binding(
@@ -198,6 +213,7 @@ class _Lowerer:
         )
         self.next_binding_order += 1
         scope.bindings[name] = binding
+        self.source_names.add(name)
         return binding
 
     def _new_block_scope(
@@ -422,6 +438,17 @@ class _Lowerer:
             if node.item is not None:
                 self._discover_node(node.item, scope, current_function)
             return
+        if isinstance(node, hir.Flow):
+            for arm in node.arms:
+                self._discover_node(arm.condition, scope, current_function)
+                self._discover_node(arm.body, scope, current_function)
+            if node.default is not None:
+                self._discover_node(node.default, scope, current_function)
+            return
+        if isinstance(node, hir.ShortCircuit):
+            self._discover_node(node.left, scope, current_function)
+            self._discover_node(node.right, scope, current_function)
+            return
         if isinstance(node, hir.FunctionCall):
             self._discover_node(node.func, scope, current_function)
             for arg in node.pos_args:
@@ -632,17 +659,26 @@ class _Lowerer:
             if isinstance(node.func.type, ty.OverloadType):
                 if node.selected_method_index is None:
                     raise ValueError('INTERNAL ERROR: overload call has no selected method index')
-                alternatives = self._resolve_callable(node.func)
-                if len(alternatives) != len(node.func.type.methods):
-                    raise ValueError(
-                        'INTERNAL ERROR: overload alternatives do not align with methods'
+                if (
+                    isinstance(node.func, hir.ExpressedIdentifier)
+                    and node.func.name in builtins.builtin_types
+                ):
+                    func = replace(
+                        node.func,
+                        type=node.func.type.methods[node.selected_method_index],
                     )
-                selected = alternatives[node.selected_method_index]
-                func: hir.AST = hir.ExpressedIdentifier(
-                    node.func.loc,
-                    selected.literal.type,
-                    selected.symbol,
-                )
+                else:
+                    alternatives = self._resolve_callable(node.func)
+                    if len(alternatives) != len(node.func.type.methods):
+                        raise ValueError(
+                            'INTERNAL ERROR: overload alternatives do not align with methods'
+                        )
+                    selected = alternatives[node.selected_method_index]
+                    func = hir.ExpressedIdentifier(
+                        node.func.loc,
+                        selected.literal.type,
+                        selected.symbol,
+                    )
             else:
                 func = self._require_node(self._transform_node(node.func))
             return replace(
@@ -681,6 +717,29 @@ class _Lowerer:
                     if node.item is not None
                     else None
                 ),
+            )
+        if isinstance(node, hir.Flow):
+            return replace(
+                node,
+                arms=[
+                    replace(
+                        arm,
+                        condition=self._require_node(self._transform_node(arm.condition)),
+                        body=self._require_node(self._transform_node(arm.body)),
+                    )
+                    for arm in node.arms
+                ],
+                default=(
+                    self._require_node(self._transform_node(node.default))
+                    if node.default is not None
+                    else None
+                ),
+            )
+        if isinstance(node, hir.ShortCircuit):
+            return replace(
+                node,
+                left=self._require_node(self._transform_node(node.left)),
+                right=self._require_node(self._transform_node(node.right)),
             )
         if isinstance(node, hir.Assign):
             return replace(
@@ -725,11 +784,578 @@ class _Lowerer:
             )
         return node
 
+    def _lower_statement_body(self, node: hir.AST) -> hir.AST:
+        """Lower expressions contained in a body that is used as a statement."""
+        if isinstance(node, hir.Block):
+            items: list[hir.AST] = []
+            for item in node.items:
+                items.extend(self._lower_statement(item))
+            return replace(node, items=items)
+        statements = self._lower_statement(node)
+        if len(statements) == 1:
+            return statements[0]
+        return hir.Block(node.loc, ty.VOID_TYPE, statements, True)
+
+    def _lower_function_body(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
+        """Lower a function body and install labeled-exit signal state when needed."""
+        previous_state = (
+            self.loop_signal_levels,
+            self.loop_signal_kind,
+            self.lower_loop_depth,
+        )
+        uses_nonlocal_exit = self._contains_nonlocal_exit(node)
+        if uses_nonlocal_exit:
+            self.loop_signal_levels, self.loop_signal_kind = self._new_loop_signals(node)
+        else:
+            self.loop_signal_levels = None
+            self.loop_signal_kind = None
+        self.lower_loop_depth = 0
+
+        lowered = self._lower_function_body_inner(node, rettype)
+        if uses_nonlocal_exit:
+            declarations = self._loop_signal_declarations(node.loc)
+            if isinstance(lowered, hir.Block) and lowered.scoped:
+                lowered = replace(lowered, items=[*declarations, *lowered.items])
+            else:
+                lowered = hir.Block(
+                    lowered.loc,
+                    lowered.type,
+                    [*declarations, lowered],
+                    True,
+                )
+
+        (
+            self.loop_signal_levels,
+            self.loop_signal_kind,
+            self.lower_loop_depth,
+        ) = previous_state
+        return lowered
+
+    def _lower_function_body_inner(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
+        """Make an implicit scalar function result explicit while lowering statements."""
+        if rettype == ty.VOID_TYPE or self._contains_return(node):
+            return self._lower_statement_body(node)
+        if isinstance(node, hir.Block) and node.scoped:
+            value_indices = [
+                index
+                for index, item in enumerate(node.items)
+                if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
+            ]
+            if len(value_indices) != 1:
+                self._target_error(node, 'function body does not have one implicit return value')
+            value_index = value_indices[0]
+            items: list[hir.AST] = []
+            for index, item in enumerate(node.items):
+                if index != value_index:
+                    items.extend(self._lower_statement(item))
+                    continue
+                prelude, value = self._extract_expression(item)
+                items.extend(prelude)
+                items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
+            return replace(node, type=ty.BOTTOM_TYPE, items=items)
+        prelude, value = self._extract_expression(node)
+        statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
+        return hir.Block(node.loc, ty.BOTTOM_TYPE, statements, True)
+
+    @classmethod
+    def _contains_nonlocal_exit(cls, node: hir.AST) -> bool:
+        """Whether a body contains a break or continue targeting an outer loop."""
+        if isinstance(node, (hir.Break, hir.Continue)):
+            return node.loop_levels > 0
+        if isinstance(node, hir.Block):
+            return any(cls._contains_nonlocal_exit(item) for item in node.items)
+        if isinstance(node, hir.Flow):
+            return any(cls._contains_nonlocal_exit(arm.body) for arm in node.arms) or (
+                node.default is not None
+                and cls._contains_nonlocal_exit(node.default)
+            )
+        return False
+
+    @classmethod
+    def _contains_return(cls, node: hir.AST) -> bool:
+        """Whether a body contains any explicit return site."""
+        if isinstance(node, hir.Return):
+            return True
+        if isinstance(node, hir.Block):
+            return any(cls._contains_return(item) for item in node.items)
+        if isinstance(node, hir.Flow):
+            return any(cls._contains_return(arm.body) for arm in node.arms) or (
+                node.default is not None and cls._contains_return(node.default)
+            )
+        return False
+
+    def _lower_statement(self, node: hir.AST) -> list[hir.AST]:
+        """Return target statements, inserting expression-extraction preludes."""
+        if isinstance(node, hir.ScopeMetatag):
+            return []
+        if isinstance(node, hir.Block):
+            return [self._lower_statement_body(node)]
+        if isinstance(node, hir.Flow):
+            is_loop = any(isinstance(arm, hir.LoopArm) for arm in node.arms)
+            prelude, flow = self._lower_flow(node)
+            statements: list[hir.AST] = [*prelude, flow]
+            if (
+                is_loop
+                and self.lower_loop_depth > 0
+                and self.loop_signal_levels is not None
+            ):
+                statements.extend(self._loop_signal_checkpoint(node.loc))
+            return statements
+        if isinstance(node, hir.Declare):
+            prelude, expr = self._extract_expression(node.expr)
+            return [*prelude, replace(node, expr=expr)]
+        if isinstance(node, hir.Assign):
+            prelude, value = self._extract_expression(node.value)
+            return [*prelude, replace(node, value=value)]
+        if isinstance(node, hir.Return):
+            if node.item is None:
+                return [node]
+            prelude, item = self._extract_expression(node.item)
+            return [*prelude, replace(node, item=item)]
+        if isinstance(node, (hir.Break, hir.Continue)):
+            if node.loop_levels == 0:
+                return [replace(node, label=None)]
+            if self.loop_signal_levels is None or self.loop_signal_kind is None:
+                self._target_error(node, 'nonlocal loop exit outside a lowered function')
+            kind = 1 if isinstance(node, hir.Break) else 2
+            return [
+                self._loop_signal_assignment(
+                    self.loop_signal_levels,
+                    node.loop_levels,
+                    node.loc,
+                ),
+                self._loop_signal_assignment(
+                    self.loop_signal_kind,
+                    kind,
+                    node.loc,
+                ),
+                hir.Break(node.loc, ty.BOTTOM_TYPE),
+            ]
+        prelude, value = self._extract_expression(node)
+        return [*prelude, value]
+
+    def _extract_expression(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        """Extract statement-valued subexpressions and return a scalar expression."""
+        if isinstance(node, hir.Flow):
+            if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+                self._target_error(node, 'statement-only flow used where a value is required')
+            target = self._new_flow_temp(node)
+            declaration = hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                node.type,
+                self._placeholder(node),
+            )
+            flow_prelude, flow = self._lower_flow(node, target=target)
+            return [declaration, *flow_prelude, flow], target
+        if isinstance(node, hir.ShortCircuit):
+            return self._extract_expression(self._short_circuit_flow(node))
+        if isinstance(node, hir.FunctionCall):
+            prelude: list[hir.AST] = []
+            func_prelude, func = self._extract_expression(node.func)
+            prelude.extend(func_prelude)
+            pos_args: list[hir.AST] = []
+            for arg in node.pos_args:
+                arg_prelude, lowered_arg = self._extract_expression(arg)
+                prelude.extend(arg_prelude)
+                pos_args.append(lowered_arg)
+            kw_args: dict[str, hir.AST] = {}
+            for name, arg in node.kw_args.items():
+                arg_prelude, lowered_arg = self._extract_expression(arg)
+                prelude.extend(arg_prelude)
+                kw_args[name] = lowered_arg
+            call = replace(node, func=func, pos_args=pos_args, kw_args=kw_args)
+            if self._is_eager_bool_logical_call(call):
+                eager_args: list[hir.AST] = []
+                for arg in call.pos_args:
+                    target = self._new_eager_temp(arg)
+                    prelude.append(hir.Declare(
+                        arg.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        target.name,
+                        'bool',
+                        arg,
+                    ))
+                    eager_args.append(target)
+                call = replace(call, pos_args=eager_args)
+            return prelude, call
+        if isinstance(node, (hir.ValueCast, hir.Transmute)):
+            prelude, expr = self._extract_expression(node.expr)
+            return prelude, replace(node, expr=expr)
+        if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            prelude, item = self._extract_expression(node.items[0])
+            return prelude, replace(node, items=[item])
+        return [], node
+
+    def _lower_flow(
+        self,
+        node: hir.Flow,
+        *,
+        target: hir.ExpressedIdentifier | None = None,
+    ) -> tuple[list[hir.AST], hir.Flow]:
+        """Lower one structured flow, optionally assigning each branch value."""
+        prelude: list[hir.AST] = []
+        arms: list[hir.IfArm | hir.LoopArm] = []
+        for index, arm in enumerate(node.arms):
+            condition_prelude, condition = self._prepare_condition(arm.condition)
+            if condition_prelude:
+                if isinstance(arm, hir.LoopArm) or index > 0:
+                    self._target_error(
+                        arm.condition,
+                        'condition requiring extracted statements in this flow position',
+                    )
+                prelude.extend(condition_prelude)
+            if isinstance(arm, hir.LoopArm):
+                self.lower_loop_depth += 1
+            body = (
+                self._assign_flow_body(arm.body, target)
+                if target is not None
+                else self._lower_statement_body(arm.body)
+            )
+            if isinstance(arm, hir.LoopArm):
+                self.lower_loop_depth -= 1
+            arms.append(replace(arm, condition=condition, body=body))
+        default = None
+        if node.default is not None:
+            default = (
+                self._assign_flow_body(node.default, target)
+                if target is not None
+                else self._lower_statement_body(node.default)
+            )
+        return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
+
+    def _prepare_condition(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        """Preserve lazy boolean operators while lowering their operands."""
+        if isinstance(node, hir.ShortCircuit):
+            left_prelude, left = self._prepare_condition(node.left)
+            right_prelude, right = self._prepare_condition(node.right)
+            if right_prelude:
+                self._target_error(
+                    node.right,
+                    'right short-circuit operand requiring extracted statements',
+                )
+            return left_prelude, replace(node, left=left, right=right)
+        return self._extract_expression(node)
+
+    def _assign_flow_body(
+        self,
+        body: hir.AST,
+        target: hir.ExpressedIdentifier,
+    ) -> hir.AST:
+        """Replace a continuing scalar branch result with a temporary assignment."""
+        if body.type == ty.BOTTOM_TYPE:
+            return self._lower_statement_body(body)
+        if isinstance(body, hir.Block) and body.scoped:
+            value_indices = [
+                index
+                for index, item in enumerate(body.items)
+                if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
+            ]
+            if len(value_indices) != 1:
+                self._target_error(body, 'conditional branch does not have one scalar value')
+            value_index = value_indices[0]
+            items: list[hir.AST] = []
+            for index, item in enumerate(body.items):
+                if index != value_index:
+                    items.extend(self._lower_statement(item))
+                    continue
+                prelude, value = self._extract_expression(item)
+                items.extend(prelude)
+                items.append(self._flow_assignment(target, value))
+            return replace(body, type=ty.VOID_TYPE, items=items)
+        prelude, value = self._extract_expression(body)
+        statements = [*prelude, self._flow_assignment(target, value)]
+        return hir.Block(body.loc, ty.VOID_TYPE, statements, True)
+
+    @staticmethod
+    def _flow_assignment(
+        target: hir.ExpressedIdentifier,
+        value: hir.AST,
+    ) -> hir.Assign:
+        """Build a synthetic assignment to a flow-result temporary."""
+        use = replace(target, loc=value.loc)
+        return hir.Assign(value.loc, ty.VOID_TYPE, use, '=', value)
+
+    def _new_flow_temp(self, node: hir.AST) -> hir.ExpressedIdentifier:
+        """Allocate a deterministic temporary absent from all source bindings."""
+        while True:
+            name = f'__dewy_flow_{self.next_flow_temp}'
+            self.next_flow_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(node.loc, node.type, name)
+
+    def _new_eager_temp(self, node: hir.AST) -> hir.ExpressedIdentifier:
+        """Allocate an argument temporary that forces eager logical-call evaluation."""
+        while True:
+            name = f'__dewy_eager_{self.next_eager_temp}'
+            self.next_eager_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(node.loc, 'bool', name)
+
+    def _new_loop_signals(
+        self,
+        node: hir.AST,
+    ) -> tuple[hir.ExpressedIdentifier, hir.ExpressedIdentifier]:
+        """Allocate collision-free outward-level and exit-kind signal names."""
+        while True:
+            ordinal = self.next_loop_signal
+            self.next_loop_signal += 1
+            levels_name = f'__dewy_loop_levels_{ordinal}'
+            kind_name = f'__dewy_loop_kind_{ordinal}'
+            if levels_name in self.source_names or kind_name in self.source_names:
+                continue
+            self.source_names.update({levels_name, kind_name})
+            return (
+                hir.ExpressedIdentifier(node.loc, 'int64', levels_name),
+                hir.ExpressedIdentifier(node.loc, 'int64', kind_name),
+            )
+
+    def _loop_signal_declarations(self, loc: Span) -> list[hir.Declare]:
+        """Initialize the current function's labeled-exit signals."""
+        assert self.loop_signal_levels is not None
+        assert self.loop_signal_kind is not None
+        zero = self._int64_literal(loc, 0)
+        return [
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                self.loop_signal_levels.name,
+                'int64',
+                zero,
+            ),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                self.loop_signal_kind.name,
+                'int64',
+                replace(zero),
+            ),
+        ]
+
+    @staticmethod
+    def _int64_literal(loc: Span, value: int) -> hir.Integer:
+        return hir.Integer(loc, 'int64', t0.base10, value)
+
+    @classmethod
+    def _loop_signal_assignment(
+        cls,
+        target: hir.ExpressedIdentifier,
+        value: int,
+        loc: Span,
+    ) -> hir.Assign:
+        return hir.Assign(
+            loc,
+            ty.VOID_TYPE,
+            replace(target, loc=loc),
+            '=',
+            cls._int64_literal(loc, value),
+        )
+
+    @classmethod
+    def _loop_signal_condition(
+        cls,
+        target: hir.ExpressedIdentifier,
+        dunder: Literal['__eq__', '__gt__'],
+        value: int,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        function_type = ty.FunctionType(
+            [
+                ty.PosOrKwArg('left', 'int64'),
+                ty.PosOrKwArg('right', 'int64'),
+            ],
+            [],
+            None,
+            'bool',
+            [],
+        )
+        function = hir.ExpressedIdentifier(loc, function_type, dunder)
+        return hir.FunctionCall(
+            loc,
+            'bool',
+            function,
+            [
+                replace(target, loc=loc),
+                cls._int64_literal(loc, value),
+            ],
+            {},
+        )
+
+    def _loop_signal_checkpoint(self, loc: Span) -> list[hir.Flow]:
+        """Handle or propagate a pending nonlocal exit after one nested loop."""
+        assert self.loop_signal_levels is not None
+        assert self.loop_signal_kind is not None
+
+        break_body = hir.Block(
+            loc,
+            ty.BOTTOM_TYPE,
+            [
+                self._loop_signal_assignment(self.loop_signal_kind, 0, loc),
+                hir.Break(loc, ty.BOTTOM_TYPE),
+            ],
+            True,
+        )
+        continue_body = hir.Block(
+            loc,
+            ty.BOTTOM_TYPE,
+            [
+                self._loop_signal_assignment(self.loop_signal_kind, 0, loc),
+                hir.Continue(loc, ty.BOTTOM_TYPE),
+            ],
+            True,
+        )
+        kind_flow = hir.Flow(
+            loc,
+            ty.BOTTOM_TYPE,
+            [
+                hir.IfArm(
+                    loc,
+                    ty.BOTTOM_TYPE,
+                    self._loop_signal_condition(
+                        self.loop_signal_kind,
+                        '__eq__',
+                        1,
+                        loc,
+                    ),
+                    break_body,
+                ),
+            ],
+            continue_body,
+        )
+        target_body = hir.Block(
+            loc,
+            ty.BOTTOM_TYPE,
+            [
+                self._loop_signal_assignment(self.loop_signal_levels, 0, loc),
+                kind_flow,
+            ],
+            True,
+        )
+        target_checkpoint = hir.Flow(
+            loc,
+            ty.VOID_TYPE,
+            [
+                hir.IfArm(
+                    loc,
+                    ty.BOTTOM_TYPE,
+                    self._loop_signal_condition(
+                        self.loop_signal_levels,
+                        '__eq__',
+                        1,
+                        loc,
+                    ),
+                    target_body,
+                ),
+            ],
+            None,
+        )
+
+        propagate_body = hir.Block(
+            loc,
+            ty.BOTTOM_TYPE,
+            [
+                hir.Assign(
+                    loc,
+                    ty.VOID_TYPE,
+                    replace(self.loop_signal_levels, loc=loc),
+                    '-=',
+                    self._int64_literal(loc, 1),
+                ),
+                hir.Break(loc, ty.BOTTOM_TYPE),
+            ],
+            True,
+        )
+        propagate_checkpoint = hir.Flow(
+            loc,
+            ty.VOID_TYPE,
+            [
+                hir.IfArm(
+                    loc,
+                    ty.BOTTOM_TYPE,
+                    self._loop_signal_condition(
+                        self.loop_signal_levels,
+                        '__gt__',
+                        1,
+                        loc,
+                    ),
+                    propagate_body,
+                ),
+            ],
+            None,
+        )
+        return [target_checkpoint, propagate_checkpoint]
+
+    @staticmethod
+    def _is_eager_bool_logical_call(node: hir.FunctionCall) -> bool:
+        """Whether target operator syntax needs pre-evaluated direct-call operands."""
+        return (
+            isinstance(node.func, hir.ExpressedIdentifier)
+            and node.func.name in {'__and__', '__or__', '__nand__', '__nor__'}
+            and isinstance(node.func.type, ty.FunctionType)
+            and all(param.type == 'bool' for param in node.func.type.pos_or_kw)
+        )
+
+    def _placeholder(self, node: hir.AST) -> hir.AST:
+        """Return an udewy-representable initializer for a flow temporary."""
+        if node.type == 'bool':
+            return hir.Bool(node.loc, 'bool', False)
+        if isinstance(node.type, str) and node.type in {
+            'int8',
+            'int16',
+            'int32',
+            'int64',
+            'uint8',
+            'uint16',
+            'uint32',
+            'uint64',
+        }:
+            return hir.Integer(node.loc, node.type, t0.base10, 0)
+        self._target_error(
+            node,
+            f'no udewy flow temporary representation for `{type_to_dewy(node.type)}`',
+        )
+
+    def _short_circuit_flow(self, node: hir.ShortCircuit) -> hir.Flow:
+        """Expand a value-position lazy boolean operator into an equivalent flow."""
+        true = hir.Bool(node.loc, 'bool', True)
+        false = hir.Bool(node.loc, 'bool', False)
+        if node.op == 'and':
+            consequent, default = node.right, false
+        elif node.op == 'or':
+            consequent, default = true, node.right
+        elif node.op == 'nand':
+            consequent, default = self._bool_not(node.right), true
+        else:
+            assert node.op == 'nor'
+            consequent, default = false, self._bool_not(node.right)
+        arm = hir.IfArm(node.loc, 'bool', node.left, consequent)
+        return hir.Flow(node.loc, 'bool', [arm], default)
+
+    @staticmethod
+    def _bool_not(node: hir.AST) -> hir.FunctionCall:
+        """Build the concrete boolean negation used by `nand` and `nor`."""
+        function_type = ty.FunctionType(
+            [ty.PosOrKwArg('item', 'bool')],
+            [],
+            None,
+            'bool',
+            [],
+        )
+        function = hir.ExpressedIdentifier(node.loc, function_type, '__not__')
+        return hir.FunctionCall(node.loc, 'bool', function, [node], {})
+
     def _target_error(self, node: hir.AST, message: str) -> NoReturn:
-        """Report a valid HIR callable construct unsupported by udewy."""
+        """Report a valid HIR construct unsupported by udewy."""
         raise NotImplementedYet(Error(
             srcfile=self.srcfile,
-            title='udewy target cannot lower this callable',
+            title='udewy target cannot lower this construct',
             pointer_messages=[Pointer(span=node.loc, message=message)],
         ))
 

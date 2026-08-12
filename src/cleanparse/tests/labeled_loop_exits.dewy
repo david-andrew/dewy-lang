@@ -1,0 +1,27 @@
+let main = ():>int64 => {
+    let result:int64 = 0
+    let outer_index:int64 = 0
+    $outer
+    loop outer_index <? 5 {
+        outer_index += 1
+        let inner_index:int64 = 0
+        $inner
+        loop inner_index <? 3 {
+            inner_index += 1
+            if outer_index =? 1 {
+                result += 1
+                continue $outer
+            }
+            if inner_index =? 2 {
+                if outer_index =? 2 {
+                    result += 10
+                    break $inner
+                }
+                result += 30
+                break $outer
+            }
+        }
+        result += 1
+    }
+    return result
+}

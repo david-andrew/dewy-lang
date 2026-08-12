@@ -27,6 +27,9 @@ UDEWY_BINOP_DUNDERS = {
     '__and__': 'and',
     '__or__': 'or',
     '__xor__': 'xor',
+    '__nand__': 'nand',
+    '__nor__': 'nor',
+    '__xnor__': 'xnor',
 }
 
 UDEWY_PREFIX_DUNDERS = {
@@ -103,7 +106,12 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
             kw_only_args=[],
             rest_args=None,
             rettype=ty.VOID_TYPE,
-            body=ast,
+            body=hir.Block(
+                ast.loc,
+                ty.VOID_TYPE,
+                program.remaining_items,
+                ast.scoped,
+            ),
         )
 
     ctx = EmitContext(set(functions) | set(builtins.builtin_types), set())
@@ -128,6 +136,10 @@ def _contains_return(node: hir.AST) -> bool:
         return True
     if isinstance(node, hir.Block):
         return any(_contains_return(item) for item in node.items)
+    if isinstance(node, hir.Flow):
+        return any(_contains_return(arm.body) for arm in node.arms) or (
+            node.default is not None and _contains_return(node.default)
+        )
     return False
 
 def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -> str:
@@ -148,8 +160,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     code.append(' '.join(args))
     code.append(f'):>{emit_type(func.rettype)} => ')
 
-    # udewy function bodies must return explicitly, so expression bodies get wrapped in a
-    # return. NOTE: this lowering's real home is MIR (see the terminator sketch in mir.py)
+    # udewy function bodies must return explicitly, so expression bodies get wrapped in a return.
     local_names = {arg.name for arg in func.pos_or_kw_args}
     local_names.update(arg.name for arg in func.kw_only_args)
     if func.rest_args is not None:
@@ -169,6 +180,12 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
     match ast:
         case hir.Block(): return emit_block(ast, ctx)
         case hir.Return(): return emit_return(ast, ctx)
+        case hir.Flow(): return emit_flow(ast, ctx)
+        case hir.ScopeMetatag():
+            raise ValueError('INTERNAL ERROR: scope metatag reached udewy emission')
+        case hir.Break(): return emit_loop_exit(ast, 'break')
+        case hir.Continue(): return emit_loop_exit(ast, 'continue')
+        case hir.ShortCircuit(): return emit_short_circuit(ast, ctx)
         case hir.Integer(): return emit_integer(ast)
         case hir.Bool(): return 'true' if ast.value else 'false'
         case hir.Void(): return 'void'
@@ -179,6 +196,14 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
         case hir.FunctionCall(): return emit_function_call(ast, ctx)
         case _:
             raise NotImplementedError(f'emit_ast not implemented for AST type: {type(ast).__name__}')
+
+
+def emit_loop_exit(ast: hir.Break | hir.Continue, keyword: str) -> str:
+    """Emit an exit only after labeled metadata has been lowered away."""
+    if ast.label is not None or ast.loop_levels != 0:
+        raise ValueError('INTERNAL ERROR: labeled loop exit reached udewy emission')
+    return keyword
+
 
 def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:
     # udewy requires a type annotation on every binding; derive one from the
@@ -193,6 +218,40 @@ def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:
 
 def emit_assign(assign: hir.Assign, ctx: EmitContext) -> str:
     return f'{emit_ast(assign.target, ctx)} {assign.op} {emit_ast(assign.value, ctx)}'
+
+
+def emit_flow(flow: hir.Flow, ctx: EmitContext) -> str:
+    """Emit an ordered `if` chain or a while-style `loop`."""
+    parts: list[str] = []
+    for index, arm in enumerate(flow.arms):
+        if index:
+            parts.append(' else ')
+        keyword = 'if' if isinstance(arm, hir.IfArm) else 'loop'
+        parts.append(
+            f'{keyword} {emit_ast(arm.condition, ctx)} '
+            f'{_emit_flow_body(arm.body, ctx)}'
+        )
+    if flow.default is not None:
+        parts.append(f' else {_emit_flow_body(flow.default, ctx)}')
+    return ''.join(parts)
+
+
+def _emit_flow_body(body: hir.AST, ctx: EmitContext) -> str:
+    """Ensure a flow arm is represented by a scoped udewy block."""
+    if isinstance(body, hir.Block) and body.scoped:
+        return emit_block(body, ctx)
+    return '{\n' + indent(emit_ast(body, ctx), TAB) + '\n}'
+
+
+def emit_short_circuit(expr: hir.ShortCircuit, ctx: EmitContext) -> str:
+    """Emit a lazy boolean condition, preserving left-to-right evaluation."""
+    left = emit_ast(expr.left, ctx)
+    right = emit_ast(expr.right, ctx)
+    if isinstance(expr.left, hir.ShortCircuit):
+        left = f'({left})'
+    if isinstance(expr.right, hir.ShortCircuit):
+        right = f'({right})'
+    return f'{left} {expr.op} {right}'
 
 
 def emit_transmute(transmute: hir.Transmute, ctx: EmitContext) -> str:

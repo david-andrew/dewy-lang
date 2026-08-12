@@ -235,7 +235,51 @@ In this loop, the first block is guaranteed to execute at least once. Then we ch
 
 ## Break, Continue, Return inside Loops
 
-TODO->write this. follows basic principles of other languages. extra is that you can use `#hashtags` to break/continue from inside nested loops
+`break` exits the nearest enclosing loop, while `continue` begins that loop's
+next iteration. `return` leaves the containing function.
+
+```dewy
+loop running
+{
+    if should_skip { continue }
+    if finished { break }
+    process()
+}
+```
+
+A scope metatag can select an outer loop from nested control flow. A bare
+`$name` declares a generic metatag for its entire lexical scope. A labeled
+`break` or `continue` targets the nearest enclosing loop whose parent scope
+declares that name:
+
+```dewy
+$rows
+loop next_row()
+{
+    loop next_column()
+    {
+        if retry_row() { continue $rows }
+        if table_complete() { break $rows }
+        process_cell()
+    }
+}
+```
+
+The metatag is not syntactically attached to the following loop. It is a scope
+marker that labels every loop directly contained by that scope, so multiple
+sibling loops may share it. Placing the metatag immediately before the first
+loop that uses it is the conventional style.
+
+Scope metatags are visible throughout their scope, including before their
+source position. Declaring the same name twice in one scope is an error, as is
+shadowing an active metatag in a nested scope. The same name may be reused in
+disjoint sibling scopes after the first declaration is no longer visible.
+Labels never cross function boundaries.
+
+The compiler reports an error when a labeled exit names an unknown metatag, or
+when the metatag is visible but its scope is not the parent of an enclosing
+loop. The latter commonly means the marker was placed inside the loop body
+instead of in the loop's parent scope.
 
 ## Loop Generators
 

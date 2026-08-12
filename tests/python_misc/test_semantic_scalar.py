@@ -34,13 +34,15 @@ let main = ():>int => {
         'equal': '__eq__',
         'ordered': '__lt__',
         'inverted': '__ne__',
-        'both': '__and__',
     }
     for name, dunder in expected.items():
         expr = declarations[name]
         assert isinstance(expr, hir.FunctionCall)
         assert isinstance(expr.func, hir.ExpressedIdentifier)
         assert expr.func.name == dunder
+
+    assert isinstance(declarations['both'], hir.ShortCircuit)
+    assert declarations['both'].op == 'and'
 
 
 def test_assignment_is_void_and_retains_compound_operator() -> None:

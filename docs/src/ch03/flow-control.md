@@ -122,7 +122,13 @@ Values from loops can be captured to construct sequences, which is explored more
 
 ## Break, Continue, Return, <expr-return>
 
-(TODO) branch inside body of conditional
+`break` and `continue` can select an enclosing loop through a scope metatag,
+such as `break $outer`. See
+[Break, Continue, Return inside Loops](loops.md#break-continue-return-inside-loops)
+for the target and visibility rules.
+
+`return` exits the containing function and may be used from inside conditional
+or loop bodies.
 
 ## Advanced Flow Control
 

@@ -114,6 +114,24 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'Void'
     if isinstance(node, hir.Return):
         return 'Return'
+    if isinstance(node, hir.IfArm):
+        return 'IfArm'
+    if isinstance(node, hir.LoopArm):
+        return 'LoopArm'
+    if isinstance(node, hir.Flow):
+        return f'Flow({len(node.arms)} arms)'
+    if isinstance(node, hir.ScopeMetatag):
+        return f'ScopeMetatag(${node.name})'
+    if isinstance(node, hir.Break):
+        if node.label is not None:
+            return f'Break(${node.label}, loop_levels={node.loop_levels})'
+        return 'Break'
+    if isinstance(node, hir.Continue):
+        if node.label is not None:
+            return f'Continue(${node.label}, loop_levels={node.loop_levels})'
+        return 'Continue'
+    if isinstance(node, hir.ShortCircuit):
+        return f'ShortCircuit({node.op})'
     if isinstance(node, hir.Declare):
         ann = f':{type_to_dewy(node.annotation)}' if node.annotation is not None else ''
         return f'Declare({node.decltype} {node.name}{ann})'
@@ -163,6 +181,18 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     """Named child edges for tree dumping; binops/unaries are flattened for readability."""
     if isinstance(node, hir.Return):
         return [('item', node.item)] if node.item is not None else []
+    if isinstance(node, (hir.IfArm, hir.LoopArm)):
+        return [('condition', node.condition), ('body', node.body)]
+    if isinstance(node, hir.Flow):
+        out: list[tuple[str, hir.AST | hir.Param]] = [
+            (f'arms[{i}]', arm)
+            for i, arm in enumerate(node.arms)
+        ]
+        if node.default is not None:
+            out.append(('default', node.default))
+        return out
+    if isinstance(node, hir.ShortCircuit):
+        return [('left', node.left), ('right', node.right)]
     if isinstance(node, hir.Declare):
         return [('expr', node.expr)]
     if isinstance(node, hir.Assign):
@@ -454,6 +484,20 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         if node.item is None:
             return _text('return')
         return _seq(_text('return '), _to_doc(node.item, 0, indent))
+    if isinstance(node, hir.Flow):
+        return _flow_doc(node, min_prec, indent)
+    if isinstance(node, hir.ScopeMetatag):
+        return _text(f'${node.name}')
+    if isinstance(node, hir.Break):
+        suffix = f' ${node.label}' if node.label is not None else ''
+        return _text(f'break{suffix}')
+    if isinstance(node, hir.Continue):
+        suffix = f' ${node.label}' if node.label is not None else ''
+        return _text(f'continue{suffix}')
+    if isinstance(node, hir.ShortCircuit):
+        return _short_circuit_doc(node, min_prec, indent)
+    if isinstance(node, (hir.IfArm, hir.LoopArm)):
+        raise TypeError(f'{type(node).__name__} can only be rendered inside Flow')
     if isinstance(node, hir.Declare):
         # No Nest around the RHS: a Nest would still apply to HardLines inside a
         # block body even when the SoftLine after `=` stays flat, over-indenting.
@@ -593,6 +637,40 @@ def _call_doc(node: hir.FunctionCall, min_prec: int, indent: int) -> Doc:
     if _CALL_PREC < min_prec:
         return _seq(_text('('), call, _text(')'))
     return call
+
+
+def _short_circuit_doc(node: hir.ShortCircuit, min_prec: int, indent: int) -> Doc:
+    """Render a lazy boolean logical operator with normal operator precedence."""
+    prec = _op_prec(node.op)
+    doc = _seq(
+        _to_doc(node.left, _child_min_prec(prec, 'left'), indent),
+        _text(f' {node.op} '),
+        _to_doc(node.right, _child_min_prec(prec, 'right'), indent),
+    )
+    if prec < min_prec:
+        return _seq(_text('('), doc, _text(')'))
+    return doc
+
+
+def _flow_doc(node: hir.Flow, min_prec: int, indent: int) -> Doc:
+    """Render an ordered structured flow chain."""
+    docs: list[Doc] = []
+    for i, arm in enumerate(node.arms):
+        if i:
+            docs.append(_text(' else '))
+        keyword = 'if' if isinstance(arm, hir.IfArm) else 'loop'
+        docs.extend([
+            _text(f'{keyword} '),
+            _to_doc(arm.condition, 0, indent),
+            _text(' '),
+            _to_doc(arm.body, 0, indent),
+        ])
+    if node.default is not None:
+        docs.extend([_text(' else '), _to_doc(node.default, 0, indent)])
+    doc = _seq(*docs)
+    if min_prec > 0:
+        return _seq(_text('('), doc, _text(')'))
+    return doc
 
 
 def _function_literal_doc(node: hir.FunctionLiteral, min_prec: int, indent: int) -> Doc:
