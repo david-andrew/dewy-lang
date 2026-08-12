@@ -187,6 +187,8 @@
 <blockquote>
 <p>Note: <code>[first..2ndlast,last]</code> is explicitly <strong>NOT ALLOWED</strong>, as it can have unintuitive behavior, and is covered by <code>[first,second..last]</code>.</p>
 </blockquote>
+<p>The inferred step may be positive or negative. A zero step, such as
+<code>1,1..10</code>, is invalid for iteration.</p>
 <p>In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.</p>
 <iframe
     src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bfirst..last%5D%20%20%20%25%20first%20to%20last%20including%20first%20and%20last%0A%5Bfirst..last%29%20%20%20%25%20first%20to%20last%20including%20first%2C%20excluding%20last%0A%28first..last%5D%20%20%20%25%20first%20to%20last%20excluding%20first%2C%20including%20last%0A%28first..last%29%20%20%20%25%20first%20to%20last%20excluding%20first%20and%20last%0Afirst..last%20%20%20%20%20%25%20same%20as%20%5Bfirst..last%5D.%20Careful%20of%20precedence&id=DewyIframe33"
@@ -228,6 +230,14 @@ However, due to range juxtapose's low precedence, any range as part of an <code>
     id="DewyIframe37"
     frameBorder="0"
 ></iframe>
+<p>Right-unbounded ranges have a first value and can therefore define an
+unbounded iterator. Left-unbounded ranges such as <code>..5</code>, trailing-pair forms
+such as <code>..3,5</code>, and the fully unbounded <code>..</code> remain valid range values but
+cannot be iterated because they have no first value.</p>
+<p>The semantic compiler represents right-unbounded integer iteration with
+arbitrary precision. The current udewy backend diagnoses such loops until its
+deferred bigint iterator representation is implemented; it does not silently
+wrap an <code>int64</code> counter.</p>
 <h2 id="ordinal-ranges"><a class="header" href="#ordinal-ranges">Ordinal Ranges</a></h2>
 <p>Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.</p>
 <p>For example, the following range captures all characters in the range from <code>'a'</code> to <code>'z'</code> inclusive</p>
