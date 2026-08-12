@@ -400,7 +400,7 @@ def test_range_iterator_continue_advances_once_before_the_body() -> None:
     emitted = codegen(SrcFile(None, """
 let main = ():>int64 => {
     let result:int64 = 0
-    loop i in [0..2] {
+    loop i in 0..2 {
         if i =? 1 { continue }
         result += i
     }
@@ -418,7 +418,7 @@ def test_labeled_exits_preserve_depth_through_range_iterators() -> None:
     source = """
 let main = ():>void => {
     $outer
-    loop i in [0..2] {
+    loop i in 0..2 {
         loop true {
             if i =? 1 { continue $outer }
             break $outer

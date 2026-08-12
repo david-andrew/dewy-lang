@@ -51,6 +51,12 @@ class AST:
 @dataclass
 class Void(AST): ...
 
+
+@dataclass
+class Undefined(AST):
+    """The first-class singleton value denoting absence."""
+
+
 @dataclass
 class Return(AST):
     item: AST|None = None
@@ -113,6 +119,15 @@ class ShortCircuit(AST):
 
 
 @dataclass
+class TypeTest(AST):
+    """A runtime `is?` or `isnt?` test against a type expression."""
+
+    value: AST
+    test_type: ty.TypeExpr
+    negated: bool
+
+
+@dataclass
 class Declare(AST):
     decltype: Literal['let', 'const'] # others tbd
     name: str                         #TBD future handling of unpacking assignment
@@ -167,6 +182,19 @@ class IteratorExpression(AST):
     first: int
     last: int
     count: int
+
+
+IteratorLogicalOp = Literal['and', 'or', 'xor', 'nand', 'nor', 'xnor']
+IteratorFormulaToken = int | IteratorLogicalOp
+
+
+@dataclass
+class MultiIteratorExpression(AST):
+    """Eager iterator leaves and a postfix logical formula over their indices."""
+
+    iterators: list[IteratorExpression]
+    formula: list[IteratorFormulaToken]
+    repeats_when_exhausted: bool
 
 
 @dataclass

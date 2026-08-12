@@ -1,0 +1,19 @@
+let main = ():>int64 => {
+    let result:int64 = 0
+    $outer
+    loop i in 0..1 or j in 0..2 {
+        loop k in 0..0 and l in 0..0 {
+            if j =? 0 {
+                result += 2
+                continue $outer
+            }
+            if j =? 1 {
+                result += 10
+                break
+            }
+            result += 30
+            break $outer
+        }
+    }
+    return result
+}

@@ -89,6 +89,28 @@ Standard true/false type
 my_bool = true
 ```
 
+### Undefined and optional values
+
+`undefined` is a first-class singleton value. It is distinct from `void`, which
+means that an expression produces no value, and from a binding that has not yet
+been initialized.
+
+An optional value has type `T | undefined`. Test its runtime type with `is?` or
+`isnt?` before using it as `T`; the matching control-flow edge narrows the
+binding:
+
+```dewy
+let answer:int64|undefined = find_answer()
+
+if answer isnt? undefined {
+    print(answer + 1)
+}
+```
+
+`value is? T` asks whether the runtime type of `value` is compatible with `T`;
+`value isnt? T` is its inverse. The initial udewy target supports optional
+booleans, fixed-width integers, array handles, and function pointers.
+
 ### Complex
 
 complex numbers

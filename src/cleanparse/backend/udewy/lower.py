@@ -130,6 +130,7 @@ class _FunctionDef:
     definition_scope: _Scope
     overload_member: bool
     symbol: str = ''
+    optional_result_name: str | None = None
 
 
 class _Lowerer:
@@ -154,11 +155,17 @@ class _Lowerer:
         self.next_array_temp = 1
         self.next_iterator_temp = 1
         self.next_iterator_value = 1
+        self.next_optional_temp = 1
         self.next_loop_signal = 1
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
         self.lower_loop_depth = 0
         self.lowering_module_startup = False
+        self.optional_payloads: dict[int, ty.TypeExpr] = {}
+        self.optional_globals_initialized: set[int] = set()
+        self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
+        self.call_optional_kwargs: dict[int, dict[str, ty.TypeExpr]] = {}
+        self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.needs_startup = False
         self.startup_symbol = '__dewy_top_level'
         self.user_main_base = '__dewy_user_main'
@@ -210,6 +217,7 @@ class _Lowerer:
                         transformed.loc,
                         transformed.expr.type,
                         transformed.name,
+                        binding_id=transformed.binding_id,
                     ),
                     '=',
                     transformed.expr,
@@ -250,37 +258,155 @@ class _Lowerer:
 
     def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
         literal = function.literal
-        rettype = self._target_scalar_type(literal.rettype, literal)
-        function_type = literal.type
-        if isinstance(function_type, ty.FunctionType):
-            function_type = replace(function_type, ret=rettype)
+        result_payload = ty.optional_payload(literal.rettype)
+        if isinstance(result_payload, ty.ArrayType):
+            self._target_error(
+                literal,
+                'optional array returns require array ownership lowering',
+            )
+        rettype = (
+            ty.VOID_TYPE
+            if result_payload is not None
+            else self._target_scalar_type(literal.rettype, literal)
+        )
+        lowered_pos: list[hir.Param | hir.BoundParam] = []
+        lowered_kw: list[hir.Param | hir.BoundParam] = []
+        parameter_prologue: list[hir.AST] = []
+
+        def lower_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
+            if (
+                isinstance(param.type, ty.TypeOr)
+                and 'undefined' in param.type.items
+                and ty.optional_payload(param.type) is None
+            ):
+                self._target_error(literal, 'heterogeneous optional parameter type')
+            payload = ty.optional_payload(param.type)
+            if payload is None:
+                return self._transform_param(param)
+            if isinstance(param, hir.BoundParam):
+                self._target_error(literal, 'optional parameter defaults')
+            incoming_name = self._new_optional_name(f'arg_{param.name}')
+            incoming = hir.ExpressedIdentifier(
+                literal.loc,
+                param.type,
+                incoming_name,
+            )
+            cell = hir.ExpressedIdentifier(
+                literal.loc,
+                'int64',
+                param.name,
+                binding_id=param.binding_id,
+            )
+            parameter_prologue.append(
+                hir.Declare(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    param.name,
+                    'int64',
+                    self._optional_allocation(literal.loc),
+                    binding_id=param.binding_id,
+                )
+            )
+            parameter_prologue.extend(self._optional_write(cell, incoming, payload))
+            return replace(
+                param,
+                name=incoming_name,
+                type='int64',
+                binding_id=None,
+            )
+
+        lowered_pos = [lower_param(param) for param in literal.pos_or_kw_args]
+        lowered_kw = [lower_param(param) for param in literal.kw_only_args]
+        lowered_rest = (
+            lower_param(literal.rest_args)
+            if literal.rest_args is not None
+            else None
+        )
+        result_target = None
+        if result_payload is not None:
+            assert function.optional_result_name is not None
+            lowered_pos.append(
+                hir.Param(function.optional_result_name, 'int64')
+            )
+            result_target = hir.ExpressedIdentifier(
+                literal.loc,
+                literal.rettype,
+                function.optional_result_name,
+            )
+        previous_result = self.current_optional_result
+        self.current_optional_result = result_target
+        body = self._lower_function_body(
+            self._require_node(self._transform_node(literal.body)),
+            literal.rettype,
+        )
+        self.current_optional_result = previous_result
+        if parameter_prologue:
+            if isinstance(body, hir.Block):
+                body = replace(body, items=[*parameter_prologue, *body.items])
+            else:
+                body = hir.Block(body.loc, body.type, [*parameter_prologue, body], True)
+        function_type = self._lower_callable_type(literal.type)
         return LoweredFunction(
             function.symbol,
             replace(
                 literal,
                 type=function_type,
-                pos_or_kw_args=[
-                    self._transform_param(param)
-                    for param in literal.pos_or_kw_args
-                ],
-                kw_only_args=[
-                    self._transform_param(param)
-                    for param in literal.kw_only_args
-                ],
-                rest_args=(
-                    self._transform_param(literal.rest_args)
-                    if literal.rest_args is not None
-                    else None
-                ),
+                pos_or_kw_args=lowered_pos,
+                kw_only_args=lowered_kw,
+                rest_args=lowered_rest,
                 rettype=rettype,
-                body=self._lower_function_body(
-                    self._require_node(self._transform_node(literal.body)),
-                    literal.rettype,
-                ),
+                body=body,
             ),
         )
 
+    def _lower_callable_type(self, type_: ty.Type) -> ty.Type:
+        if not isinstance(type_, ty.FunctionType):
+            return type_
+        pos = [
+            ty.PosOrKwArg(
+                param.name,
+                self._lower_runtime_value_type(param.type),
+            )
+            for param in type_.pos_or_kw
+        ]
+        kw_only = [
+            replace(
+                param,
+                type=self._lower_runtime_value_type(param.type),
+            )
+            for param in type_.kw_only
+        ]
+        rettype: ty.TypeExpr = type_.ret
+        if ty.optional_payload(type_.ret) is not None:
+            pos.append(ty.PosOrKwArg(None, 'int64'))
+            rettype = ty.VOID_TYPE
+        return replace(
+            type_,
+            pos_or_kw=pos,
+            kw_only=kw_only,
+            ret=rettype,
+        )
+
+    def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
+        if ty.optional_payload(type_) is not None:
+            return 'int64'
+        if isinstance(type_, ty.FunctionType):
+            lowered = self._lower_callable_type(type_)
+            assert isinstance(lowered, ty.FunctionType)
+            return lowered
+        return type_
+
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
+        if (
+            isinstance(type_, ty.TypeOr)
+            and 'undefined' in type_.items
+            and ty.optional_payload(type_) is None
+        ):
+            self._target_error(
+                node,
+                'heterogeneous runtime union containing `undefined`',
+            )
         if isinstance(type_, ty.ArrayType):
             self._target_error(node, 'array return values are not supported by udewy')
         if not isinstance(type_, ty.IntegerLiteralType):
@@ -310,6 +436,15 @@ class _Lowerer:
     def _global_storage(self, declaration: hir.Declare) -> hir.Declare:
         """Create inert udewy storage initialized later by module startup."""
         annotation = declaration.annotation or declaration.expr.type
+        if (
+            isinstance(annotation, ty.TypeOr)
+            and 'undefined' in annotation.items
+            and ty.optional_payload(annotation) is None
+        ):
+            self._target_error(
+                declaration,
+                'heterogeneous runtime union containing `undefined`',
+            )
         if isinstance(annotation, ty.IntegerLiteralType):
             if not ty.integer_literal_fits(annotation.value, 'int64'):
                 raise NotImplementedYet(Error(
@@ -324,6 +459,8 @@ class _Lowerer:
                 ))
             annotation = 'int64'
         if isinstance(annotation, ty.ArrayType):
+            annotation = 'int64'
+        if ty.optional_payload(annotation) is not None:
             annotation = 'int64'
         if annotation == 'bool':
             initializer: hir.AST = hir.Bool(declaration.loc, 'bool', False)
@@ -448,6 +585,9 @@ class _Lowerer:
                     item.binding_id,
                 )
                 self.declare_bindings[id(item)] = binding
+                payload = ty.optional_payload(item.annotation or item.expr.type)
+                if payload is not None and item.binding_id is not None:
+                    self.optional_payloads[item.binding_id] = payload
 
         for item in block.items:
             if isinstance(item, hir.Declare):
@@ -525,6 +665,8 @@ class _Lowerer:
             definition_scope,
             overload_member,
         )
+        if ty.optional_payload(literal.rettype) is not None:
+            function.optional_result_name = self._new_optional_name('result')
         self.next_function_order += 1
         self.functions.append(function)
         self.function_by_literal[id(literal)] = function
@@ -556,6 +698,9 @@ class _Lowerer:
                 None,
                 param.binding_id,
             )
+            payload = ty.optional_payload(param.type)
+            if payload is not None and param.binding_id is not None:
+                self.optional_payloads[param.binding_id] = payload
         for param in literal.kw_only_args:
             self._new_binding(
                 function_scope,
@@ -565,6 +710,9 @@ class _Lowerer:
                 None,
                 param.binding_id,
             )
+            payload = ty.optional_payload(param.type)
+            if payload is not None and param.binding_id is not None:
+                self.optional_payloads[param.binding_id] = payload
         if literal.rest_args is not None:
             self._new_binding(
                 function_scope,
@@ -574,6 +722,9 @@ class _Lowerer:
                 None,
                 literal.rest_args.binding_id,
             )
+            payload = ty.optional_payload(literal.rest_args.type)
+            if payload is not None and literal.rest_args.binding_id is not None:
+                self.optional_payloads[literal.rest_args.binding_id] = payload
         if isinstance(literal.body, hir.Block):
             self._discover_block(
                 literal.body,
@@ -650,25 +801,33 @@ class _Lowerer:
             return
         if isinstance(node, hir.Flow):
             for arm in node.arms:
-                if isinstance(arm.condition, hir.IteratorExpression):
-                    iterator = arm.condition
-                    binding = self._new_binding(
-                        scope,
-                        iterator.target.name,
-                        'value',
-                        current_function,
-                        None,
-                        iterator.target.binding_id,
-                    )
-                    binding.emitted_name = self._new_iterator_name(
-                        'value'
-                    )
-                    self.identifier_bindings[id(iterator.target)] = binding
-                    self._discover_node(
-                        iterator.iterable,
-                        scope,
-                        current_function,
-                    )
+                iterators = (
+                    [arm.condition]
+                    if isinstance(arm.condition, hir.IteratorExpression)
+                    else arm.condition.iterators
+                    if isinstance(arm.condition, hir.MultiIteratorExpression)
+                    else []
+                )
+                if iterators:
+                    for iterator in iterators:
+                        binding = self._new_binding(
+                            scope,
+                            iterator.target.name,
+                            'value',
+                            current_function,
+                            None,
+                            iterator.target.binding_id,
+                        )
+                        binding.emitted_name = self._new_iterator_name('value')
+                        self.identifier_bindings[id(iterator.target)] = binding
+                        payload = ty.optional_payload(iterator.target.type)
+                        if payload is not None and iterator.target.binding_id is not None:
+                            self.optional_payloads[iterator.target.binding_id] = payload
+                        self._discover_node(
+                            iterator.iterable,
+                            scope,
+                            current_function,
+                        )
                 else:
                     self._discover_node(arm.condition, scope, current_function)
                 self._discover_node(arm.body, scope, current_function)
@@ -678,6 +837,9 @@ class _Lowerer:
         if isinstance(node, hir.ShortCircuit):
             self._discover_node(node.left, scope, current_function)
             self._discover_node(node.right, scope, current_function)
+            return
+        if isinstance(node, hir.TypeTest):
+            self._discover_node(node.value, scope, current_function)
             return
         if isinstance(node, hir.ArrayLiteral):
             for item in node.items:
@@ -889,8 +1051,12 @@ class _Lowerer:
     def _transform_param(self, param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
         """Rewrite callable references inside a parameter default."""
         if isinstance(param, hir.BoundParam):
-            return replace(param, value=self._require_node(self._transform_node(param.value)))
-        return param
+            return replace(
+                param,
+                type=self._lower_runtime_value_type(param.type),
+                value=self._require_node(self._transform_node(param.value)),
+            )
+        return replace(param, type=self._lower_runtime_value_type(param.type))
 
     def _transform_node(self, node: hir.AST) -> hir.AST | None:
         """Rewrite callable references and elide compile-time declarations.
@@ -906,7 +1072,11 @@ class _Lowerer:
             if binding.kind == 'function':
                 if binding.function is None:
                     raise ValueError(f'INTERNAL ERROR: missing function for `{binding.name}`')
-                return replace(node, name=binding.function.symbol)
+                return replace(
+                    node,
+                    name=binding.function.symbol,
+                    type=self._lower_callable_type(node.type),
+                )
             if binding.kind == 'overload':
                 self._target_error(node, 'runtime multifunction values are not supported by udewy')
             if binding.emitted_name is not None:
@@ -914,7 +1084,11 @@ class _Lowerer:
             return node
         if isinstance(node, hir.FunctionLiteral):
             function = self.function_by_literal[id(node)]
-            return hir.ExpressedIdentifier(node.loc, node.type, function.symbol)
+            return hir.ExpressedIdentifier(
+                node.loc,
+                self._lower_callable_type(node.type),
+                function.symbol,
+            )
         if isinstance(node, hir.OverloadedFunction):
             self._target_error(node, 'runtime multifunction values are not supported by udewy')
         if isinstance(node, hir.ArrayLiteral):
@@ -940,6 +1114,14 @@ class _Lowerer:
                     self._transform_node(node.iterable)
                 ),
             )
+        if isinstance(node, hir.MultiIteratorExpression):
+            iterators: list[hir.IteratorExpression] = []
+            for iterator in node.iterators:
+                transformed = self._transform_node(iterator)
+                if not isinstance(transformed, hir.IteratorExpression):
+                    raise TypeError('INTERNAL ERROR: multiiterator leaf was not preserved')
+                iterators.append(transformed)
+            return replace(node, iterators=iterators)
         if isinstance(node, hir.Index):
             return replace(
                 node,
@@ -956,6 +1138,11 @@ class _Lowerer:
                 value=self._require_node(self._transform_node(node.value)),
             )
         if isinstance(node, hir.FunctionCall):
+            source_function_type: ty.FunctionType | None = (
+                node.func.type
+                if isinstance(node.func.type, ty.FunctionType)
+                else None
+            )
             if isinstance(node.func.type, ty.OverloadType):
                 if node.selected_method_index is None:
                     raise ValueError('INTERNAL ERROR: overload call has no selected method index')
@@ -979,9 +1166,12 @@ class _Lowerer:
                         selected.literal.type,
                         selected.symbol,
                     )
+                source_function_type = node.func.type.methods[
+                    node.selected_method_index
+                ]
             else:
                 func = self._require_node(self._transform_node(node.func))
-            return replace(
+            transformed = replace(
                 node,
                 func=func,
                 pos_args=[
@@ -994,6 +1184,17 @@ class _Lowerer:
                 },
                 selected_method_index=None,
             )
+            if source_function_type is not None:
+                self.call_optional_args[id(transformed)] = [
+                    ty.optional_payload(param.type)
+                    for param in source_function_type.pos_or_kw
+                ]
+                self.call_optional_kwargs[id(transformed)] = {
+                    param.name: payload
+                    for param in source_function_type.kw_only
+                    if (payload := ty.optional_payload(param.type)) is not None
+                }
+            return transformed
         if isinstance(node, hir.Block):
             items: list[hir.AST] = []
             for item in node.items:
@@ -1040,6 +1241,11 @@ class _Lowerer:
                 node,
                 left=self._require_node(self._transform_node(node.left)),
                 right=self._require_node(self._transform_node(node.right)),
+            )
+        if isinstance(node, hir.TypeTest):
+            return replace(
+                node,
+                value=self._require_node(self._transform_node(node.value)),
             )
         if isinstance(node, hir.Assign):
             return replace(
@@ -1149,12 +1355,48 @@ class _Lowerer:
                 if index != value_index:
                     items.extend(self._lower_statement(item))
                     continue
+                if self.current_optional_result is not None:
+                    payload = ty.optional_payload(self.current_optional_result.type)
+                    if payload is None:
+                        raise TypeError('INTERNAL ERROR: missing optional result payload')
+                    items.extend(
+                        self._optional_write(
+                            replace(self.current_optional_result, type='int64'),
+                            item,
+                            payload,
+                        )
+                    )
+                    items.append(
+                        hir.Return(
+                            item.loc,
+                            ty.BOTTOM_TYPE,
+                            hir.Void(item.loc, ty.VOID_TYPE),
+                        )
+                    )
+                    continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
                 items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
             return replace(node, type=ty.BOTTOM_TYPE, items=items)
-        prelude, value = self._extract_expression(node)
-        statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
+        if self.current_optional_result is not None:
+            payload = ty.optional_payload(self.current_optional_result.type)
+            if payload is None:
+                raise TypeError('INTERNAL ERROR: missing optional result payload')
+            statements = [
+                *self._optional_write(
+                    replace(self.current_optional_result, type='int64'),
+                    node,
+                    payload,
+                ),
+                hir.Return(
+                    node.loc,
+                    ty.BOTTOM_TYPE,
+                    hir.Void(node.loc, ty.VOID_TYPE),
+                ),
+            ]
+        else:
+            prelude, value = self._extract_expression(node)
+            statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
         return hir.Block(node.loc, ty.BOTTOM_TYPE, statements, True)
 
     @classmethod
@@ -1197,10 +1439,13 @@ class _Lowerer:
                 and isinstance(node.arms[0], hir.LoopArm)
                 and isinstance(
                     node.arms[0].condition,
-                    hir.IteratorExpression,
+                    (hir.IteratorExpression, hir.MultiIteratorExpression),
                 )
             ):
-                statements = self._lower_iterator_flow(node, node.arms[0])
+                if isinstance(node.arms[0].condition, hir.MultiIteratorExpression):
+                    statements = self._lower_multi_iterator_flow(node, node.arms[0])
+                else:
+                    statements = self._lower_iterator_flow(node, node.arms[0])
             else:
                 prelude, flow = self._lower_flow(node)
                 statements = [*prelude, flow]
@@ -1212,11 +1457,41 @@ class _Lowerer:
                 statements.extend(self._loop_signal_checkpoint(node.loc))
             return statements
         if isinstance(node, hir.Declare):
+            declared_type = node.annotation or node.expr.type
+            if (
+                isinstance(declared_type, ty.TypeOr)
+                and 'undefined' in declared_type.items
+                and ty.optional_payload(declared_type) is None
+            ):
+                self._target_error(
+                    node,
+                    'heterogeneous runtime union containing `undefined`',
+                )
+            payload = ty.optional_payload(declared_type)
+            if payload is not None:
+                cell = hir.ExpressedIdentifier(
+                    node.loc,
+                    'int64',
+                    node.name,
+                    binding_id=node.binding_id,
+                )
+                declaration = replace(
+                    node,
+                    decltype='let',
+                    annotation='int64',
+                    expr=self._optional_allocation(node.loc),
+                )
+                return [
+                    declaration,
+                    *self._optional_write(cell, node.expr, payload),
+                ]
             prelude, expr = self._extract_expression(node.expr)
             annotation = (
                 'int64'
                 if isinstance(node.annotation or node.expr.type, ty.ArrayType)
-                else node.annotation
+                else self._lower_runtime_value_type(node.annotation)
+                if node.annotation is not None
+                else None
             )
             return [
                 *prelude,
@@ -1256,9 +1531,83 @@ class _Lowerer:
                 self._array_store(value, address, node.target.type, node.loc),
             ]
         if isinstance(node, hir.Assign):
+            payload = (
+                self.optional_payloads.get(node.target.binding_id)
+                if node.target.binding_id is not None
+                else None
+            )
+            if payload is not None:
+                cell = replace(node.target, type='int64')
+                statements: list[hir.AST] = []
+                binding = self.binding_by_semantic_id.get(node.target.binding_id)
+                if (
+                    self.lowering_module_startup
+                    and binding is not None
+                    and binding.owner_function is None
+                    and node.target.binding_id not in self.optional_globals_initialized
+                ):
+                    statements.append(
+                        hir.Assign(
+                            node.loc,
+                            ty.VOID_TYPE,
+                            cell,
+                            '=',
+                            self._optional_allocation(node.loc),
+                        )
+                    )
+                    self.optional_globals_initialized.add(node.target.binding_id)
+                value = node.value
+                if node.op != '=':
+                    dunder = {
+                        '+=': '__add__',
+                        '-=': '__sub__',
+                    }.get(node.op)
+                    if dunder is None:
+                        self._target_error(node, f'optional compound assignment `{node.op}`')
+                    function_type = ty.FunctionType(
+                        [
+                            ty.PosOrKwArg('left', payload),
+                            ty.PosOrKwArg('right', payload),
+                        ],
+                        [],
+                        None,
+                        payload,
+                        [],
+                    )
+                    value = hir.FunctionCall(
+                        node.loc,
+                        payload,
+                        hir.ExpressedIdentifier(node.loc, function_type, dunder),
+                        [
+                            self._optional_load_payload(cell, payload, node.loc),
+                            node.value,
+                        ],
+                        {},
+                    )
+                statements.extend(self._optional_write(cell, value, payload))
+                return statements
             prelude, value = self._extract_expression(node.value)
             return [*prelude, replace(node, value=value)]
         if isinstance(node, hir.Return):
+            if self.current_optional_result is not None:
+                if node.item is None:
+                    self._target_error(node, 'optional return without a value')
+                payload = ty.optional_payload(node.item.type)
+                if payload is None:
+                    function_type = self.current_optional_result.type
+                    if not isinstance(function_type, ty.TypeOr):
+                        raise TypeError('INTERNAL ERROR: missing optional result type')
+                    payload = ty.optional_payload(function_type)
+                if payload is None:
+                    raise TypeError('INTERNAL ERROR: missing optional result payload')
+                return [
+                    *self._optional_write(
+                        replace(self.current_optional_result, type='int64'),
+                        node.item,
+                        payload,
+                    ),
+                    hir.Return(node.loc, ty.BOTTOM_TYPE, hir.Void(node.loc, ty.VOID_TYPE)),
+                ]
             if node.item is None:
                 return [node]
             prelude, item = self._extract_expression(node.item)
@@ -1287,6 +1636,43 @@ class _Lowerer:
 
     def _extract_expression(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         """Extract statement-valued subexpressions and return a scalar expression."""
+        if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+            payload = self.optional_payloads.get(node.binding_id)
+            if payload is not None:
+                cell = replace(node, type='int64')
+                if ty.optional_payload(node.type) is not None:
+                    return [], cell
+                return [], self._optional_load_payload(cell, payload, node.loc)
+        if isinstance(node, hir.Undefined):
+            self._target_error(node, '`undefined` value without an optional context')
+        if isinstance(node, hir.TypeTest):
+            prelude, value = self._extract_expression(node.value)
+            payload = ty.optional_payload(node.value.type)
+            if payload is None and isinstance(node.value, hir.ExpressedIdentifier):
+                payload = self.optional_payloads.get(node.value.binding_id)
+            system = ty.TypeSystem()
+            if payload is None:
+                result = system.is_subtype(node.value.type, node.test_type)
+                if node.negated:
+                    result = not result
+                return prelude, hir.Bool(node.loc, 'bool', result)
+            payload_matches = system.is_subtype(payload, node.test_type)
+            undefined_matches = system.is_subtype('undefined', node.test_type)
+            if payload_matches == undefined_matches:
+                result = payload_matches
+                if node.negated:
+                    result = not result
+                return prelude, hir.Bool(node.loc, 'bool', result)
+            expected_tag = 1 if payload_matches else 0
+            if node.negated:
+                expected_tag = 1 - expected_tag
+            tag = self._optional_tag(value, node.loc)
+            return prelude, self._typed_equality(
+                tag,
+                self._uint8_literal(node.loc, expected_tag),
+                'uint8',
+                node.loc,
+            )
         if isinstance(node, hir.Flow):
             if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
                 self._target_error(node, 'statement-only flow used where a value is required')
@@ -1338,16 +1724,70 @@ class _Lowerer:
             prelude: list[hir.AST] = []
             func_prelude, func = self._extract_expression(node.func)
             prelude.extend(func_prelude)
+            function_type = (
+                node.func.type
+                if isinstance(node.func.type, ty.FunctionType)
+                else None
+            )
+            optional_arguments = self.call_optional_args.get(id(node), [])
             pos_args: list[hir.AST] = []
-            for arg in node.pos_args:
-                arg_prelude, lowered_arg = self._extract_expression(arg)
+            for index, arg in enumerate(node.pos_args):
+                expected_type = (
+                    function_type.pos_or_kw[index].type
+                    if function_type is not None
+                    and index < len(function_type.pos_or_kw)
+                    else None
+                )
+                payload = (
+                    optional_arguments[index]
+                    if index < len(optional_arguments)
+                    else ty.optional_payload(expected_type)
+                    if expected_type is not None
+                    else None
+                )
+                if payload is not None:
+                    arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                else:
+                    arg_prelude, lowered_arg = self._extract_expression(arg)
                 prelude.extend(arg_prelude)
                 pos_args.append(lowered_arg)
             kw_args: dict[str, hir.AST] = {}
+            optional_kwargs = self.call_optional_kwargs.get(id(node), {})
             for name, arg in node.kw_args.items():
-                arg_prelude, lowered_arg = self._extract_expression(arg)
+                payload = optional_kwargs.get(name)
+                if payload is not None:
+                    arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                else:
+                    arg_prelude, lowered_arg = self._extract_expression(arg)
                 prelude.extend(arg_prelude)
                 kw_args[name] = lowered_arg
+            result_payload = ty.optional_payload(node.type)
+            if result_payload is not None:
+                result = hir.ExpressedIdentifier(
+                    node.loc,
+                    'int64',
+                    self._new_optional_name('result_value'),
+                )
+                prelude.append(
+                    hir.Declare(
+                        node.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        result.name,
+                        'int64',
+                        self._optional_allocation(node.loc),
+                    )
+                )
+                prelude.append(
+                    replace(
+                        node,
+                        type=ty.VOID_TYPE,
+                        func=func,
+                        pos_args=[*pos_args, result],
+                        kw_args=kw_args,
+                    )
+                )
+                return prelude, replace(result, type=node.type)
             call = replace(node, func=func, pos_args=pos_args, kw_args=kw_args)
             if self._is_eager_bool_logical_call(call):
                 eager_args: list[hir.AST] = []
@@ -1470,6 +1910,232 @@ class _Lowerer:
             )
         return self._extract_expression(node)
 
+    def _optional_allocation(self, loc: Span) -> hir.FunctionCall:
+        allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
+        return self._intrinsic_call(
+            allocator,
+            [self._int64_literal(loc, 16)],
+            'int64',
+            loc,
+        )
+
+    def _optional_payload_address(self, cell: hir.AST, loc: Span) -> hir.AST:
+        return self._int64_binary(
+            '__add__',
+            cell,
+            self._int64_literal(loc, 8),
+            loc,
+        )
+
+    @staticmethod
+    def _uint8_literal(loc: Span, value: int) -> hir.Integer:
+        return hir.Integer(loc, 'uint8', t0.base10, value)
+
+    def _optional_tag(self, cell: hir.AST, loc: Span) -> hir.FunctionCall:
+        return self._intrinsic_call('__load_u8__', [cell], 'uint8', loc)
+
+    def _optional_store_payload(
+        self,
+        value: hir.AST,
+        cell: hir.AST,
+        payload: ty.TypeExpr,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        address = self._optional_payload_address(cell, loc)
+        if payload == 'bool':
+            value = hir.Transmute(value.loc, 'uint8', value)
+            return self._intrinsic_call('__store_u8__', [value, address], ty.VOID_TYPE, loc)
+        layout = ty.fixed_integer_layout(payload)
+        if layout is not None:
+            width, signed = layout
+            prefix = 'i' if signed else 'u'
+            return self._intrinsic_call(
+                f'__store_{prefix}{width}__',
+                [value, address],
+                ty.VOID_TYPE,
+                loc,
+            )
+        if isinstance(payload, ty.FunctionType):
+            value = hir.Transmute(value.loc, 'int64', value)
+        return self._intrinsic_call('__store_i64__', [value, address], ty.VOID_TYPE, loc)
+
+    def _optional_load_payload(
+        self,
+        cell: hir.AST,
+        payload: ty.TypeExpr,
+        loc: Span,
+    ) -> hir.AST:
+        address = self._optional_payload_address(cell, loc)
+        if payload == 'bool':
+            loaded = self._intrinsic_call('__load_u8__', [address], 'uint8', loc)
+            return hir.Transmute(loc, 'bool', loaded)
+        layout = ty.fixed_integer_layout(payload)
+        if layout is not None:
+            width, signed = layout
+            prefix = 'i' if signed else 'u'
+            return self._intrinsic_call(
+                f'__load_{prefix}{width}__',
+                [address],
+                payload,
+                loc,
+            )
+        loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)
+        if isinstance(payload, ty.FunctionType):
+            return hir.Transmute(
+                loc,
+                self._lower_callable_type(payload),
+                loaded,
+            )
+        return replace(loaded, type=payload)
+
+    def _optional_write(
+        self,
+        cell: hir.AST,
+        value: hir.AST,
+        payload: ty.TypeExpr,
+    ) -> list[hir.AST]:
+        if isinstance(value, hir.ValueCast):
+            return self._optional_write(cell, value.expr, payload)
+        if isinstance(value, hir.Flow):
+            prelude, flow = self._lower_optional_flow(value, cell, payload)
+            return [*prelude, flow]
+        def tag_store(tag: int) -> hir.FunctionCall:
+            return self._intrinsic_call(
+                '__store_u8__',
+                [self._uint8_literal(value.loc, tag), cell],
+                ty.VOID_TYPE,
+                value.loc,
+            )
+        if isinstance(value, hir.Undefined):
+            zero = self._int64_literal(value.loc, 0)
+            return [
+                tag_store(0),
+                self._intrinsic_call(
+                    '__store_i64__',
+                    [zero, self._optional_payload_address(cell, value.loc)],
+                    ty.VOID_TYPE,
+                    value.loc,
+                ),
+            ]
+        if ty.optional_payload(value.type) is not None:
+            prelude, source = self._extract_expression(value)
+            tag = self._optional_tag(source, value.loc)
+            payload_value = self._optional_load_payload(source, payload, value.loc)
+            return [
+                *prelude,
+                self._intrinsic_call('__store_u8__', [tag, cell], ty.VOID_TYPE, value.loc),
+                self._optional_store_payload(payload_value, cell, payload, value.loc),
+            ]
+        prelude, payload_value = self._extract_expression(value)
+        return [
+            *prelude,
+            tag_store(1),
+            self._optional_store_payload(payload_value, cell, payload, value.loc),
+        ]
+
+    def _lower_optional_flow(
+        self,
+        node: hir.Flow,
+        cell: hir.AST,
+        payload: ty.TypeExpr,
+    ) -> tuple[list[hir.AST], hir.Flow]:
+        prelude: list[hir.AST] = []
+        arms: list[hir.IfArm | hir.LoopArm] = []
+        for index, arm in enumerate(node.arms):
+            condition_prelude, condition = self._prepare_condition(arm.condition)
+            if condition_prelude:
+                if isinstance(arm, hir.LoopArm) or index > 0:
+                    self._target_error(
+                        arm.condition,
+                        'optional flow condition requiring extracted statements',
+                    )
+                prelude.extend(condition_prelude)
+            arms.append(
+                replace(
+                    arm,
+                    condition=condition,
+                    body=self._optional_flow_body(
+                        arm.body,
+                        cell,
+                        payload,
+                    ),
+                )
+            )
+        default = (
+            self._optional_flow_body(node.default, cell, payload)
+            if node.default is not None
+            else None
+        )
+        return prelude, replace(
+            node,
+            type=ty.VOID_TYPE,
+            arms=arms,
+            default=default,
+        )
+
+    def _optional_flow_body(
+        self,
+        body: hir.AST,
+        cell: hir.AST,
+        payload: ty.TypeExpr,
+    ) -> hir.Block:
+        if isinstance(body, hir.Block) and body.scoped:
+            value_indices = [
+                index
+                for index, item in enumerate(body.items)
+                if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
+            ]
+            if len(value_indices) != 1:
+                self._target_error(body, 'optional branch does not have one value')
+            statements: list[hir.AST] = []
+            for index, item in enumerate(body.items):
+                if index == value_indices[0]:
+                    statements.extend(self._optional_write(cell, item, payload))
+                else:
+                    statements.extend(self._lower_statement(item))
+            return replace(body, type=ty.VOID_TYPE, items=statements)
+        return hir.Block(
+            body.loc,
+            ty.VOID_TYPE,
+            self._optional_write(cell, body, payload),
+            True,
+        )
+
+    def _materialize_optional(
+        self,
+        value: hir.AST,
+        payload: ty.TypeExpr,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        if ty.optional_payload(value.type) is not None:
+            prelude, cell = self._extract_expression(value)
+            if isinstance(cell, hir.ExpressedIdentifier):
+                return prelude, replace(cell, type='int64')
+            target = hir.ExpressedIdentifier(
+                value.loc,
+                'int64',
+                self._new_optional_name('value'),
+            )
+        else:
+            target = hir.ExpressedIdentifier(
+                value.loc,
+                'int64',
+                self._new_optional_name('value'),
+            )
+            prelude = []
+        declaration = hir.Declare(
+            value.loc,
+            ty.VOID_TYPE,
+            'let',
+            target.name,
+            'int64',
+            self._optional_allocation(value.loc),
+        )
+        return [
+            *prelude,
+            declaration,
+            *self._optional_write(target, value, payload),
+        ], target
+
     def _module_array_item_is_stable(
         self,
         node: hir.AST,
@@ -1537,6 +2203,14 @@ class _Lowerer:
         while True:
             name = f'__dewy_iterator_{role}_{self.next_iterator_value}'
             self.next_iterator_value += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return name
+
+    def _new_optional_name(self, role: str) -> str:
+        while True:
+            name = f'__dewy_optional_{role}_{self.next_optional_temp}'
+            self.next_optional_temp += 1
             if name not in self.source_names:
                 self.source_names.add(name)
                 return name
@@ -1742,6 +2416,266 @@ class _Lowerer:
         )
         return [offset_declaration, target_declaration, loop]
 
+    def _lower_multi_iterator_flow(
+        self,
+        node: hir.Flow,
+        arm: hir.LoopArm,
+    ) -> list[hir.AST]:
+        condition = arm.condition
+        if not isinstance(condition, hir.MultiIteratorExpression):
+            raise TypeError('INTERNAL ERROR: multiiterator loop has no composite condition')
+        declarations: list[hir.AST] = []
+        updates: list[hir.AST] = []
+        active_values: list[hir.ExpressedIdentifier] = []
+        for iterator in condition.iterators:
+            offset = self._new_iterator_temp(iterator)
+            active = hir.ExpressedIdentifier(
+                iterator.loc,
+                'bool',
+                self._new_iterator_name('active'),
+            )
+            active_values.append(active)
+            declarations.extend([
+                hir.Declare(
+                    iterator.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    offset.name,
+                    'int64',
+                    self._int64_literal(iterator.loc, 0),
+                ),
+                hir.Declare(
+                    iterator.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    active.name,
+                    'bool',
+                    hir.Bool(iterator.loc, 'bool', False),
+                ),
+            ])
+            payload = ty.optional_payload(iterator.target.type)
+            target = replace(iterator.target, loc=iterator.loc)
+            if payload is not None:
+                target = replace(target, type='int64')
+                declarations.append(
+                    hir.Declare(
+                        iterator.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        target.name,
+                        'int64',
+                        self._optional_allocation(iterator.loc),
+                        binding_id=iterator.target.binding_id,
+                    )
+                )
+                declarations.extend(
+                    self._optional_write(
+                        target,
+                        hir.Undefined(iterator.loc, 'undefined'),
+                        payload,
+                    )
+                )
+            else:
+                declarations.append(
+                    hir.Declare(
+                        iterator.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        target.name,
+                        'int64',
+                        self._int64_literal(iterator.loc, iterator.first),
+                        binding_id=iterator.target.binding_id,
+                    )
+                )
+            active_test = self._int64_comparison(
+                '__lt__',
+                replace(offset, loc=iterator.loc),
+                self._int64_literal(iterator.loc, iterator.count),
+                iterator.loc,
+            )
+            updates.append(
+                hir.Assign(
+                    iterator.loc,
+                    ty.VOID_TYPE,
+                    replace(active, loc=iterator.loc),
+                    '=',
+                    active_test,
+                )
+            )
+            value = self._int64_binary(
+                '__add__',
+                self._int64_literal(iterator.loc, iterator.first),
+                replace(offset, loc=iterator.loc),
+                iterator.loc,
+            )
+            if payload is not None:
+                defined_body = [
+                    *self._optional_write(target, value, payload),
+                    hir.Assign(
+                        iterator.loc,
+                        ty.VOID_TYPE,
+                        replace(offset, loc=iterator.loc),
+                        '+=',
+                        self._int64_literal(iterator.loc, 1),
+                    ),
+                ]
+                exhausted_body = self._optional_write(
+                    target,
+                    hir.Undefined(iterator.loc, 'undefined'),
+                    payload,
+                )
+            else:
+                defined_body = [
+                    hir.Assign(
+                        iterator.loc,
+                        ty.VOID_TYPE,
+                        replace(target, type='int64'),
+                        '=',
+                        value,
+                    ),
+                    hir.Assign(
+                        iterator.loc,
+                        ty.VOID_TYPE,
+                        replace(offset, loc=iterator.loc),
+                        '+=',
+                        self._int64_literal(iterator.loc, 1),
+                    ),
+                ]
+                exhausted_body = []
+            updates.append(
+                hir.Flow(
+                    iterator.loc,
+                    ty.VOID_TYPE,
+                    [
+                        hir.IfArm(
+                            iterator.loc,
+                            ty.VOID_TYPE,
+                            replace(active, loc=iterator.loc),
+                            hir.Block(
+                                iterator.loc,
+                                ty.VOID_TYPE,
+                                defined_body,
+                                True,
+                            ),
+                        )
+                    ],
+                    (
+                        hir.Block(
+                            iterator.loc,
+                            ty.VOID_TYPE,
+                            exhausted_body,
+                            True,
+                        )
+                        if exhausted_body
+                        else None
+                    ),
+                )
+            )
+
+        formula_stack: list[hir.AST] = []
+        for token in condition.formula:
+            if isinstance(token, int):
+                formula_stack.append(active_values[token])
+                continue
+            right = formula_stack.pop()
+            left = formula_stack.pop()
+            formula_stack.append(
+                self._bool_binary(token, left, right, node.loc)
+            )
+        formula = formula_stack[0]
+        self.lower_loop_depth += 1
+        lowered_source = self._lower_statement_body(arm.body)
+        self.lower_loop_depth -= 1
+        source_items = (
+            lowered_source.items
+            if isinstance(lowered_source, hir.Block)
+            else [lowered_source]
+        )
+        body_gate = hir.Flow(
+            node.loc,
+            ty.VOID_TYPE,
+            [
+                hir.IfArm(
+                    node.loc,
+                    ty.VOID_TYPE,
+                    formula,
+                    hir.Block(node.loc, ty.VOID_TYPE, source_items, True),
+                )
+            ],
+            hir.Block(
+                node.loc,
+                ty.BOTTOM_TYPE,
+                [hir.Break(node.loc, ty.BOTTOM_TYPE)],
+                True,
+            ),
+        )
+        loop_body = hir.Block(
+            arm.body.loc,
+            ty.VOID_TYPE,
+            [*updates, body_gate],
+            True,
+        )
+        loop = hir.Flow(
+            node.loc,
+            ty.VOID_TYPE,
+            [
+                hir.LoopArm(
+                    arm.loc,
+                    ty.VOID_TYPE,
+                    hir.Bool(node.loc, 'bool', True),
+                    loop_body,
+                )
+            ],
+            None,
+        )
+        return [*declarations, loop]
+
+    @staticmethod
+    def _bool_binary(
+        op: hir.IteratorLogicalOp,
+        left: hir.AST,
+        right: hir.AST,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        function_type = ty.FunctionType(
+            [
+                ty.PosOrKwArg('left', 'bool'),
+                ty.PosOrKwArg('right', 'bool'),
+            ],
+            [],
+            None,
+            'bool',
+            [],
+        )
+        base_op: hir.IteratorLogicalOp = {
+            'nand': 'and',
+            'nor': 'or',
+            'xnor': 'xor',
+        }.get(op, op)
+        call = hir.FunctionCall(
+            loc,
+            'bool',
+            hir.ExpressedIdentifier(loc, function_type, f'__{base_op}__'),
+            [left, right],
+            {},
+        )
+        if op not in {'nand', 'nor', 'xnor'}:
+            return call
+        unary_type = ty.FunctionType(
+            [ty.PosOrKwArg('item', 'bool')],
+            [],
+            None,
+            'bool',
+            [],
+        )
+        return hir.FunctionCall(
+            loc,
+            'bool',
+            hir.ExpressedIdentifier(loc, unary_type, '__not__'),
+            [call],
+            {},
+        )
+
     def _lower_flow(
         self,
         node: hir.Flow,
@@ -1800,6 +2734,31 @@ class _Lowerer:
             loc,
             'bool',
             hir.ExpressedIdentifier(loc, function_type, name),
+            [left, right],
+            {},
+        )
+
+    @staticmethod
+    def _typed_equality(
+        left: hir.AST,
+        right: hir.AST,
+        operand_type: ty.TypeExpr,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        function_type = ty.FunctionType(
+            [
+                ty.PosOrKwArg('left', operand_type),
+                ty.PosOrKwArg('right', operand_type),
+            ],
+            [],
+            None,
+            'bool',
+            [],
+        )
+        return hir.FunctionCall(
+            loc,
+            'bool',
+            hir.ExpressedIdentifier(loc, function_type, '__eq__'),
             [left, right],
             {},
         )

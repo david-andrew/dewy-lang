@@ -40,13 +40,13 @@ loop i >? 0
 
 Many languages feature for loops, which iterate over some iterable object. The simplest case of this would be iterating over a range of numbers. In Dewy, the `in` operator manages iteration for loops. `in` has two aspects:
 
-1. the variable on the left is assigned with the next value of the iterable on the right (or `void` if there are no more values)
+1. the variable on the left is assigned with the next value of the iterable on the right (or `undefined` if there are no more values)
 2. the expression returns `true` or `false` depending on if there was a value to assign to the variable this iteration.
 
 This means that `in` expressions can be used to trivially construct a for-loop.
 
 ```dewy
-loop i in [1..5]
+loop i in 1..5
 {
     print('{i}, ')
 }
@@ -122,7 +122,7 @@ Charlie chose Green
 Other languages commonly have an `enumerate` function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using `and`:
 
 ```dewy
-loop i in [0..] and fruit in ['apple' 'banana' 'peach' 'pear']
+loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
     printl'{i}) {fruit}'
 ```
 
@@ -155,6 +155,30 @@ Which prints
 ```
 
 Since this is just combining boolean expressions, any combination of expressions that results in a boolean may be used.
+
+Multiiterator conditions are eager even though ordinary Boolean `and` and `or`
+expressions short-circuit. Each `in` leaf advances exactly once, from left to
+right, before the logical formula is evaluated. An exhausted leaf assigns
+`undefined` and contributes `false`; the formula then uses its literal truth
+table for `and`, `or`, `xor`, `nand`, `nor`, and `xnor`. Consequently, a formula
+such as `nor` can remain true after every input is exhausted and continue until
+the body exits explicitly.
+
+The compiler uses known iterator lengths to type each target. A target is plain
+`T` when it is defined on every reachable body iteration and `T | undefined`
+when the condition can admit an iteration after that input is exhausted. When
+lengths cannot be proven, the safe fallback is `T | undefined`. Optional targets
+must be narrowed before use:
+
+```dewy
+loop short_item in short_items or long_item in long_items
+{
+    if short_item isnt? undefined {
+        process(short_item)
+    }
+    process(long_item)
+}
+```
 
 ```dewy
 limit = time.now + 5(minutes)
@@ -192,7 +216,7 @@ do-loop over an iterator. On the first iteration, `i` will be undefined, while i
 
 ```dewy
 do printl'this is a do-for loop. i={i}'
-loop i in [0..5]
+loop i in 0..5
 ```
 
 Which prints
@@ -286,7 +310,7 @@ instead of in the loop's parent scope.
 Let's look at this example
 
 ```dewy
-loop i in [1..10] {i}
+loop i in 1..10 {i}
 ```
 
 Every iteration of the loop, the current value of `i` is "expressed", that is to say, the value could be stored in a variable or a container.
@@ -294,16 +318,16 @@ Every iteration of the loop, the current value of `i` is "expressed", that is to
 Lets capture the expressed value in a container by wrapping the loop in `[]` brackets
 
 ```dewy
-[loop i in [1..10] {i}]
+[loop i in 1..10 {i}]
 ```
 
 This "generates" the array `[1 2 3 4 5 6 7 8 9 10]`, which we can then store into a variable
 
 ```dewy
-my_array = [loop i in [1..10] {i}]
+my_array = [loop i in 1..10 {i}]
 
 %optional to omit the braces since only a single expression is in the body
-my_array = [loop i in [1..10] i]
+my_array = [loop i in 1..10 i]
 ```
 
 And thus we have created the simplest list generator.
@@ -314,7 +338,7 @@ Generators can do a lot of interesting things. For example we can express multip
 
 ```dewy
 %note the braces are not optional in this case
-my_array = [loop i in [1..5] { i i^2 }]
+my_array = [loop i in 1..5 { i i^2 }]
 ```
 
 producing the array `[1 1 2 4 3 9 4 16 5 25]`.
@@ -322,7 +346,7 @@ producing the array `[1 1 2 4 3 9 4 16 5 25]`.
 We can also construct a dictionary by expressing with a `->` between two values
 
 ```dewy
-squares = [loop i in [1..5] { i -> i^2 }]
+squares = [loop i in 1..5 { i -> i^2 }]
 ```
 
 which produces the dictionary `[1->1 2->4 3->9 4->16 5->25]` which points from values to their squares.
@@ -334,9 +358,9 @@ You can generate a multidimensional array using multiple nested loops. For examp
 ```dewy
 indices =
 [
-    loop i in [1..5]
+    loop i in 1..5
     [
-        loop j in [1..5]
+        loop j in 1..5
         [
             i
             j

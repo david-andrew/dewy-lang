@@ -352,12 +352,11 @@ def test_unproven_dynamic_indices_remain_hard_errors(source: str) -> None:
 @pytest.mark.parametrize(
     ('range_source', 'first', 'last', 'count'),
     [
-        ('[0..2]', 0, 2, 3),
+        ('0..2', 0, 2, 3),
         ('[0..3)', 0, 2, 3),
         ('(0..2]', 1, 2, 2),
         ('(0..3)', 1, 2, 2),
-        ('0..2', 0, 2, 3),
-        ('[2..1]', 2, 1, 0),
+        ('2..1', 2, 1, 0),
     ],
 )
 def test_static_range_iterator_normalization(
@@ -397,7 +396,7 @@ let sum = ():>int64 => {
     with pytest.raises(UserError, match='undefined identifier `i`'):
         _check("""
 let f = ():>int64 => {
-    loop i in [0..1] {}
+    loop i in 0..1 {}
     return i
 }
 """)

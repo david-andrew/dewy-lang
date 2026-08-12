@@ -266,6 +266,21 @@ _fixed_integer_widths: dict[str, tuple[int, bool]] = {
 FIXED_INTEGER_TYPES = frozenset(_fixed_integer_widths)
 
 
+def optional_payload(type_: Type) -> TypeExpr | None:
+    """Return the sole non-undefined member of ``T | undefined``."""
+
+    if not isinstance(type_, TypeOr) or 'undefined' not in type_.items:
+        return None
+    payloads = [item for item in type_.items if item != 'undefined']
+    return payloads[0] if len(payloads) == 1 else None
+
+
+def optional(type_: TypeExpr) -> TypeExpr:
+    """Construct the canonical optional form for one payload type."""
+
+    return union(type_, 'undefined')
+
+
 def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
     """Return `(bit_width, signed)` for a concrete fixed-width integer."""
 

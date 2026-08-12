@@ -48,6 +48,7 @@ class Context:
     label_scopes: tuple[LabelScope, ...] = ()
     loop_boundaries: tuple[LoopBoundary, ...] = ()
     function_boundary_labels: dict[str, Span] = field(default_factory=dict)
+    refinements: dict[int, ty.Type] = field(default_factory=dict)
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
@@ -74,6 +75,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                 fork = replace(ctx,
                     declarations=ctx.declarations.new_child(),
                     binding_scopes=ctx.binding_scopes.new_child(),
+                    refinements=dict(ctx.refinements),
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
                     passes.append((typecheck_and_resolve_inner(candidate, ctx=fork, type_block=type_block, expected=expected), fork))
@@ -98,6 +100,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             # merge the winning candidate's effects back into the enclosing context
             ctx.declarations.maps[0].update(fork.declarations.maps[0])
             ctx.binding_scopes.maps[0].update(fork.binding_scopes.maps[0])
+            ctx.refinements.clear()
+            ctx.refinements.update(fork.refinements)
             if ctx.catcher is not None:
                 assert fork.catcher is not None
                 ctx.catcher.returns[:] = fork.catcher.returns
@@ -133,6 +137,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected)
         case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
         case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
+        case p0.Atom(item=t1.Identifier(name='undefined')):
+            return hir.Undefined(ast.item.loc, 'undefined')
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
         case p0.Atom(item=t1.String(content=content)): return hir.String(ast.item.loc, 'string', content)
         case p0.Atom(item=t1.Integer(value=value)):
@@ -254,11 +260,27 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             ]:
             # decl assign + type annotation: check the expression against the annotation
             annotation = ast_to_type(typeexpr, ctx=ctx)
-            expr = typecheck_and_resolve_inner(right, ctx=ctx, expected=annotation)
+            optional_payload = ty.optional_payload(annotation)
+            expression_expected = (
+                optional_payload
+                if optional_payload is not None
+                and isinstance(right, p0.Block)
+                and right.kind == '[]'
+                else annotation
+            )
+            expr = typecheck_and_resolve_inner(
+                right,
+                ctx=ctx,
+                expected=expression_expected,
+            )
             expr = check_against(expr, annotation, ctx=ctx)
+            optional_annotation_payload = ty.optional_payload(annotation)
             ctx.declarations[name] = (
                 expr.type
                 if isinstance(annotation, ty.ArrayType)
+                and isinstance(expr.type, ty.ArrayType)
+                else ty.optional(expr.type)
+                if isinstance(optional_annotation_payload, ty.ArrayType)
                 and isinstance(expr.type, ty.ArrayType)
                 else annotation
             )
@@ -302,6 +324,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     value = check_against(value, target.type, ctx=ctx)
     if isinstance(target, hir.Index):
         return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
+    if target.binding_id is not None:
+        ctx.refinements.pop(target.binding_id, None)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
 
 
@@ -314,7 +338,7 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
     if symbol not in builtins.BINOP_DUNDER_MAP:
         not_implemented(ctx.srcfile, ast.op.loc, f'compound assignment operator `{symbol}=`')
 
-    target = tcr_assignment_target(ast.left, ctx=ctx)
+    target = tcr_assignment_target(ast.left, ctx=ctx, refined=True)
     if isinstance(target, hir.Index):
         not_implemented(
             ctx.srcfile,
@@ -494,6 +518,61 @@ def _flow_value_type(
     return ty.union(*values)
 
 
+def _refine_type_test(
+    current: ty.Type,
+    test: ty.TypeExpr,
+    *,
+    matches: bool,
+    ctx: Context,
+) -> ty.Type:
+    payload = ty.optional_payload(current)
+    variants: list[ty.TypeExpr] = (
+        [payload, 'undefined']
+        if payload is not None
+        else [cast(ty.TypeExpr, current)]
+    )
+    selected = [
+        variant
+        for variant in variants
+        if ctx.type_system.is_subtype(variant, test) == matches
+    ]
+    return ty.union(*selected)
+
+
+def _refine_condition_context(
+    ctx: Context,
+    condition: hir.AST,
+    *,
+    truth: bool,
+) -> Context:
+    refinements = dict(ctx.refinements)
+    if isinstance(condition, hir.TypeTest):
+        value = condition.value
+        if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
+            current = refinements.get(value.binding_id, value.type)
+            refinements[value.binding_id] = _refine_type_test(
+                current,
+                condition.test_type,
+                matches=truth != condition.negated,
+                ctx=ctx,
+            )
+        return replace(ctx, refinements=refinements)
+    if isinstance(condition, hir.ShortCircuit):
+        if condition.op == 'and' and truth:
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=True)
+            return _refine_condition_context(left_ctx, condition.right, truth=True)
+        if condition.op == 'or' and not truth:
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=False)
+            return _refine_condition_context(left_ctx, condition.right, truth=False)
+        if condition.op == 'nand' and not truth:
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=True)
+            return _refine_condition_context(left_ctx, condition.right, truth=True)
+        if condition.op == 'nor' and truth:
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=False)
+            return _refine_condition_context(left_ctx, condition.right, truth=False)
+    return ctx
+
+
 def _tcr_range_iterator(
     condition_ast: p0.AST,
     *,
@@ -575,6 +654,144 @@ def _tcr_range_iterator(
     return iterator, iterator_ctx
 
 
+_ITERATOR_LOGICAL_OPS: dict[str, hir.IteratorLogicalOp] = {
+    'and': 'and',
+    '&': 'and',
+    'or': 'or',
+    '|': 'or',
+    'xor': 'xor',
+    'nand': 'nand',
+    'nor': 'nor',
+    'xnor': 'xnor',
+}
+
+
+def _eval_iterator_formula(
+    formula: list[hir.IteratorFormulaToken],
+    active: list[bool],
+) -> bool:
+    stack: list[bool] = []
+    for token in formula:
+        if isinstance(token, int):
+            stack.append(active[token])
+            continue
+        right = stack.pop()
+        left = stack.pop()
+        result = {
+            'and': left and right,
+            'or': left or right,
+            'xor': left != right,
+            'nand': not (left and right),
+            'nor': not (left or right),
+            'xnor': left == right,
+        }[token]
+        stack.append(result)
+    if len(stack) != 1:
+        raise ValueError('INTERNAL ERROR: malformed iterator postfix formula')
+    return stack[0]
+
+
+def _contains_iterator_syntax(ast: p0.AST) -> bool:
+    if not isinstance(ast, p0.BinOp):
+        return False
+    if isinstance(ast.op, t1.Operator) and ast.op.symbol == 'in':
+        return True
+    return _contains_iterator_syntax(ast.left) or _contains_iterator_syntax(ast.right)
+
+
+def _tcr_loop_iterator(
+    condition_ast: p0.AST,
+    *,
+    ctx: Context,
+) -> tuple[hir.IteratorExpression | hir.MultiIteratorExpression, Context] | None:
+    iterators: list[hir.IteratorExpression] = []
+    names: set[str] = set()
+
+    def collect(
+        ast: p0.AST,
+        current_ctx: Context,
+    ) -> tuple[list[hir.IteratorFormulaToken], Context] | None:
+        if (
+            isinstance(ast, p0.BinOp)
+            and isinstance(ast.op, t1.Operator)
+            and ast.op.symbol in _ITERATOR_LOGICAL_OPS
+        ):
+            left = collect(ast.left, current_ctx)
+            if left is None:
+                return None
+            left_formula, right_ctx = left
+            right = collect(ast.right, right_ctx)
+            if right is None:
+                return None
+            right_formula, result_ctx = right
+            return [
+                *left_formula,
+                *right_formula,
+                _ITERATOR_LOGICAL_OPS[ast.op.symbol],
+            ], result_ctx
+
+        result = _tcr_range_iterator(ast, ctx=current_ctx)
+        if result is None:
+            return None
+        iterator, iterator_ctx = result
+        if iterator.target.name in names:
+            user_error(
+                ctx.srcfile,
+                f'duplicate iterator target `{iterator.target.name}`',
+                Pointer(
+                    span=iterator.target.loc,
+                    message='each target may occur only once in a multiiterator condition',
+                ),
+            )
+        names.add(iterator.target.name)
+        index = len(iterators)
+        iterators.append(iterator)
+        return [index], iterator_ctx
+
+    collected = collect(condition_ast, ctx)
+    if collected is None:
+        if _contains_iterator_syntax(condition_ast):
+            not_implemented(
+                ctx.srcfile,
+                condition_ast.loc,
+                'mixed Boolean and iterator loop condition',
+            )
+        return None
+    formula, iterator_ctx = collected
+    if len(iterators) == 1:
+        return iterators[0], iterator_ctx
+
+    counts = [iterator.count for iterator in iterators]
+    stop: int | None = None
+    for iteration in sorted({0, *counts}):
+        active = [iteration < count for count in counts]
+        if not _eval_iterator_formula(formula, active):
+            stop = iteration
+            break
+    repeats = stop is None
+    typed_iterators: list[hir.IteratorExpression] = []
+    for iterator in iterators:
+        target_type: ty.Type = (
+            ty.optional('int64')
+            if stop is None or stop > iterator.count
+            else 'int64'
+        )
+        target = replace(iterator.target, type=target_type)
+        typed_iterators.append(replace(iterator, target=target))
+        if target.binding_id is not None:
+            binding = ctx.binding_registry.by_id[target.binding_id]
+            binding.type = target_type
+        iterator_ctx.declarations[target.name] = target_type
+    condition = hir.MultiIteratorExpression(
+        condition_ast.loc,
+        ty.TypeParameterize('multiiterator', ['int64']),
+        typed_iterators,
+        formula,
+        repeats,
+    )
+    return condition, iterator_ctx
+
+
 def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.Flow:
     """Typecheck supported structured `if` and while-style `loop` flows."""
     if not ast.arms:
@@ -599,22 +816,41 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             not_implemented(ctx.srcfile, ast.loc, 'multi-value conditional result')
         arms: list[hir.IfArm | hir.LoopArm] = []
         bodies: list[hir.AST] = []
+        arm_ctx = ctx
         for arm in ast.arms:
             if len(arm.parts) != 3:
                 raise ValueError(f'INTERNAL ERROR: malformed if arm: {arm.parts!r}')
             _, condition_ast, body_ast = arm.parts
             assert isinstance(condition_ast, p0.AST)
             assert isinstance(body_ast, p0.AST)
-            condition = _check_flow_condition(condition_ast, ctx=ctx)
-            body = typecheck_and_resolve_inner(body_ast, ctx=ctx, expected=branch_expected)
+            condition = _check_flow_condition(condition_ast, ctx=arm_ctx)
+            body_ctx = _refine_condition_context(
+                arm_ctx,
+                condition,
+                truth=True,
+            )
+            body = typecheck_and_resolve_inner(
+                body_ast,
+                ctx=body_ctx,
+                expected=branch_expected,
+            )
             if branch_expected is not None:
                 body = check_against(body, branch_expected, ctx=ctx)
             arms.append(hir.IfArm(arm.loc, body.type, condition, body))
             bodies.append(body)
+            arm_ctx = _refine_condition_context(
+                arm_ctx,
+                condition,
+                truth=False,
+            )
 
         default = None
         if ast.default is not None:
-            default = typecheck_and_resolve_inner(ast.default, ctx=ctx, expected=branch_expected)
+            default = typecheck_and_resolve_inner(
+                ast.default,
+                ctx=arm_ctx,
+                expected=branch_expected,
+            )
             if branch_expected is not None:
                 default = check_against(default, branch_expected, ctx=ctx)
             bodies.append(default)
@@ -649,10 +885,10 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         _, condition_ast, body_ast = arm.parts
         assert isinstance(condition_ast, p0.AST)
         assert isinstance(body_ast, p0.AST)
-        iterator_result = _tcr_range_iterator(condition_ast, ctx=ctx)
+        iterator_result = _tcr_loop_iterator(condition_ast, ctx=ctx)
         if iterator_result is None:
             condition = _check_flow_condition(condition_ast, ctx=ctx)
-            body_ctx = ctx
+            body_ctx = _refine_condition_context(ctx, condition, truth=True)
         else:
             condition, body_ctx = iterator_result
         if not ctx.label_scopes:
@@ -1279,10 +1515,33 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     if symbol == 'as':
         not_implemented(ctx.srcfile, binop.op.loc, 'value conversion with `as`')
 
+    if symbol in {'is?', 'isnt?'}:
+        value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        require_valued(value.type, ctx.srcfile, value.loc, 'type-test operand')
+        test_type = ast_to_type(binop.right, ctx=ctx)
+        return hir.TypeTest(
+            binop.loc,
+            'bool',
+            value,
+            test_type,
+            symbol == 'isnt?',
+        )
+
     if symbol in ('=','::',':='):
         return tcr_assign(binop, ctx=ctx, expected=expected)
 
     if isinstance(binop.op, t2.InvertedComparisonOp):
+        if binop.op.op in {'is?', 'isnt?'}:
+            value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+            require_valued(value.type, ctx.srcfile, value.loc, 'type-test operand')
+            test_type = ast_to_type(binop.right, ctx=ctx)
+            return hir.TypeTest(
+                binop.loc,
+                'bool',
+                value,
+                test_type,
+                binop.op.op == 'is?',
+            )
         fname = builtins.INVERTED_COMPARISON_DUNDER_MAP.get(binop.op.op)
         if fname is None:
             not_implemented(ctx.srcfile, binop.op.loc, f'inverted comparison `not{binop.op.op}`')
@@ -1305,7 +1564,17 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     # TODO: how to handle the fact that `and` and `or` might have inner elements that need type_block? for now just pass in to left and right
     # full expression
     left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
-    right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
+    right_ctx = ctx
+    if left.type == 'bool':
+        if symbol in {'and', '&', 'nand'}:
+            right_ctx = _refine_condition_context(ctx, left, truth=True)
+        elif symbol in {'or', '|', 'nor'}:
+            right_ctx = _refine_condition_context(ctx, left, truth=False)
+    right = typecheck_and_resolve_inner(
+        binop.right,
+        ctx=right_ctx,
+        type_block=type_block,
+    )
     
     match binop.op:
         case t2.QJuxtapose():
@@ -1406,11 +1675,12 @@ def tcr_assignment_target(
     target: p0.AST,
     *,
     ctx: Context,
+    refined: bool = False,
 ) -> hir.ExpressedIdentifier | hir.Index:
     """Resolve an identifier or statically proven array-element assignment target."""
 
     if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
-        resolved = tcr_identifier(target.item, ctx=ctx)
+        resolved = tcr_identifier(target.item, ctx=ctx, refined=refined)
         assert isinstance(resolved, hir.ExpressedIdentifier)
         return resolved
 
@@ -1594,6 +1864,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         label_scopes=(LabelScope({}),),
         loop_boundaries=(),
         function_boundary_labels=function_boundary_labels,
+        refinements={},
     )
     body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
 
@@ -1987,12 +2258,24 @@ def apply_promotions(args: list[hir.AST], promote_pos: list[ty.TypeExpr | None])
 def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:
     raise NotImplementedError('typecheck_partial_eval')
 
-def tcr_identifier(id: t1.Identifier, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
+def tcr_identifier(
+    id: t1.Identifier,
+    *,
+    ctx: Context,
+    expected: ty.Type | None = None,
+    refined: bool = True,
+) -> hir.AST:
     if id.name in ctx.declarations:
         binding = ctx.binding_scopes.get(id.name)
+        declared_type = ctx.declarations[id.name]
+        resolved_type = (
+            ctx.refinements.get(binding.id, declared_type)
+            if refined and binding is not None
+            else declared_type
+        )
         return hir.ExpressedIdentifier(
             id.loc,
-            ctx.declarations[id.name],
+            resolved_type,
             id.name,
             binding_id=binding.id if binding is not None else None,
         )

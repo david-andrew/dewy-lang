@@ -242,6 +242,13 @@ class _BoundsValidator:
                     state,
                     validate=validate,
                 )
+            if isinstance(arm.condition, hir.MultiIteratorExpression):
+                return self._analyze_multi_iterator_loop(
+                    arm.condition,
+                    arm.body,
+                    state,
+                    validate=validate,
+                )
             return self._analyze_while_loop(
                 arm.condition,
                 arm.body,
@@ -330,6 +337,37 @@ class _BoundsValidator:
         for exit_state in exits:
             if iterator.target.binding_id is not None:
                 exit_state.pop(iterator.target.binding_id, None)
+        return self._join_states([state, *exits])
+
+    def _analyze_multi_iterator_loop(
+        self,
+        condition: hir.MultiIteratorExpression,
+        body: hir.AST,
+        state: State,
+        *,
+        validate: bool,
+    ) -> State:
+        body_state = dict(state)
+        for iterator in condition.iterators:
+            self._eval(iterator.iterable, body_state, validate=validate)
+            if iterator.count > 0 and iterator.target.binding_id is not None:
+                body_state[iterator.target.binding_id] = Interval(
+                    iterator.first,
+                    iterator.last,
+                )
+        transfer = self._loop_transfer(body, body_state, validate=validate)
+        exits = [
+            *([transfer.normal] if transfer.normal is not None else []),
+            *transfer.breaks.get(0, []),
+        ]
+        target_ids = {
+            iterator.target.binding_id
+            for iterator in condition.iterators
+            if iterator.target.binding_id is not None
+        }
+        for exit_state in exits:
+            for binding_id in target_ids:
+                exit_state.pop(binding_id, None)
         return self._join_states([state, *exits])
 
     def _loop_transfer(
@@ -533,6 +571,13 @@ class _BoundsValidator:
             return None
         if isinstance(node, hir.IteratorExpression):
             self._eval(node.iterable, state, validate=validate)
+            return None
+        if isinstance(node, hir.MultiIteratorExpression):
+            for iterator in node.iterators:
+                self._eval(iterator.iterable, state, validate=validate)
+            return None
+        if isinstance(node, hir.TypeTest):
+            self._eval(node.value, state, validate=validate)
             return None
         if isinstance(node, hir.TypeBlock):
             for item in node.items:

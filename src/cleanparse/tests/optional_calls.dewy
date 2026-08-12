@@ -1,0 +1,14 @@
+let choose = ((value:int64):>int64|undefined => value)
+           & ((value:bool):>int64|undefined =>
+                if value 20 else undefined)
+
+let main = ():>int64 => {
+    let local = (value:int64):>int64|undefined => value
+    let callback:<int64:>int64|undefined> = local
+    let first:int64|undefined = choose(20)
+    let second:int64|undefined = (callback)(20)
+    if first is? int64 and second is? int64 {
+        return first + second + 2
+    }
+    return 0
+}

@@ -115,6 +115,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     # Prefer structural/annotated info over inferred AST.type (except ValueCast).
     if isinstance(node, hir.Void):
         return 'Void'
+    if isinstance(node, hir.Undefined):
+        return 'Undefined'
     if isinstance(node, hir.Return):
         return 'Return'
     if isinstance(node, hir.IfArm):
@@ -135,6 +137,9 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'Continue'
     if isinstance(node, hir.ShortCircuit):
         return f'ShortCircuit({node.op})'
+    if isinstance(node, hir.TypeTest):
+        operator = 'isnt?' if node.negated else 'is?'
+        return f'TypeTest({operator} {type_to_dewy(node.test_type)})'
     if isinstance(node, hir.Declare):
         ann = f':{type_to_dewy(node.annotation)}' if node.annotation is not None else ''
         binding = f' #{node.binding_id}' if node.binding_id is not None else ''
@@ -156,6 +161,11 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return (
             f'IteratorExpression({node.target.name}, '
             f'first={node.first}, last={node.last}, count={node.count})'
+        )
+    if isinstance(node, hir.MultiIteratorExpression):
+        return (
+            f'MultiIteratorExpression({len(node.iterators)} leaves, '
+            f'repeats={node.repeats_when_exhausted})'
         )
     if isinstance(node, hir.Index):
         return (
@@ -217,6 +227,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return out
     if isinstance(node, hir.ShortCircuit):
         return [('left', node.left), ('right', node.right)]
+    if isinstance(node, hir.TypeTest):
+        return [('value', node.value)]
     if isinstance(node, hir.Declare):
         return [('expr', node.expr)]
     if isinstance(node, hir.Assign):
@@ -227,6 +239,11 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('array', node.array)]
     if isinstance(node, hir.IteratorExpression):
         return [('target', node.target), ('iterable', node.iterable)]
+    if isinstance(node, hir.MultiIteratorExpression):
+        return [
+            (f'iterators[{index}]', iterator)
+            for index, iterator in enumerate(node.iterators)
+        ]
     if isinstance(node, hir.Index):
         return [('array', node.array), ('index', node.index)]
     if isinstance(node, hir.IndexAssign):
@@ -506,6 +523,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
     assert isinstance(node, hir.AST)
     if isinstance(node, hir.Void):
         return _text('void')
+    if isinstance(node, hir.Undefined):
+        return _text('undefined')
     if isinstance(node, hir.Integer):
         return _text(_format_integer(node))
     if isinstance(node, hir.Bool):
@@ -527,6 +546,18 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
             _text(' in '),
             _to_doc(node.iterable, 0, indent),
         )
+    if isinstance(node, hir.MultiIteratorExpression):
+        stack: list[Doc] = []
+        for token in node.formula:
+            if isinstance(token, int):
+                stack.append(_to_doc(node.iterators[token], 0, indent))
+                continue
+            right = stack.pop()
+            left = stack.pop()
+            stack.append(
+                _seq(_text('('), left, _text(f' {token} '), right, _text(')'))
+            )
+        return stack[0]
     if isinstance(node, hir.Index):
         return _seq(
             _to_doc(node.array, _CALL_PREC, indent),
@@ -552,6 +583,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _text(f'continue{suffix}')
     if isinstance(node, hir.ShortCircuit):
         return _short_circuit_doc(node, min_prec, indent)
+    if isinstance(node, hir.TypeTest):
+        operator = 'isnt?' if node.negated else 'is?'
+        return _seq(
+            _to_doc(node.value, 0, indent),
+            _text(f' {operator} {type_to_dewy(node.test_type)}'),
+        )
     if isinstance(node, (hir.IfArm, hir.LoopArm)):
         raise TypeError(f'{type(node).__name__} can only be rendered inside Flow')
     if isinstance(node, hir.Declare):

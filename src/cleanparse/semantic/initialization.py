@@ -189,16 +189,26 @@ class _InitializationChecker:
             current = initialized
             reached_known_arm = False
             for arm in node.arms:
-                if isinstance(arm.condition, hir.IteratorExpression):
-                    current = self._check_eager(
-                        arm.condition.iterable,
-                        current,
-                        parameters,
-                        call_stack,
+                if isinstance(
+                    arm.condition,
+                    (hir.IteratorExpression, hir.MultiIteratorExpression),
+                ):
+                    iterators = (
+                        [arm.condition]
+                        if isinstance(arm.condition, hir.IteratorExpression)
+                        else arm.condition.iterators
                     )
+                    for iterator in iterators:
+                        current = self._check_eager(
+                            iterator.iterable,
+                            current,
+                            parameters,
+                            call_stack,
+                        )
                     body_initialized = set(current)
-                    if arm.condition.target.binding_id is not None:
-                        body_initialized.add(arm.condition.target.binding_id)
+                    for iterator in iterators:
+                        if iterator.target.binding_id is not None:
+                            body_initialized.add(iterator.target.binding_id)
                     self._check_eager(
                         arm.body,
                         body_initialized,
@@ -270,6 +280,23 @@ class _InitializationChecker:
         if isinstance(node, hir.IteratorExpression):
             return self._check_eager(
                 node.iterable,
+                initialized,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.MultiIteratorExpression):
+            current = initialized
+            for iterator in node.iterators:
+                current = self._check_eager(
+                    iterator.iterable,
+                    current,
+                    parameters,
+                    call_stack,
+                )
+            return current
+        if isinstance(node, hir.TypeTest):
+            return self._check_eager(
+                node.value,
                 initialized,
                 parameters,
                 call_stack,
