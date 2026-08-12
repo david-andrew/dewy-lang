@@ -244,20 +244,36 @@
     id="DewyIframe22"
     frameBorder="0"
 ></iframe>
+<h3 id="undefined-and-optional-values"><a class="header" href="#undefined-and-optional-values">Undefined and optional values</a></h3>
+<p><code>undefined</code> is a first-class singleton value. It is distinct from <code>void</code>, which
+means that an expression produces no value, and from a binding that has not yet
+been initialized.</p>
+<p>An optional value has type <code>T | undefined</code>. Test its runtime type with <code>is?</code> or
+<code>isnt?</code> before using it as <code>T</code>; the matching control-flow edge narrows the
+binding:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=let%20answer%3Aint64%7Cundefined%20%3D%20find_answer%28%29%0A%0Aif%20answer%20isnt%3F%20undefined%20%7B%0A%20%20%20%20print%28answer%20%2B%201%29%0A%7D&id=DewyIframe23"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe23"
+    frameBorder="0"
+></iframe>
+<p><code>value is? T</code> asks whether the runtime type of <code>value</code> is compatible with <code>T</code>;
+<code>value isnt? T</code> is its inverse. The initial udewy target supports optional
+booleans, fixed-width integers, array handles, and function pointers.</p>
 <h3 id="complex"><a class="header" href="#complex">Complex</a></h3>
 <p>complex numbers</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_complex0%20%3D%202%5E/2%20%2B%202i%5E/2%0Amy_complex1%20%3D%20complex%282%5E/2%202%5E/2%29%0Amy_complex2%20%3D%20complex%281%2045%C2%B0%29%0Amy_complex3%20%3D%201%20%E2%88%A0%2045%C2%B0&id=DewyIframe23"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_complex0%20%3D%202%5E/2%20%2B%202i%5E/2%0Amy_complex1%20%3D%20complex%282%5E/2%202%5E/2%29%0Amy_complex2%20%3D%20complex%281%2045%C2%B0%29%0Amy_complex3%20%3D%201%20%E2%88%A0%2045%C2%B0&id=DewyIframe24"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe23"
+    id="DewyIframe24"
     frameBorder="0"
 ></iframe>
 <h3 id="quaternions"><a class="header" href="#quaternions">Quaternions</a></h3>
 <p>Quaternions</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=q%20%3D%201%20%2B%202i%20%2B%203j%20%2B%204k%0AQ%20%3D%201%20%2B%202I%20%2B%203J%20%2B%204K%20%20%20%25%20can%20use%20lower%20or%20uppercase&id=DewyIframe24"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=q%20%3D%201%20%2B%202i%20%2B%203j%20%2B%204k%0AQ%20%3D%201%20%2B%202I%20%2B%203J%20%2B%204K%20%20%20%25%20can%20use%20lower%20or%20uppercase&id=DewyIframe25"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe24"
+    id="DewyIframe25"
     frameBorder="0"
 ></iframe>
 <h2 id="misc"><a class="header" href="#misc">MISC.</a></h2>
