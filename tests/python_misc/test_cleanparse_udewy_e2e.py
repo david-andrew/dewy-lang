@@ -63,6 +63,10 @@ LOWERED_CASES = [
     ('multi_iterator_exhausted_truth.dewy', 42),
     ('multi_iterator_labeled_exits.dewy', 42),
     ('multi_iterator_operators.dewy', 42),
+    ('range_stepped.dewy', 42),
+    ('range_stepped_array.dewy', 42),
+    ('range_stepped_labeled_exits.dewy', 42),
+    ('range_stepped_multi_optional.dewy', 42),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]

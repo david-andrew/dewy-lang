@@ -16,7 +16,10 @@ but cannot be represented directly by udewy:
   structured loops;
 - fresh local arrays become stack allocations with width-specific stores, while
   module arrays receive static backing and indexed operations become memory
-  intrinsics.
+  intrinsics;
+- finite static range iterators become counted loops with scaled offsets,
+  while semantically unbounded integer iterators remain blocked on bigint
+  target support.
 
 Lowering has two phases. Discovery replays lexical scope resolution, records
 function units and captures, and preserves the type checker's forward-function
@@ -886,13 +889,17 @@ class _Lowerer:
                 self._discover_node(item, scope, current_function)
             return
         if isinstance(node, hir.Range):
-            if node.step_pair is not None:
-                for item in node.step_pair:
-                    self._discover_node(item, scope, current_function)
-            if node.left is not None:
-                self._discover_node(node.left, scope, current_function)
-            if node.right is not None:
-                self._discover_node(node.right, scope, current_function)
+            items = [
+                *([] if node.step_pair is None else node.step_pair),
+                *([] if node.left is None else [node.left]),
+                *([] if node.right is None else [node.right]),
+            ]
+            seen: set[int] = set()
+            for item in items:
+                if id(item) in seen:
+                    continue
+                seen.add(id(item))
+                self._discover_node(item, scope, current_function)
 
     def _check_captures(self) -> None:
         """Reject function units that require an udewy closure environment."""
@@ -1267,23 +1274,29 @@ class _Lowerer:
                 ],
             )
         if isinstance(node, hir.Range):
+            originals = [
+                *([] if node.step_pair is None else node.step_pair),
+                *([] if node.left is None else [node.left]),
+                *([] if node.right is None else [node.right]),
+            ]
+            transformed_by_id = {
+                id(item): self._require_node(self._transform_node(item))
+                for item in {id(item): item for item in originals}.values()
+            }
             return replace(
                 node,
                 step_pair=(
-                    tuple(
-                        self._require_node(self._transform_node(item))
-                        for item in node.step_pair
-                    )
+                    tuple(transformed_by_id[id(item)] for item in node.step_pair)
                     if node.step_pair is not None
                     else None
                 ),
                 left=(
-                    self._require_node(self._transform_node(node.left))
+                    transformed_by_id[id(node.left)]
                     if node.left is not None
                     else None
                 ),
                 right=(
-                    self._require_node(self._transform_node(node.right))
+                    transformed_by_id[id(node.right)]
                     if node.right is not None
                     else None
                 ),
@@ -2350,6 +2363,8 @@ class _Lowerer:
         iterator = arm.condition
         if not isinstance(iterator, hir.IteratorExpression):
             raise TypeError('INTERNAL ERROR: iterator loop has no iterator condition')
+        self._require_finite_udewy_iterator(iterator)
+        assert iterator.count is not None
         offset = self._new_iterator_temp(iterator)
         offset_declaration = hir.Declare(
             iterator.loc,
@@ -2368,11 +2383,9 @@ class _Lowerer:
             self._int64_literal(iterator.loc, iterator.first),
             binding_id=iterator.target.binding_id,
         )
-        target_value = self._int64_binary(
-            '__add__',
-            self._int64_literal(iterator.loc, iterator.first),
+        target_value = self._iterator_value(
+            iterator,
             replace(offset, loc=iterator.loc),
-            iterator.loc,
         )
         target_assignment = hir.Assign(
             iterator.loc,
@@ -2424,10 +2437,13 @@ class _Lowerer:
         condition = arm.condition
         if not isinstance(condition, hir.MultiIteratorExpression):
             raise TypeError('INTERNAL ERROR: multiiterator loop has no composite condition')
+        for iterator in condition.iterators:
+            self._require_finite_udewy_iterator(iterator)
         declarations: list[hir.AST] = []
         updates: list[hir.AST] = []
         active_values: list[hir.ExpressedIdentifier] = []
         for iterator in condition.iterators:
+            assert iterator.count is not None
             offset = self._new_iterator_temp(iterator)
             active = hir.ExpressedIdentifier(
                 iterator.loc,
@@ -2502,11 +2518,9 @@ class _Lowerer:
                     active_test,
                 )
             )
-            value = self._int64_binary(
-                '__add__',
-                self._int64_literal(iterator.loc, iterator.first),
+            value = self._iterator_value(
+                iterator,
                 replace(offset, loc=iterator.loc),
-                iterator.loc,
             )
             if payload is not None:
                 defined_body = [
@@ -2629,6 +2643,69 @@ class _Lowerer:
             None,
         )
         return [*declarations, loop]
+
+    def _require_finite_udewy_iterator(
+        self,
+        iterator: hir.IteratorExpression,
+    ) -> None:
+        if iterator.count is None:
+            raise NotImplementedYet(Error(
+                srcfile=self.srcfile,
+                title='udewy unbounded range iteration requires bigint lowering',
+                pointer_messages=[
+                    Pointer(
+                        span=iterator.iterable.loc,
+                        message=(
+                            'this iterator is semantically unbounded and cannot '
+                            'use a wrapping int64 counter'
+                        ),
+                    )
+                ],
+            ))
+        payload = ty.optional_payload(iterator.target.type)
+        target_type = payload if payload is not None else iterator.target.type
+        values = [
+            iterator.first,
+            iterator.step,
+            iterator.count,
+            *([iterator.last] if iterator.last is not None else []),
+        ]
+        if target_type != 'int64' or not all(
+            ty.integer_literal_fits(value, 'int64')
+            for value in values
+        ):
+            raise NotImplementedYet(Error(
+                srcfile=self.srcfile,
+                title='udewy range iteration requires bigint lowering',
+                pointer_messages=[
+                    Pointer(
+                        span=iterator.iterable.loc,
+                        message='this normalized iterator does not fit the int64 ABI',
+                    )
+                ],
+            ))
+
+    def _iterator_value(
+        self,
+        iterator: hir.IteratorExpression,
+        offset: hir.AST,
+    ) -> hir.AST:
+        scaled_offset = (
+            offset
+            if iterator.step == 1
+            else self._int64_binary(
+                '__mul__',
+                offset,
+                self._int64_literal(iterator.loc, iterator.step),
+                iterator.loc,
+            )
+        )
+        return self._int64_binary(
+            '__add__',
+            self._int64_literal(iterator.loc, iterator.first),
+            scaled_offset,
+            iterator.loc,
+        )
 
     @staticmethod
     def _bool_binary(

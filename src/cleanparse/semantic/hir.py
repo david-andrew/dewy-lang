@@ -180,8 +180,9 @@ class IteratorExpression(AST):
     target: ExpressedIdentifier
     iterable: AST
     first: int
-    last: int
-    count: int
+    step: int
+    last: int | None
+    count: int | None
 
 
 IteratorLogicalOp = Literal['and', 'or', 'xor', 'nand', 'nor', 'xnor']

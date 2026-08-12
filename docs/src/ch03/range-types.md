@@ -25,6 +25,9 @@ Like in haskell, you can use a tuple to include a second value to specify the st
 
 > Note: `[first..2ndlast,last]` is explicitly **NOT ALLOWED**, as it can have unintuitive behavior, and is covered by `[first,second..last]`.
 
+The inferred step may be positive or negative. A zero step, such as
+`1,1..10`, is invalid for iteration.
+
 In addition, ranges can have their bounds be inclusive or exclusive. Inclusive bounds are indicated by square brackets, and exclusive bounds are indicated by parenthesis. The default is inclusive bounds. Also left and right bounds can be specified independently, so you can have a range that is inclusive on the left and exclusive on the right, or vice versa.
 
 ```dewy
@@ -80,6 +83,16 @@ range3 = [1..5)  % 1 2 3 4
 range4 = [1..5]  % 1 2 3 4 5
 range5 = 1..5    % 1 2 3 4 5
 ```
+
+Right-unbounded ranges have a first value and can therefore define an
+unbounded iterator. Left-unbounded ranges such as `..5`, trailing-pair forms
+such as `..3,5`, and the fully unbounded `..` remain valid range values but
+cannot be iterated because they have no first value.
+
+The semantic compiler represents right-unbounded integer iteration with
+arbitrary precision. The current udewy backend diagnoses such loops until its
+deferred bigint iterator representation is implemented; it does not silently
+wrap an `int64` counter.
 
 ## Ordinal Ranges
 

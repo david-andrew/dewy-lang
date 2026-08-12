@@ -344,13 +344,22 @@ class _InitializationChecker:
             return current
         if isinstance(node, hir.Range):
             current = initialized
-            if node.step_pair is not None:
-                for item in node.step_pair:
-                    current = self._check_eager(item, current, parameters, call_stack)
-            if node.left is not None:
-                current = self._check_eager(node.left, current, parameters, call_stack)
-            if node.right is not None:
-                current = self._check_eager(node.right, current, parameters, call_stack)
+            items = [
+                *([] if node.step_pair is None else node.step_pair),
+                *([] if node.left is None else [node.left]),
+                *([] if node.right is None else [node.right]),
+            ]
+            seen: set[int] = set()
+            for item in items:
+                if id(item) in seen:
+                    continue
+                seen.add(id(item))
+                current = self._check_eager(
+                    item,
+                    current,
+                    parameters,
+                    call_stack,
+                )
             return current
         return initialized
 

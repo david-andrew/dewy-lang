@@ -160,7 +160,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     if isinstance(node, hir.IteratorExpression):
         return (
             f'IteratorExpression({node.target.name}, '
-            f'first={node.first}, last={node.last}, count={node.count})'
+            f'first={node.first}, step={node.step}, '
+            f'last={node.last}, count={node.count})'
         )
     if isinstance(node, hir.MultiIteratorExpression):
         return (
@@ -286,14 +287,22 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.TypeBlock):
         return [(f'items[{i}]', it) for i, it in enumerate(node.items)]
     if isinstance(node, hir.Range):
+        if node.step_pair is not None:
+            out = [
+                ('step0', node.step_pair[0]),
+                ('step1', node.step_pair[1]),
+            ]
+            if (
+                node.right is not None
+                and node.right is not node.step_pair[1]
+            ):
+                out.append(('right', node.right))
+            return out
         out = []
         if node.left is not None:
             out.append(('left', node.left))
         if node.right is not None:
             out.append(('right', node.right))
-        if node.step_pair is not None:
-            out.append(('step0', node.step_pair[0]))
-            out.append(('step1', node.step_pair[1]))
         return out
     return []
 
@@ -836,13 +845,30 @@ def _block_doc(node: hir.Block, min_prec: int, indent: int) -> Doc:
 
 def _range_doc(node: hir.Range, min_prec: int, indent: int) -> Doc:
     """Render a range as `left..right` with optional step and bounds markers."""
-    left = _to_doc(node.left, _RANGE_PREC + 1, indent) if node.left is not None else _text('')
-    right = _to_doc(node.right, _RANGE_PREC + 1, indent) if node.right is not None else _text('')
-    core = _seq(left, _text('..'), right)
     if node.step_pair is not None:
         s0 = _to_doc(node.step_pair[0], 0, indent)
         s1 = _to_doc(node.step_pair[1], 0, indent)
-        core = _seq(core, _text(','), s0, _text('..'), s1)
+        if node.left is not None:
+            right = (
+                _to_doc(node.right, _RANGE_PREC + 1, indent)
+                if node.right is not None
+                else _text('')
+            )
+            core = _seq(s0, _text(','), s1, _text('..'), right)
+        else:
+            core = _seq(_text('..'), s0, _text(','), s1)
+    else:
+        left = (
+            _to_doc(node.left, _RANGE_PREC + 1, indent)
+            if node.left is not None
+            else _text('')
+        )
+        right = (
+            _to_doc(node.right, _RANGE_PREC + 1, indent)
+            if node.right is not None
+            else _text('')
+        )
+        core = _seq(left, _text('..'), right)
     if node.bounds is not None and node.bounds != '[]':
         # wrap with bound markers — Dewy uses bracket forms around the range
         lo, hi = node.bounds[0], node.bounds[1]

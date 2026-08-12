@@ -68,3 +68,22 @@ copies when non-aliasing value semantics are proven.
 Proof required: whole-call provenance and escape analysis must show that each
 removed allocation or copy is unobservable and that result storage outlives
 every use.
+
+## Unbounded integer iterator representation
+
+Semantic contract: an unannotated right-unbounded integer range advances with
+arbitrary precision and never wraps. Its direction and stride come from its
+first two anchors, and every yielded value remains an integer even after it
+exceeds all fixed-width representations.
+
+Correct baseline: preserve the unbounded iterator in semantic HIR and reject
+udewy lowering while the only available runtime counter representation is
+`int64`.
+
+Deferred lowering: use bigint-backed iterator targets and counters, with
+specialized fixed-width counters only where range analysis proves that every
+reachable iteration remains representable.
+
+Proof required: fixed-width substitution must prove that no reachable value,
+offset, or stepped arithmetic intermediate can overflow. Practical execution
+time is not evidence that an unbounded iterator will stay within `int64`.

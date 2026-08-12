@@ -573,12 +573,95 @@ def _refine_condition_context(
     return ctx
 
 
+@dataclass(frozen=True)
+class _NormalizedIntegerRange:
+    first: int
+    step: int
+    last: int | None
+    count: int | None
+    target_type: ty.TypeExpr
+
+
+def _normalize_integer_range(
+    iterable: hir.Range,
+    *,
+    ctx: Context,
+) -> _NormalizedIntegerRange:
+    if iterable.left is None:
+        user_error(
+            ctx.srcfile,
+            'range iteration requires a left anchor',
+            Pointer(
+                span=iterable.loc,
+                message='this range has no first value to iterate from',
+            ),
+            hint='left-unbounded ranges may be used as range values, but not iterated',
+        )
+
+    first_anchor = _constant_integer(iterable.left, ctx=ctx)
+    second_anchor: int | None = None
+    if iterable.step_pair is not None:
+        second_anchor = _constant_integer(iterable.step_pair[1], ctx=ctx)
+    right = (
+        _constant_integer(iterable.right, ctx=ctx)
+        if iterable.right is not None
+        else None
+    )
+    if (
+        first_anchor is None
+        or iterable.step_pair is not None
+        and second_anchor is None
+        or iterable.right is not None
+        and right is None
+    ):
+        user_error(
+            ctx.srcfile,
+            'range iterator anchors must be compile-time integers',
+            Pointer(
+                span=iterable.loc,
+                message='each supplied range anchor must have one exact integer value',
+            ),
+        )
+
+    step = 1 if second_anchor is None else second_anchor - first_anchor
+    if step == 0:
+        user_error(
+            ctx.srcfile,
+            'range iterator step cannot be zero',
+            Pointer(
+                span=iterable.loc,
+                message='the first two anchors produce a step of zero',
+            ),
+            hint='choose a distinct second anchor',
+        )
+
+    bounds_kind = iterable.bounds or '[]'
+    first = first_anchor + (step if bounds_kind[0] == '(' else 0)
+    if right is None:
+        return _NormalizedIntegerRange(first, step, None, None, 'int')
+
+    right_inclusive = bounds_kind[1] == ']'
+    if step > 0:
+        distance = right - first - (0 if right_inclusive else 1)
+    else:
+        distance = first - right - (0 if right_inclusive else 1)
+    count = max(0, distance // abs(step) + 1)
+    last = first + (count - 1) * step if count else first - step
+    backend_values = (first, step, last, count, right)
+    target_type: ty.TypeExpr = (
+        'int64'
+        if all(ty.integer_literal_fits(value, 'int64') for value in backend_values)
+        else 'int'
+    )
+    return _NormalizedIntegerRange(first, step, last, count, target_type)
+
+
 def _tcr_range_iterator(
     condition_ast: p0.AST,
     *,
     ctx: Context,
 ) -> tuple[hir.IteratorExpression, Context] | None:
-    """Check the Stage 4b `name in static_integer_range` iterator form."""
+    """Check and normalize a static integer range loop condition."""
 
     if not (
         isinstance(condition_ast, p0.BinOp)
@@ -590,66 +673,41 @@ def _tcr_range_iterator(
         return None
 
     identifier = condition_ast.left.item
-    binding = ctx.binding_registry.allocate_param(
-        identifier.name,
-        'int64',
-        identifier.loc,
-    )
-    iterator_ctx = replace(
-        ctx,
-        declarations=ctx.declarations.new_child({identifier.name: 'int64'}),
-        binding_scopes=ctx.binding_scopes.new_child({identifier.name: binding}),
-    )
-    iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=iterator_ctx)
+    iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=ctx)
     if not isinstance(iterable, hir.Range):
         not_implemented(
             ctx.srcfile,
             condition_ast.right.loc,
             'iteration over a non-range value',
         )
-    if iterable.step_pair is not None:
-        not_implemented(ctx.srcfile, iterable.loc, 'stepped range iteration')
-    if iterable.left is None or iterable.right is None:
-        not_implemented(ctx.srcfile, iterable.loc, 'unbounded range iteration')
-    left = _constant_integer(iterable.left, ctx=iterator_ctx)
-    right = _constant_integer(iterable.right, ctx=iterator_ctx)
-    if left is None or right is None:
-        user_error(
-            ctx.srcfile,
-            'range iterator bounds must be compile-time integers',
-            Pointer(
-                span=iterable.loc,
-                message='both range endpoints must have exact integer values',
-            ),
-        )
-    bounds_kind = iterable.bounds or '[]'
-    first = left + (1 if bounds_kind[0] == '(' else 0)
-    last = right - (1 if bounds_kind[1] == ')' else 0)
-    count = max(0, last - first + 1)
-    for value, label in [(first, 'first'), (last, 'last'), (count, 'count')]:
-        if not ty.integer_literal_fits(value, 'int64'):
-            user_error(
-                ctx.srcfile,
-                'range iterator does not fit the udewy integer representation',
-                Pointer(
-                    span=iterable.loc,
-                    message=f'normalized {label} value `{value}` does not fit in `int64`',
-                ),
-            )
+    normalized = _normalize_integer_range(iterable, ctx=ctx)
+    binding = ctx.binding_registry.allocate_param(
+        identifier.name,
+        normalized.target_type,
+        identifier.loc,
+    )
+    iterator_ctx = replace(
+        ctx,
+        declarations=ctx.declarations.new_child(
+            {identifier.name: normalized.target_type}
+        ),
+        binding_scopes=ctx.binding_scopes.new_child({identifier.name: binding}),
+    )
     target = hir.ExpressedIdentifier(
         identifier.loc,
-        'int64',
+        normalized.target_type,
         identifier.name,
         binding_id=binding.id,
     )
     iterator = hir.IteratorExpression(
         condition_ast.loc,
-        ty.TypeParameterize('iterator', ['int64']),
+        ty.TypeParameterize('iterator', [normalized.target_type]),
         target,
         iterable,
-        first,
-        last,
-        count,
+        normalized.first,
+        normalized.step,
+        normalized.last,
+        normalized.count,
     )
     return iterator, iterator_ctx
 
@@ -763,8 +821,16 @@ def _tcr_loop_iterator(
 
     counts = [iterator.count for iterator in iterators]
     stop: int | None = None
-    for iteration in sorted({0, *counts}):
-        active = [iteration < count for count in counts]
+    boundaries = {
+        count
+        for count in counts
+        if count is not None
+    }
+    for iteration in sorted({0, *boundaries}):
+        active = [
+            count is None or iteration < count
+            for count in counts
+        ]
         if not _eval_iterator_formula(formula, active):
             stop = iteration
             break
@@ -772,9 +838,10 @@ def _tcr_loop_iterator(
     typed_iterators: list[hir.IteratorExpression] = []
     for iterator in iterators:
         target_type: ty.Type = (
-            ty.optional('int64')
-            if stop is None or stop > iterator.count
-            else 'int64'
+            ty.optional(iterator.target.type)
+            if iterator.count is not None
+            and (stop is None or stop > iterator.count)
+            else iterator.target.type
         )
         target = replace(iterator.target, type=target_type)
         typed_iterators.append(replace(iterator, target=target))
@@ -784,7 +851,14 @@ def _tcr_loop_iterator(
         iterator_ctx.declarations[target.name] = target_type
     condition = hir.MultiIteratorExpression(
         condition_ast.loc,
-        ty.TypeParameterize('multiiterator', ['int64']),
+        ty.TypeParameterize(
+            'multiiterator',
+            [
+                'int'
+                if any(iterator.target.type == 'int' for iterator in iterators)
+                else 'int64'
+            ],
+        ),
         typed_iterators,
         formula,
         repeats,
@@ -1750,10 +1824,80 @@ def tcr_bare_range(ast: p0.Flat, *, ctx: Context, expected: ty.Type|None=None) -
         case _:
             raise ValueError(f'INTERNAL ERROR: unrecognized bare range structure: {ast=}')
     
-    left = typecheck_and_resolve_inner(left, ctx=ctx) if left is not None else None
-    right = typecheck_and_resolve_inner(right, ctx=ctx) if right is not None else None
-    #TODO: handle if left or right have comma, split out step pair
-    return hir.Range(ast.loc, 'range', bounds=None, step_pair=None, left=left, right=right)
+    def comma_pair(item: p0.AST | None) -> tuple[p0.AST, p0.AST] | None:
+        if not (
+            isinstance(item, p0.Flat)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == ','
+        ):
+            return None
+        if len(item.items) != 2:
+            user_error(
+                ctx.srcfile,
+                'range step syntax requires exactly two anchors',
+                Pointer(
+                    span=item.loc,
+                    message='expected `first,second..last`',
+                ),
+            )
+        return item.items[0], item.items[1]
+
+    left_pair = comma_pair(left)
+    right_pair = comma_pair(right)
+    if left_pair is not None and right_pair is not None:
+        user_error(
+            ctx.srcfile,
+            'range cannot specify step anchors on both sides',
+            Pointer(span=ast.loc, message='choose one step-pair form'),
+        )
+    if right_pair is not None and left is not None:
+        user_error(
+            ctx.srcfile,
+            'trailing range step pairs require an unbounded left side',
+            Pointer(
+                span=right.loc,
+                message='`first..second_last,last` is not a valid range',
+            ),
+            hint='write `first,second..last` instead',
+        )
+
+    step_pair: tuple[hir.AST, hir.AST] | None = None
+    if left_pair is not None:
+        first = typecheck_and_resolve_inner(left_pair[0], ctx=ctx)
+        second = typecheck_and_resolve_inner(left_pair[1], ctx=ctx)
+        checked_left: hir.AST | None = first
+        checked_right = (
+            typecheck_and_resolve_inner(right, ctx=ctx)
+            if right is not None
+            else None
+        )
+        step_pair = (first, second)
+    elif right_pair is not None:
+        second_last = typecheck_and_resolve_inner(right_pair[0], ctx=ctx)
+        last = typecheck_and_resolve_inner(right_pair[1], ctx=ctx)
+        checked_left = None
+        checked_right = last
+        step_pair = (second_last, last)
+    else:
+        checked_left = (
+            typecheck_and_resolve_inner(left, ctx=ctx)
+            if left is not None
+            else None
+        )
+        checked_right = (
+            typecheck_and_resolve_inner(right, ctx=ctx)
+            if right is not None
+            else None
+        )
+
+    return hir.Range(
+        ast.loc,
+        'range',
+        bounds=None,
+        step_pair=step_pair,
+        left=checked_left,
+        right=checked_right,
+    )
 
 
 

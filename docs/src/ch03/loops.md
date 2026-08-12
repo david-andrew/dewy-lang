@@ -46,13 +46,30 @@ Many languages feature for loops, which iterate over some iterable object. The s
 This means that `in` expressions can be used to trivially construct a for-loop.
 
 ```dewy
-loop i in 1..5
+loop i in [1..5]
 {
     print('{i}, ')
 }
 ```
 
 Which prints out `1, 2, 3, 4, 5, ` to the console. Each iteration, `in` causes `i` to be assigned the next value in the sequence, while returning true for the loop condition. When the sequence is exhausted, `in` returns false, and the loop ends.
+
+Integer ranges use a unit step by default. A second anchor specifies another
+step, including a negative one:
+
+```dewy
+loop even in 0,2..10 { printl(even) }
+loop descending in 5,4..0 { printl(descending) }
+```
+
+The step is the second anchor minus the first. A zero step is an iteration
+error. A right-unbounded form such as `0..` has a first value and is
+semantically iterable forever; a left-unbounded form such as `..10` has no
+first value and cannot be iterated.
+
+The current udewy target intentionally rejects right-unbounded iteration until
+bigint-backed iterator values are available. This preserves Dewy's
+arbitrary-precision semantics instead of allowing an `int64` counter to wrap.
 
 For loops can also iterate over the items in any type of container. Iterating over a list looks like this
 
@@ -122,7 +139,7 @@ Charlie chose Green
 Other languages commonly have an `enumerate` function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using `and`:
 
 ```dewy
-loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
+loop i in [0..] and fruit in ['apple' 'banana' 'peach' 'pear']
     printl'{i}) {fruit}'
 ```
 
@@ -216,7 +233,7 @@ do-loop over an iterator. On the first iteration, `i` will be undefined, while i
 
 ```dewy
 do printl'this is a do-for loop. i={i}'
-loop i in 0..5
+loop i in [0..5]
 ```
 
 Which prints
@@ -310,7 +327,7 @@ instead of in the loop's parent scope.
 Let's look at this example
 
 ```dewy
-loop i in 1..10 {i}
+loop i in [1..10] {i}
 ```
 
 Every iteration of the loop, the current value of `i` is "expressed", that is to say, the value could be stored in a variable or a container.
@@ -318,16 +335,16 @@ Every iteration of the loop, the current value of `i` is "expressed", that is to
 Lets capture the expressed value in a container by wrapping the loop in `[]` brackets
 
 ```dewy
-[loop i in 1..10 {i}]
+[loop i in [1..10] {i}]
 ```
 
 This "generates" the array `[1 2 3 4 5 6 7 8 9 10]`, which we can then store into a variable
 
 ```dewy
-my_array = [loop i in 1..10 {i}]
+my_array = [loop i in [1..10] {i}]
 
 %optional to omit the braces since only a single expression is in the body
-my_array = [loop i in 1..10 i]
+my_array = [loop i in [1..10] i]
 ```
 
 And thus we have created the simplest list generator.
@@ -338,7 +355,7 @@ Generators can do a lot of interesting things. For example we can express multip
 
 ```dewy
 %note the braces are not optional in this case
-my_array = [loop i in 1..5 { i i^2 }]
+my_array = [loop i in [1..5] { i i^2 }]
 ```
 
 producing the array `[1 1 2 4 3 9 4 16 5 25]`.
@@ -346,7 +363,7 @@ producing the array `[1 1 2 4 3 9 4 16 5 25]`.
 We can also construct a dictionary by expressing with a `->` between two values
 
 ```dewy
-squares = [loop i in 1..5 { i -> i^2 }]
+squares = [loop i in [1..5] { i -> i^2 }]
 ```
 
 which produces the dictionary `[1->1 2->4 3->9 4->16 5->25]` which points from values to their squares.
@@ -358,9 +375,9 @@ You can generate a multidimensional array using multiple nested loops. For examp
 ```dewy
 indices =
 [
-    loop i in 1..5
+    loop i in [1..5]
     [
-        loop j in 1..5
+        loop j in [1..5]
         [
             i
             j

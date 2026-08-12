@@ -325,9 +325,8 @@ class _BoundsValidator:
             return dict(state)
         body_state = dict(state)
         if iterator.target.binding_id is not None:
-            body_state[iterator.target.binding_id] = Interval(
-                iterator.first,
-                iterator.last,
+            body_state[iterator.target.binding_id] = self._iterator_interval(
+                iterator
             )
         transfer = self._loop_transfer(body, body_state, validate=validate)
         exits = [
@@ -350,10 +349,12 @@ class _BoundsValidator:
         body_state = dict(state)
         for iterator in condition.iterators:
             self._eval(iterator.iterable, body_state, validate=validate)
-            if iterator.count > 0 and iterator.target.binding_id is not None:
-                body_state[iterator.target.binding_id] = Interval(
-                    iterator.first,
-                    iterator.last,
+            if (
+                iterator.count != 0
+                and iterator.target.binding_id is not None
+            ):
+                body_state[iterator.target.binding_id] = self._iterator_interval(
+                    iterator
                 )
         transfer = self._loop_transfer(body, body_state, validate=validate)
         exits = [
@@ -369,6 +370,21 @@ class _BoundsValidator:
             for binding_id in target_ids:
                 exit_state.pop(binding_id, None)
         return self._join_states([state, *exits])
+
+    @staticmethod
+    def _iterator_interval(iterator: hir.IteratorExpression) -> Interval:
+        if iterator.count is None:
+            return (
+                Interval(iterator.first, None)
+                if iterator.step > 0
+                else Interval(None, iterator.first)
+            )
+        if iterator.last is None:
+            raise ValueError('INTERNAL ERROR: finite iterator has no last value')
+        return Interval(
+            min(iterator.first, iterator.last),
+            max(iterator.first, iterator.last),
+        )
 
     def _loop_transfer(
         self,
@@ -561,13 +577,17 @@ class _BoundsValidator:
             self._eval(node.right, state, validate=validate)
             return None
         if isinstance(node, hir.Range):
-            if node.step_pair is not None:
-                for item in node.step_pair:
-                    self._eval(item, state, validate=validate)
-            if node.left is not None:
-                self._eval(node.left, state, validate=validate)
-            if node.right is not None:
-                self._eval(node.right, state, validate=validate)
+            items = [
+                *([] if node.step_pair is None else node.step_pair),
+                *([] if node.left is None else [node.left]),
+                *([] if node.right is None else [node.right]),
+            ]
+            seen: set[int] = set()
+            for item in items:
+                if id(item) in seen:
+                    continue
+                seen.add(id(item))
+                self._eval(item, state, validate=validate)
             return None
         if isinstance(node, hir.IteratorExpression):
             self._eval(node.iterable, state, validate=validate)
