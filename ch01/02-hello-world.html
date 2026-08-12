@@ -190,6 +190,22 @@ $ cd hello_world
 <pre><code class="language-bash">$ dewy hello.dewy
 </code></pre>
 <p>Which should print <code>Hello, World!</code> in the terminal. </p>
+<h2 id="top-level-execution-and-main"><a class="header" href="#top-level-execution-and-main">Top-Level Execution and <code>main</code></a></h2>
+<p>Dewy executes top-level code in source order. A program does not need a
+<code>main</code> function, as the example above demonstrates.</p>
+<p>When a module declares <code>main</code>, Dewy runs the complete top level first and then
+automatically invokes <code>main</code>. For now, an automatically invoked <code>main</code> takes no
+arguments and returns either an integer exit code or <code>void</code>; its return type may
+be inferred.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=let%20message%20%3D%20%27Hello%27%0Aprintl%27%7Bmessage%7D%20from%20the%20top%20level%27%0A%0Alet%20main%20%3D%20%28%29%20%3D%3E%20%7B%0A%20%20%20%20printl%27Hello%20from%20main%27%0A%20%20%20%20return%200%0A%7D&id=DewyIframe2"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe2"
+    frameBorder="0"
+></iframe>
+<p>An explicit <code>main()</code> at the top level is an ordinary call. It does not suppress
+the automatic invocation, so that program calls <code>main</code> once in sequence and
+once again after top-level execution finishes.</p>
 <h2 id="how-it-works"><a class="header" href="#how-it-works">How it Works</a></h2>
 <p>This code invokes the <code>printl</code> function with the string <code>'Hello, World!'</code>. <code>printl</code> is a commonly used function that takes text and prints it to the terminal, followed by a newline.</p>
 <h2 id="compiling-and-running-are-the-same-step"><a class="header" href="#compiling-and-running-are-the-same-step">Compiling and Running Are the Same Step</a></h2>
