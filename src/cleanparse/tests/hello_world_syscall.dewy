@@ -1,0 +1,6 @@
+let main = ():>int64 => {
+    let message:array<uint8> = "Hello, World!\n"
+    let data:int64 = __load_i64__(message)
+    let written:int64 = __syscall3__(1 1 data message.length)
+    return 0
+}

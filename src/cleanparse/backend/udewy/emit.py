@@ -50,16 +50,7 @@ UNSUPPORTED_NARROW_DUNDERS = {
     '__rshift__',
 }
 SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
-UDEWY_MEMORY_INTRINSICS = {
-    '__alloca__',
-    '__static_alloca__',
-    *{
-        f'__{operation}_{prefix}{width}__'
-        for operation in ('load', 'store')
-        for prefix in ('i', 'u')
-        for width in (8, 16, 32, 64)
-    },
-}
+UDEWY_INTRINSICS = set(builtins.udewy_intrinsic_types)
 
 @dataclass
 class EmitContext:
@@ -424,7 +415,7 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
         isinstance(call.func, hir.ExpressedIdentifier)
         and (
             call.func.name in ctx.direct_function_names
-            or call.func.name in UDEWY_MEMORY_INTRINSICS
+            or call.func.name in UDEWY_INTRINSICS
         )
         and call.func.name not in ctx.local_names
     ):

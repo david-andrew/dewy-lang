@@ -2315,6 +2315,11 @@ class _Lowerer:
         source = node.expr
         if isinstance(target, ty.ArrayType):
             if target.element == 'uint8':
+                if isinstance(source, hir.String) and isinstance(
+                    source.type,
+                    ty.StringLiteralType,
+                ):
+                    return self._extract_utf8_literal_array(node, source)
                 prelude, string = self._extract_expression(source)
                 descriptor = self._new_array_temp(
                     hir.ArrayLiteral(node.loc, target, [])
@@ -2451,6 +2456,73 @@ class _Lowerer:
                 return self._grapheme_array_to_string(node, source)
             return self._extract_expression(source)
         self._target_error(node, f'representation conversion to `{type_to_dewy(target)}`')
+
+    def _extract_utf8_literal_array(
+        self,
+        node: hir.RepresentationCast,
+        source: hir.String,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        byte_length = len(source.content.encode('utf-8'))
+        descriptor = self._new_array_temp(
+            hir.ArrayLiteral(node.loc, node.type, [])
+        )
+        descriptor_word = replace(descriptor, type='int64')
+        allocator = (
+            '__static_alloca__'
+            if self.lowering_module_startup
+            else '__alloca__'
+        )
+        return [
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                descriptor.name,
+                'int64',
+                self._intrinsic_call(
+                    allocator,
+                    [self._int64_literal(node.loc, ARRAY_DESCRIPTOR_SIZE)],
+                    'int64',
+                    node.loc,
+                ),
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_DATA_OFFSET,
+                replace(source, type='int64'),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_LENGTH_OFFSET,
+                self._int64_literal(node.loc, byte_length),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_CAPACITY_OFFSET,
+                self._int64_literal(node.loc, byte_length),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_STRIDE_OFFSET,
+                self._int64_literal(node.loc, 1),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_FLAGS_OFFSET,
+                self._int64_literal(node.loc, ARRAY_BORROWED_TEXT),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_OWNER_OFFSET,
+                self._int64_literal(node.loc, 0),
+                node.loc,
+            ),
+        ], descriptor
 
     def _compile_time_grapheme_array_content(
         self,

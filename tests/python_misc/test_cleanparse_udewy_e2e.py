@@ -76,6 +76,7 @@ LOWERED_CASES = [
     ('string_ranges.dewy', 42),
     ('string_containers.dewy', 42),
     ('runtime_grapheme_strings.dewy', 42),
+    ('hello_world_syscall.dewy', 0),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]
@@ -105,6 +106,23 @@ def test_udewy_fixture_compiles_and_runs(
     monkeypatch.chdir(tmp_path)
     exit_code = entry_point(udewy_path, [])
     assert exit_code == expected_exit
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_bare_metal_dewy_hello_world(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'hello_world_syscall.dewy'))
+    assert '__load_i64__(message)' in emitted
+    assert '__syscall3__(1 1 data 14)' in emitted
+
+    udewy_path = tmp_path / 'hello_world_syscall.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 0
+    assert capfd.readouterr().out == 'Hello, World!\n'
 
 
 @pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')

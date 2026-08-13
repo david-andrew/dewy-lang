@@ -81,6 +81,17 @@ Type expressions above; here `<T>` is a type-parameter list.
 - [ ] Optional `main` argument `argv:array<string>`.
 - [ ] Optional `main` environment argument. The environment structure is still TBD.
 
+## Udewy intrinsics and host interoperability
+
+- [x] Typed source access to udewy's portable memory, allocation, signed-shift,
+      and unsigned-operation intrinsics.
+- [x] Typed access to Linux `__syscall0__` through `__syscall6__`, emitted as
+      direct udewy intrinsic calls.
+- [x] Executable x86-64 Linux bare-metal hello world using a UTF-8 byte view,
+      its byte length, and the `write` syscall.
+- [ ] Target-specific non-Linux host intrinsics and capability selection.
+- [ ] Foreign symbols, external linkage, and a stable FFI surface.
+
 ## Initialization and callable-effect analysis
 
 - [x] Eager top-level and local expressions cannot use values before
@@ -258,7 +269,6 @@ semantics.
 - [ ] Linear algebra, multidimensional array sysntax, etc.
 - [ ] Generators (`yield`)
 - [ ] Unpack and collect
-- [ ] Host intrinsics and foreign-function interop
 - [ ] Effects and error values
 - [ ] Compile-time evaluation and meta-programming
     - [ ] metatags for things historically passed as compiler flags
@@ -269,6 +279,8 @@ semantics.
 - [ ] implementation of hello world examples from the different domains
 - [ ] test harness system. 
     - [ ] self hosted unit tests with automation for running on all updates
+- [ ] basic optimizations
+    - [ ] different runtimer lowering/representations depending on how something is used. e.g. `array<uint8>` doesn't necessarily need all of the runtime description stuff especially if at compiletime where it is being used, we can just have the generated code deal with the correct length/stride/etc. directly rather than storing that all in a runtime struct
 
 ### Full Refinement System
 - [ ] Flow-sensitive refinement typing. Track value facts through ordinary control flow: x != 0, 0 <= i < a.length, literal values, unions/intersections, exclusions like T & ~0, etc.
@@ -295,6 +307,7 @@ semantics.
 - [ ] complete docs rewrite
     - [ ] API/language reference
     - [ ] dewy book
+- [ ] making generated code more human friendly
 
 ### Aspirational/Experimental/etc.
 - [ ] non text-editor view over code/AST. basically render AST to look like text, but render with user set visual settings for spacing, indentation, comment positions, etc. etc. Probably requires a custom editor-esque app. Should generally feel mostly like editing regular text in a text editor, just without the pure bag-of-characters semantics

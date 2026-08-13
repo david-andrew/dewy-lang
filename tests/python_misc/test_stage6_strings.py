@@ -42,6 +42,20 @@ def test_string_literals_keep_exact_types_until_contextualized() -> None:
     assert declarations['clusters'].expr.type == ty.ArrayType('grapheme', 4)
 
 
+def test_contextual_uint8_literal_materializes_without_grapheme_metadata() -> None:
+    emitted = codegen(SrcFile(None, '''
+let read = ():>uint8 => {
+    let bytes:array<uint8> = "café"
+    return bytes[3]
+}
+'''))
+
+    assert '__dewy_string_boundaries_' not in emitted
+    assert '__dewy_string_value_' not in emitted
+    assert '"\\x63\\x61\\x66\\xc3\\xa9"' in emitted
+    assert '__store_i64__(5 __dewy_array_1 + 8)' in emitted
+
+
 def test_char_is_the_one_grapheme_string_refinement() -> None:
     root = _check(
         'let composed:char = "é" '
@@ -164,8 +178,15 @@ let main = ():>int64 => {
     let bytes:array<uint8> = text as array<uint8>
     bytes[0] = 120
     let untouched:array<uint8> = text as array<uint8>
+    let direct:array<uint8> = "abc"
+    direct[0] = 120
+    let fresh:array<uint8> = "abc"
     let scalars:array<uint32> = text as array<uint32>
-    if family.length =? 1 and untouched[0] =? 99 and scalars[3] =? 233 {
+    if family.length =? 1
+        and untouched[0] =? 99
+        and direct[0] =? 120
+        and fresh[0] =? 97
+        and scalars[3] =? 233 {
         return 42
     } else {
         return 1

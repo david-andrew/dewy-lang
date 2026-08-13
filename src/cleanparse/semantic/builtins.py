@@ -183,6 +183,56 @@ def _signed_shift_intrinsic() -> ty.FunctionType:
     )
 
 
+def _udewy_intrinsic(
+    params: list[ty.TypeExpr],
+    ret: ty.TypeExpr,
+) -> ty.FunctionType:
+    return ty.FunctionType(
+        [ty.PosOrKwArg(None, param) for param in params],
+        [],
+        None,
+        ret,
+    )
+
+
+udewy_intrinsic_types: dict[str, ty.FunctionType] = {
+    **{
+        f'__load_{prefix}{width}__': _udewy_intrinsic(
+            [ty.TOP_TYPE],
+            f'{type_prefix}{width}',
+        )
+        for prefix, type_prefix in (('i', 'int'), ('u', 'uint'))
+        for width in (8, 16, 32, 64)
+    },
+    **{
+        f'__store_{prefix}{width}__': _udewy_intrinsic(
+            [f'{type_prefix}{width}', ty.TOP_TYPE],
+            ty.VOID_TYPE,
+        )
+        for prefix, type_prefix in (('i', 'int'), ('u', 'uint'))
+        for width in (8, 16, 32, 64)
+    },
+    '__load__': _udewy_intrinsic([ty.TOP_TYPE], 'int64'),
+    '__store__': _udewy_intrinsic(['int64', ty.TOP_TYPE], ty.VOID_TYPE),
+    '__alloca__': _udewy_intrinsic(['int64'], 'int64'),
+    '__static_alloca__': _udewy_intrinsic(['int64'], 'int64'),
+    '__signed_shr__': _signed_shift_intrinsic(),
+    '__unsigned_idiv__': _udewy_intrinsic(['uint64', 'uint64'], 'uint64'),
+    '__unsigned_mod__': _udewy_intrinsic(['uint64', 'uint64'], 'uint64'),
+    '__unsigned_lt__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
+    '__unsigned_gt__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
+    '__unsigned_lte__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
+    '__unsigned_gte__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
+    **{
+        f'__syscall{arity}__': _udewy_intrinsic(
+            ['int64'] * (arity + 1),
+            'int64',
+        )
+        for arity in range(7)
+    },
+}
+
+
 # TODO: dealing with type promotions.
 # probably the dispatch system would be able to track promotions that need to happen
 builtin_types: dict[str, ty.TypeExpr] = {
@@ -196,7 +246,6 @@ builtin_types: dict[str, ty.TypeExpr] = {
     '__mod__': _binary_generic('int'),
     '__lshift__': _shift_generic(),
     '__rshift__': _shift_generic(),
-    '__signed_shr__': _signed_shift_intrinsic(),
     '__eq__': _binary_generic(ty.TOP_TYPE, 'bool'),
     '__ne__': _binary_generic(ty.TOP_TYPE, 'bool'),
     '__gt__': _binary_generic('number', 'bool'),
@@ -220,6 +269,7 @@ builtin_types: dict[str, ty.TypeExpr] = {
             [],
         ),
     ]),
+    **udewy_intrinsic_types,
 }
 
 # Explicit cross-branch promote rules (a, b, result). Along-edge cases use the subtype graph.
