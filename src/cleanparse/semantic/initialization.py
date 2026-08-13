@@ -7,7 +7,7 @@ from typing import NoReturn
 
 from ..reporting import Error, Pointer, SrcFile
 from . import hir, ty
-from .bindings import Binding, BindingRegistry
+from .bindings import BindingRegistry
 from .errors import NotImplementedYet, UserError
 from .hir_display import type_to_dewy
 
@@ -80,10 +80,29 @@ class _InitializationChecker:
             self._collect_reassigned_callables(node.left)
             self._collect_reassigned_callables(node.right)
             return
+        if isinstance(node, hir.StringLength):
+            self._collect_reassigned_callables(node.string)
+            return
+        if isinstance(node, hir.StringIndex):
+            self._collect_reassigned_callables(node.string)
+            self._collect_reassigned_callables(node.index)
+            return
+        if isinstance(node, hir.StringSlice):
+            self._collect_reassigned_callables(node.string)
+            self._collect_reassigned_callables(node.range)
+            return
+        if isinstance(node, hir.StringEqual):
+            self._collect_reassigned_callables(node.left)
+            self._collect_reassigned_callables(node.right)
+            return
+        if isinstance(node, hir.StringConcat):
+            self._collect_reassigned_callables(node.left)
+            self._collect_reassigned_callables(node.right)
+            return
         if isinstance(node, hir.Return) and node.item is not None:
             self._collect_reassigned_callables(node.item)
             return
-        if isinstance(node, (hir.ValueCast, hir.Transmute)):
+        if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
             self._collect_reassigned_callables(node.expr)
             return
         if isinstance(node, hir.ObjectLiteral):
@@ -375,6 +394,65 @@ class _InitializationChecker:
                 parameters,
                 call_stack,
             )
+        if isinstance(node, hir.StringLength):
+            return self._check_eager(
+                node.string,
+                initialized,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.StringIndex):
+            current = self._check_eager(
+                node.string,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.index,
+                current,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.StringSlice):
+            current = self._check_eager(
+                node.string,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.range,
+                current,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.StringEqual):
+            current = self._check_eager(
+                node.left,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.right,
+                current,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.StringConcat):
+            current = self._check_eager(
+                node.left,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.right,
+                current,
+                parameters,
+                call_stack,
+            )
         if isinstance(node, hir.Assign):
             current = self._check_eager(
                 node.target,
@@ -383,7 +461,7 @@ class _InitializationChecker:
                 call_stack,
             )
             return self._check_eager(node.value, current, parameters, call_stack)
-        if isinstance(node, (hir.ValueCast, hir.Transmute)):
+        if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
             return self._check_eager(node.expr, initialized, parameters, call_stack)
         if isinstance(node, hir.TypeBlock):
             current = initialized

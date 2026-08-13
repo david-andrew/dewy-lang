@@ -3,7 +3,12 @@
 import pytest
 
 from src.cleanparse.semantic import builtins
-from src.cleanparse.semantic.ty import DispatchError, FunctionType, OverloadType, TypeSystem
+from src.cleanparse.semantic.ty import (
+    DispatchError,
+    OverloadType,
+    StringType,
+    TypeSystem,
+)
 
 
 def _ts() -> TypeSystem:
@@ -15,8 +20,8 @@ def _ts() -> TypeSystem:
 def test_add_same_types_no_promotion():
     ts = _ts()
     add = builtins.builtin_types['__add__']
-    assert isinstance(add, FunctionType)
-    r = ts.match_best_function([add], ['int', 'int'])
+    assert isinstance(add, OverloadType)
+    r = ts.match_best_function(add.methods, ['int', 'int'])
     assert r.method.ret == 'int'
     assert r.promote_pos == [None, None]
 
@@ -24,8 +29,8 @@ def test_add_same_types_no_promotion():
 def test_add_int_float_promotes_left():
     ts = _ts()
     add = builtins.builtin_types['__add__']
-    assert isinstance(add, FunctionType)
-    r = ts.match_best_function([add], ['int', 'float'])
+    assert isinstance(add, OverloadType)
+    r = ts.match_best_function(add.methods, ['int', 'float'])
     assert r.method.ret == 'float'
     assert r.promote_pos == ['float', None]
 
@@ -33,9 +38,20 @@ def test_add_int_float_promotes_left():
 def test_add_int_string_rejects():
     ts = _ts()
     add = builtins.builtin_types['__add__']
-    assert isinstance(add, FunctionType)
+    assert isinstance(add, OverloadType)
     with pytest.raises(DispatchError):
-        ts.match_best_function([add], ['int', 'string'])
+        ts.match_best_function(add.methods, ['int', 'string'])
+
+
+def test_add_string_overload() -> None:
+    ts = _ts()
+    add = builtins.builtin_types['__add__']
+    assert isinstance(add, OverloadType)
+    result = ts.match_best_function(
+        add.methods,
+        [StringType(), StringType()],
+    )
+    assert result.method.ret == StringType()
 
 
 def test_and_overload_bool_vs_int():

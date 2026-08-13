@@ -186,7 +186,10 @@ def _signed_shift_intrinsic() -> ty.FunctionType:
 # TODO: dealing with type promotions.
 # probably the dispatch system would be able to track promotions that need to happen
 builtin_types: dict[str, ty.TypeExpr] = {
-    '__add__': _binary_generic('number'),
+    '__add__': ty.OverloadType([
+        _binary_generic('number'),
+        _binary_concrete(ty.StringType(), ty.StringType()),
+    ]),
     '__sub__': _binary_generic('number'),
     '__mul__': _binary_generic('number'),
     '__floordiv__': _binary_generic('int'),

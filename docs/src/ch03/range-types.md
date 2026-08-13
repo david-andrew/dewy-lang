@@ -94,11 +94,15 @@ arbitrary precision. The current udewy backend diagnoses such loops until its
 deferred bigint iterator representation is implemented; it does not silently
 wrap an `int64` counter.
 
-## Ordinal Ranges
+## Character Ranges
 
-Ranges can also be constructed using any ordinal type. Currently the only only built in ordinal type other than numbers would be strings.
+Unannotated string bounds use the default one-grapheme string representation.
+Iteration is defined when each supplied anchor is a grapheme containing exactly
+one Unicode scalar. Values advance in Unicode scalar order and skip the
+surrogate interval.
 
-For example, the following range captures all characters in the range from `'a'` to `'z'` inclusive
+For example, the following range captures all characters from `'a'` through
+`'z'` inclusively:
 
 ```dewy
 ord_range = 'a'..'z'
@@ -111,18 +115,21 @@ alpha_range = ['a'..'z'] + ['A'..'Z']
 ascii_range = 'A'..'z' %this would include extra characters like '[\]^_{|}' etc.
 ```
 
-But I probably won't just be limited to individual characters. In principle you ought to be able to do something like this
+Descending and stepped forms use the same syntax as numeric ranges:
 
 ```dewy
-word_range = 'apple'..'zebra'
-'panda' in? word_range  %returns true
+loop letter in 'z','y'..'a' { ... }
 ```
 
-which would create a range that consists of every possible 5 letter combination starting from the word `'apple'` and iterating through to the word `'zebra'`.
+An explicit scalar context materializes one-scalar literal endpoints as
+`uint32`:
 
-> Note: this is distinct from every dictionary word in that range, as it will include many many gibberish words.
+```dewy
+let ascii_scalars:range<uint32> = 'A'..'Z'
+```
 
-TDB exactly what criteria will be used for ordering strings, as I like string orderings that respect numbers embedded in them (e.g. `'apple2'` should come before `'apple10'`), but that becomes difficult with arbitrary strings. perhaps there might be a macro setting for the ordering type used
+Multi-scalar grapheme and whole-string enumeration is intentionally undefined
+until Dewy has an explicit alphabet or collation model.
 
 ## Range Uses
 

@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from collections import defaultdict
-from typing import TypeAlias, Literal
-
-import pdb
+from typing import Literal
 
 """
 Candidate type names:
@@ -156,6 +154,20 @@ class IntegerLiteralType:
 
 
 @dataclass(frozen=True)
+class StringLiteralType:
+    """The singleton type inhabited by one exact Unicode scalar sequence."""
+
+    value: str
+
+
+@dataclass(frozen=True)
+class StringType:
+    """An immutable grapheme sequence, optionally refined to an exact length."""
+
+    length: int | None = None
+
+
+@dataclass(frozen=True)
 class ArrayType:
     """A homogeneous mutable array, optionally refined to an exact length."""
 
@@ -179,13 +191,13 @@ class ObjectType:
     fields: tuple[ObjectField, ...]
 
     def field(self, name: str) -> ObjectField | None:
-        for field in self.fields:
-            if field.name == name:
-                return field
+        for object_field in self.fields:
+            if object_field.name == name:
+                return object_field
         return None
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType | ObjectType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | StringType | ArrayType | ObjectType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -246,10 +258,10 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     'set',
     'object',
 
-    # tbd string stuff
-    'char', #'uscalar',     # char # unicode scalar # rune # char # string<length=1>. Not a 'codepoint'
-    'grapheme', 
-    'string',   # array<unicode_scalar> | array<grapheme>
+    # strings are immutable grapheme sequences; char is the one-grapheme alias
+    'string',
+    ('grapheme', 'string'),
+    ('char', 'grapheme'),
     # 'istring',  # string with interpolated values. istring probably isn't a separate type? since it should be interchangable with strings
     
     # tbd misc stuff
@@ -262,6 +274,8 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     OverloadType: 'multifunction',
     SequenceType: 'generator',  # a group of expressed values is consumable like a generator; only the bare umbrella, `<int int> of? generator<int>` is TBD
     IntegerLiteralType: 'int',
+    StringLiteralType: 'string',
+    StringType: 'string',
     ArrayType: 'array',
     ObjectType: 'object',
 
@@ -334,6 +348,14 @@ def integer_literal_fits(value: int, target: Primitive) -> bool:
     if signed:
         return -(1 << (width - 1)) <= value < (1 << (width - 1))
     return 0 <= value < (1 << width)
+
+
+def string_literal_lengths(value: str) -> tuple[int, int, int]:
+    """Return UTF-8 byte, Unicode scalar, and grapheme counts for a literal."""
+
+    from .unicode_graphemes import grapheme_count
+
+    return len(value.encode('utf-8')), len(value), grapheme_count(value)
 
 
 class TypeSystem:
@@ -444,6 +466,16 @@ class TypeSystem:
             return a if self._integer_literal_implies(a, b) else None
         if isinstance(b, IntegerLiteralType) and isinstance(a, str):
             return b if self._integer_literal_implies(b, a) else None
+        if isinstance(a, StringLiteralType):
+            return a if self._string_literal_implies(a, b) else None
+        if isinstance(b, StringLiteralType):
+            return b if self._string_literal_implies(b, a) else None
+        if isinstance(a, StringType) and isinstance(b, StringType):
+            if a.length is None:
+                return b
+            if b.length is None:
+                return a
+            return a if a.length == b.length else None
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
             if a.element != b.element:
                 return None
@@ -525,6 +557,15 @@ class TypeSystem:
                 return a == b
             if isinstance(b, str):
                 return self._integer_literal_implies(a, b)
+        if isinstance(a, StringLiteralType):
+            return self._string_literal_implies(a, b)
+        if isinstance(a, StringType):
+            if isinstance(b, StringType):
+                return b.length is None or a.length == b.length
+            if isinstance(b, str):
+                if b in {'char', 'grapheme'}:
+                    return a.length == 1
+                return self._is_nom_subtype('string', b)
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
             return (
                 a.element == b.element
@@ -578,6 +619,36 @@ class TypeSystem:
         if integer_literal_fits(literal.value, target):
             return True
         return self._is_nom_subtype('int', target)
+
+    def _string_literal_implies(
+        self,
+        literal: StringLiteralType,
+        target: LiteralAtom,
+    ) -> bool:
+        """Whether an exact string can materialize in the requested domain."""
+
+        byte_count, scalar_count, grapheme_count = string_literal_lengths(literal.value)
+        if isinstance(target, StringLiteralType):
+            return literal == target
+        if isinstance(target, StringType):
+            return target.length is None or target.length == grapheme_count
+        if isinstance(target, ArrayType):
+            lengths = {
+                'uint8': byte_count,
+                'uint32': scalar_count,
+                'grapheme': grapheme_count,
+                'char': grapheme_count,
+                'string': grapheme_count,
+            }
+            length = lengths.get(target.element) if isinstance(target.element, str) else None
+            return length is not None and (
+                target.length is None or target.length == length
+            )
+        if isinstance(target, str):
+            if target in {'char', 'grapheme'}:
+                return grapheme_count == 1
+            return self._is_nom_subtype('string', target)
+        return False
 
 
     def clause_is_empty(self, clause: DnfClause) -> bool:
@@ -715,10 +786,18 @@ class TypeSystem:
             if isinstance(current, IntegerLiteralType) and isinstance(actual, IntegerLiteralType):
                 bindings[name] = 'int'
                 return True
+            if isinstance(current, StringLiteralType) and isinstance(actual, StringLiteralType):
+                bindings[name] = StringType()
+                return True
             if isinstance(current, IntegerLiteralType) and self.is_subtype(current, actual):
                 bindings[name] = actual
                 return True
             if isinstance(actual, IntegerLiteralType) and self.is_subtype(actual, current):
+                return True
+            if isinstance(current, StringLiteralType) and self.is_subtype(current, actual):
+                bindings[name] = actual
+                return True
+            if isinstance(actual, StringLiteralType) and self.is_subtype(actual, current):
                 return True
             promoted = self.promote_type(current, actual)
             if promoted is None:
@@ -949,7 +1028,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType | ObjectType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | StringType | ArrayType | ObjectType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1069,6 +1148,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return SequenceType([to_nnf(x) for x in t.items])
     if isinstance(t, ArrayType):
         return ArrayType(to_nnf(t.element), t.length)
+    if isinstance(t, StringType):
+        return t
     if isinstance(t, ObjectType):
         return ObjectType(
             tuple(
@@ -1095,7 +1176,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, ArrayType, ObjectType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, StringType, ArrayType, ObjectType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1193,6 +1274,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
     if isinstance(t, str):
         return bindings.get(t, t)
     if isinstance(t, IntegerLiteralType):
+        return t
+    if isinstance(t, (StringLiteralType, StringType)):
         return t
     if isinstance(t, ArrayType):
         return ArrayType(substitute_type(t.element, bindings), t.length)

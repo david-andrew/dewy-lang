@@ -299,16 +299,14 @@ let main = ():>int64 => value
     assert 'value = 42' in emitted
 
 
-def test_unsupported_global_storage_type_has_a_target_diagnostic() -> None:
+def test_global_string_storage_is_initialized_during_startup() -> None:
     source = """
 let message = "hello"
 let main = ():>int64 => 0
 """
-    with pytest.raises(
-        NotImplementedYet,
-        match='top-level storage is not implemented for this type',
-    ):
-        _codegen(source)
+    emitted = _codegen(source)
+    assert 'let message:int64 = 0' in emitted
+    assert 'message = __dewy_string_value_' in emitted
 
 
 def test_generated_startup_symbol_avoids_source_bindings() -> None:

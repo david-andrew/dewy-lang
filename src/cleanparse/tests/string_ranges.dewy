@@ -1,0 +1,13 @@
+let main = ():>int64 => {
+    let result:int64 = 0
+    loop c in 'a'..'c' {
+        result += 1
+    }
+    loop c in 'f','d'..'b' {
+        result += 3
+    }
+    loop c in '\uD7FF'..'\uE000' {
+        result += 15
+    }
+    return result
+}

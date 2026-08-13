@@ -142,7 +142,21 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Identifier(name='undefined')):
             return hir.Undefined(ast.item.loc, 'undefined')
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
-        case p0.Atom(item=t1.String(content=content)): return hir.String(ast.item.loc, 'string', content)
+        case p0.Atom(item=t1.String(content=content)):
+            from .unicode_graphemes import unicode_scalars
+
+            try:
+                unicode_scalars(content)
+            except ValueError:
+                user_error(
+                    ctx.srcfile,
+                    'string literal contains a Unicode surrogate',
+                    Pointer(
+                        span=ast.item.loc,
+                        message='Dewy strings contain Unicode scalar values only',
+                    ),
+                )
+            return hir.String(ast.item.loc, ty.StringLiteralType(content), content)
         case p0.Atom(item=t1.Integer(value=value)):
             parsed = t0.parse_integer(value.src, value.prefix)
             return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
@@ -156,7 +170,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Bool(value=value)): return hir.Bool(ast.item.loc, 'bool', value)
         # case p0.Atom(item=t2.OpFn()): ...
         # case p0.Atom(item=t2.Placeholder()): ...
-        case p0.Flat(op=t2.RangeJuxtapose()): return tcr_bare_range(ast, ctx=ctx)
+        case p0.Flat(op=t2.RangeJuxtapose()):
+            return tcr_bare_range(ast, ctx=ctx, expected=expected)
         case _:
             not_implemented(ctx.srcfile, ast.loc, f'{type(ast).__name__} expression')
 
@@ -618,6 +633,18 @@ class _NormalizedIntegerRange:
     target_type: ty.TypeExpr
 
 
+def _constant_scalar_grapheme(node: hir.AST) -> int | None:
+    while isinstance(node, hir.RepresentationCast):
+        node = node.expr
+    if not isinstance(node, hir.String):
+        return None
+    if len(node.content) != 1 or ty.string_literal_lengths(node.content)[2] != 1:
+        return None
+    from .unicode_graphemes import unicode_scalar_ordinal
+
+    return unicode_scalar_ordinal(ord(node.content))
+
+
 def _normalize_integer_range(
     iterable: hir.Range,
     *,
@@ -634,12 +661,25 @@ def _normalize_integer_range(
             hint='left-unbounded ranges may be used as range values, but not iterated',
         )
 
-    first_anchor = _constant_integer(iterable.left, ctx=ctx)
+    string_range = _is_string_type(iterable.left.type)
+    first_anchor = (
+        _constant_scalar_grapheme(iterable.left)
+        if string_range
+        else _constant_integer(iterable.left, ctx=ctx)
+    )
     second_anchor: int | None = None
     if iterable.step_pair is not None:
-        second_anchor = _constant_integer(iterable.step_pair[1], ctx=ctx)
+        second_anchor = (
+            _constant_scalar_grapheme(iterable.step_pair[1])
+            if string_range
+            else _constant_integer(iterable.step_pair[1], ctx=ctx)
+        )
     right = (
-        _constant_integer(iterable.right, ctx=ctx)
+        (
+            _constant_scalar_grapheme(iterable.right)
+            if string_range
+            else _constant_integer(iterable.right, ctx=ctx)
+        )
         if iterable.right is not None
         else None
     )
@@ -652,10 +692,19 @@ def _normalize_integer_range(
     ):
         user_error(
             ctx.srcfile,
-            'range iterator anchors must be compile-time integers',
+            (
+                'character range anchors must be single-scalar graphemes'
+                if string_range
+                else 'range iterator anchors must be compile-time integers'
+            ),
             Pointer(
                 span=iterable.loc,
-                message='each supplied range anchor must have one exact integer value',
+                message=(
+                    'multi-scalar grapheme and whole-string iteration requires '
+                    'an explicit alphabet or collation'
+                    if string_range
+                    else 'each supplied range anchor must have one exact integer value'
+                ),
             ),
         )
 
@@ -674,7 +723,12 @@ def _normalize_integer_range(
     bounds_kind = iterable.bounds or '[]'
     first = first_anchor + (step if bounds_kind[0] == '(' else 0)
     if right is None:
-        return _NormalizedIntegerRange(first, step, None, None, 'int')
+        if string_range:
+            from .unicode_graphemes import MAX_UNICODE_SCALAR_ORDINAL
+
+            right = MAX_UNICODE_SCALAR_ORDINAL if step > 0 else 0
+        else:
+            return _NormalizedIntegerRange(first, step, None, None, 'int')
 
     right_inclusive = bounds_kind[1] == ']'
     if step > 0:
@@ -685,7 +739,9 @@ def _normalize_integer_range(
     last = first + (count - 1) * step if count else first - step
     backend_values = (first, step, last, count, right)
     target_type: ty.TypeExpr = (
-        'int64'
+        ty.StringType(1)
+        if string_range
+        else 'int64'
         if all(ty.integer_literal_fits(value, 'int64') for value in backend_values)
         else 'int'
     )
@@ -711,6 +767,42 @@ def _tcr_range_iterator(
     identifier = condition_ast.left.item
     iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=ctx)
     if not isinstance(iterable, hir.Range):
+        if _is_string_type(iterable.type):
+            target_type = ty.StringType(1)
+            binding = ctx.binding_registry.allocate_param(
+                identifier.name,
+                target_type,
+                identifier.loc,
+            )
+            iterator_ctx = replace(
+                ctx,
+                declarations=ctx.declarations.new_child(
+                    {identifier.name: target_type}
+                ),
+                binding_scopes=ctx.binding_scopes.new_child(
+                    {identifier.name: binding}
+                ),
+            )
+            target = hir.ExpressedIdentifier(
+                identifier.loc,
+                target_type,
+                identifier.name,
+                binding_id=binding.id,
+            )
+            length = _known_string_length(iterable.type)
+            return (
+                hir.IteratorExpression(
+                    condition_ast.loc,
+                    ty.TypeParameterize('iterator', [target_type]),
+                    target,
+                    iterable,
+                    0,
+                    1,
+                    None if length is None else length - 1,
+                    length,
+                ),
+                iterator_ctx,
+            )
         not_implemented(
             ctx.srcfile,
             condition_ast.right.loc,
@@ -1291,7 +1383,7 @@ def _function_uses_bindings(node: hir.AST, binding_ids: set[int]) -> bool:
         )
     if isinstance(node, hir.Return) and node.item is not None:
         return _function_uses_bindings(node.item, binding_ids)
-    if isinstance(node, (hir.ValueCast, hir.Transmute)):
+    if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
         return _function_uses_bindings(node.expr, binding_ids)
     if isinstance(node, hir.MemberAccess):
         return _function_uses_bindings(node.value, binding_ids)
@@ -1315,6 +1407,28 @@ def _function_uses_bindings(node: hir.AST, binding_ids: set[int]) -> bool:
         return (
             _function_uses_bindings(node.target, binding_ids)
             or _function_uses_bindings(node.value, binding_ids)
+        )
+    if isinstance(node, hir.StringLength):
+        return _function_uses_bindings(node.string, binding_ids)
+    if isinstance(node, hir.StringIndex):
+        return (
+            _function_uses_bindings(node.string, binding_ids)
+            or _function_uses_bindings(node.index, binding_ids)
+        )
+    if isinstance(node, hir.StringSlice):
+        return (
+            _function_uses_bindings(node.string, binding_ids)
+            or _function_uses_bindings(node.range, binding_ids)
+        )
+    if isinstance(node, hir.StringEqual):
+        return (
+            _function_uses_bindings(node.left, binding_ids)
+            or _function_uses_bindings(node.right, binding_ids)
+        )
+    if isinstance(node, hir.StringConcat):
+        return (
+            _function_uses_bindings(node.left, binding_ids)
+            or _function_uses_bindings(node.right, binding_ids)
         )
     if isinstance(node, hir.TypeTest):
         return _function_uses_bindings(node.value, binding_ids)
@@ -1521,11 +1635,15 @@ def _tcr_object_literal(
         )
         object_type = expected_object
     marked: list[hir.ObjectField] = []
-    for field, binding in zip(fields, field_bindings):
-        value = _mark_object_receiver(field.value, object_fields, object_type)
+    for object_field, binding in zip(fields, field_bindings):
+        value = _mark_object_receiver(
+            object_field.value,
+            object_fields,
+            object_type,
+        )
         if isinstance(value, hir.FunctionLiteral):
             binding.function = value
-        marked.append(replace(field, value=value))
+        marked.append(replace(object_field, value=value))
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
 
@@ -1537,20 +1655,28 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         not_implemented(ctx.srcfile, binop.loc, 'computed member access')
     name = binop.right.item.name
     if name == 'length':
-        array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
-        if isinstance(array.type, ty.ArrayType):
+        value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        if isinstance(value.type, ty.ArrayType):
             result_type: ty.Type = (
-                ty.IntegerLiteralType(array.type.length)
-                if array.type.length is not None
+                ty.IntegerLiteralType(value.type.length)
+                if value.type.length is not None
                 else 'int64'
             )
-            return hir.ArrayLength(binop.loc, result_type, array)
+            return hir.ArrayLength(binop.loc, result_type, value)
+        string_length = _known_string_length(value.type)
+        if _is_string_type(value.type):
+            result_type = (
+                ty.IntegerLiteralType(string_length)
+                if string_length is not None
+                else 'int64'
+            )
+            return hir.StringLength(binop.loc, result_type, value)
     value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
     if not isinstance(value.type, ty.ObjectType):
         if name == 'length':
             type_error(
                 ctx.srcfile,
-                '`.length` requires an array',
+                '`.length` requires an array or string',
                 Pointer(
                     span=value.loc,
                     message=f'this has type `{type_to_dewy(value.type)}`',
@@ -1587,7 +1713,7 @@ def _member_root_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
         if isinstance(root, hir.Block) and not root.scoped and len(root.items) == 1:
             root = root.items[0]
             continue
-        if isinstance(root, (hir.ValueCast, hir.Transmute)):
+        if isinstance(root, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
             root = root.expr
             continue
         break
@@ -1603,7 +1729,7 @@ def _tcr_array_literal(
     expected: ty.Type | None,
     ctx: Context,
 ) -> hir.ArrayLiteral:
-    """Check a one-dimensional homogeneous fixed-width integer array."""
+    """Check a one-dimensional homogeneous array with a supported element layout."""
 
     expected_array = expected if isinstance(expected, ty.ArrayType) else None
     if expected is not None and expected_array is None:
@@ -1634,7 +1760,10 @@ def _tcr_array_literal(
         concrete_types = {
             item.type
             for item in items
-            if not isinstance(item.type, ty.IntegerLiteralType)
+            if not isinstance(
+                item.type,
+                (ty.IntegerLiteralType, ty.StringLiteralType),
+            )
         }
         if not items:
             type_error(
@@ -1646,7 +1775,29 @@ def _tcr_array_literal(
                 ),
             )
         if not concrete_types:
-            element_type = 'int64'
+            if all(isinstance(item.type, ty.IntegerLiteralType) for item in items):
+                element_type = 'int64'
+            elif all(isinstance(item.type, ty.StringLiteralType) for item in items):
+                element_type = ty.StringType(
+                    1
+                    if all(
+                        _known_string_length(item.type) == 1
+                        for item in items
+                    )
+                    else None
+                )
+            else:
+                type_error(
+                    ctx.srcfile,
+                    'array elements are not homogeneous',
+                    *[
+                        Pointer(
+                            span=item.loc,
+                            message=f'element has type `{type_to_dewy(item.type)}`',
+                        )
+                        for item in items
+                    ],
+                )
         elif len(concrete_types) == 1:
             element_type = concrete_types.pop()
         else:
@@ -1662,17 +1813,14 @@ def _tcr_array_literal(
                 ],
             )
 
-    if (
-        not isinstance(element_type, str)
-        or element_type not in ty.FIXED_INTEGER_TYPES
-    ):
+    if not _supported_array_element_type(element_type):
         type_error(
             ctx.srcfile,
             'unsupported array element type',
             Pointer(
                 span=block.loc,
                 message=(
-                    'Stage 4a arrays require a fixed-width integer element type, '
+                    'arrays require a fixed-width scalar or handle element type, '
                     f'got `{type_to_dewy(element_type)}`'
                 ),
             ),
@@ -1684,6 +1832,25 @@ def _tcr_array_literal(
         checked_items.append(check_against(item, element_type, ctx=ctx))
     array_type = ty.ArrayType(element_type, len(checked_items))
     return hir.ArrayLiteral(block.loc, array_type, checked_items)
+
+
+def _supported_array_element_type(type_: ty.Type) -> bool:
+    return (
+        isinstance(
+            type_,
+            (
+                ty.ArrayType,
+                ty.FunctionType,
+                ty.StringLiteralType,
+                ty.StringType,
+            ),
+        )
+        or isinstance(type_, str)
+        and (
+            type_ in ty.FIXED_INTEGER_TYPES
+            or type_ in {'bool', 'string', 'grapheme', 'char'}
+        )
+    )
 
 
 def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
@@ -1883,9 +2050,38 @@ def _dispatch_builtin(
         )
 
     contextual_args = [
-        _contextualize_flow_result(arg, param.type, ctx=ctx)
+        check_against(
+            _contextualize_flow_result(arg, param.type, ctx=ctx),
+            param.type,
+            ctx=ctx,
+        )
         for arg, param in zip(args, result.method.pos_or_kw)
     ]
+    if (
+        fname in {'__eq__', '__ne__'}
+        and len(contextual_args) == 2
+        and all(_is_string_type(arg.type) for arg in contextual_args)
+    ):
+        return hir.StringEqual(
+            loc,
+            'bool',
+            contextual_args[0],
+            contextual_args[1],
+            fname == '__ne__',
+        )
+    if (
+        fname == '__add__'
+        and len(contextual_args) == 2
+        and all(_is_string_type(arg.type) for arg in contextual_args)
+    ):
+        left, right = contextual_args
+        if isinstance(args[0].type, ty.StringLiteralType) and isinstance(
+            args[1].type,
+            ty.StringLiteralType,
+        ):
+            content = args[0].type.value + args[1].type.value
+            return hir.String(loc, ty.StringLiteralType(content), content)
+        return hir.StringConcat(loc, ty.StringType(), left, right)
     return hir.FunctionCall(
         loc,
         result.method.ret,
@@ -1950,10 +2146,12 @@ def _constant_integer(
         return node.type.value
     if isinstance(node, hir.Integer):
         return node.value
-    if isinstance(node, hir.ValueCast):
+    if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
         return _constant_integer(node.expr, ctx=ctx, seen_bindings=seen_bindings)
     if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):
         return node.array.type.length
+    if isinstance(node, hir.StringLength):
+        return _known_string_length(node.string.type)
     if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
         seen = set() if seen_bindings is None else seen_bindings
         if node.binding_id in seen:
@@ -2034,12 +2232,22 @@ def _tcr_array_length(binop: p0.BinOp, *, ctx: Context) -> hir.ArrayLength:
     return hir.ArrayLength(binop.loc, result_type, array)
 
 
-def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
+def _known_string_length(type_: ty.Type) -> int | None:
+    if isinstance(type_, ty.StringLiteralType):
+        return ty.string_literal_lengths(type_.value)[2]
+    if isinstance(type_, ty.StringType):
+        return type_.length
+    if isinstance(type_, str) and type_ in {'char', 'grapheme'}:
+        return 1
+    return None
+
+
+def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
-    if not isinstance(array.type, ty.ArrayType):
+    if not isinstance(array.type, ty.ArrayType) and not _is_string_type(array.type):
         type_error(
             ctx.srcfile,
-            'index target is not an array',
+            'index target is not an array or string',
             Pointer(
                 span=array.loc,
                 message=f'this has type `{type_to_dewy(array.type)}`',
@@ -2056,6 +2264,58 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
             Pointer(span=binop.right.loc, message='expected exactly one index expression'),
         )
     index = typecheck_and_resolve_inner(binop.right.inner[0], ctx=ctx)
+    if isinstance(index, hir.Range):
+        if not _is_string_type(array.type):
+            not_implemented(ctx.srcfile, index.loc, 'array range slicing')
+        if index.step_pair is not None:
+            not_implemented(ctx.srcfile, index.loc, 'stepped string slicing')
+        length = _known_string_length(array.type)
+        slice_length: int | None = None
+        if length is None and (index.left is not None or index.right is not None):
+            user_error(
+                ctx.srcfile,
+                'string slice is not proven in bounds',
+                Pointer(
+                    span=index.loc,
+                    message='bounded slicing requires a known string length',
+                ),
+            )
+        if length is not None:
+            left = 0 if index.left is None else _constant_integer(index.left, ctx=ctx)
+            right = (
+                length - 1
+                if index.right is None
+                else _constant_integer(index.right, ctx=ctx)
+            )
+            if left is None or right is None:
+                user_error(
+                    ctx.srcfile,
+                    'string slice is not proven in bounds',
+                    Pointer(
+                        span=index.loc,
+                        message='slice endpoints must have compile-time integer values',
+                    ),
+                )
+            if left is not None and right is not None:
+                bounds_kind = index.bounds or '[]'
+                start = left + (1 if bounds_kind[0] == '(' else 0)
+                stop = right - (1 if bounds_kind[1] == ')' else 0)
+                if start < 0 or stop >= length:
+                    user_error(
+                        ctx.srcfile,
+                        'string slice is out of bounds',
+                        Pointer(
+                            span=index.loc,
+                            message=f'this slice is outside `0..{length - 1}`',
+                        ),
+                    )
+                slice_length = max(0, stop - start + 1)
+        return hir.StringSlice(
+            binop.loc,
+            ty.StringType(slice_length),
+            array,
+            index,
+        )
     if not (
         isinstance(index.type, ty.IntegerLiteralType)
         or (
@@ -2063,7 +2323,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
             and ctx.type_system.is_subtype(index.type, 'int')
         )
     ):
-        type_error(
+        user_error(
             ctx.srcfile,
             'array index must be an integer',
             Pointer(
@@ -2072,18 +2332,23 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
             ),
         )
     constant_index = _constant_integer(index, ctx=ctx)
-    if array.type.length is None:
+    length = (
+        array.type.length
+        if isinstance(array.type, ty.ArrayType)
+        else _known_string_length(array.type)
+    )
+    if length is None:
         user_error(
             ctx.srcfile,
-            'array index is not proven in bounds',
+            'sequence index is not proven in bounds',
             Pointer(
                 span=array.loc,
-                message='this array does not have an exact compile-time length',
+                message='this sequence does not have an exact compile-time length',
             ),
         )
     if (
         constant_index is not None
-        and not 0 <= constant_index < array.type.length
+        and not 0 <= constant_index < length
     ):
         user_error(
             ctx.srcfile,
@@ -2092,10 +2357,19 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
                 span=index.loc,
                 message=(
                     f'index {constant_index} is outside '
-                    f'`0..{array.type.length - 1}`'
+                    f'`0..{length - 1}`'
                 ),
             ),
         )
+    if _is_string_type(array.type):
+        return hir.StringIndex(
+            binop.loc,
+            ty.StringType(1),
+            array,
+            index,
+            constant_index,
+        )
+    assert isinstance(array.type, ty.ArrayType)
     return hir.Index(
         binop.loc,
         array.type.element,
@@ -2146,10 +2420,25 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         item = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         require_valued(item.type, ctx.srcfile, item.loc, 'transmute operand')
         target = ast_to_type(binop.right, ctx=ctx)
+        if not _transmute_compatible(item.type, target):
+            type_error(
+                ctx.srcfile,
+                'incompatible transmute representations',
+                Pointer(
+                    span=binop.loc,
+                    message=(
+                        f'`{type_to_dewy(item.type)}` and '
+                        f'`{type_to_dewy(target)}` do not share a runtime layout'
+                    ),
+                ),
+            )
         return hir.Transmute(binop.loc, target, item)
 
     if symbol == 'as':
-        not_implemented(ctx.srcfile, binop.op.loc, 'value conversion with `as`')
+        item = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        require_valued(item.type, ctx.srcfile, item.loc, 'conversion operand')
+        target = ast_to_type(binop.right, ctx=ctx)
+        return _explicit_value_conversion(item, target, binop.loc, ctx=ctx)
 
     if symbol in {'is?', 'isnt?'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
@@ -2363,6 +2652,16 @@ def tcr_assignment_target(
                 target = replace(target, op=index_op)
         if isinstance(target.op, t2.IndexJuxtapose):
             resolved = _tcr_index(target, ctx=ctx)
+            if isinstance(resolved, (hir.StringIndex, hir.StringSlice)):
+                user_error(
+                    ctx.srcfile,
+                    'cannot mutate an immutable string',
+                    Pointer(
+                        span=target.loc,
+                        message='convert to a mutable array representation first',
+                    ),
+                )
+            assert isinstance(resolved, hir.Index)
             root = resolved.array
             while True:
                 if isinstance(root, hir.Index):
@@ -2375,7 +2674,7 @@ def tcr_assignment_target(
                 ):
                     root = root.items[0]
                     continue
-                if isinstance(root, (hir.ValueCast, hir.Transmute)):
+                if isinstance(root, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
                     root = root.expr
                     continue
                 break
@@ -2481,9 +2780,100 @@ def tcr_bare_range(ast: p0.Flat, *, ctx: Context, expected: ty.Type|None=None) -
             else None
         )
 
+    anchors = [
+        *([] if step_pair is None else step_pair),
+        *([] if checked_left is None else [checked_left]),
+        *([] if checked_right is None else [checked_right]),
+    ]
+    scalar_range_context = (
+        isinstance(expected, ty.TypeParameterize)
+        and expected.t == 'range'
+        and expected.args == ['uint32']
+    )
+    if scalar_range_context:
+        converted: dict[int, hir.AST] = {}
+        for anchor in anchors:
+            value = anchor
+            while isinstance(value, hir.RepresentationCast):
+                value = value.expr
+            if isinstance(value, hir.String) and len(value.content) == 1:
+                converted[id(anchor)] = hir.Integer(
+                    anchor.loc,
+                    'uint32',
+                    t0.base10,
+                    ord(value.content),
+                )
+            else:
+                converted[id(anchor)] = check_against(anchor, 'uint32', ctx=ctx)
+        checked_left = (
+            converted.get(id(checked_left), checked_left)
+            if checked_left is not None
+            else None
+        )
+        checked_right = (
+            converted.get(id(checked_right), checked_right)
+            if checked_right is not None
+            else None
+        )
+        step_pair = (
+            (
+                converted.get(id(step_pair[0]), step_pair[0]),
+                converted.get(id(step_pair[1]), step_pair[1]),
+            )
+            if step_pair is not None
+            else None
+        )
+        anchors = [
+            *([] if step_pair is None else step_pair),
+            *([] if checked_left is None else [checked_left]),
+            *([] if checked_right is None else [checked_right]),
+        ]
+    string_anchors = [anchor for anchor in anchors if _is_string_type(anchor.type)]
+    range_type: ty.TypeExpr = expected if scalar_range_context else 'range'
+    if string_anchors:
+        if len(string_anchors) != len(anchors):
+            type_error(
+                ctx.srcfile,
+                'range anchors must use one ordinal domain',
+                *[
+                    Pointer(
+                        span=anchor.loc,
+                        message=f'this anchor has type `{type_to_dewy(anchor.type)}`',
+                    )
+                    for anchor in anchors
+                ],
+            )
+        grapheme_domain = all(
+            _known_string_length(anchor.type) == 1
+            for anchor in string_anchors
+        )
+        target = ty.StringType(1) if grapheme_domain else ty.StringType()
+        transformed = {
+            id(anchor): check_against(anchor, target, ctx=ctx)
+            for anchor in string_anchors
+        }
+        checked_left = (
+            transformed.get(id(checked_left), checked_left)
+            if checked_left is not None
+            else None
+        )
+        checked_right = (
+            transformed.get(id(checked_right), checked_right)
+            if checked_right is not None
+            else None
+        )
+        step_pair = (
+            (
+                transformed.get(id(step_pair[0]), step_pair[0]),
+                transformed.get(id(step_pair[1]), step_pair[1]),
+            )
+            if step_pair is not None
+            else None
+        )
+        range_type = ty.TypeParameterize('range', [target])
     return hir.Range(
         ast.loc,
-        'range',
+        range_type,
         bounds=None,
         step_pair=step_pair,
         left=checked_left,
@@ -2819,19 +3209,29 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                     Pointer(span=ast.loc, message='use `array<T>`'),
                 )
             element = ast_to_type(element_ast, ctx=ctx)
-            if not isinstance(element, str) or element not in ty.FIXED_INTEGER_TYPES:
+            if not _supported_array_element_type(element):
                 type_error(
                     ctx.srcfile,
                     'unsupported array element type',
                     Pointer(
                         span=element_ast.loc,
                         message=(
-                            'Stage 4a arrays require a fixed-width integer type, '
+                            'arrays require a fixed-width scalar or handle type, '
                             f'got `{type_to_dewy(element)}`'
                         ),
                     ),
                 )
             return ty.ArrayType(element, length)
+
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
+            left=p0.Atom(item=t1.Identifier(name='range')),
+            right=p0.Block(kind='<>', inner=[element_ast]),
+        ):
+            return ty.TypeParameterize(
+                'range',
+                [ast_to_type(element_ast, ctx=ctx)],
+            )
 
         case p0.Block(kind='<>'|'()', inner=[inner]):
             return ast_to_type(inner, ctx=ctx)
@@ -3011,7 +3411,11 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
             Pointer(span=right.loc, message=str(e)))
 
     contextual_pos_args = [
-        _contextualize_flow_result(arg, param.type, ctx=ctx)
+        check_against(
+            _contextualize_flow_result(arg, param.type, ctx=ctx),
+            param.type,
+            ctx=ctx,
+        )
         for arg, param in zip(pos_args, result.method.pos_or_kw)
     ]
     parameter_types = {
@@ -3019,7 +3423,11 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         for param in [*result.method.pos_or_kw, *result.method.kw_only]
     }
     contextual_kw_args = {
-        name: _contextualize_flow_result(arg, parameter_types[name], ctx=ctx)
+        name: check_against(
+            _contextualize_flow_result(arg, parameter_types[name], ctx=ctx),
+            parameter_types[name],
+            ctx=ctx,
+        )
         for name, arg in kw_args.items()
     }
     return hir.FunctionCall(
@@ -3030,6 +3438,113 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         contextual_kw_args,
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
+
+
+def _is_string_type(type_: ty.Type) -> bool:
+    if isinstance(type_, (ty.StringLiteralType, ty.StringType)):
+        return True
+    return isinstance(type_, str) and type_ in {'string', 'grapheme', 'char'}
+
+
+def _explicit_value_conversion(
+    node: hir.AST,
+    target: ty.Type,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> hir.AST:
+    source = node.type
+    target = _refine_string_materialization_target(source, target)
+    if source == target:
+        return node
+    if isinstance(source, ty.StringLiteralType) and ctx.type_system.is_subtype(
+        source,
+        target,
+    ):
+        return hir.RepresentationCast(loc, target, node)
+    if _is_string_type(source):
+        if isinstance(target, ty.ArrayType) and target.element in {
+            'uint8',
+            'uint32',
+            'grapheme',
+            'char',
+        }:
+            return hir.RepresentationCast(loc, target, node)
+        if target in {'string', 'grapheme', 'char'}:
+            if ctx.type_system.is_subtype(source, target):
+                return hir.RepresentationCast(loc, target, node)
+    if isinstance(source, ty.ArrayType):
+        if target in {'string', 'grapheme', 'char'}:
+            if source.element in {'uint8', 'uint32'}:
+                type_error(
+                    ctx.srcfile,
+                    'string conversion requires a validity proof',
+                    Pointer(
+                        span=loc,
+                        message=(
+                            f'`{type_to_dewy(source)}` does not prove that its '
+                            'contents form valid Unicode text'
+                        ),
+                    ),
+                    hint='validation-backed refinement types are not implemented yet',
+                )
+            if (
+                source.element in {'grapheme', 'char'}
+                or isinstance(source.element, ty.StringType)
+                and source.element.length == 1
+            ) and target == 'string':
+                return hir.RepresentationCast(loc, target, node)
+    if ctx.type_system.is_subtype(source, target):
+        return node
+    if ctx.type_system.promote_type(source, target) == target:
+        return hir.ValueCast(loc, target, node)
+    type_error(
+        ctx.srcfile,
+        'unsupported value conversion',
+        Pointer(
+            span=loc,
+            message=(
+                f'cannot convert `{type_to_dewy(source)}` to '
+                f'`{type_to_dewy(target)}`'
+            ),
+        ),
+    )
+
+
+def _transmute_compatible(source: ty.Type, target: ty.Type) -> bool:
+    """Whether source and target have the same one-word udewy value shape."""
+
+    if source in (ty.VOID_TYPE, ty.INFERRED_TYPE) or target in (
+        ty.VOID_TYPE,
+        ty.INFERRED_TYPE,
+    ):
+        return False
+    source_string = _is_string_type(source)
+    target_string = _is_string_type(target)
+    source_array = isinstance(source, ty.ArrayType)
+    target_array = isinstance(target, ty.ArrayType)
+    if (source_string and target_array) or (source_array and target_string):
+        return False
+    return True
+
+
+def _refine_string_materialization_target(
+    source: ty.Type,
+    target: ty.Type,
+) -> ty.Type:
+    if not isinstance(source, ty.StringLiteralType):
+        return target
+    if not isinstance(target, ty.ArrayType) or target.length is not None:
+        return target
+    byte_count, scalar_count, grapheme_count = ty.string_literal_lengths(source.value)
+    length = {
+        'uint8': byte_count,
+        'uint32': scalar_count,
+        'grapheme': grapheme_count,
+        'char': grapheme_count,
+        'string': grapheme_count,
+    }.get(target.element) if isinstance(target.element, str) else None
+    return ty.ArrayType(target.element, length) if length is not None else target
 
 
 def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
@@ -3046,6 +3561,12 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
+    if isinstance(node.type, ty.StringLiteralType) and ctx.type_system.is_subtype(
+        node.type,
+        expected,
+    ):
+        target = _refine_string_materialization_target(node.type, expected)
+        return hir.RepresentationCast(node.loc, target, node)
     if ctx.type_system.is_subtype(node.type, expected):
         return node
     if ctx.type_system.promote_type(node.type, expected) == expected:

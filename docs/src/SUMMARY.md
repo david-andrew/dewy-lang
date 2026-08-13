@@ -28,6 +28,7 @@
 - [Language Features](ch03/00-features.md)
     - [Expressions, Statements, and Blocks](ch03/expressions-statements-blocks.md)
     - [Units](ch03/units.md)
+    - [String Types](ch03/string-types.md)
     - [String Interpolation](ch03/string-interpolation.md)
     - [Basic Data Types](ch03/basic-data-types.md)
     - [Container Types](ch03/container-types.md)

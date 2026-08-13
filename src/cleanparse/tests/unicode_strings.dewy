@@ -1,0 +1,13 @@
+let main = ():>int64 => {
+    let text = "café 👨‍👩‍👧‍👦 🇺🇸"
+    let family = text[5]
+    let bytes:array<uint8> = text as array<uint8>
+    bytes[0] = 120
+    let untouched:array<uint8> = text as array<uint8>
+    let scalars:array<uint32> = text as array<uint32>
+    if family.length =? 1 and untouched[0] =? 99 and scalars[3] =? 233 {
+        return 42
+    } else {
+        return 1
+    }
+}

@@ -18,6 +18,11 @@ def type_to_dewy(t: ty.Type) -> str:
         return t
     if isinstance(t, ty.IntegerLiteralType):
         return str(t.value)
+    if isinstance(t, ty.StringLiteralType):
+        return repr(t.value)
+    if isinstance(t, ty.StringType):
+        length = f'<length={t.length}>' if t.length is not None else ''
+        return f'string{length}'
     if isinstance(t, ty.TypeAnd):
         return ' & '.join(_type_atom_parens(x) for x in t.items)
     if isinstance(t, ty.TypeOr):
@@ -192,8 +197,24 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'IndexAssign'
     if isinstance(node, hir.String):
         return f'String({node.content!r})'
+    if isinstance(node, hir.StringLength):
+        return 'StringLength'
+    if isinstance(node, hir.StringIndex):
+        return (
+            f'StringIndex(constant={node.constant_index})'
+            if node.constant_index is not None
+            else 'StringIndex(dynamic)'
+        )
+    if isinstance(node, hir.StringSlice):
+        return 'StringSlice'
+    if isinstance(node, hir.StringEqual):
+        return 'StringEqual(not=?)' if node.negated else 'StringEqual(=?)'
+    if isinstance(node, hir.StringConcat):
+        return 'StringConcat(+)'
     if isinstance(node, hir.ValueCast):
         return f'ValueCast(as {type_to_dewy(node.type)})'
+    if isinstance(node, hir.RepresentationCast):
+        return f'RepresentationCast(as {type_to_dewy(node.type)})'
     if isinstance(node, hir.Transmute):
         return f'Transmute({type_to_dewy(node.type)})'
     if isinstance(node, hir.BoundParam):
@@ -271,7 +292,17 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('array', node.array), ('index', node.index)]
     if isinstance(node, hir.IndexAssign):
         return [('target', node.target), ('value', node.value)]
-    if isinstance(node, hir.ValueCast):
+    if isinstance(node, hir.StringLength):
+        return [('string', node.string)]
+    if isinstance(node, hir.StringIndex):
+        return [('string', node.string), ('index', node.index)]
+    if isinstance(node, hir.StringSlice):
+        return [('string', node.string), ('range', node.range)]
+    if isinstance(node, hir.StringEqual):
+        return [('left', node.left), ('right', node.right)]
+    if isinstance(node, hir.StringConcat):
+        return [('left', node.left), ('right', node.right)]
+    if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
         return [('expr', node.expr)]
     if isinstance(node, hir.Transmute):
         return [('expr', node.expr)]
@@ -562,6 +593,34 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _text('true' if node.value else 'false')
     if isinstance(node, hir.String):
         return _text(repr(node.content))
+    if isinstance(node, hir.StringLength):
+        return _seq(_to_doc(node.string, _CALL_PREC, indent), _text('.length'))
+    if isinstance(node, hir.StringIndex):
+        return _seq(
+            _to_doc(node.string, _CALL_PREC, indent),
+            _text('['),
+            _to_doc(node.index, 0, indent),
+            _text(']'),
+        )
+    if isinstance(node, hir.StringSlice):
+        return _seq(
+            _to_doc(node.string, _CALL_PREC, indent),
+            _range_doc(node.range, 0, indent),
+        )
+    if isinstance(node, hir.StringEqual):
+        op = 'not=?' if node.negated else '=?'
+        return _seq(
+            _to_doc(node.left, _op_prec(op), indent),
+            _text(f' {op} '),
+            _to_doc(node.right, _op_prec(op) + 1, indent),
+        )
+    if isinstance(node, hir.StringConcat):
+        prec = _op_prec('+')
+        return _seq(
+            _to_doc(node.left, prec, indent),
+            _text(' + '),
+            _to_doc(node.right, prec + 1, indent),
+        )
     if isinstance(node, hir.ArrayLiteral):
         items = [_to_doc(item, 0, indent) for item in node.items]
         return _group(_seq(
@@ -670,6 +729,15 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         ))
     if isinstance(node, hir.ValueCast):
         # `ValueCast.type` is the cast target (the value's expressed type).
+        inner = _seq(
+            _to_doc(node.expr, _AS_PREC + 1, indent),
+            _text(' as '),
+            _text(type_to_dewy(node.type)),
+        )
+        if _AS_PREC < min_prec:
+            return _seq(_text('('), inner, _text(')'))
+        return inner
+    if isinstance(node, hir.RepresentationCast):
         inner = _seq(
             _to_doc(node.expr, _AS_PREC + 1, indent),
             _text(' as '),

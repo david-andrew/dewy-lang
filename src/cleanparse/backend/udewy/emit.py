@@ -260,6 +260,7 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
         case hir.Continue(): return emit_loop_exit(ast, 'continue')
         case hir.ShortCircuit(): return emit_short_circuit(ast, ctx)
         case hir.Integer(): return emit_integer(ast)
+        case hir.String(): return emit_string(ast)
         case hir.Bool(): return 'true' if ast.value else 'false'
         case hir.Void(): return 'void'
         case hir.Declare(): return emit_declare(ast, ctx)
@@ -277,6 +278,13 @@ def emit_loop_exit(ast: hir.Break | hir.Continue, keyword: str) -> str:
     if ast.label is not None or ast.loop_levels != 0:
         raise ValueError('INTERNAL ERROR: labeled loop exit reached udewy emission')
     return keyword
+
+
+def emit_string(string: hir.String) -> str:
+    """Emit decoded Dewy text as an exact UTF-8 byte literal for udewy."""
+
+    content = ''.join(f'\\x{byte:02x}' for byte in string.content.encode('utf-8'))
+    return f'"{content}"'
 
 
 def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:

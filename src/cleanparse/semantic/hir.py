@@ -263,8 +263,46 @@ class String(AST):
 
 
 @dataclass
+class StringLength(AST):
+    string: AST
+
+
+@dataclass
+class StringIndex(AST):
+    string: AST
+    index: AST
+    constant_index: int | None
+
+
+@dataclass
+class StringSlice(AST):
+    string: AST
+    range: Range
+
+
+@dataclass
+class StringEqual(AST):
+    left: AST
+    right: AST
+    negated: bool = False
+
+
+@dataclass
+class StringConcat(AST):
+    left: AST
+    right: AST
+
+
+@dataclass
 class ValueCast(AST):
     """Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target."""
+    expr: AST
+
+
+@dataclass
+class RepresentationCast(AST):
+    """A conversion that materializes a value in a different representation."""
+
     expr: AST
 
 

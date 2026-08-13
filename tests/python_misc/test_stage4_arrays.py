@@ -189,10 +189,11 @@ let f = ():>uint8 => {
 }
 """))
 
-    assert '__alloca__(10) + 8' in emitted
-    assert '__store_u8__(1 __dewy_array_1)' in emitted
-    assert '__store_u8__(42 bytes + 1)' in emitted
-    assert 'return __load_u8__(bytes + 1)' in emitted
+    assert '__alloca__(2)' in emitted
+    assert '__alloca__(48)' in emitted
+    assert '__store_u8__(1 __load_i64__(__dewy_array_1))' in emitted
+    assert '__store_u8__(42 __load_i64__(bytes) + 1)' in emitted
+    assert 'return __load_u8__(__load_i64__(bytes) + 1)' in emitted
 
 
 @pytest.mark.parametrize(
@@ -221,9 +222,16 @@ let f = ():>{type_name} => {{
 }}
 """))
 
-    assert f'__alloca__({8 + 2 * element_bytes}) + 8' in emitted
-    assert f'__store_{prefix}{width}__(2 __dewy_array_1 + {element_bytes})' in emitted
-    assert f'__load_{prefix}{width}__(values + {element_bytes})' in emitted
+    assert f'__alloca__({2 * element_bytes})' in emitted
+    assert '__alloca__(48)' in emitted
+    assert (
+        f'__store_{prefix}{width}__('
+        f'2 __load_i64__(__dewy_array_1) + {element_bytes})'
+    ) in emitted
+    assert (
+        f'__load_{prefix}{width}__('
+        f'__load_i64__(values) + {element_bytes})'
+    ) in emitted
 
 
 def test_udewy_rejects_array_returns_and_local_array_escapes() -> None:
@@ -417,8 +425,8 @@ let f = ():>uint16 => {
 }
 """))
 
-    assert '__store_u16__(42 values + (i * 2))' in emitted
-    assert 'result = __load_u16__(values + (i * 2))' in emitted
+    assert '__store_u16__(42 __load_i64__(values) + (i * 2))' in emitted
+    assert 'result = __load_u16__(__load_i64__(values) + (i * 2))' in emitted
 
 
 def test_range_iterator_codegen_is_a_counted_loop() -> None:

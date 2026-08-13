@@ -72,6 +72,10 @@ LOWERED_CASES = [
     ('object_methods.dewy', 42),
     ('object_types.dewy', 42),
     ('object_regressions.dewy', 42),
+    ('unicode_strings.dewy', 42),
+    ('string_ranges.dewy', 42),
+    ('string_containers.dewy', 42),
+    ('runtime_grapheme_strings.dewy', 42),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]

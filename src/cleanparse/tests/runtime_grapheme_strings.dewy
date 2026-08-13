@@ -1,0 +1,51 @@
+let main = ():>int64 => {
+    let acute_parts:array<grapheme> = ['e' 'x']
+    acute_parts[1] = '́'
+    let acute:string = acute_parts as string
+
+    let flag_parts:array<grapheme> = ['🇺' '🇸']
+    let flag:string = flag_parts as string
+
+    let zwj_parts:array<grapheme> = ['👩' '‍' '👩']
+    let zwj:string = zwj_parts as string
+
+    let separate_parts:array<grapheme> = ['a' 'b']
+    let separate:string = separate_parts as string
+
+    let empty_parts:array<grapheme> = []
+    let empty:string = empty_parts as string
+
+    let rules_parts:array<grapheme> = [
+        '\r' '\n' '\r' '́'
+        'ᄀ' 'ᅡ' 'ᆨ'
+        '؀' 'A'
+        'क' 'ा'
+        'क' '्' 'क'
+        '👩' '̈' '‍' '👩'
+        '🇦' '🇧' '🇨'
+    ]
+    let rules:string = rules_parts as string
+
+    if acute not=? "é" or acute.length not=? 1 {
+        return 1
+    }
+    if flag not=? "🇺🇸" {
+        return 2
+    }
+    if flag.length not=? 1 {
+        return 6
+    }
+    if zwj not=? "👩‍👩" or zwj.length not=? 1 {
+        return 3
+    }
+    if separate not=? "ab" or separate.length not=? 2 {
+        return 4
+    }
+    if empty not=? "" or empty.length not=? 0 {
+        return 5
+    }
+    if rules not=? "\r\n\ŕ각؀Aकाक्क👩̈‍👩🇦🇧🇨" or rules.length not=? 10 {
+        return 7
+    }
+    return 42
+}

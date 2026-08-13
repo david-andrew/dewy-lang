@@ -139,13 +139,14 @@ semantics.
 
 ## Homogeneous arrays
 
-- [x] Homogeneous literals of fixed-width integer elements.
+- [x] Homogeneous literals of fixed-width scalar and handle elements.
 - [x] Exact length refinements, `array<T length=N>`, and `.length`.
 - [x] Width-correct local and global storage for all fixed-width integer types.
 - [x] Constant and flow-proven dynamic indexing, indexed assignment, and const
       mutation checks.
 - [x] Bounds facts from comparisons, arithmetic, loops, and range iterators.
-- [ ] Element layouts other than fixed-width integers.
+- [x] `bool`, string/grapheme, function, nested-array, and object-handle
+      element layouts.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
 - [ ] Returning arrays and allowing stack-allocated arrays to escape their
@@ -160,6 +161,9 @@ semantics.
 - [x] Rejection of zero steps and iteration over ranges without a left anchor.
 - [x] udewy lowering for finite ranges whose values and iteration arithmetic fit
       the supported `int64` representation.
+- [x] Default one-grapheme character ranges, including descending and stepped
+      forms, scalar-order iteration, and skipping the Unicode surrogate gap.
+- [x] Explicit `range<uint32>` context for one-scalar string endpoints.
 - [ ] Runtime-computed range anchors and steps.
 - [ ] Bigint lowering for right-unbounded or finite out-of-`int64` ranges.
 - [ ] Using general range values beyond the currently supported iterator
@@ -186,7 +190,8 @@ semantics.
 - [x] Exhausted targets become `undefined`, with optional target types inferred
       from statically known iterator lengths and the complete logical formula.
 - [x] Literal post-exhaustion truth-table behavior and labeled exits.
-- [ ] Iterator sources other than the currently normalized integer ranges.
+- [x] Grapheme iteration over strings.
+- [ ] Multiiterator sources other than normalized integer ranges.
 - [ ] Conditions that mix iterator clauses with ordinary Boolean predicates.
 - [ ] Iterator fusion and scalar replacement of the baseline per-leaf state.
 
@@ -201,7 +206,7 @@ semantics.
 - [x] Function fields, including parenthesis-free zero-argument calls on member
       access, and object-local reads of sibling fields.
 - [x] Sequential udewy layout for `bool`, fixed-width integers, function
-      pointers, and nested objects of those types.
+      pointers, string/array handles, and nested objects of those types.
 - [ ] Dictionary and bidictionary `[]` forms.
 - [ ] sets `set[1 2 3 4]`
 - [ ] Extracting an object method as a naked function value.
@@ -209,10 +214,28 @@ semantics.
 
 ## Strings
 
-- [x] String literals are tokenized, parsed, represented in HIR, and assigned the
-      semantic `string` type.
-- [ ] udewy storage, ABI lowering, and emission for string values.
-- [ ] String operations, byte indexing, and arrays containing strings.
+- [x] Exact string-literal types with contextual materialization as immutable
+      grapheme strings, `array<uint8>`, `array<uint32>`, or
+      `array<grapheme>`. `char` is the one-grapheme string refinement.
+- [x] Unicode 16.0.0 UAX #29 extended-grapheme segmentation from checked-in
+      generated property tables, including combining marks, Hangul, emoji ZWJ
+      sequences, regional indicators, modifiers, and Indic conjuncts.
+- [x] One-word udewy string descriptors over immutable UTF-8 plus byte-offset
+      grapheme boundaries. Literals, calls, returns, globals, objects,
+      optionals, and handle-element arrays use the descriptor ABI.
+- [x] Grapheme `.length`, indexing, slicing with all bound forms, iteration,
+      exact byte equality, and supported character ranges.
+- [x] `string as array<uint8>` borrowing with copy-on-write mutation,
+      materialized `array<uint32>` scalar views, string-to-grapheme arrays, and
+      grapheme-array-to-string conversion with UAX #29 re-segmentation.
+- [x] `as` performs representation-changing conversions; `transmute` remains
+      bit-preserving and rejects string/array layout reinterpretation.
+- [x] Runtime re-segmentation uses current grapheme-array values, including
+      mutations that cause adjacent clusters to merge.
+- [ ] `array<uint8>` or `array<uint32>` to string. These conversions require
+      future refinement proofs for valid UTF-8 or Unicode scalar contents.
+- [ ] Normalization APIs and normalization-aware comparisons. String equality
+      currently preserves and compares the exact scalar spelling.
 
 ## Conditional values
 

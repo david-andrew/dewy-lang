@@ -511,6 +511,9 @@ class _BoundsValidator:
                 self._eval(node.expr, state, validate=validate),
                 node.type,
             )
+        if isinstance(node, hir.RepresentationCast):
+            self._eval(node.expr, state, validate=validate)
+            return None
         if isinstance(node, hir.Transmute):
             self._eval(node.expr, state, validate=validate)
             return None
@@ -520,6 +523,10 @@ class _BoundsValidator:
                 length = node.array.type.length
                 return None if length is None else Interval.exact(length)
             return None
+        if isinstance(node, hir.StringLength):
+            self._eval(node.string, state, validate=validate)
+            length = self._string_length(node.string.type)
+            return None if length is None else Interval.exact(length)
         if isinstance(node, hir.Index):
             self._eval(node.array, state, validate=validate)
             interval = self._eval(node.index, state, validate=validate)
@@ -529,6 +536,24 @@ class _BoundsValidator:
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, state, validate=validate)
             self._eval(node.value, state, validate=validate)
+            return None
+        if isinstance(node, hir.StringIndex):
+            self._eval(node.string, state, validate=validate)
+            interval = self._eval(node.index, state, validate=validate)
+            if validate:
+                self._validate_index(node, interval)
+            return None
+        if isinstance(node, hir.StringSlice):
+            self._eval(node.string, state, validate=validate)
+            self._eval(node.range, state, validate=validate)
+            return None
+        if isinstance(node, hir.StringEqual):
+            self._eval(node.left, state, validate=validate)
+            self._eval(node.right, state, validate=validate)
+            return None
+        if isinstance(node, hir.StringConcat):
+            self._eval(node.left, state, validate=validate)
+            self._eval(node.right, state, validate=validate)
             return None
         if isinstance(node, hir.ArrayLiteral):
             for item in node.items:
@@ -652,7 +677,7 @@ class _BoundsValidator:
             return Interval.exact(node.type.value)
         if isinstance(node, hir.Integer):
             return Interval.exact(node.value)
-        if isinstance(node, hir.ValueCast):
+        if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             return self._constant_expr(node.expr, seen)
         if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):
             length = node.array.type.length
@@ -732,12 +757,33 @@ class _BoundsValidator:
             return None
         return interval
 
+    @staticmethod
+    def _string_length(type_: ty.Type) -> int | None:
+        if isinstance(type_, ty.StringLiteralType):
+            return ty.string_literal_lengths(type_.value)[2]
+        if isinstance(type_, ty.StringType):
+            return type_.length
+        if isinstance(type_, str) and type_ in {'char', 'grapheme'}:
+            return 1
+        return None
+
     def _validate_index(
         self,
-        node: hir.Index,
+        node: hir.Index | hir.StringIndex,
         interval: Interval | None,
     ) -> None:
-        length = node.array.type.length if isinstance(node.array.type, ty.ArrayType) else None
+        if isinstance(node, hir.Index):
+            length = (
+                node.array.type.length
+                if isinstance(node.array.type, ty.ArrayType)
+                else None
+            )
+            index = node.index
+            kind = 'array'
+        else:
+            length = self._string_length(node.string.type)
+            index = node.index
+            kind = 'string'
         if (
             length is not None
             and interval is not None
@@ -757,12 +803,12 @@ class _BoundsValidator:
         )
         user_error(
             self.srcfile,
-            'array index is not proven in bounds',
+            f'{kind} index is not proven in bounds',
             Pointer(
-                span=node.index.loc,
+                span=index.loc,
                 message=f'the index interval here is `{known}`',
             ),
-            hint='establish both a nonnegative lower bound and an upper bound below the array length',
+            hint=f'establish both a nonnegative lower bound and an upper bound below the {kind} length',
         )
 
     def _refine(
@@ -835,7 +881,7 @@ class _BoundsValidator:
 
     @staticmethod
     def _binding_id(node: hir.AST) -> int | None:
-        while isinstance(node, hir.ValueCast):
+        while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
         return (
             node.binding_id
