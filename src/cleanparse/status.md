@@ -255,6 +255,111 @@ semantics.
 - [x] Non-exhaustive conditionals are statement-valued `void`.
 - [ ] Multi-value conditional results.
 
+## Array, object, and other compile-time versus runtime representations
+
+The source-level type of a value describes its semantics, not a mandatory
+machine layout. Lowering should retain only information that can affect the
+program at runtime. Facts already established by typing, refinement, control-flow,
+or effect analysis should normally become constants in the emitted program
+rather than fields stored beside every value.
+
+The current backend generally uses one canonical representation for each
+non-scalar type. In particular, every array is represented by a pointer to a
+48-byte descriptor containing `data`, `length`, `capacity`, `stride`, `flags`,
+and `owner`. This is a useful initial implementation because every array is a
+one-word handle and all lowering paths can use the same operations, but it is
+not required by the language semantics. At present array elements can be
+mutated, but arrays cannot change length; `capacity`, `stride`, and `owner` are
+not read by generated programs. `flags` is needed only for runtime
+copy-on-write of borrowed UTF-8, while exact array length and element stride are
+usually known statically.
+
+The intended rule is that each value receives the least runtime representation
+needed by all of its reachable uses. For arrays this includes:
+
+- An immutable literal used directly by another operation can lower to static
+  element data, or directly to an udewy literal operand, with no descriptor.
+- A fixed-length mutable local array needs writable element storage, but does
+  not inherently need metadata beside that storage.
+- A view whose length is known only at runtime may need `(data, length)`.
+- A borrowed byte view that may be mutated needs enough dynamic state to
+  distinguish borrowed from owned storage and perform copy-on-write. If analysis
+  proves that it is never mutated, that state is unnecessary.
+- A future growable array may need `(data, length, capacity)`. Capacity should
+  not exist merely in anticipation of operations that the value never performs.
+- Element stride follows from `array<T>` and should be compiled into address
+  arithmetic. A runtime stride is justified only by genuine type erasure, such
+  as an existential container or an FFI contract whose element layout is not
+  statically available. Merely placing differently typed arrays in different
+  fields of one object does not erase their element types.
+- Ownership or lifetime metadata is needed only when the selected memory
+  management strategy must inspect it dynamically. It need not be a field on
+  every array merely because some arrays borrow storage.
+
+This produces a spectrum rather than a second universal layout: no runtime
+value, raw data only, a scalar tuple such as `(data, length)`, or a full
+descriptor. Known `.length` operations and element widths are substituted
+directly at their uses. A descriptor is materialized only at a boundary that
+actually requires the canonical handle representation.
+
+The same principle applies beyond arrays:
+
+- Object fields can remain independent scalar values, and unused fields can be
+  absent, while an object that escapes or crosses a canonical ABI boundary may
+  require materialization into memory. Scalar replacement must preserve the
+  language's object value and mutation semantics.
+- Exact string literals should remain semantic singletons until context selects
+  UTF-8 bytes, Unicode scalars, graphemes, or a runtime string. UTF-8 data,
+  grapheme boundaries, byte length, and grapheme length should be materialized
+  only when the selected operations require them.
+- Optional and union tags can disappear after exhaustive narrowing, or be
+  encoded in an unused payload value when a valid niche is proven. A general
+  tag-and-payload representation remains the fallback.
+- Ranges and iterators whose bounds and state transitions are known can lower
+  directly to loop scalars instead of heap- or stack-resident iterator records.
+- Function values need only a code pointer when no environment is captured;
+  closures require an environment only when captures survive lowering.
+
+Representation selection must happen after semantic typing. Two values with the
+same Dewy type may therefore use different machine representations without that
+difference becoming observable in Dewy. The compiler must insert an adapter or
+materialize the canonical form when differently represented values meet at
+control-flow joins, indirect calls, separately compiled interfaces, FFI
+boundaries, or unspecialized function parameters. Direct calls may instead be
+specialized so that compile-time facts continue across the boundary.
+
+Choosing a smaller representation requires proofs about every relevant use:
+
+- use analysis determines which metadata and operations are observed;
+- escape and lifetime analysis determines whether storage or descriptors must
+  survive the current scope;
+- mutation, effect, and alias analysis determines whether facts remain true
+  across assignments and calls, and whether borrowed storage needs copy-on-write;
+- control-flow analysis selects a representation valid for every path and
+  identifies where values with different representations merge;
+- ABI analysis determines where a stable canonical layout is externally
+  observable or needed for indirect access.
+
+When a proof is unavailable, lowering should use the canonical representation
+rather than changing semantics or inserting speculative behavior. This makes
+the full descriptor a correctness fallback, not the default cost paid by every
+value.
+
+Incremental implementation work:
+
+- [ ] Record representation requirements from array operations, mutation,
+      aliases, escapes, and call boundaries.
+- [ ] Scalar-replace fixed local arrays and emit immutable literals as raw static
+      data when no descriptor is required.
+- [ ] Stop storing array length, capacity, stride, flags, and ownership metadata
+      when each fact is either unused or available statically.
+- [ ] Materialize canonical descriptors only at representation-changing
+      boundaries, and specialize direct calls where profitable.
+- [ ] Extend the same analysis to objects, strings, optionals/unions, iterators,
+      and closures.
+- [ ] Remove or redesign canonical descriptor fields that remain unused once
+      dynamic arrays and lifetime management have defined semantics.
+
 ## Completely unimplemented
 
 - [ ] Imports and modules
@@ -280,7 +385,9 @@ semantics.
 - [ ] test harness system. 
     - [ ] self hosted unit tests with automation for running on all updates
 - [ ] basic optimizations
-    - [ ] different runtimer lowering/representations depending on how something is used. e.g. `array<uint8>` doesn't necessarily need all of the runtime description stuff especially if at compiletime where it is being used, we can just have the generated code deal with the correct length/stride/etc. directly rather than storing that all in a runtime struct
+    - [ ] use-dependent lowering and scalar replacement as described in
+          "Array, object, and other compile-time versus runtime representations"
+          above
 
 ### Full Refinement System
 - [ ] Flow-sensitive refinement typing. Track value facts through ordinary control flow: x != 0, 0 <= i < a.length, literal values, unions/intersections, exclusions like T & ~0, etc.
