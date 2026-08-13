@@ -419,3 +419,21 @@ Incremental implementation work:
 ### Aspirational/Experimental/etc.
 - [ ] non text-editor view over code/AST. basically render AST to look like text, but render with user set visual settings for spacing, indentation, comment positions, etc. etc. Probably requires a custom editor-esque app. Should generally feel mostly like editing regular text in a text editor, just without the pure bag-of-characters semantics
 - [ ] saving/editing packed ASTs instead of bag-of-characters raw text for source code. hashing sort of like unison, though tbd the exact semantics
+- [ ] python FFI (dewy as host). Semi integrated into the type system in terms of python FFI stuff e.g.:
+    ```dewy
+    let x: PyObject = np.array(...)
+    
+    # many function calls into python might look like this
+    (...args:array<PyObject>):> (PyObject | PythonError) & PythonEffect
+
+    PythonCallable:type = [
+      __call__ = (...args:array<PyObject>):> (PyObject | PythonError) & PythonEffect
+    ]
+    PythonIndexable = [
+      __index__ = (key:PyObject):> (PyObject|PythonError) & PythonEffect
+    ]
+    PythonAccessable = [
+      __access__ = (fieldname:string):> (PyObject|PythonError) & PythonEffect
+    ]
+    ```
+    Probably it wouldn't quite look like this, and there would also be a dynamic process that would actually check if the python object supported whatever operation you were trying to do to it, or returning an error. And then usage within dewy would look pretty close to normal dewy code, just the type checking safety falls away
