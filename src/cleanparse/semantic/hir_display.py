@@ -33,6 +33,12 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.ArrayType):
         length = f' length={t.length}' if t.length is not None else ''
         return f'array<{type_to_dewy(t.element)}{length}>'
+    if isinstance(t, ty.ObjectType):
+        fields = ' '.join(
+            f'{"const " if not field.mutable else ""}{field.name}:{type_to_dewy(field.type)}'
+            for field in t.fields
+        )
+        return f'[{fields}]'
     if isinstance(t, ty.FunctionType):
         return _function_type_to_dewy(t)
     if isinstance(t, ty.OverloadType):
@@ -155,6 +161,14 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'Integer({_format_integer(node)})'
     if isinstance(node, hir.ArrayLiteral):
         return f'ArrayLiteral({len(node.items)} items)'
+    if isinstance(node, hir.ObjectLiteral):
+        return f'ObjectLiteral({len(node.fields)} fields)'
+    if isinstance(node, hir.MemberAccess):
+        return f'MemberAccess(.{node.name})'
+    if isinstance(node, hir.MemberAssign):
+        return 'MemberAssign'
+    if isinstance(node, hir.TypeValue):
+        return f'TypeValue({type_to_dewy(node.value)})'
     if isinstance(node, hir.ArrayLength):
         return 'ArrayLength'
     if isinstance(node, hir.IteratorExpression):
@@ -236,6 +250,14 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('target', node.target), ('value', node.value)]
     if isinstance(node, hir.ArrayLiteral):
         return [(f'items[{i}]', item) for i, item in enumerate(node.items)]
+    if isinstance(node, hir.ObjectLiteral):
+        return [(field.name, field.value) for field in node.fields]
+    if isinstance(node, hir.MemberAccess):
+        return [('value', node.value)]
+    if isinstance(node, hir.MemberAssign):
+        return [('target', node.target), ('value', node.value)]
+    if isinstance(node, hir.TypeValue):
+        return []
     if isinstance(node, hir.ArrayLength):
         return [('array', node.array)]
     if isinstance(node, hir.IteratorExpression):
@@ -547,6 +569,32 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
             _nest(indent, _join(_SOFT, items)),
             _text(']'),
         ))
+    if isinstance(node, hir.ObjectLiteral):
+        items = [
+            _seq(
+                _text(f'{"const " if not field.mutable else ""}{field.name} = '),
+                _to_doc(field.value, 0, indent),
+            )
+            for field in node.fields
+        ]
+        return _group(_seq(
+            _text('['),
+            _nest(indent, _join(_SOFT, items)),
+            _text(']'),
+        ))
+    if isinstance(node, hir.MemberAccess):
+        return _seq(
+            _to_doc(node.value, _CALL_PREC, indent),
+            _text(f'.{node.name}'),
+        )
+    if isinstance(node, hir.MemberAssign):
+        return _seq(
+            _to_doc(node.target, 0, indent),
+            _text(' = '),
+            _to_doc(node.value, 0, indent),
+        )
+    if isinstance(node, hir.TypeValue):
+        return _text(type_to_dewy(node.value))
     if isinstance(node, hir.ArrayLength):
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
     if isinstance(node, hir.IteratorExpression):

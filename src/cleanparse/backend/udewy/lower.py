@@ -156,6 +156,7 @@ class _Lowerer:
         self.next_flow_temp = 1
         self.next_eager_temp = 1
         self.next_array_temp = 1
+        self.next_object_temp = 1
         self.next_iterator_temp = 1
         self.next_iterator_value = 1
         self.next_optional_temp = 1
@@ -166,9 +167,18 @@ class _Lowerer:
         self.lowering_module_startup = False
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.optional_globals_initialized: set[int] = set()
+        self.object_globals_initialized: set[int] = set()
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
         self.call_optional_kwargs: dict[int, dict[str, ty.TypeExpr]] = {}
         self.current_optional_result: hir.ExpressedIdentifier | None = None
+        self.current_object_result: hir.ExpressedIdentifier | None = None
+        self.current_object_receiver: hir.ExpressedIdentifier | None = None
+        self.current_object_type: ty.ObjectType | None = None
+        self.current_object_field_ids: set[int] = set()
+        self.current_object_field_names: dict[int, str] = {}
+        self.object_literal_contexts: list[
+            tuple[hir.AST, ty.ObjectType, dict[int, str]]
+        ] = []
         self.needs_startup = False
         self.startup_symbol = '__dewy_top_level'
         self.user_main_base = '__dewy_user_main'
@@ -186,8 +196,13 @@ class _Lowerer:
         self.needs_startup = any(
             not (
                 isinstance(item, hir.Declare)
-                and (binding := self.declare_bindings.get(id(item))) is not None
-                and binding.kind in {'function', 'overload'}
+                and (
+                    (
+                        (binding := self.declare_bindings.get(id(item))) is not None
+                        and binding.kind in {'function', 'overload'}
+                    )
+                    or isinstance(item.expr, hir.TypeValue)
+                )
             )
             and not isinstance(item, hir.ScopeMetatag)
             for item in self.root.items
@@ -262,6 +277,7 @@ class _Lowerer:
     def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
         literal = function.literal
         result_payload = ty.optional_payload(literal.rettype)
+        object_result = isinstance(literal.rettype, ty.ObjectType)
         if isinstance(result_payload, ty.ArrayType):
             self._target_error(
                 literal,
@@ -269,7 +285,7 @@ class _Lowerer:
             )
         rettype = (
             ty.VOID_TYPE
-            if result_payload is not None
+            if result_payload is not None or object_result
             else self._target_scalar_type(literal.rettype, literal)
         )
         lowered_pos: list[hir.Param | hir.BoundParam] = []
@@ -283,6 +299,42 @@ class _Lowerer:
                 and ty.optional_payload(param.type) is None
             ):
                 self._target_error(literal, 'heterogeneous optional parameter type')
+            if isinstance(param.type, ty.ObjectType):
+                if isinstance(param, hir.BoundParam):
+                    self._target_error(literal, 'object parameter defaults')
+                incoming_name = self._new_object_name(f'arg_{param.name}')
+                incoming = hir.ExpressedIdentifier(
+                    literal.loc,
+                    'int64',
+                    incoming_name,
+                )
+                cell = hir.ExpressedIdentifier(
+                    literal.loc,
+                    'int64',
+                    param.name,
+                    binding_id=param.binding_id,
+                )
+                size, _offsets = self._object_layout(param.type, literal)
+                parameter_prologue.append(
+                    hir.Declare(
+                        literal.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        param.name,
+                        'int64',
+                        self._object_allocation(literal.loc, size),
+                        binding_id=param.binding_id,
+                    )
+                )
+                parameter_prologue.extend(
+                    self._object_copy(cell, incoming, param.type, literal.loc)
+                )
+                return replace(
+                    param,
+                    name=incoming_name,
+                    type='int64',
+                    binding_id=None,
+                )
             payload = ty.optional_payload(param.type)
             if payload is None:
                 return self._transform_param(param)
@@ -326,30 +378,62 @@ class _Lowerer:
             if literal.rest_args is not None
             else None
         )
+        receiver = None
+        if literal.object_receiver:
+            receiver_name = self._new_object_name('self')
+            receiver = hir.ExpressedIdentifier(literal.loc, 'int64', receiver_name)
+            lowered_pos = [hir.Param(receiver_name, 'int64'), *lowered_pos]
         result_target = None
-        if result_payload is not None:
+        object_result_target = None
+        if result_payload is not None or object_result:
             assert function.optional_result_name is not None
             lowered_pos.append(
                 hir.Param(function.optional_result_name, 'int64')
             )
-            result_target = hir.ExpressedIdentifier(
+            target = hir.ExpressedIdentifier(
                 literal.loc,
                 literal.rettype,
                 function.optional_result_name,
             )
+            if object_result:
+                object_result_target = target
+            else:
+                result_target = target
         previous_result = self.current_optional_result
+        previous_object_result = self.current_object_result
+        previous_receiver = self.current_object_receiver
+        previous_object_type = self.current_object_type
+        previous_field_ids = self.current_object_field_ids
+        previous_field_names = self.current_object_field_names
         self.current_optional_result = result_target
+        self.current_object_result = object_result_target
+        self.current_object_receiver = receiver
+        self.current_object_type = literal.object_type
+        self.current_object_field_ids = {binding_id for binding_id, _name in literal.object_fields}
+        self.current_object_field_names = {
+            binding_id: name for binding_id, name in literal.object_fields
+        }
         body = self._lower_function_body(
             self._require_node(self._transform_node(literal.body)),
             literal.rettype,
         )
         self.current_optional_result = previous_result
+        self.current_object_result = previous_object_result
+        self.current_object_receiver = previous_receiver
+        self.current_object_type = previous_object_type
+        self.current_object_field_ids = previous_field_ids
+        self.current_object_field_names = previous_field_names
         if parameter_prologue:
             if isinstance(body, hir.Block):
                 body = replace(body, items=[*parameter_prologue, *body.items])
             else:
                 body = hir.Block(body.loc, body.type, [*parameter_prologue, body], True)
         function_type = self._lower_callable_type(literal.type)
+        if literal.object_receiver and isinstance(function_type, ty.FunctionType):
+            function_type = replace(
+                function_type,
+                pos_or_kw=[ty.PosOrKwArg(None, 'int64'), *function_type.pos_or_kw],
+            )
         return LoweredFunction(
             function.symbol,
             replace(
@@ -381,7 +465,7 @@ class _Lowerer:
             for param in type_.kw_only
         ]
         rettype: ty.TypeExpr = type_.ret
-        if ty.optional_payload(type_.ret) is not None:
+        if isinstance(type_.ret, ty.ObjectType) or ty.optional_payload(type_.ret) is not None:
             pos.append(ty.PosOrKwArg(None, 'int64'))
             rettype = ty.VOID_TYPE
         return replace(
@@ -393,6 +477,8 @@ class _Lowerer:
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         if ty.optional_payload(type_) is not None:
+            return 'int64'
+        if isinstance(type_, ty.ObjectType):
             return 'int64'
         if isinstance(type_, ty.FunctionType):
             lowered = self._lower_callable_type(type_)
@@ -462,6 +548,8 @@ class _Lowerer:
                 ))
             annotation = 'int64'
         if isinstance(annotation, ty.ArrayType):
+            annotation = 'int64'
+        if isinstance(annotation, ty.ObjectType):
             annotation = 'int64'
         if ty.optional_payload(annotation) is not None:
             annotation = 'int64'
@@ -668,7 +756,10 @@ class _Lowerer:
             definition_scope,
             overload_member,
         )
-        if ty.optional_payload(literal.rettype) is not None:
+        if ty.optional_payload(literal.rettype) is not None or isinstance(
+            literal.rettype,
+            ty.ObjectType,
+        ):
             function.optional_result_name = self._new_optional_name('result')
         self.next_function_order += 1
         self.functions.append(function)
@@ -859,6 +950,28 @@ class _Lowerer:
             self._discover_node(node.target, scope, current_function)
             self._discover_node(node.value, scope, current_function)
             return
+        if isinstance(node, hir.ObjectLiteral):
+            for field in node.fields:
+                self._discover_node(
+                    field.value,
+                    scope,
+                    current_function,
+                    suggested_name=(
+                        self._new_object_name(f'method_{field.name}')
+                        if isinstance(field.value, hir.FunctionLiteral)
+                        else None
+                    ),
+                )
+            return
+        if isinstance(node, hir.MemberAccess):
+            self._discover_node(node.value, scope, current_function)
+            return
+        if isinstance(node, hir.MemberAssign):
+            self._discover_node(node.target, scope, current_function)
+            self._discover_node(node.value, scope, current_function)
+            return
+        if isinstance(node, hir.TypeValue):
+            return
         if isinstance(node, hir.FunctionCall):
             self._discover_node(node.func, scope, current_function)
             for arg in node.pos_args:
@@ -871,14 +984,14 @@ class _Lowerer:
             self._discover_node(node.value, scope, current_function)
             target_binding = self.identifier_bindings.get(id(node.target))
             if (
-                isinstance(node.value.type, ty.ArrayType)
+                isinstance(node.value.type, (ty.ArrayType, ty.ObjectType))
                 and current_function is not None
                 and target_binding is not None
                 and target_binding.owner_function is None
             ):
                 self._target_error(
                     node,
-                    'a function-local array cannot escape into module storage',
+                    'a function-local array or object cannot escape into module storage',
                 )
             return
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
@@ -1106,6 +1219,33 @@ class _Lowerer:
                     for item in node.items
                 ],
             )
+        if isinstance(node, hir.ObjectLiteral):
+            return replace(
+                node,
+                fields=[
+                    replace(
+                        field,
+                        value=self._require_node(self._transform_node(field.value)),
+                    )
+                    for field in node.fields
+                ],
+            )
+        if isinstance(node, hir.MemberAccess):
+            return replace(
+                node,
+                value=self._require_node(self._transform_node(node.value)),
+            )
+        if isinstance(node, hir.MemberAssign):
+            target = self._transform_node(node.target)
+            if not isinstance(target, hir.MemberAccess):
+                raise TypeError('INTERNAL ERROR: member assignment target was not a member access')
+            return replace(
+                node,
+                target=target,
+                value=self._require_node(self._transform_node(node.value)),
+            )
+        if isinstance(node, hir.TypeValue):
+            return node
         if isinstance(node, hir.ArrayLength):
             return replace(
                 node,
@@ -1212,6 +1352,8 @@ class _Lowerer:
         if isinstance(node, hir.Declare):
             binding = self.declare_bindings[id(node)]
             if binding.kind in {'function', 'overload'}:
+                return None
+            if isinstance(node.expr, hir.TypeValue):
                 return None
             return replace(
                 node,
@@ -1387,6 +1529,9 @@ class _Lowerer:
                         )
                     )
                     continue
+                if self.current_object_result is not None:
+                    items.extend(self._object_result_write(item))
+                    continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
                 items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
@@ -1407,6 +1552,8 @@ class _Lowerer:
                     hir.Void(node.loc, ty.VOID_TYPE),
                 ),
             ]
+        elif self.current_object_result is not None:
+            statements = self._object_result_write(node)
         else:
             prelude, value = self._extract_expression(node)
             statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
@@ -1498,10 +1645,12 @@ class _Lowerer:
                     declaration,
                     *self._optional_write(cell, node.expr, payload),
                 ]
+            if isinstance(declared_type, ty.ObjectType):
+                return self._lower_object_declare(node, declared_type)
             prelude, expr = self._extract_expression(node.expr)
             annotation = (
                 'int64'
-                if isinstance(node.annotation or node.expr.type, ty.ArrayType)
+                if isinstance(node.annotation or node.expr.type, (ty.ArrayType, ty.ObjectType))
                 else self._lower_runtime_value_type(node.annotation)
                 if node.annotation is not None
                 else None
@@ -1543,7 +1692,16 @@ class _Lowerer:
                 *value_prelude,
                 self._array_store(value, address, node.target.type, node.loc),
             ]
+        if isinstance(node, hir.MemberAssign):
+            return self._lower_member_assign(node)
         if isinstance(node, hir.Assign):
+            if (
+                node.target.binding_id is not None
+                and node.target.binding_id in self.current_object_field_ids
+            ):
+                return self._lower_object_field_assign(node)
+            if isinstance(node.target.type, ty.ObjectType):
+                return self._lower_object_assign(node)
             payload = (
                 self.optional_payloads.get(node.target.binding_id)
                 if node.target.binding_id is not None
@@ -1602,6 +1760,10 @@ class _Lowerer:
             prelude, value = self._extract_expression(node.value)
             return [*prelude, replace(node, value=value)]
         if isinstance(node, hir.Return):
+            if self.current_object_result is not None:
+                if node.item is None:
+                    self._target_error(node, 'object return without a value')
+                return self._object_result_write(node.item)
             if self.current_optional_result is not None:
                 if node.item is None:
                     self._target_error(node, 'optional return without a value')
@@ -1650,12 +1812,31 @@ class _Lowerer:
     def _extract_expression(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         """Extract statement-valued subexpressions and return a scalar expression."""
         if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+            for base, object_type, field_names in reversed(self.object_literal_contexts):
+                if node.binding_id in field_names:
+                    return self._extract_literal_field_identifier(
+                        node,
+                        base,
+                        object_type,
+                        field_names[node.binding_id],
+                    )
+        if (
+            isinstance(node, hir.ExpressedIdentifier)
+            and node.binding_id is not None
+            and node.binding_id in self.current_object_field_ids
+        ):
+            return self._extract_object_field_identifier(node)
+        if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
             payload = self.optional_payloads.get(node.binding_id)
             if payload is not None:
                 cell = replace(node, type='int64')
                 if ty.optional_payload(node.type) is not None:
                     return [], cell
                 return [], self._optional_load_payload(cell, payload, node.loc)
+        if isinstance(node, hir.ObjectLiteral):
+            return self._extract_object_literal(node)
+        if isinstance(node, hir.MemberAccess):
+            return self._extract_member_access(node)
         if isinstance(node, hir.Undefined):
             self._target_error(node, '`undefined` value without an optional context')
         if isinstance(node, hir.TypeTest):
@@ -1734,6 +1915,8 @@ class _Lowerer:
             )
             return prelude, self._array_load(address, node.type, node.loc)
         if isinstance(node, hir.FunctionCall):
+            if self._is_object_method_func(node.func):
+                return self._extract_method_call(node)
             prelude: list[hir.AST] = []
             func_prelude, func = self._extract_expression(node.func)
             prelude.extend(func_prelude)
@@ -1760,6 +1943,8 @@ class _Lowerer:
                 )
                 if payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
+                    arg_prelude, lowered_arg = self._extract_object_pointer(arg)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 prelude.extend(arg_prelude)
@@ -1770,10 +1955,14 @@ class _Lowerer:
                 payload = optional_kwargs.get(name)
                 if payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                elif isinstance(arg.type, ty.ObjectType):
+                    arg_prelude, lowered_arg = self._extract_object_pointer(arg)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 prelude.extend(arg_prelude)
                 kw_args[name] = lowered_arg
+            if isinstance(node.type, ty.ObjectType):
+                return self._finish_object_call(node, func, pos_args, kw_args, prelude)
             result_payload = ty.optional_payload(node.type)
             if result_payload is not None:
                 result = hir.ExpressedIdentifier(
@@ -1980,7 +2169,7 @@ class _Lowerer:
     ) -> hir.AST:
         address = self._optional_payload_address(cell, loc)
         if payload == 'bool':
-            loaded = self._intrinsic_call('__load_u8__', [address], 'uint8', loc)
+            loaded = self._intrinsic_call('__load_i8__', [address], 'int8', loc)
             return hir.Transmute(loc, 'bool', loaded)
         layout = ty.fixed_integer_layout(payload)
         if layout is not None:
@@ -2201,6 +2390,22 @@ class _Lowerer:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, node.type, name)
 
+    def _new_object_temp(self, loc: Span) -> hir.ExpressedIdentifier:
+        while True:
+            name = f'__dewy_object_{self.next_object_temp}'
+            self.next_object_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(loc, 'int64', name)
+
+    def _new_object_name(self, role: str) -> str:
+        while True:
+            name = f'__dewy_object_{role}_{self.next_object_temp}'
+            self.next_object_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return name
+
     def _new_iterator_temp(
         self,
         node: hir.IteratorExpression,
@@ -2352,6 +2557,553 @@ class _Lowerer:
             ty.VOID_TYPE,
             loc,
         )
+
+    def _object_layout(
+        self,
+        object_type: ty.ObjectType,
+        node: hir.AST,
+    ) -> tuple[int, dict[str, int]]:
+        offset = 0
+        align = 1
+        offsets: dict[str, int] = {}
+        for field in object_type.fields:
+            size, field_align = self._field_size_align(field.type, node)
+            offset = (offset + field_align - 1) // field_align * field_align
+            offsets[field.name] = offset
+            offset += size
+            align = max(align, field_align)
+        size = (offset + align - 1) // align * align if align else offset
+        return max(size, 1), offsets
+
+    def _field_size_align(self, type_: ty.Type, node: hir.AST) -> tuple[int, int]:
+        if type_ == 'bool':
+            return 1, 1
+        layout = ty.fixed_integer_layout(type_)
+        if layout is not None:
+            width, _signed = layout
+            size = width // 8
+            return size, size
+        if isinstance(type_, ty.FunctionType):
+            return 8, 8
+        if isinstance(type_, ty.ObjectType):
+            size, offsets = self._object_layout(type_, node)
+            align = 1
+            for field in type_.fields:
+                _field_size, field_align = self._field_size_align(field.type, node)
+                align = max(align, field_align)
+            return size, align
+        self._target_error(node, f'object field layout `{type_to_dewy(type_)}`')
+
+    def _object_allocation(self, loc: Span, size: int) -> hir.FunctionCall:
+        allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
+        return self._intrinsic_call(
+            allocator,
+            [self._int64_literal(loc, size)],
+            'int64',
+            loc,
+        )
+
+    def _field_address(self, base: hir.AST, offset: int, loc: Span) -> hir.AST:
+        if offset == 0:
+            return replace(base, type='int64')
+        return self._int64_binary(
+            '__add__',
+            replace(base, type='int64'),
+            self._int64_literal(loc, offset),
+            loc,
+        )
+
+    def _value_load(self, address: hir.AST, type_: ty.Type, loc: Span) -> hir.AST:
+        if isinstance(type_, ty.ObjectType):
+            return replace(address, type='int64')
+        if type_ == 'bool':
+            loaded = self._intrinsic_call('__load_i8__', [address], 'int8', loc)
+            return hir.Transmute(loc, 'bool', loaded)
+        layout = ty.fixed_integer_layout(type_)
+        if layout is not None:
+            width, signed = layout
+            prefix = 'i' if signed else 'u'
+            return self._intrinsic_call(
+                f'__load_{prefix}{width}__',
+                [address],
+                type_,
+                loc,
+            )
+        if isinstance(type_, ty.FunctionType):
+            loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)
+            return hir.Transmute(loc, self._lower_callable_type(type_), loaded)
+        self._target_error(address, f'object field load `{type_to_dewy(type_)}`')
+
+    def _value_store(
+        self,
+        value: hir.AST,
+        address: hir.AST,
+        type_: ty.Type,
+        loc: Span,
+    ) -> list[hir.AST]:
+        if isinstance(type_, ty.ObjectType):
+            return self._object_copy(address, value, type_, loc)
+        if type_ == 'bool':
+            stored = hir.Transmute(value.loc, 'uint8', value)
+            return [self._intrinsic_call('__store_u8__', [stored, address], ty.VOID_TYPE, loc)]
+        layout = ty.fixed_integer_layout(type_)
+        if layout is not None:
+            width, signed = layout
+            prefix = 'i' if signed else 'u'
+            return [self._intrinsic_call(
+                f'__store_{prefix}{width}__',
+                [value, address],
+                ty.VOID_TYPE,
+                loc,
+            )]
+        if isinstance(type_, ty.FunctionType):
+            stored = hir.Transmute(value.loc, 'int64', value)
+            return [self._intrinsic_call('__store_i64__', [stored, address], ty.VOID_TYPE, loc)]
+        self._target_error(value, f'object field store `{type_to_dewy(type_)}`')
+
+    def _object_copy(
+        self,
+        dest: hir.AST,
+        src: hir.AST,
+        object_type: ty.ObjectType,
+        loc: Span,
+    ) -> list[hir.AST]:
+        _size, offsets = self._object_layout(object_type, dest)
+        statements: list[hir.AST] = []
+        for field in object_type.fields:
+            dest_addr = self._field_address(dest, offsets[field.name], loc)
+            src_addr = self._field_address(src, offsets[field.name], loc)
+            if isinstance(field.type, ty.ObjectType):
+                statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc))
+            elif isinstance(field.type, ty.FunctionType):
+                loaded = self._intrinsic_call(
+                    '__load_i64__',
+                    [src_addr],
+                    'int64',
+                    loc,
+                )
+                statements.append(
+                    self._intrinsic_call(
+                        '__store_i64__',
+                        [loaded, dest_addr],
+                        ty.VOID_TYPE,
+                        loc,
+                    )
+                )
+            else:
+                loaded = self._value_load(src_addr, field.type, loc)
+                statements.extend(self._value_store(loaded, dest_addr, field.type, loc))
+        return statements
+
+    def _extract_object_literal(
+        self,
+        node: hir.ObjectLiteral,
+        dest: hir.ExpressedIdentifier | None = None,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        if not isinstance(node.type, ty.ObjectType):
+            self._target_error(node, 'object literal does not have an object type')
+        size, offsets = self._object_layout(node.type, node)
+        statements: list[hir.AST] = []
+        if dest is None:
+            dest = self._new_object_temp(node.loc)
+            statements.append(
+                hir.Declare(
+                    node.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    dest.name,
+                    'int64',
+                    self._object_allocation(node.loc, size),
+                )
+            )
+        statements.extend(self._initialize_object_fields(node, dest, offsets))
+        return statements, dest
+
+    def _init_object_literal_at(
+        self,
+        node: hir.ObjectLiteral,
+        dest: hir.AST,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        if not isinstance(node.type, ty.ObjectType):
+            self._target_error(node, 'object literal does not have an object type')
+        _size, offsets = self._object_layout(node.type, node)
+        return self._initialize_object_fields(node, dest, offsets), dest
+
+    def _initialize_object_fields(
+        self,
+        node: hir.ObjectLiteral,
+        dest: hir.AST,
+        offsets: dict[str, int],
+    ) -> list[hir.AST]:
+        assert isinstance(node.type, ty.ObjectType)
+        field_names = {
+            field.binding_id: field.name
+            for field in node.fields
+            if field.binding_id is not None
+        }
+        self.object_literal_contexts.append((dest, node.type, field_names))
+        statements: list[hir.AST] = []
+        try:
+            for field in node.fields:
+                address = self._field_address(dest, offsets[field.name], field.loc)
+                expected = node.type.field(field.name)
+                field_type = expected.type if expected is not None else field.value.type
+                if (
+                    isinstance(field.value, hir.ObjectLiteral)
+                    and isinstance(field_type, ty.ObjectType)
+                ):
+                    nested_prelude, _nested = self._init_object_literal_at(
+                        field.value,
+                        address,
+                    )
+                    statements.extend(nested_prelude)
+                    continue
+                prelude, value = self._extract_expression(field.value)
+                statements.extend(prelude)
+                statements.extend(
+                    self._value_store(value, address, field_type, field.loc)
+                )
+        finally:
+            self.object_literal_contexts.pop()
+        return statements
+
+    def _extract_object_pointer(
+        self,
+        node: hir.AST,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        if isinstance(node, hir.ObjectLiteral):
+            return self._extract_object_literal(node)
+        if isinstance(node, hir.MemberAccess) and isinstance(node.type, ty.ObjectType):
+            return self._extract_member_access(node)
+        if isinstance(node, hir.FunctionCall) and isinstance(node.type, ty.ObjectType):
+            return self._extract_expression(node)
+        prelude, value = self._extract_expression(node)
+        return prelude, value
+
+    def _extract_member_access(
+        self,
+        node: hir.MemberAccess,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        prelude, obj = self._extract_object_pointer(node.value)
+        if not isinstance(node.value.type, ty.ObjectType):
+            self._target_error(node, 'member access requires an object')
+        _size, offsets = self._object_layout(node.value.type, node)
+        address = self._field_address(obj, offsets[node.name], node.loc)
+        field = node.value.type.field(node.name)
+        field_type = field.type if field is not None else node.type
+        if isinstance(field_type, ty.ObjectType):
+            return prelude, address
+        return prelude, self._value_load(address, field_type, node.loc)
+
+    def _extract_object_field_identifier(
+        self,
+        node: hir.ExpressedIdentifier,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        if self.current_object_receiver is None or self.current_object_type is None:
+            self._target_error(node, 'object field capture without a receiver')
+        name = self.current_object_field_names[node.binding_id]
+        _size, offsets = self._object_layout(self.current_object_type, node)
+        address = self._field_address(self.current_object_receiver, offsets[name], node.loc)
+        field = self.current_object_type.field(name)
+        field_type = field.type if field is not None else node.type
+        if isinstance(field_type, ty.ObjectType):
+            return [], address
+        return [], self._value_load(address, field_type, node.loc)
+
+    def _extract_literal_field_identifier(
+        self,
+        node: hir.ExpressedIdentifier,
+        base: hir.AST,
+        object_type: ty.ObjectType,
+        name: str,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        _size, offsets = self._object_layout(object_type, node)
+        address = self._field_address(base, offsets[name], node.loc)
+        field = object_type.field(name)
+        field_type = field.type if field is not None else node.type
+        if isinstance(field_type, ty.ObjectType):
+            return [], address
+        return [], self._value_load(address, field_type, node.loc)
+
+    def _is_object_method_func(self, func: hir.AST) -> bool:
+        if isinstance(func, hir.MemberAccess) and isinstance(func.type, ty.FunctionType):
+            return True
+        return (
+            isinstance(func, hir.ExpressedIdentifier)
+            and func.binding_id is not None
+            and func.binding_id in self.current_object_field_ids
+            and isinstance(func.type, ty.FunctionType)
+        )
+
+    def _method_runtime_type(self, type_: ty.FunctionType) -> ty.FunctionType:
+        lowered = self._lower_callable_type(type_)
+        assert isinstance(lowered, ty.FunctionType)
+        return replace(
+            lowered,
+            pos_or_kw=[ty.PosOrKwArg(None, 'int64'), *lowered.pos_or_kw],
+        )
+
+    def _extract_method_call(
+        self,
+        node: hir.FunctionCall,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        func = node.func
+        if isinstance(func, hir.MemberAccess):
+            if not isinstance(func.value.type, ty.ObjectType):
+                self._target_error(node, 'method call requires an object')
+            obj_prelude, obj = self._extract_object_pointer(func.value)
+            object_type = func.value.type
+            name = func.name
+            function_type = func.type
+        else:
+            if self.current_object_receiver is None or self.current_object_type is None:
+                self._target_error(node, 'object method call without a receiver')
+            obj_prelude, obj = [], self.current_object_receiver
+            object_type = self.current_object_type
+            assert isinstance(func, hir.ExpressedIdentifier) and func.binding_id is not None
+            name = self.current_object_field_names[func.binding_id]
+            function_type = func.type
+        if not isinstance(function_type, ty.FunctionType):
+            self._target_error(node, 'object method is not a function')
+        _size, offsets = self._object_layout(object_type, node)
+        loaded = hir.Transmute(
+            func.loc,
+            self._method_runtime_type(function_type),
+            self._intrinsic_call(
+                '__load_i64__',
+                [self._field_address(obj, offsets[name], func.loc)],
+                'int64',
+                func.loc,
+            ),
+        )
+        prelude = [*obj_prelude]
+        pos_args: list[hir.AST] = [replace(obj, type='int64')]
+        optional_arguments = self.call_optional_args.get(id(node), [])
+        for index, arg in enumerate(node.pos_args):
+            expected_type = (
+                function_type.pos_or_kw[index].type
+                if index < len(function_type.pos_or_kw)
+                else None
+            )
+            payload = (
+                optional_arguments[index]
+                if index < len(optional_arguments)
+                else ty.optional_payload(expected_type)
+                if expected_type is not None
+                else None
+            )
+            if payload is not None:
+                arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+            elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
+                arg_prelude, lowered_arg = self._extract_object_pointer(arg)
+            else:
+                arg_prelude, lowered_arg = self._extract_expression(arg)
+            prelude.extend(arg_prelude)
+            pos_args.append(lowered_arg)
+        kw_args: dict[str, hir.AST] = {}
+        optional_kwargs = self.call_optional_kwargs.get(id(node), {})
+        for name, arg in node.kw_args.items():
+            payload = optional_kwargs.get(name)
+            if payload is not None:
+                arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+            elif isinstance(arg.type, ty.ObjectType):
+                arg_prelude, lowered_arg = self._extract_object_pointer(arg)
+            else:
+                arg_prelude, lowered_arg = self._extract_expression(arg)
+            prelude.extend(arg_prelude)
+            kw_args[name] = lowered_arg
+        if isinstance(node.type, ty.ObjectType):
+            return self._finish_object_call(
+                node,
+                loaded,
+                pos_args,
+                kw_args,
+                prelude,
+            )
+        result_payload = ty.optional_payload(node.type)
+        if result_payload is not None:
+            result = hir.ExpressedIdentifier(
+                node.loc,
+                'int64',
+                self._new_optional_name('result_value'),
+            )
+            prelude.append(
+                hir.Declare(
+                    node.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    result.name,
+                    'int64',
+                    self._optional_allocation(node.loc),
+                )
+            )
+            prelude.append(
+                replace(
+                    node,
+                    type=ty.VOID_TYPE,
+                    func=loaded,
+                    pos_args=[*pos_args, result],
+                    kw_args=kw_args,
+                )
+            )
+            return prelude, replace(result, type=node.type)
+        call = replace(node, func=loaded, pos_args=pos_args, kw_args=kw_args)
+        return prelude, call
+
+    def _finish_object_call(
+        self,
+        node: hir.FunctionCall,
+        func: hir.AST,
+        pos_args: list[hir.AST],
+        kw_args: dict[str, hir.AST],
+        prelude: list[hir.AST],
+    ) -> tuple[list[hir.AST], hir.AST]:
+        if not isinstance(node.type, ty.ObjectType):
+            self._target_error(node, 'object call result is not an object')
+        size, _offsets = self._object_layout(node.type, node)
+        result = self._new_object_temp(node.loc)
+        prelude.append(
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                result.name,
+                'int64',
+                self._object_allocation(node.loc, size),
+            )
+        )
+        prelude.append(
+            replace(
+                node,
+                type=ty.VOID_TYPE,
+                func=func,
+                pos_args=[*pos_args, result],
+                kw_args=kw_args,
+            )
+        )
+        return prelude, result
+
+    def _lower_object_declare(
+        self,
+        node: hir.Declare,
+        object_type: ty.ObjectType,
+    ) -> list[hir.AST]:
+        if isinstance(node.expr, (hir.ObjectLiteral, hir.FunctionCall)):
+            prelude, ptr = self._extract_expression(node.expr)
+            return [
+                *prelude,
+                replace(
+                    node,
+                    decltype='let',
+                    annotation='int64',
+                    expr=ptr,
+                ),
+            ]
+        size, _offsets = self._object_layout(object_type, node)
+        cell = hir.ExpressedIdentifier(
+            node.loc,
+            'int64',
+            node.name,
+            binding_id=node.binding_id,
+        )
+        declaration = replace(
+            node,
+            decltype='let',
+            annotation='int64',
+            expr=self._object_allocation(node.loc, size),
+        )
+        prelude, src = self._extract_object_pointer(node.expr)
+        return [declaration, *prelude, *self._object_copy(cell, src, object_type, node.loc)]
+
+    def _lower_object_assign(self, node: hir.Assign) -> list[hir.AST]:
+        if node.op != '=':
+            self._target_error(node, f'object compound assignment `{node.op}`')
+        if not isinstance(node.target.type, ty.ObjectType):
+            self._target_error(node, 'object assignment requires an object')
+        dest = replace(node.target, type='int64')
+        statements: list[hir.AST] = []
+        binding = (
+            self.binding_by_semantic_id.get(node.target.binding_id)
+            if node.target.binding_id is not None
+            else None
+        )
+        if (
+            self.lowering_module_startup
+            and binding is not None
+            and binding.owner_function is None
+            and node.target.binding_id is not None
+            and node.target.binding_id not in self.object_globals_initialized
+        ):
+            size, _offsets = self._object_layout(node.target.type, node)
+            statements.append(
+                hir.Assign(
+                    node.loc,
+                    ty.VOID_TYPE,
+                    dest,
+                    '=',
+                    self._object_allocation(node.loc, size),
+                )
+            )
+            self.object_globals_initialized.add(node.target.binding_id)
+        prelude, src = self._extract_object_pointer(node.value)
+        statements.extend(prelude)
+        statements.extend(self._object_copy(dest, src, node.target.type, node.loc))
+        return statements
+
+    def _lower_object_field_assign(self, node: hir.Assign) -> list[hir.AST]:
+        if node.op != '=':
+            self._target_error(node, f'object field compound assignment `{node.op}`')
+        if self.current_object_receiver is None or self.current_object_type is None:
+            self._target_error(node, 'object field assignment without a receiver')
+        assert node.target.binding_id is not None
+        name = self.current_object_field_names[node.target.binding_id]
+        _size, offsets = self._object_layout(self.current_object_type, node)
+        address = self._field_address(
+            self.current_object_receiver,
+            offsets[name],
+            node.loc,
+        )
+        field = self.current_object_type.field(name)
+        field_type = field.type if field is not None else node.target.type
+        if isinstance(field_type, ty.ObjectType):
+            prelude, src = self._extract_object_pointer(node.value)
+            return [*prelude, *self._object_copy(address, src, field_type, node.loc)]
+        prelude, value = self._extract_expression(node.value)
+        return [*prelude, *self._value_store(value, address, field_type, node.loc)]
+
+    def _lower_member_assign(self, node: hir.MemberAssign) -> list[hir.AST]:
+        prelude, obj = self._extract_object_pointer(node.target.value)
+        if not isinstance(node.target.value.type, ty.ObjectType):
+            self._target_error(node, 'member assignment requires an object')
+        _size, offsets = self._object_layout(node.target.value.type, node)
+        address = self._field_address(obj, offsets[node.target.name], node.loc)
+        field = node.target.value.type.field(node.target.name)
+        field_type = field.type if field is not None else node.target.type
+        if isinstance(field_type, ty.ObjectType):
+            value_prelude, src = self._extract_object_pointer(node.value)
+            return [*prelude, *value_prelude, *self._object_copy(address, src, field_type, node.loc)]
+        value_prelude, value = self._extract_expression(node.value)
+        return [*prelude, *value_prelude, *self._value_store(value, address, field_type, node.loc)]
+
+    def _object_result_write(self, item: hir.AST) -> list[hir.AST]:
+        if self.current_object_result is None:
+            raise TypeError('INTERNAL ERROR: missing object result cell')
+        object_type = self.current_object_result.type
+        if not isinstance(object_type, ty.ObjectType):
+            raise TypeError('INTERNAL ERROR: object result is not an object type')
+        dest = replace(self.current_object_result, type='int64')
+        if isinstance(item, hir.ObjectLiteral):
+            prelude, _ptr = self._init_object_literal_at(item, dest)
+            return [
+                *prelude,
+                hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
+            ]
+        prelude, src = self._extract_object_pointer(item)
+        return [
+            *prelude,
+            *self._object_copy(dest, src, object_type, item.loc),
+            hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
+        ]
 
     def _lower_iterator_flow(
         self,

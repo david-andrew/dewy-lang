@@ -329,7 +329,10 @@ def emit_short_circuit(expr: hir.ShortCircuit, ctx: EmitContext) -> str:
 
 
 def emit_transmute(transmute: hir.Transmute, ctx: EmitContext) -> str:
-    return f'{emit_ast(transmute.expr, ctx)} transmute {emit_type(transmute.type)}'
+    expr = emit_ast(transmute.expr, ctx)
+    if isinstance(transmute.expr, hir.Transmute):
+        expr = f'({expr})'
+    return f'{expr} transmute {emit_type(transmute.type)}'
 
 
 def _binop_call(call: hir.FunctionCall) -> tuple[str, hir.AST, hir.AST] | None:
@@ -407,7 +410,7 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
         return f'{sym}{separator}{emit_operand(item, ctx)}'
     if call.kw_args:
         raise NotImplementedError('udewy codegen for keyword arguments')
-    args = ' '.join(emit_ast(arg, ctx) for arg in call.pos_args)
+    args = ' '.join(_emit_call_arg(arg, ctx) for arg in call.pos_args)
     callee = emit_ast(call.func, ctx)
     if (
         isinstance(call.func, hir.ExpressedIdentifier)
@@ -425,7 +428,17 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
 
 def emit_operand(node: hir.AST, ctx: EmitContext) -> str:
     # TODO: precedence-aware parenthesization; for now always wrap nested infix calls
-    if isinstance(node, hir.FunctionCall) and _binop_call(node) is not None:
+    if (
+        isinstance(node, hir.FunctionCall)
+        and _binop_call(node) is not None
+        or isinstance(node, hir.Transmute)
+    ):
+        return f'({emit_ast(node, ctx)})'
+    return emit_ast(node, ctx)
+
+
+def _emit_call_arg(node: hir.AST, ctx: EmitContext) -> str:
+    if isinstance(node, hir.Transmute):
         return f'({emit_ast(node, ctx)})'
     return emit_ast(node, ctx)
 

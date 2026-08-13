@@ -163,7 +163,29 @@ class ArrayType:
     length: int | None = None
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType
+@dataclass(frozen=True)
+class ObjectField:
+    """One named field in source order."""
+
+    name: str
+    type: 'TypeExpr'
+    mutable: bool = True
+
+
+@dataclass(frozen=True)
+class ObjectType:
+    """A structural object whose field order is part of the type."""
+
+    fields: tuple[ObjectField, ...]
+
+    def field(self, name: str) -> ObjectField | None:
+        for field in self.fields:
+            if field.name == name:
+                return field
+        return None
+
+
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType | ObjectType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -241,6 +263,7 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     SequenceType: 'generator',  # a group of expressed values is consumable like a generator; only the bare umbrella, `<int int> of? generator<int>` is TBD
     IntegerLiteralType: 'int',
     ArrayType: 'array',
+    ObjectType: 'object',
 
     # TBD about these
     # IteratorType: 'iterator',
@@ -279,6 +302,17 @@ def optional(type_: TypeExpr) -> TypeExpr:
     """Construct the canonical optional form for one payload type."""
 
     return union(type_, 'undefined')
+
+
+def is_zero_arg_function(type_: Type) -> bool:
+    """Whether a type is a function that takes no arguments."""
+
+    return (
+        isinstance(type_, FunctionType)
+        and not type_.pos_or_kw
+        and not type_.kw_only
+        and type_.rest is None
+    )
 
 
 def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
@@ -418,6 +452,8 @@ class TypeSystem:
             if b.length is None:
                 return a
             return a if a.length == b.length else None
+        if isinstance(a, ObjectType) and isinstance(b, ObjectType):
+            return a if a == b else None
 
         a_nom = self._structural_nominal(a)
         b_nom = self._structural_nominal(b)
@@ -494,6 +530,8 @@ class TypeSystem:
                 a.element == b.element
                 and (b.length is None or a.length == b.length)
             )
+        if isinstance(a, ObjectType) and isinstance(b, ObjectType):
+            return a == b
 
         a_nom = self._structural_nominal(a)
         if a_nom is not None and isinstance(b, str) and self._is_nom_subtype(a_nom, b):
@@ -911,7 +949,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | ArrayType | ObjectType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1031,6 +1069,13 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return SequenceType([to_nnf(x) for x in t.items])
     if isinstance(t, ArrayType):
         return ArrayType(to_nnf(t.element), t.length)
+    if isinstance(t, ObjectType):
+        return ObjectType(
+            tuple(
+                ObjectField(field.name, to_nnf(field.type), field.mutable)
+                for field in t.fields
+            )
+        )
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
 
 
@@ -1050,7 +1095,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, ArrayType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, ArrayType, ObjectType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1151,6 +1196,17 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return t
     if isinstance(t, ArrayType):
         return ArrayType(substitute_type(t.element, bindings), t.length)
+    if isinstance(t, ObjectType):
+        return ObjectType(
+            tuple(
+                ObjectField(
+                    field.name,
+                    substitute_type(field.type, bindings),
+                    field.mutable,
+                )
+                for field in t.fields
+            )
+        )
     if isinstance(t, TypeAnd):
         return TypeAnd([substitute_type(x, bindings) for x in t.items])
     if isinstance(t, TypeOr):

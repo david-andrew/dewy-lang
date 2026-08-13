@@ -1,5 +1,39 @@
 # Object and Class Types
 
+Object types are containers of named fields: values and functions in source order.
+Field names and order are part of the type. A named `type` alias is a compile-time
+name for that structural type; it is not a runtime value.
+
+```dewy
+let Pair:type = [left:int64 right:int64]
+let origin:Pair = [left = 0 right = 0]
+```
+
+Anonymous object literals use `=` (or `let`/`const`) at the top level of `[]`.
+Empty `[]` is not classified as an object. Dictionary arrows (`->`, `<->`) are a
+separate container kind.
+
+```dewy
+let point = [
+    x = 10
+    y = 20
+    sum = ():>int64 => x + y
+]
+point.x
+point.sum          % zero-argument function fields are called
+point.sum()        % explicit call of the same field
+```
+
+Constructors are ordinary functions that return object literals. Assignment,
+parameters, and returns use value semantics: a copy of the object, not an alias.
+Function fields may read sibling fields; they have no `self` parameter. Extracting
+a method as a naked function value is not supported.
+
+```dewy
+let make = (x:int64 y:int64):>Pair => [left = x right = y]
+let get_left = (pair:Pair):>int64 => pair.left
+```
+
 Object types are basically just containers containing assignments of variables and functions
 
 ```dewy

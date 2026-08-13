@@ -30,6 +30,8 @@ class _InitializationChecker:
         self.registry = registry
         self.srcfile = srcfile
         self.reassigned_callables: set[int] = set()
+        self.reassigned_objects: set[int] = set()
+        self.reassigned_members: set[tuple[int, tuple[str, ...]]] = set()
         self._collect_reassigned_callables(root)
 
     def _collect_reassigned_callables(self, node: hir.AST) -> None:
@@ -39,6 +41,11 @@ class _InitializationChecker:
                 and isinstance(node.target.type, (ty.FunctionType, ty.OverloadType))
             ):
                 self.reassigned_callables.add(node.target.binding_id)
+            if (
+                node.target.binding_id is not None
+                and isinstance(node.target.type, ty.ObjectType)
+            ):
+                self.reassigned_objects.add(node.target.binding_id)
             self._collect_reassigned_callables(node.value)
             return
         if isinstance(node, hir.Block):
@@ -78,6 +85,47 @@ class _InitializationChecker:
             return
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
             self._collect_reassigned_callables(node.expr)
+            return
+        if isinstance(node, hir.ObjectLiteral):
+            for field in node.fields:
+                self._collect_reassigned_callables(field.value)
+            return
+        if isinstance(node, hir.MemberAccess):
+            self._collect_reassigned_callables(node.value)
+            return
+        if isinstance(node, hir.MemberAssign):
+            key = self._member_key(node.target)
+            if key is not None:
+                self.reassigned_members.add(key)
+            self._collect_reassigned_callables(node.target)
+            self._collect_reassigned_callables(node.value)
+            return
+
+    @staticmethod
+    def _member_key(
+        node: hir.MemberAccess,
+    ) -> tuple[int, tuple[str, ...]] | None:
+        names = [node.name]
+        root = node.value
+        while isinstance(root, hir.MemberAccess):
+            names.append(root.name)
+            root = root.value
+        if not isinstance(root, hir.ExpressedIdentifier) or root.binding_id is None:
+            return None
+        return root.binding_id, tuple(reversed(names))
+
+    def _member_was_reassigned(self, node: hir.MemberAccess) -> bool:
+        key = self._member_key(node)
+        if key is None:
+            return False
+        binding_id, path = key
+        if binding_id in self.reassigned_objects:
+            return True
+        return any(
+            changed_binding == binding_id
+            and path[:len(changed_path)] == changed_path
+            for changed_binding, changed_path in self.reassigned_members
+        )
 
     def check(self) -> None:
         initialized = self._check_block(self.root, set(), {}, set())
@@ -361,6 +409,40 @@ class _InitializationChecker:
                     call_stack,
                 )
             return current
+        if isinstance(node, hir.ObjectLiteral):
+            current = set(initialized)
+            for field in node.fields:
+                current = self._check_eager(
+                    field.value,
+                    current,
+                    parameters,
+                    call_stack,
+                )
+                if field.binding_id is not None:
+                    current.add(field.binding_id)
+            return initialized
+        if isinstance(node, hir.MemberAccess):
+            return self._check_eager(
+                node.value,
+                initialized,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.MemberAssign):
+            current = self._check_eager(
+                node.target,
+                initialized,
+                parameters,
+                call_stack,
+            )
+            return self._check_eager(
+                node.value,
+                current,
+                parameters,
+                call_stack,
+            )
+        if isinstance(node, hir.TypeValue):
+            return initialized
         return initialized
 
     def _check_function_defaults(
@@ -397,6 +479,8 @@ class _InitializationChecker:
         if id(function) in call_stack:
             return
         available = set(initialized)
+        for binding_id, _name in function.object_fields:
+            available.add(binding_id)
         parameter_effects: dict[int, CallableEffect] = {}
         for index, param in enumerate(function.pos_or_kw_args):
             if param.binding_id is not None:
@@ -516,6 +600,57 @@ class _InitializationChecker:
                         return None
                     targets.extend(resolved)
             return targets
+        if isinstance(node, hir.MemberAccess):
+            if self._member_was_reassigned(node):
+                return None
+            field = self._object_field_value(node.value, node.name, parameters, seen)
+            if field is not None:
+                return self._callable_targets(field, parameters, seen)
+            if isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
+                return None
+            return None
+        return None
+
+    def _object_field_value(
+        self,
+        node: hir.AST,
+        name: str,
+        parameters: dict[int, CallableEffect],
+        seen: set[int],
+    ) -> hir.AST | None:
+        while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            node = node.items[0]
+        if isinstance(node, hir.ObjectLiteral):
+            for field in node.fields:
+                if field.name == name:
+                    return field.value
+            return None
+        if isinstance(node, hir.ExpressedIdentifier):
+            if node.binding_id is None or node.binding_id in seen:
+                return None
+            if node.binding_id in self.reassigned_objects:
+                return None
+            binding = self.registry.by_id.get(node.binding_id)
+            if binding is None or binding.declaration is None:
+                return None
+            if node.binding_id in self.reassigned_callables:
+                return None
+            return self._object_field_value(
+                binding.declaration.expr,
+                name,
+                parameters,
+                {*seen, node.binding_id},
+            )
+        if isinstance(node, hir.FunctionCall):
+            producers = self._callable_targets(node.func, parameters, seen)
+            if producers is None:
+                return None
+            for producer in producers:
+                for result in self._function_results(producer.body):
+                    field = self._object_field_value(result, name, parameters, seen)
+                    if field is not None:
+                        return field
+            return None
         return None
 
     def _function_results(self, node: hir.AST) -> list[hir.AST]:

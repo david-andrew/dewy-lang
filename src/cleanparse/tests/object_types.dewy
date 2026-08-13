@@ -1,0 +1,8 @@
+let Pair:type = [left:int64 right:int64]
+let make = (left:int64 right:int64):>Pair => [left = left right = right]
+let get_left = (pair:Pair):>int64 => pair.left
+
+let main = ():>int64 => {
+    let pair:Pair = make(20 22)
+    return get_left(pair) + pair.right
+}

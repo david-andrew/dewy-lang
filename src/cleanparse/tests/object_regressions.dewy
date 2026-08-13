@@ -1,0 +1,15 @@
+let main = ():>int64 => {
+    let value:int64 = 1
+    let source = [
+        value = ():>int64 => 20
+        maybe = (flag:bool):>int64|undefined => if flag 20 else undefined
+        flag = true
+    ]
+    let copy = source
+    let sequential = [a = 1 b = a + 1]
+    let optional:int64|undefined = copy.maybe(copy.flag)
+    if optional is? int64 and copy.flag =? true {
+        return copy.value + optional + sequential.b
+    }
+    return 0
+}

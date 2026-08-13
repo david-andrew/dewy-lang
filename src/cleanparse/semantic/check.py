@@ -49,6 +49,8 @@ class Context:
     loop_boundaries: tuple[LoopBoundary, ...] = ()
     function_boundary_labels: dict[str, Span] = field(default_factory=dict)
     refinements: dict[int, ty.Type] = field(default_factory=dict)
+    type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
+    resolving_type_aliases: set[int] = field(default_factory=set)
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
@@ -64,7 +66,7 @@ def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
     initialization.validate_initialization(checked, ctx.binding_registry, srcfile)
     return checked
 
-def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None) -> hir.AST:
+def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     match ast:
         case p0.Ambiguous(candidates=candidates):
             # speculatively check each candidate reading against a forked declarations layer
@@ -134,7 +136,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
 
         case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected)
         case p0.Prefix(): return tcr_prefix(ast, ctx=ctx, expected=expected)
-        case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected)
+        case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected, call_target=call_target)
         case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
         case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
         case p0.Atom(item=t1.Identifier(name='undefined')):
@@ -260,6 +262,19 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             ]:
             # decl assign + type annotation: check the expression against the annotation
             annotation = ast_to_type(typeexpr, ctx=ctx)
+            if annotation == ty.TYPE_TYPE:
+                type_value = ast_to_type(right, ctx=ctx)
+                expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, type_value)
+                ctx.declarations[name] = ty.TYPE_TYPE
+                declaration = _complete_binding(
+                    ast,
+                    hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
+                    ctx=ctx,
+                )
+                binding = ctx.binding_registry.by_id[declaration.binding_id]
+                binding.type = ty.TYPE_TYPE
+                binding.type_value = type_value
+                return declaration
             optional_payload = ty.optional_payload(annotation)
             expression_expected = (
                 optional_payload
@@ -277,11 +292,11 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             optional_annotation_payload = ty.optional_payload(annotation)
             ctx.declarations[name] = (
                 expr.type
-                if isinstance(annotation, ty.ArrayType)
-                and isinstance(expr.type, ty.ArrayType)
+                if isinstance(annotation, (ty.ArrayType, ty.ObjectType))
+                and isinstance(expr.type, type(annotation))
                 else ty.optional(expr.type)
-                if isinstance(optional_annotation_payload, ty.ArrayType)
-                and isinstance(expr.type, ty.ArrayType)
+                if isinstance(optional_annotation_payload, (ty.ArrayType, ty.ObjectType))
+                and isinstance(expr.type, type(optional_annotation_payload))
                 else annotation
             )
             return _complete_binding(
@@ -324,6 +339,21 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     value = check_against(value, target.type, ctx=ctx)
     if isinstance(target, hir.Index):
         return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
+    if isinstance(target, hir.MemberAccess):
+        if isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
+            if not isinstance(value, hir.FunctionLiteral):
+                not_implemented(
+                    ctx.srcfile,
+                    value.loc,
+                    'assigning a non-literal function to an object field',
+                )
+            assert isinstance(target.value.type, ty.ObjectType)
+            value = replace(
+                value,
+                object_receiver=True,
+                object_type=target.value.type,
+            )
+        return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, value)
     if target.binding_id is not None:
         ctx.refinements.pop(target.binding_id, None)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
@@ -344,6 +374,12 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
             ctx.srcfile,
             ast.left.loc,
             'compound indexed assignment',
+        )
+    if isinstance(target, hir.MemberAccess):
+        not_implemented(
+            ctx.srcfile,
+            ast.left.loc,
+            'compound member assignment',
         )
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
     result = _dispatch_builtin(
@@ -1061,6 +1097,505 @@ def _collect_block_bindings(block: p0.Block, *, ctx: Context) -> None:
         ctx.binding_registry.allocate(item, name, kind, item.loc)
 
 
+def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
+    if not _is_top_level_declare(item):
+        return None
+    if not isinstance(item, p0.KeywordExpr) or len(item.parts) != 2:
+        return None
+    expression = item.parts[1]
+    if not (
+        isinstance(expression, p0.BinOp)
+        and isinstance(expression.op, t1.Operator)
+        and expression.op.symbol in {'=', '::', ':='}
+        and isinstance(expression.left, p0.BinOp)
+        and isinstance(expression.left.op, t1.Operator)
+        and expression.left.op.symbol == ':'
+        and isinstance(expression.left.left, p0.Atom)
+        and isinstance(expression.left.left.item, t1.Identifier)
+        and isinstance(expression.left.right, p0.Atom)
+        and isinstance(expression.left.right.item, t1.Identifier)
+        and expression.left.right.item.name == 'type'
+    ):
+        return None
+    return expression.left.left.item.name, expression.right
+
+
+def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
+    aliases: list[sb.Binding] = []
+    for item in block.inner:
+        alias = _type_alias_rhs(item)
+        if alias is None:
+            continue
+        name, rhs = alias
+        binding = ctx.binding_registry.by_syntax.get(id(item))
+        if binding is None:
+            binding = ctx.binding_registry.allocate(item, name, 'value', item.loc)
+        binding.type = ty.TYPE_TYPE
+        ctx.type_alias_asts[binding.id] = rhs
+        ctx.declarations[name] = ty.TYPE_TYPE
+        ctx.binding_scopes[name] = binding
+        aliases.append(binding)
+    for binding in aliases:
+        _resolve_type_alias(binding, ctx=ctx)
+
+
+def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeExpr:
+    if binding.type_value is not None:
+        return binding.type_value
+    if binding.id in ctx.resolving_type_aliases:
+        user_error(
+            ctx.srcfile,
+            f'cyclic type alias involving `{binding.name}`',
+            Pointer(span=binding.loc, message='this alias is part of the cycle'),
+        )
+    rhs = ctx.type_alias_asts[binding.id]
+    ctx.resolving_type_aliases.add(binding.id)
+    try:
+        binding.type_value = ast_to_type(rhs, ctx=ctx)
+    finally:
+        ctx.resolving_type_aliases.remove(binding.id)
+    return binding.type_value
+
+
+def _is_top_level_arrow(item: p0.AST) -> bool:
+    return (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol in {'->', '<->'}
+    )
+
+
+def _is_top_level_assign(item: p0.AST) -> bool:
+    return (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+    )
+
+
+def _is_top_level_declare(item: p0.AST) -> bool:
+    return (
+        isinstance(item, p0.KeywordExpr)
+        and item.parts
+        and isinstance(item.parts[0], t1.Keyword)
+        and item.parts[0].name in {'let', 'const'}
+    )
+
+
+def _bracket_kind(items: list[p0.AST]) -> Literal['dict', 'bidict', 'object', 'array']:
+    if items and all(
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '->'
+        for item in items
+    ):
+        return 'dict'
+    if items and all(
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '<->'
+        for item in items
+    ):
+        return 'bidict'
+    if any(_is_top_level_arrow(item) for item in items):
+        return 'dict'
+    if any(_is_top_level_assign(item) or _is_top_level_declare(item) for item in items):
+        return 'object'
+    return 'array'
+
+
+def _object_field_syntax(
+    item: p0.AST,
+    *,
+    ctx: Context,
+) -> tuple[str, p0.AST | None, p0.AST, Span, bool]:
+    """Return the name, annotation, initializer, location, and mutability."""
+
+    if _is_top_level_declare(item):
+        declaration = _declaration_parts(item)
+        if declaration is None:
+            not_implemented(ctx.srcfile, item.loc, 'this object field declaration')
+        name, value = declaration
+        assert isinstance(item, p0.KeywordExpr)
+        keyword = item.parts[0]
+        assert isinstance(keyword, t1.Keyword)
+        annotation = None
+        if (
+            isinstance(item, p0.KeywordExpr)
+            and isinstance(item.parts[1], p0.BinOp)
+            and isinstance(item.parts[1].left, p0.BinOp)
+            and isinstance(item.parts[1].left.op, t1.Operator)
+            and item.parts[1].left.op.symbol == ':'
+        ):
+            annotation = item.parts[1].left.right
+        return name, annotation, value, item.loc, keyword.name != 'const'
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+    ):
+        return item.left.item.name, None, item.right, item.loc, True
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.BinOp)
+        and isinstance(item.left.op, t1.Operator)
+        and item.left.op.symbol == ':'
+        and isinstance(item.left.left, p0.Atom)
+        and isinstance(item.left.left.item, t1.Identifier)
+    ):
+        return item.left.left.item.name, item.left.right, item.right, item.loc, True
+    user_error(
+        ctx.srcfile,
+        'object fields must be assignments or declarations',
+        Pointer(span=item.loc, message='this is not a named field'),
+    )
+
+
+def _function_uses_bindings(node: hir.AST, binding_ids: set[int]) -> bool:
+    if isinstance(node, hir.ExpressedIdentifier):
+        return node.binding_id in binding_ids
+    if isinstance(node, hir.FunctionLiteral):
+        return False
+    if isinstance(node, hir.Block):
+        return any(_function_uses_bindings(item, binding_ids) for item in node.items)
+    if isinstance(node, hir.Declare):
+        return _function_uses_bindings(node.expr, binding_ids)
+    if isinstance(node, hir.Assign):
+        return (
+            _function_uses_bindings(node.target, binding_ids)
+            or _function_uses_bindings(node.value, binding_ids)
+        )
+    if isinstance(node, hir.FunctionCall):
+        return (
+            _function_uses_bindings(node.func, binding_ids)
+            or any(_function_uses_bindings(arg, binding_ids) for arg in node.pos_args)
+            or any(_function_uses_bindings(arg, binding_ids) for arg in node.kw_args.values())
+        )
+    if isinstance(node, hir.Flow):
+        return any(
+            _function_uses_bindings(arm.condition, binding_ids)
+            or _function_uses_bindings(arm.body, binding_ids)
+            for arm in node.arms
+        ) or (
+            node.default is not None
+            and _function_uses_bindings(node.default, binding_ids)
+        )
+    if isinstance(node, hir.ShortCircuit):
+        return (
+            _function_uses_bindings(node.left, binding_ids)
+            or _function_uses_bindings(node.right, binding_ids)
+        )
+    if isinstance(node, hir.Return) and node.item is not None:
+        return _function_uses_bindings(node.item, binding_ids)
+    if isinstance(node, (hir.ValueCast, hir.Transmute)):
+        return _function_uses_bindings(node.expr, binding_ids)
+    if isinstance(node, hir.MemberAccess):
+        return _function_uses_bindings(node.value, binding_ids)
+    if isinstance(node, hir.MemberAssign):
+        return (
+            _function_uses_bindings(node.target, binding_ids)
+            or _function_uses_bindings(node.value, binding_ids)
+        )
+    if isinstance(node, hir.ObjectLiteral):
+        return any(_function_uses_bindings(field.value, binding_ids) for field in node.fields)
+    if isinstance(node, hir.ArrayLiteral):
+        return any(_function_uses_bindings(item, binding_ids) for item in node.items)
+    if isinstance(node, hir.ArrayLength):
+        return _function_uses_bindings(node.array, binding_ids)
+    if isinstance(node, hir.Index):
+        return (
+            _function_uses_bindings(node.array, binding_ids)
+            or _function_uses_bindings(node.index, binding_ids)
+        )
+    if isinstance(node, hir.IndexAssign):
+        return (
+            _function_uses_bindings(node.target, binding_ids)
+            or _function_uses_bindings(node.value, binding_ids)
+        )
+    if isinstance(node, hir.TypeTest):
+        return _function_uses_bindings(node.value, binding_ids)
+    if isinstance(node, hir.IfArm) or isinstance(node, hir.LoopArm):
+        return (
+            _function_uses_bindings(node.condition, binding_ids)
+            or _function_uses_bindings(node.body, binding_ids)
+        )
+    return False
+
+
+def _mark_object_receiver(
+    value: hir.AST,
+    field_bindings: tuple[tuple[int, str], ...],
+    object_type: ty.ObjectType,
+) -> hir.AST:
+    if not isinstance(value, hir.FunctionLiteral):
+        return value
+    binding_ids = {binding_id for binding_id, _name in field_bindings}
+    uses_fields = _function_uses_bindings(value.body, binding_ids)
+    return replace(
+        value,
+        object_receiver=True,
+        object_fields=field_bindings if uses_fields else (),
+        object_type=object_type,
+    )
+
+
+def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
+    if not isinstance(node, hir.MemberAccess):
+        return node
+    if ty.is_zero_arg_function(node.type):
+        assert isinstance(node.type, ty.FunctionType)
+        return hir.FunctionCall(node.loc, node.type.ret, node, [], {})
+    if isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
+        not_implemented(
+            ctx.srcfile,
+            node.loc,
+            'extracting an object method as a function value',
+        )
+    return node
+
+
+def _tcr_object_literal(
+    block: p0.Block,
+    *,
+    expected: ty.Type | None,
+    ctx: Context,
+) -> hir.ObjectLiteral:
+    expected_object = expected if isinstance(expected, ty.ObjectType) else None
+    if expected is not None and expected_object is None:
+        type_error(
+            ctx.srcfile,
+            'type mismatch',
+            Pointer(
+                span=block.loc,
+                message=f'expected `{type_to_dewy(expected)}`, got an object literal',
+            ),
+        )
+
+    ctx = replace(
+        ctx,
+        declarations=ctx.declarations.new_child(),
+        binding_scopes=ctx.binding_scopes.new_child(),
+    )
+    specs = [_object_field_syntax(item, ctx=ctx) for item in block.inner]
+    seen: dict[str, Span] = {}
+    for name, _annotation, _value, loc, _mutable in specs:
+        previous = seen.get(name)
+        if previous is not None:
+            user_error(
+                ctx.srcfile,
+                f'duplicate object field `{name}`',
+                Pointer(span=loc, message='this field repeats a name'),
+                Pointer(span=previous, message='the earlier field is here'),
+            )
+        seen[name] = loc
+
+    if expected_object is not None:
+        expected_names = [field.name for field in expected_object.fields]
+        actual_names = [
+            name for name, _annotation, _value, _loc, _mutable in specs
+        ]
+        if actual_names != expected_names:
+            type_error(
+                ctx.srcfile,
+                'object fields do not match the expected type',
+                Pointer(
+                    span=block.loc,
+                    message=(
+                        f'expected `[{ " ".join(f"{field.name}:{type_to_dewy(field.type)}" for field in expected_object.fields) }]`, '
+                        f'got fields `{" ".join(actual_names)}`'
+                    ),
+                ),
+            )
+
+    field_bindings: list[sb.Binding] = []
+    deferred: set[int] = set()
+    for index, (name, annotation_ast, value_ast, loc, _mutable) in enumerate(specs):
+        kind: sb.BindingKind = (
+            'function'
+            if isinstance(value_ast, p0.BinOp)
+            and isinstance(value_ast.op, t1.Operator)
+            and value_ast.op.symbol == '=>'
+            else 'value'
+        )
+        binding = ctx.binding_registry.allocate(block.inner[index], name, kind, loc)
+        field_bindings.append(binding)
+        if kind != 'function':
+            continue
+        try:
+            signature = signature_of(value_ast, ctx=ctx)
+        except ReportException:
+            continue
+        if signature is None:
+            continue
+        deferred.add(index)
+        binding.type = signature
+        ctx.declarations[name] = signature
+        ctx.binding_scopes[name] = binding
+
+    checked_fields: list[hir.AST | None] = [None] * len(specs)
+    for index, (name, annotation_ast, value_ast, loc, _mutable) in enumerate(specs):
+        if index in deferred:
+            continue
+        field_expected: ty.Type | None = None
+        if annotation_ast is not None:
+            field_expected = ast_to_type(annotation_ast, ctx=ctx)
+        elif expected_object is not None:
+            field_expected = expected_object.fields[index].type
+        value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
+        require_valued(value.type, ctx.srcfile, value.loc, 'object field')
+        if isinstance(value.type, (ty.FunctionType, ty.OverloadType)) and not isinstance(
+            value,
+            hir.FunctionLiteral,
+        ):
+            not_implemented(
+                ctx.srcfile,
+                value.loc,
+                'storing a non-literal function in an object field',
+            )
+        if field_expected is not None:
+            value = check_against(value, field_expected, ctx=ctx)
+            field_type: ty.Type = field_expected
+        elif isinstance(value.type, ty.IntegerLiteralType):
+            value = check_against(value, 'int64', ctx=ctx)
+            field_type = 'int64'
+        else:
+            field_type = value.type
+        binding = field_bindings[index]
+        binding.type = field_type
+        binding.kind = (
+            'function'
+            if isinstance(value, hir.FunctionLiteral)
+            else 'value'
+        )
+        ctx.declarations[name] = field_type
+        ctx.binding_scopes[name] = binding
+        checked_fields[index] = value
+    for index, (name, annotation_ast, value_ast, loc, _mutable) in enumerate(specs):
+        if index not in deferred:
+            continue
+        field_expected = field_bindings[index].type
+        if annotation_ast is not None:
+            field_expected = ast_to_type(annotation_ast, ctx=ctx)
+        elif expected_object is not None:
+            field_expected = expected_object.fields[index].type
+        value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
+        require_valued(value.type, ctx.srcfile, value.loc, 'object field')
+        if field_expected is not None:
+            value = check_against(value, field_expected, ctx=ctx)
+            field_type = field_expected
+        else:
+            field_type = value.type
+        binding = field_bindings[index]
+        binding.type = field_type
+        if isinstance(value, hir.FunctionLiteral):
+            binding.function = value
+        ctx.declarations[name] = field_type
+        ctx.binding_scopes[name] = binding
+        checked_fields[index] = value
+
+    object_fields = tuple(
+        (binding.id, name)
+        for binding, (name, _annotation, _value, _loc, _mutable) in zip(
+            field_bindings,
+            specs,
+        )
+    )
+    fields: list[hir.ObjectField] = []
+    types: list[ty.ObjectField] = []
+    for index, (name, _annotation, _value_ast, loc, mutable) in enumerate(specs):
+        value = checked_fields[index]
+        assert value is not None
+        binding = field_bindings[index]
+        fields.append(hir.ObjectField(loc, name, value, binding.id, mutable))
+        types.append(ty.ObjectField(name, binding.type or value.type, mutable))
+    object_type = ty.ObjectType(tuple(types))
+    if expected_object is not None:
+        check_against(
+            hir.ObjectLiteral(block.loc, object_type, fields),
+            expected_object,
+            ctx=ctx,
+        )
+        object_type = expected_object
+    marked: list[hir.ObjectField] = []
+    for field, binding in zip(fields, field_bindings):
+        value = _mark_object_receiver(field.value, object_fields, object_type)
+        if isinstance(value, hir.FunctionLiteral):
+            binding.function = value
+        marked.append(replace(field, value=value))
+    return hir.ObjectLiteral(block.loc, object_type, marked)
+
+
+def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
+    if not (
+        isinstance(binop.right, p0.Atom)
+        and isinstance(binop.right.item, t1.Identifier)
+    ):
+        not_implemented(ctx.srcfile, binop.loc, 'computed member access')
+    name = binop.right.item.name
+    if name == 'length':
+        array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        if isinstance(array.type, ty.ArrayType):
+            result_type: ty.Type = (
+                ty.IntegerLiteralType(array.type.length)
+                if array.type.length is not None
+                else 'int64'
+            )
+            return hir.ArrayLength(binop.loc, result_type, array)
+    value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    if not isinstance(value.type, ty.ObjectType):
+        if name == 'length':
+            type_error(
+                ctx.srcfile,
+                '`.length` requires an array',
+                Pointer(
+                    span=value.loc,
+                    message=f'this has type `{type_to_dewy(value.type)}`',
+                ),
+            )
+        type_error(
+            ctx.srcfile,
+            'member access requires an object',
+            Pointer(
+                span=value.loc,
+                message=f'this has type `{type_to_dewy(value.type)}`',
+            ),
+        )
+    field = value.type.field(name)
+    if field is None:
+        user_error(
+            ctx.srcfile,
+            f'unknown object field `{name}`',
+            Pointer(span=binop.right.loc, message='this field is not present'),
+            hint=f'available fields: {", ".join(item.name for item in value.type.fields) or "(none)"}',
+        )
+    return hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
+
+
+def _member_root_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
+    root = node
+    while True:
+        if isinstance(root, hir.MemberAccess):
+            root = root.value
+            continue
+        if isinstance(root, hir.Index):
+            root = root.array
+            continue
+        if isinstance(root, hir.Block) and not root.scoped and len(root.items) == 1:
+            root = root.items[0]
+            continue
+        if isinstance(root, (hir.ValueCast, hir.Transmute)):
+            root = root.expr
+            continue
+        break
+    if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
+        return ctx.binding_registry.by_id.get(root.binding_id)
+    return None
+
+
 def _tcr_array_literal(
     block: p0.Block,
     items: list[hir.AST],
@@ -1164,7 +1699,33 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             label_scopes=(*ctx.label_scopes, _collect_label_scope(block, ctx=ctx)),
         )
 
+    if block.kind == '[]':
+        arrows = [item for item in block.inner if _is_top_level_arrow(item)]
+        if arrows and len(arrows) != len(block.inner):
+            user_error(
+                ctx.srcfile,
+                'cannot mix dictionary arrows with other `[]` items',
+                Pointer(span=arrows[0].loc, message='this arrow is inside a mixed container'),
+            )
+        arrow_symbols = {
+            item.op.symbol
+            for item in arrows
+            if isinstance(item, p0.BinOp) and isinstance(item.op, t1.Operator)
+        }
+        if len(arrow_symbols) > 1:
+            user_error(
+                ctx.srcfile,
+                'cannot mix `->` and `<->` in one container',
+                Pointer(span=arrows[0].loc, message='dictionary arrows must all use the same operator'),
+            )
+        kind = _bracket_kind(block.inner)
+        if kind in {'dict', 'bidict'}:
+            not_implemented(ctx.srcfile, block.loc, 'dictionary literals')
+        if kind == 'object' or isinstance(expected, ty.ObjectType):
+            return _tcr_object_literal(block, expected=expected, ctx=ctx)
+
     _collect_block_bindings(block, ctx=ctx)
+    _prebind_type_aliases(block, ctx=ctx)
 
     deferred_functions: set[int] = set()
     if not type_block:
@@ -1544,7 +2105,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.Index:
     )
 
 
-def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None) -> hir.AST:
+def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
     
@@ -1562,7 +2123,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         return typecheck_and_resolve_inner(p0.Ambiguous(binop.loc, candidates), ctx=ctx, type_block=type_block, expected=expected)
 
     if isinstance(binop.op, t2.CallJuxtapose):
-        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
+        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
         return tcr_function_call(left, binop.right, ctx=ctx, expected=expected)
 
     if isinstance(binop.op, t2.CombinedAssignmentOp):
@@ -1573,11 +2134,12 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     if isinstance(binop.op, t2.IndexJuxtapose):
         return _tcr_index(binop, ctx=ctx)
     if symbol == '.':
-        return _tcr_array_length(binop, ctx=ctx)
+        access = _tcr_member_access(binop, ctx=ctx)
+        return access if call_target else _maybe_auto_call_member(access, ctx=ctx)
     if symbol == '=>': return tcr_function_literal(binop, ctx=ctx, expected=expected)
 
     if symbol == '|>':
-        callable_value = typecheck_and_resolve_inner(binop.right, ctx=ctx)
+        callable_value = typecheck_and_resolve_inner(binop.right, ctx=ctx, call_target=True)
         return tcr_function_call(callable_value, binop.left, ctx=ctx, expected=expected)
 
     if symbol == 'transmute':
@@ -1750,8 +2312,8 @@ def tcr_assignment_target(
     *,
     ctx: Context,
     refined: bool = False,
-) -> hir.ExpressedIdentifier | hir.Index:
-    """Resolve an identifier or statically proven array-element assignment target."""
+) -> hir.ExpressedIdentifier | hir.Index | hir.MemberAccess:
+    """Resolve an identifier, array-element, or object-field assignment target."""
 
     if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
         resolved = tcr_identifier(target.item, ctx=ctx, refined=refined)
@@ -1759,6 +2321,35 @@ def tcr_assignment_target(
         return resolved
 
     if isinstance(target, p0.BinOp):
+        if isinstance(target.op, t1.Operator) and target.op.symbol == '.':
+            access = _tcr_member_access(target, ctx=ctx)
+            if not isinstance(access, hir.MemberAccess):
+                not_implemented(ctx.srcfile, target.loc, 'assignment to `.length`')
+            if not access.mutable:
+                user_error(
+                    ctx.srcfile,
+                    f'cannot mutate const object field `{access.name}`',
+                    Pointer(span=target.loc, message='this field is const'),
+                )
+            binding = _member_root_binding(access, ctx=ctx)
+            if (
+                binding is not None
+                and binding.declaration is not None
+                and binding.declaration.decltype == 'const'
+            ):
+                user_error(
+                    ctx.srcfile,
+                    'cannot mutate a field of a const object',
+                    Pointer(
+                        span=access.value.loc,
+                        message=f'`{binding.name}` is declared const',
+                    ),
+                    Pointer(
+                        span=binding.declaration.loc,
+                        message='const declaration is here',
+                    ),
+                )
+            return access
         if isinstance(target.op, t2.QJuxtapose):
             index_op = next(
                 (
@@ -2088,11 +2679,86 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
     return args
 
 
+def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
+    """Parse one `name:type` row of an object type, including `fn:(T):>U` desugaring."""
+
+    mutable = True
+    if (
+        isinstance(item, p0.KeywordExpr)
+        and len(item.parts) == 2
+        and isinstance(item.parts[0], t1.Keyword)
+        and item.parts[0].name in {'let', 'const'}
+        and isinstance(item.parts[1], p0.AST)
+    ):
+        mutable = item.parts[0].name != 'const'
+        item = item.parts[1]
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == ':>'
+        and isinstance(item.left, p0.BinOp)
+        and isinstance(item.left.op, t1.Operator)
+        and item.left.op.symbol == ':'
+        and isinstance(item.left.left, p0.Atom)
+        and isinstance(item.left.left.item, t1.Identifier)
+    ):
+        return ty.ObjectField(
+            item.left.left.item.name,
+            ty.FunctionType(
+                _function_type_args(item.left.right, ctx=ctx),
+                [],
+                None,
+                ast_to_type(item.right, ctx=ctx),
+            ),
+            mutable,
+        )
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == ':'
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+    ):
+        return ty.ObjectField(
+            item.left.item.name,
+            ast_to_type(item.right, ctx=ctx),
+            mutable,
+        )
+    user_error(
+        ctx.srcfile,
+        'object type fields must be `name:type`',
+        Pointer(span=item.loc, message='this is not a named field type'),
+    )
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
     match ast:
         case p0.Atom(item=t1.Identifier(name=name)):
+            binding = ctx.binding_scopes.get(name)
+            if binding is not None:
+                if binding.type_value is not None:
+                    return binding.type_value
+                if binding.id in ctx.type_alias_asts:
+                    return _resolve_type_alias(binding, ctx=ctx)
             return name
+
+        case p0.Block(kind='[]', inner=items):
+            seen: dict[str, Span] = {}
+            fields: list[ty.ObjectField] = []
+            for item in items:
+                field = _object_type_member(item, ctx=ctx)
+                previous = seen.get(field.name)
+                if previous is not None:
+                    user_error(
+                        ctx.srcfile,
+                        f'duplicate object field `{field.name}`',
+                        Pointer(span=item.loc, message='this field repeats a name'),
+                        Pointer(span=previous, message='the earlier field is here'),
+                    )
+                seen[field.name] = item.loc
+                fields.append(field)
+            return ty.ObjectType(tuple(fields))
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
@@ -2412,6 +3078,10 @@ def tcr_identifier(
     if id.name in ctx.declarations:
         binding = ctx.binding_scopes.get(id.name)
         declared_type = ctx.declarations[id.name]
+        if declared_type == ty.TYPE_TYPE or (
+            binding is not None and binding.type_value is not None
+        ):
+            not_implemented(ctx.srcfile, id.loc, 'runtime type values')
         resolved_type = (
             ctx.refinements.get(binding.id, declared_type)
             if refined and binding is not None

@@ -67,6 +67,11 @@ LOWERED_CASES = [
     ('range_stepped_array.dewy', 42),
     ('range_stepped_labeled_exits.dewy', 42),
     ('range_stepped_multi_optional.dewy', 42),
+    ('object_fields.dewy', 42),
+    ('object_nested.dewy', 42),
+    ('object_methods.dewy', 42),
+    ('object_types.dewy', 42),
+    ('object_regressions.dewy', 42),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]

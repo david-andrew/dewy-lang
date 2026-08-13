@@ -17,6 +17,38 @@ are supported through parsing, semantic analysis, udewy lowering, and emission.
 - [x] `transmute` for values whose source and destination representations are
       supported by the udewy backend, including function pointers.
 
+## Type expressions and type-valued inference
+
+- [x] Explicit compile-time aliases using `let T:type = ...`, including a
+      single type expression grouped as `<...>` in that expected type position.
+- [x] Contextual value typing from annotations, function parameters and returns,
+      and supported container element or field types.
+- [ ] Standalone non-juxtaposed `<...>` expressions producing compile-time
+      values of type `type`.
+- [ ] Inferring `let T = <...>` as a compile-time type alias without requiring
+      the explicit `:type` annotation.
+- [ ] Runtime type values, reflection, and general compile-time evaluation of
+      type expressions.
+
+## Generics
+
+The type system already instantiates generic function types for built-in
+operator overloads, such as `<T of int>(left:T right:T):>T`. User-written
+generic functions, type aliases, and explicit type arguments are not
+implemented. Non-juxtaposed `<...>` as a type-valued group is tracked under
+Type expressions above; here `<T>` is a type-parameter list.
+
+- [x] Internal generic parameters, call-site inference, and instantiation used
+      by built-in operator overloads.
+- [x] Parameterized built-in types in annotations, including `array<T>` and
+      `array<T length=N>`.
+- [ ] User-written generic functions such as
+      `identity = <T>(value:T):>T => value`.
+- [ ] Generic bounds (`T of number`) in source, explicit type arguments at
+      call sites, and named generic type aliases.
+- [ ] User-defined parameterized types and generic object types.
+- [ ] Monomorphization or other udewy lowering for user generic values.
+
 ## Structured control flow
 
 - [x] Boolean `if`/`else if`/`else`, including scalar expression-valued
@@ -158,6 +190,23 @@ semantics.
 - [ ] Conditions that mix iterator clauses with ordinary Boolean predicates.
 - [ ] Iterator fusion and scalar replacement of the baseline per-leaf state.
 
+## Objects
+
+- [x] Anonymous object literals with named fields in source order.
+- [x] Structural object types and named compile-time `type` aliases used in
+      annotations.
+- [x] Field read and write, nested objects, and exact name/type/order matching.
+- [x] Object parameters, returns, and constructors (functions that return
+      literals), with value-semantics copies.
+- [x] Function fields, including parenthesis-free zero-argument calls on member
+      access, and object-local reads of sibling fields.
+- [x] Sequential udewy layout for `bool`, fixed-width integers, function
+      pointers, and nested objects of those types.
+- [ ] Dictionary and bidictionary `[]` forms.
+- [ ] sets `set[1 2 3 4]`
+- [ ] Extracting an object method as a naked function value.
+- [ ] Packing, field reordering, dunder methods, and width subtyping.
+
 ## Strings
 
 - [x] String literals are tokenized, parsed, represented in HIR, and assigned the
@@ -178,8 +227,6 @@ semantics.
 - [ ] Floating-point, rational, and real numbers
 - [ ] Physical units
 - [ ] Dictionaries, bidirectional maps, and sets
-- [ ] Objects
-- [ ] Generics
 - [ ] Pattern matching (`match`)
 - [ ] String interpolation
 - [ ] Partial application (`@`)
@@ -195,6 +242,7 @@ semantics.
 - [ ] bootstrap compiler implementation in dewy
 - [ ] full end to end self-hosted compiler via dewy->udewy frontend, udewy->asm backend
 - [ ] standard library
+    - [ ] OS agnostic interfaces on top of OS-dependent implementations per supported OS/environment
 - [ ] implementation of hello world examples from the different domains
 - [ ] test harness system. 
     - [ ] self hosted unit tests with automation for running on all updates

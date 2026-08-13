@@ -611,6 +611,19 @@ class _BoundsValidator:
         if isinstance(node, hir.FunctionLiteral):
             self._analyze_function(node, validate=validate)
             return None
+        if isinstance(node, hir.ObjectLiteral):
+            for field in node.fields:
+                self._eval(field.value, state, validate=validate)
+            return None
+        if isinstance(node, hir.MemberAccess):
+            self._eval(node.value, state, validate=validate)
+            return None
+        if isinstance(node, hir.MemberAssign):
+            self._eval(node.target, state, validate=validate)
+            self._eval(node.value, state, validate=validate)
+            return None
+        if isinstance(node, hir.TypeValue):
+            return None
         return None
 
     def _constant_binding(

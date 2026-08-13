@@ -167,6 +167,48 @@ class ArrayLiteral(AST):
 
 
 @dataclass
+class ObjectField:
+    """One initialized field of an object literal."""
+
+    loc: Span
+    name: str
+    value: AST
+    binding_id: int | None = None
+    mutable: bool = True
+
+
+@dataclass
+class ObjectLiteral(AST):
+    """A structural object value with source-order fields."""
+
+    fields: list[ObjectField]
+
+
+@dataclass
+class MemberAccess(AST):
+    """A named field read from an object."""
+
+    value: AST
+    name: str
+    mutable: bool = True
+
+
+@dataclass
+class MemberAssign(AST):
+    """Mutation of one object field."""
+
+    target: MemberAccess
+    value: AST
+
+
+@dataclass
+class TypeValue(AST):
+    """A compile-time type used as a named alias."""
+
+    value: ty.TypeExpr
+
+
+@dataclass
 class ArrayLength(AST):
     """The element count of an array value."""
 
@@ -262,6 +304,9 @@ class FunctionLiteral(AST):
     rest_args: Param | BoundParam | None
     rettype: ty.Type
     body: AST
+    object_receiver: bool = False
+    object_fields: tuple[tuple[int, str], ...] = ()
+    object_type: ty.ObjectType | None = None
 
 #TODO: partial eval is basically like a stack of function calls (though need to be careful about eager vs lazy evaluation of parameters (since they probably should be eager))
 
