@@ -272,3 +272,7 @@ semantics.
 - [ ] complete docs rewrite
     - [ ] API/language reference
     - [ ] dewy book
+
+### Aspirational/Experimental/etc.
+- [ ] non text-editor view over code/AST. basically render AST to look like text, but render with user set visual settings for spacing, indentation, comment positions, etc. etc. Probably requires a custom editor-esque app. Should generally feel mostly like editing regular text in a text editor, just without the pure bag-of-characters semantics
+- [ ] saving/editing packed ASTs instead of bag-of-characters raw text for source code. hashing sort of like unison, though tbd the exact semantics
