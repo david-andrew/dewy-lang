@@ -4511,17 +4511,41 @@ though in this contrived example, it would be simpler to just do
 VecWithPositiveY<T of real> = array<T length=@(>=?)(... 2) a=>a[1]>?0>
 ```
 
+### maybe nicer lambda syntax for conditions [Allow conditional expressions directly in the type parameterization (no need for lambdas)]
+since frequently conditions are going to be some sort of relational, it would be nice if you could capture them more simply.
+while 
+`length=@(>=?)(... 1)` 
+is technically correct, I really want to be able to do something more like
+`length=@(>=?1)`
+
+Alternatively, it could be the case that we key off the name of the function argument, and use that to identify the parameter of the object to apply the constraint to
+```dewy
+myarray:array<T length=>length>=?2 >
+```
+
+Or maybe even better, we could allow for arbitrary conditional expressions in the body which would get captured as conditions!
+
+```dewy
+myarray:array<T length>=?1 >
+```
+And this can have a really nice translation back to arbitrary user objects because it is an operation over a specific named member in the object. It could even involve a more complex 
+
+```dewy
+MyStruct:type = [a:int b:bool c:string]
+
+myarray:array<MyStruct< a>=?42 b=?true c not=? 'apple'> length>?0 >
+```
 
 
 ## Implicit partial evaluation
 May we consider allowing implicit partial evaluation in cases where it's obvious the arguments are not complete. For example if a user passes `...` or `void` where an argument should go, which for partial eval indicates skipping over setting that argument, perhaps that could be an indicator enough to know it's partial eval without requiring the `@`. I think this mainly would be useful for making operator functions more elegant, but it might make other instances of partial evaluation less clear
 
 ```dewy
-greaterthan3 = (>)(... 3)
+greaterthan3 = (>?)(... 3)
 ```
 currently if we wanted this, we have to include `@`
 ```dewy
-greaterthan3 = @(>)(... 3)
+greaterthan3 = @(>?)(... 3)
 ```
 but because there is obviously a `...` this shouldn't+couldn't be called
 
@@ -4529,8 +4553,16 @@ Additionally, consider if using `...` as an operand might also implicitly make i
 
 
 
+### alternative syntax for making simple conditional lambdas
+```dewy
+greaterthan3 = @(>?3)
+```
 
+Or perhaps to not break existing syntax
 
+```dewy
+greaterthan3 = @(...>?3)
+```
 
 ## words for subtyping vs having traits [`T of SomeType`, `T has SomeTrait`, `x is? SomeType`, `x isnt? SomeType`, `t has? SomeTrait`, `t of? SomeType`]
 current is 
@@ -4589,3 +4621,67 @@ x: Type1
 y: Trait1
 x: Type1 & Trait1
 ```
+
+
+
+## Splicing structural types into the nominal type tree [settled: `A = B & [...]` + `__as__` overload per nominal parent. coercion happens at canonical-representation boundaries; explicit `__as__` beats composed paths; diamond ambiguity is a lazy use-site error. see "Structural splicing into the nominal type tree" in src/cleanparse/status.md]
+I think in general structural types will typically inherit directly from `any`, or perhaps some prior defined structural type that you want to expand.
+
+However I think it could plenty of times be the case that you build something structurally but allow that structural type to also be used any time a nominal type is expected. I think this should be handled by intersecting the structural type with the nominal type (or potentially using the `of` syntax), and then explicitly define an overload for converting the struct type to the nominal type
+
+
+```dewy
+
+SomeStructThatIsAlsoInt:type = int & [
+    a:int
+    b:bool
+    c:string
+
+
+]< (a>?42 and b) or (a<?42 and not b) >
+
+# SomeStructThatIsAlsoInt:type of int = [...]<...>   # perhaps focus on the above syntax as it is simpler/aligns nicely with the existing ADT operations in the type system
+
+# would be slightly nicer if this could go inside the struct declaration, but I think it's fine to be outside and live next to it
+__as__ &= (x:SomeStructThatIsAlsoInt):>int => if x.b x.a+5 else x.a-5  # any time this struct needs to be interpreted as an integer, use the convert function
+```
+
+the `int & ...` is what splices the structural type into the nominal tree, and the overload of `__as__` is what let's anything expecting a regular `int` know how to actually deal with it
+- I think it probably is a type error if you combine a structural and nominal type and don't define the `__as__` for the structural into the nominal
+
+So with this setup, a structural type can be used anywhere some nominal type is expected
+```dewy
+square = (x:int):>int => x^2
+
+x:SomeStructThatIsAlsoInt = [a=421 b=true c='good']
+x2 = square(x)   # implicitly calls `x as int` which uses the `__as__` overload
+```
+This example is a little bit contrived, but the idea is mostly that structural type ARE the nominal type even if the runtime representation isn't necessarily the exact same.
+
+```dewy
+# similarly combining two or more structural types uses the same approach (probably move this example to a different section)
+Struct1:type = [a:int b:int c:bool d:string]
+Struct2:type = Struct1 & <T>[values:array<T>]  # arbitrarily combine with named or anonymous structural types
+```
+
+
+In terms of single vs multiple inheritance:
+- nominal types are single inheritance
+- structural types are multiple inheritance (can inherit multiple structural type or nominal types or an arbitrary mix)
+
+## TypeScript-style array type syntax `T[]` via juxtaposition [settled: `T[]` = `array<T>`, `T[5]` = `array<T length=?5>`, `T[3 4]` for multidim. parsed as index-juxtapose of a type with an array literal]
+Settled version is in status.md ("Array type literal syntax"). Short version: `int[]` is sugar for `array<int>`, `int[5]` for `array<int length=?5>`, `int[3 4]` for `array<int length=?[3 4]>` (multidim shapes, dovetails with planned linear algebra syntax).
+
+The neat part is that this needs no separate type grammar: it's just juxtaposition of a type value with an array literal, and juxtaposition already resolves to different operations based on operand types (`a(b)` -> `__mul__` vs `__call__`). Indexing a type object is otherwise meaningless, so type-juxtaposed-with-array-literal is free to mean array-type construction. Precedence is the index-juxtapose tier (high), so `bool|string[]` is `bool | (string[])` like TypeScript.
+
+
+## Generic non-function expressions (unsettled)
+Generics so far are a special way of making something into a function that takes a type parameter. There isn't a syntax for genericizing an arbitrary non-function expression, e.g. something like:
+```dewy
+array:type = <T>(T[])   # hypothetical: a generic *expression*, not a function
+```
+Undecided whether this is worth supporting at all. Points from discussion:
+- if generics are sugar for type-parameter functions, then `Tagged<int>()` re-evaluates the body per instantiation like any call. Generic instantiation should NOT be memoized — that would introduce a second evaluation rule for what is definitionally just a function call (and would smuggle back site+args type identity, which was rejected in favor of pure per-evaluation generativity)
+- this only matters when the body mints a nominal type (`type of T`, `T & [...]` with nominal T). Purely structural results are duck-typed, so a structural generic factory is stable across instantiations for free
+- the workaround for stable nominal-minting factories is the closure/bind-once idiom: `TaggedInt = Tagged(int)` and reuse the binding
+- so a generic-expression form would mostly be convenience sugar; possibly a fool's errand given the existing mechanisms compose to cover both behaviors

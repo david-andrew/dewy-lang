@@ -390,6 +390,161 @@ Incremental implementation work:
           above
 
 ### Full Refinement System
+The refinement system shall work as follows:
+- any type may receive a parameterize block (e.g. `T<p1 p2 etc...>`), including types that don't take any explicit parameters
+- arbitrary conditional expressions in the parameterize block are the refinement conditions for that type (that the refinement system would statically prove at compiletime)
+```dewy
+NonEmptyArray = array<length>?1>  # retains the generic T from array, e.g. can do NonEmptyArray<int> because we didn't fill in the type
+
+MyStruct:type = [a:int b:bool c:string]< a>?10 b=?true c not=? 'apple' >
+```
+
+- entries in the parameterize block are distinguished syntactically: an expression whose
+  top level is a `?`-comparison (`>?`, `=?`, `not=?`, etc.) or a lambda is a refinement
+  condition; every other expression is a parameter value. So a literal boolean is
+  unambiguously a parameter, and no wrapping/escaping syntax is needed:
+```dewy
+trues:array<true length=?5> = [true true true true true]  # element type is literal-type true, length refined to 5
+```
+  In the rare case where a precomputed boolean should act as a condition, spell it
+  explicitly: `cond =? true`, or use a lambda. A refinement condition that statically
+  reduces to a constant (always true / always false) is a compile error, since it is
+  either vacuous or unsatisfiable and almost certainly a mistake.
+
+- inside the parameterize block, if the type is a structural type, all members on that
+  struct are in scope to reference for conditions. Members shadow outer bindings; outer
+  scope is otherwise visible (needed for e.g. `length =? n` against an enclosing generic
+  parameter)
+- inside the parameterize block of nominal types, there is no `self`, so you have to use a lambda to access the value
+```dewy
+Positive = int< i=>i>?0 >  # to refer to primitive types, use a single-argument lambda
+```
+  Note that `[i:int]< i>?0 >` is *not* an alternate spelling of the same type: it is a
+  structural wrapper type containing an int, which is a different type from a refined
+  `int` (see structural splicing below for how such a wrapper could be made usable as
+  an int).
+
+- parameterizing a type returns another type, so parameterization may be stacked; each
+  application only narrows (predicate intersection), so the semantics are well defined
+  and stacking is allowed uniformly, whether through intermediate identifiers or
+  directly (`MyStruct<c1><c2>`). Direct stacking is unidiomatic and may warrant a style
+  lint, but not an error
+```dewy
+T1 = MyStruct<condition1>
+T2 = T1<condition2>  # T2 requires both conditions
+```
+Mainly useful for e.g. letting you return a type and some consumer can further refine it if they need. In general, from an implementation point of view, applying a parameterization is much like doing a partial application on the type object: you're setting particular members, registering refinements, etc.
+
+- when the checker cannot prove a required refinement at a use site, the programmer has
+  two escape hatches:
+  an explicit runtime check whose success refines the value afterward, or an `unsafe`
+  assertion that takes on the proof obligation without a runtime check. Proof-failure
+  diagnostics should report the known facts, the required fact, and the missing
+  relationship.
+
+### Structural splicing into the nominal type tree
+Structural types may be spliced into the nominal type tree by intersecting with a
+nominal type. The intended idiom: the spliced type *semantically is* the nominal type,
+but with a different runtime representation (and/or extra metadata):
+```dewy
+Posit64:type = float64 & [sign:bit regime:array<bits> exponent:array<bits> fraction:array<bits>]< regime.length + exponent.length + fraction.length =? 63 >
+__as__ &= (x:Posit64):>float64 => { some algorithm to convert posits to floats }
+```
+Rules and semantics:
+- intersecting a structural type with a nominal type requires a corresponding `__as__`
+  overload converting to the nominal type. The absence is checked lazily at use sites
+  (definitions may appear after the type, in any order at module level), and it is a
+  type error to actually need the conversion when none is defined
+- `x is? float64` is true for a `Posit64` instance; the spliced type genuinely is a
+  descendant of the nominal type
+- the nominal type tree itself is single inheritance, but structural (including
+  spliced) types may have multiple parents, including multiple nominal parents
+  (`MyType = int & float64 & [...]`), with one `__as__` overload per nominal parent
+- nominal types are immutable / have no internal fields to mutate, so coercion never
+  creates mutation-aliasing concerns; `__as__` produces a fresh value with ordinary
+  value semantics
+- `as`/`__as__` in general must be invoked explicitly; the sole implicit case is a
+  spliced type flowing to a context requiring one of its nominal ancestors
+- coercion happens at *canonical-representation boundaries*, not call boundaries. A
+  generic bound like `<T of float64>(left:T right:T)` binds `T = Posit64` directly with
+  no conversion; `__as__` is inserted only where the canonical machine representation
+  is actually required (e.g. inside a builtin body), per the representation-selection
+  rules described earlier in this document. Consequently, overload resolution prefers a
+  representation-preserving match over one requiring `__as__`, so defining
+  posit-native operations opts out of coercion per-operation
+- conversion path resolution: an explicitly defined direct `__as__` always takes
+  precedence over a composed path. Composed paths (chaining `__as__` up the ancestry,
+  e.g. `Tracked -> Posit64 -> float64` for `Tracked = Posit64 & [...]`) are allowed
+  when unambiguous. With multiple nominal parents, diamonds are possible
+  (`X = int & float64 & [...]` at a boundary expecting a common ancestor); if multiple
+  composed paths exist at a use site, that is a type error, resolved
+  by defining a direct conversion. The error surfaces only at ambiguous *use* sites —
+  the mere existence of multiple paths is fine (opt-in lint at most) — and the
+  diagnostic must name the competing paths and the definition sites of the `__as__`
+  overloads involved
+- a pure nominal descendant with no structural body is spelled as an ordinary
+  expression: `UserId = type of int`
+
+### Generativity of type expressions
+- `type of T` and `T & [...]` (where `T` is nominal) are generative: each *evaluation*
+  mints a distinct nominal type. Type expressions are ordinary expressions and function
+  bodies re-evaluate on every call, so a factory function containing a generative type
+  expression returns a fresh type per call
+- intersections of purely structural types are *not* generative: structural type
+  equality is duck typing, so two evaluations of the same structural intersection
+  produce equal types. Generativity only enters when a nominal type is being minted.
+  If you want a combined structural type with unique (generative) identity, splice in
+  an anonymous nominal type: `MyUniqueStructType = type of any & [...]`
+- applicative behavior (one stable type reused everywhere) is achieved with existing
+  mechanisms: bind the result once and refer to the binding (possibly closing over it),
+  or explicitly cache results (note: a userland memoizing type factory requires mutable
+  state that persists across compile-time evaluations)
+```dewy
+Tagged = (T:type) => T & [tag:string]
+TaggedInt = Tagged(int)   # bind once; every use of TaggedInt is the same type
+a: TaggedInt = [...]
+b: TaggedInt = [...]      # compatible with a. Writing `a: Tagged(int)` and `b: Tagged(int)` would mint two distinct types
+```
+- generics do not change this: genericizing an expression is sugar for making it a
+  function taking a type parameter, so `Tagged = <T>() => T & [tag:string]` invoked as
+  `Tagged<int>()` re-evaluates the body and mints a fresh type per instantiation, same
+  as any other call. Generic instantiation is deliberately *not* memoized — that would
+  introduce a second evaluation rule for what is definitionally just a function call.
+  (Note this only matters when the body mints a nominal type; a generic producing a
+  purely structural result is stable across instantiations for free, per duck typing)
+- type annotations (on parameters, returns, bindings) are conceptually evaluated once,
+  at typechecking time — checking happens once even if the function is called many
+  times. Default values, by contrast, are re-evaluated on every call (so
+  `(a:array = []) => ...` gets a fresh array per call, avoiding the shared
+  mutable-default trap). A generative type expression in default-value position therefore
+  mints a fresh type per call, consistent with both rules
+- builtin parameterization like `array<int>` falls on the non-generative side: `array`
+  is a builtin structural type, and parameterizing an existing type is partial
+  application on the type object (narrowing), not minting a descendant. The dividing
+  line: parameterization narrows, `type of` / nominal-splicing mints
+
+### Array type literal syntax (`T[]`)
+TypeScript-style postfix `[]` is sugar for the builtin `array` type (which is the
+canonical representation; it is a structural type with a `length` field):
+```dewy
+int[]          # array<int>
+int[5]         # array<int length=?5>
+int[3 4]       # array<int length=?[3 4]>   multidimensional shape
+int[][]        # array<array<int>>          left-associative
+(bool|string)[]  # array<bool|string>
+bool|string[]    # bool | array<string>     postfix [] binds much tighter than |
+```
+- since Dewy has no separate type-level grammar (types are ordinary expressions), this
+  parses in the value grammar as juxtaposition of a value with an array literal — the
+  same surface form as indexing. Juxtaposition resolves to different operations based
+  on operand types (like `a(b)` resolving to `__mul__` vs `__call__`), so a type
+  juxtaposed with an array literal resolves to array-type construction. Indexing a
+  type object is otherwise meaningless, so nothing legitimate is displaced
+- precedence is that of index juxtapose (high, same tier as call/index, possibly tied
+  with type-param juxtapose)
+
+
+> NOTE: these were old notes/tasks about the refinement system. some might be superceded by the above version, but we'll keep them as a reference for now
 - [ ] Flow-sensitive refinement typing. Track value facts through ordinary control flow: x != 0, 0 <= i < a.length, literal values, unions/intersections, exclusions like T & ~0, etc.
 - [ ] Refinement-aware function contracts. Let parameter and return types express predicates and relationships between values, including overloads selected by refinements.
 - [ ] Static proof before implicit partial operations. Operations like indexing, division, narrowing casts, invalid shifts, etc. compile normally only when the compiler can prove their preconditions.
@@ -406,6 +561,11 @@ Incremental implementation work:
 - [ ] Useful proof diagnostics. When verification fails, report known facts, required fact, and the missing relationship, rather than exposing solver internals.
 - [ ] Optimization driven by proofs. Reuse refinement information for bounds-check elimination, integer-width selection, dead-branch elimination, specialization, and other lowering decisions.
 - [ ] Idiomatic code designed to be provable. Make the language’s normal APIs and control structures naturally expose the invariants the verifier needs, rather than treating verification as an add-on.
+
+
+###
+
+
 
 ### Meta stuff
 - [ ] remove old src and replace with cleanparse (delete intermediate cleanparse folder)
