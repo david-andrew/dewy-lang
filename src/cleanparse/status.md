@@ -415,7 +415,7 @@ Incremental implementation work:
       dynamic arrays and lifetime management have defined semantics.
 
 ## Completely unimplemented
-
+In no particular order
 - [ ] Imports and modules
 - [ ] Floating-point, rational, and real numbers
 - [ ] Physical units
@@ -435,6 +435,7 @@ Incremental implementation work:
 - [ ] full end to end self-hosted compiler via dewy->udewy frontend, udewy->asm backend
 - [ ] standard library
     - [ ] OS agnostic interfaces on top of OS-dependent implementations per supported OS/environment
+- [ ] LSP for syntax highlighting, type narrowed lookup, struct member listing, etc
 - [ ] implementation of hello world examples from the different domains
 - [ ] test harness system. 
     - [ ] self hosted unit tests with automation for running on all updates
