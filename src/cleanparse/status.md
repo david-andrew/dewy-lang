@@ -584,6 +584,8 @@ bool|string[]    # bool | array<string>     postfix [] binds much tighter than |
 - [ ] Optimization driven by proofs. Reuse refinement information for bounds-check elimination, integer-width selection, dead-branch elimination, specialization, and other lowering decisions.
 - [ ] Idiomatic code designed to be provable. Make the language’s normal APIs and control structures naturally expose the invariants the verifier needs, rather than treating verification as an add-on.
 
+### Dewy compilation of UDewy programs
+- [ ] TBD work for ensuing dewy compiler compiles well-formed udewy programs and they produce the same visible outcomes as if compiled directly with udewy
 
 ### Proper compilation target list/representation
 - [ ] redo the list of targets for compilation targets and how they are handled. Note we are not recreating LLVM's target triples because plenty of those have redundant information or need an extra field. Instead the dewy/udewy list of targets will be more about each target name having only as many fields as it needs to describe itself. The following list is not set in stone, but merely an initial stab at what the targets list might look like:
