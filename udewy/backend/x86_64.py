@@ -267,6 +267,20 @@ class X86_64Backend(Backend):
             self._emit_data(f"    .zero {size}")
 
         return label_id
+
+    def intern_words(self, elements: list[int | str]) -> int:
+        """Add initialized raw 64-bit words to the data section."""
+        label_id = self._next_label
+        label = self._new_label("static")
+        self._static_labels[label_id] = label
+
+        self._emit_data(f".section .data.{label},\"aw\",@progbits")
+        self._emit_data("    .balign 8")
+        self._emit_data_label(label)
+        for element in elements:
+            self._emit_data(f"    .quad {element}")
+
+        return label_id
     
     def push_string_ref(self, label_id: int) -> None:
         """Push address of string data onto value stack."""

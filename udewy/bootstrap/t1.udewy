@@ -60,6 +60,20 @@ const TK_FN_ARROW:int       = 47
 const TK_PIPE:int           = 48
 const TK_TRANSMUTE:int      = 49
 
+const T1_KIND_NAMES:int = __static_words__(
+    "TK_UNKNOWN"
+    "TK_IDENT" "TK_IDENT_CALL" "TK_STRING" "TK_BASED_STRING" "TK_TYPE_PARAM"
+    "TK_VOID" "TK_NUMBER" "TK_LET" "TK_CONST" "TK_IF"
+    "TK_LOOP" "TK_ELSE" "TK_RETURN" "TK_BREAK" "TK_CONTINUE"
+    "TK_EXTERN" "TK_PLUS" "TK_MINUS" "TK_MUL" "TK_IDIV"
+    "TK_MOD" "TK_EQ" "TK_NOT_EQ" "TK_GT" "TK_GT_EQ"
+    "TK_LT" "TK_LT_EQ" "TK_AND" "TK_OR" "TK_XOR"
+    "TK_NOT" "TK_LEFT_SHIFT" "TK_RIGHT_SHIFT" "TK_ASSIGN" "TK_UPDATE_ASSIGN"
+    "TK_EXPR_CALL" "TK_LEFT_PAREN" "TK_RIGHT_PAREN" "TK_LEFT_BRACE" "TK_RIGHT_BRACE"
+    "TK_LEFT_BRACKET" "TK_RIGHT_BRACKET" "_TK_COLON" "_TK_FN_COLON" "TK_TYPE"
+    "TK_FN_TYPE" "TK_FN_ARROW" "TK_PIPE" "TK_TRANSMUTE"
+)
+
 # ----------------------------------------------------------------------------
 # Characters
 # ----------------------------------------------------------------------------
@@ -734,56 +748,8 @@ let t1_token_text = (ts:int idx:int):>int => {
 # ----------------------------------------------------------------------------
 
 let t1_kind_name = (kind:int):>int => {
-    if kind =? TK_IDENT { return "TK_IDENT" }
-    if kind =? TK_IDENT_CALL { return "TK_IDENT_CALL" }
-    if kind =? TK_STRING { return "TK_STRING" }
-    if kind =? TK_BASED_STRING { return "TK_BASED_STRING" }
-    if kind =? TK_TYPE_PARAM { return "TK_TYPE_PARAM" }
-    if kind =? TK_VOID { return "TK_VOID" }
-    if kind =? TK_NUMBER { return "TK_NUMBER" }
-    if kind =? TK_LET { return "TK_LET" }
-    if kind =? TK_CONST { return "TK_CONST" }
-    if kind =? TK_IF { return "TK_IF" }
-    if kind =? TK_LOOP { return "TK_LOOP" }
-    if kind =? TK_ELSE { return "TK_ELSE" }
-    if kind =? TK_RETURN { return "TK_RETURN" }
-    if kind =? TK_BREAK { return "TK_BREAK" }
-    if kind =? TK_CONTINUE { return "TK_CONTINUE" }
-    if kind =? TK_EXTERN { return "TK_EXTERN" }
-    if kind =? TK_PLUS { return "TK_PLUS" }
-    if kind =? TK_MINUS { return "TK_MINUS" }
-    if kind =? TK_MUL { return "TK_MUL" }
-    if kind =? TK_IDIV { return "TK_IDIV" }
-    if kind =? TK_MOD { return "TK_MOD" }
-    if kind =? TK_EQ { return "TK_EQ" }
-    if kind =? TK_NOT_EQ { return "TK_NOT_EQ" }
-    if kind =? TK_GT { return "TK_GT" }
-    if kind =? TK_GT_EQ { return "TK_GT_EQ" }
-    if kind =? TK_LT { return "TK_LT" }
-    if kind =? TK_LT_EQ { return "TK_LT_EQ" }
-    if kind =? TK_AND { return "TK_AND" }
-    if kind =? TK_OR { return "TK_OR" }
-    if kind =? TK_XOR { return "TK_XOR" }
-    if kind =? TK_NOT { return "TK_NOT" }
-    if kind =? TK_LEFT_SHIFT { return "TK_LEFT_SHIFT" }
-    if kind =? TK_RIGHT_SHIFT { return "TK_RIGHT_SHIFT" }
-    if kind =? TK_ASSIGN { return "TK_ASSIGN" }
-    if kind =? TK_UPDATE_ASSIGN { return "TK_UPDATE_ASSIGN" }
-    if kind =? TK_EXPR_CALL { return "TK_EXPR_CALL" }
-    if kind =? TK_LEFT_PAREN { return "TK_LEFT_PAREN" }
-    if kind =? TK_RIGHT_PAREN { return "TK_RIGHT_PAREN" }
-    if kind =? TK_LEFT_BRACE { return "TK_LEFT_BRACE" }
-    if kind =? TK_RIGHT_BRACE { return "TK_RIGHT_BRACE" }
-    if kind =? TK_LEFT_BRACKET { return "TK_LEFT_BRACKET" }
-    if kind =? TK_RIGHT_BRACKET { return "TK_RIGHT_BRACKET" }
-    if kind =? TK_COLON_TMP { return "_TK_COLON" }
-    if kind =? TK_FN_COLON_TMP { return "_TK_FN_COLON" }
-    if kind =? TK_TYPE { return "TK_TYPE" }
-    if kind =? TK_FN_TYPE { return "TK_FN_TYPE" }
-    if kind =? TK_FN_ARROW { return "TK_FN_ARROW" }
-    if kind =? TK_PIPE { return "TK_PIPE" }
-    if kind =? TK_TRANSMUTE { return "TK_TRANSMUTE" }
-    return "TK_UNKNOWN"
+    if (kind <? 0) or (kind >? TK_TRANSMUTE) { return "TK_UNKNOWN" }
+    return __load__(T1_KIND_NAMES + kind * 8)
 }
 
 # Emit each token in a normalized form: `KIND LOC HEX_VALUE\n`. For easy

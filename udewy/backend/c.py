@@ -105,6 +105,12 @@ def _c_capability_for_source(path: Path) -> str | None:
 
 
 @dataclass
+class _WordsInit:
+    name: str
+    elements: list[int | str]
+
+
+@dataclass
 class _FunctionBuilder:
     label_id: int
     name: str
@@ -145,6 +151,7 @@ class CBackend(Backend):
         self._string_contents: dict[int, bytes] = {}
         self._static_names: dict[int, str] = {}
         self._static_sizes: dict[int, int] = {}
+        self._static_word_initializers: dict[int, _WordsInit] = {}
 
         self._function_order: list[int] = []
         self._function_builders: dict[int, _FunctionBuilder] = {}
@@ -612,6 +619,12 @@ class CBackend(Backend):
     def _render_backend_init(self) -> str | None:
         lines: list[str] = []
 
+        for words_init in self._static_word_initializers.values():
+            for index, element in enumerate(words_init.elements):
+                if isinstance(element, int):
+                    continue
+                lines.append(f"    {words_init.name}[{index}] = {element};")
+
         for label_id, init in self._global_initializers.items():
             if isinstance(init, int):
                 continue
@@ -782,6 +795,14 @@ class CBackend(Backend):
 
         for label_id in sorted(self._static_names):
             name = self._static_names[label_id]
+            words_init = self._static_word_initializers.get(label_id)
+            if words_init is not None:
+                values = ", ".join(
+                    _u64_literal(element) if isinstance(element, int) else "UINT64_C(0)"
+                    for element in words_init.elements
+                )
+                parts.append(f"static udewy_word {name}[{len(words_init.elements)}] = {{ {values} }};")
+                continue
             size = max(1, self._static_sizes[label_id])
             parts.append(f"static unsigned char {name}[{size}] = {{0}};")
 
@@ -950,6 +971,14 @@ class CBackend(Backend):
         label_id = self._alloc_label_id()
         self._static_names[label_id] = f"udewy_static_{label_id}"
         self._static_sizes[label_id] = size
+        return label_id
+
+    def intern_words(self, elements: list[int | str]) -> int:
+        label_id = self._alloc_label_id()
+        name = f"udewy_static_{label_id}"
+        self._static_names[label_id] = name
+        self._static_sizes[label_id] = len(elements) * 8
+        self._static_word_initializers[label_id] = _WordsInit(name=name, elements=elements)
         return label_id
 
     def push_string_ref(self, label_id: int) -> None:

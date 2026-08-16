@@ -33,6 +33,21 @@ const HL_OPERATOR:int = "#d4d4d4"
 
 const HL_NO_MATCH:int = -1
 
+# Indexed by t1 kind. Slot 0 is unused; missing kinds stay 0 (plain).
+const HL_TOKEN_COLORS:int = __static_words__(
+    0
+    HL_IDENT HL_FUNCTION HL_STRING 0 HL_TYPE
+    HL_DECLARATION HL_NUMBER HL_DECLARATION HL_DECLARATION HL_KEYWORD
+    HL_KEYWORD HL_KEYWORD HL_KEYWORD HL_KEYWORD HL_KEYWORD
+    HL_KEYWORD HL_OPERATOR HL_OPERATOR HL_OPERATOR HL_OPERATOR
+    HL_OPERATOR HL_OPERATOR HL_OPERATOR HL_OPERATOR HL_OPERATOR
+    HL_OPERATOR HL_OPERATOR HL_KEYWORD HL_KEYWORD HL_KEYWORD
+    HL_KEYWORD HL_OPERATOR HL_OPERATOR HL_OPERATOR HL_OPERATOR
+    HL_PUNCTUATION HL_PUNCTUATION HL_PUNCTUATION HL_BRACE HL_BRACE
+    HL_PUNCTUATION HL_PUNCTUATION 0 0 HL_TYPE
+    HL_TYPE HL_OPERATOR HL_OPERATOR HL_KEYWORD
+)
+
 # ----------------------------------------------------------------------------
 # DOM emitter primitives
 # ----------------------------------------------------------------------------
@@ -389,53 +404,8 @@ let hl_prelude = (parent:int src:int n:int):>int => {
 
 # Map a t1 kind to a color string (or 0 = plain).
 let hl_token_color = (kind:int):>int => {
-    if kind =? TK_LET { return HL_DECLARATION }
-    if kind =? TK_CONST { return HL_DECLARATION }
-    if kind =? TK_IF { return HL_KEYWORD }
-    if kind =? TK_LOOP { return HL_KEYWORD }
-    if kind =? TK_ELSE { return HL_KEYWORD }
-    if kind =? TK_RETURN { return HL_KEYWORD }
-    if kind =? TK_BREAK { return HL_KEYWORD }
-    if kind =? TK_CONTINUE { return HL_KEYWORD }
-    if kind =? TK_EXTERN { return HL_KEYWORD }
-    if kind =? TK_TRANSMUTE { return HL_KEYWORD }
-    if kind =? TK_VOID { return HL_DECLARATION }
-    if kind =? TK_AND { return HL_KEYWORD }
-    if kind =? TK_OR { return HL_KEYWORD }
-    if kind =? TK_XOR { return HL_KEYWORD }
-    if kind =? TK_NOT { return HL_KEYWORD }
-    if kind =? TK_IDENT_CALL { return HL_FUNCTION }
-    if kind =? TK_TYPE { return HL_TYPE }
-    if kind =? TK_FN_TYPE { return HL_TYPE }
-    if kind =? TK_TYPE_PARAM { return HL_TYPE }
-    if kind =? TK_STRING { return HL_STRING }
-    if kind =? TK_NUMBER { return HL_NUMBER }
-    if kind =? TK_LEFT_BRACE { return HL_BRACE }
-    if kind =? TK_RIGHT_BRACE { return HL_BRACE }
-    if kind =? TK_LEFT_PAREN { return HL_PUNCTUATION }
-    if kind =? TK_RIGHT_PAREN { return HL_PUNCTUATION }
-    if kind =? TK_LEFT_BRACKET { return HL_PUNCTUATION }
-    if kind =? TK_RIGHT_BRACKET { return HL_PUNCTUATION }
-    if kind =? TK_EXPR_CALL { return HL_PUNCTUATION }
-    if kind =? TK_PLUS { return HL_OPERATOR }
-    if kind =? TK_MINUS { return HL_OPERATOR }
-    if kind =? TK_MUL { return HL_OPERATOR }
-    if kind =? TK_IDIV { return HL_OPERATOR }
-    if kind =? TK_MOD { return HL_OPERATOR }
-    if kind =? TK_EQ { return HL_OPERATOR }
-    if kind =? TK_NOT_EQ { return HL_OPERATOR }
-    if kind =? TK_GT { return HL_OPERATOR }
-    if kind =? TK_GT_EQ { return HL_OPERATOR }
-    if kind =? TK_LT { return HL_OPERATOR }
-    if kind =? TK_LT_EQ { return HL_OPERATOR }
-    if kind =? TK_LEFT_SHIFT { return HL_OPERATOR }
-    if kind =? TK_RIGHT_SHIFT { return HL_OPERATOR }
-    if kind =? TK_ASSIGN { return HL_OPERATOR }
-    if kind =? TK_UPDATE_ASSIGN { return HL_OPERATOR }
-    if kind =? TK_FN_ARROW { return HL_OPERATOR }
-    if kind =? TK_PIPE { return HL_OPERATOR }
-    if kind =? TK_IDENT { return HL_IDENT }
-    return 0
+    if (kind <? 0) or (kind >? TK_TRANSMUTE) { return 0 }
+    return __load__(HL_TOKEN_COLORS + kind * 8)
 }
 
 # Compute the end offset (exclusive) of a token, given the kind/value/location

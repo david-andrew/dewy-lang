@@ -481,6 +481,32 @@ let rv_intern_string = (data:int len:int):>int => {
     return label_id
 }
 
+let rv_intern_words = (elements_vec:int kinds_vec:int):>int => {
+    let label_id:int = rv_next_label
+    let label:int = rv_new_label("static")
+    intmap_put(rv_static_labels label_id label)
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .data.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"aw\",@progbits")
+    vec_push(rv_data bb_finalize_as_string(bb))
+    vec_push(rv_data "    .balign 8")
+    rv_emit_data_label(label)
+    let i:int = 0
+    loop i <? vec_len(elements_vec) {
+        let line:int = bb_new(32)
+        bb_push_str(line "    .dword ")
+        if vec_get(kinds_vec i) =? 1 {
+            bb_push_int(line vec_get(elements_vec i))
+        } else {
+            bb_push_str(line vec_get(elements_vec i))
+        }
+        vec_push(rv_data bb_finalize_as_string(line))
+        i = i + 1
+    }
+    return label_id
+}
+
 let rv_define_global = (name:int kind:int value:int):>int => {
     let label_id:int = rv_next_label
     let label:int = 0
@@ -1348,6 +1374,7 @@ let rv_install_backend = ():>void => {
     be_set_module_init = rv_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
     be_intern_string = rv_intern_string
+    be_intern_words = rv_intern_words
     be_define_global = rv_define_global
     be_declare_extern_global = rv_declare_extern_global
     be_intern_static = rv_intern_static

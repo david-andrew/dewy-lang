@@ -497,6 +497,32 @@ let x86_intern_string = (data:int len:int):>int => {
     return label_id
 }
 
+let x86_intern_words = (elements_vec:int kinds_vec:int):>int => {
+    let label_id:int = x86_next_label
+    let label:int = x86_new_label("static")
+    intmap_put(x86_static_labels label_id label)
+    let bb:int = bb_new(64 + str_len(label))
+    bb_push_str(bb ".section .data.")
+    bb_push_str(bb label)
+    bb_push_str(bb ",\"aw\",@progbits")
+    vec_push(x86_data bb_finalize_as_string(bb))
+    vec_push(x86_data "    .balign 8")
+    x86_emit_data_label(label)
+    let i:int = 0
+    loop i <? vec_len(elements_vec) {
+        let line:int = bb_new(32)
+        bb_push_str(line "    .quad ")
+        if vec_get(kinds_vec i) =? 1 {
+            bb_push_int(line vec_get(elements_vec i))
+        } else {
+            bb_push_str(line vec_get(elements_vec i))
+        }
+        vec_push(x86_data bb_finalize_as_string(line))
+        i = i + 1
+    }
+    return label_id
+}
+
 let x86_define_global = (name:int kind:int value:int):>int => {
     let label_id:int = x86_next_label
     let label:int = 0
@@ -1527,6 +1553,7 @@ let x86_install_backend = ():>void => {
     be_set_imported_sources = be_default_set_imported_sources
 
     be_intern_string = x86_intern_string
+    be_intern_words = x86_intern_words
     be_define_global = x86_define_global
     be_declare_extern_global = x86_declare_extern_global
     be_intern_static = x86_intern_static

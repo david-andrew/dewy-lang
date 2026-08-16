@@ -270,6 +270,23 @@ let w_intern_string = (data:int len:int):>int => {
     return label_id
 }
 
+let w_intern_words = (elements_vec:int kinds_vec:int):>int => {
+    let label_id:int = w_next_label
+    w_next_label = w_next_label + 1
+    let n:int = vec_len(elements_vec)
+    let buf:int = arena_alloc(n * 8)
+    let i:int = 0
+    loop i <? n {
+        # Function references are table indices; data references are linear
+        # memory offsets. Both are resolved by the existing *_ref callbacks.
+        w_encode_i64_le(buf + i * 8 vec_get(elements_vec i))
+        i = i + 1
+    }
+    let offset:int = w_alloc_data(buf n * 8)
+    intmap_put(w_static_offsets label_id offset)
+    return label_id
+}
+
 let w_define_global = (name:int kind:int value:int):>int => {
     let label_id:int = w_next_label
     w_next_label = w_next_label + 1
@@ -3243,6 +3260,7 @@ let w_install_backend = ():>void => {
     be_set_module_init = w_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
     be_intern_string = w_intern_string
+    be_intern_words = w_intern_words
     be_define_global = w_define_global
     be_declare_extern_global = w_declare_extern_global
     be_intern_static = w_intern_static

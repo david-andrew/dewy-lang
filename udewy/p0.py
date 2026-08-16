@@ -82,6 +82,7 @@ class ParseState:
     current_fn_label_id: int | None = None
     fn_references: dict[int, set[int]] = field(default_factory=dict)
     top_level_fn_refs: set[int] = field(default_factory=set)
+    static_word_fn_locs: dict[int, int] = field(default_factory=dict)
 
 
 def note_fn_use(state: "ParseState", target_label_id: int) -> None:
@@ -350,6 +351,40 @@ def lookup_stable_int(
     return stable_value.value
 
 
+def is_extern_function_value(state: ParseState, stable_value: StableValue) -> bool:
+    return stable_value.kind == "function" and any(
+        entry.label_id == stable_value.value and entry.is_extern
+        for entry in state.fn_table.values()
+    )
+
+
+def parse_static_words(
+    toks: list[t1.Token],
+    idx: int,
+    state: ParseState,
+) -> tuple[int, StableValue]:
+    if idx >= len(toks) or toks[idx].kind == t1.Kind.TK_RIGHT_PAREN:
+        loc = toks[idx].location if idx < len(toks) else len(state.src)
+        error(state.src, loc, "__static_words__ expects at least one compile-time stable word")
+
+    words: list[int | str] = []
+    while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
+        word_loc = toks[idx].location
+        parsed = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
+        if parsed is None:
+            error(state.src, word_loc, "__static_words__ arguments must be compile-time stable words")
+        idx, stable_value = parsed
+        if is_extern_function_value(state, stable_value):
+            error(state.src, word_loc, "__static_words__ does not accept extern function references")
+        if stable_value.kind == "function":
+            state.static_word_fn_locs.setdefault(stable_value.value, word_loc)
+        words.append(stable_value_to_directive(state.backend, stable_value))
+
+    idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
+    label_id = state.backend.intern_words(words)
+    return idx, StableValue("static", label_id)
+
+
 def try_parse_stable_expr(
     toks: list[t1.Token],
     idx: int,
@@ -420,6 +455,12 @@ def try_parse_stable_expr(
 
     if kind == t1.Kind.TK_IDENT_CALL:
         name = get_token_name(toks, idx, state.src)
+        if name == "__static_words__":
+            new_idx, stable_value = parse_static_words(toks, idx + 1, state)
+            if emit_runtime:
+                push_stable_value(backend, stable_value)
+            return new_idx, stable_value
+
         if name != "__static_alloca__":
             return None
 
@@ -621,6 +662,9 @@ def declare_extern_function(
         label_id = state.backend.declare_extern_function(name, num_args)
         return fn_declare(state.fn_table, name, label_id, num_args, True, is_extern=True)
 
+    static_word_loc = state.static_word_fn_locs.get(entry.label_id)
+    if static_word_loc is not None:
+        error(state.src, static_word_loc, "__static_words__ does not accept extern function references")
     if entry.is_defined:
         error(state.src, loc, f"Function {name!r} is already declared")
     if entry.num_args is not None and entry.num_args != num_args:
@@ -780,6 +824,11 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
             size, idx = parse_static_alloca_size(toks, idx, state)
             label_id = backend.intern_static(size)
             backend.push_static_ref(label_id)
+            return idx
+
+        if name == "__static_words__":
+            idx, stable_value = parse_static_words(toks, idx, state)
+            push_stable_value(backend, stable_value)
             return idx
 
         if backend.is_intrinsic(name):

@@ -23,7 +23,7 @@ The grammar aims to highlight the following (non-exhaustive) constructs:
 - **Operators**: `=?`, `>?`, `<?`, `>=?`, `<=?`, `=>`, `|>`, `=`, `+=`, `-=`, `*=`, `//=`, `%=`, `<<`, `>>`, `<<=`, `>>=`, `//`, `+`, `-`, `*`, `%`
 - **Constants**: `true`, `false`, `void`
 - **Metatags**: `$target`, `$supported_targets`, `$warning`, `$error`, and other `$name` forms
-- **Intrinsics**: `__load__`, `__store__`, `__load_u64__`, `__store_u64__`, `__load_i64__`, `__store_i64__`, `__load_u32__`, `__store_u32__`, `__load_i32__`, `__store_i32__`, `__load_u16__`, `__store_u16__`, `__load_i16__`, `__store_i16__`, `__load_u8__`, `__store_u8__`, `__load_i8__`, `__store_i8__`, `__signed_shr__`, `__unsigned_idiv__`, `__unsigned_mod__`, `__unsigned_lt__`, `__unsigned_gt__`, `__unsigned_lte__`, `__unsigned_gte__`, `__alloca__`, `__static_alloca__`
+- **Intrinsics**: `__load__`, `__store__`, `__load_u64__`, `__store_u64__`, `__load_i64__`, `__store_i64__`, `__load_u32__`, `__store_u32__`, `__load_i32__`, `__store_i32__`, `__load_u16__`, `__store_u16__`, `__load_i16__`, `__store_i16__`, `__load_u8__`, `__store_u8__`, `__load_i8__`, `__store_i8__`, `__signed_shr__`, `__unsigned_idiv__`, `__unsigned_mod__`, `__unsigned_lt__`, `__unsigned_gt__`, `__unsigned_lte__`, `__unsigned_gte__`, `__alloca__`, `__static_alloca__`, `__static_words__`
 - **Type annotations**: `:Type` and `:>ReturnType`
 - **Strings**: `"double quoted"` with escape sequences, path strings like `p"..."`, and byte-exact based strings such as `0b"1010_0001"` and `0x"de ad be ef"`
 - **Numbers**: decimal (`123`), hex (`0xDEAD_BEEF`), binary (`0b1010_0101`)

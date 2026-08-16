@@ -30,75 +30,22 @@ let bk_quit:bool = false
 
 # ---------- Key map (KEY_* id -> KeyboardEvent.code cstr) -----------------------
 
-const KEYMAP_BUF:Ptr = __static_alloca__(416)     # KEY_COUNT * 8
-
-let keymap_set = (key:KeyId code:Cstr):>void => {
-    __store__(code KEYMAP_BUF + key * 8)
-    return void
-}
-
-let keymap_init = ():>void => {
-    keymap_set(KEY_W "KeyW\0")
-    keymap_set(KEY_A "KeyA\0")
-    keymap_set(KEY_S "KeyS\0")
-    keymap_set(KEY_D "KeyD\0")
-    keymap_set(KEY_Q "KeyQ\0")
-    keymap_set(KEY_E "KeyE\0")
-    keymap_set(KEY_R "KeyR\0")
-    keymap_set(KEY_F "KeyF\0")
-    keymap_set(KEY_T "KeyT\0")
-    keymap_set(KEY_G "KeyG\0")
-    keymap_set(KEY_Y "KeyY\0")
-    keymap_set(KEY_H "KeyH\0")
-    keymap_set(KEY_U "KeyU\0")
-    keymap_set(KEY_O "KeyO\0")
-    keymap_set(KEY_I "KeyI\0")
-    keymap_set(KEY_J "KeyJ\0")
-    keymap_set(KEY_K "KeyK\0")
-    keymap_set(KEY_L "KeyL\0")
-    keymap_set(KEY_Z "KeyZ\0")
-    keymap_set(KEY_X "KeyX\0")
-    keymap_set(KEY_C "KeyC\0")
-    keymap_set(KEY_V "KeyV\0")
-    keymap_set(KEY_B "KeyB\0")
-    keymap_set(KEY_N "KeyN\0")
-    keymap_set(KEY_M "KeyM\0")
-    keymap_set(KEY_P "KeyP\0")
-    keymap_set(KEY_UP "ArrowUp\0")
-    keymap_set(KEY_DOWN "ArrowDown\0")
-    keymap_set(KEY_LEFT "ArrowLeft\0")
-    keymap_set(KEY_RIGHT "ArrowRight\0")
-    keymap_set(KEY_SPACE "Space\0")
-    keymap_set(KEY_ENTER "Enter\0")
-    keymap_set(KEY_ESC "Escape\0")
-    keymap_set(KEY_TAB "Tab\0")
-    keymap_set(KEY_LSHIFT "ShiftLeft\0")
-    keymap_set(KEY_1 "Digit1\0")
-    keymap_set(KEY_2 "Digit2\0")
-    keymap_set(KEY_3 "Digit3\0")
-    keymap_set(KEY_4 "Digit4\0")
-    keymap_set(KEY_5 "Digit5\0")
-    keymap_set(KEY_6 "Digit6\0")
-    keymap_set(KEY_7 "Digit7\0")
-    keymap_set(KEY_8 "Digit8\0")
-    keymap_set(KEY_9 "Digit9\0")
-    keymap_set(KEY_0 "Digit0\0")
-    keymap_set(KEY_F5 "F5\0")
-    keymap_set(KEY_F9 "F9\0")
-    keymap_set(KEY_DELETE "Delete\0")
-    keymap_set(KEY_BACKSPACE "Backspace\0")
-    keymap_set(KEY_LCTRL "ControlLeft\0")
-    keymap_set(KEY_LALT "AltLeft\0")
-    keymap_set(KEY_F2 "F2\0")
-    return void
-}
+const KEYMAP_BUF:Ptr = __static_words__(
+    "KeyW\0" "KeyA\0" "KeyS\0" "KeyD\0" "KeyQ\0" "KeyE\0" "KeyR\0" "KeyF\0"
+    "KeyT\0" "KeyG\0" "KeyY\0" "KeyH\0" "KeyU\0" "KeyO\0" "KeyI\0" "KeyJ\0"
+    "KeyK\0" "KeyL\0" "KeyZ\0" "KeyX\0" "KeyC\0" "KeyV\0" "KeyB\0" "KeyN\0"
+    "KeyM\0" "KeyP\0" "ArrowUp\0" "ArrowDown\0" "ArrowLeft\0" "ArrowRight\0"
+    "Space\0" "Enter\0" "Escape\0" "Tab\0" "ShiftLeft\0" "Digit1\0" "Digit2\0"
+    "Digit3\0" "Digit4\0" "Digit5\0" "Digit6\0" "Digit7\0" "Digit8\0" "Digit9\0"
+    "Digit0\0" "F5\0" "F9\0" "Delete\0" "Backspace\0" "ControlLeft\0" "AltLeft\0"
+    "F2\0"
+)
 
 # ---------- Lifecycle ------------------------------------------------------------
 
 let ud_dom_set_title = (title:int title_len:int):>int => extern
 
 let backend_init = (width:int height:int title_ptr:Cstr):>int => {
-    keymap_init()
     ud_dom_set_title(title_ptr cstr_len(title_ptr))
     return __gpu_init__(width height)
 }

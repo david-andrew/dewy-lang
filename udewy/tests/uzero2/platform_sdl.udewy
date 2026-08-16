@@ -28,74 +28,28 @@ let bk_wheel_accum_q:Q16 = 0             # fractional wheel carry (trackpads)
 let bk_wheel_steps:int = 0
 
 # ---------- Key map (KEY_* id -> SDL scancode) -------------------------------
+# Order matches KEY_W=0 .. KEY_F2=51 in constants.udewy.
 
-const KEYMAP_BUF:Ptr = __static_alloca__(416)     # KEY_COUNT * 8
-
-let keymap_set = (key:KeyId scancode:int):>void => {
-    __store__(scancode KEYMAP_BUF + key * 8)
-    return void
-}
-
-let keymap_init = ():>void => {
-    keymap_set(KEY_W 26)
-    keymap_set(KEY_A 4)
-    keymap_set(KEY_S 22)
-    keymap_set(KEY_D 7)
-    keymap_set(KEY_Q 20)
-    keymap_set(KEY_E 8)
-    keymap_set(KEY_R 21)
-    keymap_set(KEY_F 9)
-    keymap_set(KEY_T 23)
-    keymap_set(KEY_G 10)
-    keymap_set(KEY_Y 28)
-    keymap_set(KEY_H 11)
-    keymap_set(KEY_U 24)
-    keymap_set(KEY_O 18)
-    keymap_set(KEY_I 12)
-    keymap_set(KEY_J 13)
-    keymap_set(KEY_K 14)
-    keymap_set(KEY_L 15)
-    keymap_set(KEY_Z 29)
-    keymap_set(KEY_X 27)
-    keymap_set(KEY_C 6)
-    keymap_set(KEY_V 25)
-    keymap_set(KEY_B 5)
-    keymap_set(KEY_N 17)
-    keymap_set(KEY_M 16)
-    keymap_set(KEY_P 19)
-    keymap_set(KEY_UP 82)
-    keymap_set(KEY_DOWN 81)
-    keymap_set(KEY_LEFT 80)
-    keymap_set(KEY_RIGHT 79)
-    keymap_set(KEY_SPACE 44)
-    keymap_set(KEY_ENTER 40)
-    keymap_set(KEY_ESC 41)
-    keymap_set(KEY_TAB 43)
-    keymap_set(KEY_LSHIFT 225)
-    keymap_set(KEY_1 30)
-    keymap_set(KEY_2 31)
-    keymap_set(KEY_3 32)
-    keymap_set(KEY_4 33)
-    keymap_set(KEY_5 34)
-    keymap_set(KEY_6 35)
-    keymap_set(KEY_7 36)
-    keymap_set(KEY_8 37)
-    keymap_set(KEY_9 38)
-    keymap_set(KEY_0 39)
-    keymap_set(KEY_F5 62)
-    keymap_set(KEY_F9 66)
-    keymap_set(KEY_DELETE 76)
-    keymap_set(KEY_BACKSPACE 42)
-    keymap_set(KEY_LCTRL 224)
-    keymap_set(KEY_LALT 226)
-    keymap_set(KEY_F2 59)
-    return void
-}
+const KEYMAP_BUF:Ptr = __static_words__(
+    SDL_SCANCODE_W SDL_SCANCODE_A SDL_SCANCODE_S SDL_SCANCODE_D
+    SDL_SCANCODE_Q SDL_SCANCODE_E SDL_SCANCODE_R SDL_SCANCODE_F
+    SDL_SCANCODE_T SDL_SCANCODE_G SDL_SCANCODE_Y SDL_SCANCODE_H
+    SDL_SCANCODE_U SDL_SCANCODE_O SDL_SCANCODE_I SDL_SCANCODE_J
+    SDL_SCANCODE_K SDL_SCANCODE_L SDL_SCANCODE_Z SDL_SCANCODE_X
+    SDL_SCANCODE_C SDL_SCANCODE_V SDL_SCANCODE_B SDL_SCANCODE_N
+    SDL_SCANCODE_M SDL_SCANCODE_P
+    SDL_SCANCODE_UP SDL_SCANCODE_DOWN SDL_SCANCODE_LEFT SDL_SCANCODE_RIGHT
+    SDL_SCANCODE_SPACE SDL_SCANCODE_RETURN SDL_SCANCODE_ESCAPE SDL_SCANCODE_TAB
+    SDL_SCANCODE_LSHIFT
+    SDL_SCANCODE_1 SDL_SCANCODE_2 SDL_SCANCODE_3 SDL_SCANCODE_4 SDL_SCANCODE_5
+    SDL_SCANCODE_6 SDL_SCANCODE_7 SDL_SCANCODE_8 SDL_SCANCODE_9 SDL_SCANCODE_0
+    SDL_SCANCODE_F5 SDL_SCANCODE_F9 SDL_SCANCODE_DELETE SDL_SCANCODE_BACKSPACE
+    SDL_SCANCODE_LCTRL SDL_SCANCODE_LALT SDL_SCANCODE_F2
+)
 
 # ---------- Lifecycle ---------------------------------------------------------
 
 let backend_init = (width:int height:int title_ptr:Cstr):>int => {
-    keymap_init()
     SDL_SetMainReady()
     if SDL_Init(SDL_INIT_VIDEO + SDL_INIT_AUDIO) =? 0 { return 1 }
     if SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER 1) =? 0 { SDL_Quit() return 2 }

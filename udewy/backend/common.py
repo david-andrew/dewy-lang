@@ -138,6 +138,15 @@ class Backend(ABC):
         The block has no length prefix and is returned as raw writable storage.
         Returns a handle/label_id that can be used with push_static_ref.
         """
+
+    @abstractmethod
+    def intern_words(self, elements: list[int | str]) -> int:
+        """
+        Add initialized raw 64-bit words to the data section.
+
+        The block has no length prefix and is returned as raw writable storage.
+        Returns a handle/label_id that can be used with push_static_ref.
+        """
     
     
     @abstractmethod

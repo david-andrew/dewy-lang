@@ -1,7 +1,7 @@
 # Jump Table Demo: Simple Stack-Based Calculator
 #
-# Opcode handlers are stored in a function-pointer table built once at
-# startup. Dispatch is an indirect call through that table.
+# Opcode handlers are stored in a compile-time function-pointer table.
+# Dispatch is an indirect call through that table.
 #
 # Opcodes:
 #   0 = PUSH (next byte is value to push)
@@ -55,16 +55,7 @@ let op_halt = (unused:int):>int => {
     return 1
 }
 
-let handlers:int = __static_alloca__(40)
-
-let init_handlers = ():>void => {
-    __store__(op_push handlers)
-    __store__(op_add handlers + 8)
-    __store__(op_sub handlers + 16)
-    __store__(op_mul handlers + 24)
-    __store__(op_halt handlers + 32)
-    return void
-}
+const handlers:int = __static_words__(op_push op_add op_sub op_mul op_halt)
 
 # Helper to write a digit
 let print_digit = (n:int):>void => {
@@ -126,7 +117,6 @@ let execute = (program:int len:int):>int => {
 let main = ():>int => {
     # Program: (3 + 5) * (10 - 2)
     # Bytecode: PUSH 3, PUSH 5, ADD, PUSH 10, PUSH 2, SUB, MUL, HALT
-    init_handlers()
     let program:int = 0x"00 03 00 05 01 00 0a 00 02 02 03 04"
     let prog_len:int = __load__(program - 8)
     let stack_idx:int = 0

@@ -1,5 +1,6 @@
 from json import loads
 from pathlib import Path
+from re import search
 
 from udewy.third_party.web.generate_highlighted_udewy import DEFAULT_THEME, highlighted_spans
 
@@ -54,3 +55,10 @@ def test_textmate_based_string_quotes_use_string_scope() -> None:
     for pattern in grammar["repository"]["based-string"]["patterns"]:
         assert pattern["beginCaptures"]["2"]["name"] == "string.quoted.double.udewy"
         assert pattern["endCaptures"]["0"]["name"] == "string.quoted.double.udewy"
+
+
+def test_textmate_highlights_static_words_as_an_intrinsic() -> None:
+    grammar_path = REPO_ROOT / "udewy" / "vscode-udewy" / "syntaxes" / "udewy.tmLanguage.json"
+    grammar = loads(grammar_path.read_text())
+
+    assert search(grammar["repository"]["intrinsic"]["match"], "__static_words__")

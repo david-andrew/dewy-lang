@@ -809,12 +809,23 @@ These intrinsics provide direct memory access:
 | `__store_i64__(val addr)` | Store 64-bit `val` to `addr`, return 0 |
 | `__alloca__(size)` | Allocate `size` bytes of temporary storage and return an 8-byte-aligned address |
 | `__static_alloca__(size)` | Allocate `size` bytes of writable static storage and return its address |
+| `__static_words__(word...)` | Intern one or more compile-time stable 64-bit words and return their 8-byte-aligned static address |
 
 Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings exist to make programmer intent explicit. `__load__`/`__store__` are convenience shorthands for the unsigned 64-bit forms. For stores, signedness affects only intent and documentation; the stored bit pattern is the low `N` bits of `val`.
 
 `__alloca__(size)` reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to at least 8 bytes, and native backends may round the reserved size up further to preserve ABI stack alignment. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.
 
 `__static_alloca__(size)` reserves writable storage in the program's static data area. The storage is zero-initialized, has a single shared instance for the entire program, and is not tied to any function call frame. Its `size` argument must be a compile-time stable integer value, which may be provided directly as a number literal or indirectly through a `const` binding or backend-provided builtin constant.
+
+`__static_words__(word...)` creates writable static storage initialized with one or more compile-time stable words. Accepted values are integer literals and stable aliases, non-extern function references, ordinary or based string pointers, and pointers returned by `__static_alloca__` or another `__static_words__` call. The result points directly to the first word: there is no length prefix, element type, bounds information, or array behavior.
+
+```udewy
+const handlers:int = __static_words__(on_start on_update on_stop)
+let handler:int = __load__(handlers + state * 8)
+(handler)(context)
+```
+
+Integer entries use the target's native 64-bit byte order. References use the backend's normal runtime representation: addresses on native and C targets, linear-memory addresses for WASM data, and WASM function-table indices for functions. This makes `__static_words__` suitable for vtables, lookup tables, and ABI descriptors interpreted by the consumer. Use based strings instead when the bytes must be identical across targets.
 
 ## 2.2 Arithmetic Operations
 
@@ -949,7 +960,7 @@ Intrinsics and backend-provided names fall into tiers. The tiers matter for port
 
 These are the operations defined in [Part 2: Core Intrinsics](#part-2-core-intrinsics). Every backend in this repository implements them:
 
-- Memory: `__load__` / `__store__` and the sized variants, `__alloca__`, `__static_alloca__`
+- Memory: `__load__` / `__store__` and the sized variants, `__alloca__`, `__static_alloca__`, `__static_words__`
 - Arithmetic helpers: `__signed_shr__`, `__unsigned_idiv__`, `__unsigned_mod__`, unsigned comparisons
 
 A program that uses only core intrinsics plus ordinary udewy syntax is backend-portable at the *language* level. It still needs a platform layer for I/O, allocation, and exit unless it is fully freestanding.

@@ -376,6 +376,22 @@ class Wasm32Backend(Backend):
         self._static_labels[label_id] = f".static{label_id}"
 
         return label_id
+
+    def intern_words(self, elements: list[int | str]) -> int:
+        """Add initialized raw 64-bit words to linear memory."""
+        label_id = self._next_label
+        self._next_label += 1
+
+        data = b""
+        for element in elements:
+            value = element if isinstance(element, int) else self._resolve_data_ref(element)
+            data += (value & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, "little")
+
+        offset = self._alloc_data(data)
+        self._static_offsets[label_id] = offset
+        self._static_labels[label_id] = f".static{label_id}"
+
+        return label_id
     
     def push_string_ref(self, label_id: int) -> None:
         """Push address of string data onto value stack."""

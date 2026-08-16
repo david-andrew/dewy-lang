@@ -63,6 +63,22 @@ let main = ():>int => {
 }
 '''
 
+STATIC_WORDS_SRC = """
+const handler_alias:int = handler
+const words:int = __static_words__(7 handler_alias)
+
+let handler = (value:int):>int => {
+    return value + 1
+}
+
+let main = ():>int => {
+    if __load__(words) not=? 7 { return 1 }
+    let fn:int = __load__(words + 8)
+    if (fn)(41) not=? 42 { return 2 }
+    return 0
+}
+"""
+
 
 @pytest.fixture(scope="session")
 def bootstrap_binary(tmp_path_factory) -> Path:
@@ -187,6 +203,22 @@ def test_based_string_packing_matches_between_compilers(bootstrap_binary, tmp_pa
     bs_work = tmp_path / "bs"
     bs_work.mkdir()
     bs_bin = _compile_with([str(bootstrap_binary)], BASED_STRING_SRC, "c", bs_work)
+
+    assert subprocess.run([str(py_bin)]).returncode == 0
+    assert subprocess.run([str(bs_bin)]).returncode == 0
+
+
+def test_static_words_match_between_compilers(bootstrap_binary, tmp_path) -> None:
+    if which("cc") is None:
+        pytest.skip("cc not installed")
+
+    py_work = tmp_path / "py"
+    py_work.mkdir()
+    py_bin = _compile_with(["python", "-m", "udewy"], STATIC_WORDS_SRC, "c", py_work)
+
+    bs_work = tmp_path / "bs"
+    bs_work.mkdir()
+    bs_bin = _compile_with([str(bootstrap_binary)], STATIC_WORDS_SRC, "c", bs_work)
 
     assert subprocess.run([str(py_bin)]).returncode == 0
     assert subprocess.run([str(bs_bin)]).returncode == 0

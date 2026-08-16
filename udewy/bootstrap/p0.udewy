@@ -118,7 +118,8 @@ const PS_NEXT_GLOBAL_INIT:int = 80
 const PS_CURRENT_FN:int = 88         # label_id (-1 if none)
 const PS_FN_REFERENCES:int = 96      # IntMap label -> IntSet
 const PS_TOP_LEVEL_FN_REFS:int = 104 # IntSet
-const PS_SIZE:int = 112
+const PS_STATIC_WORD_FN_LOCS:int = 112 # IntMap label -> source location
+const PS_SIZE:int = 120
 
 let ps_src = (s:int):>int => { return __load__(s + PS_SRC) }
 let ps_toks = (s:int):>int => { return __load__(s + PS_TOKS) }
@@ -134,6 +135,7 @@ let ps_next_global_init = (s:int):>int => { return __load__(s + PS_NEXT_GLOBAL_I
 let ps_current_fn = (s:int):>int => { return __load__(s + PS_CURRENT_FN) }
 let ps_fn_references = (s:int):>int => { return __load__(s + PS_FN_REFERENCES) }
 let ps_top_level_fn_refs = (s:int):>int => { return __load__(s + PS_TOP_LEVEL_FN_REFS) }
+let ps_static_word_fn_locs = (s:int):>int => { return __load__(s + PS_STATIC_WORD_FN_LOCS) }
 
 let ps_set_loop_depth = (s:int v:int):>void => { __store__(v s + PS_LOOP_DEPTH)  return void }
 let ps_set_in_condition = (s:int v:int):>void => { __store__(v s + PS_IN_CONDITION)  return void }
@@ -160,6 +162,7 @@ let ps_new = (src:int toks:int):>int => {
     __store__(-1 s + PS_CURRENT_FN)
     __store__(intmap_new() s + PS_FN_REFERENCES)
     __store__(intset_new() s + PS_TOP_LEVEL_FN_REFS)
+    __store__(intmap_new() s + PS_STATIC_WORD_FN_LOCS)
     return s
 }
 
@@ -497,6 +500,25 @@ let stable_value_to_directive_value = (sv:int):>int => {
     return 0
 }
 
+let is_extern_function_value = (state:int sv:int):>int => {
+    if sv_kind(sv) not=? SV_FN { return false }
+    let fn_table:int = ps_fn_table(state)
+    let cap:int = map_cap(fn_table)
+    let slots:int = map_slots(fn_table)
+    let i:int = 0
+    loop i <? cap {
+        let slot:int = slots + (i * MAP_SLOT_SIZE)
+        if __load__(slot + MAP_SLOT_STATE) =? MAP_OCCUPIED {
+            let entry:int = __load__(slot + MAP_SLOT_VALUE)
+            if (fe_label(entry) =? sv_value(sv)) and fe_is_extern(entry) {
+                return true
+            }
+        }
+        i = i + 1
+    }
+    return false
+}
+
 let next_global_init_name = (state:int):>int => {
     let idx:int = ps_next_global_init(state)
     ps_set_next_global_init(state idx + 1)
@@ -588,6 +610,10 @@ let declare_extern_function = (state:int name:int num_args:int loc:int):>int => 
     if entry =? 0 {
         let label_id:int = (be_declare_extern_function)(name num_args)
         return fn_declare(state name label_id num_args true true)
+    }
+    let static_word_loc:int = intmap_get(ps_static_word_fn_locs(state) fe_label(entry))
+    if static_word_loc not=? IM_MISSING {
+        diag_error(static_word_loc "__static_words__ does not accept extern function references")
     }
     if fe_is_defined(entry) {
         eprint("Function '")
@@ -808,6 +834,43 @@ let validate_intrinsic_arity = (state:int name:int arg_count:int loc:int):>void 
 # parse_expr -- udewy's forward function references let these reference each
 # other directly.
 
+let parse_static_words = (state:int idx:int sv_out:int):>int => {
+    let n:int = tok_count(state)
+    if (idx >=? n) or (tok_kind(state idx) =? TK_RIGHT_PAREN) {
+        let loc:int = str_len(ps_src(state))
+        if idx <? n { loc = tok_location(state idx) }
+        diag_error(loc "__static_words__ expects at least one compile-time stable word")
+    }
+
+    let words:int = vec_new(8)
+    let kinds:int = vec_new(8)
+    loop (idx <? n) and (tok_kind(state idx) not=? TK_RIGHT_PAREN) {
+        let word_loc:int = tok_location(state idx)
+        let word_out:int = __static_alloca__(8)
+        let new_idx:int = try_parse_stable_expr(state idx false word_out)
+        if new_idx =? -1 {
+            diag_error(word_loc "__static_words__ arguments must be compile-time stable words")
+        }
+        let word:int = __load__(word_out)
+        if is_extern_function_value(state word) {
+            diag_error(word_loc "__static_words__ does not accept extern function references")
+        }
+        if sv_kind(word) =? SV_FN {
+            let fn_locs:int = ps_static_word_fn_locs(state)
+            if intmap_get(fn_locs sv_value(word)) =? IM_MISSING {
+                intmap_put(fn_locs sv_value(word) word_loc)
+            }
+        }
+        vec_push(words stable_value_to_directive_value(word))
+        vec_push(kinds sv_kind(word))
+        idx = new_idx
+    }
+
+    idx = expect(state idx TK_RIGHT_PAREN)
+    __store__(sv_new(SV_STATIC (be_intern_words)(words kinds)) sv_out)
+    return idx
+}
+
 let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int => {
     let n:int = tok_count(state)
     if idx >=? n { return -1 }
@@ -869,6 +932,14 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
     }
     if k =? TK_IDENT_CALL {
         let name:int = get_token_name(state idx)
+        if str_eq(name "__static_words__") {
+            let words_out:int = __static_alloca__(8)
+            let new_idx:int = parse_static_words(state idx + 1 words_out)
+            let sv:int = __load__(words_out)
+            if emit_runtime { push_stable_value(sv) }
+            __store__(sv sv_out)
+            return new_idx
+        }
         if not str_eq(name "__static_alloca__") {
             return -1
         }
@@ -1007,6 +1078,13 @@ let parse_atom = (state:int idx:int):>int => {
             idx = parse_static_alloca_size(state idx size_out)
             let label_id:int = (be_intern_static)(__load__(size_out))
             (be_push_static_ref)(label_id)
+            return idx
+        }
+
+        if str_eq(name "__static_words__") {
+            let words_out:int = __static_alloca__(8)
+            idx = parse_static_words(state idx words_out)
+            push_stable_value(__load__(words_out))
             return idx
         }
 
