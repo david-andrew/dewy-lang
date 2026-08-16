@@ -1120,17 +1120,34 @@ a method as a naked function value is not supported.</p>
 <h3 id="default-arguments"><a class="header" href="#default-arguments">Default Arguments</a></h3>
 <p>Function arguments can have default values, which are used if the argument is not specified in the function call.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=foo%20%3D%20%28a%20b%3D5%29%20%3D%3E%20a%20%2B%20b%0Afoo%283%29%20%20%20%20%20%20%25returns%208%0Afoo%283%20b%3D2%29%20%20%25returns%205%0A%0Abar%20%3D%20%28a%3Aint%20b%3Aint%3D5%20c%3Aint%3D10%29%20%3D%3E%20a%20%2B%20b%20%2B%20c%0Abar%283%29%20%20%20%20%20%20%25returns%2018%0Abar%283%20c%3D2%29%20%20%25returns%2010&id=DewyIframe74"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=let%20foo%20%3D%20%28a%3Aint64%20b%3Aint64%3D5%29%3A%3Eint64%20%3D%3E%20a%20%2B%20b%0Afoo%283%29%20%20%20%20%20%20%25returns%208%0Afoo%283%20b%3D2%29%20%20%25returns%205%0A%0Alet%20bar%20%3D%20%28a%3Aint64%20b%3Aint64%3D5%20c%3Aint64%3D10%29%3A%3Eint64%20%3D%3E%20a%20%2B%20b%20%2B%20c%0Abar%283%29%20%20%20%20%20%20%25returns%2018%0Abar%283%20c%3D2%29%20%20%25returns%2010&id=DewyIframe74"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe74"
     frameBorder="0"
 ></iframe>
+<p>Parameters with defaults are keyword-only: positional arguments skip them, and
+callers override them by name. A default expression runs each time that
+parameter is omitted, so mutable defaults such as arrays are fresh for every
+call.</p>
 <h2 id="calling-functions"><a class="header" href="#calling-functions">Calling functions</a></h2>
-<p>TODO</p>
-<ul>
-<li>calling a function with name, parenthesis, and args</li>
-<li>functions with no arguments can omit the parenthesis</li>
-</ul>
+<p>Required named parameters may be supplied positionally or by name. Keyword
+arguments can be reordered:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=let%20subtract%20%3D%20%28x%3Aint64%20y%3Aint64%29%3A%3Eint64%20%3D%3E%20x%20-%20y%0Asubtract%285%202%29%0Asubtract%28y%3D2%20x%3D5%29&id=DewyIframe75"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe75"
+    frameBorder="0"
+></iframe>
+<p>A bare <code>...</code> closes the positional run and makes the following parameters
+required keyword-only:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=let%20configure%20%3D%20%28value%3Aint64%20...%20scale%3Aint64%29%3A%3Eint64%20%3D%3E%20value%20%2A%20scale%0Aconfigure%286%20scale%3D7%29&id=DewyIframe76"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe76"
+    frameBorder="0"
+></iframe>
+<p>Rest capture, argument spreading, and partial application are not yet
+implemented by the cleanparse compiler.</p>
 <h2 id="optional-name-only-and-positional-only-arguments"><a class="header" href="#optional-name-only-and-positional-only-arguments">Optional, Name-only and Positional-only Arguments</a></h2>
 <p>TODO</p>
 <ul>
@@ -1144,44 +1161,44 @@ a method as a naked function value is not supported.</p>
 <h2 id="partial-function-evaluation"><a class="header" href="#partial-function-evaluation">Partial Function Evaluation</a></h2>
 <p>First note that if you want to pass a function around as an object, you need to get a handle to the function using the <code>@</code> (&quot;handle&quot;) operator.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_func%20%3D%20%28%29%20%3D%3E%20printl%27foo%27%0A%0Areference_to_my_func%20%3D%20%40my_func&id=DewyIframe75"
-    style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe75"
-    frameBorder="0"
-></iframe>
-<p>If you don't include the <code>@</code> operator, then the evaluation of the right-hand side would be stored into the left side</p>
-<iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=reference_to_my_func%20%3D%20my_func%20%20%25this%20doesn%27t%20work&id=DewyIframe76"
-    style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe76"
-    frameBorder="0"
-></iframe>
-<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is not able to be assigned, causing a compiler error. We'd also get a compiler error if <code>my_func</code> required arguments, as we essentially are trying to call my_func without an arguments.</p>
-<iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=another_func%20%3D%20%28a%20b%20c%20x%29%20%3D%3E%20a%5E2%2Ax%20%2B%20b%2Ax%20%2B%20c%0A%0Agood_reference%20%3D%20%40another_func%0Abad_reference%20%3D%20another_func%20%20%25this%20causes%20a%20compilation%20error&id=DewyIframe77"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_func%20%3D%20%28%29%20%3D%3E%20printl%27foo%27%0A%0Areference_to_my_func%20%3D%20%40my_func&id=DewyIframe77"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe77"
     frameBorder="0"
 ></iframe>
-<p>Now, using the <code>@</code> operator, we can not only create a new reference to an existing function, but we can also <strong>apply arguments to the reference</strong>. What this means is we can fix the value of given arguments, allowing us to create a new function.</p>
+<p>If you don't include the <code>@</code> operator, then the evaluation of the right-hand side would be stored into the left side</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=sum%20%3D%20%28a%20b%29%20%3D%3E%20a%20%2B%20b%20%20%20%25simple%20addition%20function%0Aadd5%20%3D%20%40sum%285%29%20%20%20%20%20%20%20%20%20%20%25partially%20evaluate%20sum%20with%20a%3D5&id=DewyIframe78"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=reference_to_my_func%20%3D%20my_func%20%20%25this%20doesn%27t%20work&id=DewyIframe78"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe78"
     frameBorder="0"
 ></iframe>
-<p>Here we've created a new function <code>add5</code> which takes a single argument, and return the result of that argument plus 5.</p>
+<p>what happens is <code>my_func</code> prints out &quot;foo&quot; to the command line, and then since it returns no value, <code>reference_to_my_func</code> is not able to be assigned, causing a compiler error. We'd also get a compiler error if <code>my_func</code> required arguments, as we essentially are trying to call my_func without an arguments.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=add5%2824%29%20%20%20%20%20%20%20%20%25returns%2029%0Aadd5%28-7%29%20%20%20%20%20%20%20%20%25returns%20-2%0A%0Athirtyseven%20%3D%20%40add5%2832%29%20%25new%20function%20that%20takes%200%20arguments%0Athirtyseven%20%20%20%25returns%2037&id=DewyIframe79"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=another_func%20%3D%20%28a%20b%20c%20x%29%20%3D%3E%20a%5E2%2Ax%20%2B%20b%2Ax%20%2B%20c%0A%0Agood_reference%20%3D%20%40another_func%0Abad_reference%20%3D%20another_func%20%20%25this%20causes%20a%20compilation%20error&id=DewyIframe79"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe79"
     frameBorder="0"
 ></iframe>
-<p>TODO-&gt;explain about overwriting arguments.</p>
+<p>Now, using the <code>@</code> operator, we can not only create a new reference to an existing function, but we can also <strong>apply arguments to the reference</strong>. What this means is we can fix the value of given arguments, allowing us to create a new function.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=new_sum%20%3D%20%28x%20y%29%20%3D%3E%20thirtyseven%28a%3Dx%20b%3Dy%29&id=DewyIframe80"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=sum%20%3D%20%28a%20b%29%20%3D%3E%20a%20%2B%20b%20%20%20%25simple%20addition%20function%0Aadd5%20%3D%20%40sum%285%29%20%20%20%20%20%20%20%20%20%20%25partially%20evaluate%20sum%20with%20a%3D5&id=DewyIframe80"
     style="width: 100%; border-radius: 0.5rem;"
     id="DewyIframe80"
+    frameBorder="0"
+></iframe>
+<p>Here we've created a new function <code>add5</code> which takes a single argument, and return the result of that argument plus 5.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=add5%2824%29%20%20%20%20%20%20%20%20%25returns%2029%0Aadd5%28-7%29%20%20%20%20%20%20%20%20%25returns%20-2%0A%0Athirtyseven%20%3D%20%40add5%2832%29%20%25new%20function%20that%20takes%200%20arguments%0Athirtyseven%20%20%20%25returns%2037&id=DewyIframe81"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe81"
+    frameBorder="0"
+></iframe>
+<p>TODO-&gt;explain about overwriting arguments.</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=new_sum%20%3D%20%28x%20y%29%20%3D%3E%20thirtyseven%28a%3Dx%20b%3Dy%29&id=DewyIframe82"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe82"
     frameBorder="0"
 ></iframe>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="operators"><a class="header" href="#operators">Operators</a></h1>
@@ -1273,9 +1290,9 @@ a method as a naked function value is not supported.</p>
 <p>most binary operators can be appended with an <code>=</code> sign to make them into an assignment
 e.g.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=a%20%2B%3D%205%20%20%25is%20equivalent%20to%20a%20%3D%20a%20%2B%205%0Aa%20%3C%3F%3D%205%20%20%25is%20equivalent%20to%20a%20%3D%20a%20%3C%3F%205%0Aa%20%21%3E%3E%3D%205%20%20%25is%20equivalent%20to%20a%20%3D%20a%20%21%3E%3E%205%0Aa%20xor%3D%20false%20%20%25is%20equivalent%20to%20a%20%3D%20a%20xor%20false&id=DewyIframe81"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=a%20%2B%3D%205%20%20%25is%20equivalent%20to%20a%20%3D%20a%20%2B%205%0Aa%20%3C%3F%3D%205%20%20%25is%20equivalent%20to%20a%20%3D%20a%20%3C%3F%205%0Aa%20%21%3E%3E%3D%205%20%20%25is%20equivalent%20to%20a%20%3D%20a%20%21%3E%3E%205%0Aa%20xor%3D%20false%20%20%25is%20equivalent%20to%20a%20%3D%20a%20xor%20false&id=DewyIframe83"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe81"
+    id="DewyIframe83"
     frameBorder="0"
 ></iframe>
 <p>(TODO: This should also probably be able to be combined with element-wise/vectorized <code>.</code> operations where each element in the list is updated according to the operation (can be done in parallel))</p>
@@ -1283,9 +1300,9 @@ e.g.</p>
 <p>the elementwise operator <code>.</code> can be prepended to most binary operators to make it be performed on each element in a array or sequence
 e.g.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%23find%20the%20prime%20factors%20of%2020%0Aa%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%20%20%23primes%20up%20to%2020%0Amods%20%3D%2020%20.%25%20a%20%20%23returns%20%5B0%202%200%206%209%207%203%201%5D%0Ais_factor%20%3D%20mods%20.%3D%3F%200%20%23returns%20%5Btrue%20false%20true%20false%20false%20false%20false%5D%0Ap_factors%20%3D%20a%5Bis_factor%5D%20%23returns%20%5B2%205%5D%0A%0A%23above%20in%20a%20single%20line%0Ap_factors%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%5B20%20.%25%20%5B2%203%205%207%2011%2013%2017%2019%5D%20.%3D%3F%200%5D%0A%0A%23though%20it%27s%20probably%20cleaner%20in%202%20lines%0Aprimes%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%0Ap_factors%20%3D%20primes%5B20%20.%25%20primes%20.%3D%3F%200%5D&id=DewyIframe82"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%23find%20the%20prime%20factors%20of%2020%0Aa%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%20%20%23primes%20up%20to%2020%0Amods%20%3D%2020%20.%25%20a%20%20%23returns%20%5B0%202%200%206%209%207%203%201%5D%0Ais_factor%20%3D%20mods%20.%3D%3F%200%20%23returns%20%5Btrue%20false%20true%20false%20false%20false%20false%5D%0Ap_factors%20%3D%20a%5Bis_factor%5D%20%23returns%20%5B2%205%5D%0A%0A%23above%20in%20a%20single%20line%0Ap_factors%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%5B20%20.%25%20%5B2%203%205%207%2011%2013%2017%2019%5D%20.%3D%3F%200%5D%0A%0A%23though%20it%27s%20probably%20cleaner%20in%202%20lines%0Aprimes%20%3D%20%5B2%203%205%207%2011%2013%2017%2019%5D%0Ap_factors%20%3D%20primes%5B20%20.%25%20primes%20.%3D%3F%200%5D&id=DewyIframe84"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe82"
+    id="DewyIframe84"
     frameBorder="0"
 ></iframe>
 <p>This works if either the either first operand is a list, or the second is a list, or both are lists with the exact same shape</p>
@@ -1351,9 +1368,9 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <p>*Decimal is the default base, so the prefix is generally not necessary, unless the default base is changed.</p>
 <p>Some examples:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=0b10101010%20%20%25%20170%0A0t121010%20%20%20%20%25%20435%0A0q123%20%20%20%20%20%20%20%25%2027%0A0s1432%20%20%20%20%20%20%25%20380%0A0o1234567%20%20%20%25%20342391%0A0xdeadbeef%20%20%25%203735928559%0A0u1v2u3t%20%20%20%20%25%2066156669%0A0rz1b2c3%20%20%20%20%25%202118512019%0A0yl1z2%243%21%20%20%20%25%203231913341182&id=DewyIframe83"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=0b10101010%20%20%25%20170%0A0t121010%20%20%20%20%25%20435%0A0q123%20%20%20%20%20%20%20%25%2027%0A0s1432%20%20%20%20%20%20%25%20380%0A0o1234567%20%20%20%25%20342391%0A0xdeadbeef%20%20%25%203735928559%0A0u1v2u3t%20%20%20%20%25%2066156669%0A0rz1b2c3%20%20%20%20%25%202118512019%0A0yl1z2%243%21%20%20%20%25%203231913341182&id=DewyIframe85"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe83"
+    id="DewyIframe85"
     frameBorder="0"
 ></iframe>
 <p>See also: <a href="https://en.wikipedia.org/wiki/List_of_numeral_systems">Base names</a>, and <a href="https://en.wikipedia.org/wiki/Senary">Seximal</a></p>
@@ -1433,16 +1450,16 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 </ul>
 <p>Something more ideal may make use of string prefix functions</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%28meta%29r%27%27%27%0A%20%20%20%20%23rule%20%3D%20%23hashtag%20%27%3D%27%20%23expr%20%27%3B%27%20%3D%3E%20%7B%20/%7Bsemantics%20for%20handling%20the%20rule%7D/%20%7D%3B%0A%27%27%27&id=DewyIframe84"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%28meta%29r%27%27%27%0A%20%20%20%20%23rule%20%3D%20%23hashtag%20%27%3D%27%20%23expr%20%27%3B%27%20%3D%3E%20%7B%20/%7Bsemantics%20for%20handling%20the%20rule%7D/%20%7D%3B%0A%27%27%27&id=DewyIframe86"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe84"
+    id="DewyIframe86"
     frameBorder="0"
 ></iframe>
 <p>Or perhaps a syntax constructed explicitly from valid Dewy expressions</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%23rule%20%3D%20%23hashtag%2C%20%27%3D%27%2C%20%23expr%2C%20%27%3B%27%20%3D%3E%20%7B%20/%7Bsemantics%20for%20handling%20the%20rule%7D/%20%7D&id=DewyIframe85"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%23rule%20%3D%20%23hashtag%2C%20%27%3D%27%2C%20%23expr%2C%20%27%3B%27%20%3D%3E%20%7B%20/%7Bsemantics%20for%20handling%20the%20rule%7D/%20%7D&id=DewyIframe87"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe85"
+    id="DewyIframe87"
     frameBorder="0"
 ></iframe>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="flow-control"><a class="header" href="#flow-control">Flow Control</a></h1>
@@ -1450,38 +1467,38 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <h2 id="if-expressions"><a class="header" href="#if-expressions">If Expressions</a></h2>
 <p>If expressions allow you to conditionally evaluate code based on whether or not some condition is met.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_var%20%3D%2010%0Aif%20my_var%20%3D%3F%2010%0A%20%20%20%20printl%22my_var%20is%20ten%22&id=DewyIframe86"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_var%20%3D%2010%0Aif%20my_var%20%3D%3F%2010%0A%20%20%20%20printl%22my_var%20is%20ten%22&id=DewyIframe88"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe86"
+    id="DewyIframe88"
     frameBorder="0"
 ></iframe>
 <p>The syntax for an <code>if</code> expression is:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=if%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe87"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=if%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe89"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe87"
+    id="DewyIframe89"
     frameBorder="0"
 ></iframe>
 <p>where <code>&lt;condition&gt;</code> must result in a boolean value, and <code>&lt;expression&gt;</code> can be anything. Commonly, <code>&lt;expression&gt;</code> will be a block containing multiple expressions.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=if%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20%25do%20something%0A%20%20%20%20%25do%20another%20thing%0A%7D&id=DewyIframe88"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=if%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20%25do%20something%0A%20%20%20%20%25do%20another%20thing%0A%7D&id=DewyIframe90"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe88"
+    id="DewyIframe90"
     frameBorder="0"
 ></iframe>
 <h2 id="loop-expressions"><a class="header" href="#loop-expressions">Loop Expressions</a></h2>
 <p>Loop expressions allow you to repeat the execution of some code while some condition is met.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Aloop%20i%20%3C%3F%2010%0A%7B%0A%20%20%20%20printl%22i%20is%20%7Bi%7D%22%0A%20%20%20%20i%20%2B%3D%201%0A%7D&id=DewyIframe89"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Aloop%20i%20%3C%3F%2010%0A%7B%0A%20%20%20%20printl%22i%20is%20%7Bi%7D%22%0A%20%20%20%20i%20%2B%3D%201%0A%7D&id=DewyIframe91"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe89"
+    id="DewyIframe91"
     frameBorder="0"
 ></iframe>
 <p>The syntax for a <code>loop</code> expression is:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe90"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe92"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe90"
+    id="DewyIframe92"
     frameBorder="0"
 ></iframe>
 <p>where <code>&lt;condition&gt;</code> must be an expression that evaluates to a boolean value, and <code>&lt;expression&gt;</code> can be anything.</p>
@@ -1489,23 +1506,23 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <h2 id="flow-chains"><a class="header" href="#flow-chains">Flow Chains</a></h2>
 <p>Multiple flow expressions can be chained together via the <code>else</code> operator, along with an optional final default case that need not be a flow expression. In normal languages, this would be <code>if-else-if</code> kinds of sequences, which are certainly possible in Dewy:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_var%20%3D%20%27apple%27%0Aif%20my_var%20%3D%3F%20%27banana%27%0A%20%20%20%20printl%27A%20fruit%20enjoyed%20by%20monkeys%27%0Aelse%0A%20%20%20%20printl%27monkeys%20don%5C%27t%20like%20%7Bmy_var%7D%2C%20only%20bananas%21%27&id=DewyIframe91"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_var%20%3D%20%27apple%27%0Aif%20my_var%20%3D%3F%20%27banana%27%0A%20%20%20%20printl%27A%20fruit%20enjoyed%20by%20monkeys%27%0Aelse%0A%20%20%20%20printl%27monkeys%20don%5C%27t%20like%20%7Bmy_var%7D%2C%20only%20bananas%21%27&id=DewyIframe93"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe91"
+    id="DewyIframe93"
     frameBorder="0"
 ></iframe>
 <p>or even</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_var%20%3D%2042%0Aif%20my_var%20%3C%3D%3F%2010%0A%20%20%20%20printl%27a%20small%20number%27%0Aelse%20if%20my_var%20%3C%3D%3F%2050%0A%20%20%20%20printl%27a%20medium%20number%27%0Aelse%0A%20%20%20%20printl%27a%20number%20larger%20than%2050%27&id=DewyIframe92"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_var%20%3D%2042%0Aif%20my_var%20%3C%3D%3F%2010%0A%20%20%20%20printl%27a%20small%20number%27%0Aelse%20if%20my_var%20%3C%3D%3F%2050%0A%20%20%20%20printl%27a%20medium%20number%27%0Aelse%0A%20%20%20%20printl%27a%20number%20larger%20than%2050%27&id=DewyIframe94"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe92"
+    id="DewyIframe94"
     frameBorder="0"
 ></iframe>
 <p>But Dewy also allows <code>loop</code> expressions to be combined in this way as well:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=if%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20greater%20than%20b%27%0A%7D%0Aelse%20loop%20a%20%3C%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20less%20than%20b.%20Increasing%20a%20until%20it%20matches%20b%27%0A%20%20%20%20a%20%2B%3D%201%0A%7D%0Aelse%0A%7B%0A%20%20%20%20printl%27a%20is%20equal%20to%20b%27%0A%7D&id=DewyIframe93"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=if%20a%20%3E%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20greater%20than%20b%27%0A%7D%0Aelse%20loop%20a%20%3C%3F%20b%0A%7B%0A%20%20%20%20printl%27a%20is%20less%20than%20b.%20Increasing%20a%20until%20it%20matches%20b%27%0A%20%20%20%20a%20%2B%3D%201%0A%7D%0Aelse%0A%7B%0A%20%20%20%20printl%27a%20is%20equal%20to%20b%27%0A%7D&id=DewyIframe95"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe93"
+    id="DewyIframe95"
     frameBorder="0"
 ></iframe>
 <p>In the above example, if <code>a</code> is greater than <code>b</code>, the first block would be executed, and the rest of the blocks are skipped. If <code>a</code> is less than <code>b</code>, the loop in the second block executes, incrementing <code>a</code> until it is equal to <code>b</code>, at which point the rest of the chain is skipped. Only if <code>a</code> is neither greater than nor less than <code>b</code> (i.e. <code>a</code> equals <code>b</code>) will the final block be executed exclusively.</p>
@@ -1514,9 +1531,9 @@ Also any instances of elementwise operators (e.g. <code>.+</code> <code>.=</code
 <h2 id="capturing-values"><a class="header" href="#capturing-values">Capturing Values</a></h2>
 <p>Unlike if statements from other languages, <code>if</code>s and <code>loop</code>s in Dewy are themselves expressions, allowing any expressed values to be captured. <code>if</code> expressions basically act like Dewy's version of the ternary operator</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_fruit%20%3D%20%27kiwi%27%0Atropical_fruits%20%3D%20%5B%27banana%27%20%27pineapple%27%20%27kiwi%27%20%27papaya%27%5D%0Amy_var%20%3D%20if%20my_fruit%20in%3F%20tropical_fruit%0A%20%20%20%20%27a%20tropical%20fruit%27%0Aelse%0A%20%20%20%20%27some%20other%20type%20of%20fruit%27&id=DewyIframe94"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_fruit%20%3D%20%27kiwi%27%0Atropical_fruits%20%3D%20%5B%27banana%27%20%27pineapple%27%20%27kiwi%27%20%27papaya%27%5D%0Amy_var%20%3D%20if%20my_fruit%20in%3F%20tropical_fruit%0A%20%20%20%20%27a%20tropical%20fruit%27%0Aelse%0A%20%20%20%20%27some%20other%20type%20of%20fruit%27&id=DewyIframe96"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe94"
+    id="DewyIframe96"
     frameBorder="0"
 ></iframe>
 <p><code>my_var</code> would have a value of <code>'a tropical fruit'</code> at the end of the above example.</p>
@@ -1537,9 +1554,9 @@ or loop bodies.</p>
 <p>Other languages make use of sometimes multiple keywords such as <code>for</code>, <code>while</code>, <code>do-while</code>, <code>for each</code>, etc., to handle looping over a piece of code. Dewy instead simply uses the <code>loop</code> keyword to handle all forms of looping.</p>
 <p>Syntactically, loops are quite simple. The syntax for a loop is:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe95"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20%3Ccondition%3E%20%3Cexpression%3E&id=DewyIframe97"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe95"
+    id="DewyIframe97"
     frameBorder="0"
 ></iframe>
 <p>Where <code>&lt;condition&gt;</code> must result in a boolean determines if the loop continues, and <code>&lt;expression&gt;</code> which can be anything is executed each time the loop repeats.</p>
@@ -1547,18 +1564,18 @@ or loop bodies.</p>
 <h2 id="infinite-loops"><a class="header" href="#infinite-loops">Infinite Loops</a></h2>
 <p>An infinite loop is one that never ends. They are constructed by hardcoding the condition to <code>true</code>, which ensures that the loop will always repeat.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20true%0A%7B%0A%20%20%20%20%25do%20something%20repeatedly%20forever%0A%7D&id=DewyIframe96"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20true%0A%7B%0A%20%20%20%20%25do%20something%20repeatedly%20forever%0A%7D&id=DewyIframe98"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe96"
+    id="DewyIframe98"
     frameBorder="0"
 ></iframe>
 <p>The only way to leave an infinite loop is via the <code>break</code>, and <code>return</code> keywords.</p>
 <h2 id="while-loops"><a class="header" href="#while-loops">While Loops</a></h2>
 <p>A while loop is a loop that executes &quot;while&quot; some condition is true. A simple boolean expression can be used as the condition. When the condition is false, the loop ends.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20%3E%3F%200%0A%7B%0A%20%20%20%20%25while%20i%20is%20greater%20than%200%2C%20do%20something%0A%7D&id=DewyIframe97"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20%3E%3F%200%0A%7B%0A%20%20%20%20%25while%20i%20is%20greater%20than%200%2C%20do%20something%0A%7D&id=DewyIframe99"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe97"
+    id="DewyIframe99"
     frameBorder="0"
 ></iframe>
 <h2 id="for-loops"><a class="header" href="#for-loops">For Loops</a></h2>
@@ -1569,18 +1586,18 @@ or loop bodies.</p>
 </ol>
 <p>This means that <code>in</code> expressions can be used to trivially construct a for-loop.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..5%5D%0A%7B%0A%20%20%20%20print%28%27%7Bi%7D%2C%20%27%29%0A%7D&id=DewyIframe98"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..5%5D%0A%7B%0A%20%20%20%20print%28%27%7Bi%7D%2C%20%27%29%0A%7D&id=DewyIframe100"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe98"
+    id="DewyIframe100"
     frameBorder="0"
 ></iframe>
 <p>Which prints out <code>1, 2, 3, 4, 5, </code> to the console. Each iteration, <code>in</code> causes <code>i</code> to be assigned the next value in the sequence, while returning true for the loop condition. When the sequence is exhausted, <code>in</code> returns false, and the loop ends.</p>
 <p>Integer ranges use a unit step by default. A second anchor specifies another
 step, including a negative one:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20even%20in%200%2C2..10%20%7B%20printl%28even%29%20%7D%0Aloop%20descending%20in%205%2C4..0%20%7B%20printl%28descending%29%20%7D&id=DewyIframe99"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20even%20in%200%2C2..10%20%7B%20printl%28even%29%20%7D%0Aloop%20descending%20in%205%2C4..0%20%7B%20printl%28descending%29%20%7D&id=DewyIframe101"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe99"
+    id="DewyIframe101"
     frameBorder="0"
 ></iframe>
 <p>The step is the second anchor minus the first. A zero step is an iteration
@@ -1592,9 +1609,9 @@ bigint-backed iterator values are available. This preserves Dewy's
 arbitrary-precision semantics instead of allowing an <code>int64</code> counter to wrap.</p>
 <p>For loops can also iterate over the items in any type of container. Iterating over a list looks like this</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%7B%0A%20%20%20%20print%28%27I%20like%20to%20eat%20%7Bfruit%7D%21%27%29%0A%7D&id=DewyIframe100"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%7B%0A%20%20%20%20print%28%27I%20like%20to%20eat%20%7Bfruit%7D%21%27%29%0A%7D&id=DewyIframe102"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe100"
+    id="DewyIframe102"
     frameBorder="0"
 ></iframe>
 <p>Which prints the following to the console</p>
@@ -1605,9 +1622,9 @@ I like to eat pear
 </code></pre>
 <p>Items in a dictionary can be iterated over like so</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ratings%20%3D%20%5B%0A%20%20%20%20%27star%20wars%27%20-%3E%2073%0A%20%20%20%20%27star%20trek%27%20-%3E%2089%0A%20%20%20%20%27star%20gate%27%20-%3E%2084%0A%20%20%20%20%27battlestar%20galactica%27%20-%3E%2087%0A%20%20%20%20%27legend%20of%20the%20galactic%20heroes%27%20-%3E%20100%0A%5D%0A%0Aloop%20%5Bshow%20rating%5D%20in%20ratings%0A%7B%0A%20%20%20%20printl%28%27I%20give%20%7Bshow%7D%20a%20%7Brating%7D%20out%20100%27%29%0A%7D&id=DewyIframe101"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=ratings%20%3D%20%5B%0A%20%20%20%20%27star%20wars%27%20-%3E%2073%0A%20%20%20%20%27star%20trek%27%20-%3E%2089%0A%20%20%20%20%27star%20gate%27%20-%3E%2084%0A%20%20%20%20%27battlestar%20galactica%27%20-%3E%2087%0A%20%20%20%20%27legend%20of%20the%20galactic%20heroes%27%20-%3E%20100%0A%5D%0A%0Aloop%20%5Bshow%20rating%5D%20in%20ratings%0A%7B%0A%20%20%20%20printl%28%27I%20give%20%7Bshow%7D%20a%20%7Brating%7D%20out%20100%27%29%0A%7D&id=DewyIframe103"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe101"
+    id="DewyIframe103"
     frameBorder="0"
 ></iframe>
 <p>This takes advantage of the fact that iterating over a dictionary returns each pair, which can then be unpacked into separate variables <code>show</code> and <code>rating</code>. This prints out the following to the console</p>
@@ -1620,9 +1637,9 @@ I give legend of the galactic heroes a 100 out of 100
 <h3 id="multiple-conditions"><a class="header" href="#multiple-conditions">Multiple Conditions</a></h3>
 <p>A neat side effect of <code>in</code> statements returning a boolean is that it provides a free method for looping over multiple sequences simultaneously. Simply combine two <code>in</code> statements with a logical operator. The loop will continue until one sequence is exhausted, both, or something else, depending on which logical operator is used. The behavior <code>zip</code> from other languages can be achieved by combining sequences with <code>and</code></p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=names%20%3D%20%5B%27Alice%27%20%27Bob%27%20%27Charlie%27%5D%0Acolors%20%3D%20%5B%27Red%27%20%27Blue%27%20%27Green%27%20%27Yellow%27%5D%0A%0Aloop%20name%20in%20names%20and%20color%20in%20colors%0A%20%20%20%20printl%27%7Bname%7D%20chose%20%7Bcolor%7D%27&id=DewyIframe102"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=names%20%3D%20%5B%27Alice%27%20%27Bob%27%20%27Charlie%27%5D%0Acolors%20%3D%20%5B%27Red%27%20%27Blue%27%20%27Green%27%20%27Yellow%27%5D%0A%0Aloop%20name%20in%20names%20and%20color%20in%20colors%0A%20%20%20%20printl%27%7Bname%7D%20chose%20%7Bcolor%7D%27&id=DewyIframe104"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe102"
+    id="DewyIframe104"
     frameBorder="0"
 ></iframe>
 <p>In this case, the loop runs until either sequence is exhausted (as <code>and</code> requires both conditions to be true, so as soon as one is false, the loop ends). This prints out the following to the console</p>
@@ -1632,9 +1649,9 @@ Charlie chose Green
 </code></pre>
 <p>Other languages commonly have an <code>enumerate</code> function which will count how many iterations have occurred on top of looping over some sequence. This can be achieved by combining an infinite range with any sequence using <code>and</code>:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B0..%5D%20and%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%20%20%20%20printl%27%7Bi%7D%29%20%7Bfruit%7D%27&id=DewyIframe103"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B0..%5D%20and%20fruit%20in%20%5B%27apple%27%20%27banana%27%20%27peach%27%20%27pear%27%5D%0A%20%20%20%20printl%27%7Bi%7D%29%20%7Bfruit%7D%27&id=DewyIframe105"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe103"
+    id="DewyIframe105"
     frameBorder="0"
 ></iframe>
 <p><code>i</code> will never run out of values, so the loop continues so long as <code>fruit</code> has values remaining. This prints out the following to the console</p>
@@ -1645,9 +1662,9 @@ Charlie chose Green
 </code></pre>
 <p>Using the <code>or</code> operator to combine sequences will loop until so long as either of the sequences have values remaining.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=A%20%3D%20%5B1%202%203%5D%0AB%20%3D%20%5B4%205%206%207%208%5D%0Aloop%20a%20in%20A%20or%20b%20in%20B%0A%20%20%20%20printl%5Ba%20b%5D&id=DewyIframe104"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=A%20%3D%20%5B1%202%203%5D%0AB%20%3D%20%5B4%205%206%207%208%5D%0Aloop%20a%20in%20A%20or%20b%20in%20B%0A%20%20%20%20printl%5Ba%20b%5D&id=DewyIframe106"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe104"
+    id="DewyIframe106"
     frameBorder="0"
 ></iframe>
 <p>Which prints</p>
@@ -1671,38 +1688,38 @@ when the condition can admit an iteration after that input is exhausted. When
 lengths cannot be proven, the safe fallback is <code>T | undefined</code>. Optional targets
 must be narrowed before use:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20short_item%20in%20short_items%20or%20long_item%20in%20long_items%0A%7B%0A%20%20%20%20if%20short_item%20isnt%3F%20undefined%20%7B%0A%20%20%20%20%20%20%20%20process%28short_item%29%0A%20%20%20%20%7D%0A%20%20%20%20process%28long_item%29%0A%7D&id=DewyIframe105"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20short_item%20in%20short_items%20or%20long_item%20in%20long_items%0A%7B%0A%20%20%20%20if%20short_item%20isnt%3F%20undefined%20%7B%0A%20%20%20%20%20%20%20%20process%28short_item%29%0A%20%20%20%20%7D%0A%20%20%20%20process%28long_item%29%0A%7D&id=DewyIframe107"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe105"
+    id="DewyIframe107"
     frameBorder="0"
 ></iframe>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=limit%20%3D%20time.now%20%2B%205%28minutes%29%0Aloop%20batch%20in%20batches%20and%20time.now%20%3C%3F%20limit%0A%20%20%20%20process%28batch%29&id=DewyIframe106"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=limit%20%3D%20time.now%20%2B%205%28minutes%29%0Aloop%20batch%20in%20batches%20and%20time.now%20%3C%3F%20limit%0A%20%20%20%20process%28batch%29&id=DewyIframe108"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe106"
+    id="DewyIframe108"
     frameBorder="0"
 ></iframe>
 <p>As a similar approach, perhaps there might be iterators in this style where they don't have a fixed value, but instead track over some changing resource</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20batch%20in%20batches%20and%20t%20in%20timer%285%28minutes%29%29%0A%7B%0A%20%20%20%20process%28batch%29%0A%20%20%20%20printl%27timeout%20in%20%7Bt%7D%27%0A%7D&id=DewyIframe107"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20batch%20in%20batches%20and%20t%20in%20timer%285%28minutes%29%29%0A%7B%0A%20%20%20%20process%28batch%29%0A%20%20%20%20printl%27timeout%20in%20%7Bt%7D%27%0A%7D&id=DewyIframe109"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe107"
+    id="DewyIframe109"
     frameBorder="0"
 ></iframe>
 <h2 id="do-loop-do"><a class="header" href="#do-loop-do">Do Loop Do</a></h2>
 <p>The do-while version of the loop can be constructed by putting the <code>do</code> keyword before the body, and putting the <code>loop</code> keyword and its condition after the body. This means loop body is executed at least once before the condition is checked, at which point the loop could exit or continue.</p>
 <p>Basic do-while loop:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Ado%0A%7B%0A%20%20%20%20i%20%2B%3D%201%0A%20%20%20%20printl%27this%20is%20a%20do-while%20loop%27%0A%7D%0Aloop%20i%20%3C%3F%2020&id=DewyIframe108"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Ado%0A%7B%0A%20%20%20%20i%20%2B%3D%201%0A%20%20%20%20printl%27this%20is%20a%20do-while%20loop%27%0A%7D%0Aloop%20i%20%3C%3F%2020&id=DewyIframe110"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe108"
+    id="DewyIframe110"
     frameBorder="0"
 ></iframe>
 <p>do-loop over an iterator. On the first iteration, <code>i</code> will be undefined, while it will be available on subsequent iterations</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-for%20loop.%20i%3D%7Bi%7D%27%0Aloop%20i%20in%20%5B0..5%5D&id=DewyIframe109"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-for%20loop.%20i%3D%7Bi%7D%27%0Aloop%20i%20in%20%5B0..5%5D&id=DewyIframe111"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe109"
+    id="DewyIframe111"
     frameBorder="0"
 ></iframe>
 <p>Which prints</p>
@@ -1716,9 +1733,9 @@ this is a do-for loop. i=5
 </code></pre>
 <p>Technically you can construct an infinite do-while loop, but it's basically identical to a regular infinite loop</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-infinite%20loop%27%0Aloop%20true&id=DewyIframe110"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=do%20printl%27this%20is%20a%20do-infinite%20loop%27%0Aloop%20true&id=DewyIframe112"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe110"
+    id="DewyIframe112"
     frameBorder="0"
 ></iframe>
 <p>Lastly you can sandwich <code>loop</code> between two blocks using two <code>do</code> keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition</p>
@@ -1726,9 +1743,9 @@ this is a do-for loop. i=5
 <p>Note: the syntax for do-loop-do is still being finalized, and may change from this example</p>
 </blockquote>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Ado%0A%7B%0A%20%20%20%20printl%27before%20condition%20is%20checked%27%0A%7D%0Aloop%20i%20%3C%3F%2020%20do%0A%7B%0A%20%20%20%20printl%27after%20condition%20is%20checked%27%0A%20%20%20%20i%20%2B%3D%201%0A%7D&id=DewyIframe111"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=i%20%3D%200%0Ado%0A%7B%0A%20%20%20%20printl%27before%20condition%20is%20checked%27%0A%7D%0Aloop%20i%20%3C%3F%2020%20do%0A%7B%0A%20%20%20%20printl%27after%20condition%20is%20checked%27%0A%20%20%20%20i%20%2B%3D%201%0A%7D&id=DewyIframe113"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe111"
+    id="DewyIframe113"
     frameBorder="0"
 ></iframe>
 <p>In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.</p>
@@ -1736,9 +1753,9 @@ this is a do-for loop. i=5
 <p><code>break</code> exits the nearest enclosing loop, while <code>continue</code> begins that loop's
 next iteration. <code>return</code> leaves the containing function.</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20running%0A%7B%0A%20%20%20%20if%20should_skip%20%7B%20continue%20%7D%0A%20%20%20%20if%20finished%20%7B%20break%20%7D%0A%20%20%20%20process%28%29%0A%7D&id=DewyIframe112"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20running%0A%7B%0A%20%20%20%20if%20should_skip%20%7B%20continue%20%7D%0A%20%20%20%20if%20finished%20%7B%20break%20%7D%0A%20%20%20%20process%28%29%0A%7D&id=DewyIframe114"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe112"
+    id="DewyIframe114"
     frameBorder="0"
 ></iframe>
 <p>A scope metatag can select an outer loop from nested control flow. A bare
@@ -1746,9 +1763,9 @@ next iteration. <code>return</code> leaves the containing function.</p>
 <code>break</code> or <code>continue</code> targets the nearest enclosing loop whose parent scope
 declares that name:</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%24rows%0Aloop%20next_row%28%29%0A%7B%0A%20%20%20%20loop%20next_column%28%29%0A%20%20%20%20%7B%0A%20%20%20%20%20%20%20%20if%20retry_row%28%29%20%7B%20continue%20%24rows%20%7D%0A%20%20%20%20%20%20%20%20if%20table_complete%28%29%20%7B%20break%20%24rows%20%7D%0A%20%20%20%20%20%20%20%20process_cell%28%29%0A%20%20%20%20%7D%0A%7D&id=DewyIframe113"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%24rows%0Aloop%20next_row%28%29%0A%7B%0A%20%20%20%20loop%20next_column%28%29%0A%20%20%20%20%7B%0A%20%20%20%20%20%20%20%20if%20retry_row%28%29%20%7B%20continue%20%24rows%20%7D%0A%20%20%20%20%20%20%20%20if%20table_complete%28%29%20%7B%20break%20%24rows%20%7D%0A%20%20%20%20%20%20%20%20process_cell%28%29%0A%20%20%20%20%7D%0A%7D&id=DewyIframe115"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe113"
+    id="DewyIframe115"
     frameBorder="0"
 ></iframe>
 <p>The metatag is not syntactically attached to the following loop. It is a scope
@@ -1767,50 +1784,50 @@ instead of in the loop's parent scope.</p>
 <h2 id="loop-generators"><a class="header" href="#loop-generators">Loop Generators</a></h2>
 <p>Let's look at this example</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..10%5D%20%7Bi%7D&id=DewyIframe114"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=loop%20i%20in%20%5B1..10%5D%20%7Bi%7D&id=DewyIframe116"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe114"
+    id="DewyIframe116"
     frameBorder="0"
 ></iframe>
 <p>Every iteration of the loop, the current value of <code>i</code> is &quot;expressed&quot;, that is to say, the value could be stored in a variable or a container.</p>
 <p>Lets capture the expressed value in a container by wrapping the loop in <code>[]</code> brackets</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D&id=DewyIframe115"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D&id=DewyIframe117"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe115"
+    id="DewyIframe117"
     frameBorder="0"
 ></iframe>
 <p>This &quot;generates&quot; the array <code>[1 2 3 4 5 6 7 8 9 10]</code>, which we can then store into a variable</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D%0A%0A%25optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20i%5D&id=DewyIframe116"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=my_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20%7Bi%7D%5D%0A%0A%25optional%20to%20omit%20the%20braces%20since%20only%20a%20single%20expression%20is%20in%20the%20body%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..10%5D%20i%5D&id=DewyIframe118"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe116"
+    id="DewyIframe118"
     frameBorder="0"
 ></iframe>
 <p>And thus we have created the simplest list generator.</p>
 <h3 id="multiple-expressions-per-iteration"><a class="header" href="#multiple-expressions-per-iteration">Multiple Expressions per Iteration</a></h3>
 <p>Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe117"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%25note%20the%20braces%20are%20not%20optional%20in%20this%20case%0Amy_array%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20i%5E2%20%7D%5D&id=DewyIframe119"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe117"
+    id="DewyIframe119"
     frameBorder="0"
 ></iframe>
 <p>producing the array <code>[1 1 2 4 3 9 4 16 5 25]</code>.</p>
 <p>We can also construct a dictionary by expressing with a <code>-&gt;</code> between two values</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe118"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=squares%20%3D%20%5Bloop%20i%20in%20%5B1..5%5D%20%7B%20i%20-%3E%20i%5E2%20%7D%5D&id=DewyIframe120"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe118"
+    id="DewyIframe120"
     frameBorder="0"
 ></iframe>
 <p>which produces the dictionary <code>[1-&gt;1 2-&gt;4 3-&gt;9 4-&gt;16 5-&gt;25]</code> which points from values to their squares.</p>
 <h3 id="multidimensional-generators"><a class="header" href="#multidimensional-generators">Multidimensional Generators</a></h3>
 <p>You can generate a multidimensional array using multiple nested loops. For example</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%20%5B1..5%5D%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%20%5B1..5%5D%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe119"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=indices%20%3D%0A%5B%0A%20%20%20%20loop%20i%20in%20%5B1..5%5D%0A%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20loop%20j%20in%20%5B1..5%5D%0A%20%20%20%20%20%20%20%20%5B%0A%20%20%20%20%20%20%20%20%20%20%20%20i%0A%20%20%20%20%20%20%20%20%20%20%20%20j%0A%20%20%20%20%20%20%20%20%5D%0A%20%20%20%20%5D%0A%5D&id=DewyIframe121"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe119"
+    id="DewyIframe121"
     frameBorder="0"
 ></iframe>
 <p>which produces the following 3D array representing the indices of a 5x5 matrix as tuples</p>
@@ -1830,9 +1847,9 @@ instead of in the loop's parent scope.</p>
 </blockquote>
 <p>Examples of imports</p>
 <iframe
-    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%0A%25%20import%20an%20item%20from%20a%20local%20file%0Afrom%20p%22stuff.dewy%22%20import%20myfun%0A%0A%25%20import%20an%20item%20from%20a%20local%20file%2C%20and%20rename%20it%0Afrom%20p%22../some/other/path/to/stuff.dewy%22%20import%20myfun%20as%20myfun2%0A%0A%25%20import%20a%20whole%20file%20as%20an%20object%20with%20a%20given%20name.%0A%25%20tbd%20if%20you%20can%20omit%20the%20name%20since%20not%20an%20installed%20library%0Aimport%20p%22../../mylib3.dewy%22%20as%20mylib3%0A%0A%25%20import%20all%20the%20contents%20of%20a%20file%20into%20the%20current%20scope%0Afrom%20p%22mylib4.dewy%22%20import%20...%0A%0A%25%20import%20several%20functions%20from%20a%20local%20file%2C%20unpacking%20some%20from%20nested%20objects%0Afrom%20p%22stuff2.dewy%22%20import%20myfun2%2C%20myfun3%20as%20f1%2C%20mymodule%20as%20%5Bf2%20f3%20mod3%20as%20%5Bf4%20f5%5D%5D%0A%0A%25importing%20from%20a%20whole%20folder%0Afrom%20p%22myproject%22%20import%20mod1%2C%20mod2%2C%20mod3%0A%0A%25TODO%3A%20what%20about%20glob%20patterns%20in%20the%20import%20path%3F%0Afrom%20p%22myproject/%2A.dewy%22%20import%20...%0A%0A%25%20import%20a%20whole%20installed%20library%0Aimport%20IO%0A%0A%25%20import%20items%20from%20an%20installed%20library%0Afrom%20Math%20import%20sin%2C%20cos%2C%20tan%0A%0A%25%20import%20and%20rename%20a%20whole%20installed%20library%0Aimport%20seaborn%20as%20sns%0A%0A%25%20import%20and%20rename%20items%20from%20an%20installed%20library%0Afrom%20sklearn%20import%20RandomForest%20as%20RF%2C%20LinearRegression%20as%20LR&id=DewyIframe120"
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%0A%25%20import%20an%20item%20from%20a%20local%20file%0Afrom%20p%22stuff.dewy%22%20import%20myfun%0A%0A%25%20import%20an%20item%20from%20a%20local%20file%2C%20and%20rename%20it%0Afrom%20p%22../some/other/path/to/stuff.dewy%22%20import%20myfun%20as%20myfun2%0A%0A%25%20import%20a%20whole%20file%20as%20an%20object%20with%20a%20given%20name.%0A%25%20tbd%20if%20you%20can%20omit%20the%20name%20since%20not%20an%20installed%20library%0Aimport%20p%22../../mylib3.dewy%22%20as%20mylib3%0A%0A%25%20import%20all%20the%20contents%20of%20a%20file%20into%20the%20current%20scope%0Afrom%20p%22mylib4.dewy%22%20import%20...%0A%0A%25%20import%20several%20functions%20from%20a%20local%20file%2C%20unpacking%20some%20from%20nested%20objects%0Afrom%20p%22stuff2.dewy%22%20import%20myfun2%2C%20myfun3%20as%20f1%2C%20mymodule%20as%20%5Bf2%20f3%20mod3%20as%20%5Bf4%20f5%5D%5D%0A%0A%25importing%20from%20a%20whole%20folder%0Afrom%20p%22myproject%22%20import%20mod1%2C%20mod2%2C%20mod3%0A%0A%25TODO%3A%20what%20about%20glob%20patterns%20in%20the%20import%20path%3F%0Afrom%20p%22myproject/%2A.dewy%22%20import%20...%0A%0A%25%20import%20a%20whole%20installed%20library%0Aimport%20IO%0A%0A%25%20import%20items%20from%20an%20installed%20library%0Afrom%20Math%20import%20sin%2C%20cos%2C%20tan%0A%0A%25%20import%20and%20rename%20a%20whole%20installed%20library%0Aimport%20seaborn%20as%20sns%0A%0A%25%20import%20and%20rename%20items%20from%20an%20installed%20library%0Afrom%20sklearn%20import%20RandomForest%20as%20RF%2C%20LinearRegression%20as%20LR&id=DewyIframe122"
     style="width: 100%; border-radius: 0.5rem;"
-    id="DewyIframe120"
+    id="DewyIframe122"
     frameBorder="0"
 ></iframe>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="standard-library"><a class="header" href="#standard-library">Standard Library</a></h1>
