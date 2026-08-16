@@ -118,7 +118,10 @@ Type expressions above; here `<T>` is a type-parameter list.
       function types, and pipe calls.
 - [x] Keyword-only parameters and defaults participate in semantic checking and
       initialization analysis.
-- [ ] Keyword arguments and argument spreading do not yet lower to udewy calls.
+- [x] Keyword arguments and per-call defaults lower through a positional udewy
+      ABI for direct, piped, overload-selected, indirect, and method calls.
+- [ ] Rest parameters, argument spreading, and partial application do not yet
+      lower to udewy calls.
 
 ## Integer representations and operations
 

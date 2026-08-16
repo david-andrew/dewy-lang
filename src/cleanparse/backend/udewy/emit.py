@@ -193,7 +193,7 @@ def emit_type(t: ty.Type) -> str:
 
 def emit_arg(arg: hir.Param | hir.BoundParam) -> str:
     if isinstance(arg, hir.BoundParam):
-        return f'{arg.name}:{emit_type(arg.type)}={arg.value}'
+        raise ValueError('INTERNAL ERROR: default parameter reached udewy emission')
     return f'{arg.name}:{emit_type(arg.type)}'
 
 def _contains_return(node: hir.AST) -> bool:
@@ -215,12 +215,10 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     args: list[str] = []
     for arg in func.pos_or_kw_args:
         args.append(emit_arg(arg))
-    if func.rest_args is not None:
-        args.append(f'...{emit_arg(func.rest_args)}')
-    if func.kw_only_args:
-        if func.rest_args is None: args.append('...')
-        for arg in func.kw_only_args:
-            args.append(emit_arg(arg))
+    if func.rest_args is not None or func.kw_only_args:
+        raise ValueError(
+            'INTERNAL ERROR: non-positional function signature reached udewy emission'
+        )
 
     code.append(' '.join(args))
     code.append(f'):>{emit_type(func.rettype)} => ')
@@ -416,7 +414,7 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
         separator = ' ' if sym.isalpha() else ''
         return f'{sym}{separator}{emit_operand(item, ctx)}'
     if call.kw_args:
-        raise NotImplementedError('udewy codegen for keyword arguments')
+        raise ValueError('INTERNAL ERROR: keyword argument reached udewy emission')
     args = ' '.join(_emit_call_arg(arg, ctx) for arg in call.pos_args)
     callee = emit_ast(call.func, ctx)
     if (

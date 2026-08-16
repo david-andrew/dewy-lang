@@ -855,8 +855,6 @@ class TypeSystem:
             bindings[m.ret] = expected_return
             contextual_type_vars.add(m.ret)
 
-        if len(pos_types) < len(m.pos_or_kw):
-            return None
         if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
             return None
 
@@ -870,6 +868,8 @@ class TypeSystem:
         for name, kt in kw_types.items():
             if name in pos_names:
                 p = next(p for p in m.pos_or_kw if p.name == name)
+                if m.pos_or_kw.index(p) < len(pos_types):
+                    return None
                 if not match_param(p.type, kt):
                     return None
                 continue
@@ -879,6 +879,12 @@ class TypeSystem:
                 continue
             if m.rest is None:
                 return None
+
+        if any(
+            param.name not in kw_types
+            for param in m.pos_or_kw[len(pos_types):]
+        ):
+            return None
 
         for k in m.kw_only:
             if k.required and k.name not in kw_types:
@@ -910,8 +916,6 @@ class TypeSystem:
 
     def call_accepted_concrete(self, m: FunctionType, pos_types: list[TypeExpr], kw_types: dict[str, TypeExpr]) -> bool:
         """Whether a fully concrete method accepts this call (no free type params)."""
-        if len(pos_types) < len(m.pos_or_kw):
-            return False
         if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
             return False
 
@@ -925,6 +929,8 @@ class TypeSystem:
         for name, kt in kw_types.items():
             if name in pos_names:
                 p = next(p for p in m.pos_or_kw if p.name == name)
+                if m.pos_or_kw.index(p) < len(pos_types):
+                    return False
                 if not self.is_subtype(kt, p.type):
                     return False
                 continue
@@ -934,6 +940,12 @@ class TypeSystem:
                 continue
             if m.rest is None:
                 return False
+
+        if any(
+            param.name not in kw_types
+            for param in m.pos_or_kw[len(pos_types):]
+        ):
+            return False
 
         for k in m.kw_only:
             if k.required and k.name not in kw_types:

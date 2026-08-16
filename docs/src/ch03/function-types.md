@@ -43,21 +43,41 @@ foo = () => printl'bar'
 Function arguments can have default values, which are used if the argument is not specified in the function call.
 
 ```dewy
-foo = (a b=5) => a + b
+let foo = (a:int64 b:int64=5):>int64 => a + b
 foo(3)      %returns 8
 foo(3 b=2)  %returns 5
 
-bar = (a:int b:int=5 c:int=10) => a + b + c
+let bar = (a:int64 b:int64=5 c:int64=10):>int64 => a + b + c
 bar(3)      %returns 18
 bar(3 c=2)  %returns 10
 ```
 
+Parameters with defaults are keyword-only: positional arguments skip them, and
+callers override them by name. A default expression runs each time that
+parameter is omitted, so mutable defaults such as arrays are fresh for every
+call.
+
 ## Calling functions
 
-TODO
+Required named parameters may be supplied positionally or by name. Keyword
+arguments can be reordered:
 
-- calling a function with name, parenthesis, and args
-- functions with no arguments can omit the parenthesis
+```dewy
+let subtract = (x:int64 y:int64):>int64 => x - y
+subtract(5 2)
+subtract(y=2 x=5)
+```
+
+A bare `...` closes the positional run and makes the following parameters
+required keyword-only:
+
+```dewy
+let configure = (value:int64 ... scale:int64):>int64 => value * scale
+configure(6 scale=7)
+```
+
+Rest capture, argument spreading, and partial application are not yet
+implemented by the cleanparse compiler.
 
 ## Optional, Name-only and Positional-only Arguments
 

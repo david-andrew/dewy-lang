@@ -245,6 +245,7 @@ class _Lowerer:
         self.next_iterator_temp = 1
         self.next_iterator_value = 1
         self.next_optional_temp = 1
+        self.next_default_temp = 1
         self.next_loop_signal = 1
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
@@ -386,6 +387,8 @@ class _Lowerer:
 
     def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
         literal = function.literal
+        if literal.rest_args is not None:
+            self._target_error(literal, 'rest parameters and argument spreading')
         result_payload = ty.optional_payload(literal.rettype)
         object_result = isinstance(literal.rettype, ty.ObjectType)
         if isinstance(result_payload, ty.ArrayType):
@@ -399,10 +402,10 @@ class _Lowerer:
             else self._target_scalar_type(literal.rettype, literal)
         )
         lowered_pos: list[hir.Param | hir.BoundParam] = []
-        lowered_kw: list[hir.Param | hir.BoundParam] = []
+        default_prologue: list[hir.AST] = []
         parameter_prologue: list[hir.AST] = []
 
-        def lower_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
+        def lower_param(param: hir.Param) -> hir.Param:
             if (
                 isinstance(param.type, ty.TypeOr)
                 and 'undefined' in param.type.items
@@ -410,8 +413,6 @@ class _Lowerer:
             ):
                 self._target_error(literal, 'heterogeneous optional parameter type')
             if isinstance(param.type, ty.ObjectType):
-                if isinstance(param, hir.BoundParam):
-                    self._target_error(literal, 'object parameter defaults')
                 incoming_name = self._new_object_name(f'arg_{param.name}')
                 incoming = hir.ExpressedIdentifier(
                     literal.loc,
@@ -448,8 +449,6 @@ class _Lowerer:
             payload = ty.optional_payload(param.type)
             if payload is None:
                 return self._transform_param(param)
-            if isinstance(param, hir.BoundParam):
-                self._target_error(literal, 'optional parameter defaults')
             incoming_name = self._new_optional_name(f'arg_{param.name}')
             incoming = hir.ExpressedIdentifier(
                 literal.loc,
@@ -482,12 +481,69 @@ class _Lowerer:
             )
 
         lowered_pos = [lower_param(param) for param in literal.pos_or_kw_args]
-        lowered_kw = [lower_param(param) for param in literal.kw_only_args]
-        lowered_rest = (
-            lower_param(literal.rest_args)
-            if literal.rest_args is not None
-            else None
-        )
+        for param in literal.kw_only_args:
+            if not isinstance(param, hir.BoundParam):
+                lowered_pos.append(lower_param(param))
+                continue
+            if isinstance(param.type, ty.ObjectType):
+                self._target_error(literal, 'object parameter defaults')
+            if ty.optional_payload(param.type) is not None:
+                self._target_error(literal, 'optional parameter defaults')
+            incoming_name = self._new_default_name(f'arg_{param.name}')
+            present_name = self._new_default_name(f'has_{param.name}')
+            lowered_pos.extend([
+                hir.Param(
+                    incoming_name,
+                    self._lower_runtime_value_type(param.type),
+                ),
+                hir.Param(present_name, 'bool'),
+            ])
+            incoming = hir.ExpressedIdentifier(
+                literal.loc,
+                param.type,
+                incoming_name,
+            )
+            target = hir.ExpressedIdentifier(
+                literal.loc,
+                param.type,
+                param.name,
+                binding_id=param.binding_id,
+            )
+            default = self._require_node(self._transform_node(param.value))
+            default_prologue.extend([
+                hir.Declare(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    param.name,
+                    param.type,
+                    incoming,
+                    binding_id=param.binding_id,
+                ),
+                hir.Flow(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    [
+                        hir.IfArm(
+                            literal.loc,
+                            ty.BOTTOM_TYPE,
+                            self._bool_not(hir.ExpressedIdentifier(
+                                literal.loc,
+                                'bool',
+                                present_name,
+                            )),
+                            hir.Assign(
+                                literal.loc,
+                                ty.VOID_TYPE,
+                                target,
+                                '=',
+                                default,
+                            ),
+                        ),
+                    ],
+                    None,
+                ),
+            ])
         receiver = None
         if literal.object_receiver:
             receiver_name = self._new_object_name('self')
@@ -523,10 +579,21 @@ class _Lowerer:
         self.current_object_field_names = {
             binding_id: name for binding_id, name in literal.object_fields
         }
-        body = self._lower_function_body(
-            self._require_node(self._transform_node(literal.body)),
-            literal.rettype,
-        )
+        transformed_body = self._require_node(self._transform_node(literal.body))
+        if default_prologue:
+            if isinstance(transformed_body, hir.Block):
+                transformed_body = replace(
+                    transformed_body,
+                    items=[*default_prologue, *transformed_body.items],
+                )
+            else:
+                transformed_body = hir.Block(
+                    transformed_body.loc,
+                    transformed_body.type,
+                    [*default_prologue, transformed_body],
+                    True,
+                )
+        body = self._lower_function_body(transformed_body, literal.rettype)
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
         self.current_object_receiver = previous_receiver
@@ -550,8 +617,8 @@ class _Lowerer:
                 literal,
                 type=function_type,
                 pos_or_kw_args=lowered_pos,
-                kw_only_args=lowered_kw,
-                rest_args=lowered_rest,
+                kw_only_args=[],
+                rest_args=None,
                 rettype=rettype,
                 body=body,
             ),
@@ -567,13 +634,13 @@ class _Lowerer:
             )
             for param in type_.pos_or_kw
         ]
-        kw_only = [
-            replace(
-                param,
-                type=self._lower_runtime_value_type(param.type),
-            )
-            for param in type_.kw_only
-        ]
+        for param in type_.kw_only:
+            pos.append(ty.PosOrKwArg(
+                param.name,
+                self._lower_runtime_value_type(param.type),
+            ))
+            if not param.required:
+                pos.append(ty.PosOrKwArg(None, 'bool'))
         rettype: ty.TypeExpr = type_.ret
         if isinstance(type_.ret, ty.ObjectType) or ty.optional_payload(type_.ret) is not None:
             pos.append(ty.PosOrKwArg(None, 'int64'))
@@ -581,12 +648,15 @@ class _Lowerer:
         return replace(
             type_,
             pos_or_kw=pos,
-            kw_only=kw_only,
+            kw_only=[],
+            rest=None,
             ret=rettype,
         )
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         if ty.optional_payload(type_) is not None:
+            return 'int64'
+        if isinstance(type_, ty.IntegerLiteralType):
             return 'int64'
         if isinstance(
             type_,
@@ -1957,6 +2027,103 @@ class _Lowerer:
             )
         return replace(param, type=self._lower_runtime_value_type(param.type))
 
+    def _default_placeholder(self, type_: ty.TypeExpr, loc: Span) -> hir.AST:
+        """Produce an ABI-typed value ignored when a default is selected."""
+
+        runtime_type = self._lower_runtime_value_type(type_)
+        if runtime_type == 'bool':
+            return hir.Bool(loc, 'bool', False)
+        if isinstance(runtime_type, ty.FunctionType):
+            return hir.Transmute(
+                loc,
+                runtime_type,
+                hir.Integer(loc, 'int64', t0.base10, 0),
+            )
+        if isinstance(runtime_type, ty.IntegerLiteralType):
+            return hir.Integer(
+                loc,
+                runtime_type,
+                t0.base10,
+                runtime_type.value,
+            )
+        if isinstance(runtime_type, str) and runtime_type in {
+            'int',
+            'int8',
+            'int16',
+            'int32',
+            'int64',
+            'uint',
+            'uint8',
+            'uint16',
+            'uint32',
+            'uint64',
+        }:
+            return hir.Integer(loc, runtime_type, t0.base10, 0)
+        self._target_error(
+            hir.Void(loc, ty.VOID_TYPE),
+            f'default parameter ABI for `{type_to_dewy(type_)}`',
+        )
+
+    def _normalize_call_arguments(
+        self,
+        node: hir.FunctionCall,
+        function_type: ty.FunctionType,
+        pos_args: list[hir.AST],
+        kw_args: dict[str, hir.AST],
+    ) -> tuple[
+        list[hir.AST],
+        list[int | str | None],
+        list[ty.TypeExpr | None],
+    ]:
+        """Map Dewy positional/keyword arguments onto udewy positional slots."""
+
+        remaining = dict(kw_args)
+        normalized: list[hir.AST] = []
+        source_positions: list[int | str | None] = []
+        optional_payloads: list[ty.TypeExpr | None] = []
+        for index, param in enumerate(function_type.pos_or_kw):
+            if index < len(pos_args):
+                argument = pos_args[index]
+                source_position: int | str = index
+            elif param.name is not None and param.name in remaining:
+                argument = remaining.pop(param.name)
+                source_position = param.name
+            else:
+                raise ValueError(
+                    f'INTERNAL ERROR: checked call is missing required parameter `{param.name}`'
+                )
+            normalized.append(argument)
+            source_positions.append(source_position)
+            optional_payloads.append(ty.optional_payload(param.type))
+        if len(pos_args) > len(function_type.pos_or_kw):
+            raise ValueError('INTERNAL ERROR: rest arguments reached udewy lowering')
+        for param in function_type.kw_only:
+            if param.name in remaining:
+                normalized.append(remaining.pop(param.name))
+                source_positions.append(param.name)
+                optional_payloads.append(ty.optional_payload(param.type))
+                if not param.required:
+                    normalized.append(hir.Bool(node.loc, 'bool', True))
+                    source_positions.append(None)
+                    optional_payloads.append(None)
+            elif param.required:
+                raise ValueError(
+                    f'INTERNAL ERROR: checked call is missing keyword parameter `{param.name}`'
+                )
+            else:
+                normalized.extend([
+                    self._default_placeholder(param.type, node.loc),
+                    hir.Bool(node.loc, 'bool', False),
+                ])
+                source_positions.extend([None, None])
+                optional_payloads.extend([None, None])
+        if remaining:
+            names = ', '.join(sorted(remaining))
+            raise ValueError(
+                f'INTERNAL ERROR: checked call has unmatched keyword arguments: {names}'
+            )
+        return normalized, source_positions, optional_payloads
+
     def _transform_node(self, node: hir.AST) -> hir.AST | None:
         """Rewrite callable references and elide compile-time declarations.
 
@@ -2129,43 +2296,55 @@ class _Lowerer:
                 ]
             else:
                 func = self._require_node(self._transform_node(node.func))
+            transformed_pos = [
+                self._require_node(self._transform_node(arg))
+                for arg in node.pos_args
+            ]
+            transformed_kw = {
+                name: self._require_node(self._transform_node(arg))
+                for name, arg in node.kw_args.items()
+            }
+            if source_function_type is not None:
+                normalized, source_positions, optional_payloads = (
+                    self._normalize_call_arguments(
+                        node,
+                        source_function_type,
+                        transformed_pos,
+                        transformed_kw,
+                    )
+                )
+                func = replace(
+                    func,
+                    type=self._lower_callable_type(source_function_type),
+                )
+            else:
+                normalized = transformed_pos
+                source_positions = list(range(len(transformed_pos)))
+                optional_payloads = [None] * len(transformed_pos)
             transformed = replace(
                 node,
                 func=func,
-                pos_args=[
-                    self._require_node(self._transform_node(arg))
-                    for arg in node.pos_args
-                ],
-                kw_args={
-                    name: self._require_node(self._transform_node(arg))
-                    for name, arg in node.kw_args.items()
-                },
+                pos_args=normalized,
+                kw_args={},
                 selected_method_index=None,
             )
-            for index, argument in enumerate(transformed.pos_args):
-                analysis = self.array_call_boundary_analyses.get((id(node), index))
+            for index, (argument, source_position) in enumerate(zip(
+                transformed.pos_args,
+                source_positions,
+            )):
+                if source_position is None:
+                    continue
+                analysis = self.array_call_boundary_analyses.get(
+                    (id(node), source_position)
+                )
                 if analysis is not None:
                     self.array_call_boundary_analyses[(id(transformed), index)] = replace(
                         analysis,
                         argument=argument,
                     )
-            for name, argument in transformed.kw_args.items():
-                analysis = self.array_call_boundary_analyses.get((id(node), name))
-                if analysis is not None:
-                    self.array_call_boundary_analyses[(id(transformed), name)] = replace(
-                        analysis,
-                        argument=argument,
-                    )
             if source_function_type is not None:
-                self.call_optional_args[id(transformed)] = [
-                    ty.optional_payload(param.type)
-                    for param in source_function_type.pos_or_kw
-                ]
-                self.call_optional_kwargs[id(transformed)] = {
-                    param.name: payload
-                    for param in source_function_type.kw_only
-                    if (payload := ty.optional_payload(param.type)) is not None
-                }
+                self.call_optional_args[id(transformed)] = optional_payloads
+                self.call_optional_kwargs[id(transformed)] = {}
             return transformed
         if isinstance(node, hir.Block):
             items: list[hir.AST] = []
@@ -5990,6 +6169,14 @@ class _Lowerer:
         while True:
             name = f'__dewy_array_{role}_{self.next_array_temp}'
             self.next_array_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return name
+
+    def _new_default_name(self, role: str) -> str:
+        while True:
+            name = f'__dewy_default_{role}_{self.next_default_temp}'
+            self.next_default_temp += 1
             if name not in self.source_names:
                 self.source_names.add(name)
                 return name

@@ -9,7 +9,7 @@ from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
 from . import bounds, builtins, hir, initialization, ty
-from .errors import TypeCheckError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
+from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span
 
@@ -81,12 +81,15 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
                     passes.append((typecheck_and_resolve_inner(candidate, ctx=fork, type_block=type_block, expected=expected), fork))
-                except (TypeCheckError, NotImplementedYet) as e:
+                except (TypeCheckError, UserError, NotImplementedYet) as e:
                     # NotImplementedYet prunes too so an unimplemented reading doesn't block a
                     # valid one, but it is reported preferentially when nothing survives since
                     # the failure may be a compiler gap rather than a user error
                     rejections.append(e)
             if len(passes) == 0:
+                user_rejections = [r for r in rejections if isinstance(r, UserError)]
+                if user_rejections:
+                    raise user_rejections[0]
                 unimplemented = [r for r in rejections if isinstance(r, NotImplementedYet)]
                 if unimplemented:
                     raise unimplemented[0]
@@ -3423,7 +3426,8 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name))):
                 (kw_only_args if saw_rest else pos_or_kw_args).append(hir.Param(name, type=ast_to_type(item.right, ctx=ctx)))
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
-                kw_only_args.append(hir.BoundParam(name, type=ty.INFERRED_TYPE, value=typecheck_and_resolve_inner(right, ctx=ctx)))
+                value = typecheck_and_resolve_inner(right, ctx=ctx)
+                kw_only_args.append(hir.BoundParam(name, type=value.type, value=value))
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as right):
                 kw_only_args.append(hir.BoundParam(name, type=ast_to_type(typeexpr, ctx=ctx), value=typecheck_and_resolve_inner(right, ctx=ctx)))
             case p0.BinOp(op=t2.EllipsisJuxtapose(), left=p0.Atom(item=t1.Identifier(name='...')), right=p0.Atom(item=t1.Identifier(name=name))):
@@ -3513,6 +3517,15 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
 
     contextual_method = methods[0] if len(methods) == 1 and not methods[0].type_params else None
     pos_args, kw_args = parse_call_arguments(right, ctx=ctx, method=contextual_method)
+    for name, arg in kw_args.items():
+        if not any(
+            method.rest is not None
+            or any(param.name == name for param in method.pos_or_kw)
+            or any(param.name == name for param in method.kw_only)
+            for method in methods
+        ):
+            user_error(ctx.srcfile, f'unknown keyword argument `{name}`',
+                Pointer(span=arg.loc, message='no method has a parameter with this name'))
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:

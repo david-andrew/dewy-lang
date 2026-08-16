@@ -78,6 +78,7 @@ LOWERED_CASES = [
     ('string_containers.dewy', 42),
     ('runtime_grapheme_strings.dewy', 42),
     ('jump_table.dewy', 42),
+    ('keyword_default_calls.dewy', 42),
     ('hello_world_syscall.dewy', 0),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
@@ -149,6 +150,20 @@ def test_array_call_adapter_fixture_codegen_shape() -> None:
     assert '__store_i64__(selected_values __dewy_array_4)' in emitted
     assert 'let overload_result:int64 = read_array(__dewy_array_4)' in emitted
     assert '__dewy_array_data_' not in emitted
+
+
+def test_keyword_default_fixture_codegen_shape() -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'keyword_default_calls.dewy'))
+
+    assert '__dewy_default_arg_y_' in emitted
+    assert '__dewy_default_has_y_' in emitted
+    assert 'if not __dewy_default_has_y_' in emitted
+    assert 'let direct:int64 = add(40 0 false)' in emitted
+    assert 'let override:int64 = add(39 3 true)' in emitted
+    assert 'let reordered:int64 = subtract(42 0)' in emitted
+    assert 'let keyword_only:int64 = required(40 2)' in emitted
+    assert '...' not in emitted
+    assert ' y=' not in emitted
 
 
 @pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')

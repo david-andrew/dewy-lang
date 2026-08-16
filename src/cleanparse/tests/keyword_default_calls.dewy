@@ -1,0 +1,57 @@
+let default_evaluations:int64 = 0
+let next_default = ():>int64 => {
+    default_evaluations += 1
+    return 2
+}
+let lazy = (... value:int64=next_default()):>int64 => value
+let forty_two = ():>int64 => 42
+let invoke = (... fn:<():>int64>=forty_two):>int64 => fn()
+let add = (x:int64 y:int64=2):>int64 => x + y
+let inferred = (x:int64 y=2):>int64 => x + y
+let subtract = (x:int64 y:int64):>int64 => x - y
+let required = (x:int64 ... y:int64):>int64 => x + y
+let integer = (x:int64 y:int64=2):>int64 => x + y
+let boolean = (x:bool y:int64=2):>int64 => if x 40 + y else y
+let selected = integer & boolean
+
+let fresh = (... items:array<int64 length=2>=[0 2]):>int64 => {
+    let result:int64 = items[0] + items[1]
+    items[0] = 40
+    return result
+}
+
+let main = ():>int64 => {
+    let fn = add
+    let object = [
+        base = 40
+        method = (value:int64=2):>int64 => base + value
+    ]
+    let direct:int64 = add(40)
+    let inferred_default:int64 = inferred(40)
+    let override:int64 = add(39 y=3)
+    let reordered:int64 = subtract(y=0 x=42)
+    let piped:int64 = 40 |> add
+    let indirect:int64 = (fn)(40)
+    let overloaded:int64 = selected(40)
+    let method:int64 = object.method()
+    let keyword_only:int64 = required(40 y=2)
+    let explicit_lazy:int64 = lazy(value=42)
+    let omitted_lazy:int64 = lazy()
+    let default_callback:int64 = invoke()
+    let supplied = [40 2]
+    let supplied_result:int64 = fresh(items=supplied)
+    let first_fresh:int64 = fresh()
+    let second_fresh:int64 = fresh()
+    if direct =? 42 and inferred_default =? 42 and override =? 42
+        and reordered =? 42 and piped =? 42
+        and indirect =? 42 and overloaded =? 42
+        and method =? 42 and keyword_only =? 42
+        and explicit_lazy =? 42 and omitted_lazy =? 2
+        and default_callback =? 42
+        and default_evaluations =? 1
+        and supplied_result =? 42
+        and first_fresh =? 2 and second_fresh =? 2 {
+        return 42
+    }
+    return 1
+}
