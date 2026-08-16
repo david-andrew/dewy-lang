@@ -92,6 +92,10 @@ type ArrayUse = Literal[
     'length',
     'index_read',
     'index_write',
+    'alias',
+    'call_boundary',
+    'call_boundary_pending',
+    'safe_call_boundary',
     'representation',
 ]
 
@@ -196,6 +200,26 @@ class _FunctionDef:
     optional_result_name: str | None = None
 
 
+@dataclass(frozen=True)
+class ArrayParameterAnalysis:
+    function: _FunctionDef
+    parameter: hir.Param
+    alias_group: frozenset[int]
+    uses: frozenset[ArrayUse]
+    adapter_safe: bool
+
+
+@dataclass(frozen=True)
+class ArrayCallBoundaryAnalysis:
+    function: _FunctionDef | None
+    argument: hir.AST
+    position: int | str
+    parameter: hir.Param | None
+    source_binding_id: int | None
+    source_alias_group: frozenset[int]
+    safe: bool
+
+
 class _Lowerer:
     """Discover callable units, validate captures, and rewrite them for udewy."""
 
@@ -234,6 +258,17 @@ class _Lowerer:
         self.array_representations: dict[int, ArrayRepresentation] = {}
         self.array_declarations: dict[int, hir.Declare] = {}
         self.array_uses: dict[int, set[ArrayUse]] = defaultdict(set)
+        self.array_alias_edges: dict[int, int] = {}
+        self.array_alias_groups: dict[int, frozenset[int]] = {}
+        self.array_alias_group_by_binding: dict[int, int] = {}
+        self.array_group_uses: dict[int, frozenset[ArrayUse]] = {}
+        self.array_parameters: dict[int, tuple[_FunctionDef, hir.Param]] = {}
+        self.array_parameter_analyses: dict[int, ArrayParameterAnalysis] = {}
+        self.array_calls: list[hir.FunctionCall] = []
+        self.array_call_boundary_analyses: dict[
+            tuple[int, int | str],
+            ArrayCallBoundaryAnalysis,
+        ] = {}
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_object_receiver: hir.ExpressedIdentifier | None = None
@@ -297,7 +332,7 @@ class _Lowerer:
                 continue
             if isinstance(transformed, hir.Declare):
                 representation = self._array_representation(transformed)
-                if representation in {'static_words', 'static_bytes'}:
+                if representation == 'static_words' or representation == 'static_bytes':
                     globals_.append(
                         self._static_array_global(transformed, representation)
                     )
@@ -894,12 +929,23 @@ class _Lowerer:
                 )
                 binding.function = function
             else:
+                array_use: ArrayUse = (
+                    'alias'
+                    if self._record_local_array_alias(
+                        declare,
+                        binding,
+                        scope,
+                        current_function,
+                    )
+                    else 'representation'
+                )
                 self._discover_node(
                     declare.expr,
                     scope,
                     current_function,
                     suggested_name=declare.name if binding.kind == 'overload' else None,
                     overload_member=binding.kind == 'overload',
+                    array_use=array_use,
                 )
             return
 
@@ -927,6 +973,45 @@ class _Lowerer:
         ):
             self.array_representations[declare.binding_id] = 'descriptor'
             self.array_declarations[declare.binding_id] = declare
+
+    def _record_local_array_alias(
+        self,
+        declaration: hir.Declare,
+        binding: _Binding,
+        scope: _Scope,
+        current_function: _FunctionDef | None,
+    ) -> bool:
+        if (
+            current_function is None
+            or binding.semantic_id is None
+            or not isinstance(declaration.annotation or declaration.expr.type, ty.ArrayType)
+        ):
+            return False
+        source_node = declaration.expr
+        while (
+            isinstance(source_node, hir.Block)
+            and not source_node.scoped
+            and len(source_node.items) == 1
+        ):
+            source_node = source_node.items[0]
+        if not isinstance(source_node, hir.ExpressedIdentifier):
+            return False
+        source = (
+            self.binding_by_semantic_id.get(source_node.binding_id)
+            if source_node.binding_id is not None
+            else scope.resolve(source_node.name)
+        )
+        if (
+            source is None
+            or source.semantic_id is None
+            or source.kind not in {'param', 'value'}
+            or source.owner_function is not current_function
+            or binding.owner_function is not current_function
+            or not isinstance(source_node.type, ty.ArrayType)
+        ):
+            return False
+        self.array_alias_edges[binding.semantic_id] = source.semantic_id
+        return True
 
     def _new_function(
         self,
@@ -983,6 +1068,8 @@ class _Lowerer:
                 None,
                 param.binding_id,
             )
+            if isinstance(param.type, ty.ArrayType) and param.binding_id is not None:
+                self.array_parameters[param.binding_id] = (function, param)
             payload = ty.optional_payload(param.type)
             if payload is not None and param.binding_id is not None:
                 self.optional_payloads[param.binding_id] = payload
@@ -995,6 +1082,8 @@ class _Lowerer:
                 None,
                 param.binding_id,
             )
+            if isinstance(param.type, ty.ArrayType) and param.binding_id is not None:
+                self.array_parameters[param.binding_id] = (function, param)
             payload = ty.optional_payload(param.type)
             if payload is not None and param.binding_id is not None:
                 self.optional_payloads[param.binding_id] = payload
@@ -1007,6 +1096,14 @@ class _Lowerer:
                 None,
                 literal.rest_args.binding_id,
             )
+            if (
+                isinstance(literal.rest_args.type, ty.ArrayType)
+                and literal.rest_args.binding_id is not None
+            ):
+                self.array_parameters[literal.rest_args.binding_id] = (
+                    function,
+                    literal.rest_args,
+                )
             payload = ty.optional_payload(literal.rest_args.type)
             if payload is not None and literal.rest_args.binding_id is not None:
                 self.optional_payloads[literal.rest_args.binding_id] = payload
@@ -1040,7 +1137,13 @@ class _Lowerer:
             )
             self.identifier_bindings[id(node)] = binding
             if binding is not None and binding.semantic_id is not None:
-                self.array_uses[binding.semantic_id].add(array_use)
+                effective_use = (
+                    'representation'
+                    if binding.owner_function is not None
+                    and binding.owner_function is not current_function
+                    else array_use
+                )
+                self.array_uses[binding.semantic_id].add(effective_use)
             if (
                 current_function is not None
                 and binding is not None
@@ -1204,10 +1307,25 @@ class _Lowerer:
             return
         if isinstance(node, hir.FunctionCall):
             self._discover_node(node.func, scope, current_function)
+            if any(
+                isinstance(arg.type, ty.ArrayType)
+                for arg in [*node.pos_args, *node.kw_args.values()]
+            ):
+                self.array_calls.append(node)
             for arg in node.pos_args:
-                self._discover_node(arg, scope, current_function)
+                self._discover_node(
+                    arg,
+                    scope,
+                    current_function,
+                    array_use='call_boundary_pending',
+                )
             for arg in node.kw_args.values():
-                self._discover_node(arg, scope, current_function)
+                self._discover_node(
+                    arg,
+                    scope,
+                    current_function,
+                    array_use='call_boundary_pending',
+                )
             return
         if isinstance(node, hir.Assign):
             self._discover_node(node.target, scope, current_function)
@@ -1249,20 +1367,299 @@ class _Lowerer:
                 seen.add(id(item))
                 self._discover_node(item, scope, current_function)
 
+    def _analyze_array_aliases_and_parameters(self) -> None:
+        self._build_array_alias_groups()
+        self._build_array_parameter_analyses()
+        boundary_uses = self._analyze_array_call_boundaries()
+        for uses in self.array_uses.values():
+            uses.discard('call_boundary_pending')
+        for binding_id, uses in boundary_uses.items():
+            self.array_uses[binding_id].update(uses)
+        self._refresh_array_group_uses()
+        self._build_array_parameter_analyses()
+
+    def _build_array_alias_groups(self) -> None:
+        binding_ids = {
+            *self.array_declarations,
+            *self.array_parameters,
+            *self.array_alias_edges,
+            *self.array_alias_edges.values(),
+        }
+        parents = {binding_id: binding_id for binding_id in binding_ids}
+
+        def root(binding_id: int) -> int:
+            while parents[binding_id] != binding_id:
+                parents[binding_id] = parents[parents[binding_id]]
+                binding_id = parents[binding_id]
+            return binding_id
+
+        for alias_id, source_id in self.array_alias_edges.items():
+            alias_root = root(alias_id)
+            source_root = root(source_id)
+            if alias_root != source_root:
+                parents[alias_root] = source_root
+
+        members_by_root: dict[int, set[int]] = defaultdict(set)
+        for binding_id in binding_ids:
+            members_by_root[root(binding_id)].add(binding_id)
+
+        self.array_alias_groups = {}
+        self.array_alias_group_by_binding = {}
+        for members in members_by_root.values():
+            group_id = min(members)
+            group = frozenset(members)
+            self.array_alias_groups[group_id] = group
+            for binding_id in group:
+                self.array_alias_group_by_binding[binding_id] = group_id
+        self._refresh_array_group_uses()
+
+    def _refresh_array_group_uses(self) -> None:
+        self.array_group_uses = {
+            group_id: frozenset(
+                use
+                for binding_id in group
+                for use in self.array_uses.get(binding_id, set())
+            )
+            for group_id, group in self.array_alias_groups.items()
+        }
+
+    def _build_array_parameter_analyses(self) -> None:
+        self.array_parameter_analyses = {}
+        allowed_uses: set[ArrayUse] = {'length', 'index_read', 'index_write'}
+        for binding_id, (function, parameter) in self.array_parameters.items():
+            group_id = self.array_alias_group_by_binding[binding_id]
+            group = self.array_alias_groups[group_id]
+            uses: frozenset[ArrayUse] = frozenset(
+                use for use in self.array_group_uses[group_id] if use != 'alias'
+            )
+            same_function = all(
+                self.binding_by_semantic_id[member].owner_function is function
+                for member in group
+            )
+            self.array_parameter_analyses[binding_id] = ArrayParameterAnalysis(
+                function,
+                parameter,
+                group,
+                uses,
+                same_function and uses <= allowed_uses,
+            )
+
+    def _analyze_array_call_boundaries(self) -> dict[int, set[ArrayUse]]:
+        boundary_uses: dict[int, set[ArrayUse]] = defaultdict(set)
+        self.array_call_boundary_analyses = {}
+        for call in self.array_calls:
+            function = self._direct_call_function(call)
+            for position, argument, parameter in self._call_array_arguments(
+                call,
+                function,
+            ):
+                source = self._array_argument_binding(argument)
+                source_id = (
+                    source.semantic_id
+                    if source is not None and source.semantic_id is not None
+                    else None
+                )
+                group = (
+                    self.array_alias_groups[
+                        self.array_alias_group_by_binding[source_id]
+                    ]
+                    if source_id in self.array_alias_group_by_binding
+                    else frozenset()
+                )
+                parameter_analysis = (
+                    self.array_parameter_analyses.get(parameter.binding_id)
+                    if parameter is not None and parameter.binding_id is not None
+                    else None
+                )
+                raw_kind = self._potential_raw_array_group(group)
+                safe = (
+                    function is not None
+                    and parameter_analysis is not None
+                    and parameter_analysis.adapter_safe
+                    and source is not None
+                    and source.kind != 'param'
+                    and raw_kind is not None
+                    and self._raw_array_group_uses_are_safe(group, raw_kind)
+                    and not (
+                        raw_kind == 'static_bytes'
+                        and 'index_write' in parameter_analysis.uses
+                    )
+                )
+                if source_id is not None:
+                    boundary_uses[source_id].add(
+                        'safe_call_boundary' if safe else 'call_boundary'
+                    )
+                self.array_call_boundary_analyses[(id(call), position)] = (
+                    ArrayCallBoundaryAnalysis(
+                        function,
+                        argument,
+                        position,
+                        parameter,
+                        source_id,
+                        group,
+                        safe,
+                    )
+                )
+        return boundary_uses
+
+    def _direct_call_function(
+        self,
+        call: hir.FunctionCall,
+    ) -> _FunctionDef | None:
+        if isinstance(call.func, hir.FunctionLiteral):
+            return self.function_by_literal.get(id(call.func))
+        if isinstance(call.func, hir.OverloadedFunction):
+            if call.selected_method_index is None:
+                return None
+            functions = self._resolve_callable(call.func)
+            return functions[call.selected_method_index]
+        if not isinstance(call.func, hir.ExpressedIdentifier):
+            return None
+        binding = self.identifier_bindings.get(id(call.func))
+        if binding is None:
+            return None
+        if binding.kind == 'function':
+            return binding.function
+        if binding.kind != 'overload' or call.selected_method_index is None:
+            return None
+        functions = self._resolve_callable(call.func)
+        return functions[call.selected_method_index]
+
+    @staticmethod
+    def _call_array_arguments(
+        call: hir.FunctionCall,
+        function: _FunctionDef | None,
+    ) -> list[tuple[int | str, hir.AST, hir.Param | None]]:
+        positional_parameters = (
+            function.literal.pos_or_kw_args if function is not None else []
+        )
+        named_parameters = (
+            {
+                parameter.name: parameter
+                for parameter in [
+                    *function.literal.pos_or_kw_args,
+                    *function.literal.kw_only_args,
+                ]
+            }
+            if function is not None
+            else {}
+        )
+        arguments: list[tuple[int | str, hir.AST, hir.Param | None]] = []
+        for index, argument in enumerate(call.pos_args):
+            if isinstance(argument.type, ty.ArrayType):
+                parameter = (
+                    positional_parameters[index]
+                    if index < len(positional_parameters)
+                    else None
+                )
+                arguments.append((index, argument, parameter))
+        for name, argument in call.kw_args.items():
+            if isinstance(argument.type, ty.ArrayType):
+                arguments.append((name, argument, named_parameters.get(name)))
+        return arguments
+
+    def _array_argument_binding(self, node: hir.AST) -> _Binding | None:
+        while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            node = node.items[0]
+        if not isinstance(node, hir.ExpressedIdentifier):
+            return None
+        return self.identifier_bindings.get(id(node))
+
+    def _potential_raw_array_group(
+        self,
+        group: frozenset[int],
+    ) -> Literal['stack_data', 'static_words', 'static_bytes'] | None:
+        local_literals = [
+            declaration
+            for binding_id in group
+            if (
+                (declaration := self.array_declarations.get(binding_id)) is not None
+                and self.binding_by_semantic_id[binding_id].owner_function is not None
+                and isinstance(declaration.expr, hir.ArrayLiteral)
+                and isinstance(declaration.expr.type, ty.ArrayType)
+                and declaration.expr.type.length == len(declaration.expr.items)
+            )
+        ]
+        if len(local_literals) == 1:
+            return 'stack_data'
+        if len(group) != 1:
+            return None
+        binding_id = next(iter(group))
+        declaration = self.array_declarations.get(binding_id)
+        binding = self.binding_by_semantic_id.get(binding_id)
+        if (
+            declaration is None
+            or binding is None
+            or binding.owner_function is not None
+            or declaration.decltype != 'const'
+        ):
+            return None
+        array_type = declaration.annotation or declaration.expr.type
+        if not isinstance(array_type, ty.ArrayType):
+            return None
+        if (
+            isinstance(declaration.expr, hir.ArrayLiteral)
+            and declaration.expr.items
+            and self._static_word_array_is_stable(
+                declaration.expr,
+                array_type,
+            )
+        ):
+            return 'static_words'
+        if (
+            array_type.element == 'uint8'
+            and self._static_binary_array_initializer(declaration.expr, set())
+            is not None
+        ):
+            return 'static_bytes'
+        return None
+
+    def _raw_array_group_uses_are_safe(
+        self,
+        group: frozenset[int],
+        raw_kind: Literal['stack_data', 'static_words', 'static_bytes'],
+    ) -> bool:
+        uses = {
+            use
+            for binding_id in group
+            for use in self.array_uses.get(binding_id, set())
+        } - {'alias', 'call_boundary_pending'}
+        allowed: set[ArrayUse] = {'length', 'index_read'}
+        if raw_kind == 'stack_data':
+            allowed.add('index_write')
+        return uses <= allowed
+
     def _classify_array_representations(self) -> None:
+        self._analyze_array_aliases_and_parameters()
+        allowed_uses: set[ArrayUse] = {
+            'length',
+            'index_read',
+            'index_write',
+            'safe_call_boundary',
+        }
+        for group_id, group in self.array_alias_groups.items():
+            roots = [
+                binding_id
+                for binding_id in group
+                if (
+                    (node := self.array_declarations.get(binding_id)) is not None
+                    and self.binding_by_semantic_id[binding_id].owner_function
+                    is not None
+                    and isinstance(node.expr, hir.ArrayLiteral)
+                    and isinstance(node.expr.type, ty.ArrayType)
+                    and node.expr.type.length == len(node.expr.items)
+                )
+            ]
+            group_uses: frozenset[ArrayUse] = frozenset(
+                use for use in self.array_group_uses[group_id] if use != 'alias'
+            )
+            if len(roots) == 1 and group_uses <= allowed_uses:
+                for binding_id in group:
+                    if binding_id in self.array_declarations:
+                        self.array_representations[binding_id] = 'stack_data'
+
         for binding_id, node in self.array_declarations.items():
             binding = self.binding_by_semantic_id[binding_id]
-            if (
-                binding.owner_function is not None
-                and node.decltype in {'let', 'const'}
-                and isinstance(node.expr, hir.ArrayLiteral)
-                and isinstance(node.expr.type, ty.ArrayType)
-                and node.expr.type.length == len(node.expr.items)
-            ):
-                uses = self.array_uses.get(binding_id, set())
-                if uses <= {'length', 'index_read', 'index_write'}:
-                    self.array_representations[binding_id] = 'stack_data'
-                    continue
             if (
                 binding.owner_function is not None
                 or node.decltype != 'const'
@@ -1270,7 +1667,7 @@ class _Lowerer:
             ):
                 continue
             uses = self.array_uses.get(binding_id, set())
-            if not uses <= {'length', 'index_read'}:
+            if not uses <= {'length', 'index_read', 'safe_call_boundary'}:
                 continue
             array_type = node.annotation or node.expr.type
             assert isinstance(array_type, ty.ArrayType)
@@ -1282,13 +1679,13 @@ class _Lowerer:
                     array_type,
                 )
             ):
-                self.array_representations[node.binding_id] = 'static_words'
+                self.array_representations[binding_id] = 'static_words'
             elif (
                 array_type.element == 'uint8'
                 and self._static_binary_array_initializer(node.expr, set())
                 is not None
             ):
-                self.array_representations[node.binding_id] = 'static_bytes'
+                self.array_representations[binding_id] = 'static_bytes'
 
     def _static_word_array_is_stable(
         self,
@@ -1745,6 +2142,20 @@ class _Lowerer:
                 },
                 selected_method_index=None,
             )
+            for index, argument in enumerate(transformed.pos_args):
+                analysis = self.array_call_boundary_analyses.get((id(node), index))
+                if analysis is not None:
+                    self.array_call_boundary_analyses[(id(transformed), index)] = replace(
+                        analysis,
+                        argument=argument,
+                    )
+            for name, argument in transformed.kw_args.items():
+                analysis = self.array_call_boundary_analyses.get((id(node), name))
+                if analysis is not None:
+                    self.array_call_boundary_analyses[(id(transformed), name)] = replace(
+                        analysis,
+                        argument=argument,
+                    )
             if source_function_type is not None:
                 self.call_optional_args[id(transformed)] = [
                     ty.optional_payload(param.type)
@@ -2455,7 +2866,13 @@ class _Lowerer:
                     if expected_type is not None
                     else None
                 )
-                if payload is not None:
+                boundary = self.array_call_boundary_analyses.get((id(node), index))
+                if boundary is not None and boundary.safe:
+                    arg_prelude, lowered_arg = self._materialize_array_call_argument(
+                        arg,
+                        boundary,
+                    )
+                elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
                     arg_prelude, lowered_arg = self._extract_object_pointer(arg)
@@ -2467,7 +2884,13 @@ class _Lowerer:
             optional_kwargs = self.call_optional_kwargs.get(id(node), {})
             for name, arg in node.kw_args.items():
                 payload = optional_kwargs.get(name)
-                if payload is not None:
+                boundary = self.array_call_boundary_analyses.get((id(node), name))
+                if boundary is not None and boundary.safe:
+                    arg_prelude, lowered_arg = self._materialize_array_call_argument(
+                        arg,
+                        boundary,
+                    )
+                elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType):
                     arg_prelude, lowered_arg = self._extract_object_pointer(arg)
@@ -2669,11 +3092,105 @@ class _Lowerer:
         if node.binding_id is None:
             return None
         representation = self.array_representations.get(node.binding_id)
-        return (
-            representation
-            if representation in {'stack_data', 'static_words', 'static_bytes'}
-            else None
+        if representation == 'stack_data':
+            return 'stack_data'
+        if representation == 'static_words':
+            return 'static_words'
+        if representation == 'static_bytes':
+            return 'static_bytes'
+        return None
+
+    def _materialize_array_call_argument(
+        self,
+        node: hir.AST,
+        boundary: ArrayCallBoundaryAnalysis,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        if boundary.source_binding_id is None:
+            return self._extract_expression(node)
+        representation = self.array_representations.get(
+            boundary.source_binding_id,
+            'descriptor',
         )
+        if representation == 'descriptor':
+            return self._extract_expression(node)
+        source_type = next(
+            declaration.expr.type
+            for binding_id in boundary.source_alias_group
+            if (
+                (declaration := self.array_declarations.get(binding_id)) is not None
+                and isinstance(declaration.expr.type, ty.ArrayType)
+                and declaration.expr.type.length is not None
+            )
+        )
+        assert isinstance(source_type, ty.ArrayType)
+        assert source_type.length is not None
+        element_bytes, _signed = self._array_element_layout(
+            source_type.element,
+            node,
+        )
+        source_prelude, data = self._extract_expression(node)
+        descriptor = self._new_array_temp(
+            hir.ArrayLiteral(node.loc, source_type, [])
+        )
+        descriptor_word = replace(descriptor, type='int64')
+        flags = (
+            ARRAY_BORROWED_STATIC
+            if representation == 'static_bytes'
+            else ARRAY_MUTABLE
+        )
+        statements: list[hir.AST] = [
+            *source_prelude,
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                descriptor.name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [self._int64_literal(node.loc, ARRAY_DESCRIPTOR_SIZE)],
+                    'int64',
+                    node.loc,
+                ),
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_DATA_OFFSET,
+                data,
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_LENGTH_OFFSET,
+                self._int64_literal(node.loc, source_type.length),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_CAPACITY_OFFSET,
+                self._int64_literal(node.loc, source_type.length),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_STRIDE_OFFSET,
+                self._int64_literal(node.loc, element_bytes),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_FLAGS_OFFSET,
+                self._int64_literal(node.loc, flags),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                ARRAY_OWNER_OFFSET,
+                self._int64_literal(node.loc, 0),
+                node.loc,
+            ),
+        ]
+        return statements, descriptor
 
     def _extract_representation_cast(
         self,
@@ -4996,9 +5513,16 @@ class _Lowerer:
         node: hir.Declare,
     ) -> list[hir.AST]:
         if not isinstance(node.expr, hir.ArrayLiteral):
-            raise TypeError(
-                'INTERNAL ERROR: stack-data representation requires an array literal'
-            )
+            prelude, source = self._extract_expression(node.expr)
+            return [
+                *prelude,
+                replace(
+                    node,
+                    decltype='let',
+                    annotation='int64',
+                    expr=source,
+                ),
+            ]
         array_type = node.expr.type
         if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
             raise TypeError(

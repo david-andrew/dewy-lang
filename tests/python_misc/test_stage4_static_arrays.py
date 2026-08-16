@@ -11,9 +11,7 @@ from src.cleanparse.semantic.errors import UserError
 from udewy.frontend import entry_point
 
 
-def _classify_array_representations(
-    source: str,
-) -> tuple[dict[str, ArrayRepresentation], dict[str, set[ArrayUse]]]:
+def _analyze_arrays(source: str) -> tuple[_Lowerer, dict[str, int]]:
     srcfile = SrcFile(None, source)
     root = check.typecheck_and_resolve(srcfile)
     assert isinstance(root, hir.Block)
@@ -27,10 +25,21 @@ def _classify_array_representations(
     )
     lowerer._classify_array_representations()
     names = {
+        binding.name: binding_id
+        for binding_id, binding in lowerer.binding_by_semantic_id.items()
+    }
+    return lowerer, names
+
+
+def _classify_array_representations(
+    source: str,
+) -> tuple[dict[str, ArrayRepresentation], dict[str, set[ArrayUse]]]:
+    lowerer, _ = _analyze_arrays(source)
+    names = {
         binding_id: binding.name
         for binding_id, binding in lowerer.binding_by_semantic_id.items()
     }
-    representations = {
+    representations: dict[str, ArrayRepresentation] = {
         names[binding_id]: representation
         for binding_id, representation in lowerer.array_representations.items()
     }
@@ -63,6 +72,340 @@ let read_const = ():>int64 => {
     assert uses['const_values'] == {'index_read'}
 
 
+def test_transitive_local_alias_group_propagates_stack_data() -> None:
+    lowerer, names = _analyze_arrays('''
+let read = ():>int64 => {
+    let values = [1 2]
+    let alias = values
+    let transitive = alias
+    transitive[0] = 40
+    return alias[0] + values.length
+}
+''')
+    values = names['values']
+    alias = names['alias']
+    transitive = names['transitive']
+
+    assert lowerer.array_alias_edges == {
+        alias: values,
+        transitive: alias,
+    }
+    group_id = lowerer.array_alias_group_by_binding[values]
+    assert lowerer.array_alias_groups[group_id] == {values, alias, transitive}
+    assert lowerer.array_group_uses[group_id] == {
+        'alias',
+        'length',
+        'index_read',
+        'index_write',
+    }
+    assert {
+        lowerer.array_representations[binding_id]
+        for binding_id in (values, alias, transitive)
+    } == {'stack_data'}
+
+
+def test_array_parameter_alias_closure_can_be_adapter_safe() -> None:
+    lowerer, names = _analyze_arrays('''
+let update = (items:array<int64 length=2>):>int64 => {
+    let view = items
+    view[0] = 40
+    return view[0] + items.length
+}
+''')
+    items = names['items']
+    view = names['view']
+    analysis = lowerer.array_parameter_analyses[items]
+
+    assert analysis.alias_group == {items, view}
+    assert analysis.uses == {'length', 'index_read', 'index_write'}
+    assert analysis.adapter_safe
+
+
+@pytest.mark.parametrize(
+    ('source', 'unsafe_use'),
+    [
+        (
+            '''
+let escape = (items:array<int64 length=2>):>array<int64 length=2> =>
+    items
+''',
+            'representation',
+        ),
+        (
+            '''
+let store = (items:array<int64 length=2>):>int64 => {
+    let box = [value = items]
+    return box.value[0]
+}
+''',
+            'representation',
+        ),
+        (
+            '''
+let convert = (items:array<grapheme length=2>):>string =>
+    items as string
+''',
+            'representation',
+        ),
+        (
+            '''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let forward = (forwarded:array<int64 length=2>):>int64 =>
+    first(forwarded)
+''',
+            'call_boundary',
+        ),
+        (
+            '''
+let replace = (items:array<int64 length=2>):>int64 => {
+    let replacement = [40 2]
+    items = replacement
+    return items[0]
+}
+''',
+            'representation',
+        ),
+    ],
+)
+def test_array_parameter_unsafe_uses_require_descriptors(
+    source: str,
+    unsafe_use: ArrayUse,
+) -> None:
+    lowerer, names = _analyze_arrays(source)
+    parameter_name = 'forwarded' if 'forwarded' in names else 'items'
+    analysis = lowerer.array_parameter_analyses[names[parameter_name]]
+
+    assert unsafe_use in analysis.uses
+    assert not analysis.adapter_safe
+
+
+def test_safe_direct_call_boundary_preserves_local_alias_stack_data() -> None:
+    lowerer, names = _analyze_arrays('''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let read = ():>int64 => {
+    let values = [42 0]
+    let alias = values
+    return first(alias)
+}
+''')
+    values = names['values']
+    alias = names['alias']
+    boundary = next(iter(lowerer.array_call_boundary_analyses.values()))
+
+    assert boundary.safe
+    assert boundary.function is not None
+    assert boundary.function.logical_name == 'first'
+    assert boundary.parameter is not None
+    assert boundary.parameter.name == 'items'
+    assert boundary.position == 0
+    assert boundary.source_binding_id == alias
+    assert boundary.source_alias_group == {values, alias}
+    assert lowerer.array_group_uses[
+        lowerer.array_alias_group_by_binding[values]
+    ] == {'alias', 'safe_call_boundary'}
+    assert lowerer.array_representations[values] == 'stack_data'
+    assert lowerer.array_representations[alias] == 'stack_data'
+
+
+def test_selected_overload_records_one_safe_array_boundary() -> None:
+    lowerer, names = _analyze_arrays('''
+let read_array = (items:array<int64 length=2>):>int64 => items[0]
+let identity = (value:int64):>int64 => value
+let selected = read_array & identity
+let read = ():>int64 => {
+    let values = [42 0]
+    return selected(values)
+}
+''')
+    boundary = next(iter(lowerer.array_call_boundary_analyses.values()))
+
+    assert boundary.safe
+    assert boundary.function is not None
+    assert boundary.function.logical_name == 'read_array'
+    assert lowerer.array_representations[names['values']] == 'stack_data'
+
+
+def test_read_only_static_call_boundaries_preserve_raw_tables() -> None:
+    lowerer, names = _analyze_arrays('''
+const words:array<int64> = [40 2]
+const bytes:array<uint8> = 0x"2802"
+let read_words = (items:array<int64 length=2>):>int64 => items[0]
+let read_bytes = (items:array<uint8 length=2>):>uint8 => items[0]
+let read = ():>int64 => {
+    let ignored:uint8 = read_bytes(bytes)
+    return read_words(words) + 2
+}
+''')
+
+    assert lowerer.array_representations[names['words']] == 'static_words'
+    assert lowerer.array_representations[names['bytes']] == 'static_bytes'
+    assert all(
+        boundary.safe
+        for boundary in lowerer.array_call_boundary_analyses.values()
+    )
+
+
+def test_writable_static_bytes_call_boundary_requires_descriptor() -> None:
+    lowerer, names = _analyze_arrays('''
+const bytes:array<uint8> = 0x"2802"
+let mutate = (items:array<uint8 length=2>):>uint8 => {
+    items[0] = 42
+    return items[0]
+}
+let read = ():>uint8 => mutate(bytes)
+''')
+    boundary = next(iter(lowerer.array_call_boundary_analyses.values()))
+
+    assert not boundary.safe
+    assert lowerer.array_representations[names['bytes']] == 'descriptor'
+    assert 'call_boundary' in lowerer.array_uses[names['bytes']]
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        '''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let read = ():>int64 => {
+    let indirect = first
+    let values = [42 0]
+    return indirect(values)
+}
+''',
+        '''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let forward = (forwarded:array<int64 length=2>):>int64 =>
+    first(forwarded)
+let read = ():>int64 => {
+    let values = [42 0]
+    return forward(values)
+}
+''',
+        '''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let read = (choose_left:bool):>int64 => {
+    let values = if choose_left { [42 0] } else { [0 42] }
+    return first(values)
+}
+''',
+        '''
+let store = (items:array<int64 length=2>):>int64 => {
+    let box = [value = items]
+    return box.value[0]
+}
+let read = ():>int64 => {
+    let values = [42 0]
+    return store(values)
+}
+''',
+        '''
+let read = ():>int64 => {
+    let reader = [
+        apply = (items:array<int64 length=2>):>int64 => items[0]
+    ]
+    let values = [42 0]
+    return reader.apply(values)
+}
+''',
+    ],
+)
+def test_unsafe_call_boundaries_keep_local_literals_descriptors(
+    source: str,
+) -> None:
+    lowerer, names = _analyze_arrays(source)
+
+    assert lowerer.array_representations[names['values']] == 'descriptor'
+    assert any(
+        not boundary.safe
+        for boundary in lowerer.array_call_boundary_analyses.values()
+        if boundary.source_binding_id == names['values']
+    )
+
+
+def test_local_alias_call_materializes_one_descriptor_without_copying() -> None:
+    emitted = codegen(SrcFile(None, '''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let read = ():>int64 => {
+    let values = [42 0]
+    let alias = values
+    return first(alias)
+}
+'''))
+
+    assert 'let values:int64 = __alloca__(16)' in emitted
+    assert 'let alias:int64 = values' in emitted
+    assert emitted.count('__alloca__(48)') == 1
+    assert '__store_i64__(alias __dewy_array_1)' in emitted
+    assert '__store_i64__(2 __dewy_array_1 + 8)' in emitted
+    assert '__store_i64__(2 __dewy_array_1 + 16)' in emitted
+    assert '__store_i64__(8 __dewy_array_1 + 24)' in emitted
+    assert '__store_i64__(1 __dewy_array_1 + 32)' in emitted
+    assert '__store_i64__(0 __dewy_array_1 + 40)' in emitted
+    assert 'return first(__dewy_array_1)' in emitted
+    assert '__dewy_array_data_' not in emitted
+
+
+def test_static_call_adapters_preserve_storage_flags() -> None:
+    emitted = codegen(SrcFile(None, '''
+const words:array<int64> = [40 2]
+const bytes:array<uint8> = 0x"2802"
+let read_words = (items:array<int64 length=2>):>int64 => items[0]
+let read_bytes = (items:array<uint8 length=2>):>int64 => {
+    if items[0] =? 40 and items[1] =? 2 { return 42 } else { return 1 }
+}
+let read = ():>int64 => {
+    let ignored:int64 = read_words(words)
+    return read_bytes(bytes)
+}
+'''))
+
+    assert 'const words:int64 = __static_words__(40 2)' in emitted
+    assert 'const bytes:int64 = 0x"2802"' in emitted
+    assert emitted.count('__alloca__(48)') == 2
+    assert '__store_i64__(words __dewy_array_1)' in emitted
+    assert '__store_i64__(8 __dewy_array_1 + 24)' in emitted
+    assert '__store_i64__(1 __dewy_array_1 + 32)' in emitted
+    assert '__store_i64__(bytes __dewy_array_2)' in emitted
+    assert '__store_i64__(1 __dewy_array_2 + 24)' in emitted
+    assert '__store_i64__(2 __dewy_array_2 + 32)' in emitted
+
+
+def test_selected_overload_call_uses_descriptor_adapter() -> None:
+    emitted = codegen(SrcFile(None, '''
+let read_array = (items:array<int64 length=2>):>int64 => items[0]
+let identity = (value:int64):>int64 => value
+let selected = read_array & identity
+let read = ():>int64 => {
+    let values = [42 0]
+    return selected(values)
+}
+'''))
+
+    assert 'let values:int64 = __alloca__(16)' in emitted
+    assert 'let __dewy_array_1:int64 = __alloca__(48)' in emitted
+    assert '__store_i64__(values __dewy_array_1)' in emitted
+    assert 'return read_array(__dewy_array_1)' in emitted
+
+
+def test_multiple_call_adapters_preserve_argument_order() -> None:
+    emitted = codegen(SrcFile(None, '''
+let sum = (
+    left:array<int64 length=1>
+    right:array<int64 length=1>
+):>int64 => left[0] + right[0]
+let read = ():>int64 => {
+    let left = [20]
+    let right = [22]
+    return sum(left right)
+}
+'''))
+
+    left_adapter = emitted.index('__store_i64__(left __dewy_array_1)')
+    right_adapter = emitted.index('__store_i64__(right __dewy_array_2)')
+    call = emitted.index('return sum(__dewy_array_1 __dewy_array_2)')
+    assert left_adapter < right_adapter < call
+
+
 @pytest.mark.parametrize(
     ('name', 'source'),
     [
@@ -71,29 +414,9 @@ let read_const = ():>int64 => {
             '''
 let read = ():>int64 => {
     let values = [20 22]
-    let alias = values
-    return alias[1]
-}
-''',
-        ),
-        (
-            'values',
-            '''
-let read = ():>int64 => {
-    let values = [20 22]
     let replacement = [40 2]
     values = replacement
     return values[1]
-}
-''',
-        ),
-        (
-            'values',
-            '''
-let first = (items:array<int64 length=2>):>int64 => items[0]
-let read = ():>int64 => {
-    let values = [42 0]
-    return first(values)
 }
 ''',
         ),
@@ -141,6 +464,48 @@ let read = ():>int64 => {
 let read = ():>uint8 => {
     let values:array<uint8> = 0x"2a00"
     return values[0]
+}
+''',
+        ),
+        (
+            'values',
+            '''
+let read = ():>uint8 => {
+    let values:array<uint8> = 0x"2a00"
+    let alias = values
+    return alias[0]
+}
+''',
+        ),
+        (
+            'values',
+            '''
+const values = [42 0]
+const alias = values
+let read = ():>int64 => alias[0]
+''',
+        ),
+        (
+            'values',
+            '''
+let read = ():>int64 => {
+    let values = [42 0]
+    let nested = ():>int64 => {
+        let alias = values
+        return alias[0]
+    }
+    return nested()
+}
+''',
+        ),
+        (
+            'left',
+            '''
+let read = (choose_left:bool):>int64 => {
+    let left = [42 0]
+    let right = [0 42]
+    let selected = if choose_left { left } else { right }
+    return selected[0]
 }
 ''',
         ),
@@ -251,11 +616,6 @@ let main = ():>int64 => words[0]
 const words:array<uint32> = [10 20]
 let main = ():>uint32 => words[0]
 ''',
-        '''
-const words:array<int64> = [10 20]
-let first = (items:array<int64 length=2>):>int64 => items[0]
-let main = ():>int64 => first(words)
-''',
     ],
 )
 def test_static_word_array_ambiguous_cases_keep_descriptors(source: str) -> None:
@@ -266,23 +626,28 @@ def test_static_word_array_ambiguous_cases_keep_descriptors(source: str) -> None
     assert '__store_i64__(' in emitted
 
 
-@pytest.mark.parametrize(
-    ('source', 'expected_fragments'),
-    [
-        (
-            '''
+def test_transitive_local_aliases_lower_as_raw_pointer_copies() -> None:
+    emitted = codegen(SrcFile(None, '''
 let read = ():>int64 => {
     let values = [20 22]
     let alias = values
-    return alias[1]
+    let transitive = alias
+    transitive[0] = 40
+    return alias[0] + values.length
 }
-''',
-            (
-                'let values:int64 = __dewy_array_1',
-                'let alias:int64 = values',
-                '__load_i64__(__load_i64__(alias) + 8)',
-            ),
-        ),
+'''))
+
+    assert 'let values:int64 = __alloca__(16)' in emitted
+    assert 'let alias:int64 = values' in emitted
+    assert 'let transitive:int64 = alias' in emitted
+    assert '__store_i64__(40 transitive)' in emitted
+    assert 'return __load_i64__(alias) + 2' in emitted
+    assert '__alloca__(48)' not in emitted
+
+
+@pytest.mark.parametrize(
+    ('source', 'expected_fragments'),
+    [
         (
             '''
 let read = ():>int64 => {
@@ -300,20 +665,6 @@ let read = ():>int64 => {
         ),
         (
             '''
-let first = (items:array<int64 length=2>):>int64 => items[0]
-let read = ():>int64 => {
-    let values = [42 0]
-    return first(values)
-}
-''',
-            (
-                'let values:int64 = __dewy_array_1',
-                'return first(values)',
-                '__load_i64__(__load_i64__(items))',
-            ),
-        ),
-        (
-            '''
 let read = ():>int64 => {
     let values = [42 0]
     let box = [items = values]
@@ -324,21 +675,6 @@ let read = ():>int64 => {
                 'let values:int64 = __dewy_array_1',
                 '__store_i64__(values __dewy_object_1)',
                 '__load_i64__(__load_i64__(__load_i64__(box)))',
-            ),
-        ),
-        (
-            '''
-let first = (items:array<int64 length=2>):>int64 => {
-    let values = items
-    return values[0]
-}
-const source = [42 0]
-let read = ():>int64 => first(source)
-''',
-            (
-                'let values:int64 = items',
-                '__load_i64__(__load_i64__(values))',
-                'return first(source)',
             ),
         ),
         (
@@ -446,6 +782,73 @@ let main = ():>int64 => {
 let main = ():>int64 => {
     let values:array<string> = ["a" "ok"]
     return values[1].length + 40
+}
+''',
+        ),
+        (
+            'local_alias_call_adapter',
+            '''
+let mutate = (items:array<int64 length=2>):>int64 => {
+    items[0] = 40
+    return items[0] + items[1]
+}
+let main = ():>int64 => {
+    let values = [0 2]
+    let alias = values
+    return mutate(alias)
+}
+''',
+        ),
+        (
+            'static_words_call_adapter',
+            '''
+const words:array<int64> = [40 2]
+let sum = (items:array<int64 length=2>):>int64 => items[0] + items[1]
+let main = ():>int64 => sum(words)
+''',
+        ),
+        (
+            'static_words_mutating_call_adapter',
+            '''
+const words:array<int64> = [0 2]
+let mutate = (items:array<int64 length=2>):>int64 => {
+    items[0] = 40
+    return items[0] + items[1]
+}
+let main = ():>int64 => mutate(words)
+''',
+        ),
+        (
+            'static_bytes_call_adapter',
+            '''
+const bytes:array<uint8> = 0x"2802"
+let verify = (items:array<uint8 length=2>):>int64 => {
+    if items[0] =? 40 and items[1] =? 2 { return 42 } else { return 1 }
+}
+let main = ():>int64 => verify(bytes)
+''',
+        ),
+        (
+            'static_bytes_mutating_fallback',
+            '''
+const bytes:array<uint8> = 0x"0002"
+let mutate = (items:array<uint8 length=2>):>int64 => {
+    items[0] = 40
+    if items[0] =? 40 and items[1] =? 2 { return 42 } else { return 1 }
+}
+let main = ():>int64 => mutate(bytes)
+''',
+        ),
+        (
+            'overload_call_adapter',
+            '''
+let read_array = (items:array<int64 length=2>):>int64 =>
+    items[0] + items[1]
+let identity = (value:int64):>int64 => value
+let selected = read_array & identity
+let main = ():>int64 => {
+    let values = [40 2]
+    return selected(values)
 }
 ''',
         ),

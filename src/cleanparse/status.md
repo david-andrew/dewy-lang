@@ -285,23 +285,33 @@ containing `data`, `length`, `capacity`, `stride`, `flags`, and `owner` for most
 arrays. Two proven cases omit it:
 
 - Module-scope `const` arrays whose binding-identity use set contains only
-  `.length` and indexed reads can use raw static storage. Compatible one-word
-  literals and function references use udewy's internal `__static_words__`,
-  while exact based bytes use their static data pointer.
+  `.length`, indexed reads, and proven-safe direct-call boundaries can use raw
+  static storage. Compatible one-word literals and function references use
+  udewy's internal `__static_words__`, while exact based bytes use their static
+  data pointer.
 - A function-local `let` or `const` binding initialized directly by an
   exact-length `ArrayLiteral` uses a fresh `__alloca__` element buffer when all
-  uses are `.length`, indexed reads, or indexed writes. Length is folded from
-  the exact type, element stride is compiled into address arithmetic, and
-  width-correct loads and stores address the buffer directly. Semantic checking
-  still rejects indexed writes through a `const` binding.
+  uses are `.length`, indexed reads or writes, simple same-function aliases, or
+  proven-safe direct-call boundaries. Transitive aliases copy the raw pointer,
+  so reads and writes share the same storage. Length is folded from the exact
+  type, element stride is compiled into address arithmetic, and width-correct
+  loads and stores address the buffer directly. Semantic checking still rejects
+  indexed writes through a `const` binding.
 
-Aliases, whole-array assignment, call arguments, returns or other escapes,
-object storage, based-string or copy-on-write conversions, nonliteral
-initializers, and unclassified uses conservatively retain the descriptor. No
-call-boundary adapter or representation join is implemented. At present array
-elements can be mutated, but arrays cannot change length; `capacity`, `stride`,
-and `owner` are not read by generated programs. `flags` is needed only for
-runtime copy-on-write of borrowed static bytes.
+For a statically resolved direct or selected-overload call, a parameter whose
+alias closure only observes length or indexed reads/writes is adapter-safe.
+Lowering wraps raw local/static data in a temporary canonical descriptor in the
+call prelude without copying elements; the callee ABI and indexing remain
+descriptor-based. Read-only exact static bytes use borrowed-static flags.
+
+Whole-array assignment, object storage, returns or other escapes, casts,
+parameter forwarding, indirect or method calls, nonliteral/control-flow
+initializers, aliases outside one function, and unclassified uses
+conservatively retain the descriptor. Static-byte mutation retains the
+descriptor and copy-on-write path. Control-flow representation joins, general
+or transitive effect analysis, indirect/method adapters, and descriptor-free
+specialized direct-call ABIs remain pending. At present arrays cannot change
+length; `capacity`, `stride`, and `owner` are not read by generated programs.
 
 The intended rule is that each value receives the least runtime representation
 needed by all of its reachable uses. For arrays this includes:
@@ -378,21 +388,24 @@ Incremental implementation work:
 
 - [x] Record an initial representation requirement per semantic binding for
       module `const` arrays, selecting raw storage only when every reachable
-      use is `.length` or an indexed read and conservatively falling back for
-      aliases, mutation, escapes, call boundaries, and ambiguous cases.
+      use is `.length`, an indexed read, or a proven-safe direct-call boundary.
 - [x] Emit eligible module `const` arrays of stable 64-bit words, compatible
       non-extern function references, or exact based bytes as raw static data
       with compile-time length and stride.
 - [x] Scalar-replace eligible non-escaping exact local array literals with a
       fresh raw stack-data buffer, direct width-aware indexed reads and writes,
       and compile-time `.length`.
+- [x] Propagate raw stack data through simple same-function alias chains and
+      materialize canonical descriptors without copying for proven-safe direct
+      and selected-overload call boundaries.
 - [ ] Generalize representation requirements across control-flow joins,
-      aliases, specialized calls, and additional element/storage classes.
+      general/transitive effects, cross-function aliases, indirect or method
+      calls, and additional element/storage classes.
 - [ ] Elide array length, capacity, stride, flags, and ownership metadata for
       additional runtime array representations when each fact is unused or
       available statically.
-- [ ] Materialize canonical descriptors only at representation-changing
-      boundaries, and specialize direct calls where profitable.
+- [ ] Add indirect/method boundary adapters and descriptor-free direct-call ABI
+      specialization where profitable.
 - [ ] Extend the same analysis to objects, strings, optionals/unions, iterators,
       and closures.
 - [ ] Remove or redesign canonical descriptor fields that remain unused once
