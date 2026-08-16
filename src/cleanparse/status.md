@@ -450,12 +450,16 @@ NonEmptyArray = array<length>?1>  # retains the generic T from array, e.g. can d
 MyStruct:type = [a:int b:bool c:string]< a>?10 b=?true c not=? 'apple' >
 ```
 
+- additionally assignment expressions in the conditional block can be used to directly indicate some field will always have that value. This is mostly just a convenience for a common case, e.g.
+```dewy
+NonEmptyArray = array<length=1>  # identical to array<length=?1>
+```
+
 - entries in the parameterize block are distinguished syntactically: an expression whose
-  top level is a `?`-comparison (`>?`, `=?`, `not=?`, etc.) or a lambda is a refinement
-  condition; every other expression is a parameter value. So a literal boolean is
+  top level is a `?`-comparison (`>?`, `=?`, `not=?`, etc.), or a lambda, or an assignment is a refinement condition; every other expression is a parameter value. So a literal boolean is
   unambiguously a parameter, and no wrapping/escaping syntax is needed:
 ```dewy
-trues:array<true length=?5> = [true true true true true]  # element type is literal-type true, length refined to 5
+trues:array<true length=5> = [true true true true true]  # element type is literal-type true, length refined to 5
 ```
   In the rare case where a precomputed boolean should act as a condition, spell it
   explicitly: `cond =? true`, or use a lambda. A refinement condition that statically
@@ -469,6 +473,7 @@ trues:array<true length=?5> = [true true true true true]  # element type is lite
 - inside the parameterize block of nominal types, there is no `self`, so you have to use a lambda to access the value
 ```dewy
 Positive = int< i=>i>?0 >  # to refer to primitive types, use a single-argument lambda
+Positive:type = [i:int]< i>?0 > # similar-ish outcome without needing the lambda
 ```
   Note that `[i:int]< i>?0 >` is *not* an alternate spelling of the same type: it is a
   structural wrapper type containing an int, which is a different type from a refined
