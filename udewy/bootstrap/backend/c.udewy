@@ -61,8 +61,8 @@ let c_extern_fn:int = 0          # intset of extern label_ids
 let c_main_label_id:int = 0      # -1 if no main yet
 
 let c_global_names:int = 0       # intmap label_id -> name
-let c_global_initializers:int = 0  # intmap label_id -> "<udewy str OR int>"; see c_global_init_is_str
-let c_global_init_is_str:int = 0   # intset of label_ids whose init is a string
+let c_global_initializers:int = 0  # intmap label_id -> initializer value
+let c_global_initializer_kinds:int = 0 # intmap label_id -> SV_* kind
 let c_extern_globals:int = 0     # intset
 let c_string_contents:int = 0    # intmap label_id -> bytes-buffer-string
 let c_static_sizes:int = 0       # intmap label_id -> size
@@ -90,7 +90,7 @@ let c_alloc_state = ():>void => {
     c_main_label_id = -1
     c_global_names = intmap_new()
     c_global_initializers = intmap_new()
-    c_global_init_is_str = intset_new()
+    c_global_initializer_kinds = intmap_new()
     c_extern_globals = intset_new()
     c_string_contents = intmap_new()
     c_static_sizes = intmap_new()
@@ -453,6 +453,45 @@ let c_fn_addr_expr = (label_id:int):>int => {
     return c_symbol_expr(name)
 }
 
+let c_fn_pointer_expr = (label_id:int):>int => {
+    let name:int = intmap_get(c_fn_names label_id)
+    let wrapper:int = c_known_extern_wrapper(name)
+    if wrapper not=? 0 { return wrapper }
+    return name
+}
+
+let c_string_pointer_expr = (label_id:int):>int => {
+    let bb:int = bb_new(64)
+    bb_push_str(bb "((unsigned char *)&udewy_string_")
+    bb_push_int(bb label_id)
+    bb_push_str(bb ") + sizeof(udewy_word)")
+    return bb_finalize_as_string(bb)
+}
+
+let c_static_pointer_expr = (label_id:int):>int => {
+    let bb:int = bb_new(48)
+    bb_push_str(bb "&udewy_static_")
+    bb_push_int(bb label_id)
+    return bb_finalize_as_string(bb)
+}
+
+let c_push_slot_initializer = (out:int kind:int value:int):>void => {
+    if kind =? 1 {
+        bb_push_str(out "\{ .w = ")
+        bb_push_str(out c_u64_literal(value))
+        bb_push_str(out " \}")
+    } else if kind =? 2 {
+        bb_push_str(out "\{ .fn = (udewy_fn)")
+        bb_push_str(out value)
+        bb_push_str(out " \}")
+    } else {
+        bb_push_str(out "\{ .obj = ")
+        bb_push_str(out value)
+        bb_push_str(out " \}")
+    }
+    return void
+}
+
 let c_fn_cast_expr = (expr:int arg_count:int):>int => {
     let bb:int = bb_new(64 + str_len(expr) + arg_count * 16)
     bb_push_str(bb "((udewy_word (*)(")
@@ -565,12 +604,8 @@ let c_define_global = (name:int kind:int value:int):>int => {
         gname = c_clone_str(name)
     }
     intmap_put(c_global_names label_id gname)
-    if kind =? 1 {
-        intmap_put(c_global_initializers label_id value)
-    } else {
-        intmap_put(c_global_initializers label_id value)
-        intset_add(c_global_init_is_str label_id)
-    }
+    intmap_put(c_global_initializers label_id value)
+    intmap_put(c_global_initializer_kinds label_id kind)
     return label_id
 }
 
@@ -579,6 +614,7 @@ let c_declare_extern_global = (name:int):>int => {
     c_next_label = c_next_label + 1
     intmap_put(c_global_names label_id c_clone_str(name))
     intmap_put(c_global_initializers label_id 0)
+    intmap_put(c_global_initializer_kinds label_id 1)
     intset_add(c_extern_globals label_id)
     return label_id
 }
@@ -594,11 +630,20 @@ let c_push_string_ref = (label_id:int):>void => { c_set_current(c_string_data_ex
 let c_push_global_ref = (label_id:int):>void => { c_set_current(c_symbol_expr(intmap_get(c_global_names label_id)))  return void }
 let c_push_static_ref = (label_id:int):>void => { c_set_current(c_static_data_expr(label_id))  return void }
 
-let c_load_global = (label_id:int):>void => { c_set_current(intmap_get(c_global_names label_id))  return void }
+let c_global_value_expr = (label_id:int):>int => {
+    let name:int = intmap_get(c_global_names label_id)
+    if intmap_get(c_global_initializer_kinds label_id) =? 1 { return name }
+    let bb:int = bb_new(str_len(name) + 3)
+    bb_push_str(bb name)
+    bb_push_str(bb ".w")
+    return bb_finalize_as_string(bb)
+}
+
+let c_load_global = (label_id:int):>void => { c_set_current(c_global_value_expr(label_id))  return void }
 
 let c_store_global = (label_id:int):>void => {
     let bb:int = bb_new(64)
-    bb_push_str(bb intmap_get(c_global_names label_id))
+    bb_push_str(bb c_global_value_expr(label_id))
     bb_push_str(bb " = ")
     bb_push_str(bb c_current_expr)
     bb_push_byte(bb 59)
@@ -606,9 +651,9 @@ let c_store_global = (label_id:int):>void => {
     return void
 }
 
-let c_function_ref = (label_id:int):>int => { return c_fn_addr_expr(label_id) }
-let c_string_ref = (label_id:int):>int => { return c_string_data_expr(label_id) }
-let c_static_ref = (label_id:int):>int => { return c_static_data_expr(label_id) }
+let c_function_ref = (label_id:int):>int => { return c_fn_pointer_expr(label_id) }
+let c_string_ref = (label_id:int):>int => { return c_string_pointer_expr(label_id) }
+let c_static_ref = (label_id:int):>int => { return c_static_pointer_expr(label_id) }
 
 # --- Functions ---
 
@@ -1363,6 +1408,11 @@ let c_finish_module = ():>int => {
     }
     bb_push_byte(out 10)
     bb_push_str(out "typedef uint64_t udewy_word;\n")
+    bb_push_str(out "typedef udewy_word (*udewy_fn)(void);\n")
+    bb_push_str(out "typedef union \{\n    udewy_word w;\n    void *obj;\n    udewy_fn fn;\n\} udewy_slot;\n")
+    bb_push_str(out "typedef char udewy_obj_ptr_must_be_word_sized[\n    sizeof(void *) == sizeof(udewy_word) ? 1 : -1\n];\n")
+    bb_push_str(out "typedef char udewy_fn_ptr_must_be_word_sized[\n    sizeof(udewy_fn) == sizeof(udewy_word) ? 1 : -1\n];\n")
+    bb_push_str(out "typedef char udewy_slot_must_be_word_sized[\n    sizeof(udewy_slot) == sizeof(udewy_word) ? 1 : -1\n];\n")
     bb_push_str(out "#define UDEWY_TRUE (~UINT64_C(0))\n\n")
 
     if (c_helpers and CH_ALLOCA) not=? 0 {
@@ -1395,6 +1445,49 @@ let c_finish_module = ():>int => {
     c_render_helper(out CH_STORE_U16)
     c_render_helper(out CH_STORE_U32)
     c_render_helper(out CH_STORE_U64)
+
+    # --- Prototypes (defined first then externs) ---
+    let order_n:int = vec_len(c_function_order)
+    let pi:int = 0
+    loop pi <? order_n {
+        let lid:int = vec_get(c_function_order pi)
+        if not intset_has(c_extern_fn lid) {
+            if (not c_have_reachable) or intset_has(c_reachable lid) {
+                bb_push_str(out "static udewy_word ")
+                bb_push_str(out intmap_get(c_fn_names lid))
+                bb_push_byte(out 40)
+                c_render_arg_signature(out intmap_get(c_function_param_counts lid))
+                bb_push_str(out ");\n")
+            }
+        }
+        pi = pi + 1
+    }
+    let ei:int = 0
+    loop ei <? c_next_label {
+        if intset_has(c_extern_fn ei) {
+            let name:int = intmap_get(c_fn_names ei)
+            let wrapper:int = c_known_extern_wrapper(name)
+            if wrapper =? 0 {
+                if (not c_have_reachable) or intset_has(c_reachable ei) {
+                    bb_push_str(out "extern udewy_word ")
+                    bb_push_str(out name)
+                    bb_push_byte(out 40)
+                    c_render_arg_signature(out intmap_get(c_function_param_counts ei))
+                    bb_push_str(out ");\n")
+                }
+            } else {
+                if (not c_have_reachable) or intset_has(c_reachable ei) {
+                    bb_push_str(out "static udewy_word ")
+                    bb_push_str(out wrapper)
+                    bb_push_byte(out 40)
+                    c_render_arg_signature(out intmap_get(c_function_param_counts ei))
+                    bb_push_str(out ");\n")
+                }
+            }
+        }
+        ei = ei + 1
+    }
+    bb_push_byte(out 10)
 
     # --- Data definitions ---
     # Strings.
@@ -1434,7 +1527,7 @@ let c_finish_module = ():>int => {
                 let elements:int = intmap_get(c_static_word_elements si)
                 let kinds:int = intmap_get(c_static_word_kinds si)
                 let n:int = vec_len(elements)
-                bb_push_str(out "static udewy_word udewy_static_")
+                bb_push_str(out "static udewy_slot udewy_static_")
                 bb_push_int(out si)
                 bb_push_byte(out 91)
                 bb_push_int(out n)
@@ -1442,11 +1535,7 @@ let c_finish_module = ():>int => {
                 let k:int = 0
                 loop k <? n {
                     if k >? 0 { bb_push_str(out ", ") }
-                    if vec_get(kinds k) =? 1 {
-                        bb_push_str(out c_u64_literal(vec_get(elements k)))
-                    } else {
-                        bb_push_str(out "UINT64_C(0)")
-                    }
+                    c_push_slot_initializer(out vec_get(kinds k) vec_get(elements k))
                     k = k + 1
                 }
                 bb_push_str(out " \};\n")
@@ -1474,10 +1563,13 @@ let c_finish_module = ():>int => {
                 bb_push_str(out ";\n")
             } else {
                 let init:int = intmap_get(c_global_initializers gi)
-                if intset_has(c_global_init_is_str gi) {
-                    bb_push_str(out "static udewy_word ")
+                let init_kind:int = intmap_get(c_global_initializer_kinds gi)
+                if init_kind not=? 1 {
+                    bb_push_str(out "static udewy_slot ")
                     bb_push_str(out gn)
-                    bb_push_str(out " = UINT64_C(0);\n")
+                    bb_push_str(out " = ")
+                    c_push_slot_initializer(out init_kind init)
+                    bb_push_str(out ";\n")
                 } else {
                     bb_push_str(out "static udewy_word ")
                     bb_push_str(out gn)
@@ -1488,49 +1580,6 @@ let c_finish_module = ():>int => {
             }
         }
         gi = gi + 1
-    }
-    bb_push_byte(out 10)
-
-    # --- Prototypes (defined first then externs) ---
-    let order_n:int = vec_len(c_function_order)
-    let pi:int = 0
-    loop pi <? order_n {
-        let lid:int = vec_get(c_function_order pi)
-        if not intset_has(c_extern_fn lid) {
-            if (not c_have_reachable) or intset_has(c_reachable lid) {
-                bb_push_str(out "static udewy_word ")
-                bb_push_str(out intmap_get(c_fn_names lid))
-                bb_push_byte(out 40)
-                c_render_arg_signature(out intmap_get(c_function_param_counts lid))
-                bb_push_str(out ");\n")
-            }
-        }
-        pi = pi + 1
-    }
-    let ei:int = 0
-    loop ei <? c_next_label {
-        if intset_has(c_extern_fn ei) {
-            let name:int = intmap_get(c_fn_names ei)
-            let wrapper:int = c_known_extern_wrapper(name)
-            if wrapper =? 0 {
-                if (not c_have_reachable) or intset_has(c_reachable ei) {
-                    bb_push_str(out "extern udewy_word ")
-                    bb_push_str(out name)
-                    bb_push_byte(out 40)
-                    c_render_arg_signature(out intmap_get(c_fn_param_counts ei))
-                    bb_push_str(out ");\n")
-                }
-            } else {
-                if (not c_have_reachable) or intset_has(c_reachable ei) {
-                    bb_push_str(out "static udewy_word ")
-                    bb_push_str(out wrapper)
-                    bb_push_byte(out 40)
-                    c_render_arg_signature(out intmap_get(c_fn_param_counts ei))
-                    bb_push_str(out ");\n")
-                }
-            }
-        }
-        ei = ei + 1
     }
     bb_push_byte(out 10)
 
@@ -1549,59 +1598,6 @@ let c_finish_module = ():>int => {
         wi = wi + 1
     }
     bb_push_byte(out 10)
-
-    # --- Backend init for non-trivial statics/globals ---
-    let init_lines:int = vec_new(8)
-    let sw:int = 0
-    loop sw <? c_next_label {
-        if intmap_has(c_static_word_elements sw) {
-            let elements:int = intmap_get(c_static_word_elements sw)
-            let kinds:int = intmap_get(c_static_word_kinds sw)
-            let k:int = 0
-            loop k <? vec_len(elements) {
-                if vec_get(kinds k) not=? 1 {
-                    let bb:int = bb_new(64)
-                    bb_push_str(bb "    udewy_static_")
-                    bb_push_int(bb sw)
-                    bb_push_byte(bb 91)
-                    bb_push_int(bb k)
-                    bb_push_str(bb "] = ")
-                    bb_push_str(bb vec_get(elements k))
-                    bb_push_byte(bb 59)
-                    vec_push(init_lines bb_finalize_as_string(bb))
-                }
-                k = k + 1
-            }
-        }
-        sw = sw + 1
-    }
-    let g2:int = 0
-    loop g2 <? c_next_label {
-        if intmap_has(c_global_names g2) and (not intset_has(c_extern_globals g2)) {
-            if intset_has(c_global_init_is_str g2) {
-                let bb:int = bb_new(64)
-                bb_push_str(bb "    ")
-                bb_push_str(bb intmap_get(c_global_names g2))
-                bb_push_str(bb " = ")
-                bb_push_str(bb intmap_get(c_global_initializers g2))
-                bb_push_byte(bb 59)
-                vec_push(init_lines bb_finalize_as_string(bb))
-            }
-        }
-        g2 = g2 + 1
-    }
-    let need_init:int = false
-    if vec_len(init_lines) >? 0 {
-        need_init = true
-        bb_push_str(out "static void udewy_backend_init(void) \{\n")
-        let li:int = 0
-        loop li <? vec_len(init_lines) {
-            bb_push_str(out vec_get(init_lines li))
-            bb_push_byte(out 10)
-            li = li + 1
-        }
-        bb_push_str(out "\}\n\n")
-    }
 
     # --- Function bodies ---
     let fi:int = 0
@@ -1638,7 +1634,6 @@ let c_finish_module = ():>int => {
 
     # --- main() wrapper ---
     bb_push_str(out "int main(int argc, char **argv) \{\n    (void)argc; (void)argv;\n")
-    if need_init { bb_push_str(out "    udewy_backend_init();\n") }
     if c_module_init_name not=? 0 {
         bb_push_str(out "    ")
         # Find which fn matches module_init_name source.

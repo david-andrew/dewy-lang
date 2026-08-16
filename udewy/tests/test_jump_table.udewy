@@ -10,6 +10,10 @@
 #   3 = MUL  (pop two, push product)
 #   4 = HALT (stop execution, top of stack is result)
 
+$supported_targets = ["x86_64" "c"]
+
+import p"../stdlib/stdlib.udewy"
+
 # Stack for the calculator (fixed size)
 let calc_stack:int = __static_alloca__(128)
 let stack_ptr:int = 0
@@ -57,36 +61,6 @@ let op_halt = (unused:int):>int => {
 
 const handlers:int = __static_words__(op_push op_add op_sub op_mul op_halt)
 
-# Helper to write a digit
-let print_digit = (n:int):>void => {
-    let buf:int = " "
-    __store_u8__(n + 48 buf)
-    __syscall3__(1 1 buf 1)
-    return void
-}
-
-# Print a number (simple, works for small positive numbers)
-let print_num = (n:int):>void => {
-    if n >=? 100 {
-        print_digit(n // 100)
-        n = n % 100
-        print_digit(n // 10)
-        print_digit(n % 10)
-    } else if n >=? 10 {
-        print_digit(n // 10)
-        print_digit(n % 10)
-    } else {
-        print_digit(n)
-    }
-    return void
-}
-
-let print = (s:int):>void => {
-    let len:int = __load__(s - 8)
-    __syscall3__(1 1 s len)
-    return void
-}
-
 # Execute bytecode program
 let execute = (program:int len:int):>int => {
     let pc:int = 0
@@ -127,15 +101,15 @@ let main = ():>int => {
     
     print("Calculator result: ")
     let result:int = execute(program prog_len)
-    print_num(result)
+    print_int(result)
     print("\n")
     
     # Verify: (3 + 5) * (10 - 2) = 8 * 8 = 64
     if result =? 64 {
-        print("Test passed!\n")
+        printl("Test passed!")
         return 0
     }
     
-    print("Test FAILED!\n")
+    printl("Test FAILED!")
     return 1
 }

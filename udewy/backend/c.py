@@ -146,12 +146,15 @@ class CBackend(Backend):
         self._global_names: dict[int, str] = {}
         self._extern_globals: set[int] = set()
         self._global_initializers: dict[int, int | str] = {}
+        self._global_initializer_kinds: dict[int, str] = {}
 
         self._string_names: dict[int, str] = {}
         self._string_contents: dict[int, bytes] = {}
         self._static_names: dict[int, str] = {}
         self._static_sizes: dict[int, int] = {}
         self._static_word_initializers: dict[int, _WordsInit] = {}
+        self._function_directives: set[str] = set()
+        self._object_directives: set[str] = set()
 
         self._function_order: list[int] = []
         self._function_builders: dict[int, _FunctionBuilder] = {}
@@ -272,6 +275,37 @@ class CBackend(Backend):
     def _static_data_expr(self, label_id: int) -> str:
         return self._symbol_expr(self._static_names[label_id])
 
+    def _fn_pointer_expr(self, label_id: int) -> str:
+        wrapper_name = self._known_extern_wrapper_name(label_id)
+        if wrapper_name is not None:
+            return wrapper_name
+        return self._fn_names[label_id]
+
+    def _string_pointer_expr(self, label_id: int) -> str:
+        name = self._string_names[label_id]
+        return f"((unsigned char *)&{name}) + sizeof(udewy_word)"
+
+    def _static_pointer_expr(self, label_id: int) -> str:
+        return f"&{self._static_names[label_id]}"
+
+    def _directive_kind(self, value: int | str) -> str:
+        if isinstance(value, int):
+            return "w"
+        if value in self._function_directives:
+            return "fn"
+        if value in self._object_directives:
+            return "obj"
+        raise ValueError(f"Unknown C initializer directive: {value!r}")
+
+    def _slot_initializer(self, value: int | str) -> str:
+        kind = self._directive_kind(value)
+        if kind == "w":
+            assert isinstance(value, int)
+            return f"{{ .w = {_u64_literal(value)} }}"
+        if kind == "fn":
+            return f"{{ .fn = (udewy_fn){value} }}"
+        return f"{{ .obj = {value} }}"
+
     def _directive_expr(self, value: int | str) -> str:
         if isinstance(value, int):
             return _u64_literal(value)
@@ -293,9 +327,6 @@ class CBackend(Backend):
         if not content:
             return "0"
         return ", ".join(str(byte) for byte in content)
-
-    def _pure_int_initializer(self, value: int | str) -> bool:
-        return isinstance(value, int)
 
     def _helper_closure(self) -> set[str]:
         helpers = set(self._required_helpers)
@@ -616,31 +647,6 @@ class CBackend(Backend):
         parts.append("}")
         return "\n".join(parts)
 
-    def _render_backend_init(self) -> str | None:
-        lines: list[str] = []
-
-        for words_init in self._static_word_initializers.values():
-            for index, element in enumerate(words_init.elements):
-                if isinstance(element, int):
-                    continue
-                lines.append(f"    {words_init.name}[{index}] = {element};")
-
-        for label_id, init in self._global_initializers.items():
-            if isinstance(init, int):
-                continue
-            lines.append(f"    {self._global_names[label_id]} = {init};")
-
-        if not lines:
-            return None
-
-        return "\n".join(
-            [
-                "static void udewy_backend_init(void) {",
-                *lines,
-                "}",
-            ]
-        )
-
     def _known_extern_label_ids(self) -> list[int]:
         return [
             label_id
@@ -797,11 +803,8 @@ class CBackend(Backend):
             name = self._static_names[label_id]
             words_init = self._static_word_initializers.get(label_id)
             if words_init is not None:
-                values = ", ".join(
-                    _u64_literal(element) if isinstance(element, int) else "UINT64_C(0)"
-                    for element in words_init.elements
-                )
-                parts.append(f"static udewy_word {name}[{len(words_init.elements)}] = {{ {values} }};")
+                values = ", ".join(self._slot_initializer(element) for element in words_init.elements)
+                parts.append(f"static udewy_slot {name}[{len(words_init.elements)}] = {{ {values} }};")
                 continue
             size = max(1, self._static_sizes[label_id])
             parts.append(f"static unsigned char {name}[{size}] = {{0}};")
@@ -813,10 +816,12 @@ class CBackend(Backend):
                 continue
 
             init = self._global_initializers[label_id]
-            if self._pure_int_initializer(init):
+            kind = self._global_initializer_kinds[label_id]
+            if kind == "w":
+                assert isinstance(init, int)
                 parts.append(f"static udewy_word {name} = {_u64_literal(init)};")
             else:
-                parts.append(f"static udewy_word {name} = UINT64_C(0);")
+                parts.append(f"static udewy_slot {name} = {self._slot_initializer(init)};")
 
         return parts
 
@@ -842,9 +847,6 @@ class CBackend(Backend):
 
     def _render_main_wrapper(self) -> str:
         lines = ["int main(int argc, char **argv) {"]
-
-        if self._render_backend_init() is not None:
-            lines.append("    udewy_backend_init();")
 
         if self._module_init_name is not None:
             module_init_name = self._module_init_name
@@ -888,7 +890,6 @@ class CBackend(Backend):
             if label_id not in self._extern_functions
             and (self._reachable_fn_label_ids is None or label_id in self._reachable_fn_label_ids)
         ]
-        helper_init = self._render_backend_init()
         include_lines = ["#include <stdint.h>", "#include <stddef.h>"]
         capability_headers = set[str]()
         for capability in self._c_capabilities:
@@ -899,6 +900,21 @@ class CBackend(Backend):
         sections = [
             *include_lines,
             "typedef uint64_t udewy_word;",
+            "typedef udewy_word (*udewy_fn)(void);",
+            "typedef union {",
+            "    udewy_word w;",
+            "    void *obj;",
+            "    udewy_fn fn;",
+            "} udewy_slot;",
+            "typedef char udewy_obj_ptr_must_be_word_sized[",
+            "    sizeof(void *) == sizeof(udewy_word) ? 1 : -1",
+            "];",
+            "typedef char udewy_fn_ptr_must_be_word_sized[",
+            "    sizeof(udewy_fn) == sizeof(udewy_word) ? 1 : -1",
+            "];",
+            "typedef char udewy_slot_must_be_word_sized[",
+            "    sizeof(udewy_slot) == sizeof(udewy_word) ? 1 : -1",
+            "];",
             "#define UDEWY_TRUE (~UINT64_C(0))",
             "",
         ]
@@ -909,20 +925,16 @@ class CBackend(Backend):
         extern_wrappers = self._render_known_extern_wrappers()
         fn_defs = [self._render_function(self._function_builders[label_id]) for label_id in emitted_labels]
 
-        if data_defs:
-            sections.extend(data_defs)
-            sections.append("")
-
         if prototypes:
             sections.extend(prototypes)
             sections.append("")
 
-        if extern_wrappers:
-            sections.extend(extern_wrappers)
+        if data_defs:
+            sections.extend(data_defs)
             sections.append("")
 
-        if helper_init is not None:
-            sections.append(helper_init)
+        if extern_wrappers:
+            sections.extend(extern_wrappers)
             sections.append("")
 
         sections.extend(fn_defs)
@@ -958,12 +970,14 @@ class CBackend(Backend):
         global_name = name if name is not None else f"udewy_global_{label_id}"
         self._global_names[label_id] = global_name
         self._global_initializers[label_id] = value
+        self._global_initializer_kinds[label_id] = self._directive_kind(value)
         return label_id
 
     def declare_extern_global(self, name: str) -> int:
         label_id = self._alloc_label_id()
         self._global_names[label_id] = name
         self._global_initializers[label_id] = 0
+        self._global_initializer_kinds[label_id] = "w"
         self._extern_globals.add(label_id)
         return label_id
 
@@ -991,19 +1005,32 @@ class CBackend(Backend):
         self._set_current(self._static_data_expr(label_id))
 
     def load_global(self, label_id: int) -> None:
-        self._set_current(self._global_names[label_id])
+        name = self._global_names[label_id]
+        if self._global_initializer_kinds[label_id] == "w":
+            self._set_current(name)
+        else:
+            self._set_current(f"{name}.w")
 
     def store_global(self, label_id: int) -> None:
-        self._emit(f"{self._global_names[label_id]} = {self._current_expr()};")
+        name = self._global_names[label_id]
+        if self._global_initializer_kinds[label_id] != "w":
+            name = f"{name}.w"
+        self._emit(f"{name} = {self._current_expr()};")
 
     def function_ref(self, label_id: int) -> str:
-        return self._fn_addr_expr(label_id)
+        directive = self._fn_pointer_expr(label_id)
+        self._function_directives.add(directive)
+        return directive
 
     def string_ref(self, label_id: int) -> str:
-        return self._string_data_expr(label_id)
+        directive = self._string_pointer_expr(label_id)
+        self._object_directives.add(directive)
+        return directive
 
     def static_ref(self, label_id: int) -> str:
-        return self._static_data_expr(label_id)
+        directive = self._static_pointer_expr(label_id)
+        self._object_directives.add(directive)
+        return directive
 
     # ========================================================================
     # Functions

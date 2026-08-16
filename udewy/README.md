@@ -1898,7 +1898,7 @@ The browser route is an app-style canvas renderer, not an HTML/DOM renderer. It 
 
 ## F.1 Target Description
 
-- **Architecture:** C99 implementation with 64-bit `uintptr_t` / `uint64_t`
+- **Architecture:** C99 implementation with 64-bit `uintptr_t`, object pointers, function pointers, and `uint64_t`
 - **Environment:** Any system with a C compiler that can build the generated program
 - **Output Format:** C source compiled to the host platform's native executable format
 - **Memory Model:** Native target process memory, using udewy's byte-length-prefixed ordinary-string and based-string layout
@@ -1922,7 +1922,20 @@ Internal udewy functions use readable mangled C names such as `udewy_fn_print_by
 
 Because generated function-local names are intentionally concise, imported C headers that define macros named `t0`, `local0`, `arg0`, and so on could conflict during preprocessing. Avoid importing headers with macros that use those exact names, or add a backend-specific wrapper if such a header must be used.
 
-## F.2.2 `__alloca__` Alignment
+## F.2.2 Static Address Initializers
+
+Address-bearing `__static_words__` entries and stable globals are emitted as C99 pointer or function-pointer initializers in an 8-byte `udewy_slot` union. This lets the C linker initialize function, string, and static-storage references directly; generated programs do not need a startup function to patch address values into otherwise static data. Integer-only globals remain ordinary `udewy_word` objects.
+
+This lowering relies on the target ABI representing object and function pointers in one 64-bit word, with pointer object bytes matching the corresponding `uintptr_t` value. Generated C contains compile-time size checks. A standalone probe checks the remaining representation and indirect-call assumptions for a particular compiler, target ABI, and optimization mode:
+
+```bash
+cc -std=c99 -O2 udewy/backend/c_abi_probe.c -o /tmp/udewy-c-abi-probe
+/tmp/udewy-c-abi-probe
+```
+
+Passing the probe certifies that compiler/target/options combination, not every compiler for the same architecture. Cross-compiled probes must be executed on the target hardware or under an emulator.
+
+## F.2.3 `__alloca__` Alignment
 
 - `__alloca__` rounds requested sizes up to 8 bytes
 - dynamic `__alloca__` lowers to the host compiler's `alloca` facility (or builtin equivalent)
