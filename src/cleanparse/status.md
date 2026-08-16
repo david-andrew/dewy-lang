@@ -585,6 +585,43 @@ bool|string[]    # bool | array<string>     postfix [] binds much tighter than |
 - [ ] Idiomatic code designed to be provable. Make the language’s normal APIs and control structures naturally expose the invariants the verifier needs, rather than treating verification as an add-on.
 
 
+### Proper compilation target list/representation
+- [ ] redo the list of targets for compilation targets and how they are handled. Note we are not recreating LLVM's target triples because plenty of those have redundant information or need an extra field. Instead the dewy/udewy list of targets will be more about each target name having only as many fields as it needs to describe itself. The following list is not set in stone, but merely an initial stab at what the targets list might look like:
+    - ## target the current machine (current machine must be compatible)
+    - 'x86_64',
+    - 'riscv64',
+    - 'aarch64',
+    - 'c',
+
+    - ## freestanding / baremetal
+    - 'x86_64-freestanding',
+    - 'riscv64-freestanding',
+    - 'aarch64-freestanding',
+    - 'c-freestanding',
+
+    - ## linux
+    - 'x86_64-linux',
+    - 'riscv64-linux',
+    - 'aarch64-linux',
+    - 'c-linux',
+
+    - ## mac
+    - 'x86_64-mac',
+    - 'aarch64-mac',
+
+    - ## windows
+    - 'x86_64-windows',
+    - 'riscv64-windows',
+    - 'aarch64-windows',
+    - 'c-windows',
+    
+    - ## portable-ish
+    - 'c-posix',
+    - 'c89',
+    - 'wasm32',
+
+    - ## Others TBD
+
 ###
 
 
