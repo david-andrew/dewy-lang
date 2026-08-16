@@ -22,6 +22,12 @@ def type_to_dewy(t: ty.Type) -> str:
         return repr(t.value)
     if isinstance(t, ty.BinaryLiteralType):
         return f'0x"{t.value.hex()}"'
+    if isinstance(t, ty.PathLiteralType):
+        return f'p{t.value!r}'
+    if isinstance(t, ty.PathType):
+        return 'Path'
+    if isinstance(t, ty.ModuleType):
+        return 'module'
     if isinstance(t, ty.StringType):
         length = f'<length={t.length}>' if t.length is not None else ''
         return f'string{length}'
@@ -176,6 +182,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'MemberAssign'
     if isinstance(node, hir.TypeValue):
         return f'TypeValue({type_to_dewy(node.value)})'
+    if isinstance(node, hir.ModuleNamespace):
+        return f'ModuleNamespace({node.name})'
     if isinstance(node, hir.ArrayLength):
         return 'ArrayLength'
     if isinstance(node, hir.IteratorExpression):
@@ -282,6 +290,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.MemberAssign):
         return [('target', node.target), ('value', node.value)]
     if isinstance(node, hir.TypeValue):
+        return []
+    if isinstance(node, hir.ModuleNamespace):
         return []
     if isinstance(node, hir.ArrayLength):
         return [('array', node.array)]
@@ -660,6 +670,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         )
     if isinstance(node, hir.TypeValue):
         return _text(type_to_dewy(node.value))
+    if isinstance(node, hir.ModuleNamespace):
+        return _text(node.name)
     if isinstance(node, hir.ArrayLength):
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
     if isinstance(node, hir.IteratorExpression):

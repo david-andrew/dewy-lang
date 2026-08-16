@@ -236,6 +236,12 @@ udewy_intrinsic_types: dict[str, ty.FunctionType] = {
 # TODO: dealing with type promotions.
 # probably the dispatch system would be able to track promotions that need to happen
 builtin_types: dict[str, ty.TypeExpr] = {
+    'p': ty.FunctionType(
+        [ty.PosOrKwArg('text', 'string')],
+        [],
+        None,
+        ty.PATH_TYPE,
+    ),
     '__add__': ty.OverloadType([
         _binary_generic('number'),
         _binary_concrete(ty.StringType(), ty.StringType()),
@@ -270,6 +276,10 @@ builtin_types: dict[str, ty.TypeExpr] = {
         ),
     ]),
     **udewy_intrinsic_types,
+}
+
+builtin_type_aliases: dict[str, ty.TypeExpr] = {
+    'Path': ty.PATH_TYPE,
 }
 
 # Explicit cross-branch promote rules (a, b, result). Along-edge cases use the subtype graph.

@@ -51,20 +51,53 @@ class Context:
     refinements: dict[int, ty.Type] = field(default_factory=dict)
     type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
     resolving_type_aliases: set[int] = field(default_factory=set)
+    module_loader: object | None = None
+    module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
+    module_declared_names: set[str] = field(default_factory=set)
     # TODO: etc stuff
 
 def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
-    # set up the base type system/builtins
-    type_system = ty.TypeSystem()
-    builtins.apply_builtin_promote_rules(type_system)
-    declarations = ChainMap(builtins.builtin_types)
-    
-    ctx = Context(srcfile, declarations, type_system)
-    block = p0.parse(srcfile)
-    checked = tcr_block(block, ctx=ctx)
+    if srcfile.path is not None:
+        from .modules import typecheck_program
+
+        return typecheck_program(srcfile)
+    checked, ctx = _typecheck_module(srcfile)
     bounds.validate_bounds(checked, ctx.binding_registry, srcfile)
     initialization.validate_initialization(checked, ctx.binding_registry, srcfile)
     return checked
+
+
+def _typecheck_module(
+    srcfile: SrcFile,
+    *,
+    type_system: ty.TypeSystem | None = None,
+    registry: sb.BindingRegistry | None = None,
+    module_loader: object | None = None,
+) -> tuple[hir.Block, Context]:
+    # set up the base type system/builtins
+    if type_system is None:
+        type_system = ty.TypeSystem()
+        builtins.apply_builtin_promote_rules(type_system)
+    declarations = ChainMap(builtins.builtin_types)
+
+    block = p0.parse(srcfile)
+    declared_names = {
+        declaration[0]
+        for item in block.inner
+        if (declaration := _declaration_parts(item)) is not None
+    }
+    ctx = Context(
+        srcfile,
+        declarations,
+        type_system,
+        binding_registry=registry or sb.BindingRegistry(),
+        module_loader=module_loader,
+        module_declared_names=declared_names,
+    )
+    checked = tcr_block(block, ctx=ctx)
+    if not isinstance(checked, hir.Block):
+        raise TypeError('INTERNAL ERROR: source module did not produce a block')
+    return checked, ctx
 
 def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     match ast:
@@ -77,6 +110,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                 fork = replace(ctx,
                     declarations=ctx.declarations.new_child(),
                     binding_scopes=ctx.binding_scopes.new_child(),
+                    module_namespaces=ctx.module_namespaces.new_child(),
                     refinements=dict(ctx.refinements),
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
@@ -105,6 +139,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             # merge the winning candidate's effects back into the enclosing context
             ctx.declarations.maps[0].update(fork.declarations.maps[0])
             ctx.binding_scopes.maps[0].update(fork.binding_scopes.maps[0])
+            ctx.module_namespaces.maps[0].update(fork.module_namespaces.maps[0])
             ctx.refinements.clear()
             ctx.refinements.update(fork.refinements)
             if ctx.catcher is not None:
@@ -490,7 +525,166 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
 
 
 def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
-    not_implemented(ctx.srcfile, ast.loc, 'import')
+    if ctx.module_loader is None:
+        user_error(
+            ctx.srcfile,
+            'imports require a file-backed compilation',
+            Pointer(span=ast.loc, message='no module loader is available here'),
+        )
+
+    path_ast: p0.AST
+    names_ast: p0.AST | None = None
+    namespace_name: str | None = None
+    splat = False
+    match ast.parts:
+        case [
+            t1.Keyword(name='from'),
+            p0.AST() as source,
+            t1.Keyword(name='import'),
+            p0.AST() as names,
+        ]:
+            path_ast, names_ast = source, names
+        case [
+            t1.Keyword(name='import'),
+            p0.AST() as names,
+            t1.Keyword(name='from'),
+            p0.AST() as source,
+        ]:
+            path_ast, names_ast = source, names
+        case [
+            t1.Keyword(name='import'),
+            p0.BinOp(
+                op=t1.Operator(symbol='as'),
+                left=p0.AST() as source,
+                right=p0.Atom(item=t1.Identifier(name=alias)),
+            ),
+        ]:
+            path_ast, namespace_name = source, alias
+        case [t1.Keyword(name='import'), p0.AST() as source]:
+            path_ast, splat = source, True
+        case _:
+            user_error(
+                ctx.srcfile,
+                'invalid import syntax',
+                Pointer(span=ast.loc, message='cannot interpret this import'),
+            )
+
+    path_text = _literal_import_path(path_ast, ctx=ctx)
+    loader = ctx.module_loader
+    record = loader.import_module(path_text, ctx=ctx, loc=path_ast.loc)  # type: ignore[attr-defined]
+
+    if namespace_name is not None:
+        _check_import_name_available(namespace_name, ast.loc, ctx=ctx)
+        ctx.module_namespaces[namespace_name] = record
+        return hir.Void(ast.loc, ty.VOID_TYPE)
+
+    imports = (
+        [(name, name, ast.loc) for name in record.exports]
+        if splat
+        else _parse_import_names(names_ast, ctx=ctx)
+    )
+    for source_name, local_name, loc in imports:
+        binding = record.exports.get(source_name)
+        if binding is None:
+            user_error(
+                ctx.srcfile,
+                f'module has no top-level binding `{source_name}`',
+                Pointer(span=loc, message='this name is not exported by the module'),
+                hint=(
+                    'available names: '
+                    + (', '.join(record.exports) if record.exports else '(none)')
+                ),
+            )
+        existing = ctx.binding_scopes.maps[0].get(local_name)
+        if existing is binding:
+            continue
+        _check_import_name_available(local_name, loc, ctx=ctx)
+        if binding.type is None:
+            raise ValueError(
+                f'INTERNAL ERROR: imported binding `{source_name}` has no type'
+            )
+        ctx.declarations[local_name] = binding.type
+        ctx.binding_scopes[local_name] = binding
+    return hir.Void(ast.loc, ty.VOID_TYPE)
+
+
+def _literal_import_path(ast: p0.AST, *, ctx: Context) -> str:
+    value = typecheck_and_resolve_inner(ast, ctx=ctx)
+    if not isinstance(value.type, ty.PathLiteralType):
+        user_error(
+            ctx.srcfile,
+            'import path must be an exact `Path` value',
+            Pointer(
+                span=ast.loc,
+                message='use a literal path such as `p"relative/file.dewy"`',
+            ),
+        )
+    return value.type.value
+
+
+def _parse_import_names(
+    ast: p0.AST | None,
+    *,
+    ctx: Context,
+) -> list[tuple[str, str, Span]]:
+    if ast is None:
+        raise ValueError('INTERNAL ERROR: selective import has no names')
+    if isinstance(ast, p0.Block) and ast.kind == '()':
+        items = list(ast.inner)
+    elif (
+        isinstance(ast, p0.Flat)
+        and isinstance(ast.op, t1.Operator)
+        and ast.op.symbol == ','
+    ):
+        items = list(ast.items)
+    else:
+        items = [ast]
+    if (
+        len(items) == 1
+        and isinstance(items[0], p0.Flat)
+        and isinstance(items[0].op, t1.Operator)
+        and items[0].op.symbol == ','
+    ):
+        items = list(items[0].items)
+
+    parsed: list[tuple[str, str, Span]] = []
+    for item in items:
+        if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
+            parsed.append((item.item.name, item.item.name, item.loc))
+            continue
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == 'as'
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Identifier)
+            and isinstance(item.right, p0.Atom)
+            and isinstance(item.right.item, t1.Identifier)
+        ):
+            parsed.append((item.left.item.name, item.right.item.name, item.loc))
+            continue
+        user_error(
+            ctx.srcfile,
+            'invalid imported name',
+            Pointer(
+                span=item.loc,
+                message='expected `name` or `name as alias`',
+            ),
+        )
+    return parsed
+
+
+def _check_import_name_available(name: str, loc: Span, *, ctx: Context) -> None:
+    if (
+        name in ctx.module_declared_names
+        or name in ctx.binding_scopes.maps[0]
+        or name in ctx.module_namespaces.maps[0]
+    ):
+        user_error(
+            ctx.srcfile,
+            f'imported name `{name}` conflicts with this module',
+            Pointer(span=loc, message='choose a distinct `as` alias'),
+        )
 
 def tcr_return(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     if len(ast.parts) > 2: raise ValueError(f'INTERNAL ERROR: return statement may only contain zero or one expression, got {len(ast.parts)}. {ast.parts=}. (should have been caught during p0 phase)')
@@ -1733,6 +1927,29 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     ):
         not_implemented(ctx.srcfile, binop.loc, 'computed member access')
     name = binop.right.item.name
+    if (
+        isinstance(binop.left, p0.Atom)
+        and isinstance(binop.left.item, t1.Identifier)
+        and (module := ctx.module_namespaces.get(binop.left.item.name)) is not None
+    ):
+        binding = module.exports.get(name)  # type: ignore[attr-defined]
+        if binding is None:
+            user_error(
+                ctx.srcfile,
+                f'module has no top-level binding `{name}`',
+                Pointer(span=binop.right.loc, message='this member is not exported'),
+                hint='available names: ' + ', '.join(module.exports),  # type: ignore[attr-defined]
+            )
+        if binding.type_value is not None or binding.type == ty.TYPE_TYPE:
+            not_implemented(ctx.srcfile, binop.loc, 'runtime use of an imported type')
+        if binding.type is None:
+            raise ValueError(f'INTERNAL ERROR: module member `{name}` has no type')
+        return hir.ExpressedIdentifier(
+            binop.loc,
+            binding.type,
+            binding.name,
+            binding_id=binding.id,
+        )
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.BinaryLiteralType):
@@ -1972,6 +2189,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             ctx,
             declarations=ctx.declarations.new_child(),
             binding_scopes=ctx.binding_scopes.new_child(),
+            module_namespaces=ctx.module_namespaces.new_child(),
             label_scopes=(*ctx.label_scopes, _collect_label_scope(block, ctx=ctx)),
         )
 
@@ -3245,6 +3463,26 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
     match ast:
+        case p0.BinOp(
+            op=t1.Operator(symbol='.'),
+            left=p0.Atom(item=t1.Identifier(name=module_name)),
+            right=p0.Atom(item=t1.Identifier(name=member_name)),
+        ) if (module := ctx.module_namespaces.get(module_name)) is not None:
+            binding = module.exports.get(member_name)  # type: ignore[attr-defined]
+            if binding is None:
+                user_error(
+                    ctx.srcfile,
+                    f'module has no top-level binding `{member_name}`',
+                    Pointer(span=ast.right.loc, message='this type is not exported'),
+                )
+            if binding.type_value is None:
+                type_error(
+                    ctx.srcfile,
+                    'module member is not a type',
+                    Pointer(span=ast.right.loc, message=f'`{member_name}` is a value'),
+                )
+            return binding.type_value
+
         case p0.Atom(item=t1.Identifier(name=name)):
             binding = ctx.binding_scopes.get(name)
             if binding is not None:
@@ -3252,6 +3490,9 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                     return binding.type_value
                 if binding.id in ctx.type_alias_asts:
                     return _resolve_type_alias(binding, ctx=ctx)
+                return name
+            if name in builtins.builtin_type_aliases:
+                return builtins.builtin_type_aliases[name]
             return name
 
         case p0.Block(kind='[]', inner=items):
@@ -3561,9 +3802,28 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         )
         for name, arg in kw_args.items()
     }
+    return_type = result.method.ret
+    path_arg = (
+        pos_args[0]
+        if len(pos_args) == 1 and not kw_args
+        else kw_args.get('text')
+        if not pos_args and len(kw_args) == 1
+        else None
+    )
+    literal_path_arg = path_arg
+    while isinstance(literal_path_arg, hir.RepresentationCast):
+        literal_path_arg = literal_path_arg.expr
+    if (
+        isinstance(left, hir.ExpressedIdentifier)
+        and left.name == 'p'
+        and left.binding_id is None
+        and literal_path_arg is not None
+        and isinstance(literal_path_arg.type, ty.StringLiteralType)
+    ):
+        return_type = ty.PathLiteralType(literal_path_arg.type.value)
     return hir.FunctionCall(
         Span(left.loc.start, right.loc.stop),
-        result.method.ret,
+        return_type,
         left,
         apply_promotions(contextual_pos_args, result.promote_pos),
         contextual_kw_args,
@@ -3767,6 +4027,20 @@ def tcr_identifier(
     expected: ty.Type | None = None,
     refined: bool = True,
 ) -> hir.AST:
+    if (module := ctx.module_namespaces.get(id.name)) is not None:
+        return hir.ModuleNamespace(
+            id.loc,
+            ty.ModuleType(tuple(
+                ty.ModuleField(
+                    name,
+                    binding.type or ty.TOP_TYPE,
+                    binding.id,
+                    binding.type_value,
+                )
+                for name, binding in module.exports.items()  # type: ignore[attr-defined]
+            )),
+            id.name,
+        )
     if id.name in ctx.declarations:
         binding = ctx.binding_scopes.get(id.name)
         declared_type = ctx.declarations[id.name]

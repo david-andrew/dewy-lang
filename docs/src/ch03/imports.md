@@ -1,44 +1,49 @@
 # Imports
 
-TODO
-
-> Syntax likely to change
-
-Examples of imports
+Dewy imports typed top-level bindings from another source file. Filename
+extensions have no semantics: a path such as `p"stuff.txt"` works when that file
+contains Dewy source. Relative paths are resolved from the file containing the
+import, not from the process working directory.
 
 ```dewy
-
-% import an item from a local file
+# Import one binding.
 from p"stuff.dewy" import myfun
 
-% import an item from a local file, and rename it
+# The order may be reversed.
+import myfun from p"stuff.dewy"
+
+# Rename one binding.
 from p"../some/other/path/to/stuff.dewy" import myfun as myfun2
 
-% import a whole file as an object with a given name.
-% tbd if you can omit the name since not an installed library
-import p"../../mylib3.dewy" as mylib3
+# Import several unrenamed bindings. Commas and parenthesized whitespace are
+# equivalent collection spellings.
+from p"stuff.dewy" import first, second, third
+from p"stuff.dewy" import (first second third)
 
-% import all the contents of a file into the current scope
-from p"mylib4.dewy" import ...
+# When any entry is renamed, use the parenthesized whitespace form.
+from p"stuff.dewy" import (first second as other_second third)
+import (first second as other_second third) from p"stuff.dewy"
 
-% import several functions from a local file, unpacking some from nested objects
-from p"stuff2.dewy" import myfun2, myfun3 as f1, mymodule as [f2 f3 mod3 as [f4 f5]]
+# Capture every top-level binding under a compile-time namespace.
+import p"mylib.dewy" as mylib
+let result = mylib.myfun()
+let value:mylib.MyType = mylib.default_value
 
-%importing from a whole folder
-from p"myproject" import mod1, mod2, mod3
-
-%TODO: what about glob patterns in the import path?
-from p"myproject/*.dewy" import ...
-
-% import a whole installed library
-import IO
-
-% import items from an installed library
-from Math import sin, cos, tan
-
-% import and rename a whole installed library
-import seaborn as sns
-
-% import and rename items from an installed library
-from sklearn import RandomForest as RF, LinearRegression as LR
+# Splat every top-level binding directly into the current scope.
+import p"mylib.dewy"
+let result = myfun()
 ```
+
+`p` is an ordinary function that constructs a thin `Path` object. Thus
+`p"stuff.dewy"` is call juxtaposition equivalent to `p("stuff.dewy")`. Import
+sources must retain an exact compile-time path value; dynamically computed paths
+cannot determine the module graph.
+
+Every top-level binding is importable for now, including values, functions,
+overloads, constants, and type aliases. Repeated imports of the same resolved
+file load and initialize it once. Name collisions and import cycles are compile
+errors.
+
+Installed package lookup, directory and glob imports, explicit export control,
+non-source artifact loading, and incremental per-module artifacts remain future
+work.

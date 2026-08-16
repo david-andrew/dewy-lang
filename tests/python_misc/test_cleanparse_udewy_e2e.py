@@ -79,6 +79,7 @@ LOWERED_CASES = [
     ('runtime_grapheme_strings.dewy', 42),
     ('jump_table.dewy', 42),
     ('keyword_default_calls.dewy', 42),
+    ('path_values.dewy', 42),
     ('hello_world_syscall.dewy', 0),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]

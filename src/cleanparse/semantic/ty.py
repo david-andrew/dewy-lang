@@ -204,7 +204,50 @@ class ObjectType:
         return None
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType
+@dataclass(frozen=True)
+class PathType(ObjectType):
+    """A thin path object containing its lexical text."""
+
+
+@dataclass(frozen=True, init=False)
+class PathLiteralType(PathType):
+    """The singleton type inhabited by one exact lexical path."""
+
+    value: str
+
+    def __init__(self, value: str):
+        object.__setattr__(
+            self,
+            'fields',
+            (ObjectField('text', StringLiteralType(value)),),
+        )
+        object.__setattr__(self, 'value', value)
+
+
+PATH_TYPE = PathType((ObjectField('text', StringType()),))
+
+
+@dataclass(frozen=True)
+class ModuleField:
+    """One compile-time member exported by a source module."""
+
+    name: str
+    type: 'TypeExpr'
+    binding_id: int
+    type_value: 'TypeExpr | None' = None
+
+
+@dataclass(frozen=True)
+class ModuleType:
+    """A compile-time namespace; it has no runtime representation."""
+
+    fields: tuple[ModuleField, ...]
+
+    def field(self, name: str) -> ModuleField | None:
+        return next((field for field in self.fields if field.name == name), None)
+
+
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -285,6 +328,8 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     StringType: 'string',
     ArrayType: 'array',
     ObjectType: 'object',
+    PathType: 'object',
+    PathLiteralType: 'object',
 
     # TBD about these
     # IteratorType: 'iterator',
@@ -481,6 +526,14 @@ class TypeSystem:
             return a if self._binary_literal_implies(a, b) else None
         if isinstance(b, BinaryLiteralType):
             return b if self._binary_literal_implies(b, a) else None
+        if isinstance(a, PathLiteralType):
+            return a if self._path_literal_implies(a, b) else None
+        if isinstance(b, PathLiteralType):
+            return b if self._path_literal_implies(b, a) else None
+        if isinstance(a, PathType) and isinstance(b, ObjectType):
+            return a if self._path_type_implies(a, b) else None
+        if isinstance(b, PathType) and isinstance(a, ObjectType):
+            return b if self._path_type_implies(b, a) else None
         if isinstance(a, StringType) and isinstance(b, StringType):
             if a.length is None:
                 return b
@@ -496,6 +549,8 @@ class TypeSystem:
                 return a
             return a if a.length == b.length else None
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
+            return a if a == b else None
+        if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a if a == b else None
 
         a_nom = self._structural_nominal(a)
@@ -572,6 +627,10 @@ class TypeSystem:
             return self._string_literal_implies(a, b)
         if isinstance(a, BinaryLiteralType):
             return self._binary_literal_implies(a, b)
+        if isinstance(a, PathLiteralType):
+            return self._path_literal_implies(a, b)
+        if isinstance(a, PathType) and isinstance(b, ObjectType):
+            return self._path_type_implies(a, b)
         if isinstance(a, StringType):
             if isinstance(b, StringType):
                 return b.length is None or a.length == b.length
@@ -585,6 +644,8 @@ class TypeSystem:
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
+            return a == b
+        if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b
 
         a_nom = self._structural_nominal(a)
@@ -679,6 +740,35 @@ class TypeSystem:
             isinstance(target, ArrayType)
             and target.element == 'uint8'
             and (target.length is None or target.length == len(literal.value))
+        )
+
+
+    def _path_literal_implies(
+        self,
+        literal: PathLiteralType,
+        target: LiteralAtom,
+    ) -> bool:
+        if isinstance(target, PathLiteralType):
+            return literal == target
+        if isinstance(target, PathType):
+            return self._path_type_implies(literal, target)
+        if isinstance(target, ObjectType):
+            return self._path_type_implies(literal, target)
+        return isinstance(target, str) and self._is_nom_subtype('object', target)
+
+
+    def _path_type_implies(
+        self,
+        path: PathType,
+        target: ObjectType,
+    ) -> bool:
+        if len(path.fields) != len(target.fields):
+            return False
+        return all(
+            source.name == expected.name
+            and source.mutable == expected.mutable
+            and self.is_subtype(source.type, expected.type)
+            for source, expected in zip(path.fields, target.fields)
         )
 
 
@@ -1081,7 +1171,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1203,6 +1293,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return ArrayType(to_nnf(t.element), t.length)
     if isinstance(t, StringType):
         return t
+    if isinstance(t, (PathType, PathLiteralType)):
+        return t
     if isinstance(t, ObjectType):
         return ObjectType(
             tuple(
@@ -1210,6 +1302,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
                 for field in t.fields
             )
         )
+    if isinstance(t, ModuleType):
+        return t
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
 
 
@@ -1229,7 +1323,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1328,7 +1422,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return bindings.get(t, t)
     if isinstance(t, IntegerLiteralType):
         return t
-    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType)):
+    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, PathType, PathLiteralType, ModuleType)):
         return t
     if isinstance(t, ArrayType):
         return ArrayType(substitute_type(t.element, bindings), t.length)

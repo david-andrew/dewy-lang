@@ -209,6 +209,13 @@ class TypeValue(AST):
 
 
 @dataclass
+class ModuleNamespace(AST):
+    """A compile-time namespace for one imported source module."""
+
+    name: str
+
+
+@dataclass
 class ArrayLength(AST):
     """The element count of an array value."""
 

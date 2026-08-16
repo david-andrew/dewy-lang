@@ -414,9 +414,24 @@ Incremental implementation work:
 - [ ] Remove or redesign canonical descriptor fields that remain unused once
       dynamic arrays and lifetime management have defined semantics.
 
+## Paths, imports, and modules
+
+- [x] `Path` is a thin object type and `p` is an ordinary, literal-preserving
+      builtin function with a Dewy-level specification in `library/path.dewy`.
+- [x] File-relative semantic imports support selective names, aliases,
+      parenthesized or comma-separated name collections, reversed
+      `import ... from ...` order, compile-time namespaces, and whole-module
+      splats.
+- [x] Reachable source modules, independent of filename extension, are checked
+      with one type system and binding registry, reject cycles and collisions,
+      initialize once in dependency order, receive module-qualified target
+      symbols, and merge into one udewy executable.
+- [ ] Installed package lookup, directory/glob imports, explicit export
+      control, non-source artifact loading, and incremental per-module
+      artifacts.
+
 ## Completely unimplemented
 In no particular order
-- [ ] Imports and modules
 - [ ] Floating-point, rational, and real numbers
 - [ ] Physical units
 - [ ] Dictionaries, bidirectional maps, and sets
