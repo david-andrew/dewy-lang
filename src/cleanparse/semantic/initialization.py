@@ -678,6 +678,30 @@ class _InitializationChecker:
                         return None
                     targets.extend(resolved)
             return targets
+        if isinstance(node, hir.Index):
+            array = node.array
+            if isinstance(array, hir.ExpressedIdentifier):
+                if array.binding_id is None or array.binding_id in seen:
+                    return None
+                binding = self.registry.by_id.get(array.binding_id)
+                if binding is None or binding.declaration is None:
+                    return None
+                array = binding.declaration.expr
+                seen = {*seen, binding.id}
+            if not isinstance(array, hir.ArrayLiteral):
+                return None
+            items = (
+                [array.items[node.constant_index]]
+                if node.constant_index is not None
+                else array.items
+            )
+            targets: list[hir.FunctionLiteral] = []
+            for item in items:
+                resolved = self._callable_targets(item, parameters, seen)
+                if resolved is None:
+                    return None
+                targets.extend(resolved)
+            return targets
         if isinstance(node, hir.MemberAccess):
             if self._member_was_reassigned(node):
                 return None

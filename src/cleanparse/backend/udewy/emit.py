@@ -51,6 +51,7 @@ UNSUPPORTED_NARROW_DUNDERS = {
 }
 SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
 UDEWY_INTRINSICS = set(builtins.udewy_intrinsic_types)
+INTERNAL_UDEWY_INTRINSICS = {'__static_words__'}
 
 @dataclass
 class EmitContext:
@@ -252,6 +253,7 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
         case hir.ShortCircuit(): return emit_short_circuit(ast, ctx)
         case hir.Integer(): return emit_integer(ast)
         case hir.String(): return emit_string(ast)
+        case hir.BasedString(): return emit_based_string(ast)
         case hir.Bool(): return 'true' if ast.value else 'false'
         case hir.Void(): return 'void'
         case hir.Declare(): return emit_declare(ast, ctx)
@@ -276,6 +278,12 @@ def emit_string(string: hir.String) -> str:
 
     content = ''.join(f'\\x{byte:02x}' for byte in string.content.encode('utf-8'))
     return f'"{content}"'
+
+
+def emit_based_string(string: hir.BasedString) -> str:
+    """Emit packed binary data in one canonical udewy spelling."""
+
+    return f'0x"{string.content.hex()}"'
 
 
 def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:
@@ -416,6 +424,7 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
         and (
             call.func.name in ctx.direct_function_names
             or call.func.name in UDEWY_INTRINSICS
+            or call.func.name in INTERNAL_UDEWY_INTRINSICS
         )
         and call.func.name not in ctx.local_names
     ):

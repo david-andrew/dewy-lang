@@ -225,11 +225,20 @@ semantics.
 
 ## Strings
 
-- [ ] Dewy already parses `0b"..."` and `0x"..."` based strings, but semantic
-      typing, contextual coercion, and lowering are pending. Those stages must
-      produce the same bytes as udewy: MSB-first wire-order packing with
-      automatic right-zero padding, without reinterpretation through target
-      endianness or text encoding.
+- [x] Power-of-two based strings (`0b`, `0q`, `0o`, `0x`, `0u`, and `0g`) have
+      exact binary singleton types, contextual `array<uint8>` materialization,
+      and udewy lowering. Digits contribute fixed-width `log2(base)` chunks in
+      source order; the final byte is right-zero padded. Base-64 `_` is digit
+      63 and trailing `=` contributes no bits. Lowering emits canonical packed
+      `0x"..."` data without target-endian or text reinterpretation.
+- [ ] Non-power-of-two based strings (`0t`, `0s`, `0d`, `0z`, and `0r`) are
+      reserved for future dense packing. For an `n`-digit base-`b` sequence,
+      fold the digits by rank accumulation (`rank = rank * b + digit`), encode
+      that rank in the sequence-derived width `ceil(log2(b**n))`, then
+      right-zero pad the final storage byte. This width is not generally
+      additive across concatenated subsequences, so compositionality and chunk
+      boundaries remain unresolved. Balanced ternary also needs a defined
+      ordering/rank for its negative digit before it can share this scheme.
 - [x] Exact string-literal types with contextual materialization as immutable
       grapheme strings, `array<uint8>`, `array<uint32>`, or
       `array<grapheme>`. `char` is the one-grapheme string refinement.
@@ -269,15 +278,17 @@ or effect analysis should normally become constants in the emitted program
 rather than fields stored beside every value.
 
 The current backend generally uses one canonical representation for each
-non-scalar type. In particular, every array is represented by a pointer to a
-48-byte descriptor containing `data`, `length`, `capacity`, `stride`, `flags`,
-and `owner`. This is a useful initial implementation because every array is a
-one-word handle and all lowering paths can use the same operations, but it is
-not required by the language semantics. At present array elements can be
-mutated, but arrays cannot change length; `capacity`, `stride`, and `owner` are
-not read by generated programs. `flags` is needed only for runtime
-copy-on-write of borrowed UTF-8, while exact array length and element stride are
-usually known statically.
+non-scalar type. Most arrays are represented by a pointer to a 48-byte
+descriptor containing `data`, `length`, `capacity`, `stride`, `flags`, and
+`owner`. An initial exception now selects raw static storage for module-scope
+`const` arrays whose binding-identity use set contains only `.length` and
+indexed reads: compatible one-word literals and function references use
+udewy's internal `__static_words__`, while exact based bytes use their static
+data pointer. All other arrays retain the descriptor fallback. At present
+array elements can be mutated, but arrays cannot change length; `capacity`,
+`stride`, and `owner` are not read by generated programs. `flags` is needed
+only for runtime copy-on-write of borrowed static bytes, while exact array
+length and element stride are usually known statically.
 
 The intended rule is that each value receives the least runtime representation
 needed by all of its reachable uses. For arrays this includes:
@@ -352,10 +363,16 @@ value.
 
 Incremental implementation work:
 
-- [ ] Record representation requirements from array operations, mutation,
-      aliases, escapes, and call boundaries.
-- [ ] Scalar-replace fixed local arrays and emit immutable literals as raw static
-      data when no descriptor is required.
+- [x] Record an initial representation requirement per semantic binding for
+      module `const` arrays, selecting raw storage only when every reachable
+      use is `.length` or an indexed read and conservatively falling back for
+      aliases, mutation, escapes, call boundaries, and ambiguous cases.
+- [x] Emit eligible module `const` arrays of stable 64-bit words, compatible
+      non-extern function references, or exact based bytes as raw static data
+      with compile-time length and stride.
+- [ ] Generalize representation requirements across control-flow joins,
+      aliases, specialized calls, local scalar replacement, and additional
+      element/storage classes.
 - [ ] Stop storing array length, capacity, stride, flags, and ownership metadata
       when each fact is either unused or available statically.
 - [ ] Materialize canonical descriptors only at representation-changing

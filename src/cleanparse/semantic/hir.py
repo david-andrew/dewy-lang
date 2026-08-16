@@ -263,6 +263,13 @@ class String(AST):
 
 
 @dataclass
+class BasedString(AST):
+    prefix: t0.BasePrefix
+    digits: str
+    content: bytes
+
+
+@dataclass
 class StringLength(AST):
     string: AST
 

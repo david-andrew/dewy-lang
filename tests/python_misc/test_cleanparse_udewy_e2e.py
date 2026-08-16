@@ -76,6 +76,7 @@ LOWERED_CASES = [
     ('string_ranges.dewy', 42),
     ('string_containers.dewy', 42),
     ('runtime_grapheme_strings.dewy', 42),
+    ('jump_table.dewy', 42),
     ('hello_world_syscall.dewy', 0),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
@@ -151,6 +152,21 @@ def test_reference_udewy_indirect_call_fixture(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert entry_point(repo / 'udewy' / 'tests' / 'test_indirect_call.udewy', []) == 22
+
+
+def test_jump_table_codegen_uses_raw_static_storage() -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'jump_table.dewy'))
+
+    assert (
+        'const handlers:int64 = '
+        '__static_words__(add_one double add_ten)'
+    ) in emitted
+    assert 'const program:int64 = 0x"000102"' in emitted
+    assert '0q"' not in emitted
+    assert '__load_i64__(handlers + (opcode * 8))' in emitted
+    assert 'accumulator = (handler)(accumulator)' in emitted
+    assert 'alloca__(48)' not in emitted
+    assert '__store_i64__(' not in emitted
 
 
 def test_source_suffix_does_not_affect_typing(tmp_path: Path) -> None:

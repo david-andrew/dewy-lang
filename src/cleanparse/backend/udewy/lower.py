@@ -80,7 +80,10 @@ ARRAY_FLAGS_OFFSET = 32
 ARRAY_OWNER_OFFSET = 40
 ARRAY_DESCRIPTOR_SIZE = 48
 ARRAY_MUTABLE = 1
-ARRAY_BORROWED_TEXT = 2
+ARRAY_BORROWED_STATIC = 2
+
+type ArrayRepresentation = Literal['descriptor', 'static_words', 'static_bytes']
+type ArrayUse = Literal['length', 'index', 'other']
 
 STRING_DATA_OFFSET = 0
 STRING_BYTE_LENGTH_OFFSET = 8
@@ -159,6 +162,7 @@ class _Binding:
     kind: str
     owner_function: _FunctionDef | None
     expr: hir.AST | None
+    semantic_id: int | None
     function: _FunctionDef | None = None
     emitted_name: str | None = None
 
@@ -217,6 +221,8 @@ class _Lowerer:
         self.object_globals_initialized: set[int] = set()
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
         self.call_optional_kwargs: dict[int, dict[str, ty.TypeExpr]] = {}
+        self.array_representations: dict[int, ArrayRepresentation] = {}
+        self.array_uses: dict[int, set[ArrayUse]] = defaultdict(set)
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_object_receiver: hir.ExpressedIdentifier | None = None
@@ -239,6 +245,7 @@ class _Lowerer:
             create_scope=False,
             function_body=False,
         )
+        self._classify_array_representations()
         self._check_captures()
         self.needs_startup = any(
             not (
@@ -249,6 +256,10 @@ class _Lowerer:
                         and binding.kind in {'function', 'overload'}
                     )
                     or isinstance(item.expr, hir.TypeValue)
+                    or self._array_representation(item) in {
+                        'static_words',
+                        'static_bytes',
+                    }
                 )
             )
             and not isinstance(item, hir.ScopeMetatag)
@@ -274,6 +285,12 @@ class _Lowerer:
             if transformed is None:
                 continue
             if isinstance(transformed, hir.Declare):
+                representation = self._array_representation(transformed)
+                if representation in {'static_words', 'static_bytes'}:
+                    globals_.append(
+                        self._static_array_global(transformed, representation)
+                    )
+                    continue
                 globals_.append(self._global_storage(transformed))
                 assignment = hir.Assign(
                     transformed.loc,
@@ -531,6 +548,7 @@ class _Lowerer:
                 ty.ArrayType,
                 ty.ObjectType,
                 ty.StringLiteralType,
+                ty.BinaryLiteralType,
                 ty.StringType,
             ),
         ) or (
@@ -557,6 +575,8 @@ class _Lowerer:
         if isinstance(type_, ty.ArrayType):
             self._target_error(node, 'array return values are not supported by udewy')
         if isinstance(type_, ty.StringLiteralType):
+            return 'int64'
+        if isinstance(type_, ty.BinaryLiteralType):
             return 'int64'
         if isinstance(type_, ty.StringType) or (
             isinstance(type_, str)
@@ -614,7 +634,12 @@ class _Lowerer:
             annotation = 'int64'
         if isinstance(
             annotation,
-            (ty.ArrayType, ty.StringLiteralType, ty.StringType),
+            (
+                ty.ArrayType,
+                ty.StringLiteralType,
+                ty.BinaryLiteralType,
+                ty.StringType,
+            ),
         ) or (
             isinstance(annotation, str)
             and annotation in {'string', 'grapheme', 'char'}
@@ -668,6 +693,77 @@ class _Lowerer:
             expr=initializer,
         )
 
+    def _array_representation(
+        self,
+        declaration: hir.Declare,
+    ) -> ArrayRepresentation:
+        if declaration.binding_id is None:
+            return 'descriptor'
+        return self.array_representations.get(
+            declaration.binding_id,
+            'descriptor',
+        )
+
+    def _static_array_global(
+        self,
+        declaration: hir.Declare,
+        representation: Literal['static_words', 'static_bytes'],
+    ) -> hir.Declare:
+        if representation == 'static_words':
+            if not isinstance(declaration.expr, hir.ArrayLiteral):
+                raise TypeError(
+                    'INTERNAL ERROR: static-word representation requires an array literal'
+                )
+            initializer = self._intrinsic_call(
+                '__static_words__',
+                [
+                    self._static_word_initializer_argument(
+                        item,
+                        declaration.expr.type.element,
+                        set(),
+                    )
+                    for item in declaration.expr.items
+                ],
+                'int64',
+                declaration.loc,
+            )
+        else:
+            if not isinstance(declaration.expr, hir.RepresentationCast):
+                raise TypeError(
+                    'INTERNAL ERROR: static-byte representation requires based data'
+                )
+            initializer = declaration.expr.expr
+        return replace(
+            declaration,
+            annotation='int64',
+            expr=initializer,
+        )
+
+    def _static_word_initializer_argument(
+        self,
+        node: hir.AST,
+        element_type: ty.Type,
+        seen: set[int],
+    ) -> hir.AST:
+        while isinstance(node, (hir.ValueCast, hir.Transmute)):
+            node = node.expr
+        if isinstance(element_type, ty.FunctionType):
+            return node
+        if isinstance(node, hir.Integer):
+            return node
+        if not isinstance(node, hir.ExpressedIdentifier) or node.binding_id is None:
+            raise TypeError('INTERNAL ERROR: unstable static-word initializer')
+        if node.binding_id in seen:
+            raise TypeError('INTERNAL ERROR: cyclic static-word initializer')
+        declaration = self._declaration_for_binding(node.binding_id)
+        if declaration is None:
+            raise TypeError('INTERNAL ERROR: missing static-word alias declaration')
+        return self._static_word_initializer_argument(
+            declaration.expr,
+            element_type,
+            {*seen, node.binding_id},
+        )
+
     def _new_binding(
         self,
         scope: _Scope,
@@ -684,6 +780,7 @@ class _Lowerer:
             kind,
             owner_function,
             expr,
+            semantic_id,
         )
         self.next_binding_order += 1
         scope.bindings[name] = binding
@@ -747,6 +844,11 @@ class _Lowerer:
                     item.binding_id,
                 )
                 self.declare_bindings[id(item)] = binding
+                if (
+                    item.binding_id is not None
+                    and isinstance(item.annotation or item.expr.type, ty.ArrayType)
+                ):
+                    self.array_representations[item.binding_id] = 'descriptor'
                 payload = ty.optional_payload(item.annotation or item.expr.type)
                 if payload is not None and item.binding_id is not None:
                     self.optional_payloads[item.binding_id] = payload
@@ -909,6 +1011,7 @@ class _Lowerer:
         *,
         suggested_name: str | None = None,
         overload_member: bool = False,
+        array_use: ArrayUse = 'other',
     ) -> None:
         """Resolve names and recursively collect callable constructs in ``node``."""
         if isinstance(node, hir.ExpressedIdentifier):
@@ -918,6 +1021,8 @@ class _Lowerer:
                 else scope.resolve(node.name)
             )
             self.identifier_bindings[id(node)] = binding
+            if binding is not None and binding.semantic_id is not None:
+                self.array_uses[binding.semantic_id].add(array_use)
             if (
                 current_function is not None
                 and binding is not None
@@ -1011,7 +1116,12 @@ class _Lowerer:
                 self._discover_node(item, scope, current_function)
             return
         if isinstance(node, hir.ArrayLength):
-            self._discover_node(node.array, scope, current_function)
+            self._discover_node(
+                node.array,
+                scope,
+                current_function,
+                array_use='length',
+            )
             return
         if isinstance(node, hir.StringLength):
             self._discover_node(node.string, scope, current_function)
@@ -1033,11 +1143,17 @@ class _Lowerer:
             self._discover_node(node.right, scope, current_function)
             return
         if isinstance(node, hir.Index):
-            self._discover_node(node.array, scope, current_function)
+            self._discover_node(
+                node.array,
+                scope,
+                current_function,
+                array_use='index',
+            )
             self._discover_node(node.index, scope, current_function)
             return
         if isinstance(node, hir.IndexAssign):
-            self._discover_node(node.target, scope, current_function)
+            self._discover_node(node.target.array, scope, current_function)
+            self._discover_node(node.target.index, scope, current_function)
             self._discover_node(node.value, scope, current_function)
             return
         if isinstance(node, hir.ObjectLiteral):
@@ -1085,7 +1201,12 @@ class _Lowerer:
                 )
             return
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
-            self._discover_node(node.expr, scope, current_function)
+            self._discover_node(
+                node.expr,
+                scope,
+                current_function,
+                array_use=array_use,
+            )
             return
         if isinstance(node, hir.TypeBlock):
             for item in node.items:
@@ -1103,6 +1224,142 @@ class _Lowerer:
                     continue
                 seen.add(id(item))
                 self._discover_node(item, scope, current_function)
+
+    def _classify_array_representations(self) -> None:
+        for node in self.root.items:
+            if (
+                not isinstance(node, hir.Declare)
+                or node.binding_id is None
+                or node.decltype != 'const'
+                or not isinstance(node.annotation or node.expr.type, ty.ArrayType)
+            ):
+                continue
+            uses = self.array_uses.get(node.binding_id, set())
+            if not uses <= {'length', 'index'}:
+                continue
+            array_type = node.annotation or node.expr.type
+            assert isinstance(array_type, ty.ArrayType)
+            if (
+                isinstance(node.expr, hir.ArrayLiteral)
+                and node.expr.items
+                and self._static_word_array_is_stable(
+                    node.expr,
+                    array_type,
+                )
+            ):
+                self.array_representations[node.binding_id] = 'static_words'
+            elif (
+                array_type.element == 'uint8'
+                and self._static_binary_array_initializer(node.expr, set())
+                is not None
+            ):
+                self.array_representations[node.binding_id] = 'static_bytes'
+
+    def _static_word_array_is_stable(
+        self,
+        node: hir.ArrayLiteral,
+        array_type: ty.ArrayType,
+    ) -> bool:
+        element = array_type.element
+        if not (
+            isinstance(element, str)
+            and element in {'int64', 'uint64'}
+            or isinstance(element, ty.FunctionType)
+        ):
+            return False
+        return all(
+            self._static_word_is_stable(item, element, set())
+            for item in node.items
+        )
+
+    def _static_word_is_stable(
+        self,
+        node: hir.AST,
+        element_type: ty.Type,
+        seen: set[int],
+    ) -> bool:
+        while isinstance(node, (hir.ValueCast, hir.Transmute)):
+            node = node.expr
+        if isinstance(element_type, ty.FunctionType):
+            if not isinstance(node, hir.ExpressedIdentifier):
+                return False
+            binding = self.identifier_bindings.get(id(node))
+            return (
+                binding is not None
+                and binding.kind == 'function'
+                and isinstance(node.type, ty.FunctionType)
+                and ty.TypeSystem().is_subtype(node.type, element_type)
+            )
+        if isinstance(node, hir.Integer):
+            return (
+                isinstance(node.type, ty.IntegerLiteralType)
+                and ty.integer_literal_fits(node.value, element_type)
+                or node.type == element_type
+            )
+        if not isinstance(node, hir.ExpressedIdentifier):
+            return False
+        binding = self.identifier_bindings.get(id(node))
+        if (
+            binding is None
+            or binding.semantic_id is None
+            or binding.semantic_id in seen
+            or binding.owner_function is not None
+            or binding.expr is None
+        ):
+            return False
+        declaration = self._declaration_for_binding(binding.semantic_id)
+        return (
+            declaration is not None
+            and declaration.decltype == 'const'
+            and self._static_word_is_stable(
+                binding.expr,
+                element_type,
+                {*seen, binding.semantic_id},
+            )
+        )
+
+    def _static_binary_array_initializer(
+        self,
+        node: hir.AST,
+        seen: set[int],
+    ) -> hir.AST | None:
+        if not isinstance(node, hir.RepresentationCast):
+            return None
+        source = node.expr
+        if isinstance(source, hir.BasedString):
+            return source
+        if not isinstance(source, hir.ExpressedIdentifier):
+            return None
+        binding = self.identifier_bindings.get(id(source))
+        if (
+            binding is None
+            or binding.semantic_id is None
+            or binding.semantic_id in seen
+            or binding.owner_function is not None
+            or binding.expr is None
+        ):
+            return None
+        declaration = self._declaration_for_binding(binding.semantic_id)
+        if declaration is None or declaration.decltype != 'const':
+            return None
+        if isinstance(binding.expr, hir.BasedString):
+            return source
+        nested = self._static_binary_array_initializer(
+            binding.expr,
+            {*seen, binding.semantic_id},
+        )
+        return source if nested is not None else None
+
+    def _declaration_for_binding(self, semantic_id: int) -> hir.Declare | None:
+        return next(
+            (
+                node
+                for node in self.root.items
+                if isinstance(node, hir.Declare)
+                and node.binding_id == semantic_id
+            ),
+            None,
+        )
 
     def _check_captures(self) -> None:
         """Reject function units that require an udewy closure environment."""
@@ -1778,6 +2035,7 @@ class _Lowerer:
                         ty.ArrayType,
                         ty.ObjectType,
                         ty.StringLiteralType,
+                        ty.BinaryLiteralType,
                         ty.StringType,
                     ),
                 )
@@ -2033,6 +2291,8 @@ class _Lowerer:
             return self._extract_expression(self._short_circuit_flow(node))
         if isinstance(node, hir.String):
             return self._extract_string_literal(node)
+        if isinstance(node, hir.BasedString):
+            return [], replace(node, type='int64')
         if isinstance(node, hir.RepresentationCast):
             return self._extract_representation_cast(node)
         if isinstance(node, hir.StringLength):
@@ -2068,6 +2328,18 @@ class _Lowerer:
         if isinstance(node, hir.ArrayLiteral):
             return self._extract_array_literal(node)
         if isinstance(node, hir.ArrayLength):
+            static_representation = self._static_array_use_representation(node.array)
+            if static_representation is not None and isinstance(
+                node.type,
+                ty.IntegerLiteralType,
+            ):
+                return [], self._int64_literal(node.loc, node.type.value)
+            static_bytes = self._static_binary_array_source(node.array)
+            if static_bytes is not None and isinstance(
+                node.type,
+                ty.IntegerLiteralType,
+            ):
+                return [], self._int64_literal(node.loc, node.type.value)
             prelude, array = self._extract_expression(node.array)
             if isinstance(node.type, ty.IntegerLiteralType):
                 return prelude, self._int64_literal(node.loc, node.type.value)
@@ -2077,16 +2349,34 @@ class _Lowerer:
                 node.loc,
             )
         if isinstance(node, hir.Index):
-            prelude, array = self._extract_expression(node.array)
+            static_representation = self._static_array_use_representation(node.array)
+            static_bytes = self._static_binary_array_source(node.array)
+            if static_representation is not None:
+                prelude, array = self._extract_expression(node.array)
+            elif static_bytes is not None:
+                prelude, array = self._extract_expression(static_bytes)
+            else:
+                prelude, array = self._extract_expression(node.array)
             index: int | hir.AST = node.constant_index
             if index is None:
                 index_prelude, index = self._extract_expression(node.index)
                 prelude.extend(index_prelude)
-            address = self._array_element_address(
-                array,
-                index,
-                node.type,
-                node.loc,
+            address = (
+                self._pointer_element_address(
+                    array,
+                    index,
+                    self._array_element_layout(node.type, node)[0],
+                    node.loc,
+                )
+                if static_representation is not None
+                else self._pointer_element_address(array, index, 1, node.loc)
+                if static_bytes is not None
+                else self._array_element_address(
+                    array,
+                    index,
+                    node.type,
+                    node.loc,
+                )
             )
             return prelude, self._array_load(address, node.type, node.loc)
         if isinstance(node, hir.FunctionCall):
@@ -2307,6 +2597,33 @@ class _Lowerer:
             loc,
         )
 
+    @staticmethod
+    def _static_binary_array_source(node: hir.AST) -> hir.AST | None:
+        if not isinstance(node, hir.RepresentationCast):
+            return None
+        if not isinstance(node.type, ty.ArrayType) or node.type.element != 'uint8':
+            return None
+        if not isinstance(node.expr.type, ty.BinaryLiteralType):
+            return None
+        if isinstance(node.expr, (hir.BasedString, hir.ExpressedIdentifier)):
+            return node.expr
+        return None
+
+    def _static_array_use_representation(
+        self,
+        node: hir.AST,
+    ) -> Literal['static_words', 'static_bytes'] | None:
+        if not isinstance(node, hir.ExpressedIdentifier):
+            return None
+        if node.binding_id is None:
+            return None
+        representation = self.array_representations.get(node.binding_id)
+        return (
+            representation
+            if representation in {'static_words', 'static_bytes'}
+            else None
+        )
+
     def _extract_representation_cast(
         self,
         node: hir.RepresentationCast,
@@ -2319,7 +2636,9 @@ class _Lowerer:
                     source.type,
                     ty.StringLiteralType,
                 ):
-                    return self._extract_utf8_literal_array(node, source)
+                    return self._extract_static_byte_literal_array(node, source)
+                if isinstance(source.type, ty.BinaryLiteralType):
+                    return self._extract_static_byte_literal_array(node, source)
                 prelude, string = self._extract_expression(source)
                 descriptor = self._new_array_temp(
                     hir.ArrayLiteral(node.loc, target, [])
@@ -2377,7 +2696,7 @@ class _Lowerer:
                         self._store_i64_field(
                             descriptor,
                             ARRAY_FLAGS_OFFSET,
-                            self._int64_literal(node.loc, ARRAY_BORROWED_TEXT),
+                            self._int64_literal(node.loc, ARRAY_BORROWED_STATIC),
                             node.loc,
                         ),
                         self._store_i64_field(
@@ -2457,12 +2776,19 @@ class _Lowerer:
             return self._extract_expression(source)
         self._target_error(node, f'representation conversion to `{type_to_dewy(target)}`')
 
-    def _extract_utf8_literal_array(
+    def _extract_static_byte_literal_array(
         self,
         node: hir.RepresentationCast,
-        source: hir.String,
+        source: hir.AST,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        byte_length = len(source.content.encode('utf-8'))
+        if isinstance(source.type, ty.BinaryLiteralType):
+            byte_length = len(source.type.value)
+            source_prelude, raw_data = self._extract_expression(source)
+        else:
+            assert isinstance(source, hir.String)
+            byte_length = len(source.content.encode('utf-8'))
+            source_prelude = []
+            raw_data = replace(source, type='int64')
         descriptor = self._new_array_temp(
             hir.ArrayLiteral(node.loc, node.type, [])
         )
@@ -2473,6 +2799,7 @@ class _Lowerer:
             else '__alloca__'
         )
         return [
+            *source_prelude,
             hir.Declare(
                 node.loc,
                 ty.VOID_TYPE,
@@ -2489,7 +2816,7 @@ class _Lowerer:
             self._store_i64_field(
                 descriptor_word,
                 ARRAY_DATA_OFFSET,
-                replace(source, type='int64'),
+                raw_data,
                 node.loc,
             ),
             self._store_i64_field(
@@ -2513,7 +2840,7 @@ class _Lowerer:
             self._store_i64_field(
                 descriptor_word,
                 ARRAY_FLAGS_OFFSET,
-                self._int64_literal(node.loc, ARRAY_BORROWED_TEXT),
+                self._int64_literal(node.loc, ARRAY_BORROWED_STATIC),
                 node.loc,
             ),
             self._store_i64_field(
@@ -4981,7 +5308,7 @@ class _Lowerer:
     ) -> bool:
         """Whether a top-level array element is a compile-time integer value."""
 
-        if isinstance(node, (hir.Integer, hir.String)):
+        if isinstance(node, (hir.Integer, hir.String, hir.BasedString)):
             return True
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
             return self._module_array_item_is_stable(node.expr, seen)
@@ -5204,6 +5531,7 @@ class _Lowerer:
                 ty.FunctionType,
                 ty.ObjectType,
                 ty.StringLiteralType,
+                ty.BinaryLiteralType,
                 ty.StringType,
             ),
         ) or (
@@ -5225,6 +5553,15 @@ class _Lowerer:
     ) -> hir.AST:
         element_bytes, _signed = self._array_element_layout(element_type, array)
         data = self._load_i64_field(array, ARRAY_DATA_OFFSET, loc)
+        return self._pointer_element_address(data, index, element_bytes, loc)
+
+    def _pointer_element_address(
+        self,
+        data: hir.AST,
+        index: int | hir.AST,
+        element_bytes: int,
+        loc: Span,
+    ) -> hir.AST:
         if isinstance(index, int):
             offset: hir.AST | int = index * element_bytes
             if offset == 0:
@@ -5309,7 +5646,7 @@ class _Lowerer:
         flags = self._load_i64_field(descriptor, ARRAY_FLAGS_OFFSET, loc)
         borrowed = self._typed_equality(
             flags,
-            self._int64_literal(loc, ARRAY_BORROWED_TEXT),
+            self._int64_literal(loc, ARRAY_BORROWED_STATIC),
             'int64',
             loc,
         )
@@ -5464,6 +5801,7 @@ class _Lowerer:
                 ty.ArrayType,
                 ty.FunctionType,
                 ty.StringLiteralType,
+                ty.BinaryLiteralType,
                 ty.StringType,
             ),
         ) or (
@@ -7293,6 +7631,7 @@ class _Lowerer:
             (
                 ty.ArrayType,
                 ty.StringLiteralType,
+                ty.BinaryLiteralType,
                 ty.StringType,
             ),
         ) or (

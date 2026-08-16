@@ -161,6 +161,13 @@ class StringLiteralType:
 
 
 @dataclass(frozen=True)
+class BinaryLiteralType:
+    """The singleton type inhabited by one exact byte sequence."""
+
+    value: bytes
+
+
+@dataclass(frozen=True)
 class StringType:
     """An immutable grapheme sequence, optionally refined to an exact length."""
 
@@ -197,7 +204,7 @@ class ObjectType:
         return None
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | StringType | ArrayType | ObjectType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 
 
@@ -470,6 +477,10 @@ class TypeSystem:
             return a if self._string_literal_implies(a, b) else None
         if isinstance(b, StringLiteralType):
             return b if self._string_literal_implies(b, a) else None
+        if isinstance(a, BinaryLiteralType):
+            return a if self._binary_literal_implies(a, b) else None
+        if isinstance(b, BinaryLiteralType):
+            return b if self._binary_literal_implies(b, a) else None
         if isinstance(a, StringType) and isinstance(b, StringType):
             if a.length is None:
                 return b
@@ -559,6 +570,8 @@ class TypeSystem:
                 return self._integer_literal_implies(a, b)
         if isinstance(a, StringLiteralType):
             return self._string_literal_implies(a, b)
+        if isinstance(a, BinaryLiteralType):
+            return self._binary_literal_implies(a, b)
         if isinstance(a, StringType):
             if isinstance(b, StringType):
                 return b.length is None or a.length == b.length
@@ -649,6 +662,24 @@ class TypeSystem:
                 return grapheme_count == 1
             return self._is_nom_subtype('string', target)
         return False
+
+
+    def _binary_literal_implies(
+        self,
+        literal: BinaryLiteralType,
+        target: LiteralAtom,
+    ) -> bool:
+        """Whether exact binary data can materialize as a byte array."""
+
+        if isinstance(target, BinaryLiteralType):
+            return literal == target
+        if target == TOP_TYPE:
+            return True
+        return (
+            isinstance(target, ArrayType)
+            and target.element == 'uint8'
+            and (target.length is None or target.length == len(literal.value))
+        )
 
 
     def clause_is_empty(self, clause: DnfClause) -> bool:
@@ -789,6 +820,11 @@ class TypeSystem:
             if isinstance(current, StringLiteralType) and isinstance(actual, StringLiteralType):
                 bindings[name] = StringType()
                 return True
+            if isinstance(current, BinaryLiteralType) and isinstance(actual, BinaryLiteralType):
+                if len(current.value) != len(actual.value):
+                    return False
+                bindings[name] = ArrayType('uint8', len(current.value))
+                return True
             if isinstance(current, IntegerLiteralType) and self.is_subtype(current, actual):
                 bindings[name] = actual
                 return True
@@ -798,6 +834,11 @@ class TypeSystem:
                 bindings[name] = actual
                 return True
             if isinstance(actual, StringLiteralType) and self.is_subtype(actual, current):
+                return True
+            if isinstance(current, BinaryLiteralType) and self.is_subtype(current, actual):
+                bindings[name] = actual
+                return True
+            if isinstance(actual, BinaryLiteralType) and self.is_subtype(actual, current):
                 return True
             promoted = self.promote_type(current, actual)
             if promoted is None:
@@ -1028,7 +1069,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | StringType | ArrayType | ObjectType
+type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1176,7 +1217,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, StringType, ArrayType, ObjectType)):
+    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1275,7 +1316,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return bindings.get(t, t)
     if isinstance(t, IntegerLiteralType):
         return t
-    if isinstance(t, (StringLiteralType, StringType)):
+    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType)):
         return t
     if isinstance(t, ArrayType):
         return ArrayType(substitute_type(t.element, bindings), t.length)

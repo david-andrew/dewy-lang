@@ -157,13 +157,21 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     ),
                 )
             return hir.String(ast.item.loc, ty.StringLiteralType(content), content)
+        case p0.Atom(item=t1.BasedString() as literal):
+            content, digits = _pack_based_string(literal, ctx=ctx)
+            return hir.BasedString(
+                literal.loc,
+                ty.BinaryLiteralType(content),
+                literal.base,
+                digits,
+                content,
+            )
         case p0.Atom(item=t1.Integer(value=value)):
             parsed = t0.parse_integer(value.src, value.prefix)
             return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
         case p0.Atom(item=t1.Metatag(name=name)):
             return tcr_scope_metatag(ast, name=name, ctx=ctx)
         # case p0.Atom(item=t1.Real()): ...
-        # case p0.Atom(item=t1.BasedString()): ...
         # case p0.Atom(item=t1.Semicolon()): ...
         # case p0.Atom(item=t1.Metatag()): ...
         # case p0.Atom(item=t1.Integer()): ...
@@ -174,6 +182,74 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return tcr_bare_range(ast, ctx=ctx, expected=expected)
         case _:
             not_implemented(ctx.srcfile, ast.loc, f'{type(ast).__name__} expression')
+
+
+_BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
+    '0b': 1,
+    '0q': 2,
+    '0o': 3,
+    '0x': 4,
+    '0u': 5,
+    '0g': 6,
+}
+
+
+def _pack_based_string(
+    literal: t1.BasedString,
+    *,
+    ctx: Context,
+) -> tuple[bytes, str]:
+    digit_width = _BASED_STRING_DIGIT_WIDTHS.get(literal.base)
+    if digit_width is None:
+        user_error(
+            ctx.srcfile,
+            'based-string packing is reserved',
+            Pointer(
+                span=literal.loc,
+                message=(
+                    f'base-{t0.base_radixes[literal.base]} based strings are '
+                    'reserved for future dense packing'
+                ),
+            ),
+        )
+
+    digits = ''.join(chunk.src for chunk in literal.digits)
+    if literal.base == '0g':
+        first_padding = digits.find('=')
+        if (
+            first_padding != -1
+            and any(digit != '=' for digit in digits[first_padding:])
+        ):
+            user_error(
+                ctx.srcfile,
+                'invalid base-64 padding',
+                Pointer(
+                    span=literal.loc,
+                    message='`=` may only appear at the end of a base-64 based string',
+                ),
+            )
+
+    values = t0.base_digit_values[literal.base]
+    packed = bytearray()
+    pending = 0
+    pending_bits = 0
+    for digit in digits:
+        value = values.get(digit)
+        if value is None:
+            if digit == '_' and literal.base != '0g':
+                continue
+            if digit == '=' and literal.base == '0g':
+                continue
+            raise ValueError(f'INTERNAL ERROR: invalid based-string digit {digit!r}')
+        pending = pending << digit_width | value
+        pending_bits += digit_width
+        while pending_bits >= 8:
+            pending_bits -= 8
+            packed.append((pending >> pending_bits) & 0xff)
+            pending &= (1 << pending_bits) - 1
+    if pending_bits:
+        packed.append(pending << (8 - pending_bits))
+    return bytes(packed), digits
 
 
 def _complete_binding(
@@ -1656,6 +1732,12 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     name = binop.right.item.name
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        if isinstance(value.type, ty.BinaryLiteralType):
+            value = hir.RepresentationCast(
+                value.loc,
+                ty.ArrayType('uint8', len(value.type.value)),
+                value,
+            )
         if isinstance(value.type, ty.ArrayType):
             result_type: ty.Type = (
                 ty.IntegerLiteralType(value.type.length)
@@ -1757,14 +1839,19 @@ def _tcr_array_literal(
     if expected_array is not None:
         element_type = expected_array.element
     else:
-        concrete_types = {
-            item.type
-            for item in items
-            if not isinstance(
+        concrete_types: list[ty.Type] = []
+        for item in items:
+            if isinstance(
                 item.type,
-                (ty.IntegerLiteralType, ty.StringLiteralType),
-            )
-        }
+                (
+                    ty.IntegerLiteralType,
+                    ty.StringLiteralType,
+                    ty.BinaryLiteralType,
+                ),
+            ):
+                continue
+            if item.type not in concrete_types:
+                concrete_types.append(item.type)
         if not items:
             type_error(
                 ctx.srcfile,
@@ -1786,6 +1873,25 @@ def _tcr_array_literal(
                     )
                     else None
                 )
+            elif all(isinstance(item.type, ty.BinaryLiteralType) for item in items):
+                lengths = {
+                    len(item.type.value)
+                    for item in items
+                    if isinstance(item.type, ty.BinaryLiteralType)
+                }
+                if len(lengths) != 1:
+                    type_error(
+                        ctx.srcfile,
+                        'array elements are not homogeneous',
+                        *[
+                            Pointer(
+                                span=item.loc,
+                                message=f'element has type `{type_to_dewy(item.type)}`',
+                            )
+                            for item in items
+                        ],
+                    )
+                element_type = ty.ArrayType('uint8', lengths.pop())
             else:
                 type_error(
                     ctx.srcfile,
@@ -1799,7 +1905,7 @@ def _tcr_array_literal(
                     ],
                 )
         elif len(concrete_types) == 1:
-            element_type = concrete_types.pop()
+            element_type = concrete_types[0]
         else:
             type_error(
                 ctx.srcfile,
@@ -2215,6 +2321,12 @@ def _tcr_array_length(binop: p0.BinOp, *, ctx: Context) -> hir.ArrayLength:
     ):
         not_implemented(ctx.srcfile, binop.loc, 'member access other than array `.length`')
     array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    if isinstance(array.type, ty.BinaryLiteralType):
+        array = hir.RepresentationCast(
+            array.loc,
+            ty.ArrayType('uint8', len(array.type.value)),
+            array,
+        )
     if not isinstance(array.type, ty.ArrayType):
         type_error(
             ctx.srcfile,
@@ -2244,6 +2356,12 @@ def _known_string_length(type_: ty.Type) -> int | None:
 
 def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    if isinstance(array.type, ty.BinaryLiteralType):
+        array = hir.RepresentationCast(
+            array.loc,
+            ty.ArrayType('uint8', len(array.type.value)),
+            array,
+        )
     if not isinstance(array.type, ty.ArrayType) and not _is_string_type(array.type):
         type_error(
             ctx.srcfile,
@@ -3446,6 +3564,20 @@ def _is_string_type(type_: ty.Type) -> bool:
     return isinstance(type_, str) and type_ in {'string', 'grapheme', 'char'}
 
 
+def _refine_binary_materialization_target(
+    source: ty.Type,
+    target: ty.Type,
+) -> ty.Type:
+    if (
+        isinstance(source, ty.BinaryLiteralType)
+        and isinstance(target, ty.ArrayType)
+        and target.element == 'uint8'
+        and target.length is None
+    ):
+        return ty.ArrayType('uint8', len(source.value))
+    return target
+
+
 def _explicit_value_conversion(
     node: hir.AST,
     target: ty.Type,
@@ -3454,9 +3586,26 @@ def _explicit_value_conversion(
     ctx: Context,
 ) -> hir.AST:
     source = node.type
+    target = _refine_binary_materialization_target(source, target)
     target = _refine_string_materialization_target(source, target)
     if source == target:
         return node
+    if isinstance(source, ty.BinaryLiteralType):
+        if ctx.type_system.is_subtype(source, target):
+            return hir.RepresentationCast(loc, target, node)
+        if _is_string_type(target):
+            type_error(
+                ctx.srcfile,
+                'binary data is not Unicode text',
+                Pointer(
+                    span=loc,
+                    message=(
+                        f'cannot convert `{type_to_dewy(source)}` to '
+                        f'`{type_to_dewy(target)}`'
+                    ),
+                ),
+                hint='based strings only materialize as `array<uint8>`',
+            )
     if isinstance(source, ty.StringLiteralType) and ctx.type_system.is_subtype(
         source,
         target,
@@ -3519,6 +3668,11 @@ def _transmute_compatible(source: ty.Type, target: ty.Type) -> bool:
         ty.INFERRED_TYPE,
     ):
         return False
+    if isinstance(source, ty.BinaryLiteralType) or isinstance(
+        target,
+        ty.BinaryLiteralType,
+    ):
+        return False
     source_string = _is_string_type(source)
     target_string = _is_string_type(target)
     source_array = isinstance(source, ty.ArrayType)
@@ -3561,6 +3715,10 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
+    if isinstance(node.type, ty.BinaryLiteralType):
+        target = _refine_binary_materialization_target(node.type, expected)
+        if ctx.type_system.is_subtype(node.type, target):
+            return hir.RepresentationCast(node.loc, target, node)
     if isinstance(node.type, ty.StringLiteralType) and ctx.type_system.is_subtype(
         node.type,
         expected,

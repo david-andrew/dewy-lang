@@ -20,6 +20,8 @@ def type_to_dewy(t: ty.Type) -> str:
         return str(t.value)
     if isinstance(t, ty.StringLiteralType):
         return repr(t.value)
+    if isinstance(t, ty.BinaryLiteralType):
+        return f'0x"{t.value.hex()}"'
     if isinstance(t, ty.StringType):
         length = f'<length={t.length}>' if t.length is not None else ''
         return f'string{length}'
@@ -197,6 +199,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'IndexAssign'
     if isinstance(node, hir.String):
         return f'String({node.content!r})'
+    if isinstance(node, hir.BasedString):
+        return f'BasedString({node.prefix}, {node.content.hex()})'
     if isinstance(node, hir.StringLength):
         return 'StringLength'
     if isinstance(node, hir.StringIndex):
@@ -593,6 +597,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _text('true' if node.value else 'false')
     if isinstance(node, hir.String):
         return _text(repr(node.content))
+    if isinstance(node, hir.BasedString):
+        return _text(f'{node.prefix}"{node.digits}"')
     if isinstance(node, hir.StringLength):
         return _seq(_to_doc(node.string, _CALL_PREC, indent), _text('.length'))
     if isinstance(node, hir.StringIndex):
