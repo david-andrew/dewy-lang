@@ -34,7 +34,6 @@ let arm_loop_end_labels:int = 0
 let arm_fn_labels:int = 0
 let arm_global_labels:int = 0
 let arm_string_labels:int = 0
-let arm_array_labels:int = 0
 let arm_static_labels:int = 0
 
 let arm_alloc_state = ():>void => {
@@ -51,7 +50,6 @@ let arm_alloc_state = ():>void => {
     arm_fn_labels = intmap_new()
     arm_global_labels = intmap_new()
     arm_string_labels = intmap_new()
-    arm_array_labels = intmap_new()
     arm_static_labels = intmap_new()
     return void
 }
@@ -546,34 +544,6 @@ let arm_intern_string = (data:int len:int):>int => {
     return label_id
 }
 
-let arm_intern_array = (elems_vec:int kinds_vec:int):>int => {
-    let label_id:int = arm_next_label
-    let label:int = arm_new_label("arr")
-    intmap_put(arm_array_labels label_id label)
-    let n:int = vec_len(elems_vec)
-    let bb:int = bb_new(64 + str_len(label))
-    bb_push_str(bb ".section .data.")
-    bb_push_str(bb label)
-    bb_push_str(bb ",\"aw\",@progbits")
-    vec_push(arm_data bb_finalize_as_string(bb))
-    arm_emit_data_label(label)
-    let bb2:int = bb_new(32)
-    bb_push_str(bb2 "    .xword ")
-    bb_push_int(bb2 n)
-    vec_push(arm_data bb_finalize_as_string(bb2))
-    let i:int = 0
-    loop i <? n {
-        let kind:int = vec_get(kinds_vec i)
-        let val:int = vec_get(elems_vec i)
-        let line:int = bb_new(32)
-        bb_push_str(line "    .xword ")
-        if kind =? 1 { bb_push_int(line val) } else { bb_push_str(line val) }
-        vec_push(arm_data bb_finalize_as_string(line))
-        i = i + 1
-    }
-    return label_id
-}
-
 let arm_define_global = (name:int kind:int value:int):>int => {
     let label_id:int = arm_next_label
     let label:int = 0
@@ -649,12 +619,6 @@ let arm_push_string_ref = (label_id:int):>void => {
     return void
 }
 
-let arm_push_array_ref = (label_id:int):>void => {
-    arm_emit_adrp_add("x0" intmap_get(arm_array_labels label_id))
-    arm_emit_indented("add x0, x0, #8")
-    return void
-}
-
 let arm_push_global_ref = (label_id:int):>void => {
     arm_emit_adrp_add("x0" intmap_get(arm_global_labels label_id))
     return void
@@ -681,14 +645,6 @@ let arm_function_ref = (label_id:int):>int => { return intmap_get(arm_fn_labels 
 
 let arm_string_ref = (label_id:int):>int => {
     let label:int = intmap_get(arm_string_labels label_id)
-    let bb:int = bb_new(str_len(label) + 4)
-    bb_push_str(bb label)
-    bb_push_str(bb "+8")
-    return bb_finalize_as_string(bb)
-}
-
-let arm_array_ref = (label_id:int):>int => {
-    let label:int = intmap_get(arm_array_labels label_id)
     let bb:int = bb_new(str_len(label) + 4)
     bb_push_str(bb label)
     bb_push_str(bb "+8")
@@ -1578,19 +1534,16 @@ let arm_install_backend = ():>void => {
     be_set_module_init = arm_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
     be_intern_string = arm_intern_string
-    be_intern_array = arm_intern_array
     be_define_global = arm_define_global
     be_declare_extern_global = arm_declare_extern_global
     be_intern_static = arm_intern_static
     be_push_string_ref = arm_push_string_ref
-    be_push_array_ref = arm_push_array_ref
     be_push_global_ref = arm_push_global_ref
     be_push_static_ref = arm_push_static_ref
     be_load_global = arm_load_global
     be_store_global = arm_store_global
     be_function_ref = arm_function_ref
     be_string_ref = arm_string_ref
-    be_array_ref = arm_array_ref
     be_static_ref = arm_static_ref
     be_declare_function = arm_declare_function
     be_bind_extern_function = arm_bind_extern_function

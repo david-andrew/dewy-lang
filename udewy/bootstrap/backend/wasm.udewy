@@ -43,9 +43,6 @@ let w_fn_param_counts:int = 0
 let w_indirect_arities:int = 0 # intset
 let w_global_offsets:int = 0
 let w_string_offsets:int = 0
-let w_array_offsets:int = 0
-let w_array_elements:int = 0
-let w_array_kinds:int = 0
 let w_static_offsets:int = 0
 let w_next_fn_index:int = 0
 
@@ -75,9 +72,6 @@ let w_alloc_state = ():>void => {
     w_fn_param_counts = intmap_new()
     w_global_offsets = intmap_new()
     w_string_offsets = intmap_new()
-    w_array_offsets = intmap_new()
-    w_array_elements = intmap_new()
-    w_array_kinds = intmap_new()
     w_static_offsets = intmap_new()
     w_user_main_name = w_str("$__main__")
     w_add_host_imports()
@@ -218,7 +212,7 @@ let w_set_reachable_functions = (s:int):>void => {
 }
 
 # Resolve a reference value (string like ".str3+8" or ".global2") to an offset.
-# Used when emitting array/global initializers.
+# Used when emitting global initializers.
 let w_resolve_data_ref = (value:int):>int => {
     # Detect "+8" suffix.
     let vlen:int = str_len(value)
@@ -231,15 +225,11 @@ let w_resolve_data_ref = (value:int):>int => {
     let prefix_len:int = vlen
     if has_plus8 { prefix_len = vlen - 2 }
 
-    # Match against generated label patterns: ".strN", ".arrN", ".staticN", ".globalN"
+    # Match against generated label patterns: ".strN", ".staticN", ".globalN"
     if has_plus8 {
         if str_eq_len(value 4 ".str" 4) {
             let id:int = w_parse_int(value 4 prefix_len)
             return intmap_get(w_string_offsets id) + 8
-        }
-        if str_eq_len(value 4 ".arr" 4) {
-            let id:int = w_parse_int(value 4 prefix_len)
-            return intmap_get(w_array_offsets id) + 8
         }
     }
     if str_eq_len(value 7 ".static" 7) {
@@ -277,25 +267,6 @@ let w_intern_string = (data:int len:int):>int => {
     }
     let offset:int = w_alloc_data(full len + 8)
     intmap_put(w_string_offsets label_id offset)
-    return label_id
-}
-
-let w_intern_array = (elems_vec:int kinds_vec:int):>int => {
-    let label_id:int = w_next_label
-    w_next_label = w_next_label + 1
-    let n:int = vec_len(elems_vec)
-    let buf:int = arena_alloc((n + 1) * 8)
-    w_encode_i64_le(buf n)
-    # elements are already resolved offsets (or ints for SV_INT); store directly.
-    let i:int = 0
-    loop i <? n {
-        w_encode_i64_le(buf + (i + 1) * 8 vec_get(elems_vec i))
-        i = i + 1
-    }
-    let offset:int = w_alloc_data(buf (n + 1) * 8)
-    intmap_put(w_array_offsets label_id offset)
-    intmap_put(w_array_elements label_id elems_vec)
-    intmap_put(w_array_kinds label_id kinds_vec)
     return label_id
 }
 
@@ -354,11 +325,6 @@ let w_push_string_ref = (label_id:int):>void => {
     return void
 }
 
-let w_push_array_ref = (label_id:int):>void => {
-    w_emit_const_i64(intmap_get(w_array_offsets label_id) + 8)
-    return void
-}
-
 let w_push_global_ref = (label_id:int):>void => {
     w_emit_const_i64(intmap_get(w_global_offsets label_id))
     return void
@@ -388,7 +354,6 @@ let w_function_ref = (label_id:int):>int => {
 }
 
 let w_string_ref = (label_id:int):>int => { return intmap_get(w_string_offsets label_id) + 8 }
-let w_array_ref = (label_id:int):>int => { return intmap_get(w_array_offsets label_id) + 8 }
 let w_static_ref = (label_id:int):>int => { return intmap_get(w_static_offsets label_id) }
 
 # --- Functions ---
@@ -3278,19 +3243,16 @@ let w_install_backend = ():>void => {
     be_set_module_init = w_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
     be_intern_string = w_intern_string
-    be_intern_array = w_intern_array
     be_define_global = w_define_global
     be_declare_extern_global = w_declare_extern_global
     be_intern_static = w_intern_static
     be_push_string_ref = w_push_string_ref
-    be_push_array_ref = w_push_array_ref
     be_push_global_ref = w_push_global_ref
     be_push_static_ref = w_push_static_ref
     be_load_global = w_load_global
     be_store_global = w_store_global
     be_function_ref = w_function_ref
     be_string_ref = w_string_ref
-    be_array_ref = w_array_ref
     be_static_ref = w_static_ref
     be_declare_function = w_declare_function
     be_bind_extern_function = w_bind_extern_function

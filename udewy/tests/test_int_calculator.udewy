@@ -58,7 +58,12 @@ let print_int = (x:int):>void => {
         return void
     }
 
-    let digits:array<int> = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+    let digits:int = __alloca__(160)
+    let digit_idx:int = 0
+    loop digit_idx <? 20 {
+        __store__(0 digits + digit_idx * 8)
+        digit_idx += 1
+    }
     let n:int = 0
     loop x >? 0 {
         __store__(x % 10 + CH_0 digits + n * 8)

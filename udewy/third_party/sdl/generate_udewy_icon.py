@@ -7,9 +7,7 @@ from PIL import Image
 
 
 ICON_MAGIC = 0x55444557_5949434F
-ICON_FORMAT_VERSION = 0x00000001_00000001
-PIXELS_PER_WORD = 2
-WORDS_PER_LINE = 8
+BYTES_PER_LINE = 32
 
 
 def normalize_symbol_name(name: str) -> str:
@@ -25,23 +23,11 @@ def derive_symbol_name(stem: str) -> str:
     return normalize_symbol_name(stem)
 
 
-def format_word(word: int) -> str:
-    upper = (word >> 32) & 0xFFFF_FFFF
-    lower = word & 0xFFFF_FFFF
-    return f"0x{upper:08x}_{lower:08x}"
-
-
-def pack_pixels(rgba_bytes: bytes) -> list[int]:
-    pixels = [
-        int.from_bytes(rgba_bytes[index : index + 4], "big")
-        for index in range(0, len(rgba_bytes), 4)
+def format_hex_lines(data: bytes) -> list[str]:
+    return [
+        f"    {data[offset : offset + BYTES_PER_LINE].hex()}"
+        for offset in range(0, len(data), BYTES_PER_LINE)
     ]
-    packed_words: list[int] = []
-    for index in range(0, len(pixels), PIXELS_PER_WORD):
-        first = pixels[index]
-        second = pixels[index + 1] if index + 1 < len(pixels) else 0
-        packed_words.append((first << 32) | second)
-    return packed_words
 
 
 def render_icon_module(
@@ -49,28 +35,28 @@ def render_icon_module(
     symbol_name: str,
     width: int,
     height: int,
-    packed_words: list[int],
+    rgba_bytes: bytes,
     source_path: Path,
 ) -> str:
+    header = b"".join(
+        value.to_bytes(8, "big")
+        for value in (
+            ICON_MAGIC,
+            width,
+            height,
+        )
+    )
     lines = [
         f"# Generated from {source_path.name} by generate_udewy_icon.py.",
         "",
-        f"const {symbol_name}:array<uint64> = [",
-        f"    {format_word(ICON_MAGIC)}",
-        f"    {format_word(ICON_FORMAT_VERSION)}",
-        f"    {width}",
-        f"    {height}",
-        f"    {len(packed_words)}",
+        f'const {symbol_name}:int = 0x"',
+        "    # magic, width, height",
+        *format_hex_lines(header),
+        "    # RGBA pixels in row-major wire order",
+        *format_hex_lines(rgba_bytes),
+        '"',
+        "",
     ]
-    for offset in range(0, len(packed_words), WORDS_PER_LINE):
-        chunk = packed_words[offset : offset + WORDS_PER_LINE]
-        lines.append(f"    {' '.join(format_word(word) for word in chunk)}")
-    lines.extend(
-        [
-            "]",
-            "",
-        ]
-    )
     return "\n".join(lines)
 
 
@@ -87,7 +73,7 @@ def generate_icon_module(
     with Image.open(input_image) as image:
         rgba_image = image.convert("RGBA")
         width, height = rgba_image.size
-        packed_words = pack_pixels(rgba_image.tobytes())
+        rgba_bytes = rgba_image.tobytes()
 
     output_udewy.parent.mkdir(parents=True, exist_ok=True)
     output_udewy.write_text(
@@ -95,7 +81,7 @@ def generate_icon_module(
             symbol_name=symbol_name,
             width=width,
             height=height,
-            packed_words=packed_words,
+            rgba_bytes=rgba_bytes,
             source_path=input_image,
         )
     )
@@ -103,7 +89,7 @@ def generate_icon_module(
 
 
 def build_argument_parser() -> ArgumentParser:
-    parser = ArgumentParser(description="Generate a packed udewy icon-data module from an image.")
+    parser = ArgumentParser(description="Generate a udewy RGBA icon-data module from an image.")
     parser.add_argument("input_image", type=Path, help="Path to the source image.")
     parser.add_argument(
         "output_udewy",

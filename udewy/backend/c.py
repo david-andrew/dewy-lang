@@ -105,12 +105,6 @@ def _c_capability_for_source(path: Path) -> str | None:
 
 
 @dataclass
-class _ArrayInit:
-    name: str
-    elements: list[int | str]
-
-
-@dataclass
 class _FunctionBuilder:
     label_id: int
     name: str
@@ -149,8 +143,6 @@ class CBackend(Backend):
 
         self._string_names: dict[int, str] = {}
         self._string_contents: dict[int, bytes] = {}
-        self._array_names: dict[int, str] = {}
-        self._array_initializers: dict[int, _ArrayInit] = {}
         self._static_names: dict[int, str] = {}
         self._static_sizes: dict[int, int] = {}
 
@@ -270,10 +262,6 @@ class CBackend(Backend):
         name = self._string_names[label_id]
         return f"((udewy_word)(uintptr_t)(((unsigned char *)&{name}) + sizeof(udewy_word)))"
 
-    def _array_data_expr(self, label_id: int) -> str:
-        name = self._array_names[label_id]
-        return f"((udewy_word)(uintptr_t)(((unsigned char *)&{name}) + sizeof(udewy_word)))"
-
     def _static_data_expr(self, label_id: int) -> str:
         return self._symbol_expr(self._static_names[label_id])
 
@@ -298,9 +286,6 @@ class CBackend(Backend):
         if not content:
             return "0"
         return ", ".join(str(byte) for byte in content)
-
-    def _pure_int_array(self, elements: list[int | str]) -> bool:
-        return all(isinstance(elem, int) for elem in elements)
 
     def _pure_int_initializer(self, value: int | str) -> bool:
         return isinstance(value, int)
@@ -627,12 +612,6 @@ class CBackend(Backend):
     def _render_backend_init(self) -> str | None:
         lines: list[str] = []
 
-        for array_init in self._array_initializers.values():
-            for idx, elem in enumerate(array_init.elements):
-                if isinstance(elem, int):
-                    continue
-                lines.append(f"    {array_init.name}.data[{idx}] = {elem};")
-
         for label_id, init in self._global_initializers.items():
             if isinstance(init, int):
                 continue
@@ -801,26 +780,6 @@ class CBackend(Backend):
                 )
             )
 
-        for label_id in sorted(self._array_names):
-            array_init = self._array_initializers[label_id]
-            width = max(1, len(array_init.elements))
-            if self._pure_int_array(array_init.elements):
-                init_values = ", ".join(_u64_literal(elem) for elem in array_init.elements)
-                if not init_values:
-                    init_values = "UINT64_C(0)"
-            else:
-                init_values = "UINT64_C(0)"
-            parts.append(
-                "\n".join(
-                    [
-                        f"static struct {{ udewy_word len; udewy_word data[{width}]; }} {array_init.name} = {{",
-                        f"    {_u64_literal(len(array_init.elements))},",
-                        f"    {{ {init_values} }},",
-                        "};",
-                    ]
-                )
-            )
-
         for label_id in sorted(self._static_names):
             name = self._static_names[label_id]
             size = max(1, self._static_sizes[label_id])
@@ -964,20 +923,13 @@ class CBackend(Backend):
         self._module_init_name = name
 
     # ========================================================================
-    # Data section - strings, arrays, globals
+    # Data section - strings and globals
     # ========================================================================
 
     def intern_string(self, content: bytes) -> int:
         label_id = self._alloc_label_id()
         self._string_names[label_id] = f"udewy_string_{label_id}"
         self._string_contents[label_id] = content
-        return label_id
-
-    def intern_array(self, elements: list[int | str]) -> int:
-        label_id = self._alloc_label_id()
-        name = f"udewy_array_{label_id}"
-        self._array_names[label_id] = name
-        self._array_initializers[label_id] = _ArrayInit(name=name, elements=elements)
         return label_id
 
     def define_global(self, name: str | None, value: int | str) -> int:
@@ -1003,9 +955,6 @@ class CBackend(Backend):
     def push_string_ref(self, label_id: int) -> None:
         self._set_current(self._string_data_expr(label_id))
 
-    def push_array_ref(self, label_id: int) -> None:
-        self._set_current(self._array_data_expr(label_id))
-
     def push_global_ref(self, label_id: int) -> None:
         self._set_current(self._symbol_expr(self._global_names[label_id]))
 
@@ -1023,9 +972,6 @@ class CBackend(Backend):
 
     def string_ref(self, label_id: int) -> str:
         return self._string_data_expr(label_id)
-
-    def array_ref(self, label_id: int) -> str:
-        return self._array_data_expr(label_id)
 
     def static_ref(self, label_id: int) -> str:
         return self._static_data_expr(label_id)

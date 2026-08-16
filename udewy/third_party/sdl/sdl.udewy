@@ -35,7 +35,6 @@ const SDL_GL_CONTEXT_PROFILE_COMPATIBILITY:int = 0x0002
 const SDL_PIXELFORMAT_RGBA8888:int = 0x16462004
 const SDL_PIXELFORMAT_ABGR8888:int = 0x16762004
 const SDL_UDEWY_ICON_MAGIC:int = 0x55444557_5949434f
-const SDL_UDEWY_ICON_FORMAT_VERSION:int = 0x00000001_00000001
 
 const GL_COLOR_BUFFER_BIT:int = 0x00004000
 const GL_DEPTH_BUFFER_BIT:int = 0x00000100
@@ -191,40 +190,34 @@ let SDL_RGBA32PixelFormat = ():>int => {
     return SDL_PIXELFORMAT_ABGR8888
 }
 
-let SDL_WriteRGBA32Pixel = (buf:int offset:int pixel:int):>void => {
-    __store_u8__(((pixel >> 24) and 255) (buf + offset))
-    __store_u8__(((pixel >> 16) and 255) (buf + offset + 1))
-    __store_u8__(((pixel >> 8) and 255) (buf + offset + 2))
-    __store_u8__((pixel and 255) (buf + offset + 3))
-    return 0
+let SDL_LoadBEU64 = (data:int offset:int):>int => {
+    let value:int = 0
+    let i:int = 0
+    loop i <? 8 {
+        value = (value << 8) or __load_u8__(data + offset + i)
+        i += 1
+    }
+    return value
 }
 
 let SDL_SetWindowIconFromUdewyData = (window:int icon_data:int):>int => {
-    if __load_u64__(icon_data) not=? SDL_UDEWY_ICON_MAGIC {
-        return 0
-    }
-    if __load_u64__(icon_data + 8) not=? SDL_UDEWY_ICON_FORMAT_VERSION {
+    if SDL_LoadBEU64(icon_data 0) not=? SDL_UDEWY_ICON_MAGIC {
         return 0
     }
 
-    let width:int = __load_u64__(icon_data + 16)
-    let height:int = __load_u64__(icon_data + 24)
-    let packed_word_count:int = __load_u64__(icon_data + 32)
+    let width:int = SDL_LoadBEU64(icon_data 8)
+    let height:int = SDL_LoadBEU64(icon_data 16)
     let pixel_count:int = width * height
     let pixel_buf:int = __alloca__(pixel_count * 4)
-    let word_idx:int = 0
     let pixel_idx:int = 0
-    loop word_idx <? packed_word_count {
-        let word:int = __load_u64__(icon_data + 40 + (word_idx * 8))
-        let pixel0:int = (word >> 32) and 0xFFFF_FFFF
-        SDL_WriteRGBA32Pixel(pixel_buf (pixel_idx * 4) pixel0)
+    loop pixel_idx <? pixel_count {
+        let source:int = icon_data + 24 + pixel_idx * 4
+        let destination:int = pixel_buf + pixel_idx * 4
+        __store_u8__(__load_u8__(source) destination)
+        __store_u8__(__load_u8__(source + 1) destination + 1)
+        __store_u8__(__load_u8__(source + 2) destination + 2)
+        __store_u8__(__load_u8__(source + 3) destination + 3)
         pixel_idx += 1
-        if pixel_idx <? pixel_count {
-            let pixel1:int = word and 0xFFFF_FFFF
-            SDL_WriteRGBA32Pixel(pixel_buf (pixel_idx * 4) pixel1)
-            pixel_idx += 1
-        }
-        word_idx += 1
     }
 
     let surface:int = SDL_CreateSurfaceFrom(width height SDL_RGBA32PixelFormat() pixel_buf width * 4)

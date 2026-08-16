@@ -13,51 +13,52 @@ import p"./t0.udewy"
 const TK_IDENT:int          = 1
 const TK_IDENT_CALL:int     = 2
 const TK_STRING:int         = 3
-const TK_TYPE_PARAM:int     = 4
-const TK_VOID:int           = 5
-const TK_NUMBER:int         = 6
-const TK_LET:int            = 7
-const TK_CONST:int          = 8
-const TK_IF:int             = 9
-const TK_LOOP:int           = 10
-const TK_ELSE:int           = 11
-const TK_RETURN:int         = 12
-const TK_BREAK:int          = 13
-const TK_CONTINUE:int       = 14
-const TK_EXTERN:int         = 15
-const TK_PLUS:int           = 16
-const TK_MINUS:int          = 17
-const TK_MUL:int            = 18
-const TK_IDIV:int           = 19
-const TK_MOD:int            = 20
-const TK_EQ:int             = 21
-const TK_NOT_EQ:int         = 22
-const TK_GT:int             = 23
-const TK_GT_EQ:int          = 24
-const TK_LT:int             = 25
-const TK_LT_EQ:int          = 26
-const TK_AND:int            = 27
-const TK_OR:int             = 28
-const TK_XOR:int            = 29
-const TK_NOT:int            = 30
-const TK_LEFT_SHIFT:int     = 31
-const TK_RIGHT_SHIFT:int    = 32
-const TK_ASSIGN:int         = 33
-const TK_UPDATE_ASSIGN:int  = 34
-const TK_EXPR_CALL:int      = 35
-const TK_LEFT_PAREN:int     = 36
-const TK_RIGHT_PAREN:int    = 37
-const TK_LEFT_BRACE:int     = 38
-const TK_RIGHT_BRACE:int    = 39
-const TK_LEFT_BRACKET:int   = 40
-const TK_RIGHT_BRACKET:int  = 41
-const TK_COLON_TMP:int      = 42   # _TK_COLON
-const TK_FN_COLON_TMP:int   = 43   # _TK_FN_COLON
-const TK_TYPE:int           = 44
-const TK_FN_TYPE:int        = 45
-const TK_FN_ARROW:int       = 46
-const TK_PIPE:int           = 47
-const TK_TRANSMUTE:int      = 48
+const TK_BASED_STRING:int   = 4
+const TK_TYPE_PARAM:int     = 5
+const TK_VOID:int           = 6
+const TK_NUMBER:int         = 7
+const TK_LET:int            = 8
+const TK_CONST:int          = 9
+const TK_IF:int             = 10
+const TK_LOOP:int           = 11
+const TK_ELSE:int           = 12
+const TK_RETURN:int         = 13
+const TK_BREAK:int          = 14
+const TK_CONTINUE:int       = 15
+const TK_EXTERN:int         = 16
+const TK_PLUS:int           = 17
+const TK_MINUS:int          = 18
+const TK_MUL:int            = 19
+const TK_IDIV:int           = 20
+const TK_MOD:int            = 21
+const TK_EQ:int             = 22
+const TK_NOT_EQ:int         = 23
+const TK_GT:int             = 24
+const TK_GT_EQ:int          = 25
+const TK_LT:int             = 26
+const TK_LT_EQ:int          = 27
+const TK_AND:int            = 28
+const TK_OR:int             = 29
+const TK_XOR:int            = 30
+const TK_NOT:int            = 31
+const TK_LEFT_SHIFT:int     = 32
+const TK_RIGHT_SHIFT:int    = 33
+const TK_ASSIGN:int         = 34
+const TK_UPDATE_ASSIGN:int  = 35
+const TK_EXPR_CALL:int      = 36
+const TK_LEFT_PAREN:int     = 37
+const TK_RIGHT_PAREN:int    = 38
+const TK_LEFT_BRACE:int     = 39
+const TK_RIGHT_BRACE:int    = 40
+const TK_LEFT_BRACKET:int   = 41
+const TK_RIGHT_BRACKET:int  = 42
+const TK_COLON_TMP:int      = 43   # _TK_COLON
+const TK_FN_COLON_TMP:int   = 44   # _TK_FN_COLON
+const TK_TYPE:int           = 45
+const TK_FN_TYPE:int        = 46
+const TK_FN_ARROW:int       = 47
+const TK_PIPE:int           = 48
+const TK_TRANSMUTE:int      = 49
 
 # ----------------------------------------------------------------------------
 # Characters
@@ -398,6 +399,46 @@ let t1_is_digit = (c:int):>int => {
     return t0_is_digit(c)
 }
 
+let t1_based_string_end = (src:int n:int start:int):>int => {
+    let base:int = __load_u8__(src + start + 1)
+    let i:int = start + 3
+    loop i <? n {
+        let c:int = __load_u8__(src + i)
+        if c =? T1_CH_DQUOTE { return i + 1 }
+        if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_LF) or (c =? CH_CR) or (c =? T1_CH_UNDERSCORE) {
+            i = i + 1
+            continue
+        }
+        if c =? T1_CH_HASH {
+            i = i + 1
+            loop (i <? n) and (__load_u8__(src + i) not=? CH_LF) {
+                i = i + 1
+            }
+            continue
+        }
+        let valid:int = false
+        if base =? 98 {
+            valid = (c =? 48) or (c =? 49)
+        } else {
+            valid = t1_is_hex_digit(c)
+        }
+        if not valid {
+            let bb:int = bb_new(40)
+            if base =? 98 {
+                bb_push_str(bb "invalid base-2 string digit '")
+            } else {
+                bb_push_str(bb "invalid base-16 string digit '")
+            }
+            bb_push_byte(bb c)
+            bb_push_byte(bb 39)
+            diag_error(i bb_finalize_as_string(bb))
+        }
+        i = i + 1
+    }
+    diag_error(start "unterminated based string")
+    return n
+}
+
 # Main tokenizer. `src` is a length-prefixed udewy string (length at -8).
 let t1_tokenize = (src:int):>int => {
     let n:int = str_len(src)
@@ -431,6 +472,17 @@ let t1_tokenize = (src:int):>int => {
                 i = i + 1
             }
             continue
+        }
+
+        # based string
+        if (c =? 48) and (i + 2 <? n) {
+            let base:int = __load_u8__(src + i + 1)
+            if ((base =? 98) or (base =? 120)) and (__load_u8__(src + i + 2) =? T1_CH_DQUOTE) {
+                let based_start:int = i
+                i = t1_based_string_end(src n based_start)
+                ts_push(ts i - based_start based_start TK_BASED_STRING)
+                continue
+            }
         }
 
         # identifier / keyword
@@ -666,7 +718,7 @@ let t1_tokenize = (src:int):>int => {
 
 # Return the identifier-like substring (length-prefixed udewy string) for
 # token idx. Works for TK_IDENT, TK_IDENT_CALL, TK_TYPE, TK_FN_TYPE,
-# TK_TYPE_PARAM, TK_STRING.
+# TK_TYPE_PARAM, TK_STRING, TK_BASED_STRING.
 let t1_token_text = (ts:int idx:int):>int => {
     let loc:int = ts_location(ts idx)
     let val:int = ts_value(ts idx)
@@ -685,6 +737,7 @@ let t1_kind_name = (kind:int):>int => {
     if kind =? TK_IDENT { return "TK_IDENT" }
     if kind =? TK_IDENT_CALL { return "TK_IDENT_CALL" }
     if kind =? TK_STRING { return "TK_STRING" }
+    if kind =? TK_BASED_STRING { return "TK_BASED_STRING" }
     if kind =? TK_TYPE_PARAM { return "TK_TYPE_PARAM" }
     if kind =? TK_VOID { return "TK_VOID" }
     if kind =? TK_NUMBER { return "TK_NUMBER" }
@@ -779,7 +832,7 @@ let t1_dump_token = (ts:int idx:int):>int => {
     } else if kind =? TK_TYPE_PARAM {
         bb_push_byte(bb CH_SPACE)
         bb_push_bytes(bb src + loc val)
-    } else if kind =? TK_STRING {
+    } else if (kind =? TK_STRING) or (kind =? TK_BASED_STRING) {
         bb_push_byte(bb CH_SPACE)
         bb_push_bytes(bb src + loc val)
     } else if kind =? TK_NUMBER {

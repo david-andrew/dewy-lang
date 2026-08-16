@@ -8,7 +8,7 @@ but it uses ordinary Python data structures for symbol tracking.
 from dataclasses import dataclass, field
 from typing import Literal
 
-from . import t1
+from . import t0, t1
 from .backend import Backend
 from .diagnostics import error, warning
 
@@ -30,7 +30,7 @@ class FunctionEntry:
     is_extern: bool = False
 
 
-StableValueKind = Literal["int", "function", "string", "array", "static"]
+StableValueKind = Literal["int", "function", "string", "static"]
 
 
 @dataclass(frozen=True)
@@ -156,6 +156,48 @@ def decode_string_literal(src: str, start: int, length: int) -> bytes:
     return bytes(processed)
 
 
+def decode_based_string_literal(src: str, start: int, length: int) -> bytes:
+    base = src[start + 1]
+    digit_width = 1 if base == 'b' else 4
+    processed: list[int] = []
+    byte = 0
+    used_bits = 0
+    i = start + 3
+    end = start + length - 1
+
+    while i < end:
+        c = src[i]
+        if c in t0.whitespace or c == '_':
+            i += 1
+            continue
+        if c == '#':
+            i += 1
+            while i < end and src[i] != '\n':
+                i += 1
+            continue
+
+        value = ord(c) - ord('0') if base == 'b' else t0.hex_value(c)
+        byte = byte << digit_width | value
+        used_bits += digit_width
+        if used_bits == 8:
+            processed.append(byte)
+            byte = 0
+            used_bits = 0
+        i += 1
+
+    if used_bits:
+        processed.append(byte << (8 - used_bits))
+    return bytes(processed)
+
+
+def decode_string_token(src: str, token: t1.Token) -> bytes:
+    length = token.value
+    assert isinstance(length, int)
+    if token.kind == t1.Kind.TK_BASED_STRING:
+        return decode_based_string_literal(src, token.location, length)
+    return decode_string_literal(src, token.location, length)
+
+
 # ============================================================================
 # Symbol table operations
 # ============================================================================
@@ -247,8 +289,6 @@ def stable_value_to_directive(backend: Backend, stable_value: StableValue) -> in
         return backend.function_ref(stable_value.value)
     if stable_value.kind == "string":
         return backend.string_ref(stable_value.value)
-    if stable_value.kind == "array":
-        return backend.array_ref(stable_value.value)
     if stable_value.kind == "static":
         return backend.static_ref(stable_value.value)
     raise ValueError(f"Unknown stable value kind: {stable_value.kind}")
@@ -263,9 +303,6 @@ def push_stable_value(backend: Backend, stable_value: StableValue) -> None:
         return
     if stable_value.kind == "string":
         backend.push_string_ref(stable_value.value)
-        return
-    if stable_value.kind == "array":
-        backend.push_array_ref(stable_value.value)
         return
     if stable_value.kind == "static":
         backend.push_static_ref(stable_value.value)
@@ -341,10 +378,8 @@ def try_parse_stable_expr(
             push_stable_value(backend, stable_value)
         return idx + 2, stable_value
 
-    if kind == t1.Kind.TK_STRING:
-        label_id = backend.intern_string(
-            decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
-        )
+    if kind in (t1.Kind.TK_STRING, t1.Kind.TK_BASED_STRING):
+        label_id = backend.intern_string(decode_string_token(state.src, toks[idx]))
         stable_value = StableValue("string", label_id)
         if emit_runtime:
             push_stable_value(backend, stable_value)
@@ -383,14 +418,6 @@ def try_parse_stable_expr(
             return None
         return new_idx + 1, stable_value
 
-    if kind == t1.Kind.TK_LEFT_BRACKET:
-        elem_directives, new_idx = parse_array_elements(toks, idx + 1, state)
-        label_id = backend.intern_array(elem_directives)
-        stable_value = StableValue("array", label_id)
-        if emit_runtime:
-            push_stable_value(backend, stable_value)
-        return new_idx, stable_value
-
     if kind == t1.Kind.TK_IDENT_CALL:
         name = get_token_name(toks, idx, state.src)
         if name != "__static_alloca__":
@@ -405,59 +432,6 @@ def try_parse_stable_expr(
         return new_idx, stable_value
 
     return None
-
-
-def parse_const_only_ident(name: str, loc: int, state: ParseState) -> int | str | None:
-    stable_value = lookup_stable_value(state.scope_stack, state.global_table, name, state.ctx.builtin_consts)
-    if stable_value is not None:
-        note_stable_value_use(state, stable_value)
-        return stable_value_to_directive(state.backend, stable_value)
-
-    if var_lookup(state.scope_stack, name) is not None or global_lookup(state.global_table, name) is not None:
-        return None
-
-    if type_decl_lookup(state.type_decl_stack, name):
-        error_type_decl_runtime_use(state, name, loc)
-
-    entry = note_function_reference(state.backend, state.fn_table, name, None, loc, state.src)
-    note_fn_use(state, entry.label_id)
-    return state.backend.function_ref(entry.label_id)
-
-
-def parse_array_elements(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[list[int | str], int]:
-    backend = state.backend
-    elem_directives: list[int | str] = []
-
-    while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_BRACKET:
-        elem_kind = toks[idx].kind
-
-        if elem_kind == t1.Kind.TK_NUMBER:
-            value = toks[idx].value
-            assert isinstance(value, int)
-            elem_directives.append(value)
-            idx = idx + 1
-
-        elif elem_kind == t1.Kind.TK_IDENT:
-            name = get_token_name(toks, idx, state.src)
-            directive = parse_const_only_ident(name, toks[idx].location, state)
-            if directive is not None:
-                elem_directives.append(directive)
-            else:
-                error(state.src, toks[idx].location, "Array elements must be constants")
-            idx = idx + 1
-
-        elif elem_kind == t1.Kind.TK_STRING:
-            str_label_id = backend.intern_string(
-                decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
-            )
-            idx = idx + 1
-            elem_directives.append(backend.string_ref(str_label_id))
-
-        else:
-            error(state.src, toks[idx].location, "Array elements must be constants")
-
-    idx = expect(toks, idx, t1.Kind.TK_RIGHT_BRACKET, state)
-    return elem_directives, idx
 
 
 def push_scope(scope_stack: ScopeStack) -> None:
@@ -755,10 +729,8 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
         backend.push_void()
         return idx + 1
     
-    if kind == t1.Kind.TK_STRING:
-        label_id = backend.intern_string(
-            decode_string_literal(state.src, toks[idx].location, tok_name_len(toks, idx))
-        )
+    if kind in (t1.Kind.TK_STRING, t1.Kind.TK_BASED_STRING):
+        label_id = backend.intern_string(decode_string_token(state.src, toks[idx]))
         backend.push_string_ref(label_id)
         return idx + 1
     
@@ -858,13 +830,6 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
         else:
             idx = parse_expr(toks, idx, state, 0)
         idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
-        return idx
-
-    if kind == t1.Kind.TK_LEFT_BRACKET:
-        idx = idx + 1
-        elem_directives, idx = parse_array_elements(toks, idx, state)
-        label_id = backend.intern_array(elem_directives)
-        backend.push_array_ref(label_id)
         return idx
 
     error(state.src, toks[idx].location, f"Unexpected token: {t1.dump_token(toks[idx], state.src)}")
@@ -1055,6 +1020,7 @@ def is_ignored_decl_statement_start(toks: list[t1.Token], idx: int, state: Parse
         t1.Kind.TK_IDENT_CALL,
         t1.Kind.TK_NUMBER,
         t1.Kind.TK_STRING,
+        t1.Kind.TK_BASED_STRING,
         t1.Kind.TK_VOID,
         t1.Kind.TK_LEFT_PAREN,
         t1.Kind.TK_LEFT_BRACKET,
@@ -1105,6 +1071,7 @@ def skip_ignored_atom(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         t1.Kind.TK_TYPE_PARAM,
         t1.Kind.TK_NUMBER,
         t1.Kind.TK_STRING,
+        t1.Kind.TK_BASED_STRING,
         t1.Kind.TK_VOID,
     ):
         return skip_ignored_type_suffix(toks, idx + 1)

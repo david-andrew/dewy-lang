@@ -36,7 +36,6 @@ let rv_loop_end_labels:int = 0
 let rv_fn_labels:int = 0
 let rv_global_labels:int = 0
 let rv_string_labels:int = 0
-let rv_array_labels:int = 0
 let rv_static_labels:int = 0
 
 let rv_alloc_state = ():>void => {
@@ -53,7 +52,6 @@ let rv_alloc_state = ():>void => {
     rv_fn_labels = intmap_new()
     rv_global_labels = intmap_new()
     rv_string_labels = intmap_new()
-    rv_array_labels = intmap_new()
     rv_static_labels = intmap_new()
     return void
 }
@@ -483,35 +481,6 @@ let rv_intern_string = (data:int len:int):>int => {
     return label_id
 }
 
-let rv_intern_array = (elems_vec:int kinds_vec:int):>int => {
-    let label_id:int = rv_next_label
-    let label:int = rv_new_label("arr")
-    intmap_put(rv_array_labels label_id label)
-    let n:int = vec_len(elems_vec)
-    let bb:int = bb_new(64 + str_len(label))
-    bb_push_str(bb ".section .data.")
-    bb_push_str(bb label)
-    bb_push_str(bb ",\"aw\",@progbits")
-    vec_push(rv_data bb_finalize_as_string(bb))
-    rv_emit_data_label(label)
-    let bb2:int = bb_new(32)
-    bb_push_str(bb2 "    .dword ")
-    bb_push_int(bb2 n)
-    vec_push(rv_data bb_finalize_as_string(bb2))
-    let i:int = 0
-    loop i <? n {
-        let kind:int = vec_get(kinds_vec i)
-        let val:int = vec_get(elems_vec i)
-        let line:int = bb_new(32)
-        bb_push_str(line "    .dword ")
-        if kind =? 1 { bb_push_int(line val) }
-        else { bb_push_str(line val) }
-        vec_push(rv_data bb_finalize_as_string(line))
-        i = i + 1
-    }
-    return label_id
-}
-
 let rv_define_global = (name:int kind:int value:int):>int => {
     let label_id:int = rv_next_label
     let label:int = 0
@@ -570,13 +539,6 @@ let rv_push_string_ref = (label_id:int):>void => {
     return void
 }
 
-let rv_push_array_ref = (label_id:int):>void => {
-    let label:int = intmap_get(rv_array_labels label_id)
-    rv_emit_2op("la" "a0" label)
-    rv_emit_indented("addi a0, a0, 8")
-    return void
-}
-
 let rv_push_global_ref = (label_id:int):>void => {
     rv_emit_2op("la" "a0" intmap_get(rv_global_labels label_id))
     return void
@@ -603,14 +565,6 @@ let rv_function_ref = (label_id:int):>int => { return intmap_get(rv_fn_labels la
 
 let rv_string_ref = (label_id:int):>int => {
     let label:int = intmap_get(rv_string_labels label_id)
-    let bb:int = bb_new(str_len(label) + 4)
-    bb_push_str(bb label)
-    bb_push_str(bb "+8")
-    return bb_finalize_as_string(bb)
-}
-
-let rv_array_ref = (label_id:int):>int => {
-    let label:int = intmap_get(rv_array_labels label_id)
     let bb:int = bb_new(str_len(label) + 4)
     bb_push_str(bb label)
     bb_push_str(bb "+8")
@@ -1394,19 +1348,16 @@ let rv_install_backend = ():>void => {
     be_set_module_init = rv_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
     be_intern_string = rv_intern_string
-    be_intern_array = rv_intern_array
     be_define_global = rv_define_global
     be_declare_extern_global = rv_declare_extern_global
     be_intern_static = rv_intern_static
     be_push_string_ref = rv_push_string_ref
-    be_push_array_ref = rv_push_array_ref
     be_push_global_ref = rv_push_global_ref
     be_push_static_ref = rv_push_static_ref
     be_load_global = rv_load_global
     be_store_global = rv_store_global
     be_function_ref = rv_function_ref
     be_string_ref = rv_string_ref
-    be_array_ref = rv_array_ref
     be_static_ref = rv_static_ref
     be_declare_function = rv_declare_function
     be_bind_extern_function = rv_bind_extern_function

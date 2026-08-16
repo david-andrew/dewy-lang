@@ -68,28 +68,30 @@ let sfx_kind:int = 0
 let title_pulse:int = 0
 
 # Map: 0 empty, 1-4 walls, 5 locked exit, 6 open exit. Row-major, y*MAP_W+x
-let map_cells:int = [
-    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
-    1 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 1
-    1 0 0 0 0 0 1 0 2 2 2 0 0 0 1 0 0 0 0 1
-    1 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0 0 3 0 1
-    1 0 0 4 0 0 1 0 0 0 2 0 0 0 1 0 0 3 0 1
-    1 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 1
-    1 1 0 1 1 1 1 1 1 0 1 1 1 1 1 1 0 1 1 1
-    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
-    1 0 2 0 0 0 3 3 3 0 3 3 3 0 0 0 2 0 0 1
-    1 0 2 0 0 0 3 0 0 0 0 0 3 0 0 0 2 0 0 1
-    1 0 2 0 4 0 3 0 0 0 0 0 3 0 4 0 2 0 0 1
-    1 0 2 0 0 0 3 0 0 5 0 0 3 0 0 0 2 0 0 1
-    1 0 0 0 0 0 3 3 3 0 3 3 3 0 0 0 0 0 0 1
-    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
-    1 1 1 0 1 1 1 1 0 1 1 0 1 1 1 1 0 1 1 1
-    1 0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0 0 1
-    1 0 3 3 0 0 1 0 0 4 0 0 0 1 0 0 2 2 0 1
-    1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
-    1 0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0 0 1
-    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
-]
+let map_cells_data:int = 0x"
+    # Map cells, one nibble per cell, row-major.
+    11111111111111111111
+    10000010000000100001
+    10000010222000100001
+    10000000002000000301
+    10040010002000100301
+    10000010000000100001
+    11011111101111110111
+    10000000000000000001
+    10200033303330002001
+    10200030000030002001
+    10204030000030402001
+    10200030050030002001
+    10000033303330000001
+    10000000000000000001
+    11101111011011110111
+    10000010000001000001
+    10330010040001002201
+    10000000000000000001
+    10000010000001000001
+    11111111111111111111
+"
+let map_cells:int = __static_alloca__(3200)
 
 let zbuffer:int = __static_alloca__(2560)
 let tex_pixels:int = __static_alloca__(65536)
@@ -104,46 +106,46 @@ let pickup_y:int = __static_alloca__(48)
 let pickup_kind:int = __static_alloca__(48)
 let pickup_alive:int = __static_alloca__(48)
 
-let font_rows:int = [
-    0 0 0 0 0
-    7 5 5 5 7
-    2 6 2 2 7
-    7 1 7 4 7
-    7 1 7 1 7
-    5 5 7 1 1
-    7 4 7 1 7
-    7 4 7 5 7
-    7 1 1 1 1
-    7 5 7 5 7
-    7 5 7 1 7
-    2 5 7 5 5
-    6 5 6 5 6
-    3 4 4 4 3
-    6 5 5 5 6
-    7 4 6 4 7
-    7 4 6 4 4
-    3 4 5 5 3
-    5 5 7 5 5
-    7 2 2 2 7
-    1 1 1 5 2
-    5 5 6 5 5
-    4 4 4 4 7
-    5 7 7 5 5
-    5 7 7 7 5
-    2 5 5 5 2
-    6 5 6 4 4
-    2 5 5 2 1
-    6 5 6 5 5
-    3 4 2 1 6
-    7 2 2 2 2
-    5 5 5 5 7
-    5 5 5 5 2
-    5 5 7 7 5
-    5 5 2 5 5
-    5 5 2 2 2
-    7 1 2 4 7
-]
+let font_rows:int = 0b"
 
+    000 000 000 000 000
+    111 101 101 101 111
+    010 110 010 010 111
+    111 001 111 100 111
+    111 001 111 001 111
+    101 101 111 001 001
+    111 100 111 001 111
+    111 100 111 101 111
+    111 001 001 001 001
+    111 101 111 101 111
+    111 101 111 001 111
+    010 101 111 101 101
+    110 101 110 101 110
+    011 100 100 100 011
+    110 101 101 101 110
+    111 100 110 100 111
+    111 100 110 100 100
+    011 100 101 101 011
+    101 101 111 101 101
+    111 010 010 010 111
+    001 001 001 101 010
+    101 101 110 101 101
+    100 100 100 100 111
+    101 111 111 101 101
+    101 111 111 111 101
+    010 101 101 101 010
+    110 101 110 100 100
+    010 101 101 010 001
+    110 101 110 101 101
+    011 100 010 001 110
+    111 010 010 010 010
+    101 101 101 101 111
+    101 101 101 101 010
+    101 101 111 111 101
+    101 101 010 101 101
+    101 101 010 010 010
+    111 001 010 100 111
+"
 let text_title:int = "uCRYPT"
 let text_sub:int = "NEON DUNGEON"
 let text_start:int = "SPACE TO ENTER"
@@ -190,6 +192,18 @@ let str_len = (s:int):>int => {
         n += 1
     }
     return n
+}
+
+let initialize_map = ():>void => {
+    let i:int = 0
+    loop i <? (MAP_W * MAP_H) {
+        let byte:int = __load_u8__(map_cells_data + (i // 2))
+        let shift:int = 4
+        if (i % 2) not=? 0 { shift = 0 }
+        __store__((byte >> shift) and 15 map_cells + i * 8)
+        i += 1
+    }
+    return 0
 }
 
 let map_at = (mx:int my:int):>int => {
@@ -357,11 +371,23 @@ let glyph_index = (ch:int):>int => {
     return 0
 }
 
+let packed_bits = (data:int bit_offset:int width:int):>int => {
+    let value:int = 0
+    let i:int = 0
+    loop i <? width {
+        let bit_index:int = bit_offset + i
+        let byte:int = __load_u8__(data + (bit_index // 8))
+        value = (value << 1) or ((byte >> (7 - (bit_index % 8))) and 1)
+        i += 1
+    }
+    return value
+}
+
 let draw_char = (fb:int ch:int x:int y:int scale:int r:int g:int b:int):>void => {
     let gi:int = glyph_index(ch)
     let row:int = 0
     loop row <? 5 {
-        let bits:int = __load__(font_rows + (gi * 5 + row) * 8)
+        let bits:int = packed_bits(font_rows (gi * 5 + row) * 3 3)
         let col:int = 0
         loop col <? 3 {
             if (bits and (4 >> col)) not=? 0 {
@@ -1284,6 +1310,7 @@ let update_title = ():>void => {
 }
 
 let game_init = ():>void => {
+    initialize_map()
     build_textures()
     game_state = STATE_TITLE
     frame = 0

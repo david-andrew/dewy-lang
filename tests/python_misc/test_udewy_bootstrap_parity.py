@@ -51,6 +51,18 @@ let main = ():>int => {
 }
 """
 
+BASED_STRING_SRC = '''
+const data:int = 0x"12 # ignored text
+34"
+
+let main = ():>int => {
+    if __load__(data - 8) not=? 2 { return 1 }
+    if __load_u8__(data) not=? 0x12 { return 2 }
+    if __load_u8__(data + 1) not=? 0x34 { return 3 }
+    return 0
+}
+'''
+
 
 @pytest.fixture(scope="session")
 def bootstrap_binary(tmp_path_factory) -> Path:
@@ -162,3 +174,19 @@ def test_c_helpers_behaviour_matches_between_compilers(bootstrap_binary, tmp_pat
     assert py_exit == 0, f"Python compiler produced a binary that exits {py_exit}"
     assert bs_exit == 0, f"Bootstrap compiler produced a binary that exits {bs_exit}"
     assert py_exit == bs_exit
+
+
+def test_based_string_packing_matches_between_compilers(bootstrap_binary, tmp_path) -> None:
+    if which("cc") is None:
+        pytest.skip("cc not installed")
+
+    py_work = tmp_path / "py"
+    py_work.mkdir()
+    py_bin = _compile_with(["python", "-m", "udewy"], BASED_STRING_SRC, "c", py_work)
+
+    bs_work = tmp_path / "bs"
+    bs_work.mkdir()
+    bs_bin = _compile_with([str(bootstrap_binary)], BASED_STRING_SRC, "c", bs_work)
+
+    assert subprocess.run([str(py_bin)]).returncode == 0
+    assert subprocess.run([str(bs_bin)]).returncode == 0

@@ -65,9 +65,6 @@ let c_global_initializers:int = 0  # intmap label_id -> "<udewy str OR int>"; se
 let c_global_init_is_str:int = 0   # intset of label_ids whose init is a string
 let c_extern_globals:int = 0     # intset
 let c_string_contents:int = 0    # intmap label_id -> bytes-buffer-string
-let c_array_label_ids:int = 0    # vec of label_ids for arrays in insertion order
-let c_array_elements:int = 0     # intmap label_id -> elements vec
-let c_array_kinds:int = 0        # intmap label_id -> kinds vec
 let c_static_sizes:int = 0       # intmap label_id -> size
 
 let c_function_order:int = 0     # vec of label_ids
@@ -94,9 +91,6 @@ let c_alloc_state = ():>void => {
     c_global_init_is_str = intset_new()
     c_extern_globals = intset_new()
     c_string_contents = intmap_new()
-    c_array_label_ids = vec_new(8)
-    c_array_elements = intmap_new()
-    c_array_kinds = intmap_new()
     c_static_sizes = intmap_new()
     c_function_order = vec_new(16)
     c_function_lines = intmap_new()
@@ -440,14 +434,6 @@ let c_string_data_expr = (label_id:int):>int => {
     return bb_finalize_as_string(bb)
 }
 
-let c_array_data_expr = (label_id:int):>int => {
-    let bb:int = bb_new(64)
-    bb_push_str(bb "((udewy_word)(uintptr_t)(((unsigned char *)&udewy_array_")
-    bb_push_int(bb label_id)
-    bb_push_str(bb ") + sizeof(udewy_word)))")
-    return bb_finalize_as_string(bb)
-}
-
 let c_static_data_expr = (label_id:int):>int => {
     let bb:int = bb_new(64)
     bb_push_str(bb "((udewy_word)(uintptr_t)(&udewy_static_")
@@ -545,25 +531,6 @@ let c_intern_string = (data:int len:int):>int => {
     return label_id
 }
 
-let c_intern_array = (elems_vec:int kinds_vec:int):>int => {
-    let label_id:int = c_next_label
-    c_next_label = c_next_label + 1
-    vec_push(c_array_label_ids label_id)
-    # Copy vecs.
-    let e:int = vec_new(vec_len(elems_vec))
-    let k:int = vec_new(vec_len(kinds_vec))
-    let i:int = 0
-    loop i <? vec_len(elems_vec) {
-        vec_push(e vec_get(elems_vec i))
-        vec_push(k vec_get(kinds_vec i))
-        i = i + 1
-    }
-    intmap_put(c_array_elements label_id e)
-    intmap_put(c_array_kinds label_id k)
-    return label_id
-}
-
-# kind is SV_* (1..5). value is int (when SV_INT) or string (otherwise).
 let c_define_global = (name:int kind:int value:int):>int => {
     let label_id:int = c_next_label
     c_next_label = c_next_label + 1
@@ -603,7 +570,6 @@ let c_intern_static = (size:int):>int => {
 }
 
 let c_push_string_ref = (label_id:int):>void => { c_set_current(c_string_data_expr(label_id))  return void }
-let c_push_array_ref = (label_id:int):>void => { c_set_current(c_array_data_expr(label_id))  return void }
 let c_push_global_ref = (label_id:int):>void => { c_set_current(c_symbol_expr(intmap_get(c_global_names label_id)))  return void }
 let c_push_static_ref = (label_id:int):>void => { c_set_current(c_static_data_expr(label_id))  return void }
 
@@ -621,7 +587,6 @@ let c_store_global = (label_id:int):>void => {
 
 let c_function_ref = (label_id:int):>int => { return c_fn_addr_expr(label_id) }
 let c_string_ref = (label_id:int):>int => { return c_string_data_expr(label_id) }
-let c_array_ref = (label_id:int):>int => { return c_array_data_expr(label_id) }
 let c_static_ref = (label_id:int):>int => { return c_static_data_expr(label_id) }
 
 # --- Functions ---
@@ -1440,39 +1405,6 @@ let c_finish_module = ():>int => {
         }
         i = i + 1
     }
-    # Arrays.
-    let ai:int = 0
-    loop ai <? vec_len(c_array_label_ids) {
-        let lid:int = vec_get(c_array_label_ids ai)
-        let elems:int = intmap_get(c_array_elements lid)
-        let kinds:int = intmap_get(c_array_kinds lid)
-        let n:int = vec_len(elems)
-        let w:int = n
-        if w =? 0 { w = 1 }
-        bb_push_str(out "static struct \{ udewy_word len; udewy_word data[")
-        bb_push_int(out w)
-        bb_push_str(out "]; \} udewy_array_")
-        bb_push_int(out lid)
-        bb_push_str(out " = \{\n    ")
-        bb_push_str(out c_u64_literal(n))
-        bb_push_str(out ",\n    \{ ")
-        if n =? 0 {
-            bb_push_str(out "UINT64_C(0)")
-        } else {
-            let k:int = 0
-            loop k <? n {
-                if k >? 0 { bb_push_str(out ", ") }
-                if vec_get(kinds k) =? 1 {
-                    bb_push_str(out c_u64_literal(vec_get(elems k)))
-                } else {
-                    bb_push_str(out "UINT64_C(0)")
-                }
-                k = k + 1
-            }
-        }
-        bb_push_str(out " \},\n\};\n")
-        ai = ai + 1
-    }
     # Statics.
     let si:int = 0
     loop si <? c_next_label {
@@ -1575,31 +1507,8 @@ let c_finish_module = ():>int => {
     }
     bb_push_byte(out 10)
 
-    # --- Backend init for non-trivial globals/arrays ---
+    # --- Backend init for non-trivial globals ---
     let init_lines:int = vec_new(8)
-    let arr_idx:int = 0
-    loop arr_idx <? vec_len(c_array_label_ids) {
-        let lid:int = vec_get(c_array_label_ids arr_idx)
-        let elems:int = intmap_get(c_array_elements lid)
-        let kinds:int = intmap_get(c_array_kinds lid)
-        let n:int = vec_len(elems)
-        let k:int = 0
-        loop k <? n {
-            if vec_get(kinds k) not=? 1 {
-                let bb:int = bb_new(64)
-                bb_push_str(bb "    udewy_array_")
-                bb_push_int(bb lid)
-                bb_push_str(bb ".data[")
-                bb_push_int(bb k)
-                bb_push_str(bb "] = ")
-                bb_push_str(bb vec_get(elems k))
-                bb_push_byte(bb 59)
-                vec_push(init_lines bb_finalize_as_string(bb))
-            }
-            k = k + 1
-        }
-        arr_idx = arr_idx + 1
-    }
     let g2:int = 0
     loop g2 <? c_next_label {
         if intmap_has(c_global_names g2) and (not intset_has(c_extern_globals g2)) {
@@ -1763,19 +1672,16 @@ let c_install_backend = ():>void => {
     be_set_module_init = c_set_module_init
     be_set_imported_sources = c_set_imported_sources
     be_intern_string = c_intern_string
-    be_intern_array = c_intern_array
     be_define_global = c_define_global
     be_declare_extern_global = c_declare_extern_global
     be_intern_static = c_intern_static
     be_push_string_ref = c_push_string_ref
-    be_push_array_ref = c_push_array_ref
     be_push_global_ref = c_push_global_ref
     be_push_static_ref = c_push_static_ref
     be_load_global = c_load_global
     be_store_global = c_store_global
     be_function_ref = c_function_ref
     be_string_ref = c_string_ref
-    be_array_ref = c_array_ref
     be_static_ref = c_static_ref
     be_declare_function = c_declare_function
     be_bind_extern_function = c_bind_extern_function

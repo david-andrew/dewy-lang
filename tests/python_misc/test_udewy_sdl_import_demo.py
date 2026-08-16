@@ -2,14 +2,44 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from udewy import p0, t0, t1
-from udewy.third_party.sdl.desktop_launch import SDL_APP_ID_ENV, SDL_X11_WMCLASS_ENV, default_sdl_icon_source, prepare_sdl_desktop_launch
 from udewy.backend import get_backend
+from udewy.third_party.sdl.desktop_launch import (
+    SDL_APP_ID_ENV,
+    SDL_X11_WMCLASS_ENV,
+    default_sdl_icon_source,
+    prepare_sdl_desktop_launch,
+)
+from udewy.third_party.sdl.generate_udewy_icon import ICON_MAGIC, render_icon_module
 
 
 def test_sdl_demo_collects_link_artifact() -> None:
     loaded = t0.load_program(Path("udewy/tests/demo_sdl3.udewy"))
     assert any(Path(path).name == "libSDL3.a" for path in loaded.link_artifacts)
     assert any(".so" in Path(path).name for path in loaded.link_artifacts)
+
+
+def test_generated_icon_layout_has_raw_rgba_after_header() -> None:
+    rgba = b"\x10\x20\x30\x40"
+    source = render_icon_module(
+        symbol_name="TEST_ICON",
+        width=1,
+        height=1,
+        rgba_bytes=rgba,
+        source_path=Path("test.png"),
+    )
+    token = next(token for token in t1.tokenize(source) if token.kind == t1.Kind.TK_BASED_STRING)
+    length = token.value
+    assert isinstance(length, int)
+    data = p0.decode_based_string_literal(source, token.location, length)
+
+    assert data == b"".join(
+        (
+            ICON_MAGIC.to_bytes(8, "big"),
+            (1).to_bytes(8, "big"),
+            (1).to_bytes(8, "big"),
+            rgba,
+        )
+    )
 
 
 def test_generated_default_icon_module_compiles() -> None:
@@ -23,7 +53,13 @@ def test_generated_default_icon_module_compiles() -> None:
 import p"{icon_module}"
 
 let main = ():>int => {{
-    return __load_u64__(SDL_DEFAULT_WINDOW_ICON_DATA + 16)
+    let width:int = 0
+    let i:int = 0
+    loop i <? 8 {{
+        width = (width << 8) or __load_u8__(SDL_DEFAULT_WINDOW_ICON_DATA + 8 + i)
+        i += 1
+    }}
+    return width
 }}
 """
         )

@@ -59,19 +59,16 @@ let be_set_imported_sources:int = 0   # fn (paths_vec:int):>void
 
 # Data section
 let be_intern_string:int = 0          # fn (data:int len:int):>int
-let be_intern_array:int = 0           # fn (elements_vec:int kinds_vec:int):>int
-let be_define_global:int = 0          # fn (name:int kind:int value:int):>int  kind: 0=int, 1=fn, 2=str, 3=arr, 4=static
+let be_define_global:int = 0          # fn (name:int kind:int value:int):>int  kind: SV_*
 let be_declare_extern_global:int = 0  # fn (name:int):>int
 let be_intern_static:int = 0          # fn (size:int):>int
 let be_push_string_ref:int = 0        # fn (label_id:int):>void
-let be_push_array_ref:int = 0         # fn (label_id:int):>void
 let be_push_global_ref:int = 0        # fn (label_id:int):>void
 let be_push_static_ref:int = 0        # fn (label_id:int):>void
 let be_load_global:int = 0            # fn (label_id:int):>void
 let be_store_global:int = 0           # fn (label_id:int):>void
 let be_function_ref:int = 0           # fn (label_id:int):>int
 let be_string_ref:int = 0             # fn (label_id:int):>int
-let be_array_ref:int = 0              # fn (label_id:int):>int
 let be_static_ref:int = 0             # fn (label_id:int):>int
 
 # Functions

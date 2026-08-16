@@ -13,8 +13,7 @@ import p"./backend/common.udewy"
 const SV_INT:int = 1
 const SV_FN:int = 2
 const SV_STR:int = 3
-const SV_ARR:int = 4
-const SV_STATIC:int = 5
+const SV_STATIC:int = 4
 
 const SV_KIND:int = 0
 const SV_VALUE:int = 8
@@ -296,6 +295,52 @@ let decode_string_literal = (src:int start:int length:int):>int => {
     return bb_finalize_as_string(bb)
 }
 
+let decode_based_string_literal = (src:int start:int length:int):>int => {
+    let base:int = __load_u8__(src + start + 1)
+    let digit_width:int = 4
+    if base =? 98 { digit_width = 1 }
+    let bb:int = bb_new(length)
+    let byte:int = 0
+    let used_bits:int = 0
+    let i:int = start + 3
+    let end:int = start + length - 1
+    loop i <? end {
+        let c:int = __load_u8__(src + i)
+        if (c =? CH_SPACE) or (c =? CH_TAB) or (c =? CH_LF) or (c =? CH_CR) or (c =? 95) {
+            i = i + 1
+            continue
+        }
+        if c =? 35 {
+            i = i + 1
+            loop (i <? end) and (__load_u8__(src + i) not=? CH_LF) {
+                i = i + 1
+            }
+            continue
+        }
+        let value:int = c - 48
+        if base not=? 98 { value = t1_hex_value(c) }
+        byte = (byte << digit_width) or value
+        used_bits = used_bits + digit_width
+        if used_bits =? 8 {
+            bb_push_byte(bb byte)
+            byte = 0
+            used_bits = 0
+        }
+        i = i + 1
+    }
+    if used_bits >? 0 {
+        bb_push_byte(bb byte << (8 - used_bits))
+    }
+    return bb_finalize_as_string(bb)
+}
+
+let decode_string_token = (state:int idx:int):>int => {
+    if tok_kind(state idx) =? TK_BASED_STRING {
+        return decode_based_string_literal(ps_src(state) tok_location(state idx) tok_value(state idx))
+    }
+    return decode_string_literal(ps_src(state) tok_location(state idx) tok_value(state idx))
+}
+
 # ----------------------------------------------------------------------------
 # Symbol tables
 # ----------------------------------------------------------------------------
@@ -432,7 +477,6 @@ let push_stable_value = (sv:int):>void => {
     if k =? SV_INT { (be_push_const_i64)(v)  return void }
     if k =? SV_FN { (be_push_fn_ref)(v)  return void }
     if k =? SV_STR { (be_push_string_ref)(v)  return void }
-    if k =? SV_ARR { (be_push_array_ref)(v)  return void }
     if k =? SV_STATIC { (be_push_static_ref)(v)  return void }
     eprintl("INTERNAL: unknown stable value kind")
     host_exit(1)
@@ -449,7 +493,6 @@ let stable_value_to_directive_value = (sv:int):>int => {
     if k =? SV_INT { return v }
     if k =? SV_FN { return (be_function_ref)(v) }
     if k =? SV_STR { return (be_string_ref)(v) }
-    if k =? SV_ARR { return (be_array_ref)(v) }
     if k =? SV_STATIC { return (be_static_ref)(v) }
     return 0
 }
@@ -761,9 +804,9 @@ let validate_intrinsic_arity = (state:int name:int arg_count:int loc:int):>void 
 # Stable expression parsing
 # ----------------------------------------------------------------------------
 # Returns the new idx on success (and writes the resolved SV to sv_out), or
-# -1 on no match. Mutually recursive with parse_array_elements,
-# parse_static_alloca_size, parse_expr -- udewy's forward function references
-# let these reference each other directly.
+# -1 on no match. Mutually recursive with parse_static_alloca_size and
+# parse_expr -- udewy's forward function references let these reference each
+# other directly.
 
 let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int => {
     let n:int = tok_count(state)
@@ -784,10 +827,8 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
         __store__(sv sv_out)
         return idx + 2
     }
-    if k =? TK_STRING {
-        let loc:int = tok_location(state idx)
-        let len:int = tok_value(state idx)
-        let bytes:int = decode_string_literal(ps_src(state) loc len)
+    if (k =? TK_STRING) or (k =? TK_BASED_STRING) {
+        let bytes:int = decode_string_token(state idx)
         let label_id:int = (be_intern_string)(bytes str_len(bytes))
         let sv:int = sv_new(SV_STR label_id)
         if emit_runtime { push_stable_value(sv) }
@@ -826,17 +867,6 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
         __store__(__load__(inner_out) sv_out)
         return new_idx + 1
     }
-    if k =? TK_LEFT_BRACKET {
-        let kinds:int = vec_new(4)
-        let elems:int = vec_new(4)
-        let new_idx_out:int = __static_alloca__(8)
-        parse_array_elements(state idx + 1 kinds elems new_idx_out)
-        let label_id:int = (be_intern_array)(elems kinds)
-        let sv:int = sv_new(SV_ARR label_id)
-        if emit_runtime { push_stable_value(sv) }
-        __store__(sv sv_out)
-        return __load__(new_idx_out)
-    }
     if k =? TK_IDENT_CALL {
         let name:int = get_token_name(state idx)
         if not str_eq(name "__static_alloca__") {
@@ -851,67 +881,6 @@ let try_parse_stable_expr = (state:int idx:int emit_runtime:int sv_out:int):>int
         return new_idx
     }
     return -1
-}
-
-# ----------------------------------------------------------------------------
-# Array element parsing
-# ----------------------------------------------------------------------------
-
-let parse_const_only_ident_directive = (state:int name:int loc:int kind_out:int value_out:int):>int => {
-    let sv:int = lookup_stable_value(state name)
-    if sv not=? 0 {
-        note_stable_value_use(state sv)
-        __store__(sv_kind(sv) kind_out)
-        __store__(stable_value_to_directive_value(sv) value_out)
-        return true
-    }
-    if (var_lookup(state name) not=? 0) or (global_lookup(state name) not=? 0) {
-        return false
-    }
-    if type_decl_lookup(state name) {
-        error_type_decl_runtime_use(state name loc)
-    }
-    let entry:int = note_function_reference(state name (-1) loc)
-    note_fn_use(state fe_label(entry))
-    __store__(SV_FN kind_out)
-    __store__((be_function_ref)(fe_label(entry)) value_out)
-    return true
-}
-
-let parse_array_elements = (state:int idx:int kinds:int elems:int idx_out:int):>void => {
-    let n:int = tok_count(state)
-    loop (idx <? n) and (tok_kind(state idx) not=? TK_RIGHT_BRACKET) {
-        let ek:int = tok_kind(state idx)
-        if ek =? TK_NUMBER {
-            vec_push(kinds SV_INT)
-            vec_push(elems tok_value(state idx))
-            idx = idx + 1
-        } else if ek =? TK_IDENT {
-            let name:int = get_token_name(state idx)
-            let kind_out:int = __static_alloca__(8)
-            let value_out:int = __static_alloca__(16) + 8   # avoid collision
-            let ok:int = parse_const_only_ident_directive(state name tok_location(state idx) kind_out value_out)
-            if not ok {
-                diag_error(tok_location(state idx) "Array elements must be constants")
-            }
-            vec_push(kinds __load__(kind_out))
-            vec_push(elems __load__(value_out))
-            idx = idx + 1
-        } else if ek =? TK_STRING {
-            let loc:int = tok_location(state idx)
-            let len:int = tok_value(state idx)
-            let bytes:int = decode_string_literal(ps_src(state) loc len)
-            let label_id:int = (be_intern_string)(bytes str_len(bytes))
-            vec_push(kinds SV_STR)
-            vec_push(elems (be_string_ref)(label_id))
-            idx = idx + 1
-        } else {
-            diag_error(tok_location(state idx) "Array elements must be constants")
-        }
-    }
-    idx = expect(state idx TK_RIGHT_BRACKET)
-    __store__(idx idx_out)
-    return void
 }
 
 # ----------------------------------------------------------------------------
@@ -982,8 +951,8 @@ let parse_atom = (state:int idx:int):>int => {
         (be_push_void)()
         return idx + 1
     }
-    if k =? TK_STRING {
-        let bytes:int = decode_string_literal(ps_src(state) tok_location(state idx) tok_value(state idx))
+    if (k =? TK_STRING) or (k =? TK_BASED_STRING) {
+        let bytes:int = decode_string_token(state idx)
         let label_id:int = (be_intern_string)(bytes str_len(bytes))
         (be_push_string_ref)(label_id)
         return idx + 1
@@ -1093,17 +1062,6 @@ let parse_atom = (state:int idx:int):>int => {
         idx = expect(state idx TK_RIGHT_PAREN)
         return idx
     }
-    if k =? TK_LEFT_BRACKET {
-        idx = idx + 1
-        let kinds:int = vec_new(4)
-        let elems:int = vec_new(4)
-        let idx_out:int = __static_alloca__(8)
-        parse_array_elements(state idx kinds elems idx_out)
-        let label_id:int = (be_intern_array)(elems kinds)
-        (be_push_array_ref)(label_id)
-        return __load__(idx_out)
-    }
-
     diag_error(tok_location(state idx) "Unexpected token")
     return idx
 }
@@ -1239,6 +1197,7 @@ let is_ignored_decl_statement_start = (state:int idx:int):>int => {
     if k =? TK_IDENT_CALL { return true }
     if k =? TK_NUMBER { return true }
     if k =? TK_STRING { return true }
+    if k =? TK_BASED_STRING { return true }
     if k =? TK_VOID { return true }
     if k =? TK_LEFT_PAREN { return true }
     if k =? TK_LEFT_BRACKET { return true }
@@ -1280,7 +1239,7 @@ let skip_ignored_atom = (state:int idx:int):>int => {
         diag_error(str_len(ps_src(state)) "Expected expression in ignored type declaration")
     }
     let k:int = tok_kind(state idx)
-    if (k =? TK_IDENT) or (k =? TK_TYPE) or (k =? TK_TYPE_PARAM) or (k =? TK_NUMBER) or (k =? TK_STRING) or (k =? TK_VOID) {
+    if (k =? TK_IDENT) or (k =? TK_TYPE) or (k =? TK_TYPE_PARAM) or (k =? TK_NUMBER) or (k =? TK_STRING) or (k =? TK_BASED_STRING) or (k =? TK_VOID) {
         return skip_ignored_type_suffix(state idx + 1)
     }
     if k =? TK_IDENT_CALL {

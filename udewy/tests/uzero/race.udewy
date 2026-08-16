@@ -1285,8 +1285,7 @@ let draw_walls = ():>void => {
 # ---------- Cars: load/store + grid init -----------------------------------
 # Per-frame, car_load(idx) pulls everything into the global "scratch"
 # variables, the unified physics_step / ai_compute_input runs against
-# those, then car_store(idx) writes the new state back. This mirrors the
-# stride-packed pattern in demo_sdl_gl_fzero.
+# those, then car_store(idx) writes the new state back.
 
 let car_load = (idx:int):>void => {
     let o:int = CAR_BUF + (idx * CAR_STRIDE)

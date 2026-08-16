@@ -31,28 +31,67 @@ const F64_POS_ONE_EIGHTY:int = __i64_to_f64_bits__(180)
 const F64_POS_TWO_TWENTY:int = __i64_to_f64_bits__(220)
 const F64_POS_THREE_TWENTY:int = __i64_to_f64_bits__(320)
 
-let glyph_mu:int = [0 0 17 17 17 21 24]
-let glyph_Z:int = [31 1 2 4 8 16 31]
-let glyph_E:int = [31 16 30 16 16 16 31]
-let glyph_R:int = [30 17 17 30 20 18 17]
-let glyph_O:int = [14 17 17 17 17 17 14]
-let glyph_S:int = [15 16 14 1 1 17 14]
-let glyph_T:int = [31 4 4 4 4 4 4]
-let glyph_A:int = [14 17 17 31 17 17 17]
-let glyph_C:int = [14 17 16 16 16 17 14]
-let glyph_P:int = [30 17 17 30 16 16 16]
-let glyph_U:int = [17 17 17 17 17 17 14]
-let glyph_N:int = [17 25 21 19 17 17 17]
-let glyph_D:int = [30 17 17 17 17 17 30]
-let glyph_F:int = [31 16 30 16 16 16 16]
+let glyph_bits:int = 0b"
+    # mu
+    00000 00000 10001 10001 10001 10101 11000
+    # Z
+    11111 00001 00010 00100 01000 10000 11111
+    # E
+    11111 10000 11110 10000 10000 10000 11111
+    # R
+    11110 10001 10001 11110 10100 10010 10001
+    # O
+    01110 10001 10001 10001 10001 10001 01110
+    # S
+    01111 10000 01110 00001 00001 10001 01110
+    # T
+    11111 00100 00100 00100 00100 00100 00100
+    # A
+    01110 10001 10001 11111 10001 10001 10001
+    # C
+    01110 10001 10000 10000 10000 10001 01110
+    # P
+    11110 10001 10001 11110 10000 10000 10000
+    # U
+    10001 10001 10001 10001 10001 10001 01110
+    # N
+    10001 11001 10101 10011 10001 10001 10001
+    # D
+    11110 10001 10001 10001 10001 10001 11110
+    # F
+    11111 10000 11110 10000 10000 10000 10000
+    # 1
+    00100 01100 00100 00100 00100 00100 01110
+    # 2
+    01110 10001 00001 00010 00100 01000 11111
+    # 3
+    11110 00001 00001 01110 00001 00001 11110
+    # 4
+    00010 00110 01010 10010 11111 00010 00010
+    # 5
+    11111 10000 11110 00001 00001 10001 01110
+"
 
-let glyph_1:int = [4 12 4 4 4 4 14]
-let glyph_2:int = [14 17 1 2 4 8 31]
-let glyph_3:int = [30 1 1 14 1 1 30]
-let glyph_4:int = [2 6 10 18 31 2 2]
-let glyph_5:int = [31 16 30 1 1 17 14]
-
-let lane_marks:int = [0 5 10 15 20]
+const glyph_mu:int = 0
+const glyph_Z:int = 1
+const glyph_E:int = 2
+const glyph_R:int = 3
+const glyph_O:int = 4
+const glyph_S:int = 5
+const glyph_T:int = 6
+const glyph_A:int = 7
+const glyph_C:int = 8
+const glyph_P:int = 9
+const glyph_U:int = 10
+const glyph_N:int = 11
+const glyph_D:int = 12
+const glyph_F:int = 13
+const glyph_1:int = 14
+const glyph_2:int = 15
+const glyph_3:int = 16
+const glyph_4:int = 17
+const glyph_5:int = 18
+let lane_marks:int = 0x"00 05 0a 0f 14"
 
 let game_state:int = 0
 let menu_row:int = 0
@@ -72,9 +111,9 @@ let finish_timer:int = 0
 let steer_tilt:int = 0
 let crash_flash:int = 0
 
-let cpu_xs:int = [0 0 0 0]
-let cpu_progress:int = [120 240 360 480]
-let cpu_speed_seed:int = [5 6 5 7]
+let cpu_xs:int = __static_alloca__(32)
+let cpu_progress:int = __static_alloca__(32)
+let cpu_speed_seed:int = 0x"05 06 05 07"
 
 let key_left:int = 0
 let key_right:int = 0
@@ -134,7 +173,7 @@ let sin256 = (angle:int):>int => {
 }
 
 let lane_x = (lane:int):>int => {
-    return __load__(lane_marks + (lane * 8)) - 10
+    return __load_u8__(lane_marks + lane) - 10
 }
 
 let track_curve = (distance:int):>int => {
@@ -176,10 +215,22 @@ let bar2 = (x:int y:int w:int h:int r:int g:int b:int):>void => {
     return 0
 }
 
+let packed_bits = (data:int bit_offset:int width:int):>int => {
+    let value:int = 0
+    let i:int = 0
+    loop i <? width {
+        let bit_index:int = bit_offset + i
+        let byte:int = __load_u8__(data + (bit_index // 8))
+        value = (value << 1) or ((byte >> (7 - (bit_index % 8))) and 1)
+        i += 1
+    }
+    return value
+}
+
 let draw_glyph = (glyph:int x:int y:int scale:int r:int g:int b:int):>void => {
     let row:int = 0
     loop row <? 7 {
-        let bits:int = __load__(glyph + (row * 8))
+        let bits:int = packed_bits(glyph_bits (glyph * 35) + (row * 5) 5)
         let col:int = 0
         loop col <? 5 {
             if ((bits >> (4 - col)) and 1) not=? 0 {
@@ -488,7 +539,7 @@ let update_race = ():>void => {
         let progress_addr:int = cpu_progress + (i * 8)
         let x_addr:int = cpu_xs + (i * 8)
         let progress:int = __load__(progress_addr)
-        let step:int = __load__(cpu_speed_seed + (i * 8))
+        let step:int = __load_u8__(cpu_speed_seed + i)
         if progress <? player_distance {
             step += 1
         }

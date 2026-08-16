@@ -24,6 +24,7 @@ DEFAULT_THEME: dict[str, str] = {
     "type": "#4ec9b0",
     "string": "#ce9178",
     "number": "#b5cea8",
+    "numeric_prefix": "#569cd6",
     "comment": "#6a9955",
     "meta": "#569cd6",
     "punctuation": "#c586c0",
@@ -154,6 +155,9 @@ def _string_literal(value: str) -> str:
 
 
 def _token_end(src: str, token: t1.Token) -> int:
+    if token.kind == t1.Kind.TK_BASED_STRING:
+        return token.location + int(token.value)
+
     if token.kind in {
         t1.Kind.TK_IDENT,
         t1.Kind.TK_TYPE,
@@ -275,6 +279,51 @@ def _highlight_suffix(src: str, start: int, theme: dict[str, str]) -> tuple[list
 def _highlight_string_at(src: str, start: int, theme: dict[str, str]) -> tuple[list[HighlightSpan], int]:
     end = t0.string_end(src, start)
     return [HighlightSpan(src[start:end], theme["string"])], end
+
+
+def _highlight_based_string(
+    src: str,
+    start: int,
+    end: int,
+    theme: dict[str, str],
+) -> list[HighlightSpan]:
+    spans = [
+        HighlightSpan(src[start : start + 2], theme["numeric_prefix"]),
+        HighlightSpan('"', theme["string"]),
+    ]
+    cursor = start + 3
+    body_end = end - 1
+
+    while cursor < body_end:
+        if src[cursor] == "#":
+            comment_end = min(t0.skip_comment(src, cursor), body_end)
+            spans.append(HighlightSpan(src[cursor:comment_end], theme["comment"]))
+            cursor = comment_end
+            continue
+
+        if src[cursor] in t0.whitespace or src[cursor] == "_":
+            separator_end = cursor + 1
+            while (
+                separator_end < body_end
+                and (src[separator_end] in t0.whitespace or src[separator_end] == "_")
+            ):
+                separator_end += 1
+            spans.append(HighlightSpan(src[cursor:separator_end], None))
+            cursor = separator_end
+            continue
+
+        digit_end = cursor + 1
+        while (
+            digit_end < body_end
+            and src[digit_end] not in t0.whitespace
+            and src[digit_end] not in "_#"
+        ):
+            digit_end += 1
+        spans.append(HighlightSpan(src[cursor:digit_end], theme["number"]))
+        cursor = digit_end
+
+    spans.append(HighlightSpan('"', theme["string"]))
+    return spans
 
 
 def _highlight_metatag(name: str, theme: dict[str, str]) -> list[HighlightSpan]:
@@ -546,6 +595,8 @@ def _highlight_t1_spans(src: str, theme: dict[str, str]) -> list[HighlightSpan]:
         elif token.kind == t1.Kind.TK_NOT_EQ and start >= 3 and src[start - 3:start] == "not":
             spans.append(HighlightSpan("not", theme["declaration"]))
             spans.append(HighlightSpan(src[start:end], theme["operator"]))
+        elif token.kind == t1.Kind.TK_BASED_STRING:
+            spans.extend(_highlight_based_string(src, start, end, theme))
         else:
             spans.append(HighlightSpan(src[start:end], color))
         cursor = end

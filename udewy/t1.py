@@ -19,6 +19,7 @@ class Kind(Enum):
     TK_IDENT         = auto()    # (length, start, TK_IDENT)        # basic identifier. used for all identifiers except for function calls and indexes
     TK_IDENT_CALL    = auto()    # (length, start, TK_IDENT_CALL)   # an identifier followed by a paren. e.g. `some_fn(`
     TK_STRING        = auto()    # (length, start, TK_STRING)
+    TK_BASED_STRING  = auto()    # (length, start, TK_BASED_STRING)
     TK_TYPE_PARAM    = auto()    # (length, start, TK_TYPE_PARAM)  # a type parameter. e.g. `<T>` or `<int|string|undefined>`
     TK_VOID          = auto()
     TK_NUMBER        = auto()
@@ -63,7 +64,7 @@ class Kind(Enum):
     TK_FN_TYPE       = auto()    # `:>` e.g. `let foo = ():>bar => { ... }`
     TK_FN_ARROW      = auto()    # `=>`
     TK_PIPE          = auto()    # `|>` e.g. `x |> f1 |> f2 |> f3`
-    TK_TRANSMUTE     = auto()    # `transmute` i.e. `<expr> transmute <(ident typeparam?)|typeparam>` e.g. `true transmute uint64`, `[1 2 3 4] transmute array<string>`, `foo transmute <int | string | bool>`, etc.
+    TK_TRANSMUTE     = auto()    # `transmute` i.e. `<expr> transmute <(ident typeparam?)|typeparam>` e.g. `true transmute uint64`, `buffer transmute array<byte>`, `foo transmute <int | string | bool>`, etc.
 
 # operators that can be in place operators 
 POSSIBLE_IN_PLACE_OPS: set[Kind] = {
@@ -187,6 +188,31 @@ def bracketed_type_end(src: str, start: int) -> int:
     return i
 
 
+def based_string_end(src: str, start: int) -> int:
+    base = src[start + 1]
+    valid_digits = "01" if base == "b" else "0123456789abcdefABCDEF"
+    i = start + 3
+
+    while i < len(src):
+        c = src[i]
+        if c == '"':
+            return i + 1
+        if c in t0.whitespace or c == '_':
+            i += 1
+            continue
+        if c == '#':
+            i += 1
+            while i < len(src) and src[i] != '\n':
+                i += 1
+            continue
+        if c not in valid_digits:
+            error(src, i, f"invalid base-{2 if base == 'b' else 16} string digit {c!r}")
+        i += 1
+
+    error(src, start, "unterminated based string")
+    raise AssertionError
+
+
 def tokenize(src:str)->list[Token]:
     n = len(src)
     i = 0
@@ -208,6 +234,13 @@ def tokenize(src:str)->list[Token]:
             i += 1
             while i < n and src[i] != "\n":
                 i += 1
+            continue
+
+        # based string
+        if src.startswith(('0b"', '0x"'), i):
+            start = i
+            i = based_string_end(src, start)
+            toks.append(Token(i - start, start, Kind.TK_BASED_STRING))
             continue
 
         # identifier or keyword
@@ -373,7 +406,8 @@ def dump_token(token:Token, src:str):
     elif token.kind == Kind.TK_TYPE:        value = ':' +  src[location:location+cast(int, token.value)]
     elif token.kind == Kind.TK_FN_TYPE:     value = ':>' + src[location:location+cast(int, token.value)]
     elif token.kind == Kind.TK_TYPE_PARAM:  value =        src[location:location+cast(int, token.value)]  # <> already included in range
-    elif token.kind == Kind.TK_STRING:      value =        src[location:location+cast(int, token.value)]
+    elif token.kind in (Kind.TK_STRING, Kind.TK_BASED_STRING):
+        value = src[location:location+cast(int, token.value)]
     elif token.kind == Kind.TK_NUMBER:      value =        cast(int, token.value)
     
     if value is not None:

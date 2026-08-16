@@ -85,13 +85,9 @@ let prev_mouse_y:int = 0
 let prev_down:int = 0
 let last_emit_time_ms:int = 0
 let ripple_lifetime_ms:int = 2000
-let ripple_pos:int = [
-    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-]
-let ripple_time_ms:int = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-let ripple_strength:int = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+let ripple_pos:int = __static_alloca__(480)
+let ripple_time_ms:int = __static_alloca__(240)
+let ripple_strength:int = __static_alloca__(240)
 
 let str_len = (s:int):>int => {
     return __load__(s - 8)
@@ -160,6 +156,14 @@ let main = ():>int => {
         __webgl_init__(shader str_len(shader) width height)
         prev_mouse_x = width // 2
         prev_mouse_y = height // 2
+        let i:int = 0
+        loop i <? max_ripples {
+            array_set(ripple_pos i * 2 0)
+            array_set(ripple_pos i * 2 + 1 0)
+            array_set(ripple_time_ms i 0)
+            array_set(ripple_strength i 0)
+            i += 1
+        }
         initialized = 1
     }
 

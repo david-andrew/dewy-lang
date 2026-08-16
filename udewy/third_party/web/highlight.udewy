@@ -23,6 +23,7 @@ const HL_FUNCTION:int = "#dcdcaa"
 const HL_TYPE:int = "#4ec9b0"
 const HL_STRING:int = "#ce9178"
 const HL_NUMBER:int = "#b5cea8"
+const HL_NUMERIC_PREFIX:int = "#569cd6"
 const HL_COMMENT:int = "#6a9955"
 const HL_META:int = "#569cd6"
 const HL_PUNCTUATION:int = "#c586c0"
@@ -136,6 +137,46 @@ let hl_emit_string_at = (parent:int src:int n:int start:int):>int => {
     let end_idx:int = t0_string_end(src n start)
     hl_emit_string_range(parent src start end_idx)
     return end_idx
+}
+
+# Highlight a based string with numeric prefix and digits, string-colored
+# quotes, plain separators, and normal line-comment coloring.
+let hl_emit_based_string = (parent:int src:int n:int start:int end_idx:int):>void => {
+    hl_emit_color(parent src start start + 2 HL_NUMERIC_PREFIX)
+    hl_emit_color(parent src start + 2 start + 3 HL_STRING)
+    let body_end:int = end_idx - 1
+    let cursor:int = start + 3
+    loop cursor <? body_end {
+        let c:int = __load_u8__(src + cursor)
+        if c =? T0_CH_HASH {
+            let comment_end:int = t0_skip_comment(src n cursor)
+            if comment_end >? body_end { comment_end = body_end }
+            hl_emit_color(parent src cursor comment_end HL_COMMENT)
+            cursor = comment_end
+            continue
+        }
+        if t0_is_ws(c) or (c =? T1_CH_UNDERSCORE) {
+            let separator_end:int = cursor + 1
+            loop separator_end <? body_end {
+                let sc:int = __load_u8__(src + separator_end)
+                if (not t0_is_ws(sc)) and (sc not=? T1_CH_UNDERSCORE) { break }
+                separator_end = separator_end + 1
+            }
+            hl_emit_plain(parent src cursor separator_end)
+            cursor = separator_end
+            continue
+        }
+        let digit_end:int = cursor + 1
+        loop digit_end <? body_end {
+            let dc:int = __load_u8__(src + digit_end)
+            if t0_is_ws(dc) or (dc =? T1_CH_UNDERSCORE) or (dc =? T0_CH_HASH) { break }
+            digit_end = digit_end + 1
+        }
+        hl_emit_color(parent src cursor digit_end HL_NUMBER)
+        cursor = digit_end
+    }
+    hl_emit_color(parent src body_end end_idx HL_STRING)
+    return void
 }
 
 # Emit a metatag `$name` as '$' (operator) + 'name' (meta). `name_len` is the
@@ -401,6 +442,7 @@ let hl_token_color = (kind:int):>int => {
 # from the TokenStream and the source it was tokenized from. Mirrors
 # _token_end in the Python.
 let hl_token_end = (src:int n:int loc:int val:int kind:int):>int => {
+    if kind =? TK_BASED_STRING { return loc + val }
     if kind =? TK_IDENT { return loc + val }
     if kind =? TK_TYPE { return loc + val }
     if kind =? TK_FN_TYPE { return loc + val }
@@ -535,7 +577,9 @@ let hl_emit_t1 = (parent:int src:int n:int):>void => {
             if (tlen =? 5) and str_eq_len(src + loc 5 "false" 5) { is_bool_lit = true }
         }
 
-        if kind =? TK_IDENT_CALL {
+        if kind =? TK_BASED_STRING {
+            hl_emit_based_string(parent src n loc end_idx)
+        } else if kind =? TK_IDENT_CALL {
             let name_end:int = loc + val
             hl_emit_color(parent src loc name_end HL_FUNCTION)
             hl_emit_color(parent src name_end end_idx HL_PUNCTUATION)

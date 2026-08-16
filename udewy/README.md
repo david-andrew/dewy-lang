@@ -175,9 +175,30 @@ on one line"
 
 **Non-ASCII content:** Aside from escape sequences, the bytes between the quotes are copied into the literal **verbatim**. The compiler performs no encoding validation, conversion, or normalization, so a literal contains exactly the bytes of the source file. Since source files are conventionally UTF-8, `"μZero"` produces the UTF-8 encoding of (`0xCE 0xBC 0x5A 0x65 0x72 0x6F`) -- 2 initial bytes for `μ` followed by ascii `Zero`. A source file saved in another encoding would pass its raw bytes through just the same in that encoding rather than UTF-8. The length prefix counts **bytes**, not characters or codepoints; all text-encoding interpretation is left to the program. A backslash followed by a non-ASCII character passes that character's bytes through unchanged.
 
-> NOTE: for an explicit byte-stable version with a fixed encoding regardless of the underlying file encoding, use byte literals for any non-ascii, e.g. `'\xce\xbcZero'`.
+> NOTE: for an explicit byte-stable version with a fixed encoding regardless of the underlying file encoding, use byte escapes for any non-ASCII content, e.g. `"\xce\xbcZero"`.
 
 **Memory layout:** String literals are stored in static memory with an 8-byte length prefix. The variable holds a pointer to the first character (after the length). See [Memory Layout](#16-memory-layout).
+
+### Based String Literals
+
+Based strings use `0b"..."` or `0x"..."` to write exact bytes directly:
+
+```udewy
+let bits:int = 0b"1010_0001 11"       # a1 c0
+let header:int = 0x"de ad
+    # comments may separate digits
+    be ef"
+```
+
+Based strings are ordinary expressions, not directives or a special declaration form. Only base 2 and base 16 are supported, and the prefixes are exactly lowercase `0b` and `0x`. Binary bodies accept `0` and `1`; hexadecimal bodies accept `0`-`9`, `a`-`f`, and `A`-`F`.
+
+Whitespace, underscores, and `#` line comments are separators and contribute no bits. After removing those separators, digits are packed in source order using **MSB-first wire order**: the first digit supplies the highest bit or nibble of the first byte, then packing continues toward the low bits before moving to the next byte. If the final byte is incomplete, its remaining low bits are automatically zero-filled on the right. Thus `0b"1"` is the byte `0x80`, `0b"1111_0000 1"` is `0xF0 0x80`, and `0x"a b c"` is `0xAB 0xC0`.
+
+Because a `#` comment continues through the newline, a closing quote on the same line is part of the comment; place the closing quote on a later line.
+
+No target-endian conversion is performed. The bytes in static storage are exactly this wire-order sequence on every backend. A based string carries no element type, dimensions, or shape metadata; consumers are responsible for knowing the data's format.
+
+Ordinary strings and based strings share the same static-storage layout: an 8-byte byte-length immediately before the data, with the expression evaluating to a pointer to the first data byte. `__load__(ptr - 8)` is therefore the byte length for both forms.
 
 ### Path Literals
 
@@ -221,11 +242,11 @@ let x:int = 42
 
 **Parameterized types** (`:type<param>` or `<param>` alone):
 ```udewy
-let arr:array<int> = [1 2 3]
+let data:array<int> = buffer
 let mixed<int|string> = value    # type param without colon
 ```
 
-The content inside `<>` is not validated. This allows complex type expressions that udewy couldn't otherwise parse:
+The content inside `<>` is not validated, and annotations such as `array<T>` are opaque to udewy. This allows complex type expressions that udewy couldn't otherwise parse:
 ```udewy
 let x<(int & Something<10>) | undefined> = 10
 ```
@@ -398,34 +419,6 @@ Parentheses override precedence and grouping:
 let x:int = (a + b) * c
 ```
 
-### Array Literals
-
-Array literals are enclosed in square brackets with space-separated elements:
-
-```udewy
-let nums = [1 2 3 4 5]
-let handlers = [on_start on_update on_stop]
-let messages = ["error" "warning" "info"]
-```
-
-Elements may be:
-- Number literals
-- String literals
-- Identifiers referencing compile-time stable values or functions
-
-A value is **compile-time stable** when the compiler can determine it completely during compilation and knows that the binding cannot later change. In practice this includes:
-- Number literals
-- String literals
-- Array literals
-- Static storage addresses produced by `__static_alloca__(...)`
-- Backend-provided builtin constants
-- `const` bindings initialized from other compile-time stable values
-- Function identifiers, since functions are top-level only and cannot be redefined or reassigned
-
-Top-level `let` and `const` bindings may also use non-stable initializer expressions. Those initializers are lowered into a synthetic startup pass that runs once before `main`, in declaration order. Such bindings remain ordinary runtime globals, so they do **not** count as compile-time stable unless their initializer was already compile-time stable.
-
-Array literals are stored in static memory with an 8-byte length prefix. See [Memory Layout](#16-memory-layout).
-
 ### Function Calls
 
 **Named call:**
@@ -454,7 +447,7 @@ Variables must be declared with `let` or `const`, require a **type annotation**,
 ```udewy
 let x:int = 42
 const BUFFER_SIZE:int = 1024
-let data<array<int>> = [1 2 3]
+let data:array<int> = __alloca__(BUFFER_SIZE)
 ```
 
 `let` declares a mutable binding. `const` declares an immutable binding and cannot be assigned after its initializer.
@@ -697,53 +690,42 @@ udewy does not support closures. Functions cannot capture variables from enclosi
 
 udewy uses a simple, uniform memory layout. All values are 64-bit integers. Complex data structures are built using pointers and manual offset calculations.
 
-### Strings and Arrays
+### Strings and Based Strings
 
-Both strings and arrays share the same layout in memory:
+Ordinary strings and based strings share the same layout in static memory:
 
 ```
-┌─────────────────┬────────────────────────┐
-│ Length (8 bytes)│ Data (N × element_size)│
-└─────────────────┴────────────────────────┘
+┌──────────────────────┬────────────────┐
+│ Byte length (8 bytes)│ Data (N bytes) │
+└──────────────────────┴────────────────┘
 ```
 
-- **Length prefix:** 8 bytes containing the number of elements (not byte count)
-- **Data:** The actual content
-  - Strings: 1 byte per element (raw bytes; non-ASCII source text contributes its encoded bytes verbatim, one element each)
-  - Arrays: 8 bytes per element (all elements are 64-bit)
+- **Length prefix:** 8 bytes containing the byte count
+- **Data:** exactly the ordinary string's decoded source bytes or the based string's MSB-first wire-order bytes
 
-When you use a string or array literal, the variable holds a pointer to the **start of the data** (after the length). Access the length at `ptr - 8`:
+The expression holds a pointer to the **start of the data** (after the length). Access the byte length at `ptr - 8`:
 
 ```udewy
-let arr = [10 20 30]
-#        ┌─────────┬────┬────┬────┐
-# Memory │ len=3   │ 10 │ 20 │ 30 │
-#        └─────────┴────┴────┴────┘
-#                  ↑
-#                  arr points here
-
-let len:int = __load__(arr - 8)      # 3
-let first:int = __load__(arr)        # 10
-let second:int = __load__(arr + 8)   # 20
+let packet:int = 0x"01 02 ff"
+let len:int = __load__(packet - 8)       # 3
+let first:int = __load_u8__(packet)      # 1
+let second:int = __load_u8__(packet + 1) # 2
 ```
 
 ### Static vs Dynamic Data
 
-**String and array literals** are stored in static memory (the data section). This has important implications:
-
-1. They are **mutable** - values can be overwritten
-2. They are **shared** - all uses of the same literal reference the same memory
-3. They persist across function calls (no stack allocation)
+Ordinary and based string literals are stored in static memory (the data section). Their storage may be shared by multiple uses and persists across calls, so literals should not be used as mutable working buffers.
 
 ```udewy
-let put_int = (n:int):>void => {
-    let buf = [0 0 0 0 0 0 0 0]  # static buffer
-    # buf contains values from previous calls!
-    # ...
+let process = ():>void => {
+    let local_buf:int = __alloca__(256)        # fresh for this call
+    let shared_buf:int = __static_alloca__(64) # one zero-initialized static buffer
+    # write through __store_u8__, __store_u64__, etc.
+    return void
 }
 ```
 
-For fresh storage, allocate memory dynamically using syscalls (see examples).
+Use `__alloca__(size)` for a fresh function-local mutable buffer, `__static_alloca__(size)` for a shared zero-initialized mutable buffer, or an allocator appropriate to the target for other lifetimes.
 
 ### Simulating Structs
 
@@ -882,7 +864,6 @@ These patterns compile in both udewy and Dewy but may behave differently:
 | `x >> n` (when x is signed) | Unsigned shift (zeros fill) | Signed shift (sign bit fills)* |
 | `a and b` / `a or b` | Both sides always evaluated* | Short-circuit evaluation |
 | `str1 =? str2` | Compares pointers | Compares content |
-| updating a value in an array | global instance updated (all arrays are static) | scope local instance is updated
 
 > NOTE: Dewy selects signed or unsigned shift based on left operand type.
 
@@ -896,7 +877,7 @@ Until automatic well-formedness verification is implemented in the dewy compiler
 
 1. **Use `__signed_shr__`** when arithmetic shift is needed for signed values
 2. **Short-circuit only in conditions** - side effects in `and`/`or` operands still always occur in ordinary expressions; only `if`/`loop` conditions short-circuit
-3. **Implement content comparison functions** for string/array equality
+3. **Implement content comparison functions** when byte-string content equality is needed
 4. **Use unsigned intrinsics explicitly** when raw unsigned interpretation matters
 5. **Test with increasing compiler strictness** as the Dewy compiler matures. The full dewy compiler will be able to flag ALL cases of ill-formed udewy.
 
@@ -1141,16 +1122,15 @@ prefix_expr     ::= '-' prefix_expr
 
 atom            ::= NUMBER
                   | STRING
+                  | BASED_STRING
                   | 'true'
                   | 'false'
                   | 'void'
                   | IDENT
                   | IDENT '(' arg_list ')'
                   | '(' expr ')' ('(' arg_list ')')?
-                  | '[' array_elem* ']'
 
 arg_list        ::= expr*
-array_elem      ::= NUMBER | STRING | IDENT  # IDENT must resolve to a compile-time stable value or function
 
 cast_annot      ::= 'transmute' (IDENT type_param? | type_param)
 
@@ -1163,7 +1143,7 @@ binop           ::= '+' | '-' | '*' | '//' | '%'
                   | 'and' | 'or' | 'xor'
                   | '|>'
 
-const_expr      ::= NUMBER | STRING | IDENT | '[' array_elem* ']'
+const_expr      ::= NUMBER | STRING | BASED_STRING | IDENT
 
 # Lexical elements
 IDENT           ::= [a-zA-Z_][a-zA-Z0-9_]*
@@ -1174,6 +1154,10 @@ binary          ::= '0b' [01_]+
 STRING          ::= '"' string_char* '"'
 string_char     ::= <any char except '"' or '\'>
                   | '\' <any char>
+BASED_STRING    ::= ('0b' binary_string_body | '0x' hex_string_body)
+binary_string_body ::= '"' ([01_] | whitespace | line_comment)* '"'
+hex_string_body ::= '"' ([0-9a-fA-F_] | whitespace | line_comment)* '"'
+line_comment    ::= '#' <characters through end of line>
 ```
 
 > NOTE: `prelude_directive` forms are consumed during preprocessing and do not appear in the token stream seen by the parser. The word `import` remains reserved, so any surviving `import` is rejected during tokenization.
@@ -1185,6 +1169,7 @@ string_char     ::= <any char except '"' or '\'>
 udewy deliberately omits features to keep the compiler simple and auditable:
 
 - **No indexing syntax** (`arr[i]`): Would require type information to know element size
+- **No runtime array literal syntax**: square brackets remain available in prelude metadata, ignored type declarations, and bracketed type annotations
 - **No value casts** (`as`): Would require type-aware conversion
 - **No string interpolation**: Strings are simple byte sequences
 - **No closures or nested functions**: Functions only at top level
@@ -1613,7 +1598,7 @@ AArch64 Linux uses the same unified syscall table as RISC-V Linux. All builtin c
 
 - All udewy values are `i64` in WASM
 - Memory addresses are `i64` but truncated to `i32` at every memory operation
-- Strings and arrays use the same length-prefixed layout as native backends
+- Ordinary strings and based strings use the same byte-length-prefixed static layout as native backends
 
 ## D.2.1 `__alloca__` Alignment
 
@@ -1819,16 +1804,14 @@ python udewy/third_party/sdl/generate_udewy_icon.py my_icon.png
 
 Use `--symbol` if you want to override the exported symbol name, or pass an explicit output path if you want the generated `.udewy` file somewhere else.
 
-The generated module exports one `array<uint64>` symbol. Its layout is:
+The generated module exports one `int`-annotated pointer whose value is a based string. The consumer knows the record shape; udewy does not attach runtime shape or element metadata. Its byte layout is:
 
-- word 0: icon magic
-- word 1: format/version word
-- word 2: width
-- word 3: height
-- word 4: packed-word count
-- words 5+: packed pixels, two pixels per `uint64`, written as `0xRRGGBBAA_RRGGBBAA`
+- bytes 0-7: icon magic word
+- bytes 8-15: width word
+- bytes 16-23: height word
+- bytes 24+: raw RGBA pixels in row-major order, four bytes per pixel
 
-The generator writes eight packed words per line for readability, but the runtime format is just a normal udewy array literal.
+The generator inserts whitespace and line breaks for readability; those separators do not contribute bytes to the based string.
 
 Use a generated icon module from SDL code like this:
 
@@ -1907,7 +1890,7 @@ The browser route is an app-style canvas renderer, not an HTML/DOM renderer. It 
 - **Architecture:** C99 implementation with 64-bit `uintptr_t` / `uint64_t`
 - **Environment:** Any system with a C compiler that can build the generated program
 - **Output Format:** C source compiled to the host platform's native executable format
-- **Memory Model:** Native target process memory, using udewy's usual length-prefixed string/array layout
+- **Memory Model:** Native target process memory, using udewy's byte-length-prefixed ordinary-string and based-string layout
 
 This backend is intended as a portable code-generation target, not as a promise that every udewy program is portable. Programs remain portable only to the extent that their `extern` bindings, imported C capabilities, and imported native artifacts are portable.
 
@@ -1916,7 +1899,7 @@ This backend is intended as a portable code-generation target, not as a promise 
 - All runtime values are emitted as `udewy_word`, a generated C typedef for `uint64_t`
 - Signed operations explicitly cast to `int64_t` where udewy semantics require signed interpretation
 - udewy booleans still use `true = 0xFFFF_FFFF_FFFF_FFFF` and `false = 0`
-- Strings and arrays keep the normal udewy layout: one 8-byte length word immediately before the data pointer
+- Ordinary strings and based strings keep the normal udewy layout: one 8-byte byte-length word immediately before the data pointer
 
 The generated C helper layer uses direct `unsigned char *` access for `u8` loads/stores and bytewise helpers for wider loads/stores. Wider operations use the target's native byte order, detected by the generated C at compile time. This matches the native-backend model: raw memory is target memory, not a fixed little-endian serialization format.
 

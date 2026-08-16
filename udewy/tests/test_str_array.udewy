@@ -1,8 +1,8 @@
-# Test string array
-let greetings = ["hello\n" "world\n"]
+# Test string storage
+let greeting:int = "hello\n"
 
 let main = ():>int => {
-    let str_ptr:int = __load__(greetings)
+    let str_ptr:int = greeting
     let str_len:int = __load__(str_ptr - 8)
     __syscall3__(1 1 str_ptr str_len)
     return 0

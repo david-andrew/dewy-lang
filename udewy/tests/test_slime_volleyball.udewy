@@ -99,46 +99,46 @@ let ball_prev_x:int = 90
 let ball_prev_y:int = 84
 let ball_prev_y_fp:int = 504
 
-let font_rows:int = [
-    0 0 0 0 0
-    7 5 5 5 7
-    2 6 2 2 7
-    7 1 7 4 7
-    7 1 7 1 7
-    5 5 7 1 1
-    7 4 7 1 7
-    7 4 7 5 7
-    7 1 1 1 1
-    7 5 7 5 7
-    7 5 7 1 7
-    2 5 7 5 5
-    6 5 6 5 6
-    3 4 4 4 3
-    6 5 5 5 6
-    7 4 6 4 7
-    7 4 6 4 4
-    3 4 5 5 3
-    5 5 7 5 5
-    7 2 2 2 7
-    1 1 1 5 2
-    5 5 6 5 5
-    4 4 4 4 7
-    5 7 7 5 5
-    5 7 7 7 5
-    2 5 5 5 2
-    6 5 6 4 4
-    2 5 5 2 1
-    6 5 6 5 5
-    3 4 2 1 6
-    7 2 2 2 2
-    5 5 5 5 7
-    5 5 5 5 2
-    5 5 7 7 5
-    5 5 2 5 5
-    5 5 2 2 2
-    7 1 2 4 7
-]
+let font_rows:int = 0b"
 
+    000 000 000 000 000
+    111 101 101 101 111
+    010 110 010 010 111
+    111 001 111 100 111
+    111 001 111 001 111
+    101 101 111 001 001
+    111 100 111 001 111
+    111 100 111 101 111
+    111 001 001 001 001
+    111 101 111 101 111
+    111 101 111 001 111
+    010 101 111 101 101
+    110 101 110 101 110
+    011 100 100 100 011
+    110 101 101 101 110
+    111 100 110 100 111
+    111 100 110 100 100
+    011 100 101 101 011
+    101 101 111 101 101
+    111 010 010 010 111
+    001 001 001 101 010
+    101 101 110 101 101
+    100 100 100 100 111
+    101 111 111 101 101
+    101 111 111 111 101
+    010 101 101 101 010
+    110 101 110 100 100
+    010 101 101 010 001
+    110 101 110 101 101
+    011 100 010 001 110
+    111 010 010 010 010
+    101 101 101 101 111
+    101 101 101 101 010
+    101 101 111 111 101
+    101 101 010 101 101
+    101 101 010 010 010
+    111 001 010 100 111
+"
 let key_a:int = "KeyA"
 let key_d:int = "KeyD"
 let key_s:int = "KeyS"
@@ -306,10 +306,6 @@ let toggle_aspect_lock = ():>int => {
     return 0
 }
 
-let arr_get = (arr:int idx:int):>int => {
-    return __load__(arr + idx * 8)
-}
-
 let key_down = (code:int):>int => {
     return __key_down__(code str_len(code))
 }
@@ -405,11 +401,23 @@ let font_index = (code:int):>int => {
     return 0
 }
 
+let packed_bits = (data:int bit_offset:int width:int):>int => {
+    let value:int = 0
+    let i:int = 0
+    loop i <? width {
+        let bit_index:int = bit_offset + i
+        let byte:int = __load_u8__(data + (bit_index // 8))
+        value = (value << 1) or ((byte >> (7 - (bit_index % 8))) and 1)
+        i += 1
+    }
+    return value
+}
+
 let draw_char = (code:int x:int y:int scale:int r:int g:int b:int):>int => {
     let idx:int = font_index(code)
     let row:int = 0
     loop row <? 5 {
-        let pattern:int = arr_get(font_rows ((idx * 5) + row))
+        let pattern:int = packed_bits(font_rows (idx * 5 + row) * 3 3)
         let col:int = 0
         loop col <? 3 {
             let mask:int = 1 << (2 - col)

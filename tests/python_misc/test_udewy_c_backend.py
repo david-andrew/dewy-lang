@@ -35,20 +35,6 @@ let main = ():>int => {
 """
 
 
-REFERENCE_INIT_SOURCE = """
-let add1 = (n:int):>int => {
-    return n + 1
-}
-
-let table:int = [add1]
-
-let main = ():>int => {
-    let fn:int = __load__(table)
-    return (fn)(41)
-}
-"""
-
-
 CALLOC_EXTERN_SOURCE = """
 import p"__STDLIB_MODULE__"
 
@@ -262,12 +248,6 @@ def test_c_backend_exposes_no_builtin_constants() -> None:
 def test_c_backend_runs_core_runtime_features() -> None:
     _, exit_code = compile_and_run(CORE_RUNTIME_SOURCE, "core_runtime")
     assert exit_code == 0
-
-
-@pytest.mark.skipif(not cc_available(), reason="cc not available")
-def test_c_backend_initializes_reference_data_before_main() -> None:
-    _, exit_code = compile_and_run(REFERENCE_INIT_SOURCE, "reference_init")
-    assert exit_code == 42
 
 
 @pytest.mark.skipif(not cc_available(), reason="cc not available")

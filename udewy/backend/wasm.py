@@ -6,7 +6,7 @@ Generates WebAssembly Text format (WAT) with browser-focused host function impor
 Semantic choices:
 - All udewy values are i64 (wasm i64)
 - Pointers are i64 values but truncated to i32 at every memory operation
-- Strings/arrays use the same length-prefixed layout (length at ptr-8)
+- Strings use a length-prefixed layout (length at ptr-8)
 - Browser functionality via imported JS host functions (no syscall emulation)
 
 Host functions provided by JS:
@@ -68,8 +68,6 @@ class Wasm32Backend(Backend):
         self._global_labels: dict[int, str] = {}
         self._string_offsets: dict[int, int] = {}
         self._string_labels: dict[int, str] = {}
-        self._array_offsets: dict[int, int] = {}
-        self._array_labels: dict[int, str] = {}
         self._static_offsets: dict[int, int] = {}
         self._static_labels: dict[int, str] = {}
         
@@ -175,9 +173,6 @@ class Wasm32Backend(Backend):
             for sid, slabel in self._string_labels.items():
                 if slabel == ref_part:
                     return self._string_offsets[sid] + 8
-            for aid, alabel in self._array_labels.items():
-                if alabel == ref_part:
-                    return self._array_offsets[aid] + 8
             raise ValueError(f"Unknown wasm data reference: {value}")
 
         for sid, slabel in self._static_labels.items():
@@ -342,32 +337,6 @@ class Wasm32Backend(Backend):
         
         return label_id
     
-    def intern_array(self, elements: list[int | str]) -> int:
-        """Add an array constant to the data section."""
-        label_id = self._next_label
-        self._next_label += 1
-        
-        # Length prefix
-        length_bytes = len(elements).to_bytes(8, 'little')
-        
-        # Elements
-        elem_bytes = b""
-        for elem in elements:
-            if isinstance(elem, int):
-                elem_bytes += (elem & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
-            elif isinstance(elem, str):
-                ref_offset = self._resolve_data_ref(elem)
-                elem_bytes += (ref_offset & 0xFFFF_FFFF_FFFF_FFFF).to_bytes(8, 'little', signed=False)
-            else:
-                raise TypeError(f"Unsupported wasm array element directive: {elem!r}")
-        
-        full_data = length_bytes + elem_bytes
-        offset = self._alloc_data(full_data)
-        self._array_offsets[label_id] = offset
-        self._array_labels[label_id] = f".arr{label_id}"
-        
-        return label_id
-    
     def define_global(self, name: str | None, value: int | str) -> int:
         """Define a global variable."""
         label_id = self._next_label
@@ -413,11 +382,6 @@ class Wasm32Backend(Backend):
         offset = self._string_offsets[label_id] + 8  # Skip length prefix
         self._emit(f"i64.const {offset}")
     
-    def push_array_ref(self, label_id: int) -> None:
-        """Push address of array data onto value stack."""
-        offset = self._array_offsets[label_id] + 8  # Skip length prefix
-        self._emit(f"i64.const {offset}")
-    
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
         offset = self._global_offsets[label_id]
@@ -449,9 +413,6 @@ class Wasm32Backend(Backend):
 
     def string_ref(self, label_id: int) -> int:
         return self._string_offsets[label_id] + 8
-
-    def array_ref(self, label_id: int) -> int:
-        return self._array_offsets[label_id] + 8
 
     def static_ref(self, label_id: int) -> int:
         return self._static_offsets[label_id]

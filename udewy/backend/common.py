@@ -101,7 +101,7 @@ class Backend(ABC):
         pass
     
     # ========================================================================
-    # Data section - strings, arrays, globals
+    # Data section - strings and globals
     # ========================================================================
     
     @abstractmethod
@@ -111,16 +111,6 @@ class Backend(ABC):
         
         The string is stored with a length prefix (8 bytes).
         Returns a handle/label_id that can be used with push_string_ref.
-        """
-    
-    @abstractmethod
-    def intern_array(self, elements: list[int | str]) -> int:
-        """
-        Add an array constant to the data section.
-        
-        Elements can be integers or label references (as strings).
-        The array is stored with a length prefix (8 bytes).
-        Returns a handle/label_id that can be used with push_array_ref.
         """
     
     @abstractmethod
@@ -155,10 +145,6 @@ class Backend(ABC):
         """Push address of string data (after length prefix) onto value stack."""
     
     @abstractmethod
-    def push_array_ref(self, label_id: int) -> None:
-        """Push address of array data (after length prefix) onto value stack."""
-    
-    @abstractmethod
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
 
@@ -181,10 +167,6 @@ class Backend(ABC):
     @abstractmethod
     def string_ref(self, label_id: int) -> int | str:
         """Return a backend-native constant reference to string data."""
-
-    @abstractmethod
-    def array_ref(self, label_id: int) -> int | str:
-        """Return a backend-native constant reference to array data."""
 
     @abstractmethod
     def static_ref(self, label_id: int) -> int | str:

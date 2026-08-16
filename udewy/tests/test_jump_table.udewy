@@ -1,7 +1,7 @@
 # Jump Table Demo: Simple Stack-Based Calculator
 #
-# This demonstrates a jump table (array of function pointers) in a realistic
-# context: a bytecode interpreter for a simple calculator.
+# Opcode handlers are stored in a function-pointer table built once at
+# startup. Dispatch is an indirect call through that table.
 #
 # Opcodes:
 #   0 = PUSH (next byte is value to push)
@@ -11,7 +11,7 @@
 #   4 = HALT (stop execution, top of stack is result)
 
 # Stack for the calculator (fixed size)
-let calc_stack = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+let calc_stack:int = __static_alloca__(128)
 let stack_ptr:int = 0
 
 # Opcode handler functions
@@ -55,8 +55,16 @@ let op_halt = (unused:int):>int => {
     return 1
 }
 
-# Jump table: array of function pointers indexed by opcode
-let dispatch_table = [op_push op_add op_sub op_mul op_halt]
+let handlers:int = __static_alloca__(40)
+
+let init_handlers = ():>void => {
+    __store__(op_push handlers)
+    __store__(op_add handlers + 8)
+    __store__(op_sub handlers + 16)
+    __store__(op_mul handlers + 24)
+    __store__(op_halt handlers + 32)
+    return void
+}
 
 # Helper to write a digit
 let print_digit = (n:int):>void => {
@@ -89,31 +97,24 @@ let print = (s:int):>void => {
 }
 
 # Execute bytecode program
-# Note: Since udewy doesn't support indirect function calls yet,
-# we use explicit dispatch. With indirect calls, we could do:
-#   let handler:int = __load__(dispatch_table + opcode * 8)
-#   handler(arg)
 let execute = (program:int len:int):>int => {
     let pc:int = 0
     
     loop pc <? len {
-        let opcode:int = __load__(program + pc * 8)
+        let opcode:int = __load_u8__(program + pc)
         pc = pc + 1
-        
-        # Manual dispatch (would be single indirect call with full support)
+        if opcode >=? 5 {
+            return 0
+        }
+
+        let val:int = 0
         if opcode =? 0 {
-            # PUSH: get value from next position
-            let val:int = __load__(program + pc * 8)
+            val = __load_u8__(program + pc)
             pc = pc + 1
-            op_push(val)
-        } else if opcode =? 1 {
-            op_add(0)
-        } else if opcode =? 2 {
-            op_sub(0)
-        } else if opcode =? 3 {
-            op_mul(0)
-        } else if opcode =? 4 {
-            # HALT: return top of stack
+        }
+
+        let fn:int = __load__(handlers + opcode * 8)
+        if (fn)(val) {
             stack_ptr = stack_ptr - 1
             return __load__(calc_stack + stack_ptr * 8)
         }
@@ -125,10 +126,14 @@ let execute = (program:int len:int):>int => {
 let main = ():>int => {
     # Program: (3 + 5) * (10 - 2)
     # Bytecode: PUSH 3, PUSH 5, ADD, PUSH 10, PUSH 2, SUB, MUL, HALT
-    let program = [0 3 0 5 1 0 10 0 2 2 3 4]
-    
-    # Get program length
+    init_handlers()
+    let program:int = 0x"00 03 00 05 01 00 0a 00 02 02 03 04"
     let prog_len:int = __load__(program - 8)
+    let stack_idx:int = 0
+    loop stack_idx <? 16 {
+        __store__(0 calc_stack + stack_idx * 8)
+        stack_idx += 1
+    }
     
     print("Calculator result: ")
     let result:int = execute(program prog_len)

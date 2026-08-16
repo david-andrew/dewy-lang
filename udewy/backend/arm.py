@@ -65,7 +65,6 @@ class ArmBackend(Backend):
         self._fn_labels: dict[int, str] = {}
         self._global_labels: dict[int, str] = {}
         self._string_labels: dict[int, str] = {}
-        self._array_labels: dict[int, str] = {}
         self._static_labels: dict[int, str] = {}
     
     def _emit(self, instr: str) -> None:
@@ -300,20 +299,6 @@ class ArmBackend(Backend):
         
         return label_id
     
-    def intern_array(self, elements: list[int | str]) -> int:
-        """Add an array constant to the data section."""
-        label_id = self._next_label
-        label = self._new_label("arr")
-        self._array_labels[label_id] = label
-        
-        self._emit_data(f".section .data.{label},\"aw\",@progbits")
-        self._emit_data_label(label)
-        self._emit_data(f"    .xword {len(elements)}")
-        for elem in elements:
-            self._emit_data(f"    .xword {elem}")
-        
-        return label_id
-    
     def define_global(self, name: str | None, value: int | str) -> int:
         """Define a global variable."""
         label_id = self._next_label
@@ -358,13 +343,6 @@ class ArmBackend(Backend):
         self._emit(f"add x0, x0, :lo12:{label}")
         self._emit("add x0, x0, #8")
     
-    def push_array_ref(self, label_id: int) -> None:
-        """Push address of array data onto value stack."""
-        label = self._array_labels[label_id]
-        self._emit(f"adrp x0, {label}")
-        self._emit(f"add x0, x0, :lo12:{label}")
-        self._emit("add x0, x0, #8")
-    
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
         label = self._global_labels[label_id]
@@ -396,9 +374,6 @@ class ArmBackend(Backend):
 
     def string_ref(self, label_id: int) -> str:
         return f"{self._string_labels[label_id]}+8"
-
-    def array_ref(self, label_id: int) -> str:
-        return f"{self._array_labels[label_id]}+8"
 
     def static_ref(self, label_id: int) -> str:
         return self._static_labels[label_id]

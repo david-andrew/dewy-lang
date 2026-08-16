@@ -225,6 +225,11 @@ semantics.
 
 ## Strings
 
+- [ ] Dewy already parses `0b"..."` and `0x"..."` based strings, but semantic
+      typing, contextual coercion, and lowering are pending. Those stages must
+      produce the same bytes as udewy: MSB-first wire-order packing with
+      automatic right-zero padding, without reinterpretation through target
+      endianness or text encoding.
 - [x] Exact string-literal types with contextual materialization as immutable
       grapheme strings, `array<uint8>`, `array<uint32>`, or
       `array<grapheme>`. `char` is the one-grapheme string refinement.

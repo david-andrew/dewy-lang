@@ -5,6 +5,7 @@
   "patterns": [
     { "include": "#comment" },
     { "include": "#path-string" },
+    { "include": "#based-string" },
     { "include": "#string" },
     { "include": "#type-parameter" },
     { "include": "#number" },
@@ -54,6 +55,46 @@
         {
           "name": "constant.character.escape.udewy",
           "match": "\\\\(?:[ntr0\"\\\\]|.)"
+        }
+      ]
+    },
+    "based-string": {
+      "patterns": [
+        {
+          "begin": "\\b(0b)(\")",
+          "beginCaptures": {
+            "1": { "name": "storage.type.numeric.prefix.udewy" },
+            "2": { "name": "string.quoted.double.udewy" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "string.quoted.double.udewy" }
+          },
+          "patterns": [
+            { "include": "#comment" },
+            {
+              "name": "constant.numeric.binary.udewy",
+              "match": "[01]+"
+            }
+          ]
+        },
+        {
+          "begin": "\\b(0x)(\")",
+          "beginCaptures": {
+            "1": { "name": "storage.type.numeric.prefix.udewy" },
+            "2": { "name": "string.quoted.double.udewy" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "string.quoted.double.udewy" }
+          },
+          "patterns": [
+            { "include": "#comment" },
+            {
+              "name": "constant.numeric.hex.udewy",
+              "match": "[0-9A-Fa-f]+"
+            }
+          ]
         }
       ]
     },
