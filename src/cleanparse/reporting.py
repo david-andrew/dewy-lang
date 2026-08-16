@@ -991,6 +991,19 @@ class ReportException(Exception):
         self.report = report
         super().__init__(str(report))
 
+    def _render_traceback_(self) -> list[str]:
+        return str(self.report).splitlines()
+
+
+def _report_excepthook(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
+    if isinstance(exc, ReportException):
+        sys.stderr.write(str(exc.report) + "\n")
+        return
+    sys.__excepthook__(exc_type, exc, tb)
+
+
+sys.excepthook = _report_excepthook
+
 
 def main() -> None:
     from textwrap import dedent
