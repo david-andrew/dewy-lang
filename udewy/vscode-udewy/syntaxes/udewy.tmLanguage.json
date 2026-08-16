@@ -12,6 +12,7 @@
     { "include": "#constant" },
     { "include": "#intrinsic" },
     { "include": "#metatag" },
+    { "include": "#type-declaration" },
     { "include": "#type-annotation" },
     { "include": "#function-definition" },
     { "include": "#transmute" },
@@ -234,6 +235,49 @@
         }
       ]
     },
+    "type-declaration": {
+      "name": "meta.type-declaration.udewy",
+      "contentName": "entity.name.type.udewy",
+      "begin": "^(\\s*)([A-Za-z_][A-Za-z0-9_]*)(\\s*)(:)(\\s*)(type)\\b(\\s*)(=)(\\s*)",
+      "beginCaptures": {
+        "2": { "name": "entity.name.type.udewy" },
+        "4": { "name": "punctuation.separator.type.udewy" },
+        "6": { "name": "entity.name.type.udewy" },
+        "8": { "name": "keyword.operator.assignment.udewy" }
+      },
+      "end": "(?=#|$)",
+      "patterns": [
+        { "include": "#ignored-type-group" }
+      ]
+    },
+    "ignored-type-group": {
+      "patterns": [
+        {
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            { "include": "#comment" },
+            { "include": "#ignored-type-group" }
+          ]
+        },
+        {
+          "begin": "\\(",
+          "end": "\\)",
+          "patterns": [
+            { "include": "#comment" },
+            { "include": "#ignored-type-group" }
+          ]
+        },
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [
+            { "include": "#comment" },
+            { "include": "#ignored-type-group" }
+          ]
+        }
+      ]
+    },
     "type-annotation": {
       "patterns": [
         {
@@ -306,16 +350,54 @@
       ]
     },
     "type-parameter": {
-      "name": "entity.name.type.udewy",
+      "name": "meta.type-parameter.udewy",
+      "contentName": "entity.name.type.udewy",
       "begin": "<(?![?=<])",
+      "beginCaptures": {
+        "0": { "name": "entity.name.type.udewy" }
+      },
       "end": "(?<!:)>(?![=?])",
-      "patterns": [{ "include": "#type-parameter" }]
+      "endCaptures": {
+        "0": { "name": "entity.name.type.udewy" }
+      },
+      "patterns": [
+        {
+          "name": "invalid.illegal.comment.udewy",
+          "match": "#.*$"
+        },
+        { "include": "#type-parameter" }
+      ]
     },
     "bracketed-type": {
-      "name": "entity.name.type.udewy",
+      "name": "meta.bracketed-type.udewy",
+      "contentName": "entity.name.type.udewy",
       "begin": "\\[",
+      "beginCaptures": {
+        "0": { "name": "entity.name.type.udewy" }
+      },
       "end": "\\]",
-      "patterns": [{ "include": "#bracketed-type" }]
+      "endCaptures": {
+        "0": { "name": "entity.name.type.udewy" }
+      },
+      "patterns": [
+        { "include": "#opaque-type-string" },
+        {
+          "name": "invalid.illegal.comment.udewy",
+          "match": "#.*$"
+        },
+        { "include": "#bracketed-type" }
+      ]
+    },
+    "opaque-type-string": {
+      "name": "entity.name.type.udewy",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "entity.name.type.udewy",
+          "match": "\\\\."
+        }
+      ]
     },
     "function-definition": {
       "match": "\\b(let|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\(",
