@@ -426,9 +426,12 @@ Incremental implementation work:
       with one type system and binding registry, reject cycles and collisions,
       initialize once in dependency order, receive module-qualified target
       symbols, and merge into one udewy executable.
-- [ ] Installed package lookup, directory/glob imports, explicit export
-      control, non-source artifact loading, and incremental per-module
-      artifacts.
+- [ ] ~~Installed package lookup, directory/glob imports, explicit export control,~~ non-source artifact loading, ~~and incremental per-module artifacts.~~
+
+TODO: probably move to a different sections
+- [ ] somewhere we should define a list of .dewy files that form the standard import prelude.
+this includes `p`, and other common things always present by defualt (unless freestanding mode (or perhaps no-prelude mode)). This lets us decrease the size of some of the builtin definitions in the compiler
+
 
 ## Completely unimplemented
 In no particular order
