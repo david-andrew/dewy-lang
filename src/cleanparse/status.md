@@ -158,6 +158,9 @@ semantics.
 - [x] Bounds facts from comparisons, arithmetic, loops, and range iterators.
 - [x] `bool`, string/grapheme, function, nested-array, and object-handle
       element layouts.
+- [x] Non-escaping function-local `let` and `const` bindings initialized by an
+      exact-length array literal use only a fresh stack element buffer when
+      every use is `.length`, an indexed read, or an indexed write.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
 - [ ] Returning arrays and allowing stack-allocated arrays to escape their
@@ -277,18 +280,28 @@ program at runtime. Facts already established by typing, refinement, control-flo
 or effect analysis should normally become constants in the emitted program
 rather than fields stored beside every value.
 
-The current backend generally uses one canonical representation for each
-non-scalar type. Most arrays are represented by a pointer to a 48-byte
-descriptor containing `data`, `length`, `capacity`, `stride`, `flags`, and
-`owner`. An initial exception now selects raw static storage for module-scope
-`const` arrays whose binding-identity use set contains only `.length` and
-indexed reads: compatible one-word literals and function references use
-udewy's internal `__static_words__`, while exact based bytes use their static
-data pointer. All other arrays retain the descriptor fallback. At present
-array elements can be mutated, but arrays cannot change length; `capacity`,
-`stride`, and `owner` are not read by generated programs. `flags` is needed
-only for runtime copy-on-write of borrowed static bytes, while exact array
-length and element stride are usually known statically.
+The current backend still uses a canonical pointer to a 48-byte descriptor
+containing `data`, `length`, `capacity`, `stride`, `flags`, and `owner` for most
+arrays. Two proven cases omit it:
+
+- Module-scope `const` arrays whose binding-identity use set contains only
+  `.length` and indexed reads can use raw static storage. Compatible one-word
+  literals and function references use udewy's internal `__static_words__`,
+  while exact based bytes use their static data pointer.
+- A function-local `let` or `const` binding initialized directly by an
+  exact-length `ArrayLiteral` uses a fresh `__alloca__` element buffer when all
+  uses are `.length`, indexed reads, or indexed writes. Length is folded from
+  the exact type, element stride is compiled into address arithmetic, and
+  width-correct loads and stores address the buffer directly. Semantic checking
+  still rejects indexed writes through a `const` binding.
+
+Aliases, whole-array assignment, call arguments, returns or other escapes,
+object storage, based-string or copy-on-write conversions, nonliteral
+initializers, and unclassified uses conservatively retain the descriptor. No
+call-boundary adapter or representation join is implemented. At present array
+elements can be mutated, but arrays cannot change length; `capacity`, `stride`,
+and `owner` are not read by generated programs. `flags` is needed only for
+runtime copy-on-write of borrowed static bytes.
 
 The intended rule is that each value receives the least runtime representation
 needed by all of its reachable uses. For arrays this includes:
@@ -370,11 +383,14 @@ Incremental implementation work:
 - [x] Emit eligible module `const` arrays of stable 64-bit words, compatible
       non-extern function references, or exact based bytes as raw static data
       with compile-time length and stride.
+- [x] Scalar-replace eligible non-escaping exact local array literals with a
+      fresh raw stack-data buffer, direct width-aware indexed reads and writes,
+      and compile-time `.length`.
 - [ ] Generalize representation requirements across control-flow joins,
-      aliases, specialized calls, local scalar replacement, and additional
-      element/storage classes.
-- [ ] Stop storing array length, capacity, stride, flags, and ownership metadata
-      when each fact is either unused or available statically.
+      aliases, specialized calls, and additional element/storage classes.
+- [ ] Elide array length, capacity, stride, flags, and ownership metadata for
+      additional runtime array representations when each fact is unused or
+      available statically.
 - [ ] Materialize canonical descriptors only at representation-changing
       boundaries, and specialize direct calls where profitable.
 - [ ] Extend the same analysis to objects, strings, optionals/unions, iterators,

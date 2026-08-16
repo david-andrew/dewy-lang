@@ -82,8 +82,18 @@ ARRAY_DESCRIPTOR_SIZE = 48
 ARRAY_MUTABLE = 1
 ARRAY_BORROWED_STATIC = 2
 
-type ArrayRepresentation = Literal['descriptor', 'static_words', 'static_bytes']
-type ArrayUse = Literal['length', 'index', 'other']
+type ArrayRepresentation = Literal[
+    'descriptor',
+    'stack_data',
+    'static_words',
+    'static_bytes',
+]
+type ArrayUse = Literal[
+    'length',
+    'index_read',
+    'index_write',
+    'representation',
+]
 
 STRING_DATA_OFFSET = 0
 STRING_BYTE_LENGTH_OFFSET = 8
@@ -222,6 +232,7 @@ class _Lowerer:
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
         self.call_optional_kwargs: dict[int, dict[str, ty.TypeExpr]] = {}
         self.array_representations: dict[int, ArrayRepresentation] = {}
+        self.array_declarations: dict[int, hir.Declare] = {}
         self.array_uses: dict[int, set[ArrayUse]] = defaultdict(set)
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
@@ -849,6 +860,7 @@ class _Lowerer:
                     and isinstance(item.annotation or item.expr.type, ty.ArrayType)
                 ):
                     self.array_representations[item.binding_id] = 'descriptor'
+                    self.array_declarations[item.binding_id] = item
                 payload = ty.optional_payload(item.annotation or item.expr.type)
                 if payload is not None and item.binding_id is not None:
                     self.optional_payloads[item.binding_id] = payload
@@ -909,6 +921,12 @@ class _Lowerer:
             declare.binding_id,
         )
         self.declare_bindings[id(declare)] = binding
+        if (
+            declare.binding_id is not None
+            and isinstance(declare.annotation or declare.expr.type, ty.ArrayType)
+        ):
+            self.array_representations[declare.binding_id] = 'descriptor'
+            self.array_declarations[declare.binding_id] = declare
 
     def _new_function(
         self,
@@ -1011,7 +1029,7 @@ class _Lowerer:
         *,
         suggested_name: str | None = None,
         overload_member: bool = False,
-        array_use: ArrayUse = 'other',
+        array_use: ArrayUse = 'representation',
     ) -> None:
         """Resolve names and recursively collect callable constructs in ``node``."""
         if isinstance(node, hir.ExpressedIdentifier):
@@ -1058,6 +1076,7 @@ class _Lowerer:
                     current_function,
                     suggested_name=suggested_name,
                     overload_member=overload_member,
+                    array_use=array_use,
                 )
                 return
             self._discover_block(node, scope, current_function=current_function)
@@ -1147,12 +1166,17 @@ class _Lowerer:
                 node.array,
                 scope,
                 current_function,
-                array_use='index',
+                array_use='index_read',
             )
             self._discover_node(node.index, scope, current_function)
             return
         if isinstance(node, hir.IndexAssign):
-            self._discover_node(node.target.array, scope, current_function)
+            self._discover_node(
+                node.target.array,
+                scope,
+                current_function,
+                array_use='index_write',
+            )
             self._discover_node(node.target.index, scope, current_function)
             self._discover_node(node.value, scope, current_function)
             return
@@ -1205,7 +1229,7 @@ class _Lowerer:
                 node.expr,
                 scope,
                 current_function,
-                array_use=array_use,
+                array_use='representation',
             )
             return
         if isinstance(node, hir.TypeBlock):
@@ -1226,16 +1250,27 @@ class _Lowerer:
                 self._discover_node(item, scope, current_function)
 
     def _classify_array_representations(self) -> None:
-        for node in self.root.items:
+        for binding_id, node in self.array_declarations.items():
+            binding = self.binding_by_semantic_id[binding_id]
             if (
-                not isinstance(node, hir.Declare)
-                or node.binding_id is None
+                binding.owner_function is not None
+                and node.decltype in {'let', 'const'}
+                and isinstance(node.expr, hir.ArrayLiteral)
+                and isinstance(node.expr.type, ty.ArrayType)
+                and node.expr.type.length == len(node.expr.items)
+            ):
+                uses = self.array_uses.get(binding_id, set())
+                if uses <= {'length', 'index_read', 'index_write'}:
+                    self.array_representations[binding_id] = 'stack_data'
+                    continue
+            if (
+                binding.owner_function is not None
                 or node.decltype != 'const'
                 or not isinstance(node.annotation or node.expr.type, ty.ArrayType)
             ):
                 continue
-            uses = self.array_uses.get(node.binding_id, set())
-            if not uses <= {'length', 'index'}:
+            uses = self.array_uses.get(binding_id, set())
+            if not uses <= {'length', 'index_read'}:
                 continue
             array_type = node.annotation or node.expr.type
             assert isinstance(array_type, ty.ArrayType)
@@ -2026,6 +2061,8 @@ class _Lowerer:
                 ]
             if isinstance(declared_type, ty.ObjectType):
                 return self._lower_object_declare(node, declared_type)
+            if self._array_representation(node) == 'stack_data':
+                return self._lower_stack_array_declare(node)
             prelude, expr = self._extract_expression(node.expr)
             annotation = (
                 'int64'
@@ -2063,6 +2100,9 @@ class _Lowerer:
             ]
         if isinstance(node, hir.IndexAssign):
             target_prelude, target = self._extract_expression(node.target.array)
+            stack_data = (
+                self._array_use_representation(node.target.array) == 'stack_data'
+            )
             index_prelude: list[hir.AST] = []
             index: int | hir.AST = node.target.constant_index
             if index is None:
@@ -2073,15 +2113,24 @@ class _Lowerer:
                 node.value,
                 node.target.type,
             )
-            address = self._array_element_address(
-                target,
-                index,
-                node.target.type,
-                node.loc,
+            address = (
+                self._pointer_element_address(
+                    target,
+                    index,
+                    self._array_element_layout(node.target.type, node)[0],
+                    node.loc,
+                )
+                if stack_data
+                else self._array_element_address(
+                    target,
+                    index,
+                    node.target.type,
+                    node.loc,
+                )
             )
             cow = (
                 self._ensure_mutable_byte_array(target, node.loc)
-                if node.target.type == 'uint8'
+                if node.target.type == 'uint8' and not stack_data
                 else []
             )
             if cow:
@@ -2328,8 +2377,8 @@ class _Lowerer:
         if isinstance(node, hir.ArrayLiteral):
             return self._extract_array_literal(node)
         if isinstance(node, hir.ArrayLength):
-            static_representation = self._static_array_use_representation(node.array)
-            if static_representation is not None and isinstance(
+            raw_representation = self._array_use_representation(node.array)
+            if raw_representation is not None and isinstance(
                 node.type,
                 ty.IntegerLiteralType,
             ):
@@ -2349,9 +2398,9 @@ class _Lowerer:
                 node.loc,
             )
         if isinstance(node, hir.Index):
-            static_representation = self._static_array_use_representation(node.array)
+            raw_representation = self._array_use_representation(node.array)
             static_bytes = self._static_binary_array_source(node.array)
-            if static_representation is not None:
+            if raw_representation is not None:
                 prelude, array = self._extract_expression(node.array)
             elif static_bytes is not None:
                 prelude, array = self._extract_expression(static_bytes)
@@ -2368,7 +2417,7 @@ class _Lowerer:
                     self._array_element_layout(node.type, node)[0],
                     node.loc,
                 )
-                if static_representation is not None
+                if raw_representation is not None
                 else self._pointer_element_address(array, index, 1, node.loc)
                 if static_bytes is not None
                 else self._array_element_address(
@@ -2609,10 +2658,12 @@ class _Lowerer:
             return node.expr
         return None
 
-    def _static_array_use_representation(
+    def _array_use_representation(
         self,
         node: hir.AST,
-    ) -> Literal['static_words', 'static_bytes'] | None:
+    ) -> Literal['stack_data', 'static_words', 'static_bytes'] | None:
+        while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            node = node.items[0]
         if not isinstance(node, hir.ExpressedIdentifier):
             return None
         if node.binding_id is None:
@@ -2620,7 +2671,7 @@ class _Lowerer:
         representation = self.array_representations.get(node.binding_id)
         return (
             representation
-            if representation in {'static_words', 'static_bytes'}
+            if representation in {'stack_data', 'static_words', 'static_bytes'}
             else None
         )
 
@@ -4939,6 +4990,64 @@ class _Lowerer:
                 node.loc,
             )
         return statements, result
+
+    def _lower_stack_array_declare(
+        self,
+        node: hir.Declare,
+    ) -> list[hir.AST]:
+        if not isinstance(node.expr, hir.ArrayLiteral):
+            raise TypeError(
+                'INTERNAL ERROR: stack-data representation requires an array literal'
+            )
+        array_type = node.expr.type
+        if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
+            raise TypeError(
+                'INTERNAL ERROR: stack-data array literal requires an exact length'
+            )
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            node.expr,
+        )
+        target = hir.ExpressedIdentifier(
+            node.loc,
+            'int64',
+            node.name,
+            binding_id=node.binding_id,
+        )
+        statements: list[hir.AST] = [
+            replace(
+                node,
+                decltype='let',
+                annotation='int64',
+                expr=self._intrinsic_call(
+                    '__alloca__',
+                    [
+                        self._int64_literal(
+                            node.loc,
+                            array_type.length * element_bytes,
+                        )
+                    ],
+                    'int64',
+                    node.loc,
+                ),
+            )
+        ]
+        for index, item in enumerate(node.expr.items):
+            item_prelude, value = self._array_storage_value(
+                item,
+                array_type.element,
+            )
+            statements.extend(item_prelude)
+            address = self._pointer_element_address(
+                target,
+                index,
+                element_bytes,
+                item.loc,
+            )
+            statements.append(
+                self._array_store(value, address, array_type.element, item.loc)
+            )
+        return statements
 
     def _extract_array_literal(
         self,

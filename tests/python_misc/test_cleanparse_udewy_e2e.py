@@ -109,6 +109,29 @@ def test_udewy_fixture_compiles_and_runs(
     assert exit_code == expected_exit
 
 
+def test_fixed_local_array_fixtures_use_stack_data() -> None:
+    local_sum = codegen(SrcFile.from_path(fixtures / 'array_local_sum.dewy'))
+    assert 'let values:int64 = __alloca__(24)' in local_sum
+    assert '__store_i64__(10 values)' in local_sum
+    assert '__load_i64__(values + 16)' in local_sum
+    assert '__alloca__(48)' not in local_sum
+
+    dynamic = codegen(SrcFile.from_path(fixtures / 'array_dynamic_narrow.dewy'))
+    assert 'let bytes:int64 = __alloca__(3)' in dynamic
+    assert 'loop i <? 3' in dynamic
+    assert '__store_u8__(42 bytes + 1)' in dynamic
+    assert 'return __load_u8__(bytes + 1)' in dynamic
+    assert '__load_i64__(bytes' not in dynamic
+    assert '__alloca__(48)' not in dynamic
+
+    recursive = codegen(SrcFile.from_path(fixtures / 'array_fresh_local.dewy'))
+    assert 'let probe = (depth:int64):>int64 => {\n    let values:int64 = __alloca__(8)' in recursive
+    assert '__store_i64__(40 values)' in recursive
+    assert 'let ignored:int64 = probe(1)' in recursive
+    assert 'return __load_i64__(values)' in recursive
+    assert '__alloca__(48)' not in recursive
+
+
 @pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
 def test_bare_metal_dewy_hello_world(
     tmp_path: Path,
