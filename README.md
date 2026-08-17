@@ -22,13 +22,21 @@ A vscode extension for syntax highlighting is available at https://marketplace.v
 
 ## Installation
 
-Linux x86_64. This currently installs the `udewy` bootstrap compiler into `~/.dewy` (a `dewy` binary will land next to it later):
+Linux x86_64. This installs the `udewy` bootstrap compiler and the current
+Python-backed `dewy` compiler into `~/.dewy`:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash
 ```
 
-From a checkout, the Python Dewy compiler is:
+The first `dewy` invocation checks for Python 3.12 or newer and caches the
+compatible interpreter path for later runs. You can then run a program with:
+
+```
+dewy path/to/my_script.dewy
+```
+
+From a checkout, the equivalent command is:
 
 ```
 python -m dewy path/to/my_script.dewy
