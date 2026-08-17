@@ -262,15 +262,15 @@ def test_function_only_program_without_main_gets_empty_entrypoint() -> None:
     assert 'let main = ():>void' in emitted
 
 
-def test_inferred_integer_globals_and_main_use_int64_storage() -> None:
+def test_inferred_integer_globals_and_main_use_abstract_int_storage() -> None:
     emitted = _codegen("""
 let value = 42
 let main = () => value
 """)
 
-    assert 'let value:int64 = 0' in emitted
-    assert 'let __dewy_user_main = ():>int64' in emitted
-    assert 'let main = ():>int64' in emitted
+    assert 'let value:int = 0' in emitted
+    assert 'let __dewy_user_main = ():>int' in emitted
+    assert 'let main = ():>int' in emitted
 
 
 def test_void_main_wrapper_runs_startup_then_returns_void() -> None:

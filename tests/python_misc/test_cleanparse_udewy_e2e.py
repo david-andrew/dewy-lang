@@ -192,7 +192,7 @@ def test_no_prelude_import_writes_to_console(
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     emitted = codegen(SrcFile.from_path(fixtures / 'no_prelude' / 'main.dewy'))
-    assert 'let p =' in emitted
+    assert 'let __dewy_module_prelude_path_p =' in emitted
     assert '__syscall3__(1 1 data 22)' in emitted
 
     udewy_path = tmp_path / 'no_prelude.udewy'

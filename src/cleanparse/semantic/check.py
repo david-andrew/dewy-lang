@@ -338,7 +338,7 @@ def _pack_based_string(
 
 
 def _complete_binding(
-    ast: p0.KeywordExpr,
+    ast: p0.AST,
     declaration: hir.Declare,
     *,
     ctx: Context,
@@ -372,6 +372,12 @@ def _complete_binding(
         binding.function = declaration.expr
     ctx.binding_scopes[declaration.name] = binding
     return declaration
+
+
+def _widen_inferred_let_value(expr: hir.AST) -> hir.AST:
+    if isinstance(expr, hir.Integer) and isinstance(expr.type, ty.IntegerLiteralType):
+        return replace(expr, type='int')
+    return expr
 
 
 def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
@@ -409,6 +415,8 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             ]:
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
             require_valued(expr.type, ctx.srcfile, expr.loc, 'declaration initializer')
+            if keyword == 'let':
+                expr = _widen_inferred_let_value(expr)
 
             # if this declaration was pre-bound by the two-phase pass, verify the checked
             # type matches the pre-bound signature rather than silently overwriting it
@@ -509,6 +517,29 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     assert isinstance(ast.op, t1.Operator)
     if ast.op.symbol != '=':
         not_implemented(ctx.srcfile, ast.op.loc, f'assignment operator `{ast.op.symbol}`')
+
+    if (
+        isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Identifier)
+        and ast.left.item.name not in ctx.declarations
+    ):
+        name = ast.left.item.name
+        value = typecheck_and_resolve_inner(ast.right, ctx=ctx)
+        require_valued(value.type, ctx.srcfile, value.loc, 'declaration initializer')
+        value = _widen_inferred_let_value(value)
+        ctx.declarations[name] = value.type
+        return _complete_binding(
+            ast,
+            hir.Declare(
+                ast.loc,
+                ty.VOID_TYPE,
+                'let',
+                name,
+                None,
+                value,
+            ),
+            ctx=ctx,
+        )
 
     target = tcr_assignment_target(ast.left, ctx=ctx)
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)

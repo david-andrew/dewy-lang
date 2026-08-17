@@ -61,6 +61,62 @@ let main = ():>int => {
     assert all(assignment.target.name == 'x' for assignment in assignments)
 
 
+def test_unannotated_integer_let_widens_binding_to_int() -> None:
+    body = _main_body("""
+let main = ():>int => {
+    let x = 10
+    x += 1
+    return x
+}
+""")
+    declaration = body.items[0]
+    assignment = body.items[1]
+
+    assert isinstance(declaration, hir.Declare)
+    assert declaration.expr.type == 'int'
+    assert isinstance(assignment, hir.Assign)
+    assert assignment.target.type == 'int'
+
+
+def test_assignment_declares_only_an_unbound_identifier() -> None:
+    body = _main_body("""
+let main = ():>int => {
+    x = 10
+    x = 11
+    return x
+}
+""")
+    declaration = body.items[0]
+    assignment = body.items[1]
+
+    assert isinstance(declaration, hir.Declare)
+    assert declaration.decltype == 'let'
+    assert declaration.name == 'x'
+    assert declaration.expr.type == 'int'
+    assert isinstance(assignment, hir.Assign)
+    assert assignment.target.binding_id == declaration.binding_id
+
+
+def test_assignment_reuses_a_binding_from_a_parent_scope() -> None:
+    body = _main_body("""
+let main = ():>int => {
+    let x = 10
+    {
+        x = 11
+    }
+    return x
+}
+""")
+    declaration = body.items[0]
+    nested = body.items[1]
+
+    assert isinstance(declaration, hir.Declare)
+    assert isinstance(nested, hir.Block)
+    assignment = nested.items[0]
+    assert isinstance(assignment, hir.Assign)
+    assert assignment.target.binding_id == declaration.binding_id
+
+
 def test_transmute_is_distinct_from_value_cast() -> None:
     body = _main_body("""
 let main = ():>int => {

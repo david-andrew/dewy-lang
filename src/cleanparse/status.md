@@ -6,6 +6,10 @@ are supported through parsing, semantic analysis, udewy lowering, and emission.
 ## Core declarations and expressions
 
 - [x] `let` and `const` declarations, assignment, and combined assignment.
+      Plain `name = value` implicitly declares a `let` binding when no visible
+      binding exists; otherwise it remains reassignment.
+- [x] Unannotated `let` bindings initialized from integer literals widen the
+      binding to abstract `int` rather than retaining a singleton integer type.
 - [x] Lexical binding identities, nested scopes, and shadowing.
 - [x] Boolean, fixed-width integer, `void`, `never`, and exact integer-literal
       types within the supported operations described below.
