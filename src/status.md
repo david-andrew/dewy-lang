@@ -1,0 +1,726 @@
+# Cleanparse implementation status
+
+This document tracks language features in the cleanparse compiler. Checked items
+are supported through parsing, semantic analysis, udewy lowering, and emission.
+
+## Core declarations and expressions
+
+- [x] `let` and `const` declarations, assignment, and combined assignment.
+      Plain `name = value` implicitly declares a `let` binding when no visible
+      binding exists; otherwise it remains reassignment.
+- [x] Unannotated `let` bindings initialized from integer literals widen the
+      binding to abstract `int` rather than retaining a singleton integer type.
+- [x] Lexical binding identities, nested scopes, and shadowing.
+- [x] Boolean, fixed-width integer, `void`, `never`, and exact integer-literal
+      types within the supported operations described below.
+- [x] Contextual integer-literal typing for declarations, calls, returns, and
+      operators. A literal can inhabit any fixed-width integer type that contains
+      its value; out-of-range literals are rejected.
+- [x] Type-directed operator resolution, including distinct signed and unsigned
+      right-shift lowering.
+- [x] `transmute` for values whose source and destination representations are
+      supported by the udewy backend, including function pointers.
+
+## Type expressions and type-valued inference
+
+- [x] Explicit compile-time aliases using `let T:type = ...`, including a
+      single type expression grouped as `<...>` in that expected type position.
+- [x] Contextual value typing from annotations, function parameters and returns,
+      and supported container element or field types.
+- [ ] Standalone non-juxtaposed `<...>` expressions producing compile-time
+      values of type `type`.
+- [ ] Inferring `let T = <...>` as a compile-time type alias without requiring
+      the explicit `:type` annotation.
+- [ ] Runtime type values, reflection, and general compile-time evaluation of
+      type expressions.
+
+## Generics
+
+The type system already instantiates generic function types for built-in
+operator overloads, such as `<T of int>(left:T right:T):>T`. User-written
+generic functions, type aliases, and explicit type arguments are not
+implemented. Non-juxtaposed `<...>` as a type-valued group is tracked under
+Type expressions above; here `<T>` is a type-parameter list.
+
+- [x] Internal generic parameters, call-site inference, and instantiation used
+      by built-in operator overloads.
+- [x] Parameterized built-in types in annotations, including `array<T>` and
+      `array<T length=N>`.
+- [ ] User-written generic functions such as
+      `identity = <T>(value:T):>T => value`.
+- [ ] Generic bounds (`T of number`) in source, explicit type arguments at
+      call sites, and named generic type aliases.
+- [ ] User-defined parameterized types and generic object types.
+- [ ] Monomorphization or other udewy lowering for user generic values.
+
+## Structured control flow
+
+- [x] Boolean `if`/`else if`/`else`, including scalar expression-valued
+      conditionals.
+- [x] `loop`, `break`, and `continue`.
+- [x] Labeled loop exits using scope metatags. Labels have scope-wide visibility;
+      duplicate declarations and shadowing an active label are errors.
+- [x] Boolean short-circuiting for the operator syntax of `and`, `or`, `nand`, and
+      `nor`, including their symbolic spellings. Explicit dunder calls remain
+      ordinary eager calls.
+- [x] Return-coverage checking through exhaustive conditional flow.
+
+## Basic callable use
+
+- [x] Direct calls, forward references from function bodies, recursion, and mutual
+      recursion.
+- [x] Structural function types with named or unnamed parameter contracts.
+- [x] Function values, parameters, returns, indirect calls, and pipe calls.
+- [x] Non-capturing local functions, which are hoisted with readable,
+      scope-qualified names.
+
+## Compilation-unit execution
+
+- [x] Top-level executable statements run in source order.
+- [x] A zero-argument `main`, when present, runs after top-level execution and must
+      return an integer exit code or `void`.
+- [x] Programs without `main` receive an empty generated entry point.
+- [x] Global initialization is lowered through private startup storage while
+      preserving source-order execution.
+- [ ] Optional `main` argument `argv:array<string>`.
+- [ ] Optional `main` environment argument. The environment structure is still TBD.
+
+## Udewy intrinsics and host interoperability
+
+- [x] Typed source access to udewy's portable memory, allocation, signed-shift,
+      and unsigned-operation intrinsics.
+- [x] Typed access to Linux `__syscall0__` through `__syscall6__`, emitted as
+      direct udewy intrinsic calls.
+- [x] Executable x86-64 Linux bare-metal hello world using a UTF-8 byte view,
+      its byte length, and the `write` syscall.
+- [ ] Target-specific non-Linux host intrinsics and capability selection.
+- [ ] Foreign symbols, external linkage, and a stable FFI surface.
+
+## Initialization and callable-effect analysis
+
+- [x] Eager top-level and local expressions cannot use values before
+      initialization.
+- [x] Function bodies may refer to later declarations, with required
+      initialization checked at each call site.
+- [x] Initialization requirements propagate through direct calls, callbacks,
+      callable alternatives, and statically reachable control flow.
+- [ ] Reassigned callable values do not yet have resolved callable effects.
+- [ ] Capturing local functions are analyzed but cannot yet be lowered as
+      closures.
+
+## Function overloads
+
+- [x] Static overload composition with `&`, nested overload sets, and
+      type-directed call selection.
+- [x] Inline overloads lower to readable signature-based symbols with an ordinal
+      when signatures collide.
+- [ ] Runtime multifunction values cannot yet be represented or lowered.
+
+## Function signatures and calls
+
+- [x] Positional parameters and arguments, named parameter contracts in structural
+      function types, and pipe calls.
+- [x] Keyword-only parameters and defaults participate in semantic checking and
+      initialization analysis.
+- [x] Keyword arguments and per-call defaults lower through a positional udewy
+      ABI for direct, piped, overload-selected, indirect, and method calls.
+- [ ] Rest parameters, argument spreading, and partial application do not yet
+      lower to udewy calls.
+
+## Integer representations and operations
+
+- [x] Exact integer-literal types and contextual selection of all signed and
+      unsigned widths from 8 through 64 bits.
+- [x] udewy lowering for the fixed-width scalar operations exercised by the
+      executable fixture suite.
+- [ ] Abstract `int` has arbitrary-precision semantics but no bigint runtime
+      representation in the udewy backend.
+- [ ] Some fixed-width rollover and unsigned scalar operations still stop with
+      focused backend diagnostics.
+
+## Compile-time numeric range analysis
+
+Unannotated integers behave as arbitrary precision. Explicit fixed-width
+annotations rollover as that width. Range analysis is the pass that proves
+whether a particular `int`, iterator, or arithmetic intermediate can be
+represented with a concrete `intN` under the hood without changing those
+semantics.
+
+- [x] Flow-sensitive integer intervals for bindings, used to prove array-index
+      bounds from comparisons, arithmetic, loops, and range iterators.
+- [ ] Selecting a hidden `intN` representation for values annotated or inferred
+      as `int` when every reachable value fits that width.
+- [ ] Proving that a right-unbounded iterator such as `0..` never overflows a
+      chosen fixed-width counter, including stepped arithmetic intermediates.
+- [ ] Using the same proofs to specialize other layouts, such as optional
+      niches for narrow integers.
+
+## Homogeneous arrays
+
+- [x] Homogeneous literals of fixed-width scalar and handle elements.
+- [x] Exact length refinements, `array<T length=N>`, and `.length`.
+- [x] Width-correct local and global storage for all fixed-width integer types.
+- [x] Constant and flow-proven dynamic indexing, indexed assignment, and const
+      mutation checks.
+- [x] Bounds facts from comparisons, arithmetic, loops, and range iterators.
+- [x] `bool`, string/grapheme, function, nested-array, and object-handle
+      element layouts.
+- [x] Non-escaping function-local `let` and `const` bindings initialized by an
+      exact-length array literal use only a fresh stack element buffer when
+      every use is `.length`, an indexed read, or an indexed write.
+- [ ] Empty-array inference.
+- [ ] Arrays whose exact runtime length is not known where indexing requires it.
+- [ ] Returning arrays and allowing stack-allocated arrays to escape their
+      defining function.
+
+## Ranges and range iteration
+
+- [x] Inclusive and explicitly open or closed bounds.
+- [x] Static integer ranges, descending ranges, and stepped `first,second..last`
+      ranges.
+- [x] Right-unbounded range semantics and integer bounds in HIR.
+- [x] Rejection of zero steps and iteration over ranges without a left anchor.
+- [x] udewy lowering for finite ranges whose values and iteration arithmetic fit
+      the supported `int64` representation.
+- [x] Default one-grapheme character ranges, including descending and stepped
+      forms, scalar-order iteration, and skipping the Unicode surrogate gap.
+- [x] Explicit `range<uint32>` context for one-scalar string endpoints.
+- [ ] Runtime-computed range anchors and steps.
+- [ ] Bigint lowering for right-unbounded or finite out-of-`int64` ranges.
+- [ ] Using general range values beyond the currently supported iterator
+      normalization.
+
+## `undefined`, optional values, and type narrowing
+
+- [x] `undefined` as a value distinct from `void`.
+- [x] `T | undefined` for currently lowerable single-layout payloads.
+- [x] Flow-sensitive narrowing with `is?`, `isnt?`, and supported short-circuit
+      conditions; assignment invalidates affected refinements.
+- [x] Optional locals, globals, assignment, parameters, returns, and direct,
+      indirect, or overloaded calls.
+- [x] A correct tag-and-payload udewy ABI with value semantics.
+- [ ] General heterogeneous runtime unions such as
+      `int64 | string | undefined`.
+- [ ] Compact niche layouts and scalar-replaced optional calling conventions.
+
+## Multiiterators
+
+- [x] Arbitrarily many static range iterators combined by `and`, `or`, `xor`,
+      `nand`, `nor`, or `xnor`, including symbolic spellings and grouped formulas.
+- [x] Eager left-to-right iterator advancement.
+- [x] Exhausted targets become `undefined`, with optional target types inferred
+      from statically known iterator lengths and the complete logical formula.
+- [x] Literal post-exhaustion truth-table behavior and labeled exits.
+- [x] Grapheme iteration over strings.
+- [ ] Multiiterator sources other than normalized integer ranges.
+- [ ] Conditions that mix iterator clauses with ordinary Boolean predicates.
+- [ ] Iterator fusion and scalar replacement of the baseline per-leaf state.
+
+## Objects
+
+- [x] Anonymous object literals with named fields in source order.
+- [x] Structural object types and named compile-time `type` aliases used in
+      annotations.
+- [x] Field read and write, nested objects, and exact name/type/order matching.
+- [x] Object parameters, returns, and constructors (functions that return
+      literals), with value-semantics copies.
+- [x] Function fields, including parenthesis-free zero-argument calls on member
+      access, and object-local reads of sibling fields.
+- [x] Sequential udewy layout for `bool`, fixed-width integers, function
+      pointers, string/array handles, and nested objects of those types.
+- [ ] Dictionary and bidictionary `[]` forms.
+- [ ] sets `set[1 2 3 4]`
+- [ ] Extracting an object method as a naked function value.
+- [ ] Packing, field reordering, dunder methods, and width subtyping.
+
+## Strings
+
+- [x] Power-of-two based strings (`0b`, `0q`, `0o`, `0x`, `0u`, and `0g`) have
+      exact binary singleton types, contextual `array<uint8>` materialization,
+      and udewy lowering. Digits contribute fixed-width `log2(base)` chunks in
+      source order; the final byte is right-zero padded. Base-64 `_` is digit
+      63 and trailing `=` contributes no bits. Lowering emits canonical packed
+      `0x"..."` data without target-endian or text reinterpretation.
+- [ ] Non-power-of-two based strings (`0t`, `0s`, `0d`, `0z`, and `0r`) are
+      reserved for future dense packing. For an `n`-digit base-`b` sequence,
+      fold the digits by rank accumulation (`rank = rank * b + digit`), encode
+      that rank in the sequence-derived width `ceil(log2(b**n))`, then
+      right-zero pad the final storage byte. This width is not generally
+      additive across concatenated subsequences, so compositionality and chunk
+      boundaries remain unresolved. Balanced ternary also needs a defined
+      ordering/rank for its negative digit before it can share this scheme.
+- [x] Exact string-literal types with contextual materialization as immutable
+      grapheme strings, `array<uint8>`, `array<uint32>`, or
+      `array<grapheme>`. `char` is the one-grapheme string refinement.
+- [x] Unicode 16.0.0 UAX #29 extended-grapheme segmentation from checked-in
+      generated property tables, including combining marks, Hangul, emoji ZWJ
+      sequences, regional indicators, modifiers, and Indic conjuncts.
+- [x] One-word udewy string descriptors over immutable UTF-8 plus byte-offset
+      grapheme boundaries. Literals, calls, returns, globals, objects,
+      optionals, and handle-element arrays use the descriptor ABI.
+- [x] Grapheme `.length`, indexing, slicing with all bound forms, iteration,
+      exact byte equality, and supported character ranges.
+- [x] `string as array<uint8>` borrowing with copy-on-write mutation,
+      materialized `array<uint32>` scalar views, string-to-grapheme arrays, and
+      grapheme-array-to-string conversion with UAX #29 re-segmentation.
+- [x] `as` performs representation-changing conversions; `transmute` remains
+      bit-preserving and rejects string/array layout reinterpretation.
+- [x] Runtime re-segmentation uses current grapheme-array values, including
+      mutations that cause adjacent clusters to merge.
+- [ ] `array<uint8>` or `array<uint32>` to string. These conversions require
+      future refinement proofs for valid UTF-8 or Unicode scalar contents.
+- [ ] Normalization APIs and normalization-aware comparisons. String equality
+      currently preserves and compares the exact scalar spelling.
+
+## Conditional values
+
+- [x] Exhaustive conditionals can produce one scalar value and lower through a
+      typed temporary.
+- [x] Non-exhaustive conditionals are statement-valued `void`.
+- [ ] Multi-value conditional results.
+
+## Array, object, and other compile-time versus runtime representations
+
+The source-level type of a value describes its semantics, not a mandatory
+machine layout. Lowering should retain only information that can affect the
+program at runtime. Facts already established by typing, refinement, control-flow,
+or effect analysis should normally become constants in the emitted program
+rather than fields stored beside every value.
+
+The current backend still uses a canonical pointer to a 48-byte descriptor
+containing `data`, `length`, `capacity`, `stride`, `flags`, and `owner` for most
+arrays. Two proven cases omit it:
+
+- Module-scope `const` arrays whose binding-identity use set contains only
+  `.length`, indexed reads, and proven-safe direct-call boundaries can use raw
+  static storage. Compatible one-word literals and function references use
+  udewy's internal `__static_words__`, while exact based bytes use their static
+  data pointer.
+- A function-local `let` or `const` binding initialized directly by an
+  exact-length `ArrayLiteral` uses a fresh `__alloca__` element buffer when all
+  uses are `.length`, indexed reads or writes, simple same-function aliases, or
+  proven-safe direct-call boundaries. Transitive aliases copy the raw pointer,
+  so reads and writes share the same storage. Length is folded from the exact
+  type, element stride is compiled into address arithmetic, and width-correct
+  loads and stores address the buffer directly. Semantic checking still rejects
+  indexed writes through a `const` binding.
+
+For a statically resolved direct or selected-overload call, a parameter whose
+alias closure only observes length or indexed reads/writes is adapter-safe.
+Lowering wraps raw local/static data in a temporary canonical descriptor in the
+call prelude without copying elements; the callee ABI and indexing remain
+descriptor-based. Read-only exact static bytes use borrowed-static flags.
+
+Whole-array assignment, object storage, returns or other escapes, casts,
+parameter forwarding, indirect or method calls, nonliteral/control-flow
+initializers, aliases outside one function, and unclassified uses
+conservatively retain the descriptor. Static-byte mutation retains the
+descriptor and copy-on-write path. Control-flow representation joins, general
+or transitive effect analysis, indirect/method adapters, and descriptor-free
+specialized direct-call ABIs remain pending. At present arrays cannot change
+length; `capacity`, `stride`, and `owner` are not read by generated programs.
+
+The intended rule is that each value receives the least runtime representation
+needed by all of its reachable uses. For arrays this includes:
+
+- An immutable literal used directly by another operation can lower to static
+  element data, or directly to an udewy literal operand, with no descriptor.
+- A fixed-length mutable local array needs writable element storage, but does
+  not inherently need metadata beside that storage.
+- A view whose length is known only at runtime may need `(data, length)`.
+- A borrowed byte view that may be mutated needs enough dynamic state to
+  distinguish borrowed from owned storage and perform copy-on-write. If analysis
+  proves that it is never mutated, that state is unnecessary.
+- A future growable array may need `(data, length, capacity)`. Capacity should
+  not exist merely in anticipation of operations that the value never performs.
+- Element stride follows from `array<T>` and should be compiled into address
+  arithmetic. A runtime stride is justified only by genuine type erasure, such
+  as an existential container or an FFI contract whose element layout is not
+  statically available. Merely placing differently typed arrays in different
+  fields of one object does not erase their element types.
+- Ownership or lifetime metadata is needed only when the selected memory
+  management strategy must inspect it dynamically. It need not be a field on
+  every array merely because some arrays borrow storage.
+
+This produces a spectrum rather than a second universal layout: no runtime
+value, raw data only, a scalar tuple such as `(data, length)`, or a full
+descriptor. Known `.length` operations and element widths are substituted
+directly at their uses. A descriptor is materialized only at a boundary that
+actually requires the canonical handle representation.
+
+The same principle applies beyond arrays:
+
+- Object fields can remain independent scalar values, and unused fields can be
+  absent, while an object that escapes or crosses a canonical ABI boundary may
+  require materialization into memory. Scalar replacement must preserve the
+  language's object value and mutation semantics.
+- Exact string literals should remain semantic singletons until context selects
+  UTF-8 bytes, Unicode scalars, graphemes, or a runtime string. UTF-8 data,
+  grapheme boundaries, byte length, and grapheme length should be materialized
+  only when the selected operations require them.
+- Optional and union tags can disappear after exhaustive narrowing, or be
+  encoded in an unused payload value when a valid niche is proven. A general
+  tag-and-payload representation remains the fallback.
+- Ranges and iterators whose bounds and state transitions are known can lower
+  directly to loop scalars instead of heap- or stack-resident iterator records.
+- Function values need only a code pointer when no environment is captured;
+  closures require an environment only when captures survive lowering.
+
+Representation selection must happen after semantic typing. Two values with the
+same Dewy type may therefore use different machine representations without that
+difference becoming observable in Dewy. The compiler must insert an adapter or
+materialize the canonical form when differently represented values meet at
+control-flow joins, indirect calls, separately compiled interfaces, FFI
+boundaries, or unspecialized function parameters. Direct calls may instead be
+specialized so that compile-time facts continue across the boundary.
+
+Choosing a smaller representation requires proofs about every relevant use:
+
+- use analysis determines which metadata and operations are observed;
+- escape and lifetime analysis determines whether storage or descriptors must
+  survive the current scope;
+- mutation, effect, and alias analysis determines whether facts remain true
+  across assignments and calls, and whether borrowed storage needs copy-on-write;
+- control-flow analysis selects a representation valid for every path and
+  identifies where values with different representations merge;
+- ABI analysis determines where a stable canonical layout is externally
+  observable or needed for indirect access.
+
+When a proof is unavailable, lowering should use the canonical representation
+rather than changing semantics or inserting speculative behavior. This makes
+the full descriptor a correctness fallback, not the default cost paid by every
+value.
+
+Incremental implementation work:
+
+- [x] Record an initial representation requirement per semantic binding for
+      module `const` arrays, selecting raw storage only when every reachable
+      use is `.length`, an indexed read, or a proven-safe direct-call boundary.
+- [x] Emit eligible module `const` arrays of stable 64-bit words, compatible
+      non-extern function references, or exact based bytes as raw static data
+      with compile-time length and stride.
+- [x] Scalar-replace eligible non-escaping exact local array literals with a
+      fresh raw stack-data buffer, direct width-aware indexed reads and writes,
+      and compile-time `.length`.
+- [x] Propagate raw stack data through simple same-function alias chains and
+      materialize canonical descriptors without copying for proven-safe direct
+      and selected-overload call boundaries.
+- [ ] Generalize representation requirements across control-flow joins,
+      general/transitive effects, cross-function aliases, indirect or method
+      calls, and additional element/storage classes.
+- [ ] Elide array length, capacity, stride, flags, and ownership metadata for
+      additional runtime array representations when each fact is unused or
+      available statically.
+- [ ] Add indirect/method boundary adapters and descriptor-free direct-call ABI
+      specialization where profitable.
+- [ ] Extend the same analysis to objects, strings, optionals/unions, iterators,
+      and closures.
+- [ ] Remove or redesign canonical descriptor fields that remain unused once
+      dynamic arrays and lifetime management have defined semantics.
+
+## Paths, imports, and modules
+
+- [x] An ordered source prelude is checked and merged once, with shadowable
+      fallback bindings injected independently into each module.
+- [x] `Path` and the literal-preserving `p` constructor are ordinary Dewy
+      definitions in `library/path.dewy`; imports accept any exact structural
+      `[path:string]` value rather than requiring the standard alias.
+- [x] `$no_prelude = true` disables prelude bindings only for its containing
+      module. Prelude and prelude-free modules can coexist in one import graph.
+- [x] File-relative semantic imports support selective names, aliases,
+      parenthesized or comma-separated name collections, reversed
+      `import ... from ...` order, compile-time namespaces, and whole-module
+      splats.
+- [x] Reachable source modules, independent of filename extension, are checked
+      with one type system and binding registry, reject cycles and collisions,
+      initialize once in dependency order, receive module-qualified target
+      symbols, and merge into one udewy executable.
+- [ ] ~~Installed package lookup, directory/glob imports, explicit export control,~~ non-source artifact loading, ~~and incremental per-module artifacts.~~
+
+- [ ] Add a strict project-wide freestanding policy, likely selected by a
+      freestanding target and potentially by a separate project-wide `$`
+      metatag. Unlike file-local `$no_prelude`, it should prohibit preludes
+      throughout the graph without per-module overrides.
+
+
+## Completely unimplemented
+In no particular order
+- [ ] Floating-point, rational, and real numbers
+- [ ] Physical units
+- [ ] Dictionaries, bidirectional maps, and sets
+- [ ] Pattern matching (`match`)
+- [ ] String interpolation
+- [ ] Partial application (`@`)
+- [ ] Implicit declaration (`:=`) and compile-time assignment (`::`)
+- [ ] Juxtaposition multiplication and broadcasting
+- [ ] Linear algebra, multidimensional array sysntax, etc.
+- [ ] Generators (`yield`)
+- [ ] Unpack and collect
+- [ ] Effects and error values
+- [ ] Compile-time evaluation and meta-programming
+    - [ ] metatags for things historically passed as compiler flags
+- [ ] bootstrap compiler implementation in dewy
+- [ ] full end to end self-hosted compiler via dewy->udewy frontend, udewy->asm backend
+- [ ] standard library
+    - [ ] OS agnostic interfaces on top of OS-dependent implementations per supported OS/environment
+- [ ] LSP for syntax highlighting, type narrowed lookup, struct member listing, etc
+- [ ] implementation of hello world examples from the different domains
+- [ ] test harness system. 
+    - [ ] self hosted unit tests with automation for running on all updates
+- [ ] basic optimizations
+    - [ ] use-dependent lowering and scalar replacement as described in
+          "Array, object, and other compile-time versus runtime representations"
+          above
+
+### Full Refinement System
+The refinement system shall work as follows:
+- any type may receive a parameterize block (e.g. `T<p1 p2 etc...>`), including types that don't take any explicit parameters
+- arbitrary conditional expressions in the parameterize block are the refinement conditions for that type (that the refinement system would statically prove at compiletime)
+```dewy
+NonEmptyArray = array<length>?1>  # retains the generic T from array, e.g. can do NonEmptyArray<int> because we didn't fill in the type
+
+MyStruct:type = [a:int b:bool c:string]< a>?10 b=?true c not=? 'apple' >
+```
+
+- additionally assignment expressions in the conditional block can be used to directly indicate some field will always have that value. This is mostly just a convenience for a common case, e.g.
+```dewy
+NonEmptyArray = array<length=1>  # identical to array<length=?1>
+```
+
+- entries in the parameterize block are distinguished syntactically: an expression whose
+  top level is a `?`-comparison (`>?`, `=?`, `not=?`, etc.), or a lambda, or an assignment is a refinement condition; every other expression is a parameter value. So a literal boolean is
+  unambiguously a parameter, and no wrapping/escaping syntax is needed:
+```dewy
+trues:array<true length=5> = [true true true true true]  # element type is literal-type true, length refined to 5
+```
+  In the rare case where a precomputed boolean should act as a condition, spell it
+  explicitly: `cond =? true`, or use a lambda. A refinement condition that statically
+  reduces to a constant (always true / always false) is a compile error, since it is
+  either vacuous or unsatisfiable and almost certainly a mistake.
+
+- inside the parameterize block, if the type is a structural type, all members on that
+  struct are in scope to reference for conditions. Members shadow outer bindings; outer
+  scope is otherwise visible (needed for e.g. `length =? n` against an enclosing generic
+  parameter)
+- inside the parameterize block of nominal types, there is no `self`, so you have to use a lambda to access the value
+```dewy
+Positive = int< i=>i>?0 >  # to refer to primitive types, use a single-argument lambda
+Positive:type = [i:int]< i>?0 > # similar-ish outcome without needing the lambda
+```
+  Note that `[i:int]< i>?0 >` is *not* an alternate spelling of the same type: it is a
+  structural wrapper type containing an int, which is a different type from a refined
+  `int` (see structural splicing below for how such a wrapper could be made usable as
+  an int).
+
+- parameterizing a type returns another type, so parameterization may be stacked; each
+  application only narrows (predicate intersection), so the semantics are well defined
+  and stacking is allowed uniformly, whether through intermediate identifiers or
+  directly (`MyStruct<c1><c2>`). Direct stacking is unidiomatic and may warrant a style
+  lint, but not an error
+```dewy
+T1 = MyStruct<condition1>
+T2 = T1<condition2>  # T2 requires both conditions
+```
+Mainly useful for e.g. letting you return a type and some consumer can further refine it if they need. In general, from an implementation point of view, applying a parameterization is much like doing a partial application on the type object: you're setting particular members, registering refinements, etc.
+
+- when the checker cannot prove a required refinement at a use site, the programmer has
+  two escape hatches:
+  an explicit runtime check whose success refines the value afterward, or an `unsafe`
+  assertion that takes on the proof obligation without a runtime check. Proof-failure
+  diagnostics should report the known facts, the required fact, and the missing
+  relationship.
+
+### Structural splicing into the nominal type tree
+Structural types may be spliced into the nominal type tree by intersecting with a
+nominal type. The intended idiom: the spliced type *semantically is* the nominal type,
+but with a different runtime representation (and/or extra metadata):
+```dewy
+Posit64:type = float64 & [sign:bit regime:array<bits> exponent:array<bits> fraction:array<bits>]< regime.length + exponent.length + fraction.length =? 63 >
+__as__ &= (x:Posit64):>float64 => { some algorithm to convert posits to floats }
+```
+Rules and semantics:
+- intersecting a structural type with a nominal type requires a corresponding `__as__`
+  overload converting to the nominal type. The absence is checked lazily at use sites
+  (definitions may appear after the type, in any order at module level), and it is a
+  type error to actually need the conversion when none is defined
+- `x is? float64` is true for a `Posit64` instance; the spliced type genuinely is a
+  descendant of the nominal type
+- the nominal type tree itself is single inheritance, but structural (including
+  spliced) types may have multiple parents, including multiple nominal parents
+  (`MyType = int & float64 & [...]`), with one `__as__` overload per nominal parent
+- nominal types are immutable / have no internal fields to mutate, so coercion never
+  creates mutation-aliasing concerns; `__as__` produces a fresh value with ordinary
+  value semantics
+- `as`/`__as__` in general must be invoked explicitly; the sole implicit case is a
+  spliced type flowing to a context requiring one of its nominal ancestors
+- coercion happens at *canonical-representation boundaries*, not call boundaries. A
+  generic bound like `<T of float64>(left:T right:T)` binds `T = Posit64` directly with
+  no conversion; `__as__` is inserted only where the canonical machine representation
+  is actually required (e.g. inside a builtin body), per the representation-selection
+  rules described earlier in this document. Consequently, overload resolution prefers a
+  representation-preserving match over one requiring `__as__`, so defining
+  posit-native operations opts out of coercion per-operation
+- conversion path resolution: an explicitly defined direct `__as__` always takes
+  precedence over a composed path. Composed paths (chaining `__as__` up the ancestry,
+  e.g. `Tracked -> Posit64 -> float64` for `Tracked = Posit64 & [...]`) are allowed
+  when unambiguous. With multiple nominal parents, diamonds are possible
+  (`X = int & float64 & [...]` at a boundary expecting a common ancestor); if multiple
+  composed paths exist at a use site, that is a type error, resolved
+  by defining a direct conversion. The error surfaces only at ambiguous *use* sites —
+  the mere existence of multiple paths is fine (opt-in lint at most) — and the
+  diagnostic must name the competing paths and the definition sites of the `__as__`
+  overloads involved
+- a pure nominal descendant with no structural body is spelled as an ordinary
+  expression: `UserId = type of int`
+
+### Generativity of type expressions
+- `type of T` and `T & [...]` (where `T` is nominal) are generative: each *evaluation*
+  mints a distinct nominal type. Type expressions are ordinary expressions and function
+  bodies re-evaluate on every call, so a factory function containing a generative type
+  expression returns a fresh type per call
+- intersections of purely structural types are *not* generative: structural type
+  equality is duck typing, so two evaluations of the same structural intersection
+  produce equal types. Generativity only enters when a nominal type is being minted.
+  If you want a combined structural type with unique (generative) identity, splice in
+  an anonymous nominal type: `MyUniqueStructType = type of any & [...]`
+- applicative behavior (one stable type reused everywhere) is achieved with existing
+  mechanisms: bind the result once and refer to the binding (possibly closing over it),
+  or explicitly cache results (note: a userland memoizing type factory requires mutable
+  state that persists across compile-time evaluations)
+```dewy
+Tagged = (T:type) => T & [tag:string]
+TaggedInt = Tagged(int)   # bind once; every use of TaggedInt is the same type
+a: TaggedInt = [...]
+b: TaggedInt = [...]      # compatible with a. Writing `a: Tagged(int)` and `b: Tagged(int)` would mint two distinct types
+```
+- generics do not change this: genericizing an expression is sugar for making it a
+  function taking a type parameter, so `Tagged = <T>() => T & [tag:string]` invoked as
+  `Tagged<int>()` re-evaluates the body and mints a fresh type per instantiation, same
+  as any other call. Generic instantiation is deliberately *not* memoized — that would
+  introduce a second evaluation rule for what is definitionally just a function call.
+  (Note this only matters when the body mints a nominal type; a generic producing a
+  purely structural result is stable across instantiations for free, per duck typing)
+- type annotations (on parameters, returns, bindings) are conceptually evaluated once,
+  at typechecking time — checking happens once even if the function is called many
+  times. Default values, by contrast, are re-evaluated on every call (so
+  `(a:array = []) => ...` gets a fresh array per call, avoiding the shared
+  mutable-default trap). A generative type expression in default-value position therefore
+  mints a fresh type per call, consistent with both rules
+- builtin parameterization like `array<int>` falls on the non-generative side: `array`
+  is a builtin structural type, and parameterizing an existing type is partial
+  application on the type object (narrowing), not minting a descendant. The dividing
+  line: parameterization narrows, `type of` / nominal-splicing mints
+
+### Array type literal syntax (`T[]`)
+TypeScript-style postfix `[]` is sugar for the builtin `array` type (which is the
+canonical representation; it is a structural type with a `length` field):
+```dewy
+int[]          # array<int>
+int[5]         # array<int length=?5>
+int[3 4]       # array<int length=?[3 4]>   multidimensional shape
+int[][]        # array<array<int>>          left-associative
+(bool|string)[]  # array<bool|string>
+bool|string[]    # bool | array<string>     postfix [] binds much tighter than |
+```
+- since Dewy has no separate type-level grammar (types are ordinary expressions), this
+  parses in the value grammar as juxtaposition of a value with an array literal — the
+  same surface form as indexing. Juxtaposition resolves to different operations based
+  on operand types (like `a(b)` resolving to `__mul__` vs `__call__`), so a type
+  juxtaposed with an array literal resolves to array-type construction. Indexing a
+  type object is otherwise meaningless, so nothing legitimate is displaced
+- precedence is that of index juxtapose (high, same tier as call/index, possibly tied
+  with type-param juxtapose)
+
+
+> NOTE: these were old notes/tasks about the refinement system. some might be superceded by the above version, but we'll keep them as a reference for now
+- [ ] Flow-sensitive refinement typing. Track value facts through ordinary control flow: x != 0, 0 <= i < a.length, literal values, unions/intersections, exclusions like T & ~0, etc.
+- [ ] Refinement-aware function contracts. Let parameter and return types express predicates and relationships between values, including overloads selected by refinements.
+- [ ] Static proof before implicit partial operations. Operations like indexing, division, narrowing casts, invalid shifts, etc. compile normally only when the compiler can prove their preconditions.
+- [ ] Explicit runtime validation boundary. Runtime checks should appear only when the programmer writes an explicit check or checked operation; successful checks refine the value afterward.
+- [ ] Explicit unsafe escape hatch. Permit the programmer to assert an unproven invariant without a runtime check, with unsafe marking the proof obligation clearly.
+- [ ] Symbolic state tracking across mutation. Model operations such as push, pop, truncate, mutation, and function calls as state transitions, then propagate or invalidate refinements precisely.
+- [ ] Effect and alias tracking. Know what functions can mutate, allocate, block, access shared state, change collection length, etc., so existing proofs survive calls whenever justified.
+- [ ] Automatic arithmetic/range reasoning. Use a solver capable of proving common equalities, inequalities, ranges, and simple relationships without programmer-written proof terms.
+- [ ] Inference-first ergonomics. Ordinary imperative code should usually verify without annotations; explicit contracts/invariants should be needed mainly at abstraction boundaries and complex loops.
+- [ ] Semantic types separated from machine representation. Let types such as arbitrary-precision integers describe semantics, while range analysis chooses i8/i32/i64/... representations when provably equivalent.
+- [ ] Information-preserving casts by default. Normal casts must preserve value/precision; potentially lossy or fallible conversions should be explicit and typed accordingly.
+- [ ] Typed failure instead of hidden traps. Allocation failure and other genuinely dynamic failures should appear as result/error values or explicit effects rather than invisible exceptional paths.
+- [ ] Verifier-friendly standard library. Give core operations precise contracts—for example map preserves length, pop decrements it by one, slice has a known resulting length—so proofs compose automatically.
+- [ ] Useful proof diagnostics. When verification fails, report known facts, required fact, and the missing relationship, rather than exposing solver internals.
+- [ ] Optimization driven by proofs. Reuse refinement information for bounds-check elimination, integer-width selection, dead-branch elimination, specialization, and other lowering decisions.
+- [ ] Idiomatic code designed to be provable. Make the language’s normal APIs and control structures naturally expose the invariants the verifier needs, rather than treating verification as an add-on.
+
+### Dewy compilation of UDewy programs
+- [ ] TBD work for ensuing dewy compiler compiles well-formed udewy programs and they produce the same visible outcomes as if compiled directly with udewy
+
+### Proper compilation target list/representation
+- [ ] redo the list of targets for compilation targets and how they are handled. Note we are not recreating LLVM's target triples because plenty of those have redundant information or need an extra field. Instead the dewy/udewy list of targets will be more about each target name having only as many fields as it needs to describe itself. The following list is not set in stone, but merely an initial stab at what the targets list might look like:
+    - ## target the current machine (current machine must be compatible)
+    - 'x86_64',
+    - 'riscv64',
+    - 'aarch64',
+    - 'c',
+
+    - ## freestanding / baremetal
+    - 'x86_64-freestanding',
+    - 'riscv64-freestanding',
+    - 'aarch64-freestanding',
+    - 'c-freestanding',
+
+    - ## linux
+    - 'x86_64-linux',
+    - 'riscv64-linux',
+    - 'aarch64-linux',
+    - 'c-linux',
+
+    - ## mac
+    - 'x86_64-mac',
+    - 'aarch64-mac',
+
+    - ## windows
+    - 'x86_64-windows',
+    - 'riscv64-windows',
+    - 'aarch64-windows',
+    - 'c-windows',
+    
+    - ## portable-ish
+    - 'c-posix',
+    - 'c89',
+    - 'wasm32',
+
+    - ## Others TBD
+
+###
+
+
+
+### Meta stuff
+- [x] remove old src and replace with cleanparse (delete intermediate cleanparse folder)
+- [ ] general repo cleanup/restructuring
+- [ ] web compiler demos of language
+- [ ] complete docs rewrite
+    - [ ] API/language reference
+    - [ ] dewy book
+- [ ] making generated code more human friendly
+
+### Aspirational/Experimental/etc.
+- [ ] non text-editor view over code/AST. basically render AST to look like text, but render with user set visual settings for spacing, indentation, comment positions, etc. etc. Probably requires a custom editor-esque app. Should generally feel mostly like editing regular text in a text editor, just without the pure bag-of-characters semantics
+- [ ] saving/editing packed ASTs instead of bag-of-characters raw text for source code. hashing sort of like unison, though tbd the exact semantics
+- [ ] python FFI (dewy as host). Semi integrated into the type system in terms of python FFI stuff e.g.:
+    ```dewy
+    let x: PyObject = np.array(...)
+    
+    # many function calls into python might look like this
+    (...args:array<PyObject>):> (PyObject | PythonError) & PythonEffect
+
+    PythonCallable:type = [
+      __call__ = (...args:array<PyObject>):> (PyObject | PythonError) & PythonEffect
+    ]
+    PythonIndexable = [
+      __index__ = (key:PyObject):> (PyObject|PythonError) & PythonEffect
+    ]
+    PythonAccessable = [
+      __access__ = (fieldname:string):> (PyObject|PythonError) & PythonEffect
+    ]
+    ```
+    Probably it wouldn't quite look like this, and there would also be a dynamic process that would actually check if the python object supported whatever operation you were trying to do to it, or returning an error. And then usage within dewy would look pretty close to normal dewy code, just the type checking safety falls away

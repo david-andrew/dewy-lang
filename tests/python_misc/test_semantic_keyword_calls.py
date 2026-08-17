@@ -1,8 +1,8 @@
 import pytest
 
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
-from src.cleanparse.semantic.errors import UserError
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
+from src.semantic.errors import UserError
 
 
 def _declarations(source: str) -> dict[str, hir.AST]:

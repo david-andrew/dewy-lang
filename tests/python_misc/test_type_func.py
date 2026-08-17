@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.cleanparse.semantic.ty import (
+from src.semantic.ty import (
     DispatchError,
     KwOnlyArg,
     PosOrKwArg,
@@ -213,7 +213,7 @@ def test_instantiate_method_noop_without_params():
 
 
 def test_instantiate_method_substitutes_params():
-    from src.cleanparse.semantic.ty import GenericParam
+    from src.semantic.ty import GenericParam
     m = FunctionType(
         [PosOrKwArg('x', 'T')],
         [],

@@ -1,9 +1,9 @@
 import pytest
 
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
-from src.cleanparse.semantic.errors import TypeCheckError
-from src.cleanparse.semantic.hir_display import type_to_dewy
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
+from src.semantic.errors import TypeCheckError
+from src.semantic.hir_display import type_to_dewy
 
 
 @pytest.mark.parametrize(

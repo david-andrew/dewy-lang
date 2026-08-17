@@ -1,10 +1,10 @@
 import pytest
 
-from src.cleanparse.backend.udewy import codegen
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
-from src.cleanparse.semantic.errors import NotImplementedYet, UserError
-from src.cleanparse.semantic.hir_display import hir_to_dewy
+from src.backend.udewy import codegen
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
+from src.semantic.errors import NotImplementedYet, UserError
+from src.semantic.hir_display import hir_to_dewy
 
 
 def _check(source: str) -> hir.Block:

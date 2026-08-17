@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.cleanparse.semantic import builtins
-from src.cleanparse.semantic.ty import (
+from src.semantic import builtins
+from src.semantic.ty import (
     DispatchError,
     OverloadType,
     StringType,

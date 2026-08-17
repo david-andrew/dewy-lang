@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.cleanparse.semantic.unicode.graphemes import (
+from src.semantic.unicode.graphemes import (
     MAX_UNICODE_SCALAR_ORDINAL,
     UNICODE_SCALAR_COUNT,
     UNICODE_VERSION,

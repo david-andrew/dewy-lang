@@ -3,9 +3,9 @@ from shutil import which
 
 import pytest
 
-from src.cleanparse.backend.udewy import codegen
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic.errors import UserError
+from src.backend.udewy import codegen
+from src.reporting import SrcFile
+from src.semantic.errors import UserError
 from udewy.frontend import entry_point
 
 

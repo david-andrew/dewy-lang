@@ -1,9 +1,9 @@
 import pytest
 
-from src.cleanparse.backend.udewy import codegen
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
-from src.cleanparse.semantic.errors import NotImplementedYet, TypeCheckError, UserError
+from src.backend.udewy import codegen
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
+from src.semantic.errors import NotImplementedYet, TypeCheckError, UserError
 
 
 def _check(source: str) -> hir.Block:

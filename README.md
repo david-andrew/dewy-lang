@@ -12,7 +12,7 @@ Dewy is a general purpose programming language with a focus on engineering.
 ## Current Status
 
 ### dewy
-The main compiler for the language is being reweritten from scratch under [src/cleanparse/](src/cleanparse)
+The main compiler lives under [src/](src/)
 
 ### udewy
 The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). Currently only supports linux x86_64.
@@ -66,7 +66,7 @@ dewy my_script.dewy
 otherwise you can run the python script directly
 
 ```
-python -m src.frontend ../path/to/my_script.dewy
+python -m src ../path/to/my_script.dewy
 ```
 
 ### Examples

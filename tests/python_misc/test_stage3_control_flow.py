@@ -2,12 +2,12 @@ from typing import cast
 
 import pytest
 
-from src.cleanparse.backend.udewy import codegen
-from src.cleanparse.parser import p0, t1
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
-from src.cleanparse.semantic.errors import NotImplementedYet, TypeCheckError, UserError
-from src.cleanparse.semantic.hir_display import hir_to_dewy, hir_to_tree_str
+from src.backend.udewy import codegen
+from src.parser import p0, t1
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
+from src.semantic.errors import NotImplementedYet, TypeCheckError, UserError
+from src.semantic.hir_display import hir_to_dewy, hir_to_tree_str
 
 
 def _check(source: str) -> hir.Block:

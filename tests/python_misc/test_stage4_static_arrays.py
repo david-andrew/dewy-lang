@@ -3,11 +3,11 @@ from shutil import which
 
 import pytest
 
-from src.cleanparse.backend.udewy import codegen
-from src.cleanparse.backend.udewy.lower import ArrayRepresentation, ArrayUse, _Lowerer
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir
-from src.cleanparse.semantic.errors import UserError
+from src.backend.udewy import codegen
+from src.backend.udewy.lower import ArrayRepresentation, ArrayUse, _Lowerer
+from src.reporting import SrcFile
+from src.semantic import check, hir
+from src.semantic.errors import UserError
 from udewy.frontend import entry_point
 
 

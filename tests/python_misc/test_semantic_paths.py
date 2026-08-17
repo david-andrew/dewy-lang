@@ -1,5 +1,5 @@
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
 
 
 def _declarations(source: str) -> dict[str, hir.AST]:

@@ -3,11 +3,11 @@ from shutil import which
 
 import pytest
 
-from src.cleanparse.backend.udewy import codegen
-from src.cleanparse.reporting import SrcFile
-from src.cleanparse.semantic import check, hir, ty
-from src.cleanparse.semantic.errors import TypeCheckError, UserError
-from src.cleanparse.semantic.hir_display import hir_to_dewy, type_to_dewy
+from src.backend.udewy import codegen
+from src.reporting import SrcFile
+from src.semantic import check, hir, ty
+from src.semantic.errors import TypeCheckError, UserError
+from src.semantic.hir_display import hir_to_dewy, type_to_dewy
 from udewy.frontend import entry_point
 
 
