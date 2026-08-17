@@ -93,6 +93,8 @@ Type expressions above; here `<T>` is a type-parameter list.
       direct udewy intrinsic calls.
 - [x] Executable x86-64 Linux bare-metal hello world using a UTF-8 byte view,
       its byte length, and the `write` syscall.
+- [x] Linux x86_64 `print`/`printl` in the prelude (`library/io.dewy`) via
+      `write`. Other targets still need host-write capability selection.
 - [ ] Target-specific non-Linux host intrinsics and capability selection.
 - [ ] Foreign symbols, external linkage, and a stable FFI surface.
 
@@ -425,6 +427,9 @@ Incremental implementation work:
 - [x] `Path` and the literal-preserving `p` constructor are ordinary Dewy
       definitions in `library/path.dewy`; imports accept any exact structural
       `[path:string]` value rather than requiring the standard alias.
+- [x] `print` and `printl` are ordinary Dewy definitions in `library/io.dewy`.
+      Linux x86_64 only (`write` is syscall 1). Unused prelude bindings are
+      omitted from the merged program.
 - [x] `$no_prelude = true` disables prelude bindings only for its containing
       module. Prelude and prelude-free modules can coexist in one import graph.
 - [x] File-relative semantic imports support selective names, aliases,

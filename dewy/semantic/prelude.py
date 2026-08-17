@@ -6,4 +6,5 @@ project_root = Path(__file__).parents[2]
 
 PRELUDE_FILES = (
     project_root / 'library' / 'path.dewy',
+    project_root / 'library' / 'io.dewy',
 )

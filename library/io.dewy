@@ -1,26 +1,14 @@
-# stdout, fprint/write, etc. builtins
+# Linux x86_64 only. `write` is syscall 1; stdout is fd 1.
+# Other targets need a host write capability Dewy does not have yet.
 
-Encoding = ...  #TODO type definition
-Stream = ...    #TODO type definition
-
-write = (stream:Stream bytes:uint8[]) => ...
-read = () :> uint32[] => ...
-
-#fprint = (stream:Stream s:str encoding:Encoding $kw_only end:char|undefined=undefined) => {
-#    write(stream s.encode(encoding))
-#    if end isnt? undefined 
-#        write(stream end.encode(encoding))
-#}
-
-# print = @fprint(stream=stdout encoding='utf-8')
-print = (s:str|any) => {
-    if s isnt? str s = str(s)
-    bytes = s.encode(stdout.encoding)
-    write(stdout bytes)
+let print = (s:string):>void => {
+    let bytes:array<uint8> = s as array<uint8>
+    let data:int64 = __load_i64__(bytes)
+    let written:int64 = __syscall3__(1 1 data bytes.length)
+    return void
 }
 
-# printl = @fprint(stream=stdout encoding='utf-8' end='\n')
-printl = (s:str) => {
-    bytes = [s.encode(stdout.encoding)... '\n']
-    write(stdout bytes)
+let printl = (s:string):>void => {
+    print(s)
+    print("\n")
 }

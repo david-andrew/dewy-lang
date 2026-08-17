@@ -208,8 +208,59 @@ class ModuleCompiler:
             return replace(value, **updates)
         return value
 
+    def _collect_referenced_binding_ids(self, value: Any, found: set[int]) -> None:
+        if isinstance(value, hir.ExpressedIdentifier):
+            if value.binding_id is not None:
+                found.add(value.binding_id)
+            return
+        if isinstance(value, list):
+            for item in value:
+                self._collect_referenced_binding_ids(item, found)
+            return
+        if isinstance(value, tuple):
+            for item in value:
+                self._collect_referenced_binding_ids(item, found)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                self._collect_referenced_binding_ids(item, found)
+            return
+        if is_dataclass(value) and (
+            isinstance(value, hir.AST)
+            or isinstance(value, (hir.ObjectField, hir.Param))
+        ):
+            for field in fields(value):
+                if field.name in {'loc', 'type', 'binding_id', 'name'}:
+                    continue
+                self._collect_referenced_binding_ids(getattr(value, field.name), found)
+
+    def _needed_prelude_binding_ids(self) -> set[int]:
+        needed: set[int] = set()
+        for record in self.order:
+            if not record.prelude:
+                self._collect_referenced_binding_ids(record.root, needed)
+
+        prelude_items = [
+            item
+            for record in self.order
+            if record.prelude
+            for item in record.root.items
+            if isinstance(item, hir.Declare) and item.binding_id is not None
+        ]
+        changed = True
+        while changed:
+            changed = False
+            for item in prelude_items:
+                if item.binding_id not in needed:
+                    continue
+                before = len(needed)
+                self._collect_referenced_binding_ids(item.expr, needed)
+                changed = changed or len(needed) > before
+        return needed
+
     def finish(self, entry: ModuleRecord) -> hir.Block:
         names = self._emitted_names(entry)
+        needed_prelude = self._needed_prelude_binding_ids()
         items: list[hir.AST] = []
         for record in self.order:
             renamed = self._rename(record.root, names)
@@ -217,6 +268,13 @@ class ModuleCompiler:
             self.finished_roots[id(record)] = renamed
             for item in renamed.items:
                 if isinstance(item, hir.Void):
+                    continue
+                if (
+                    record.prelude
+                    and isinstance(item, hir.Declare)
+                    and item.binding_id is not None
+                    and item.binding_id not in needed_prelude
+                ):
                     continue
                 items.append(item)
                 if isinstance(item, hir.Declare) and item.binding_id is not None:

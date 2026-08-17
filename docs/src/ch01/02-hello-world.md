@@ -62,7 +62,7 @@ once again after top-level execution finishes.
 
 ## How it Works
 
-This code invokes the `printl` function with the string `'Hello, World!'`. `printl` is a commonly used function that takes text and prints it to the terminal, followed by a newline.
+This code invokes the `printl` function with the string `'Hello, World!'`. `printl` is a commonly used function that takes text and prints it to the terminal, followed by a newline. `print` and `printl` currently work on Linux x86_64 only.
 
 
 ## Compiling and Running Are the Same Step

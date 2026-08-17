@@ -183,8 +183,8 @@ let main = ():>int64 => value
 
     emitted = codegen(SrcFile.from_path(entry))
 
-    assert '__dewy_module_prelude_path_p' in emitted
     assert 'let p =' in emitted
+    assert '__dewy_module_prelude_path_p' not in emitted
 
 
 @pytest.mark.parametrize(
@@ -214,7 +214,7 @@ let main = ():>int64 => value
     emitted = codegen(SrcFile.from_path(entry))
 
     assert '__dewy_module_1_lib_value' in emitted
-    assert '__dewy_module_prelude_path_p' in emitted
+    assert '__dewy_module_prelude_path_p' not in emitted
 
 
 def test_no_prelude_is_local_to_each_module(tmp_path: Path) -> None:
@@ -237,8 +237,8 @@ let main = ():>int64 => ordinary()
 
     emitted = codegen(SrcFile.from_path(entry))
 
-    assert '__dewy_module_prelude_path_p' in emitted
     assert '__dewy_module_2_ordinary_ordinary' in emitted
+    assert '__dewy_module_prelude_path_p' not in emitted
 
 
 def test_mixed_prelude_diamond_loads_shared_module_once(tmp_path: Path) -> None:
@@ -263,6 +263,7 @@ let ordinary = ():>int64 => shared
         '''
 from p"bare.dewy" import bare
 from p"ordinary.dewy" import ordinary
+let marker = p("shared.dewy")
 let main = ():>int64 => bare()
 ''',
     )
@@ -286,17 +287,23 @@ def test_no_prelude_directive_controls_only_its_module_graph_needs(
     directive: str,
     has_prelude: bool,
 ) -> None:
+    body = (
+        'let marker = p(".")\nlet main = ():>int64 => 42'
+        if has_prelude
+        else 'let main = ():>int64 => 42'
+    )
     entry = _write(
         tmp_path / 'main.dewy',
         f'''
 {directive}
-let main = ():>int64 => 42
+{body}
 ''',
     )
 
     emitted = codegen(SrcFile.from_path(entry))
 
     assert ('__dewy_module_prelude_path_p' in emitted) is has_prelude
+    assert '__dewy_module_prelude_io_print' not in emitted
 
 
 @pytest.mark.parametrize(
@@ -354,6 +361,7 @@ let right = ():>int64 => base + private
         '''
 from p"left.dewy" import left
 from p"right.dewy" import right
+let marker = p("common.dewy")
 let main = ():>int64 => left() + right()
 ''',
     )
