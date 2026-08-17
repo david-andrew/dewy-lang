@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import NoReturn
 
-from ..reporting import Error, Pointer, SrcFile
-from . import hir, ty
-from .bindings import BindingRegistry
-from .errors import NotImplementedYet, UserError
-from .hir_display import type_to_dewy
+from ...reporting import Error, Pointer, SrcFile
+from .. import hir, ty
+from ..bindings import BindingRegistry
+from ..errors import NotImplementedYet, UserError
+from ..hir_display import type_to_dewy
 
 
 @dataclass(frozen=True)

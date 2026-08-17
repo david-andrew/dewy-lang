@@ -8,7 +8,7 @@ from collections import ChainMap
 from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
-from . import bounds, builtins, hir, initialization, ty
+from . import builtins, hir, ty
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span
@@ -228,7 +228,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return hir.Undefined(ast.item.loc, 'undefined')
         case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
         case p0.Atom(item=t1.String(content=content)):
-            from .unicode_graphemes import unicode_scalars
+            from .unicode.graphemes import unicode_scalars
 
             try:
                 unicode_scalars(content)
@@ -1002,7 +1002,7 @@ def _constant_scalar_grapheme(node: hir.AST) -> int | None:
         return None
     if len(node.content) != 1 or ty.string_literal_lengths(node.content)[2] != 1:
         return None
-    from .unicode_graphemes import unicode_scalar_ordinal
+    from .unicode.graphemes import unicode_scalar_ordinal
 
     return unicode_scalar_ordinal(ord(node.content))
 
@@ -1086,7 +1086,7 @@ def _normalize_integer_range(
     first = first_anchor + (step if bounds_kind[0] == '(' else 0)
     if right is None:
         if string_range:
-            from .unicode_graphemes import MAX_UNICODE_SCALAR_ORDINAL
+            from .unicode.graphemes import MAX_UNICODE_SCALAR_ORDINAL
 
             right = MAX_UNICODE_SCALAR_ORDINAL if step > 0 else 0
         else:

@@ -2,7 +2,7 @@
 
 from bisect import bisect_right
 
-from src.cleanparse.semantic.unicode_data import (
+from .data import (
     EXTENDED_PICTOGRAPHIC_RANGES,
     GRAPHEME_BREAK_RANGES,
     INDIC_CONJUNCT_BREAK_RANGES,

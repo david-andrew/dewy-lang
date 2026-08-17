@@ -10,7 +10,8 @@ from typing import Any
 
 from ..reporting import Pointer, Span, SrcFile
 from . import bindings as sb
-from . import bounds, builtins, hir, initialization, ty
+from . import builtins, hir, ty
+from .analyze import bounds, initialization
 from .errors import user_error
 from .prelude import PRELUDE_FILES
 

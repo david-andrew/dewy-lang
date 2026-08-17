@@ -405,7 +405,7 @@ def integer_literal_fits(value: int, target: Primitive) -> bool:
 def string_literal_lengths(value: str) -> tuple[int, int, int]:
     """Return UTF-8 byte, Unicode scalar, and grapheme counts for a literal."""
 
-    from .unicode_graphemes import grapheme_count
+    from .unicode.graphemes import grapheme_count
 
     return len(value.encode('utf-8')), len(value), grapheme_count(value)
 

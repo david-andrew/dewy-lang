@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..reporting import Pointer, SrcFile
-from . import bindings as sb
-from . import hir, ty
-from .errors import user_error
+from ...reporting import Pointer, SrcFile
+from .. import bindings as sb
+from .. import hir, ty
+from ..errors import user_error
 
 
 @dataclass(frozen=True)

@@ -3136,7 +3136,7 @@ class _Lowerer:
         self,
         node: hir.String,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        from ...semantic.unicode_graphemes import grapheme_boundary_byte_offsets
+        from ...semantic.unicode.graphemes import grapheme_boundary_byte_offsets
 
         boundaries = grapheme_boundary_byte_offsets(node.content)
         grapheme_length = len(boundaries) - 1
@@ -3476,7 +3476,7 @@ class _Lowerer:
                 source.type,
                 ty.StringLiteralType,
             ):
-                from ...semantic.unicode_graphemes import graphemes
+                from ...semantic.unicode.graphemes import graphemes
 
                 items = [
                     hir.String(

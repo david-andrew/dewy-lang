@@ -1,6 +1,6 @@
 """Compact Unicode 16.0.0 tables for emitted grapheme segmentation."""
 
-from ...semantic.unicode_data import (
+from ...semantic.unicode.data import (
     EXTENDED_PICTOGRAPHIC_RANGES,
     GRAPHEME_BREAK_RANGES,
     INDIC_CONJUNCT_BREAK_RANGES,
