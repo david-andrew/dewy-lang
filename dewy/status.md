@@ -477,10 +477,45 @@ In no particular order
           "Array, object, and other compile-time versus runtime representations"
           above
 
-### Full Refinement System
-The refinement system shall work as follows:
+### Liquid Refinement System
+Dewy does not have a fully arbitrary refinement type system. Refinements are
+restricted to a well-behaved liquid proposition language that the compiler can
+normally infer and prove automatically. General Dewy expressions do not become
+valid refinement predicates merely because they produce a Boolean.
+
+The intended proof boundaries are:
+- an automatically proven refinement has no runtime cost
+- an explicit runtime check refines the value on the check's successful path
+- a checked proof or lemma may discharge an obligation the automatic liquid
+  solver could not establish on its own
+- an explicit `unsafe` claim may assume an obligation without a runtime check or
+  checked proof; it is a real safety boundary and remains an audit obligation
+
+A claim accompanied by a compiler-checked proof is no longer unsafe. Commentary,
+an unchecked certificate, or an omitted proof does not discharge the unsafe
+obligation. The proof language may eventually be richer than the automatic
+solver, but facts imported back into ordinary refinement checking must have a
+conclusion the liquid proposition language can represent.
+
+The initial liquid proposition language should focus on the facts most useful to
+ordinary Dewy programs: Boolean combinations, equality and ordering, linear
+integer arithmetic, literal and type/tag tests, lengths and other trusted pure
+measures, and simple relationships between parameters and results. Arbitrary
+function calls, unrestricted quantification, effectful expressions, and general
+nonlinear arithmetic are outside the automatic refinement language. The exact
+fragment and qualifier-inference strategy remain to be specified.
+
+Refinement propositions should have their own semantic representation rather
+than reusing unrestricted HIR expressions. Reasoning about semantic arbitrary-
+precision `int` must also remain distinct from reasoning about fixed-width
+rollover arithmetic: the latter requires bit-vector-aware rules or a separate
+proof that overflow cannot occur.
+
+Within those constraints, the refinement system shall work as follows:
 - any type may receive a parameterize block (e.g. `T<p1 p2 etc...>`), including types that don't take any explicit parameters
-- arbitrary conditional expressions in the parameterize block are the refinement conditions for that type (that the refinement system would statically prove at compiletime)
+- supported liquid propositions in the parameterize block are the refinement
+  conditions for that type. The compiler attempts to prove them statically from
+  inferred facts, control flow, and declared contracts
 ```dewy
 NonEmptyArray = array<length>?1>  # retains the generic T from array, e.g. can do NonEmptyArray<int> because we didn't fill in the type
 
@@ -493,7 +528,9 @@ NonEmptyArray = array<length=1>  # identical to array<length=?1>
 ```
 
 - entries in the parameterize block are distinguished syntactically: an expression whose
-  top level is a `?`-comparison (`>?`, `=?`, `not=?`, etc.), or a lambda, or an assignment is a refinement condition; every other expression is a parameter value. So a literal boolean is
+  top level is a `?`-comparison (`>?`, `=?`, `not=?`, etc.), or a lambda, or an assignment is a refinement condition; every other expression is a parameter value. The expression selected
+  as a refinement condition must still belong to the supported liquid proposition
+  language. So a literal boolean is
   unambiguously a parameter, and no wrapping/escaping syntax is needed:
 ```dewy
 trues:array<true length=5> = [true true true true true]  # element type is literal-type true, length refined to 5
@@ -528,12 +565,19 @@ T2 = T1<condition2>  # T2 requires both conditions
 ```
 Mainly useful for e.g. letting you return a type and some consumer can further refine it if they need. In general, from an implementation point of view, applying a parameterization is much like doing a partial application on the type object: you're setting particular members, registering refinements, etc.
 
-- when the checker cannot prove a required refinement at a use site, the programmer has
-  two escape hatches:
-  an explicit runtime check whose success refines the value afterward, or an `unsafe`
-  assertion that takes on the proof obligation without a runtime check. Proof-failure
-  diagnostics should report the known facts, the required fact, and the missing
-  relationship.
+- refinement checking has three meaningful outcomes: proven, refuted, and unknown.
+  Unknown is not the same as false and should not be reported as such
+- when the checker cannot prove a required refinement at a use site, the programmer may:
+  add an explicit runtime check whose success refines the value afterward, provide a
+  compiler-checked proof or lemma, strengthen the surrounding contract, or make an
+  explicit `unsafe` claim that takes on the proof obligation without a runtime check
+- unsafe claims should be lexically explicit, scoped as locally as practical, and
+  visible to diagnostics and tooling. If used to eliminate bounds checks, select a
+  narrower representation, or justify other partial operations, violating the claim
+  may produce undefined behavior
+- proof-failure diagnostics should report the known facts, the required fact, and the
+  missing relationship, and should distinguish a refuted obligation from one that is
+  merely outside the solver's knowledge or supported fragment
 
 ### Structural splicing into the nominal type tree
 Structural types may be spliced into the nominal type tree by intersecting with a
@@ -637,15 +681,21 @@ bool|string[]    # bool | array<string>     postfix [] binds much tighter than |
   with type-param juxtapose)
 
 
-> NOTE: these were old notes/tasks about the refinement system. some might be superceded by the above version, but we'll keep them as a reference for now
+> NOTE: these are implementation notes/tasks under the liquid refinement design above.
+- [ ] Define the liquid proposition grammar, trusted pure measures, and finite
+      qualifier vocabulary used for inference. Unsupported general Dewy
+      expressions must not silently enter refinement checking.
 - [ ] Flow-sensitive refinement typing. Track value facts through ordinary control flow: x != 0, 0 <= i < a.length, literal values, unions/intersections, exclusions like T & ~0, etc.
 - [ ] Refinement-aware function contracts. Let parameter and return types express predicates and relationships between values, including overloads selected by refinements.
 - [ ] Static proof before implicit partial operations. Operations like indexing, division, narrowing casts, invalid shifts, etc. compile normally only when the compiler can prove their preconditions.
 - [ ] Explicit runtime validation boundary. Runtime checks should appear only when the programmer writes an explicit check or checked operation; successful checks refine the value afterward.
 - [ ] Explicit unsafe escape hatch. Permit the programmer to assert an unproven invariant without a runtime check, with unsafe marking the proof obligation clearly.
+- [ ] Optional checked-proof boundary. Allow a proof or lemma to discharge an
+      obligation the automatic liquid solver reports as unknown. Checked proofs
+      erase the corresponding unsafe obligation; unchecked evidence does not.
 - [ ] Symbolic state tracking across mutation. Model operations such as push, pop, truncate, mutation, and function calls as state transitions, then propagate or invalidate refinements precisely.
 - [ ] Effect and alias tracking. Know what functions can mutate, allocate, block, access shared state, change collection length, etc., so existing proofs survive calls whenever justified.
-- [ ] Automatic arithmetic/range reasoning. Use a solver capable of proving common equalities, inequalities, ranges, and simple relationships without programmer-written proof terms.
+- [ ] Automatic arithmetic/range reasoning within the liquid fragment. Use a solver capable of proving common equalities, inequalities, ranges, and simple relationships without programmer-written proof terms; solver failure or an unsupported proposition produces unknown rather than false.
 - [ ] Inference-first ergonomics. Ordinary imperative code should usually verify without annotations; explicit contracts/invariants should be needed mainly at abstraction boundaries and complex loops.
 - [ ] Semantic types separated from machine representation. Let types such as arbitrary-precision integers describe semantics, while range analysis chooses i8/i32/i64/... representations when provably equivalent.
 - [ ] Information-preserving casts by default. Normal casts must preserve value/precision; potentially lossy or fallible conversions should be explicit and typed accordingly.
