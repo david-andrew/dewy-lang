@@ -416,8 +416,13 @@ Incremental implementation work:
 
 ## Paths, imports, and modules
 
-- [x] `Path` is a thin object type and `p` is an ordinary, literal-preserving
-      builtin function with a Dewy-level specification in `library/path.dewy`.
+- [x] An ordered source prelude is checked and merged once, with shadowable
+      fallback bindings injected independently into each module.
+- [x] `Path` and the literal-preserving `p` constructor are ordinary Dewy
+      definitions in `library/path.dewy`; imports accept any exact structural
+      `[path:string]` value rather than requiring the standard alias.
+- [x] `$no_prelude = true` disables prelude bindings only for its containing
+      module. Prelude and prelude-free modules can coexist in one import graph.
 - [x] File-relative semantic imports support selective names, aliases,
       parenthesized or comma-separated name collections, reversed
       `import ... from ...` order, compile-time namespaces, and whole-module
@@ -428,9 +433,10 @@ Incremental implementation work:
       symbols, and merge into one udewy executable.
 - [ ] ~~Installed package lookup, directory/glob imports, explicit export control,~~ non-source artifact loading, ~~and incremental per-module artifacts.~~
 
-TODO: probably move to a different sections
-- [ ] somewhere we should define a list of .dewy files that form the standard import prelude.
-this includes `p`, and other common things always present by defualt (unless freestanding mode (or perhaps no-prelude mode)). This lets us decrease the size of some of the builtin definitions in the compiler
+- [ ] Add a strict project-wide freestanding policy, likely selected by a
+      freestanding target and potentially by a separate project-wide `$`
+      metatag. Unlike file-local `$no_prelude`, it should prohibit preludes
+      throughout the graph without per-module overrides.
 
 
 ## Completely unimplemented

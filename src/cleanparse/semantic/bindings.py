@@ -24,6 +24,7 @@ class Binding:
     type_value: ty.TypeExpr | None = None
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
+    literal_path_parameter: str | None = None
 
 
 @dataclass

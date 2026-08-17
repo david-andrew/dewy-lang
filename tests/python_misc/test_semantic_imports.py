@@ -125,7 +125,7 @@ let make = (text:string):>Path => p(text)
 let path = make("lib.dewy")
 from path import value
 ''',
-            'import path must be an exact `Path` value',
+            'import source requires an exact `path` field',
         ),
         (
             'from p"lib.dewy" import value\nlet value:int64 = 1',
@@ -166,6 +166,166 @@ def test_import_cycles_are_rejected(tmp_path: Path) -> None:
         codegen(SrcFile.from_path(entry))
 
 
+def test_no_prelude_module_can_define_its_own_path_constructor(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / 'lib.dewy', 'const value:int64 = 42\n')
+    entry = _write(
+        tmp_path / 'main.dewy',
+        '''
+$no_prelude = true
+let Path:type = [path:string]
+let p = (path:string):>Path => [path=path]
+from p"lib.dewy" import value
+let main = ():>int64 => value
+''',
+    )
+
+    emitted = codegen(SrcFile.from_path(entry))
+
+    assert '__dewy_module_prelude_path_p' in emitted
+    assert 'let p =' in emitted
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        'from [path="lib.dewy"] import value',
+        '''
+let MyOwnPathType:type = [path:string]
+from ([path="lib.dewy"] as MyOwnPathType) import value
+''',
+    ],
+)
+def test_no_prelude_module_can_import_from_structural_object(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    _write(tmp_path / 'lib.dewy', 'const value:int64 = 42\n')
+    entry = _write(
+        tmp_path / 'main.dewy',
+        f'''
+$no_prelude = true
+{source}
+let main = ():>int64 => value
+''',
+    )
+
+    emitted = codegen(SrcFile.from_path(entry))
+
+    assert '__dewy_module_1_lib_value' in emitted
+    assert '__dewy_module_prelude_path_p' in emitted
+
+
+def test_no_prelude_is_local_to_each_module(tmp_path: Path) -> None:
+    _write(
+        tmp_path / 'ordinary.dewy',
+        '''
+from p"leaf.dewy" import value
+let ordinary = ():>int64 => value
+''',
+    )
+    _write(tmp_path / 'leaf.dewy', 'const value:int64 = 42\n')
+    entry = _write(
+        tmp_path / 'main.dewy',
+        '''
+$no_prelude = true
+from [path="ordinary.dewy"] import ordinary
+let main = ():>int64 => ordinary()
+''',
+    )
+
+    emitted = codegen(SrcFile.from_path(entry))
+
+    assert '__dewy_module_prelude_path_p' in emitted
+    assert '__dewy_module_2_ordinary_ordinary' in emitted
+
+
+def test_mixed_prelude_diamond_loads_shared_module_once(tmp_path: Path) -> None:
+    _write(tmp_path / 'shared.dewy', 'const shared:int64 = 40\n')
+    _write(
+        tmp_path / 'bare.dewy',
+        '''
+$no_prelude = true
+from [path="shared.dewy"] import shared
+let bare = ():>int64 => shared
+''',
+    )
+    _write(
+        tmp_path / 'ordinary.dewy',
+        '''
+from p"shared.dewy" import shared
+let ordinary = ():>int64 => shared
+''',
+    )
+    entry = _write(
+        tmp_path / 'main.dewy',
+        '''
+from p"bare.dewy" import bare
+from p"ordinary.dewy" import ordinary
+let main = ():>int64 => bare()
+''',
+    )
+
+    emitted = codegen(SrcFile.from_path(entry))
+
+    assert emitted.count('let __dewy_module_prelude_path_p') == 1
+    assert emitted.count('let __dewy_module_1_shared_shared:int64 = 0') == 1
+
+
+@pytest.mark.parametrize(
+    ('directive', 'has_prelude'),
+    [
+        ('', True),
+        ('$no_prelude = false', True),
+        ('$no_prelude = true', False),
+    ],
+)
+def test_no_prelude_directive_controls_only_its_module_graph_needs(
+    tmp_path: Path,
+    directive: str,
+    has_prelude: bool,
+) -> None:
+    entry = _write(
+        tmp_path / 'main.dewy',
+        f'''
+{directive}
+let main = ():>int64 => 42
+''',
+    )
+
+    emitted = codegen(SrcFile.from_path(entry))
+
+    assert ('__dewy_module_prelude_path_p' in emitted) is has_prelude
+
+
+@pytest.mark.parametrize(
+    ('directive', 'message'),
+    [
+        (
+            '$no_prelude = 1',
+            r'\$no_prelude` must be a boolean literal',
+        ),
+        (
+            '$no_prelude = true\n$no_prelude = false',
+            r'duplicate `\$no_prelude` directive',
+        ),
+    ],
+)
+def test_no_prelude_directive_diagnostics(
+    tmp_path: Path,
+    directive: str,
+    message: str,
+) -> None:
+    entry = _write(
+        tmp_path / 'main.dewy',
+        f'{directive}\nlet main = ():>int64 => 42\n',
+    )
+
+    with pytest.raises(UserError, match=message):
+        codegen(SrcFile.from_path(entry))
+
+
 def test_transitive_modules_mangle_colliding_top_level_names(
     tmp_path: Path,
 ) -> None:
@@ -200,6 +360,7 @@ let main = ():>int64 => left() + right()
 
     emitted = codegen(SrcFile.from_path(entry))
 
+    assert emitted.count('let __dewy_module_prelude_path_p') == 1
     assert '__dewy_module_2_left_private' in emitted
     assert '__dewy_module_3_right_private' in emitted
     assert emitted.index('__dewy_module_1_common_shared = 20') < emitted.index(

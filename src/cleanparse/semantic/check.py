@@ -56,31 +56,77 @@ class Context:
     module_declared_names: set[str] = field(default_factory=set)
     # TODO: etc stuff
 
-def typecheck_and_resolve(srcfile: SrcFile) -> hir.AST:
-    if srcfile.path is not None:
-        from .modules import typecheck_program
+def typecheck_and_resolve(
+    srcfile: SrcFile,
+    *,
+    include_prelude: bool | None = None,
+) -> hir.AST:
+    from .modules import typecheck_program
 
-        return typecheck_program(srcfile)
-    checked, ctx = _typecheck_module(srcfile)
-    bounds.validate_bounds(checked, ctx.binding_registry, srcfile)
-    initialization.validate_initialization(checked, ctx.binding_registry, srcfile)
-    return checked
+    return typecheck_program(
+        srcfile,
+        include_prelude=(
+            srcfile.path is not None
+            if include_prelude is None
+            else include_prelude
+        ),
+    )
+
+
+def _parse_module(srcfile: SrcFile) -> tuple[p0.Block, bool]:
+    block = p0.parse(srcfile)
+    no_prelude: bool | None = None
+    items: list[p0.AST] = []
+    for item in block.inner:
+        if not (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == '='
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Metatag)
+            and item.left.item.name == 'no_prelude'
+        ):
+            items.append(item)
+            continue
+        if no_prelude is not None:
+            user_error(
+                srcfile,
+                'duplicate `$no_prelude` directive',
+                Pointer(span=item.loc, message='this module already sets the directive'),
+            )
+        if not isinstance(item.right, p0.Atom) or not isinstance(item.right.item, t1.Bool):
+            user_error(
+                srcfile,
+                '`$no_prelude` must be a boolean literal',
+                Pointer(span=item.right.loc, message='expected `true` or `false`'),
+            )
+        no_prelude = item.right.item.value
+    return replace(block, inner=items), bool(no_prelude)
 
 
 def _typecheck_module(
     srcfile: SrcFile,
     *,
+    block: p0.Block | None = None,
     type_system: ty.TypeSystem | None = None,
     registry: sb.BindingRegistry | None = None,
     module_loader: object | None = None,
+    prelude_bindings: dict[str, sb.Binding] | None = None,
 ) -> tuple[hir.Block, Context]:
     # set up the base type system/builtins
     if type_system is None:
         type_system = ty.TypeSystem()
         builtins.apply_builtin_promote_rules(type_system)
-    declarations = ChainMap(builtins.builtin_types)
+    prelude_bindings = prelude_bindings or {}
+    prelude_declarations = {
+        name: binding.type
+        for name, binding in prelude_bindings.items()
+        if binding.type is not None
+    }
+    declarations = ChainMap(prelude_declarations, builtins.builtin_types)
 
-    block = p0.parse(srcfile)
+    if block is None:
+        block, _ = _parse_module(srcfile)
     declared_names = {
         declaration[0]
         for item in block.inner
@@ -90,6 +136,7 @@ def _typecheck_module(
         srcfile,
         declarations,
         type_system,
+        binding_scopes=ChainMap(prelude_bindings),
         binding_registry=registry or sb.BindingRegistry(),
         module_loader=module_loader,
         module_declared_names=declared_names,
@@ -610,16 +657,27 @@ def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
 
 def _literal_import_path(ast: p0.AST, *, ctx: Context) -> str:
     value = typecheck_and_resolve_inner(ast, ctx=ctx)
-    if not isinstance(value.type, ty.PathLiteralType):
-        user_error(
-            ctx.srcfile,
-            'import path must be an exact `Path` value',
-            Pointer(
-                span=ast.loc,
-                message='use a literal path such as `p"relative/file.dewy"`',
+    value = _unwrap_literal_value(value)
+    if isinstance(value.type, ty.PathLiteralType):
+        return value.type.value
+    if isinstance(value.type, ty.ObjectType):
+        path_field = value.type.field('path')
+        if (
+            path_field is not None
+            and isinstance(path_field.type, ty.StringLiteralType)
+        ):
+            return path_field.type.value
+    user_error(
+        ctx.srcfile,
+        'import source requires an exact `path` field',
+        Pointer(
+            span=ast.loc,
+            message=(
+                'use a literal path constructor or an object such as '
+                '`[path="relative/file.dewy"]`'
             ),
-        )
-    return value.type.value
+        ),
+    )
 
 
 def _parse_import_names(
@@ -2179,6 +2237,30 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
     )
 
 
+def _literal_path_parameter(expression: p0.BinOp) -> str | None:
+    body = expression.right
+    if not isinstance(body, p0.Block) or body.kind != '[]':
+        return None
+    path_fields = [
+        item
+        for item in body.inner
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == '='
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Identifier)
+            and item.left.item.name == 'path'
+        )
+    ]
+    if len(path_fields) != 1:
+        return None
+    value = path_fields[0].right
+    if not isinstance(value, p0.Atom) or not isinstance(value.item, t1.Identifier):
+        return None
+    return value.item.name
+
+
 def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
 
@@ -2243,6 +2325,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
                 continue
             binding = ctx.binding_registry.by_syntax[id(item)]
             binding.type = signature
+            binding.literal_path_parameter = _literal_path_parameter(expression)
             ctx.declarations[name] = signature
             ctx.binding_scopes[name] = binding
 
@@ -3743,6 +3826,52 @@ def _contextualize_flow_result(
     return node
 
 
+def _unwrap_literal_value(node: hir.AST) -> hir.AST:
+    while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+        node = node.expr
+    if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+        return _unwrap_literal_value(node.items[0])
+    return node
+
+
+def _literal_path_call_result(
+    left: hir.AST,
+    pos_args: list[hir.AST],
+    kw_args: dict[str, hir.AST],
+    *,
+    ctx: Context,
+) -> ty.PathLiteralType | None:
+    if not isinstance(left, hir.ExpressedIdentifier) or left.binding_id is None:
+        return None
+    binding = ctx.binding_registry.by_id[left.binding_id]
+    parameter_name = binding.literal_path_parameter
+    if parameter_name is None or not isinstance(left.type, ty.FunctionType):
+        return None
+    params = [*left.type.pos_or_kw, *left.type.kw_only]
+    param = next((param for param in params if param.name == parameter_name), None)
+    if param is None:
+        return None
+    positional_index = next(
+        (
+            index
+            for index, candidate in enumerate(left.type.pos_or_kw)
+            if candidate.name == parameter_name
+        ),
+        None,
+    )
+    argument = (
+        pos_args[positional_index]
+        if positional_index is not None and positional_index < len(pos_args)
+        else kw_args.get(parameter_name)
+    )
+    if argument is None:
+        return None
+    argument = _unwrap_literal_value(argument)
+    if not isinstance(argument.type, ty.StringLiteralType):
+        return None
+    return ty.PathLiteralType(argument.type.value)
+
+
 def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.FunctionCall:
     if isinstance(left, hir.Block) and not left.scoped and len(left.items) == 1:
         left = left.items[0]
@@ -3803,24 +3932,14 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         for name, arg in kw_args.items()
     }
     return_type = result.method.ret
-    path_arg = (
-        pos_args[0]
-        if len(pos_args) == 1 and not kw_args
-        else kw_args.get('text')
-        if not pos_args and len(kw_args) == 1
-        else None
+    literal_path_type = _literal_path_call_result(
+        left,
+        pos_args,
+        kw_args,
+        ctx=ctx,
     )
-    literal_path_arg = path_arg
-    while isinstance(literal_path_arg, hir.RepresentationCast):
-        literal_path_arg = literal_path_arg.expr
-    if (
-        isinstance(left, hir.ExpressedIdentifier)
-        and left.name == 'p'
-        and left.binding_id is None
-        and literal_path_arg is not None
-        and isinstance(literal_path_arg.type, ty.StringLiteralType)
-    ):
-        return_type = ty.PathLiteralType(literal_path_arg.type.value)
+    if literal_path_type is not None:
+        return_type = literal_path_type
     return hir.FunctionCall(
         Span(left.loc.start, right.loc.stop),
         return_type,
@@ -3916,6 +4035,23 @@ def _explicit_value_conversion(
                 and source.element.length == 1
             ) and target == 'string':
                 return hir.RepresentationCast(loc, target, node)
+    if isinstance(source, ty.ObjectType) and isinstance(target, ty.ObjectType):
+        if (
+            len(source.fields) == len(target.fields)
+            and all(
+                source_field.name == target_field.name
+                and source_field.mutable == target_field.mutable
+                and ctx.type_system.is_subtype(
+                    source_field.type,
+                    target_field.type,
+                )
+                for source_field, target_field in zip(
+                    source.fields,
+                    target.fields,
+                )
+            )
+        ):
+            return hir.RepresentationCast(loc, target, node)
     if ctx.type_system.is_subtype(source, target):
         return node
     if ctx.type_system.promote_type(source, target) == target:

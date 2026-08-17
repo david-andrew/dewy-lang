@@ -34,10 +34,40 @@ import p"mylib.dewy"
 let result = myfun()
 ```
 
-`p` is an ordinary function that constructs a thin `Path` object. Thus
-`p"stuff.dewy"` is call juxtaposition equivalent to `p("stuff.dewy")`. Import
-sources must retain an exact compile-time path value; dynamically computed paths
-cannot determine the module graph.
+`p` is an ordinary function defined by the standard source prelude. It
+constructs a thin `[path:string]` object, so `p"stuff.dewy"` is call
+juxtaposition equivalent to `p("stuff.dewy")`.
+
+Import sources use a smaller structural protocol rather than requiring the
+standard `Path` alias. They need a `path` field containing an exact compile-time
+string:
+
+```dewy
+from [path="stuff.dewy"] import myfun
+```
+
+An equivalent source-defined constructor preserves literal paths as well.
+Dynamically computed strings cannot determine the module graph.
+
+## Source prelude
+
+The compiler checks an ordered list of Dewy source prelude files once and makes
+their top-level bindings available as fallback names in ordinary modules.
+Module declarations and explicit imports may shadow those names.
+
+The current prelude contains `library/path.dewy`, which defines `Path` and `p`.
+A module can opt out independently without changing any imported module:
+
+```dewy
+$no_prelude = true
+
+let Path:type = [path:string]
+let p = (path:string):>Path => [path=path]
+from p"stuff.dewy" import myfun
+```
+
+A prelude-free module can also import directly from `[path="stuff.dewy"]`.
+Strict project-wide freestanding compilation is separate future work.
 
 Every top-level binding is importable for now, including values, functions,
 overloads, constants, and type aliases. Repeated imports of the same resolved

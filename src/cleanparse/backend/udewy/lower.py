@@ -2265,27 +2265,6 @@ class _Lowerer:
                 value=self._require_node(self._transform_node(node.value)),
             )
         if isinstance(node, hir.FunctionCall):
-            if (
-                isinstance(node.func, hir.ExpressedIdentifier)
-                and node.func.name == 'p'
-                and node.func.binding_id is None
-            ):
-                text = (
-                    node.pos_args[0]
-                    if node.pos_args
-                    else node.kw_args['text']
-                )
-                return hir.ObjectLiteral(
-                    node.loc,
-                    node.type,
-                    [
-                        hir.ObjectField(
-                            text.loc,
-                            'text',
-                            self._require_node(self._transform_node(text)),
-                        )
-                    ],
-                )
             source_function_type: ty.FunctionType | None = (
                 node.func.type
                 if isinstance(node.func.type, ty.FunctionType)

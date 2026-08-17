@@ -69,7 +69,7 @@ class EmitContext:
 
 def codegen(srcfile:SrcFile) -> str:
     """Type-check Dewy source and emit equivalent udewy source."""
-    ast = check.typecheck_and_resolve(srcfile)
+    ast = check.typecheck_and_resolve(srcfile, include_prelude=True)
     return codegen_inner(ast, srcfile)
 
 def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:

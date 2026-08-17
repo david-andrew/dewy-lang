@@ -90,7 +90,8 @@ ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]
 def test_udewy_fixture_roundtrip(fixture_name: str) -> None:
     path = fixtures / fixture_name
     source = path.read_text()
-    assert codegen(SrcFile.from_path(path)) == source
+    no_prelude = SrcFile(path, f'$no_prelude = true\n{source}')
+    assert codegen(no_prelude) == source
 
 
 @pytest.mark.parametrize(('fixture_name', 'expected_exit'), CASES)
@@ -185,6 +186,23 @@ def test_bare_metal_dewy_hello_world(
 
 
 @pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_no_prelude_import_writes_to_console(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'no_prelude' / 'main.dewy'))
+    assert 'let p =' in emitted
+    assert '__syscall3__(1 1 data 22)' in emitted
+
+    udewy_path = tmp_path / 'no_prelude.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 0
+    assert capfd.readouterr().out == 'hello from no_prelude\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
 def test_function_values_lower_to_udewy_indirect_calls(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -213,7 +231,8 @@ def test_reference_udewy_indirect_call_fixture(
 
 
 def test_jump_table_codegen_uses_raw_static_storage() -> None:
-    emitted = codegen(SrcFile.from_path(fixtures / 'jump_table.dewy'))
+    path = fixtures / 'jump_table.dewy'
+    emitted = codegen(SrcFile(path, f'$no_prelude = true\n{path.read_text()}'))
 
     assert (
         'const handlers:int64 = '
@@ -291,7 +310,7 @@ def test_explicit_signed_shift_intrinsic_roundtrips(tmp_path: Path) -> None:
     path = tmp_path / 'intrinsic.udewy'
     path.write_text(source)
 
-    assert codegen(SrcFile.from_path(path)) == source
+    assert codegen(SrcFile(path, f'$no_prelude = true\n{source}')) == source
 
 
 def test_abstract_integer_right_shift_fails_udewy_lowering(tmp_path: Path) -> None:

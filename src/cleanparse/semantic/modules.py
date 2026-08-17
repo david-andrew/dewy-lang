@@ -12,16 +12,20 @@ from ..reporting import Pointer, Span, SrcFile
 from . import bindings as sb
 from . import bounds, builtins, hir, initialization, ty
 from .errors import user_error
+from .prelude import PRELUDE_FILES
 
 
 @dataclass
 class ModuleRecord:
-    path: Path
+    path: Path | None
     srcfile: SrcFile
+    # BindingRegistry keys syntax by identity, so parsed trees must outlive the graph.
+    syntax: object
     root: hir.Block
     exports: dict[str, sb.Binding]
     index: int
     entry: bool = False
+    prelude: bool = False
 
 
 class ModuleCompiler:
@@ -35,6 +39,25 @@ class ModuleCompiler:
         self.records: dict[Path, ModuleRecord] = {}
         self.order: list[ModuleRecord] = []
         self.stack: list[Path] = []
+        self.prelude_bindings: dict[str, sb.Binding] = {}
+        self.prelude_loaded = False
+        self.finished_roots: dict[int, hir.Block] = {}
+
+    def _ensure_prelude(self) -> None:
+        if self.prelude_loaded:
+            return
+        self.prelude_loaded = True
+        for path in PRELUDE_FILES:
+            resolved = path.resolve()
+            if resolved in self.stack:
+                continue
+            record = self.load(resolved, prelude=True)
+            for name, binding in record.exports.items():
+                if name in self.prelude_bindings:
+                    raise ValueError(
+                        f'prelude binding `{name}` is defined by more than one file'
+                    )
+                self.prelude_bindings[name] = binding
 
     def load(
         self,
@@ -43,6 +66,7 @@ class ModuleCompiler:
         importer: SrcFile | None = None,
         loc: Span | None = None,
         entry: bool = False,
+        prelude: bool = False,
     ) -> ModuleRecord:
         path = Path(path).resolve()
         cached = self.records.get(path)
@@ -74,18 +98,37 @@ class ModuleCompiler:
         srcfile = self.entry if entry else SrcFile.from_path(path)
         from . import check
 
+        block, no_prelude = check._parse_module(srcfile)
+        if not prelude and not no_prelude:
+            self._ensure_prelude()
         root, ctx = check._typecheck_module(
             srcfile,
+            block=block,
             type_system=self.type_system,
             registry=self.registry,
             module_loader=self,
+            prelude_bindings=(
+                self.prelude_bindings
+                if prelude or not no_prelude
+                else None
+            ),
         )
         exports: dict[str, sb.Binding] = {}
         for item in root.items:
             if not isinstance(item, hir.Declare) or item.binding_id is None:
                 continue
             exports[item.name] = self.registry.by_id[item.binding_id]
-        record = ModuleRecord(path, srcfile, root, exports, len(self.order), entry)
+        index = sum(not record.prelude for record in self.order)
+        record = ModuleRecord(
+            path,
+            srcfile,
+            block,
+            root,
+            exports,
+            index,
+            entry,
+            prelude,
+        )
         self.records[path] = record
         self.order.append(record)
         self.stack.pop()
@@ -112,7 +155,13 @@ class ModuleCompiler:
 
     @staticmethod
     def _module_slug(record: ModuleRecord) -> str:
-        stem = re.sub(r'[^A-Za-z0-9_]+', '_', record.path.stem).strip('_')
+        stem = re.sub(
+            r'[^A-Za-z0-9_]+',
+            '_',
+            record.path.stem if record.path is not None else 'memory',
+        ).strip('_')
+        if record.prelude:
+            return f'prelude_{stem or "module"}'
         return f'{record.index + 1}_{stem or "module"}'
 
     def _emitted_names(self, entry: ModuleRecord) -> dict[int, str]:
@@ -164,6 +213,7 @@ class ModuleCompiler:
         for record in self.order:
             renamed = self._rename(record.root, names)
             assert isinstance(renamed, hir.Block)
+            self.finished_roots[id(record)] = renamed
             for item in renamed.items:
                 if isinstance(item, hir.Void):
                     continue
@@ -184,9 +234,44 @@ class ModuleCompiler:
         return root
 
 
-def typecheck_program(srcfile: SrcFile) -> hir.Block:
-    if srcfile.path is None:
-        raise ValueError('INTERNAL ERROR: module compilation requires a source path')
+def typecheck_program(
+    srcfile: SrcFile,
+    *,
+    include_prelude: bool = True,
+) -> hir.Block:
     compiler = ModuleCompiler(srcfile)
-    entry = compiler.load(srcfile.path, entry=True)
-    return compiler.finish(entry)
+    if srcfile.path is not None:
+        entry = compiler.load(srcfile.path, entry=True)
+        merged = compiler.finish(entry)
+        return merged if include_prelude else compiler.finished_roots[id(entry)]
+
+    from . import check
+
+    block, no_prelude = check._parse_module(srcfile)
+    if not no_prelude:
+        compiler._ensure_prelude()
+    root, ctx = check._typecheck_module(
+        srcfile,
+        block=block,
+        type_system=compiler.type_system,
+        registry=compiler.registry,
+        module_loader=compiler,
+        prelude_bindings=compiler.prelude_bindings if not no_prelude else None,
+    )
+    exports = {
+        item.name: compiler.registry.by_id[item.binding_id]
+        for item in root.items
+        if isinstance(item, hir.Declare) and item.binding_id is not None
+    }
+    entry = ModuleRecord(
+        None,
+        srcfile,
+        block,
+        root,
+        exports,
+        sum(not record.prelude for record in compiler.order),
+        entry=True,
+    )
+    compiler.order.append(entry)
+    merged = compiler.finish(entry)
+    return merged if include_prelude else compiler.finished_roots[id(entry)]

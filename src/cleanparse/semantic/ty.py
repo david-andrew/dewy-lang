@@ -219,12 +219,12 @@ class PathLiteralType(PathType):
         object.__setattr__(
             self,
             'fields',
-            (ObjectField('text', StringLiteralType(value)),),
+            (ObjectField('path', StringLiteralType(value)),),
         )
         object.__setattr__(self, 'value', value)
 
 
-PATH_TYPE = PathType((ObjectField('text', StringType()),))
+PATH_TYPE = PathType((ObjectField('path', StringType()),))
 
 
 @dataclass(frozen=True)
