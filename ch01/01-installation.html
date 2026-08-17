@@ -167,24 +167,13 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
-<p>Currently, only the python interpreter backend is available. To install it, you must have <strong>python 3.11</strong> or later installed. Then to install:</p>
-<ol>
-<li>Clone the repo
-<pre><code class="language-bash">$ git clone git@github.com:david-andrew/dewy-lang.git
+<p>Linux x86_64. The installer puts the <code>udewy</code> bootstrap compiler in <code>~/.dewy</code> (a <code>dewy</code> binary will land next to it later):</p>
+<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash
 </code></pre>
-</li>
-<li>Run the install script
-<pre><code class="language-bash">$ cd dewy-lang
-$ python install.py
+<p>Open a new terminal, then:</p>
+<pre><code class="language-bash">udewy --help
 </code></pre>
-</li>
-<li>Log out and back in</li>
-</ol>
-<h2 id="verify-install"><a class="header" href="#verify-install">Verify Install</a></h2>
-<p>When you do have the language properly installed, you should be able to verify that it works like so:</p>
-<pre><code class="language-bash">$ dewy -v
-Dewy 0.0.0
-</code></pre>
+<p>From a source checkout, the Python Dewy compiler is <code>python -m dewy</code>, and udewy can be run with <code>python -m udewy</code>.</p>
 
                     </main>
 
