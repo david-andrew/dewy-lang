@@ -1,9 +1,9 @@
 import pytest
 
-from src.reporting import SrcFile
-from src.semantic import check, hir, ty
-from src.semantic.errors import TypeCheckError
-from src.semantic.hir_display import type_to_dewy
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir, ty
+from dewy.semantic.errors import TypeCheckError
+from dewy.semantic.hir_display import type_to_dewy
 
 
 @pytest.mark.parametrize(

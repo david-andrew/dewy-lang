@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.semantic import builtins
-from src.semantic.ty import (
+from dewy.semantic import builtins
+from dewy.semantic.ty import (
     DispatchError,
     OverloadType,
     StringType,

@@ -1,10 +1,10 @@
 import pytest
 
-from src.backend.udewy import codegen
-from src.reporting import SrcFile
-from src.semantic import check, hir, ty
-from src.semantic.errors import NotImplementedYet
-from src.semantic.hir_display import type_to_dewy
+from dewy.backend.udewy import codegen
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir, ty
+from dewy.semantic.errors import NotImplementedYet
+from dewy.semantic.hir_display import type_to_dewy
 
 
 def _function_type(name: str | None = None) -> ty.FunctionType:

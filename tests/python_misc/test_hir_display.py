@@ -1,8 +1,8 @@
 """Tests for HIR tree repr and Dewy pretty-printer."""
 
-from src.reporting import Span
-from src.semantic import hir
-from src.semantic.hir_display import hir_to_dewy, hir_to_tree_str
+from dewy.reporting import Span
+from dewy.semantic import hir
+from dewy.semantic.hir_display import hir_to_dewy, hir_to_tree_str
 
 LOC = Span(0, 0)
 

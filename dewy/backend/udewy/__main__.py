@@ -1,4 +1,4 @@
-"""Command-line entry point for ``python -m src.backend.udewy``."""
+"""Command-line entry point for ``python -m dewy.backend.udewy``."""
 
 from argparse import ArgumentParser
 from pathlib import Path

@@ -1,5 +1,5 @@
-from src.reporting import SrcFile
-from src.semantic import check, hir, ty
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir, ty
 
 
 def _declarations(source: str) -> dict[str, hir.AST]:

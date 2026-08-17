@@ -1,0 +1,55 @@
+name: Release udewy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'udewy/**'
+      - '.github/workflows/release-udewy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build bootstrap compiler
+        run: |
+          python -m udewy --target x86_64 -c udewy/bootstrap/main.udewy
+          cp __dewycache__/main udewy-linux-x86_64
+          sha256sum udewy-linux-x86_64
+
+      - name: Compare with previous release
+        id: changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p prev
+          if gh release download --pattern udewy-linux-x86_64 --dir prev; then
+            if cmp -s udewy-linux-x86_64 prev/udewy-linux-x86_64; then
+              echo 'Binary matches the previous release; skipping'
+              echo 'changed=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo 'No previous udewy-linux-x86_64 asset; will publish'
+          fi
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="udewy-${GITHUB_SHA::7}"
+          gh release create "$tag" udewy-linux-x86_64 \
+            --title "udewy ${GITHUB_SHA::7}" \
+            --notes "Linux x86_64 udewy bootstrap compiler from ${GITHUB_SHA}."

@@ -12,7 +12,7 @@ Dewy is a general purpose programming language with a focus on engineering.
 ## Current Status
 
 ### dewy
-The main compiler lives under [src/](src/)
+The main compiler lives under [dewy/](dewy/)
 
 ### udewy
 The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). Currently only supports linux x86_64.
@@ -22,52 +22,19 @@ A vscode extension for syntax highlighting is available at https://marketplace.v
 
 ## Installation
 
-### Dependancies
-
-For now, the only dependency is **Python >= 3.12** with an optional dependency on `rich` for rich printing/errors (`pip install rich`)
-
-Later (dev) dependencies will probably include [`QBE`](https://c9x.me/compile/)
-
-### Automatic
+Linux x86_64. This currently installs the `udewy` bootstrap compiler into `~/.dewy` (a `dewy` binary will land next to it later):
 
 ```
-python install.py
+curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash
 ```
 
-This should work on most linux distros with most common shells (`sh`, `bash`, `zsh`, `fish`). This script just attempts to add the lines below from the `Manual` section to your `.profile` or equivalent file, or your `.rc` file (e.g. `.bashrc`) if available.
-
-If you don't have a `.rc` file, You will need to logout and log back in for changes to take effect. Otherwise, you can run `source ~/.rc` to apply changes, or open a new terminal.
-
-### Manual
-
-1. Add the following to your distribution/shell's corresponding `.profile` or `.rc` file:
-
-   ```
-   if [ -d "/home/user/path/to/dewy-lang" ]; then
-     PATH="/home/user/path/to/dewy-lang:$PATH"
-   fi
-   ```
-
-   > Note: Be sure to adjust the path in the command to match the current absolute path of **this** repo
-
-   > Note: If modifying `.profile`, you must logout, and log back in for changes to take effect.
-   > If modifying a `.rc` file (e.g. `.bashrc`), then either run `source path/to/.rc` to apply changes, or open a new terminal
-
-## Try it out
-
-> Note that the language parser is largely incomplete, and there are very many different syntaxes that will get trapped at breakpoints marking TODO, or cause exceptions for `NotImplementedError`
-
-If you completed the install steps, you can simply run:
+From a checkout, the Python Dewy compiler is:
 
 ```
-dewy my_script.dewy
+python -m dewy path/to/my_script.dewy
 ```
 
-otherwise you can run the python script directly
-
-```
-python -m src ../path/to/my_script.dewy
-```
+`udewy` programs can also be run with `python -m udewy` from a checkout.
 
 ### Examples
 

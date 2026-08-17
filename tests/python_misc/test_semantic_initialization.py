@@ -1,9 +1,9 @@
 import pytest
 
-from src.backend.udewy import codegen
-from src.reporting import SrcFile
-from src.semantic import check, hir, ty
-from src.semantic.errors import NotImplementedYet, UserError
+from dewy.backend.udewy import codegen
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir, ty
+from dewy.semantic.errors import NotImplementedYet, UserError
 
 
 def _codegen(source: str) -> str:

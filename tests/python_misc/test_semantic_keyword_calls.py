@@ -1,8 +1,8 @@
 import pytest
 
-from src.reporting import SrcFile
-from src.semantic import check, hir, ty
-from src.semantic.errors import UserError
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir, ty
+from dewy.semantic.errors import UserError
 
 
 def _declarations(source: str) -> dict[str, hir.AST]:

@@ -3,14 +3,14 @@ from shutil import which
 
 import pytest
 
-from src.backend.udewy import codegen
-from src.reporting import SrcFile
-from src.semantic import check
+from dewy.backend.udewy import codegen
+from dewy.reporting import SrcFile
+from dewy.semantic import check
 from udewy.frontend import entry_point
 
 here = Path(__file__).parent
 repo = here.parent.parent
-fixtures = repo / 'src' / 'tests'
+fixtures = repo / 'dewy' / 'tests'
 
 
 def x86_64_toolchain_available() -> bool:

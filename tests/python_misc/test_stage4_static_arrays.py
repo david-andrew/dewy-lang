@@ -3,11 +3,11 @@ from shutil import which
 
 import pytest
 
-from src.backend.udewy import codegen
-from src.backend.udewy.lower import ArrayRepresentation, ArrayUse, _Lowerer
-from src.reporting import SrcFile
-from src.semantic import check, hir
-from src.semantic.errors import UserError
+from dewy.backend.udewy import codegen
+from dewy.backend.udewy.lower import ArrayRepresentation, ArrayUse, _Lowerer
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir
+from dewy.semantic.errors import UserError
 from udewy.frontend import entry_point
 
 

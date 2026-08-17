@@ -4624,7 +4624,7 @@ x: Type1 & Trait1
 
 
 
-## Splicing structural types into the nominal type tree [settled: `A = B & [...]` + `__as__` overload per nominal parent. coercion happens at canonical-representation boundaries; explicit `__as__` beats composed paths; diamond ambiguity is a lazy use-site error. see "Structural splicing into the nominal type tree" in src/status.md]
+## Splicing structural types into the nominal type tree [settled: `A = B & [...]` + `__as__` overload per nominal parent. coercion happens at canonical-representation boundaries; explicit `__as__` beats composed paths; diamond ambiguity is a lazy use-site error. see "Structural splicing into the nominal type tree" in dewy/status.md]
 I think in general structural types will typically inherit directly from `any`, or perhaps some prior defined structural type that you want to expand.
 
 However I think it could plenty of times be the case that you build something structurally but allow that structural type to also be used any time a nominal type is expected. I think this should be handled by intersecting the structural type with the nominal type (or potentially using the `of` syntax), and then explicitly define an overload for converting the struct type to the nominal type
