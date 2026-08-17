@@ -177,10 +177,34 @@ import, not from the process working directory.</p>
     id="DewyIframe122"
     frameBorder="0"
 ></iframe>
-<p><code>p</code> is an ordinary function that constructs a thin <code>Path</code> object. Thus
-<code>p&quot;stuff.dewy&quot;</code> is call juxtaposition equivalent to <code>p(&quot;stuff.dewy&quot;)</code>. Import
-sources must retain an exact compile-time path value; dynamically computed paths
-cannot determine the module graph.</p>
+<p><code>p</code> is an ordinary function defined by the standard source prelude. It
+constructs a thin <code>[path:string]</code> object, so <code>p&quot;stuff.dewy&quot;</code> is call
+juxtaposition equivalent to <code>p(&quot;stuff.dewy&quot;)</code>.</p>
+<p>Import sources use a smaller structural protocol rather than requiring the
+standard <code>Path</code> alias. They need a <code>path</code> field containing an exact compile-time
+string:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=from%20%5Bpath%3D%22stuff.dewy%22%5D%20import%20myfun&id=DewyIframe123"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe123"
+    frameBorder="0"
+></iframe>
+<p>An equivalent source-defined constructor preserves literal paths as well.
+Dynamically computed strings cannot determine the module graph.</p>
+<h2 id="source-prelude"><a class="header" href="#source-prelude">Source prelude</a></h2>
+<p>The compiler checks an ordered list of Dewy source prelude files once and makes
+their top-level bindings available as fallback names in ordinary modules.
+Module declarations and explicit imports may shadow those names.</p>
+<p>The current prelude contains <code>library/path.dewy</code>, which defines <code>Path</code> and <code>p</code>.
+A module can opt out independently without changing any imported module:</p>
+<iframe
+    src="https://david-andrew.github.io/iframes/dewy/src_only?src=%24no_prelude%20%3D%20true%0A%0Alet%20Path%3Atype%20%3D%20%5Bpath%3Astring%5D%0Alet%20p%20%3D%20%28path%3Astring%29%3A%3EPath%20%3D%3E%20%5Bpath%3Dpath%5D%0Afrom%20p%22stuff.dewy%22%20import%20myfun&id=DewyIframe124"
+    style="width: 100%; border-radius: 0.5rem;"
+    id="DewyIframe124"
+    frameBorder="0"
+></iframe>
+<p>A prelude-free module can also import directly from <code>[path=&quot;stuff.dewy&quot;]</code>.
+Strict project-wide freestanding compilation is separate future work.</p>
 <p>Every top-level binding is importable for now, including values, functions,
 overloads, constants, and type aliases. Repeated imports of the same resolved
 file load and initialize it once. Name collisions and import cycles are compile
