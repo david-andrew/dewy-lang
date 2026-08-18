@@ -485,7 +485,9 @@ valid refinement predicates merely because they produce a Boolean.
 
 The intended proof boundaries are:
 - an automatically proven refinement has no runtime cost
-- an explicit runtime check refines the value on the check's successful path
+- an explicit runtime check refines the value on every path where the check
+  succeeded, including after an early exit that discarded the failing case
+  (`if not condition then return`, and similar)
 - a checked proof or lemma may discharge an obligation the automatic liquid
   solver could not establish on its own
 - an explicit `unsafe` claim may assume an obligation without a runtime check or
@@ -505,10 +507,12 @@ function calls, unrestricted quantification, effectful expressions, and general
 nonlinear arithmetic are outside the automatic refinement language. The exact
 fragment and qualifier-inference strategy remain to be specified.
 
+> NOTE: this doesn't preclude calling functions in refinements. Suitably pure functions can be used. E.g. if the contents of a function call and any subsequent internal calls were inlined and that inlining would be a valid refinement, then that function ought to be valid.
+
 Refinement propositions should have their own semantic representation rather
 than reusing unrestricted HIR expressions. Reasoning about semantic arbitrary-
 precision `int` must also remain distinct from reasoning about fixed-width
-rollover arithmetic: the latter requires bit-vector-aware rules or a separate
+rollover arithmetic: the latter requires bit-vector-aware rules or a separate (automated or user-provided)
 proof that overflow cannot occur.
 
 Within those constraints, the refinement system shall work as follows:
@@ -517,14 +521,14 @@ Within those constraints, the refinement system shall work as follows:
   conditions for that type. The compiler attempts to prove them statically from
   inferred facts, control flow, and declared contracts
 ```dewy
-NonEmptyArray = array<length>?1>  # retains the generic T from array, e.g. can do NonEmptyArray<int> because we didn't fill in the type
+NonEmptyArray = array<length>?0>  # retains the generic T from array, e.g. can do NonEmptyArray<int> because we didn't fill in the type
 
 MyStruct:type = [a:int b:bool c:string]< a>?10 b=?true c not=? 'apple' >
 ```
 
 - additionally assignment expressions in the conditional block can be used to directly indicate some field will always have that value. This is mostly just a convenience for a common case, e.g.
 ```dewy
-NonEmptyArray = array<length=1>  # identical to array<length=?1>
+SingleValuedArray = array<length=1>  # identical to array<length=?1>
 ```
 
 - entries in the parameterize block are distinguished syntactically: an expression whose
