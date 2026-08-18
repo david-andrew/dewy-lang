@@ -46,7 +46,7 @@ fi
 
 source_dir="${temp_dir}/source"
 runtime_stage="${temp_dir}/runtime"
-for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/io.dewy; do
+for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/io.dewy library/units.dewy library/system-linux.dewy; do
     if [ ! -f "${source_dir}/${required_path}" ]; then
         echo "Downloaded source archive is missing ${required_path}." >&2
         exit 1
@@ -61,7 +61,7 @@ copy_runtime_file() {
 }
 
 # Dewy's compiler is all Python. Its tests, docs, and sample programs are not
-# needed at runtime, so only Python modules and the two implicit library files
+# needed at runtime, so only Python modules and the implicit library files
 # are installed. udewy's Python runtime has a smaller, explicit module set.
 while IFS= read -r -d '' source_file; do
     copy_runtime_file "$source_file"
@@ -86,6 +86,8 @@ done
 copy_runtime_file "${source_dir}/VERSION"
 copy_runtime_file "${source_dir}/library/path.dewy"
 copy_runtime_file "${source_dir}/library/io.dewy"
+copy_runtime_file "${source_dir}/library/units.dewy"
+copy_runtime_file "${source_dir}/library/system-linux.dewy"
 if [ -f "${source_dir}/assets/udewy_logo_128x128.png" ]; then
     copy_runtime_file "${source_dir}/assets/udewy_logo_128x128.png"
 fi

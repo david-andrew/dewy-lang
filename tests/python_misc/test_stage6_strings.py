@@ -6,7 +6,7 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import TypeCheckError, UserError
+from dewy.semantic.errors import NotImplementedYet, TypeCheckError, UserError
 from udewy.frontend import entry_point
 
 
@@ -130,6 +130,29 @@ def test_string_length_index_slice_and_equality_hir() -> None:
     assert isinstance(declarations['same'].expr, hir.StringEqual)
 
 
+def test_interpolated_string_preserves_chunks_and_checked_fields() -> None:
+    source = '''
+let index:int64 = 3
+let value = "é"
+let rendered = "{index}: {value}"
+'''
+    root = _check(source)
+    rendered = _declarations(root)['rendered'].expr
+
+    assert isinstance(rendered, hir.InterpolatedString)
+    assert len(rendered.parts) == 3
+    assert isinstance(rendered.parts[0], hir.ExpressedIdentifier)
+    assert isinstance(rendered.parts[1], hir.String)
+    assert rendered.parts[1].content == ': '
+    assert isinstance(rendered.parts[2], hir.ExpressedIdentifier)
+
+    with pytest.raises(
+        NotImplementedYet,
+        match='materializing an interpolated string outside print or printl',
+    ):
+        codegen(SrcFile(None, source))
+
+
 def test_character_ranges_default_to_graphemes_and_skip_surrogates() -> None:
     root = _check(
         "loop c in 'a'..'z' { let one:grapheme = c } "
@@ -226,3 +249,35 @@ let main = ():>int64 => {
     path.write_text(codegen(SrcFile(None, source)))
     monkeypatch.chdir(tmp_path)
     assert entry_point(path, []) == 42
+
+
+@pytest.mark.skipif(
+    which('as') is None or which('ld') is None,
+    reason='as/ld not available',
+)
+def test_hero_core_iterates_graphemes_and_streams_interpolation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    source = '''
+text = "café 👨‍👩‍👧‍👦 🍀"
+
+loop i in 0.. and c in text
+    if c not =? ' ' {
+        printl"{i}: {c}"
+    }
+'''
+    path = tmp_path / 'hero_core.udewy'
+    path.write_text(codegen(SrcFile(None, source)))
+    monkeypatch.chdir(tmp_path)
+
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == (
+        '0: c\n'
+        '1: a\n'
+        '2: f\n'
+        '3: é\n'
+        '5: 👨‍👩‍👧‍👦\n'
+        '7: 🍀\n'
+    )

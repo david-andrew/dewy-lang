@@ -641,7 +641,7 @@ class _Lowerer:
             ))
             if not param.required:
                 pos.append(ty.PosOrKwArg(None, 'bool'))
-        rettype: ty.TypeExpr = type_.ret
+        rettype: ty.TypeExpr = self._lower_runtime_value_type(type_.ret)
         if isinstance(type_.ret, ty.ObjectType) or ty.optional_payload(type_.ret) is not None:
             pos.append(ty.PosOrKwArg(None, 'int64'))
             rettype = ty.VOID_TYPE
@@ -656,6 +656,8 @@ class _Lowerer:
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         if ty.optional_payload(type_) is not None:
             return 'int64'
+        if isinstance(type_, ty.QuantityType):
+            return self._lower_runtime_value_type(type_.number)
         if isinstance(type_, ty.IntegerLiteralType):
             return 'int64'
         if isinstance(
@@ -690,6 +692,8 @@ class _Lowerer:
             )
         if isinstance(type_, ty.ArrayType):
             self._target_error(node, 'array return values are not supported by udewy')
+        if isinstance(type_, ty.QuantityType):
+            return self._target_scalar_type(type_.number, node)
         if isinstance(type_, ty.StringLiteralType):
             return 'int64'
         if isinstance(type_, ty.BinaryLiteralType):
@@ -761,6 +765,8 @@ class _Lowerer:
             and annotation in {'string', 'grapheme', 'char'}
         ):
             annotation = 'int64'
+        if isinstance(annotation, ty.QuantityType):
+            annotation = self._lower_runtime_value_type(annotation)
         if isinstance(annotation, ty.ObjectType):
             annotation = 'int64'
         if ty.optional_payload(annotation) is not None:
@@ -1333,6 +1339,10 @@ class _Lowerer:
         if isinstance(node, hir.StringConcat):
             self._discover_node(node.left, scope, current_function)
             self._discover_node(node.right, scope, current_function)
+            return
+        if isinstance(node, hir.InterpolatedString):
+            for part in node.parts:
+                self._discover_node(part, scope, current_function)
             return
         if isinstance(node, hir.Index):
             self._discover_node(
@@ -2231,6 +2241,14 @@ class _Lowerer:
                 left=self._require_node(self._transform_node(node.left)),
                 right=self._require_node(self._transform_node(node.right)),
             )
+        if isinstance(node, hir.InterpolatedString):
+            return replace(
+                node,
+                parts=[
+                    self._require_node(self._transform_node(part))
+                    for part in node.parts
+                ],
+            )
         if isinstance(node, hir.IteratorExpression):
             return replace(
                 node,
@@ -2409,10 +2427,19 @@ class _Lowerer:
                 value=self._require_node(self._transform_node(node.value)),
             )
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
-            return replace(
+            transformed = replace(
                 node,
                 expr=self._require_node(self._transform_node(node.expr)),
             )
+            if (
+                isinstance(node, (hir.ValueCast, hir.Transmute))
+                and isinstance(node.type, ty.QuantityType)
+            ):
+                return replace(
+                    transformed,
+                    type=self._lower_runtime_value_type(node.type),
+                )
+            return transformed
         if isinstance(node, hir.TypeBlock):
             return replace(
                 node,
@@ -2597,6 +2624,11 @@ class _Lowerer:
         if isinstance(node, hir.ScopeMetatag):
             return []
         if isinstance(node, hir.Block):
+            if not node.scoped:
+                statements: list[hir.AST] = []
+                for item in node.items:
+                    statements.extend(self._lower_statement(item))
+                return statements
             return [self._lower_statement_body(node)]
         if isinstance(node, hir.Flow):
             is_loop = any(isinstance(arm, hir.LoopArm) for arm in node.arms)
@@ -2966,6 +2998,11 @@ class _Lowerer:
                     )
                 )
             self._target_error(node, 'runtime string concatenation and re-segmentation')
+        if isinstance(node, hir.InterpolatedString):
+            self._target_error(
+                node,
+                'materializing an interpolated string outside print or printl',
+            )
         if isinstance(node, hir.ArrayLiteral):
             return self._extract_array_literal(node)
         if isinstance(node, hir.ArrayLength):
@@ -7252,74 +7289,11 @@ class _Lowerer:
         offset = self._new_iterator_temp(iterator)
         target = replace(iterator.target, loc=iterator.loc, type='int64')
         offset_value = replace(offset, loc=iterator.loc)
-        first_offset = self._string_boundary(
-            string,
-            offset_value,
-            iterator.loc,
-        )
-        end_offset = self._string_boundary(
-            string,
-            self._int64_binary(
-                '__add__',
-                offset_value,
-                self._int64_literal(iterator.loc, 1),
-                iterator.loc,
-            ),
-            iterator.loc,
-        )
-        boundaries = self._load_i64_field(
-            string,
-            STRING_BOUNDARIES_OFFSET,
-            iterator.loc,
-        )
         updates = [
-            self._store_i64_field(
+            *self._string_iterator_view_updates(
+                string,
                 target,
-                STRING_DATA_OFFSET,
-                self._load_i64_field(
-                    string,
-                    STRING_DATA_OFFSET,
-                    iterator.loc,
-                ),
-                iterator.loc,
-            ),
-            self._store_i64_field(
-                target,
-                STRING_BYTE_LENGTH_OFFSET,
-                self._int64_binary(
-                    '__sub__',
-                    end_offset,
-                    first_offset,
-                    iterator.loc,
-                ),
-                iterator.loc,
-            ),
-            self._store_i64_field(
-                target,
-                STRING_BOUNDARIES_OFFSET,
-                self._int64_binary(
-                    '__add__',
-                    boundaries,
-                    self._int64_binary(
-                        '__mul__',
-                        offset_value,
-                        self._int64_literal(iterator.loc, 4),
-                        iterator.loc,
-                    ),
-                    iterator.loc,
-                ),
-                iterator.loc,
-            ),
-            self._store_i64_field(
-                target,
-                STRING_GRAPHEME_LENGTH_OFFSET,
-                self._int64_literal(iterator.loc, 1),
-                iterator.loc,
-            ),
-            self._store_i64_field(
-                target,
-                STRING_START_OFFSET,
-                first_offset,
+                offset_value,
                 iterator.loc,
             ),
             hir.Assign(
@@ -7392,6 +7366,87 @@ class _Lowerer:
                 binding_id=iterator.target.binding_id,
             ),
             loop,
+        ]
+
+    def _string_iterator_view_updates(
+        self,
+        string: hir.AST,
+        target: hir.AST,
+        offset: hir.AST,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """Point one reusable string descriptor at the current grapheme."""
+
+        first_offset = self._string_boundary(
+            string,
+            offset,
+            loc,
+        )
+        end_offset = self._string_boundary(
+            string,
+            self._int64_binary(
+                '__add__',
+                offset,
+                self._int64_literal(loc, 1),
+                loc,
+            ),
+            loc,
+        )
+        boundaries = self._load_i64_field(
+            string,
+            STRING_BOUNDARIES_OFFSET,
+            loc,
+        )
+        return [
+            self._store_i64_field(
+                target,
+                STRING_DATA_OFFSET,
+                self._load_i64_field(
+                    string,
+                    STRING_DATA_OFFSET,
+                    loc,
+                ),
+                loc,
+            ),
+            self._store_i64_field(
+                target,
+                STRING_BYTE_LENGTH_OFFSET,
+                self._int64_binary(
+                    '__sub__',
+                    end_offset,
+                    first_offset,
+                    loc,
+                ),
+                loc,
+            ),
+            self._store_i64_field(
+                target,
+                STRING_BOUNDARIES_OFFSET,
+                self._int64_binary(
+                    '__add__',
+                    boundaries,
+                    self._int64_binary(
+                        '__mul__',
+                        offset,
+                        self._int64_literal(loc, 4),
+                        loc,
+                    ),
+                    loc,
+                ),
+                loc,
+            ),
+            self._store_i64_field(
+                target,
+                STRING_GRAPHEME_LENGTH_OFFSET,
+                self._int64_literal(loc, 1),
+                loc,
+            ),
+            self._store_i64_field(
+                target,
+                STRING_START_OFFSET,
+                first_offset,
+                loc,
+            ),
         ]
 
     def _string_iterator_target(
@@ -7663,18 +7718,23 @@ class _Lowerer:
         if not isinstance(condition, hir.MultiIteratorExpression):
             raise TypeError('INTERNAL ERROR: multiiterator loop has no composite condition')
         for iterator in condition.iterators:
-            if not isinstance(iterator.iterable, hir.Range):
-                self._target_error(
-                    iterator,
-                    'string iteration inside a multiiterator',
-                )
-            self._require_finite_udewy_iterator(iterator)
+            if isinstance(iterator.iterable, hir.Range):
+                self._require_finite_udewy_iterator(iterator)
         declarations: list[hir.AST] = []
         updates: list[hir.AST] = []
         active_values: list[hir.ExpressedIdentifier] = []
         for iterator in condition.iterators:
-            assert iterator.count is not None
+            string_iterator = not isinstance(iterator.iterable, hir.Range)
+            string_value: hir.AST | None = None
+            if string_iterator:
+                string_prelude, string_value = self._extract_expression(
+                    iterator.iterable
+                )
+                declarations.extend(string_prelude)
+            else:
+                assert iterator.count is not None
             offset = self._new_iterator_temp(iterator)
+            offset_value = replace(offset, loc=iterator.loc)
             active = hir.ExpressedIdentifier(
                 iterator.loc,
                 'bool',
@@ -7701,6 +7761,7 @@ class _Lowerer:
             ])
             payload = ty.optional_payload(iterator.target.type)
             target = replace(iterator.target, loc=iterator.loc)
+            value_target: hir.AST = target
             if payload is not None:
                 target = replace(target, type='int64')
                 declarations.append(
@@ -7721,6 +7782,34 @@ class _Lowerer:
                         payload,
                     )
                 )
+                if string_iterator:
+                    value_target = hir.ExpressedIdentifier(
+                        iterator.loc,
+                        payload,
+                        self._new_string_temp(
+                            iterator.loc,
+                            payload,
+                            'iterator_value',
+                        ).name,
+                    )
+                    declarations.append(
+                        hir.Declare(
+                            iterator.loc,
+                            ty.VOID_TYPE,
+                            'let',
+                            value_target.name,
+                            'int64',
+                            self._intrinsic_call(
+                                '__alloca__',
+                                [self._int64_literal(
+                                    iterator.loc,
+                                    STRING_DESCRIPTOR_SIZE,
+                                )],
+                                'int64',
+                                iterator.loc,
+                            ),
+                        )
+                    )
             else:
                 declarations.append(
                     hir.Declare(
@@ -7729,14 +7818,42 @@ class _Lowerer:
                         'let',
                         target.name,
                         'int64',
-                        self._int64_literal(iterator.loc, iterator.first),
+                        (
+                            self._intrinsic_call(
+                                '__alloca__',
+                                [
+                                    self._int64_literal(
+                                        iterator.loc,
+                                        STRING_DESCRIPTOR_SIZE,
+                                    )
+                                ],
+                                'int64',
+                                iterator.loc,
+                            )
+                            if string_iterator
+                            else self._int64_literal(
+                                iterator.loc,
+                                iterator.first,
+                            )
+                        ),
                         binding_id=iterator.target.binding_id,
                     )
                 )
+                if string_iterator:
+                    value_target = target
+            active_limit = (
+                self._load_i64_field(
+                    string_value,
+                    STRING_GRAPHEME_LENGTH_OFFSET,
+                    iterator.loc,
+                )
+                if string_value is not None
+                else self._int64_literal(iterator.loc, iterator.count)
+            )
             active_test = self._int64_comparison(
                 '__lt__',
-                replace(offset, loc=iterator.loc),
-                self._int64_literal(iterator.loc, iterator.count),
+                offset_value,
+                active_limit,
                 iterator.loc,
             )
             updates.append(
@@ -7748,17 +7865,25 @@ class _Lowerer:
                     active_test,
                 )
             )
-            value = self._iterator_value(
-                iterator,
-                replace(offset, loc=iterator.loc),
-            )
+            if string_value is not None:
+                value = value_target
+                value_updates = self._string_iterator_view_updates(
+                    string_value,
+                    value_target,
+                    offset_value,
+                    iterator.loc,
+                )
+            else:
+                value = self._iterator_value(iterator, offset_value)
+                value_updates = []
             if payload is not None:
                 defined_body = [
+                    *value_updates,
                     *self._optional_write(target, value, payload),
                     hir.Assign(
                         iterator.loc,
                         ty.VOID_TYPE,
-                        replace(offset, loc=iterator.loc),
+                        offset_value,
                         '+=',
                         self._int64_literal(iterator.loc, 1),
                     ),
@@ -7769,22 +7894,24 @@ class _Lowerer:
                     payload,
                 )
             else:
-                defined_body = [
-                    hir.Assign(
+                defined_body = [*value_updates]
+                if not string_iterator:
+                    defined_body.append(hir.Assign(
                         iterator.loc,
                         ty.VOID_TYPE,
                         replace(target, type='int64'),
                         '=',
                         value,
-                    ),
+                    ))
+                defined_body.append(
                     hir.Assign(
                         iterator.loc,
                         ty.VOID_TYPE,
-                        replace(offset, loc=iterator.loc),
+                        offset_value,
                         '+=',
                         self._int64_literal(iterator.loc, 1),
-                    ),
-                ]
+                    )
+                )
                 exhausted_body = []
             updates.append(
                 hir.Flow(
@@ -8448,6 +8575,10 @@ class _Lowerer:
             'uint64',
         }:
             return hir.Integer(node.loc, node.type, t0.base10, 0)
+        if isinstance(node.type, ty.QuantityType):
+            runtime_type = self._lower_runtime_value_type(node.type)
+            if isinstance(runtime_type, str):
+                return hir.Integer(node.loc, runtime_type, t0.base10, 0)
         if isinstance(
             node.type,
             (

@@ -1,12 +1,32 @@
 # Linux x86_64 only. `write` is syscall 1; stdout is fd 1.
 # Other targets need a host write capability Dewy does not have yet.
 
-let print = (s:string):>void => {
+let _print_string = (s:string):>void => {
     let bytes:array<uint8> = s as array<uint8>
     let data:int64 = __load_i64__(bytes)
     let written:int64 = __syscall3__(1 1 data bytes.length)
     return void
 }
+
+let _print_int64 = (value:int64):>void => {
+    if value <? 0 {
+        _print_string("-")
+        # Negating the minimum signed value would overflow.
+        if value =? -9223372036854775808 {
+            _print_string("9223372036854775808")
+            return void
+        }
+        value = -value
+    }
+    if value >=? 10 {
+        _print_int64(value // 10)
+    }
+    let digits = "0123456789"
+    _print_string(digits[value % 10])
+    return void
+}
+
+let print = _print_string & _print_int64
 
 let printl = (s:string):>void => {
     print(s)

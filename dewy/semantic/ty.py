@@ -79,6 +79,33 @@ class TypeParameterize:
     args: list[TypeExpr] #TODO: other stuff can be set here, though perhaps it doesn't affect the typing?
 
 
+@dataclass(frozen=True)
+class TypeVariable:
+    """A symbolic type inside a generic type-alias body."""
+
+    name: str
+    bound: 'TypeExpr' = TOP_TYPE
+
+
+@dataclass(frozen=True)
+class DimensionType:
+    """A normalized physical dimension used only during type checking.
+
+    Entries are sorted ``(base_dimension, exponent)`` pairs with zero
+    exponents removed.  A dimension has no runtime representation.
+    """
+
+    powers: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class QuantityType:
+    """A numeric runtime representation tagged with a physical dimension."""
+
+    number: 'TypeExpr'
+    dimension: DimensionType
+
+
 # Building blocks for FunctionType / OverloadType (not HIR params, not standalone types)
 
 @dataclass
@@ -113,6 +140,14 @@ class GenericParam:
     """
     name: str
     bound: TypeExpr = TOP_TYPE
+
+
+@dataclass
+class GenericTypeAlias:
+    """A compile-time type constructor expanded by ``Alias<args...>``."""
+
+    params: list[GenericParam]
+    body: 'TypeExpr'
 
 @dataclass
 class FunctionType:
@@ -234,7 +269,7 @@ class ModuleField:
     name: str
     type: 'TypeExpr'
     binding_id: int
-    type_value: 'TypeExpr | None' = None
+    type_value: 'TypeAliasValue | None' = None
 
 
 @dataclass(frozen=True)
@@ -247,8 +282,9 @@ class ModuleType:
         return next((field for field in self.fields if field.name == name), None)
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
+type TypeAliasValue = TypeExpr | GenericTypeAlias
 
 
 
@@ -284,7 +320,11 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     ('int32', 'int'),
     ('int64', 'int'),
     # ('int128', 'int'),
-    ('float', 'number'),
+    # Floating-point values are approximate representations of real numbers.
+    # Keeping them under `real` lets APIs such as Duration<T of real> accept
+    # both integral and floating-point representations while still excluding
+    # complex and quaternion values.
+    ('float', 'real'),
     # ('float8', 'float'),
     # ('float16', 'float'),
     ('float32', 'float'),
@@ -410,6 +450,23 @@ def string_literal_lengths(value: str) -> tuple[int, int, int]:
     return len(value.encode('utf-8')), len(value), grapheme_count(value)
 
 
+def dimension(*powers: tuple[str, int]) -> DimensionType:
+    """Build a canonical dimension from possibly repeated base powers."""
+
+    combined: dict[str, int] = defaultdict(int)
+    for name, exponent in powers:
+        combined[name] += exponent
+    return DimensionType(tuple(
+        (name, exponent)
+        for name, exponent in sorted(combined.items())
+        if exponent
+    ))
+
+
+def multiply_dimensions(left: DimensionType, right: DimensionType) -> DimensionType:
+    return dimension(*left.powers, *right.powers)
+
+
 class TypeSystem:
     def __init__(self, system_types: list[Primitive|tuple[Primitive, Primitive]] = _default_system_types):
         self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE} # void and inferred don't participate in type expressions
@@ -512,6 +569,14 @@ class TypeSystem:
         array & array<int> => array<int>   if heads meet to array
         Structural & its nominal (or ancestor) => structural; two structurals only if equal.
         """
+        if isinstance(a, TypeVariable):
+            if a == b or self.is_subtype(a.bound, b):
+                return a
+            return None
+        if isinstance(b, TypeVariable):
+            if a == b or self.is_subtype(b.bound, a):
+                return b
+            return None
         if isinstance(a, IntegerLiteralType) and isinstance(b, IntegerLiteralType):
             return a if a == b else None
         if isinstance(a, IntegerLiteralType) and isinstance(b, str):
@@ -540,6 +605,15 @@ class TypeSystem:
             if b.length is None:
                 return a
             return a if a.length == b.length else None
+        if isinstance(a, DimensionType) and isinstance(b, DimensionType):
+            return a if a == b else None
+        if isinstance(a, QuantityType) and isinstance(b, QuantityType):
+            if a.dimension != b.dimension:
+                return None
+            number = intersect(a.number, b.number)
+            if self.is_empty(number):
+                return None
+            return QuantityType(number, a.dimension)
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
             if a.element != b.element:
                 return None
@@ -618,6 +692,10 @@ class TypeSystem:
         F of? G<B...>        ⟺  false   (open world; can't invent args)
         Structural atoms also imply their STRUCTURAL_NOMINAL_MAP umbrella (and ancestors).
         """
+        if isinstance(a, TypeVariable):
+            return a == b or self.is_subtype(a.bound, b)
+        if isinstance(b, TypeVariable):
+            return a == b
         if isinstance(a, IntegerLiteralType):
             if isinstance(b, IntegerLiteralType):
                 return a == b
@@ -638,6 +716,15 @@ class TypeSystem:
                 if b in {'char', 'grapheme'}:
                     return a.length == 1
                 return self._is_nom_subtype('string', b)
+        if isinstance(a, DimensionType):
+            return a == b or b == TOP_TYPE
+        if isinstance(a, QuantityType):
+            if isinstance(b, QuantityType):
+                return (
+                    a.dimension == b.dimension
+                    and self.is_subtype(a.number, b.number)
+                )
+            return b == TOP_TYPE
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
             return (
                 a.element == b.element
@@ -1171,7 +1258,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
+type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1287,10 +1374,16 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return intersect(*(to_nnf(x) for x in t.items))
     if isinstance(t, TypeParameterize):
         return TypeParameterize(to_nnf(t.t), [to_nnf(a) for a in t.args])
+    if isinstance(t, TypeVariable):
+        return t
     if isinstance(t, SequenceType):
         return SequenceType([to_nnf(x) for x in t.items])
     if isinstance(t, ArrayType):
         return ArrayType(to_nnf(t.element), t.length)
+    if isinstance(t, QuantityType):
+        return QuantityType(to_nnf(t.number), t.dimension)
+    if isinstance(t, DimensionType):
+        return t
     if isinstance(t, StringType):
         return t
     if isinstance(t, (PathType, PathLiteralType)):
@@ -1323,7 +1416,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
+    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1420,10 +1513,14 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
     """Replace free type-param names in a type expression."""
     if isinstance(t, str):
         return bindings.get(t, t)
+    if isinstance(t, TypeVariable):
+        return bindings.get(t.name, t)
     if isinstance(t, IntegerLiteralType):
         return t
-    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, PathType, PathLiteralType, ModuleType)):
+    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType)):
         return t
+    if isinstance(t, QuantityType):
+        return QuantityType(substitute_type(t.number, bindings), t.dimension)
     if isinstance(t, ArrayType):
         return ArrayType(substitute_type(t.element, bindings), t.length)
     if isinstance(t, ObjectType):

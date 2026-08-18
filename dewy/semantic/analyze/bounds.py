@@ -555,6 +555,10 @@ class _BoundsValidator:
             self._eval(node.left, state, validate=validate)
             self._eval(node.right, state, validate=validate)
             return None
+        if isinstance(node, hir.InterpolatedString):
+            for part in node.parts:
+                self._eval(part, state, validate=validate)
+            return None
         if isinstance(node, hir.ArrayLiteral):
             for item in node.items:
                 self._eval(item, state, validate=validate)

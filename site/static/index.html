@@ -10,7 +10,7 @@
   <meta property="og:description" content="An everyday programming language for clear, expressive computation.">
   <meta property="og:type" content="website">
   <link rel="icon" href="assets/images/dewy-logo-128.png">
-  <link rel="stylesheet" href="assets/css/site.css">
+  <link rel="stylesheet" href="assets/css/site.css?v=20260818-9">
   <script src="assets/js/site.js" defer></script>
 </head>
 <body class="home-page">
@@ -51,7 +51,7 @@
       <p class="dewline-note">Quick start install for x86_64 Linux — or <a href="playground/">try µDewy in your browser</a>.</p>
 
       <div class="hero-code" aria-label="Dewy source example">
-        <div class="code-top"><span>example.dewy</span></div>
+        <div class="code-top"><span>example.dewy</span><span class="runs">runs today ✓</span></div>
         <div class="hero-code-body">
           <pre class="hero-source"><code>text = <b class="s">"café 👨‍👩‍👧‍👦 🍀"</b>
 
@@ -78,12 +78,12 @@ loop i in <b class="n">0</b>.. and c in text
     <div class="showcase">
       <div class="showcase-intro">
         <h2>Key Features</h2>
-        <p>Implemented and planned capabilities at the heart of Dewy’s design.</p>
+        <p>Capabilities at the heart of Dewy’s design, labeled by what the compiler supports today.</p>
       </div>
 
       <section class="showcase-row" aria-labelledby="units-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>units.dewy</span><span class="tag planned">planned</span></div>
+          <div class="pane-top"><span>units.dewy</span><span class="tag partial" id="badge-units">partially supported<a class="tag-footnote" href="#note-units" aria-label="See implementation footnote 1"><sup>1</sup></a></span></div>
           <pre><code><span class="ln">1</span><b class="c"># Units are values. Juxtaposition multiplies.</b>
 <span class="ln">2</span>mass = <b class="n">10</b><b class="u">kg</b>
 <span class="ln">3</span>velocity = <b class="n">30</b><b class="u">m/s</b>
@@ -95,13 +95,13 @@ loop i in <b class="n">0</b>.. and c in text
         <div class="showcase-pane prose-pane">
           <span class="chip">engineering &amp; science</span>
           <h2 id="units-heading">Physical units, built in</h2>
-          <p>Dewy was designed from day one to treat kilograms, meters, and seconds as part of the language, not a library. Juxtaposing a number with a unit multiplies them, dimensions carry through arithmetic, and mismatched dimensions are errors—so <code>20N * 10m</code> is joules and <code>3m + 5s</code> doesn’t compile.</p>
+          <p>Dewy treats kilograms, meters, and seconds as part of the language, not a library. Juxtaposing a number with a unit multiplies them, dimensions carry through arithmetic, and mismatched dimensions are errors—so <code>20N * 10m</code> is joules and <code>3m + 5s</code> doesn’t compile.</p>
         </div>
       </section>
 
       <section class="showcase-row" aria-labelledby="ranges-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>ranges.dewy</span><span class="tag planned">planned</span></div>
+          <div class="pane-top"><span>ranges.dewy</span><span class="tag partial" id="badge-ranges">partially supported<a class="tag-footnote" href="#note-ranges" aria-label="See implementation footnote 2"><sup>2</sup></a></span></div>
           <pre><code><span class="ln">1</span><b class="c"># Bounds are visible: [ ] includes, ( ) excludes.</b>
 <span class="ln">2</span>window = [<b class="n">0</b>..<b class="n">10</b>)              <b class="c"># 0 1 ... 9</b>
 <span class="ln">3</span>evens = <b class="n">0</b>,<b class="n">2</b>..<b class="n">100</b>              <b class="c"># step inferred from the pair</b>
@@ -113,13 +113,13 @@ loop i in <b class="n">0</b>.. and c in text
         <div class="showcase-pane prose-pane">
           <span class="chip">ranges</span>
           <h2 id="ranges-heading">Ranges with clear bounds</h2>
-          <p>Brackets say exactly which endpoints belong to a range, a second anchor sets the step (including negative), and the same syntax drives loops, interval membership with <code>in?</code>, and slicing with <code>end</code>. Basic ranges run in the current compiler; compound range arithmetic is part of the design ahead.</p>
+          <p>Brackets say exactly which endpoints belong to a range, a second anchor sets the step—including negative steps—and the same bound forms drive loops and string slicing.</p>
         </div>
       </section>
 
       <section class="showcase-row" aria-labelledby="loop-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>loops.dewy</span><span class="tag implemented">implemented ✓</span></div>
+          <div class="pane-top"><span>loops.dewy</span><span class="tag implemented" id="badge-loops">implemented<a class="tag-footnote" href="#note-loops" aria-label="See implementation footnote 3"><sup>3</sup></a> ✓</span></div>
           <pre><code><span class="ln">1</span>ratings = [
 <span class="ln">2</span>    <b class="s">'star wars'</b> -&gt; <b class="n">73</b>
 <span class="ln">3</span>    <b class="s">'star trek'</b> -&gt; <b class="n">89</b>
@@ -136,7 +136,7 @@ loop i in <b class="n">0</b>.. and c in text
         <div class="showcase-pane prose-pane">
           <span class="chip">iteration</span>
           <h2 id="loop-heading">One loop to rule them all</h2>
-          <p>There is no <code>for</code> / <code>while</code> / <code>do-while</code> zoo—<code>loop</code> takes any condition. The <code>in</code> operator assigns the next value and reports whether one existed, so iterating a dictionary unpacks each pair directly, and multiple iterators combine with <code>and</code> or <code>or</code> in a single loop.</p>
+          <p>There is no <code>for</code> / <code>while</code> / <code>do-while</code> zoo—<code>loop</code> takes any condition. The <code>in</code> operator assigns the next value and reports whether one existed, so iterators can combine with <code>and</code> or <code>or</code> in a single loop.</p>
         </div>
       </section>
 
@@ -162,7 +162,7 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row" aria-labelledby="fn-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>functions.dewy</span><span class="tag implemented">implemented ✓</span></div>
+          <div class="pane-top"><span>functions.dewy</span><span class="tag implemented" id="badge-functions">implemented<a class="tag-footnote" href="#note-functions" aria-label="See implementation footnote 4"><sup>4</sup></a> ✓</span></div>
           <pre><code><span class="ln">1</span><b class="c"># `&amp;` combines implementations into one overload set.</b>
 <span class="ln">2</span>format = ((value:int64):&gt;string =&gt; <b class="s">"integer: <span class="interp"><span class="interp-brace">{</span>value<span class="interp-brace">}</span></span>"</b>)
 <span class="ln">3</span>       &amp; ((value:string):&gt;string =&gt; <b class="s">"text: <span class="interp"><span class="interp-brace">{</span>value<span class="interp-brace">}</span></span>"</b>)
@@ -179,23 +179,25 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row" aria-labelledby="obj-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>objects.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln"> 1</span>counter = [
-<span class="ln"> 2</span>    value = <b class="n">40</b>
-<span class="ln"> 3</span>    increment = ():&gt;void =&gt; {
-<span class="ln"> 4</span>        value += <b class="n">1</b>
-<span class="ln"> 5</span>        return void
-<span class="ln"> 6</span>    }
-<span class="ln"> 7</span>]
+          <div class="pane-top"><span>objects.dewy</span><span class="tag implemented" id="badge-objects">implemented<a class="tag-footnote" href="#note-objects" aria-label="See implementation footnote 5"><sup>5</sup></a> ✓</span></div>
+          <pre><code><span class="ln"> 1</span>counter = (start=<b class="n">0</b>) =&gt; [
+<span class="ln"> 2</span>    value = start
+<span class="ln"> 3</span>    increment = () =&gt; value += <b class="n">1</b>
+<span class="ln"> 4</span>]
+<span class="ln"> 5</span>
+<span class="ln"> 6</span><b class="c"># make a new counter object</b>
+<span class="ln"> 7</span>count = counter(<b class="n">40</b>)
 <span class="ln"> 8</span>
 <span class="ln"> 9</span><b class="c"># called on access</b>
-<span class="ln">10</span>counter.increment
-<span class="ln">11</span>counter.increment</code></pre>
+<span class="ln">10</span>count.increment
+<span class="ln">11</span>count.increment
+<span class="ln">12</span>
+<span class="ln">13</span>printl<b class="s">"count is <b class="interp-brace">{</b><b class="interp">count.value</b><b class="interp-brace">}</b>"</b></code></pre>
         </div>
         <div class="showcase-pane prose-pane">
           <span class="chip">objects</span>
           <h2 id="obj-heading">Objects, blocks, and functions are one thing</h2>
-          <p>Dewy’s syntax is deliberately unified: an object is structural, its members can capture their siblings, and accessing a zero-argument function member calls it. The two final lines both update <code>value</code>—no <code>class</code> machinery required.</p>
+          <p>Dewy’s syntax is deliberately unified: functions can construct structural objects, members can capture their siblings, and accessing a zero-argument function member calls it. Fields and behavior live together without separate <code>class</code> machinery.</p>
         </div>
       </section>
 
@@ -218,6 +220,16 @@ loop i in <b class="n">0</b>.. and c in text
             <li><a href="contribute/">Contribute</a> — run the compilers, find starting points</li>
           </ul>
         </div>
+      </section>
+
+      <section class="implementation-notes" aria-label="Implementation footnotes">
+        <ol>
+          <li id="note-units"><a class="note-back" href="#badge-units" aria-label="Back to units example">1.</a><p><a class="note-example-link" href="#badge-units"><code>units.dewy</code></a> — time durations and unit multiplication work today; the broader unit catalog and derived-unit algebra shown here are planned.</p></li>
+          <li id="note-ranges"><a class="note-back" href="#badge-ranges" aria-label="Back to ranges example">2.</a><p><a class="note-example-link" href="#badge-ranges"><code>ranges.dewy</code></a> — the literal range forms shown here run in the current compiler; general range values, runtime-computed anchors, and compound range arithmetic are still ahead.</p></li>
+          <li id="note-loops"><a class="note-back" href="#badge-loops" aria-label="Back to loops example">3.</a><p><a class="note-example-link" href="#badge-loops"><code>loops.dewy</code></a> — dictionary entries using <code>-&gt;</code> and iterator-target unpacking with <code>[show rating]</code> are not implemented. The range/string multiiterator on line 12 works today.</p></li>
+          <li id="note-functions"><a class="note-back" href="#badge-functions" aria-label="Back to functions example">4.</a><p><a class="note-example-link" href="#badge-functions"><code>functions.dewy</code></a> — overload construction and dispatch work, but an interpolated string cannot yet be materialized and returned as a first-class <code>string</code>. Streaming interpolation directly through <code>print</code>/<code>printl</code> works.</p></li>
+          <li id="note-objects"><a class="note-back" href="#badge-objects" aria-label="Back to objects example">5.</a><p><a class="note-example-link" href="#badge-objects"><code>objects.dewy</code></a> — widening the unannotated <code>0</code> default, passing that defaulted-only parameter positionally as <code>counter(40)</code>, and captured-field assignment with <code>value += 1</code> are not implemented yet. Structural object construction, field access, defaults, and zero-argument member calls are implemented.</p></li>
+        </ol>
       </section>
     </div>
   </main>

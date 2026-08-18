@@ -99,6 +99,10 @@ class _InitializationChecker:
             self._collect_reassigned_callables(node.left)
             self._collect_reassigned_callables(node.right)
             return
+        if isinstance(node, hir.InterpolatedString):
+            for part in node.parts:
+                self._collect_reassigned_callables(part)
+            return
         if isinstance(node, hir.Return) and node.item is not None:
             self._collect_reassigned_callables(node.item)
             return
@@ -482,6 +486,16 @@ class _InitializationChecker:
                 seen.add(id(item))
                 current = self._check_eager(
                     item,
+                    current,
+                    parameters,
+                    call_stack,
+                )
+            return current
+        if isinstance(node, hir.InterpolatedString):
+            current = initialized
+            for part in node.parts:
+                current = self._check_eager(
+                    part,
                     current,
                     parameters,
                     call_stack,

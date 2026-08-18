@@ -14,7 +14,7 @@ This document tracks language features in the cleanparse compiler. Checked items
 
 ## Type expressions and type-valued inference
 
-- [x] Explicit compile-time aliases using `let T:type = ...`, including a single type expression grouped as `<...>` in that expected type position.
+- [x] Explicit compile-time aliases using `let T:type = ...` or `const T:type = ...`, including a single type expression grouped as `<...>` in that expected type position.
 - [x] Contextual value typing from annotations, function parameters and returns, and supported container element or field types.
 - [ ] Standalone non-juxtaposed `<...>` expressions producing compile-time values of type `type`.
 - [ ] Inferring `let T = <...>` as a compile-time type alias without requiring the explicit `:type` annotation.
@@ -22,12 +22,14 @@ This document tracks language features in the cleanparse compiler. Checked items
 
 ## Generics
 
-The type system already instantiates generic function types for built-in operator overloads, such as `<T of int>(left:T right:T):>T`. User-written generic functions, type aliases, and explicit type arguments are not implemented. Non-juxtaposed `<...>` as a type-valued group is tracked under Type expressions above; here `<T>` is a type-parameter list.
+The type system instantiates generic function types for built-in operator overloads, such as `<T of int>(left:T right:T):>T`. Source-defined bounded generic type aliases are also available as compile-time type constructors. User-written generic functions and explicit type arguments at function call sites are not implemented. Non-juxtaposed `<...>` as a type-valued group is tracked under Type expressions above; here `<T>` is a type-parameter list.
 
 - [x] Internal generic parameters, call-site inference, and instantiation used by built-in operator overloads.
 - [x] Parameterized built-in types in annotations, including `array<T>` and `array<T length=N>`.
+- [x] Named generic type aliases such as `const Duration:type = <T of real>(T * Time)`, including explicit alias application with `Duration<uint64>`.
+- [x] Source-level alias bounds such as `T of real`, with arity and bound diagnostics and substitution through the resulting type expression.
 - [ ] User-written generic functions such as `identity = <T>(value:T):>T => value`.
-- [ ] Generic bounds (`T of number`) in source, explicit type arguments at call sites, and named generic type aliases.
+- [ ] Explicit type arguments at generic function call sites.
 - [ ] User-defined parameterized types and generic object types.
 - [ ] Monomorphization or other udewy lowering for user generic values.
 
@@ -60,7 +62,8 @@ The type system already instantiates generic function types for built-in operato
 - [x] Typed source access to udewy's portable memory, allocation, signed-shift, and unsigned-operation intrinsics.
 - [x] Typed access to Linux `__syscall0__` through `__syscall6__`, emitted as direct udewy intrinsic calls.
 - [x] Executable x86-64 Linux bare-metal hello world using a UTF-8 byte view, its byte length, and the `write` syscall.
-- [x] Linux x86_64 `print`/`printl` in the prelude (`library/io.dewy`) via `write`. Other targets still need host-write capability selection.
+- [x] Linux x86_64 `print`/`printl` in the prelude (`library/io.dewy`) via `write`, including overloaded string and signed-integer output needed by streamed interpolation. Other targets still need host-write capability selection.
+- [x] Linux x86_64 `sleep(Duration<uint64>)` in the system prelude, lowered through `nanosleep` with a nanosecond integer representation.
 - [ ] Target-specific non-Linux host intrinsics and capability selection.
 - [ ] Foreign symbols, external linkage, and a stable FFI surface.
 
@@ -97,9 +100,23 @@ The type system already instantiates generic function types for built-in operato
 Unannotated integers behave as arbitrary precision. Explicit fixed-width annotations rollover as that width. Range analysis is the pass that proves whether a particular `int`, iterator, or arithmetic intermediate can be represented with a concrete `intN` under the hood without changing those semantics.
 
 - [x] Flow-sensitive integer intervals for bindings, used to prove array-index bounds from comparisons, arithmetic, loops, and range iterators.
+- [x] A right-unbounded integer iterator can use a concrete `int64` counter when a finite companion and the multiiterator formula prove the loop stops, and the complete observed range fits.
 - [ ] Selecting a hidden `intN` representation for values annotated or inferred as `int` when every reachable value fits that width.
-- [ ] Proving that a right-unbounded iterator such as `0..` never overflows a chosen fixed-width counter, including stepped arithmetic intermediates.
+- [ ] General proofs that a right-unbounded iterator such as `0..` never overflows a chosen fixed-width counter when termination is not established by a finite multiiterator companion.
 - [ ] Using the same proofs to specialize other layouts, such as optional niches for narrow integers.
+
+## Physical quantities and time
+
+- [x] Compile-time `DimensionType` and `QuantityType` representations, with physical dimensions excluded from runtime layout.
+- [x] Direct type products such as `int * Time`, resolved through the ordinary binary-expression syntax rather than a separate type grammar.
+- [x] Representation-parameterized `Duration<T of real>`, including `int`, fixed-width integer, exact integer-literal, and floating-point type arguments at semantic-checking time.
+- [x] Exact nanosecond, millisecond, and second unit constants. Their scale is folded into constant expressions, so `300ms` becomes the nanosecond value `300000000` without a runtime unit object.
+- [x] Juxtaposition multiplication between numbers and physical quantities, preserving the numeric representation for nonconstant values.
+- [x] `sleep(300ms)` typechecks against `Duration<uint64>`, rejects dimensionless input, and lowers to the Linux x86_64 system implementation.
+- [x] The current hero program compiles and runs end to end, combining a bounded `0..` counter, grapheme iteration, streamed interpolation, and typed sleeping while producing the expected grapheme indexes.
+- [ ] Physical base dimensions beyond `Time`, dimension division and powers, conversions between chosen canonical scales, and a complete units library.
+- [ ] Runtime arithmetic for non-integer quantity representations, pending the corresponding floating-point, rational, and real-number backend support.
+- [ ] Target-specific system preludes and portable sleep implementations outside Linux x86_64.
 
 ## Homogeneous arrays
 
@@ -139,12 +156,13 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 
 ## Multiiterators
 
-- [x] Arbitrarily many static range iterators combined by `and`, `or`, `xor`, `nand`, `nor`, or `xnor`, including symbolic spellings and grouped formulas.
+- [x] Arbitrarily many normalized iterator leaves combined by `and`, `or`, `xor`, `nand`, `nor`, or `xnor`, including symbolic spellings and grouped formulas.
 - [x] Eager left-to-right iterator advancement.
 - [x] Exhausted targets become `undefined`, with optional target types inferred from statically known iterator lengths and the complete logical formula.
 - [x] Literal post-exhaustion truth-table behavior and labeled exits.
 - [x] Grapheme iteration over strings.
-- [ ] Multiiterator sources other than normalized integer ranges.
+- [x] Mixed range/string multiiteration, including pairing a right-unbounded counter with finite grapheme iteration as in `loop i in 0.. and c in text`.
+- [ ] Multiiterator sources other than normalized integer ranges and strings.
 - [ ] Conditions that mix iterator clauses with ordinary Boolean predicates.
 - [ ] Iterator fusion and scalar replacement of the baseline per-leaf state.
 
@@ -172,6 +190,10 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] `string as array<uint8>` borrowing with copy-on-write mutation, materialized `array<uint32>` scalar views, string-to-grapheme arrays, and grapheme-array-to-string conversion with UAX #29 re-segmentation.
 - [x] `as` performs representation-changing conversions; `transmute` remains bit-preserving and rejects string/array layout reinterpretation.
 - [x] Runtime re-segmentation uses current grapheme-array values, including mutations that cause adjacent clusters to merge.
+- [x] Interpolated strings preserve alternating literal chunks and typechecked expression fields in HIR.
+- [x] `print`/`printl` specialize interpolated strings into streamed writes, avoiding a materialized interpolation container; this includes integer and grapheme fields used by the hero program.
+- [ ] Materializing an interpolated string as a first-class runtime string value. Only the streamed `print`/`printl` consumer is currently lowered.
+- [ ] A general conversion protocol such as overloadable `__as__`/`__string__` for formatting arbitrary interpolation fields.
 - [ ] `array<uint8>` or `array<uint32>` to string. These conversions require future refinement proofs for valid UTF-8 or Unicode scalar contents.
 - [ ] Normalization APIs and normalization-aware comparisons. String equality currently preserves and compares the exact scalar spelling.
 
@@ -243,6 +265,7 @@ Incremental implementation work:
 - [x] An ordered source prelude is checked and merged once, with shadowable fallback bindings injected independently into each module.
 - [x] `Path` and the literal-preserving `p` constructor are ordinary Dewy definitions in `library/path.dewy`; imports accept any exact structural `[path:string]` value rather than requiring the standard alias.
 - [x] `print` and `printl` are ordinary Dewy definitions in `library/io.dewy`. Linux x86_64 only (`write` is syscall 1). Unused prelude bindings are omitted from the merged program.
+- [x] Physical time definitions and Linux system facilities are separate implicit prelude modules (`library/units.dewy` and `library/system-linux.dewy`), are included by the installer, and remain removable when unused.
 - [x] `$no_prelude = true` disables prelude bindings only for its containing module. Prelude and prelude-free modules can coexist in one import graph.
 - [x] File-relative semantic imports support selective names, aliases, parenthesized or comma-separated name collections, reversed `import ... from ...` order, compile-time namespaces, and whole-module splats.
 - [x] Reachable source modules, independent of filename extension, are checked with one type system and binding registry, reject cycles and collisions, initialize once in dependency order, receive module-qualified target symbols, and merge into one udewy executable.
@@ -255,13 +278,11 @@ Incremental implementation work:
 In no particular order
 
 - [ ] Floating-point, rational, and real numbers
-- [ ] Physical units
 - [ ] Dictionaries, bidirectional maps, and sets
 - [ ] Pattern matching (`match`)
-- [ ] String interpolation
 - [ ] Partial application (`@`)
 - [ ] expression returning assignment (`:=`) (i.e. python walrus operator) and compile-time assignment (`::`)
-- [ ] Juxtaposition multiplication and broadcasting
+- [ ] General juxtaposition multiplication and broadcasting beyond the implemented number/physical-quantity case
 - [ ] Math
   - [ ] Linear algebra, multidimensional array syntax, etc.
   - [ ] Geometric algebra

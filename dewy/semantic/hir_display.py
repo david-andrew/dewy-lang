@@ -16,6 +16,8 @@ def type_to_dewy(t: ty.Type) -> str:
     """Render a type as Dewy source syntax."""
     if isinstance(t, str):
         return t
+    if isinstance(t, ty.TypeVariable):
+        return t.name
     if isinstance(t, ty.IntegerLiteralType):
         return str(t.value)
     if isinstance(t, ty.StringLiteralType):
@@ -31,6 +33,15 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.StringType):
         length = f'<length={t.length}>' if t.length is not None else ''
         return f'string{length}'
+    if isinstance(t, ty.DimensionType):
+        if not t.powers:
+            return 'Dimensionless'
+        return ' * '.join(
+            name if exponent == 1 else f'{name}^{exponent}'
+            for name, exponent in t.powers
+        )
+    if isinstance(t, ty.QuantityType):
+        return f'{_type_atom_parens(t.number)} * {type_to_dewy(t.dimension)}'
     if isinstance(t, ty.TypeAnd):
         return ' & '.join(_type_atom_parens(x) for x in t.items)
     if isinstance(t, ty.TypeOr):
@@ -59,6 +70,18 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.SequenceType):
         return f'<{" ".join(type_to_dewy(x) for x in t.items)}>'
     raise TypeError(f'unexpected type for type_to_dewy: {t!r}')
+
+
+def type_alias_value_to_dewy(value: ty.TypeAliasValue) -> str:
+    if not isinstance(value, ty.GenericTypeAlias):
+        return type_to_dewy(value)
+    params = ' '.join(
+        param.name
+        if param.bound == ty.TOP_TYPE
+        else f'{param.name} of {type_to_dewy(param.bound)}'
+        for param in value.params
+    )
+    return f'<{params}>({type_to_dewy(value.body)})'
 
 
 def _type_atom_parens(t: ty.Type) -> str:
@@ -181,7 +204,7 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     if isinstance(node, hir.MemberAssign):
         return 'MemberAssign'
     if isinstance(node, hir.TypeValue):
-        return f'TypeValue({type_to_dewy(node.value)})'
+        return f'TypeValue({type_alias_value_to_dewy(node.value)})'
     if isinstance(node, hir.ModuleNamespace):
         return f'ModuleNamespace({node.name})'
     if isinstance(node, hir.ArrayLength):
@@ -207,6 +230,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'IndexAssign'
     if isinstance(node, hir.String):
         return f'String({node.content!r})'
+    if isinstance(node, hir.InterpolatedString):
+        return f'InterpolatedString({len(node.parts)} parts)'
     if isinstance(node, hir.BasedString):
         return f'BasedString({node.prefix}, {node.content.hex()})'
     if isinstance(node, hir.StringLength):
@@ -316,6 +341,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('left', node.left), ('right', node.right)]
     if isinstance(node, hir.StringConcat):
         return [('left', node.left), ('right', node.right)]
+    if isinstance(node, hir.InterpolatedString):
+        return [(f'parts[{index}]', part) for index, part in enumerate(node.parts)]
     if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
         return [('expr', node.expr)]
     if isinstance(node, hir.Transmute):
@@ -607,6 +634,19 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _text('true' if node.value else 'false')
     if isinstance(node, hir.String):
         return _text(repr(node.content))
+    if isinstance(node, hir.InterpolatedString):
+        parts: list[Doc] = [_text('"')]
+        for part in node.parts:
+            if isinstance(part, hir.String):
+                parts.append(_text(repr(part.content)[1:-1]))
+            else:
+                parts.extend([
+                    _text('{'),
+                    _to_doc(part, 0, indent),
+                    _text('}'),
+                ])
+        parts.append(_text('"'))
+        return _seq(*parts)
     if isinstance(node, hir.BasedString):
         return _text(f'{node.prefix}"{node.digits}"')
     if isinstance(node, hir.StringLength):
@@ -669,7 +709,7 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
             _to_doc(node.value, 0, indent),
         )
     if isinstance(node, hir.TypeValue):
-        return _text(type_to_dewy(node.value))
+        return _text(type_alias_value_to_dewy(node.value))
     if isinstance(node, hir.ModuleNamespace):
         return _text(node.name)
     if isinstance(node, hir.ArrayLength):

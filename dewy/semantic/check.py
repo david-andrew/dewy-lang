@@ -219,6 +219,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.BinOp(op=t1.Operator(symbol=':='|'='|'::')):
             return tcr_assign(ast, ctx=ctx)
 
+        case p0.IString(): return tcr_istring(ast, ctx=ctx)
         case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected)
         case p0.Prefix(): return tcr_prefix(ast, ctx=ctx, expected=expected)
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected, call_target=call_target)
@@ -277,6 +278,60 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
     '0u': 5,
     '0g': 6,
 }
+
+
+def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
+    """Typecheck interpolation fields while retaining literal chunks."""
+
+    from .unicode.graphemes import unicode_scalars
+
+    parts: list[hir.AST] = []
+    for part in ast.content:
+        if isinstance(part, str):
+            try:
+                unicode_scalars(part)
+            except ValueError:
+                user_error(
+                    ctx.srcfile,
+                    'string literal contains a Unicode surrogate',
+                    Pointer(
+                        span=ast.loc,
+                        message='Dewy strings contain Unicode scalar values only',
+                    ),
+                )
+            if part:
+                parts.append(
+                    hir.String(ast.loc, ty.StringLiteralType(part), part)
+                )
+            continue
+        if isinstance(part, p0.ParametricEscape):
+            not_implemented(
+                ctx.srcfile,
+                part.loc,
+                'parametric escape inside an interpolated string',
+            )
+        if not isinstance(part, p0.Block):
+            raise TypeError(
+                f'INTERNAL ERROR: unexpected interpolated string part {type(part).__name__}'
+            )
+        if len(part.inner) != 1:
+            user_error(
+                ctx.srcfile,
+                'string interpolation requires one expression',
+                Pointer(
+                    span=part.loc,
+                    message='place exactly one expression between these braces',
+                ),
+            )
+        value = typecheck_and_resolve_inner(part.inner[0], ctx=ctx)
+        require_valued(
+            value.type,
+            ctx.srcfile,
+            value.loc,
+            'string interpolation field',
+        )
+        parts.append(value)
+    return hir.InterpolatedString(ast.loc, ty.StringType(), parts)
 
 
 def _pack_based_string(
@@ -447,7 +502,12 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             # decl assign + type annotation: check the expression against the annotation
             annotation = ast_to_type(typeexpr, ctx=ctx)
             if annotation == ty.TYPE_TYPE:
-                type_value = ast_to_type(right, ctx=ctx)
+                binding = ctx.binding_registry.by_syntax.get(id(ast))
+                type_value = (
+                    binding.type_value
+                    if binding is not None and binding.type_value is not None
+                    else _type_alias_value(right, ctx=ctx)
+                )
                 expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, type_value)
                 ctx.declarations[name] = ty.TYPE_TYPE
                 declaration = _complete_binding(
@@ -1327,6 +1387,33 @@ def _tcr_loop_iterator(
     repeats = stop is None
     typed_iterators: list[hir.IteratorExpression] = []
     for iterator in iterators:
+        if (
+            isinstance(iterator.iterable, hir.Range)
+            and iterator.count is None
+            and stop is not None
+        ):
+            effective_last = (
+                iterator.first + (stop - 1) * iterator.step
+                if stop > 0
+                else iterator.first - iterator.step
+            )
+            if all(
+                ty.integer_literal_fits(value, 'int64')
+                for value in (
+                    iterator.first,
+                    iterator.step,
+                    effective_last,
+                    stop,
+                )
+            ):
+                narrowed_target = replace(iterator.target, type='int64')
+                iterator = replace(
+                    iterator,
+                    type=ty.TypeParameterize('iterator', ['int64']),
+                    target=narrowed_target,
+                    last=effective_last,
+                    count=stop,
+                )
         target_type: ty.Type = (
             ty.optional(iterator.target.type)
             if iterator.count is not None
@@ -1345,7 +1432,10 @@ def _tcr_loop_iterator(
             'multiiterator',
             [
                 'int'
-                if any(iterator.target.type == 'int' for iterator in iterators)
+                if any(
+                    iterator.target.type == 'int'
+                    for iterator in typed_iterators
+                )
                 else 'int64'
             ],
         ),
@@ -1593,7 +1683,94 @@ def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
         _resolve_type_alias(binding, ctx=ctx)
 
 
-def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeExpr:
+def _generic_type_alias_parts(
+    ast: p0.AST,
+) -> tuple[p0.Block, p0.AST] | None:
+    if not (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, t2.TypeParamJuxtapose)
+        and isinstance(ast.left, p0.Block)
+        and ast.left.kind == '<>'
+    ):
+        return None
+    return ast.left, ast.right
+
+
+def _generic_type_alias(
+    parameters: p0.Block,
+    body: p0.AST,
+    *,
+    ctx: Context,
+) -> ty.GenericTypeAlias:
+    alias_ctx = replace(
+        ctx,
+        declarations=ctx.declarations.new_child(),
+        binding_scopes=ctx.binding_scopes.new_child(),
+    )
+    params: list[ty.GenericParam] = []
+    names: set[str] = set()
+    for item in parameters.inner:
+        if isinstance(item, p0.Atom) and isinstance(
+            item.item,
+            t1.Identifier,
+        ):
+            name = item.item.name
+            bound: ty.TypeExpr = ty.TOP_TYPE
+            loc = item.loc
+        elif (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == 'of'
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Identifier)
+        ):
+            name = item.left.item.name
+            bound = ast_to_type(item.right, ctx=alias_ctx)
+            loc = item.left.loc
+        else:
+            user_error(
+                ctx.srcfile,
+                'invalid generic type parameter',
+                Pointer(
+                    span=item.loc,
+                    message='expected `T` or `T of Bound`',
+                ),
+            )
+        if name in names:
+            user_error(
+                ctx.srcfile,
+                f'duplicate generic type parameter `{name}`',
+                Pointer(span=loc, message='this parameter name is repeated'),
+            )
+        names.add(name)
+        param = ty.GenericParam(name, bound)
+        params.append(param)
+        binding = alias_ctx.binding_registry.allocate_param(
+            name,
+            ty.TYPE_TYPE,
+            loc,
+        )
+        binding.type_value = ty.TypeVariable(name, bound)
+        alias_ctx.declarations[name] = ty.TYPE_TYPE
+        alias_ctx.binding_scopes[name] = binding
+    if not params:
+        user_error(
+            ctx.srcfile,
+            'generic type alias requires at least one parameter',
+            Pointer(span=parameters.loc, message='this parameter list is empty'),
+        )
+    return ty.GenericTypeAlias(params, ast_to_type(body, ctx=alias_ctx))
+
+
+def _type_alias_value(ast: p0.AST, *, ctx: Context) -> ty.TypeAliasValue:
+    generic = _generic_type_alias_parts(ast)
+    if generic is not None:
+        parameters, body = generic
+        return _generic_type_alias(parameters, body, ctx=ctx)
+    return ast_to_type(ast, ctx=ctx)
+
+
+def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasValue:
     if binding.type_value is not None:
         return binding.type_value
     if binding.id in ctx.resolving_type_aliases:
@@ -1605,7 +1782,7 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeExpr:
     rhs = ctx.type_alias_asts[binding.id]
     ctx.resolving_type_aliases.add(binding.id)
     try:
-        binding.type_value = ast_to_type(rhs, ctx=ctx)
+        binding.type_value = _type_alias_value(rhs, ctx=ctx)
     finally:
         ctx.resolving_type_aliases.remove(binding.id)
     return binding.type_value
@@ -1791,6 +1968,11 @@ def _function_uses_bindings(node: hir.AST, binding_ids: set[int]) -> bool:
         return (
             _function_uses_bindings(node.left, binding_ids)
             or _function_uses_bindings(node.right, binding_ids)
+        )
+    if isinstance(node, hir.InterpolatedString):
+        return any(
+            _function_uses_bindings(part, binding_ids)
+            for part in node.parts
         )
     if isinstance(node, hir.TypeTest):
         return _function_uses_bindings(node.value, binding_ids)
@@ -2453,6 +2635,74 @@ def _is_overload_constructor(fname: str, method: ty.FunctionType) -> bool:
     return fname == '__and__' and method.ret == 'multifunction'
 
 
+def _numeric_product_type(
+    left: ty.TypeExpr,
+    right: ty.TypeExpr,
+    *,
+    ctx: Context,
+) -> ty.TypeExpr | None:
+    """Return the ordinary numeric result type for a type-level product."""
+
+    if not (
+        ctx.type_system.is_subtype(left, 'number')
+        and ctx.type_system.is_subtype(right, 'number')
+    ):
+        return None
+    # Multiplying two numeric singleton types produces another singleton.
+    # Unit constants deliberately use singleton representations (for example,
+    # ``ms:Duration<1000000>``), so this also retains their compile-time scale.
+    if isinstance(left, ty.IntegerLiteralType) and isinstance(right, ty.IntegerLiteralType):
+        return ty.IntegerLiteralType(left.value * right.value)
+    if left == right:
+        return left
+    if ctx.type_system.is_subtype(left, right):
+        return right
+    if ctx.type_system.is_subtype(right, left):
+        return left
+    # An integer scale factor can be represented in any wider real type.  This
+    # is what lets the same unit constant preserve the representation of an
+    # ``int``, ``uint64``, or floating-point quantity multiplied by it.
+    if isinstance(left, ty.IntegerLiteralType) and ctx.type_system.is_subtype(right, 'real'):
+        return right
+    if isinstance(right, ty.IntegerLiteralType) and ctx.type_system.is_subtype(left, 'real'):
+        return left
+    return ctx.type_system.promote_type(left, right)
+
+
+def _quantity_product_type(
+    left: ty.TypeExpr,
+    right: ty.TypeExpr,
+    *,
+    ctx: Context,
+) -> ty.TypeExpr | None:
+    """Compose numeric representations and physical dimensions for ``*``."""
+
+    left_number: ty.TypeExpr
+    left_dimension: ty.DimensionType
+    if isinstance(left, ty.QuantityType):
+        left_number, left_dimension = left.number, left.dimension
+    else:
+        left_number, left_dimension = left, ty.dimension()
+
+    right_number: ty.TypeExpr
+    right_dimension: ty.DimensionType
+    if isinstance(right, ty.QuantityType):
+        right_number, right_dimension = right.number, right.dimension
+    else:
+        right_number, right_dimension = right, ty.dimension()
+
+    if not (
+        isinstance(left, ty.QuantityType)
+        or isinstance(right, ty.QuantityType)
+    ):
+        return None
+    number = _numeric_product_type(left_number, right_number, ctx=ctx)
+    if number is None:
+        return None
+    dimension = ty.multiply_dimensions(left_dimension, right_dimension)
+    return number if not dimension.powers else ty.QuantityType(number, dimension)
+
+
 def _dispatch_builtin(
     fname: str,
     args: list[hir.AST],
@@ -2464,12 +2714,78 @@ def _dispatch_builtin(
     expected: ty.Type | None = None,
 ) -> hir.AST:
     """Resolve a builtin dunder call and apply any selected promotions."""
+    arg_types = [
+        require_valued(
+            arg.type,
+            ctx.srcfile,
+            arg.loc,
+            f'operand of `{source_name}`',
+        )
+        for arg in args
+    ]
+    if fname == '__mul__' and len(args) == 2:
+        quantity_result = _quantity_product_type(
+            arg_types[0],
+            arg_types[1],
+            ctx=ctx,
+        )
+        if quantity_result is not None:
+            constant_values = [
+                _constant_integer(arg, ctx=ctx)
+                for arg in args
+            ]
+            if all(value is not None for value in constant_values):
+                left_value, right_value = cast(list[int], constant_values)
+                value = left_value * right_value
+                representation = (
+                    quantity_result.number
+                    if isinstance(quantity_result, ty.QuantityType)
+                    else quantity_result
+                )
+                if (
+                    isinstance(representation, str)
+                    and representation in ty.FIXED_INTEGER_TYPES
+                    and not ty.integer_literal_fits(value, representation)
+                ):
+                    type_error(
+                        ctx.srcfile,
+                        'physical quantity is outside its numeric representation',
+                        Pointer(
+                            span=loc,
+                            message=(
+                                f'`{value}` does not fit in '
+                                f'`{type_to_dewy(representation)}`'
+                            ),
+                        ),
+                    )
+                return hir.Integer(
+                    loc,
+                    quantity_result,
+                    t0.base10,
+                    value,
+                )
+            method = ty.FunctionType(
+                [
+                    ty.PosOrKwArg('left', arg_types[0]),
+                    ty.PosOrKwArg('right', arg_types[1]),
+                ],
+                [],
+                None,
+                quantity_result,
+            )
+            return hir.FunctionCall(
+                loc,
+                quantity_result,
+                hir.ExpressedIdentifier(op_loc, method, fname),
+                args,
+                {},
+            )
+
     ftype = ctx.declarations[fname]
     assert isinstance(ftype, (ty.FunctionType, ty.OverloadType)), (
         f'INTERNAL ERROR: builtin function type expected, got {type(ftype)}'
     )
     methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
-    arg_types = [require_valued(arg.type, ctx.srcfile, arg.loc, f'operand of `{source_name}`') for arg in args]
     try:
         expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
         result = ctx.type_system.match_best_function(methods, arg_types, expected_return=expected_return)
@@ -2587,7 +2903,7 @@ def _constant_integer(
         return node.type.value
     if isinstance(node, hir.Integer):
         return node.value
-    if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+    if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
         return _constant_integer(node.expr, ctx=ctx, seen_bindings=seen_bindings)
     if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):
         return node.array.type.length
@@ -2960,8 +3276,15 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         case t2.IndexJuxtapose():
             not_implemented(ctx.srcfile, binop.loc, 'index juxtapose')
         case t2.MultiplyJuxtapose():
-            # TODO: need table for binop compatibility
-            not_implemented(ctx.srcfile, binop.loc, 'multiply juxtapose')
+            return _dispatch_builtin(
+                '__mul__',
+                [left, right],
+                loc=binop.loc,
+                op_loc=binop.op.loc,
+                source_name='*',
+                ctx=ctx,
+                expected=expected,
+            )
         case t2.RangeJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'range juxtapose')
         case t2.EllipsisJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'ellipsis juxtapose')
         case t2.TypeParamJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'type parameterization')
@@ -3574,8 +3897,95 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
     )
 
 
+def _named_type_alias_value(
+    ast: p0.AST,
+    *,
+    ctx: Context,
+) -> ty.TypeAliasValue | None:
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier):
+        binding = ctx.binding_scopes.get(ast.item.name)
+        if binding is not None:
+            if binding.type_value is not None:
+                return binding.type_value
+            if binding.id in ctx.type_alias_asts:
+                return _resolve_type_alias(binding, ctx=ctx)
+        return builtins.builtin_type_aliases.get(ast.item.name)
+    if (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, t1.Operator)
+        and ast.op.symbol == '.'
+        and isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Identifier)
+        and isinstance(ast.right, p0.Atom)
+        and isinstance(ast.right.item, t1.Identifier)
+        and (module := ctx.module_namespaces.get(ast.left.item.name)) is not None
+    ):
+        binding = module.exports.get(ast.right.item.name)  # type: ignore[attr-defined]
+        return None if binding is None else binding.type_value
+    return None
+
+
+def _instantiate_type_alias(
+    alias: ty.GenericTypeAlias,
+    arguments: list[ty.TypeExpr],
+    *,
+    loc: Span,
+    ctx: Context,
+) -> ty.TypeExpr:
+    if len(arguments) != len(alias.params):
+        user_error(
+            ctx.srcfile,
+            'wrong number of generic type arguments',
+            Pointer(
+                span=loc,
+                message=(
+                    f'expected {len(alias.params)}, got {len(arguments)}'
+                ),
+            ),
+        )
+    bindings: dict[str, ty.TypeExpr] = {}
+    for param, argument in zip(alias.params, arguments):
+        bound = ty.substitute_type(param.bound, bindings)
+        if not ctx.type_system.is_subtype(argument, bound):
+            type_error(
+                ctx.srcfile,
+                'generic type argument does not satisfy its bound',
+                Pointer(
+                    span=loc,
+                    message=(
+                        f'`{type_to_dewy(argument)}` is not a subtype of '
+                        f'`{type_to_dewy(bound)}` for `{param.name}`'
+                    ),
+                ),
+            )
+        bindings[param.name] = argument
+    return ty.substitute_type(alias.body, bindings)
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
+    if (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, t2.TypeParamJuxtapose)
+        and isinstance(ast.right, p0.Block)
+        and ast.right.kind == '<>'
+        and (alias_value := _named_type_alias_value(ast.left, ctx=ctx))
+        is not None
+    ):
+        if not isinstance(alias_value, ty.GenericTypeAlias):
+            type_error(
+                ctx.srcfile,
+                'type alias is not generic',
+                Pointer(span=ast.left.loc, message='this alias takes no arguments'),
+            )
+        arguments = [ast_to_type(item, ctx=ctx) for item in ast.right.inner]
+        return _instantiate_type_alias(
+            alias_value,
+            arguments,
+            loc=ast.loc,
+            ctx=ctx,
+        )
+
     match ast:
         case p0.BinOp(
             op=t1.Operator(symbol='.'),
@@ -3595,19 +4005,46 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                     'module member is not a type',
                     Pointer(span=ast.right.loc, message=f'`{member_name}` is a value'),
                 )
+            if isinstance(binding.type_value, ty.GenericTypeAlias):
+                type_error(
+                    ctx.srcfile,
+                    'generic type alias requires arguments',
+                    Pointer(
+                        span=ast.loc,
+                        message=f'use `{member_name}<...>`',
+                    ),
+                )
             return binding.type_value
 
         case p0.Atom(item=t1.Identifier(name=name)):
             binding = ctx.binding_scopes.get(name)
             if binding is not None:
                 if binding.type_value is not None:
+                    if isinstance(binding.type_value, ty.GenericTypeAlias):
+                        type_error(
+                            ctx.srcfile,
+                            'generic type alias requires arguments',
+                            Pointer(span=ast.loc, message=f'use `{name}<...>`'),
+                        )
                     return binding.type_value
                 if binding.id in ctx.type_alias_asts:
-                    return _resolve_type_alias(binding, ctx=ctx)
+                    resolved = _resolve_type_alias(binding, ctx=ctx)
+                    if isinstance(resolved, ty.GenericTypeAlias):
+                        type_error(
+                            ctx.srcfile,
+                            'generic type alias requires arguments',
+                            Pointer(span=ast.loc, message=f'use `{name}<...>`'),
+                        )
+                    return resolved
                 return name
             if name in builtins.builtin_type_aliases:
                 return builtins.builtin_type_aliases[name]
             return name
+
+        case p0.Atom(item=t1.Integer(value=value)):
+            return ty.IntegerLiteralType(
+                t0.parse_integer(value.src, value.prefix)
+            )
 
         case p0.Block(kind='[]', inner=items):
             seen: dict[str, Span] = {}
@@ -3718,6 +4155,48 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 [],
                 None,
                 ast_to_type(ast.right, ctx=ctx),
+            )
+
+        case p0.BinOp(op=t1.Operator(symbol='*')):
+            left = ast_to_type(ast.left, ctx=ctx)
+            right = ast_to_type(ast.right, ctx=ctx)
+            if isinstance(left, ty.DimensionType) and isinstance(
+                right,
+                ty.DimensionType,
+            ):
+                return ty.multiply_dimensions(left, right)
+            if isinstance(left, ty.DimensionType):
+                if isinstance(right, ty.QuantityType):
+                    return ty.QuantityType(
+                        right.number,
+                        ty.multiply_dimensions(left, right.dimension),
+                    )
+                if ctx.type_system.is_subtype(right, 'number'):
+                    return ty.QuantityType(right, left)
+            if isinstance(right, ty.DimensionType):
+                if isinstance(left, ty.QuantityType):
+                    return ty.QuantityType(
+                        left.number,
+                        ty.multiply_dimensions(left.dimension, right),
+                    )
+                if ctx.type_system.is_subtype(left, 'number'):
+                    return ty.QuantityType(left, right)
+            quantity = _quantity_product_type(left, right, ctx=ctx)
+            if quantity is not None:
+                return quantity
+            number = _numeric_product_type(left, right, ctx=ctx)
+            if number is not None:
+                return number
+            type_error(
+                ctx.srcfile,
+                'invalid type product',
+                Pointer(
+                    span=ast.loc,
+                    message=(
+                        f'cannot form a result type from '
+                        f'`{type_to_dewy(left)} * {type_to_dewy(right)}`'
+                    ),
+                ),
             )
         
         case p0.BinOp(op=t1.Operator(symbol='or'|'|')):
@@ -3903,7 +4382,109 @@ def _literal_path_call_result(
     return ty.PathLiteralType(argument.type.value)
 
 
-def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.FunctionCall:
+def _checked_single_argument_call(
+    func: hir.AST,
+    argument: hir.AST,
+    *,
+    loc: Span,
+    ctx: Context,
+) -> hir.FunctionCall:
+    """Build one ordinary checked call from an already-checked argument."""
+
+    methods: list[ty.FunctionType]
+    if isinstance(func.type, ty.FunctionType):
+        methods = [func.type]
+    elif isinstance(func.type, ty.OverloadType):
+        methods = func.type.methods
+    else:
+        type_error(
+            ctx.srcfile,
+            'call target is not a function',
+            Pointer(
+                span=func.loc,
+                message=f'this has type `{type_to_dewy(func.type)}`, which is not callable',
+            ),
+        )
+    try:
+        result = ctx.type_system.match_best_function(
+            methods,
+            [require_valued(
+                argument.type,
+                ctx.srcfile,
+                argument.loc,
+                'function call argument',
+            )],
+            {},
+        )
+    except ty.DispatchError as error:
+        type_error(
+            ctx.srcfile,
+            'no string conversion available for interpolation field',
+            Pointer(span=argument.loc, message=str(error)),
+        )
+    contextual = check_against(
+        argument,
+        result.method.pos_or_kw[0].type,
+        ctx=ctx,
+    )
+    promoted = apply_promotions([contextual], result.promote_pos)
+    return hir.FunctionCall(
+        loc,
+        result.method.ret,
+        func,
+        promoted,
+        {},
+        result.method_index if isinstance(func.type, ty.OverloadType) else None,
+    )
+
+
+def _specialize_interpolated_output(
+    call: hir.FunctionCall,
+    *,
+    ctx: Context,
+) -> hir.AST:
+    """Rewrite interpolated ``print``/``printl`` calls into streaming writes."""
+
+    if (
+        not isinstance(call.func, hir.ExpressedIdentifier)
+        or call.func.name not in {'print', 'printl'}
+        or len(call.pos_args) != 1
+        or call.kw_args
+        or not isinstance(call.pos_args[0], hir.InterpolatedString)
+    ):
+        return call
+
+    print_func = tcr_identifier(
+        t1.Identifier(call.func.loc, 'print'),
+        ctx=ctx,
+    )
+    statements = [
+        _checked_single_argument_call(
+            print_func,
+            part,
+            loc=part.loc,
+            ctx=ctx,
+        )
+        for part in call.pos_args[0].parts
+    ]
+    if call.func.name == 'printl':
+        newline = hir.String(
+            call.loc,
+            ty.StringLiteralType('\n'),
+            '\n',
+        )
+        statements.append(
+            _checked_single_argument_call(
+                print_func,
+                newline,
+                loc=call.loc,
+                ctx=ctx,
+            )
+        )
+    return hir.Block(call.loc, ty.VOID_TYPE, statements, False)
+
+
+def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     if isinstance(left, hir.Block) and not left.scoped and len(left.items) == 1:
         left = left.items[0]
 
@@ -3971,7 +4552,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
     )
     if literal_path_type is not None:
         return_type = literal_path_type
-    return hir.FunctionCall(
+    call = hir.FunctionCall(
         Span(left.loc.start, right.loc.stop),
         return_type,
         left,
@@ -3979,6 +4560,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         contextual_kw_args,
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
+    return _specialize_interpolated_output(call, ctx=ctx)
 
 
 def _is_string_type(type_: ty.Type) -> bool:

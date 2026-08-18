@@ -127,20 +127,21 @@ let f = (stop:int64):>void => {
 
 
 @pytest.mark.parametrize(
-    ('operator', 'finite_optional', 'repeats'),
+    ('operator', 'finite_optional', 'repeats', 'infinite_count'),
     [
-        ('and', False, False),
-        ('or', True, True),
-        ('xor', False, False),
-        ('nand', False, False),
-        ('nor', False, False),
-        ('xnor', False, False),
+        ('and', False, False, 2),
+        ('or', True, True, None),
+        ('xor', False, False, 0),
+        ('nand', False, False, 0),
+        ('nor', False, False, 0),
+        ('xnor', False, False, 2),
     ],
 )
 def test_unbounded_multiiterator_truth_analysis(
     operator: str,
     finite_optional: bool,
     repeats: bool,
+    infinite_count: int | None,
 ) -> None:
     root = _check(f'loop infinite in 0.. {operator} finite in 0..1 {{}}')
     flow = root.items[0]
@@ -148,8 +149,8 @@ def test_unbounded_multiiterator_truth_analysis(
     condition = flow.arms[0].condition
     assert isinstance(condition, hir.MultiIteratorExpression)
     infinite, finite = condition.iterators
-    assert infinite.count is None
-    assert infinite.target.type == 'int'
+    assert infinite.count == infinite_count
+    assert infinite.target.type == ('int' if infinite_count is None else 'int64')
     assert (ty.optional_payload(finite.target.type) is not None) == finite_optional
     assert condition.repeats_when_exhausted == repeats
 

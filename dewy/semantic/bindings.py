@@ -21,7 +21,7 @@ class Binding:
     kind: BindingKind
     loc: Span
     type: ty.Type | None = None
-    type_value: ty.TypeExpr | None = None
+    type_value: ty.TypeAliasValue | None = None
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
     literal_path_parameter: str | None = None

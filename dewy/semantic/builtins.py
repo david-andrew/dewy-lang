@@ -272,7 +272,11 @@ builtin_types: dict[str, ty.TypeExpr] = {
     **udewy_intrinsic_types,
 }
 
-builtin_type_aliases: dict[str, ty.TypeExpr] = {}
+builtin_type_aliases: dict[str, ty.TypeExpr] = {
+    # Base physical dimensions are compile-time-only type factors.  The
+    # prelude builds representation-parameterized quantities from them.
+    'Time': ty.dimension(('Time', 1)),
+}
 
 # Explicit cross-branch promote rules (a, b, result). Along-edge cases use the subtype graph.
 builtin_promote_rules: list[tuple[str, str, str]] = [

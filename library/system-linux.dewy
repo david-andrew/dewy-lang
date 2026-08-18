@@ -1,0 +1,14 @@
+# Linux x86_64 system facilities.  Future targets can provide the same public
+# bindings with platform-appropriate implementations.
+
+# The Time dimension has already done its job by this boundary, so the
+# transmute exposes Duration's canonical nanosecond representation.
+let sleep = (duration:Duration<uint64>):>void => {
+    let total_nanoseconds:uint64 = duration transmute uint64
+    let request:int64 = __alloca__(16)
+    let request_nanoseconds:int64 = request + 8
+    __store_u64__(__unsigned_idiv__(total_nanoseconds 1000000000) request)
+    __store_u64__(__unsigned_mod__(total_nanoseconds 1000000000) request_nanoseconds)
+    let status:int64 = __syscall2__(35 request 0)
+    return void
+}

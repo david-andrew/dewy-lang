@@ -205,7 +205,7 @@ class MemberAssign(AST):
 class TypeValue(AST):
     """A compile-time type used as a named alias."""
 
-    value: ty.TypeExpr
+    value: ty.TypeAliasValue
 
 
 @dataclass
@@ -267,6 +267,17 @@ class IndexAssign(AST):
 @dataclass
 class String(AST):
     content: str
+
+
+@dataclass
+class InterpolatedString(AST):
+    """A source string whose expression fields have been typechecked.
+
+    The node is a semantic value, but targets may specialize consumers such as
+    ``print`` without first materializing one contiguous runtime string.
+    """
+
+    parts: list[AST]
 
 
 @dataclass

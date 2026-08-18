@@ -15,12 +15,13 @@
       <h2>Works through code generation today</h2>
       <ul>
         <li>Declarations, lexical scopes, top-level execution, modules, imports, and a source prelude</li>
-        <li>Fixed-width integers, exact literals, booleans, structural function types, and type aliases</li>
+        <li>Fixed-width integers, exact literals, booleans, structural function types, and bounded generic type aliases</li>
         <li>Direct and indirect calls, recursion, overloads, keyword arguments, and defaults</li>
-        <li>Conditional values, loops, labeled exits, ranges, and logically combined iterators</li>
+        <li>Conditional values, loops, labeled exits, ranges, and logically combined range/grapheme iterators</li>
         <li>Homogeneous arrays with statically or flow-proven indexing</li>
         <li>Structural objects, object methods, optionals, and flow-sensitive narrowing</li>
-        <li>Unicode grapheme strings, slicing, iteration, and representation-changing views</li>
+        <li>Unicode grapheme strings, slicing, iteration, representation-changing views, and streamed interpolation</li>
+        <li>Compile-time time dimensions, <code>Duration&lt;T&gt;</code>, <code>ns</code>/<code>ms</code>/<code>s</code>, and Linux x86_64 <code>sleep</code></li>
       </ul>
     </section>
     <section class="content-section">
@@ -28,7 +29,8 @@
       <ul>
         <li>Abstract <code>int</code> promises arbitrary precision, but the backend does not have a bigint runtime yet.</li>
         <li>Capturing local functions are analyzed but do not lower as closures.</li>
-        <li>General runtime unions, escaping arrays, user-defined generics, floats, effects, and pattern matching are not complete.</li>
+        <li>General runtime unions, escaping arrays, user-defined generic functions, floats, effects, and pattern matching are not complete.</li>
+        <li>Physical units currently cover time only, and interpolated strings lower through <code>print</code>/<code>printl</code> rather than materializing as first-class strings.</li>
         <li>Host capabilities and the Dewy prelude are not portable across every µDewy backend yet.</li>
         <li>The public documentation contains aspirational syntax and is being separated from the implemented reference.</li>
       </ul>
@@ -45,10 +47,10 @@
         <h3>Future features</h3>
         <ul>
           <li>Complete arbitrary-precision integers and add floating-point, rational, real, complex, and quaternion numbers.</li>
-          <li>Physical units, juxtaposition multiplication, broadcasting, and multidimensional arrays.</li>
+          <li>Extend physical units beyond time with derived-unit algebra, conversions, broadcasting, and multidimensional arrays.</li>
           <li>Dictionaries, bidirectional maps, sets, and richer generic container types.</li>
           <li>Liquid refinement contracts, checked proofs, and safe handling of partial operations such as indexing and division.</li>
-          <li>String interpolation, pattern matching, effects and error values, generators, and unpack-and-collect syntax.</li>
+          <li>First-class interpolation materialization and conversion hooks, pattern matching, effects and error values, generators, and unpack-and-collect syntax.</li>
           <li>Partial application, compile-time evaluation, and metaprogramming.</li>
           <li>A portable standard library, packages, versioned releases, and installers for more platforms.</li>
           <li>A Dewy language server, formatter, richer editor tooling, and a full Dewy browser playground.</li>

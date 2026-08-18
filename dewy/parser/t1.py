@@ -251,7 +251,8 @@ class String(Token):
                 body_start, body_stop = token.idx + 1, closer.idx
                 inner = list(tokenize_gen(tokens, ctx, body_start, body_stop))
                 chunks.append(ParametricEscape(span, inner))
-                token_iter.jump_forward(closer.idx - token.idx + 1) # skip inner tokens and closing brace
+                # ``JumpableIterator`` has already advanced past the opener.
+                token_iter.jump_forward(closer.idx - token.idx) # skip inner tokens and closing brace
             elif isinstance(token, (t0.LeftCurlyBrace, t0.TemplateLeftCurlyBrace)):
                 if token.matching_right.idx - token.idx == 1:
                     error = Error(
@@ -265,7 +266,8 @@ class String(Token):
                     error.throw()
                 inner = list(tokenize_gen(tokens, ctx, token.idx+1, token.matching_right.idx))
                 chunks.append(Block(Span(token.loc.start, token.matching_right.loc.stop), inner, '{}', None))
-                token_iter.jump_forward(token.matching_right.idx - token.idx + 1) # skip inner tokens and closing brace
+                # ``JumpableIterator`` has already advanced past the opener.
+                token_iter.jump_forward(token.matching_right.idx - token.idx) # skip inner tokens and closing brace
             else:
                 #unreachable
                 raise ValueError(f'INTERNAL ERROR: Invalid token in string body: {token}')
