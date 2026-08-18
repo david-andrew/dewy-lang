@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dewy implementation status</title>
+  <meta name="description" content="What the Dewy compiler supports today and where development is headed.">
+  <meta name="theme-color" content="#f3faf6"><link rel="icon" href="../assets/images/dewy-logo-128.png"><link rel="stylesheet" href="../assets/css/site.css"><script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="nav-wrap" aria-label="Primary navigation"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button><div class="nav-links" id="site-nav" data-nav><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="./" aria-current="page">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a><a class="nav-cta" href="../playground/">Try µDewy</a></div></nav></header>
+  <main id="main" class="page-wrap">
+    <header class="page-hero"><p class="eyebrow">Implementation status</p><h1>Real compiler. Early language.</h1><p>Dewy is under active development and has no stable release yet. This page gives the useful short version; the repository carries the detailed feature checklist.</p></header>
+    <section class="content-section">
+      <h2>Works through code generation today</h2>
+      <ul>
+        <li>Declarations, lexical scopes, top-level execution, modules, imports, and a source prelude</li>
+        <li>Fixed-width integers, exact literals, booleans, structural function types, and type aliases</li>
+        <li>Direct and indirect calls, recursion, overloads, keyword arguments, and defaults</li>
+        <li>Conditional values, loops, labeled exits, ranges, and logically combined iterators</li>
+        <li>Homogeneous arrays with statically or flow-proven indexing</li>
+        <li>Structural objects, object methods, optionals, and flow-sensitive narrowing</li>
+        <li>Unicode grapheme strings, slicing, iteration, and representation-changing views</li>
+      </ul>
+    </section>
+    <section class="content-section">
+      <h2>Important limits</h2>
+      <ul>
+        <li>Abstract <code>int</code> promises arbitrary precision, but the backend does not have a bigint runtime yet.</li>
+        <li>Capturing local functions are analyzed but do not lower as closures.</li>
+        <li>General runtime unions, escaping arrays, user-defined generics, floats, effects, and pattern matching are not complete.</li>
+        <li>Host capabilities and the Dewy prelude are not portable across every µDewy backend yet.</li>
+        <li>The public documentation contains aspirational syntax and is being separated from the implemented reference.</li>
+      </ul>
+    </section>
+    <section class="content-section">
+      <h2>Current direction</h2>
+      <div class="route-grid" style="grid-template-columns:1fr 1fr">
+        <article class="route-card"><span class="badge works">Now</span><h3>Compiler convergence</h3><p>Stabilize the new typed compiler, µDewy lowering, module system, installation path, and behavior parity.</p></article>
+        <article class="route-card"><span class="badge works">Now</span><h3>Representation analysis</h3><p>Use bounds, alias, and lifetime facts to choose safe compact layouts and calling conventions.</p></article>
+        <article class="route-card"><span class="badge planned">Next</span><h3>Liquid refinements</h3><p>Make common safety conditions provable from normal code, with useful diagnostics at unknown obligations.</p></article>
+        <article class="route-card"><span class="badge planned">Long term</span><h3>Auditable self-hosting</h3><p>Complete the path from a small trusted bootstrap through µDewy to a full compiler written in Dewy.</p></article>
+      </div>
+      <div class="future-features">
+        <h3>Future features</h3>
+        <ul>
+          <li>Complete arbitrary-precision integers and add floating-point, rational, real, complex, and quaternion numbers.</li>
+          <li>Physical units, juxtaposition multiplication, broadcasting, and multidimensional arrays.</li>
+          <li>Dictionaries, bidirectional maps, sets, and richer generic container types.</li>
+          <li>Liquid refinement contracts, checked proofs, and safe handling of partial operations such as indexing and division.</li>
+          <li>String interpolation, pattern matching, effects and error values, generators, and unpack-and-collect syntax.</li>
+          <li>Partial application, compile-time evaluation, and metaprogramming.</li>
+          <li>A portable standard library, packages, versioned releases, and installers for more platforms.</li>
+          <li>A Dewy language server, formatter, richer editor tooling, and a full Dewy browser playground.</li>
+        </ul>
+      </div>
+      <div class="button-row"><a class="button primary" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md">Detailed checklist</a><a class="button" href="https://github.com/david-andrew/dewy-lang/commits/master/">Recent development</a></div>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><p>An honest view of an evolving compiler.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../playground/">Playground</a><a href="../install/">Install</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
+</body>
+</html>

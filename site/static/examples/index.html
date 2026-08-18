@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dewy examples</title><meta name="description" content="Curated examples for the Dewy and µDewy programming languages."><meta name="theme-color" content="#f3faf6"><link rel="icon" href="../assets/images/dewy-logo-128.png"><link rel="stylesheet" href="../assets/css/site.css"><script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="nav-wrap" aria-label="Primary navigation"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button><div class="nav-links" id="site-nav" data-nav><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="./" aria-current="page">Examples</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a><a class="nav-cta" href="../playground/">Try µDewy</a></div></nav></header>
+  <main id="main" class="page-wrap">
+    <header class="page-hero"><p class="eyebrow">Examples</p><h1>See the languages at work.</h1><p>These examples are selected from executable fixtures. Dewy and µDewy are related but distinct source languages, so every example is labeled.</p></header>
+    <section class="section" style="padding-top:2rem">
+      <div class="example-grid">
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Hello, World</h2><pre><code>printl"Hello, World!"</code></pre><p>Prelude imports and top-level execution in one line.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/hello.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Array sum</h2><pre><code>let values:array&lt;int64&gt; = [10 20 12]
+let i:int64 = 0
+let total:int64 = 0
+loop i &lt;? values.length {
+    total += values[i]
+    i += 1
+}</code></pre><p>Flow-proven bounds make the indexed access valid.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/array_while_index.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Objects</h2><pre><code>let point = [
+    x = 3
+    y = 4
+    sum = () =&gt; x + y
+]
+let value = point.sum</code></pre><p>Structural fields and methods with object-local lookup.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/object_methods.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Unicode strings</h2><pre><code>let text = "café 👨‍👩‍👧‍👦"
+let family = text[5]
+let count = family.length</code></pre><p>Index and length operate on extended grapheme clusters.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/unicode_strings.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Stepped ranges</h2><pre><code>let total:int64 = 0
+loop i in 0,2..10 {
+    total += i
+}
+loop i in 5,3..0 {
+    total += i
+}</code></pre><p>A second anchor establishes either a positive or negative step without a separate range constructor.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/range_stepped.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Multiple iterators</h2><pre><code>let total:int64 = 0
+loop i in 0..2 and j in 10..20 {
+    total += i
+}</code></pre><p>Iterator conditions compose directly with logical operators; <code>and</code> stops when either iterator is exhausted.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/multi_iterator_and.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Optional narrowing</h2><pre><code>let value:int64|undefined = choose(true)
+
+if value is? int64 {
+    return value + 2
+}
+return 0</code></pre><p>A type test narrows the optional value for the successful branch without an assertion or forced unwrap.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/optional_values.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Overload sets</h2><pre><code>let choose = (():&gt;int64 =&gt; 20)
+           &amp; ((x:int64):&gt;int64 =&gt; x)
+
+let answer = choose() + choose(22)</code></pre><p><code>&amp;</code> combines ordinary function values, and each call selects the implementation matching its arguments.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/overload_calls.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Defaults and keywords</h2><pre><code>let add = (x:int64 y:int64=2):&gt;int64 =&gt;
+    x + y
+
+let answer = add(40)
+let same = add(39 y=3)</code></pre><p>Parameters can have lazy defaults, while named arguments make overrides and reordered calls explicit.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/keyword_default_calls.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Modules and paths</h2><pre><code>from p"lib.dewy" import (answer add Number)
+import p"lib.dewy" as library
+
+let value:library.Number = answer
+let result = add(value)</code></pre><p>Selective and namespaced imports share file-relative path values and one type system across modules.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/imports_basic/main.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">µDewy · playground</span><h2>Fibonacci</h2><pre><code>let fib = (n:int):&gt;int =&gt; {
+    if n &lt;=? 1 { return n }
+    return fib(n - 1) + fib(n - 2)
+}</code></pre><p>Compile the bootstrap subset entirely in the browser.</p><div class="button-row"><a class="button primary" href="../playground/">Try it</a></div></article>
+        <article class="example-card"><span class="badge works">µDewy · runs</span><h2>Self-hosting</h2><pre><code>udewy -c \
+  udewy/bootstrap/main.udewy</code></pre><p>The µDewy compiler is itself implemented in µDewy.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/tree/master/udewy/bootstrap">Compiler source</a></div></article>
+      </div>
+    </section>
+    <section class="content-section"><h2>More programs</h2><p>The repository also contains backend tests, web and SDL demos, games, data structures, graphics experiments, and older design examples. Some files under the top-level <code>examples/</code> directory describe planned language behavior rather than the current compiler.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/tree/master/examples">Design examples</a><a class="button" href="https://github.com/david-andrew/dewy-lang/tree/master/udewy/tests">µDewy programs</a></div></section>
+  </main>
+  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><p>Executable behavior and ambitious language design, clearly distinguished.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../playground/">Playground</a><a href="../install/">Install</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
+</body>
+</html>

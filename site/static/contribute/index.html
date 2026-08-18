@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Contribute to Dewy</title><meta name="description" content="Set up the Dewy repository and understand where to contribute."><meta name="theme-color" content="#f3faf6"><link rel="icon" href="../assets/images/dewy-logo-128.png"><link rel="stylesheet" href="../assets/css/site.css"><script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="nav-wrap" aria-label="Primary navigation"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button><div class="nav-links" id="site-nav" data-nav><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a><a class="nav-cta" href="../playground/">Try µDewy</a></div></nav></header>
+  <main id="main" class="page-wrap">
+    <header class="page-hero"><p class="eyebrow">Contribute</p><h1>Help make the language concrete.</h1><p>Dewy has a wide design horizon and a rapidly evolving compiler. Useful contributions start by separating implemented behavior from proposals and preserving semantic contracts.</p></header>
+    <section class="content-section"><h2>Set up the repository</h2><pre><code>git clone https://github.com/david-andrew/dewy-lang.git
+cd dewy-lang
+python -m venv .venv
+.venv/bin/pip install pytest ruff mypy pyright
+.venv/bin/pytest -q</code></pre><p>Python 3.12 or newer is required. Native backend tests may also need GNU assembler/linker, C tooling, WABT, or cross-compilers.</p></section>
+    <section class="content-section"><h2>Repository map</h2><ul class="meta-list"><li><strong><code>dewy/parser/</code></strong><span>Staged lexer and precedence parser</span></li><li><strong><code>dewy/semantic/</code></strong><span>Types, HIR, modules, initialization, and bounds analysis</span></li><li><strong><code>dewy/backend/udewy/</code></strong><span>Legalization, representation decisions, and µDewy emission</span></li><li><strong><code>udewy/</code></strong><span>Reference and self-hosted bootstrap compilers plus target backends</span></li><li><strong><code>site/</code></strong><span>Website, learning guide, language reference, and playground</span></li></ul></section>
+    <section class="content-section"><h2>Good starting areas</h2><ul><li>Correct stale documentation and label aspirational examples clearly.</li><li>Add focused tests for an existing semantic contract or backend parity case.</li><li>Improve diagnostics without changing accepted syntax.</li><li>Reduce duplication between µDewy’s Python and bootstrap backends.</li><li>Improve website accessibility, examples, and cross-linking.</li></ul><p>For language-design changes, open a focused issue before implementation so syntax, semantic behavior, and lowering constraints can be considered together.</p><div class="button-row"><a class="button primary" href="https://github.com/david-andrew/dewy-lang/issues">View issues</a><a class="button" href="https://github.com/david-andrew/dewy-lang">Open repository</a></div></section>
+  </main>
+  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><p>Build the language one verified behavior at a time.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../playground/">Playground</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
+</body>
+</html>

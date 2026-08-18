@@ -1,11 +1,10 @@
-# The Dewy Programming Language
+# Learning Dewy
 
 [Introduction](00-introduction.md)
 
 ## Getting Started
 
 - [Getting Started](ch01/00-getting-started.md)
-    - [Online Interpreter](ch01/xx-online-interpreter.md)
     - [Installation](ch01/01-installation.md)
     - [Hello, World!](ch01/02-hello-world.md)
 

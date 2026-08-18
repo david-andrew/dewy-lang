@@ -17,6 +17,7 @@ which writes the self-contained `__dewycache__/playground.html`.
 import shutil
 import subprocess
 import sys
+from hashlib import sha256
 from os import environ
 from pathlib import Path
 from urllib.request import urlopen
@@ -28,22 +29,44 @@ WEB_COMPILER_SRC = REPO_ROOT / "udewy" / "bootstrap" / "web_compiler.udewy"
 
 WABT_VERSION = "1.0.39"
 WABT_URL = f"https://unpkg.com/wabt@{WABT_VERSION}/index.js"
+WABT_SHA256 = "cecf06ab5c65c3b7c05bafe601bbba61a45e4939889c5c51351e8817ac06f48d"
+
+
+def verify_wabt(data: bytes) -> None:
+    digest = sha256(data).hexdigest()
+    if digest != WABT_SHA256:
+        raise RuntimeError(
+            f"wabt.js checksum mismatch: expected {WABT_SHA256}, got {digest}"
+        )
 
 
 def fetch_wabt(dest: Path) -> None:
     if dest.exists():
+        verify_wabt(dest.read_bytes())
         print(f"Reusing {dest}")
         return
     print(f"Downloading {WABT_URL}")
     with urlopen(WABT_URL) as r:
-        dest.write_bytes(r.read())
+        data = r.read()
+    verify_wabt(data)
+    dest.write_bytes(data)
 
 
 def build_web_compiler(dest: Path) -> None:
     env = {**environ, "PYTHONPATH": str(REPO_ROOT)}
     subprocess.run(
-        [sys.executable, "-m", "udewy", "-c", "--target", "wasm32", str(WEB_COMPILER_SRC)],
-        cwd=REPO_ROOT, check=True, env=env,
+        [
+            sys.executable,
+            "-m",
+            "udewy",
+            "-c",
+            "--target",
+            "wasm32",
+            str(WEB_COMPILER_SRC),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        env=env,
     )
     shutil.copy(REPO_ROOT / "__dewycache__" / "web_compiler.wasm", dest)
 

@@ -7,9 +7,9 @@ It's traditional in most languages to write a small program that prints "Hello, 
 It's probably a good idea to put your code in a dedicated folder.
 
 ```bash
-$ mdkir ~/code
+$ mkdir -p ~/code
 $ cd ~/code
-$ mdkir hello_world
+$ mkdir hello_world
 $ cd hello_world
 ```
 
@@ -67,10 +67,10 @@ This code invokes the `printl` function with the string `'Hello, World!'`. `prin
 
 ## Compiling and Running Are the Same Step
 
-> NOTE: this is not relevant until the LLVM/other compiler backends are implemented.
-
 When you run the program, you are actually doing two things: first compiling, and then running.
 
 Compiling is the process that translates the code from Dewy, which your computer doesn't understand natively, to machine language which it does understand. The resulting translation is saved to a file, called an **executable**, that your computer can run directly. Once the executable is created, the `dewy` command then automatically runs it for you.
 
-All of this goes on under the hood, so you don't have to worry about it. But you might notice the effects of this process, e.g. the first time you run a program, it might take a bit longer than subsequent runs. Additionally, you might notice a hidden directory containing the executable, and perhaps other files related to the compilation process. In this case, the directory is called `.hello/` and contains the executable `hello`.
+The hosted compiler first writes equivalent µDewy source, then asks the µDewy
+backend to compile and run it. Intermediate source, assembly, and executable
+artifacts are written under `__dewycache__/`.

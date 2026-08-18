@@ -1,0 +1,63 @@
+:root {
+  --dewy-accent: #9bc9af;
+}
+
+html.navy,
+html.ayu,
+html.coal {
+  --bg: #0a0d0b;
+  --fg: #dbe4dc;
+  --sidebar-bg: #101612;
+  --sidebar-fg: #aab5ac;
+  --sidebar-active: var(--dewy-accent);
+  --links: var(--dewy-accent);
+  --inline-code-color: #c4e8d3;
+  --quote-bg: #111713;
+  --quote-border: #527562;
+}
+
+.dewy-toolbar-link {
+  position: relative;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  height: var(--menu-bar-height);
+  padding: 0 10px;
+  color: var(--icons) !important;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.dewy-toolbar-link:hover,
+.dewy-toolbar-link:focus-visible {
+  color: var(--icons-hover) !important;
+}
+
+.dewy-home-link {
+  margin-left: 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--table-border-color);
+}
+
+.dewy-peer-link {
+  margin-right: 7px;
+  padding-right: 14px;
+  border-right: 1px solid var(--table-border-color);
+}
+
+code {
+  font-variant-ligatures: none;
+}
+
+blockquote:first-of-type {
+  border-radius: 0.25rem;
+}
+
+@media (max-width: 620px) {
+  .dewy-peer-link { display: none; }
+}

@@ -1,8 +1,14 @@
-# Introduction
+# Welcome to Dewy
 
-Welcome to the Dewy Programming Language Book. This book covers all aspects of the language, including syntax, style, the standard library, examples, etc.
+Welcome to the learning guide for the Dewy programming language. This book is
+an example-led path through the language, its programming model, and the ideas
+that motivate it.
 
-> Please note that this book and the language are still VERY work in progress. The book is still missing many chapters, and the current language implementation is very incomplete.
+> **Development edition:** Dewy is an early language. This guide mixes
+> implemented features with the language's intended direction. Pages should
+> call out that distinction; for exact current behavior, use the
+> [language reference](../reference/) and
+> [implementation status](../status/).
 
 ## What is Dewy
 

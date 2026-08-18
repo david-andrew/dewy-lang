@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install Dewy</title>
+  <meta name="description" content="Install the Dewy and µDewy compilers or run them from a source checkout.">
+  <meta name="theme-color" content="#f3faf6">
+  <link rel="icon" href="../assets/images/dewy-logo-128.png">
+  <link rel="stylesheet" href="../assets/css/site.css">
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="nav-wrap" aria-label="Primary navigation">
+      <a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a>
+      <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button>
+      <div class="nav-links" id="site-nav" data-nav>
+        <a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a><a class="nav-cta" href="../playground/">Try µDewy</a>
+      </div>
+    </nav>
+  </header>
+  <main id="main" class="page-wrap">
+    <header class="page-hero">
+      <p class="eyebrow">Install</p>
+      <h1>Run Dewy on your machine.</h1>
+      <p>The packaged installation currently supports Linux x86-64. It installs a native µDewy bootstrap compiler and the Python-hosted Dewy compiler.</p>
+    </header>
+
+    <section class="content-section">
+      <h2>Install the current toolchain</h2>
+      <div class="notice"><strong>Early software:</strong> inspect the installer before running it in an environment you care about. Dewy has not reached a stable release.</div>
+      <div class="install-box" style="margin-top:1.25rem">
+        <div class="install-head"><span>shell</span><button class="copy-button" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash">Copy</button></div>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash</code></pre>
+      </div>
+      <p>The installer writes to <code>~/.dewy</code> and offers to add that directory to your shell path. Dewy locates Python 3.12 or newer on first use and remembers the compatible interpreter.</p>
+      <pre><code>dewy hello.dewy
+udewy hello.udewy</code></pre>
+    </section>
+
+    <section class="content-section">
+      <h2>Run from a checkout</h2>
+      <pre><code>git clone https://github.com/david-andrew/dewy-lang.git
+cd dewy-lang
+python -m dewy dewy/tests/hello.dewy
+python -m udewy udewy/tests/test_hello.udewy</code></pre>
+      <p>The compiler writes intermediate source and target artifacts under <code>__dewycache__/</code>. Use <code>-c</code> to compile without running, and <code>--target</code> to select a µDewy backend.</p>
+    </section>
+
+    <section class="content-section">
+      <h2>Targets and present limits</h2>
+      <ul class="meta-list">
+        <li><strong>Dewy installer</strong><span>Linux x86-64</span></li>
+        <li><strong>µDewy backends</strong><span>x86-64 Linux, WebAssembly, RISC-V, AArch64, and C</span></li>
+        <li><strong>Dewy console I/O</strong><span><code>print</code> and <code>printl</code> currently use Linux x86-64 syscalls</span></li>
+        <li><strong>Stability</strong><span>Development version; syntax and semantics can change</span></li>
+      </ul>
+      <div class="button-row"><a class="button primary" href="../learn/">Continue to the guide</a><a class="button" href="../status/">See implementation status</a></div>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><p>Clear code for hard problems.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../playground/">Playground</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
+</body>
+</html>

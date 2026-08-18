@@ -97,4 +97,6 @@ Several example programs are available in [examples/](examples/). Here is a brea
 
 ## Documentation
 
-Currently out of date documentation is available at: https://david-andrew.github.io/dewy-lang/
+The language website, learning guide, reference, examples, and µDewy playground
+are built from [`site/`](site/) and published at
+https://david-andrew.github.io/dewy-lang/.

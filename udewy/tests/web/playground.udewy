@@ -383,6 +383,11 @@ let main = ():>int => {
 
     let title_block:int = Web_AppendElement(header "div")
     Web_FlexColumn(title_block 4)
+    let home_link:int = Web_Link(title_block "../" "← Dewy website")
+    Web_SetStyle(home_link "color" "#68705f")
+    Web_SetStyle(home_link "font-size" "0.78rem")
+    Web_SetStyle(home_link "font-weight" "650")
+    Web_SetStyle(home_link "text-decoration" "none")
     let kicker:int = Web_AppendTextElement(title_block "p" "udewy")
     Web_SetStyle(kicker "margin" "0")
     Web_SetStyle(kicker "color" "#8f5f2f")
