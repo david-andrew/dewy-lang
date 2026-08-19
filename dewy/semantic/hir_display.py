@@ -157,6 +157,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     # Prefer structural/annotated info over inferred AST.type (except ValueCast).
     if isinstance(node, hir.Void):
         return 'Void'
+    if isinstance(node, hir.Suppress):
+        return 'Suppress'
     if isinstance(node, hir.Undefined):
         return 'Undefined'
     if isinstance(node, hir.Return):
@@ -288,6 +290,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     """Named child edges for tree dumping; binops/unaries are flattened for readability."""
     if isinstance(node, hir.Return):
         return [('item', node.item)] if node.item is not None else []
+    if isinstance(node, hir.Suppress):
+        return [('item', node.item)]
     if isinstance(node, (hir.IfArm, hir.LoopArm)):
         return [('condition', node.condition), ('body', node.body)]
     if isinstance(node, hir.Flow):
@@ -591,6 +595,7 @@ _AND_PREC = _op_prec('&')
 _RANGE_PREC = _op_prec(t2.RangeJuxtapose)
 _ARROW_PREC = _op_prec('=>')
 _CALL_PREC = _op_prec(t2.CallJuxtapose)
+_SEMICOLON_PREC = _op_prec(t2.SemicolonJuxtapose)
 
 
 def _assoc(prec: int) -> p0.Associativity:
@@ -626,6 +631,24 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
     assert isinstance(node, hir.AST)
     if isinstance(node, hir.Void):
         return _text('void')
+    if isinstance(node, hir.Suppress):
+        item = _to_doc(node.item, _SEMICOLON_PREC + 1, indent)
+        keyword_items = (
+            hir.Return,
+            hir.Declare,
+            hir.ScopeMetatag,
+            hir.Break,
+            hir.Continue,
+        )
+        needs_group = isinstance(node.item, keyword_items) or (
+            isinstance(node.item, hir.Block)
+            and not node.item.scoped
+            and len(node.item.items) == 1
+            and isinstance(node.item.items[0], keyword_items)
+        )
+        if needs_group:
+            item = _seq(_text('('), item, _text(')'))
+        return _seq(item, _text(';'))
     if isinstance(node, hir.Undefined):
         return _text('undefined')
     if isinstance(node, hir.Integer):

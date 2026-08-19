@@ -81,7 +81,7 @@ LOWERED_CASES = [
     ('keyword_default_calls.dewy', 42),
     ('path_values.dewy', 42),
     ('hello_world_syscall.dewy', 0),
-    ('printl_hello.dewy', 0),
+    ('hello.dewy', 0),
 ]
 CASES = [*ROUNDTRIP_CASES, *LOWERED_CASES]
 ROUNDTRIP_FIXTURE_NAMES = [fixture_name for fixture_name, _ in ROUNDTRIP_CASES]
@@ -196,11 +196,11 @@ def test_prelude_printl_writes_to_console(
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
-    emitted = codegen(SrcFile.from_path(fixtures / 'printl_hello.dewy'))
+    emitted = codegen(SrcFile.from_path(fixtures / 'hello.dewy'))
     assert 'let __dewy_module_prelude_io_print' in emitted
     assert 'let __dewy_module_prelude_io_printl' in emitted
 
-    udewy_path = tmp_path / 'printl_hello.udewy'
+    udewy_path = tmp_path / 'hello.udewy'
     udewy_path.write_text(emitted)
     monkeypatch.chdir(tmp_path)
     assert entry_point(udewy_path, []) == 0

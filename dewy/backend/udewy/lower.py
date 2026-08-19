@@ -1205,6 +1205,9 @@ class _Lowerer:
         array_use: ArrayUse = 'representation',
     ) -> None:
         """Resolve names and recursively collect callable constructs in ``node``."""
+        if isinstance(node, hir.Suppress):
+            self._discover_node(node.item, scope, current_function)
+            return
         if isinstance(node, hir.ExpressedIdentifier):
             binding = (
                 self.binding_by_semantic_id.get(node.binding_id)
@@ -2118,7 +2121,12 @@ class _Lowerer:
                 source_positions.append(None)
                 optional_payloads.append(None)
         if len(pos_args) > len(function_type.pos_or_kw):
-            raise ValueError('INTERNAL ERROR: rest arguments reached udewy lowering')
+            if function_type.rest is None:
+                raise ValueError('INTERNAL ERROR: rest arguments reached udewy lowering')
+            for index in range(len(function_type.pos_or_kw), len(pos_args)):
+                normalized.append(pos_args[index])
+                source_positions.append(index)
+                optional_payloads.append(None)
         for param in function_type.kw_only:
             if param.name in remaining:
                 normalized.append(remaining.pop(param.name))
@@ -2153,6 +2161,11 @@ class _Lowerer:
         their concrete units are emitted from ``LoweredProgram.functions``
         instead of at their original lexical position.
         """
+        if isinstance(node, hir.Suppress):
+            return replace(
+                node,
+                item=self._require_node(self._transform_node(node.item)),
+            )
         if isinstance(node, hir.ExpressedIdentifier):
             binding = self.identifier_bindings.get(id(node))
             if binding is None:
@@ -2609,6 +2622,8 @@ class _Lowerer:
         """Whether a body contains a break or continue targeting an outer loop."""
         if isinstance(node, (hir.Break, hir.Continue)):
             return node.loop_levels > 0
+        if isinstance(node, hir.Suppress):
+            return cls._contains_nonlocal_exit(node.item)
         if isinstance(node, hir.Block):
             return any(cls._contains_nonlocal_exit(item) for item in node.items)
         if isinstance(node, hir.Flow):
@@ -2623,6 +2638,8 @@ class _Lowerer:
         """Whether a body contains any explicit return site."""
         if isinstance(node, hir.Return):
             return True
+        if isinstance(node, hir.Suppress):
+            return cls._contains_return(node.item)
         if isinstance(node, hir.Block):
             return any(cls._contains_return(item) for item in node.items)
         if isinstance(node, hir.Flow):
@@ -2633,6 +2650,8 @@ class _Lowerer:
 
     def _lower_statement(self, node: hir.AST) -> list[hir.AST]:
         """Return target statements, inserting expression-extraction preludes."""
+        if isinstance(node, hir.Suppress):
+            return self._lower_statement(node.item)
         if isinstance(node, hir.ScopeMetatag):
             return []
         if isinstance(node, hir.Block):

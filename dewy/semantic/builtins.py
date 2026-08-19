@@ -195,6 +195,72 @@ def _udewy_intrinsic(
     )
 
 
+_udewy_word_intrinsic_arities: dict[str, int] = {
+    '__i64_to_f32_bits__': 1,
+    '__i64_to_f64_bits__': 1,
+    '__f32_bits_to_i64__': 1,
+    '__f64_bits_to_i64__': 1,
+    '__host_log__': 2,
+    '__host_exit__': 1,
+    '__host_time__': 0,
+    '__host_random__': 0,
+    '__dom_set_text__': 2,
+    '__dom_append__': 2,
+    '__dom_clear__': 0,
+    '__dom_append_int__': 1,
+    '__log_int__': 1,
+    '__canvas_init__': 2,
+    '__canvas_width__': 0,
+    '__canvas_height__': 0,
+    '__canvas_present__': 0,
+    '__canvas_set_aspect_lock__': 1,
+    '__frame_count__': 0,
+    '__frame_time__': 0,
+    '__window_width__': 0,
+    '__window_height__': 0,
+    '__pointer_x__': 0,
+    '__pointer_y__': 0,
+    '__pointer_down__': 0,
+    '__pointer_buttons__': 0,
+    '__pointer_wheel__': 0,
+    '__key_down__': 2,
+    '__key_pressed__': 2,
+    '__key_released__': 2,
+    '__audio_init__': 3,
+    '__audio_play__': 0,
+    '__audio_sample_rate__': 0,
+    '__audio_stream_init__': 2,
+    '__audio_stream_write__': 0,
+    '__audio_stream_needs_samples__': 0,
+    '__webgl_init__': 4,
+    '__webgl_uniform1i__': 3,
+    '__webgl_uniform2i__': 4,
+    '__webgl_uniform1iv__': 4,
+    '__webgl_uniform2iv__': 4,
+    '__webgl_render__': 0,
+    '__gpu_init__': 2,
+    '__gpu_set_viewport__': 2,
+    '__gpu_clear__': 3,
+    '__gpu_set_perspective_frustum__': 6,
+    '__gpu_set_view_matrix__': 1,
+    '__gpu_set_texture__': 1,
+    '__gpu_set_blend__': 1,
+    '__gpu_set_depth_test__': 1,
+    '__gpu_set_depth_write__': 1,
+    '__gpu_set_line_width__': 1,
+    '__gpu_submit__': 3,
+    '__gpu_overlay_begin__': 2,
+    '__gpu_overlay_end__': 0,
+    '__gpu_create_texture__': 5,
+    '__gpu_present__': 0,
+    '__gpu_window_width__': 0,
+    '__gpu_window_height__': 0,
+    '__audio_queue_init__': 2,
+    '__audio_queue_push__': 2,
+    '__audio_queue_size__': 0,
+}
+
+
 udewy_intrinsic_types: dict[str, ty.FunctionType] = {
     **{
         f'__load_{prefix}{width}__': _udewy_intrinsic(
@@ -223,6 +289,16 @@ udewy_intrinsic_types: dict[str, ty.FunctionType] = {
     '__unsigned_gt__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
     '__unsigned_lte__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
     '__unsigned_gte__': _udewy_intrinsic(['uint64', 'uint64'], 'bool'),
+    '__static_words__': ty.FunctionType(
+        [ty.PosOrKwArg(None, ty.TOP_TYPE)],
+        [],
+        'words',
+        'int64',
+    ),
+    **{
+        name: _udewy_intrinsic(['int64'] * arity, 'int64')
+        for name, arity in _udewy_word_intrinsic_arities.items()
+    },
     **{
         f'__syscall{arity}__': _udewy_intrinsic(
             ['int64'] * (arity + 1),

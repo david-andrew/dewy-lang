@@ -493,6 +493,9 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> Interval | None:
+        if isinstance(node, hir.Suppress):
+            self._eval(node.item, state, validate=validate)
+            return None
         if isinstance(node.type, ty.IntegerLiteralType):
             return Interval.exact(node.type.value)
         if isinstance(node, hir.Integer):

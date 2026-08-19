@@ -705,9 +705,10 @@ def test_local_array_boundaries_keep_descriptors(
         assert fragment in emitted
 
 
-def test_static_words_is_not_a_dewy_builtin() -> None:
-    with pytest.raises(UserError, match='undefined identifier `__static_words__`'):
-        codegen(SrcFile(None, 'let data = __static_words__(1)'))
+def test_static_words_is_available_as_a_direct_dewy_intrinsic() -> None:
+    emitted = codegen(SrcFile(None, 'const data:int64 = __static_words__(40 2)'))
+
+    assert 'data = __static_words__(40 2)' in emitted
 
 
 @pytest.mark.skipif(

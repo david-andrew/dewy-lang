@@ -53,6 +53,13 @@ class Void(AST): ...
 
 
 @dataclass
+class Suppress(AST):
+    """Evaluate ``item`` for its effects without expressing its value."""
+
+    item: AST
+
+
+@dataclass
 class Undefined(AST):
     """The first-class singleton value denoting absence."""
 
@@ -446,12 +453,10 @@ Because parameter names and type names are both ordinary identifiers, a bare
 identifier is always a parameter name rather than an unnamed type annotation.
 The intended explicit positional-only form is `<name:type>`:
 
-    let increment = <value:int64> => value + 1
-    let something = (<a:int64> b:string <c:bool> ...) => ...  # mixing positional and keyword-or-positional arguments is allowed
+    let increment = (<value:int64>) => value + 1
 
 Here `value` is available in the body but callers cannot write `value=...`.
 This syntax is planned and is not yet accepted by the current compiler.
-Note that position only arguments may not come after a `...`
 
 Destructured parameters are also planned. An unannotated `[a b c]` parameter
 could accept an array by position or an object by field name; an explicit

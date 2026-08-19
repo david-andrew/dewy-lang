@@ -11,6 +11,8 @@ This document tracks language features in the cleanparse compiler. Checked items
 - [x] Contextual integer-literal typing for declarations, calls, returns, and operators. A literal can inhabit any fixed-width integer type that contains its value; out-of-range literals are rejected.
 - [x] Type-directed operator resolution, including distinct signed and unsigned right-shift lowering.
 - [x] `transmute` for values whose source and destination representations are supported by the udewy backend, including function pointers.
+- [x] A juxtaposed semicolon (`expression;`) evaluates the expression while suppressing its value, including for function return inference and udewy lowering.
+- [ ] An unattached semicolon is reserved for selecting the next array dimension, analogous to MATLAB; that array syntax is not implemented yet.
 
 ## Type expressions and type-valued inference
 
@@ -60,6 +62,7 @@ The type system instantiates generic function types for built-in operator overlo
 ## Udewy intrinsics and host interoperability
 
 - [x] Typed source access to udewy's portable memory, allocation, signed-shift, and unsigned-operation intrinsics.
+- [x] Direct Dewy access to every fixed-arity intrinsic advertised by a udewy backend, including static word data, floating-point bit conversions, and the wasm host APIs. Availability when compiling remains target-dependent.
 - [x] Typed access to Linux `__syscall0__` through `__syscall6__`, emitted as direct udewy intrinsic calls.
 - [x] Executable x86-64 Linux bare-metal hello world using a UTF-8 byte view, its byte length, and the `write` syscall.
 - [x] Linux x86_64 `print`/`printl` in the prelude (`library/io.dewy`) via `write`, including overloaded string and signed-integer output needed by streamed interpolation. Other targets still need host-write capability selection.

@@ -51,7 +51,6 @@ UNSUPPORTED_NARROW_DUNDERS = {
 }
 SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
 UDEWY_INTRINSICS = set(builtins.udewy_intrinsic_types)
-INTERNAL_UDEWY_INTRINSICS = {'__static_words__'}
 
 @dataclass
 class EmitContext:
@@ -199,6 +198,8 @@ def emit_arg(arg: hir.Param | hir.BoundParam) -> str:
 def _contains_return(node: hir.AST) -> bool:
     if isinstance(node, hir.Return):
         return True
+    if isinstance(node, hir.Suppress):
+        return _contains_return(node.item)
     if isinstance(node, hir.Block):
         return any(_contains_return(item) for item in node.items)
     if isinstance(node, hir.Flow):
@@ -422,7 +423,6 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
         and (
             call.func.name in ctx.direct_function_names
             or call.func.name in UDEWY_INTRINSICS
-            or call.func.name in INTERNAL_UDEWY_INTRINSICS
         )
         and call.func.name not in ctx.local_names
     ):

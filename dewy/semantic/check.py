@@ -258,7 +258,12 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Metatag(name=name)):
             return tcr_scope_metatag(ast, name=name, ctx=ctx)
         # case p0.Atom(item=t1.Real()): ...
-        # case p0.Atom(item=t1.Semicolon()): ...
+        case p0.Atom(item=t1.Semicolon()):
+            not_implemented(
+                ctx.srcfile,
+                ast.loc,
+                'standalone semicolon array-dimension syntax',
+            )
         # case p0.Atom(item=t1.Metatag()): ...
         # case p0.Atom(item=t1.Integer()): ...
         case p0.Atom(item=t1.Bool(value=value)): return hir.Bool(ast.item.loc, 'bool', value)
@@ -3287,6 +3292,19 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     if isinstance(binop.op, t2.CombinedAssignmentOp):
         return tcr_combined_assign(binop, ctx=ctx)
 
+    if isinstance(binop.op, t2.SemicolonJuxtapose):
+        item = typecheck_and_resolve_inner(
+            binop.left,
+            ctx=ctx,
+            type_block=type_block,
+        )
+        result_type = (
+            ty.BOTTOM_TYPE
+            if item.type == ty.BOTTOM_TYPE
+            else ty.VOID_TYPE
+        )
+        return hir.Suppress(binop.loc, result_type, item)
+
     # Special cases that don't just typecheck both sides
     symbol = binop.op.symbol if isinstance(binop.op, t1.Operator) else None
     if isinstance(binop.op, t2.IndexJuxtapose):
@@ -3406,7 +3424,6 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         case t2.RangeJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'range juxtapose')
         case t2.EllipsisJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'ellipsis juxtapose')
         case t2.TypeParamJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'type parameterization')
-        case t2.SemicolonJuxtapose(): not_implemented(ctx.srcfile, binop.loc, 'semicolon juxtapose')
         case t2.BroadcastOp(): not_implemented(ctx.srcfile, binop.loc, 'broadcast operator')
     
     # TODO: eventually should be able to remove this check once all the arms of the above match are implemented
@@ -4911,11 +4928,17 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
 
     contextual_pos_args = [
         check_against(
-            _contextualize_flow_result(arg, param.type, ctx=ctx),
-            param.type,
+            _contextualize_flow_result(
+                arg,
+                result.method.pos_or_kw[index].type,
+                ctx=ctx,
+            ),
+            result.method.pos_or_kw[index].type,
             ctx=ctx,
         )
-        for arg, param in zip(pos_args, result.method.pos_or_kw)
+        if index < len(result.method.pos_or_kw)
+        else arg
+        for index, arg in enumerate(pos_args)
     ]
     parameter_types = {
         param.name: param.type
