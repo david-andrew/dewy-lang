@@ -480,8 +480,7 @@ class _Lowerer:
                 binding_id=None,
             )
 
-        lowered_pos = [lower_param(param) for param in literal.pos_or_kw_args]
-        for param in literal.kw_only_args:
+        for param in [*literal.pos_or_kw_args, *literal.kw_only_args]:
             if not isinstance(param, hir.BoundParam):
                 lowered_pos.append(lower_param(param))
                 continue
@@ -627,13 +626,14 @@ class _Lowerer:
     def _lower_callable_type(self, type_: ty.Type) -> ty.Type:
         if not isinstance(type_, ty.FunctionType):
             return type_
-        pos = [
-            ty.PosOrKwArg(
+        pos: list[ty.PosOrKwArg] = []
+        for param in type_.pos_or_kw:
+            pos.append(ty.PosOrKwArg(
                 param.name,
                 self._lower_runtime_value_type(param.type),
-            )
-            for param in type_.pos_or_kw
-        ]
+            ))
+            if not param.required:
+                pos.append(ty.PosOrKwArg(None, 'bool'))
         for param in type_.kw_only:
             pos.append(ty.PosOrKwArg(
                 param.name,
@@ -2098,6 +2098,14 @@ class _Lowerer:
             elif param.name is not None and param.name in remaining:
                 argument = remaining.pop(param.name)
                 source_position = param.name
+            elif not param.required:
+                normalized.extend([
+                    self._default_placeholder(param.type, node.loc),
+                    hir.Bool(node.loc, 'bool', False),
+                ])
+                source_positions.extend([None, None])
+                optional_payloads.extend([None, None])
+                continue
             else:
                 raise ValueError(
                     f'INTERNAL ERROR: checked call is missing required parameter `{param.name}`'
@@ -2105,6 +2113,10 @@ class _Lowerer:
             normalized.append(argument)
             source_positions.append(source_position)
             optional_payloads.append(ty.optional_payload(param.type))
+            if not param.required:
+                normalized.append(hir.Bool(node.loc, 'bool', True))
+                source_positions.append(None)
+                optional_payloads.append(None)
         if len(pos_args) > len(function_type.pos_or_kw):
             raise ValueError('INTERNAL ERROR: rest arguments reached udewy lowering')
         for param in function_type.kw_only:
@@ -7137,8 +7149,6 @@ class _Lowerer:
         return statements
 
     def _lower_object_field_assign(self, node: hir.Assign) -> list[hir.AST]:
-        if node.op != '=':
-            self._target_error(node, f'object field compound assignment `{node.op}`')
         if self.current_object_receiver is None or self.current_object_type is None:
             self._target_error(node, 'object field assignment without a receiver')
         assert node.target.binding_id is not None
@@ -7152,9 +7162,37 @@ class _Lowerer:
         field = self.current_object_type.field(name)
         field_type = field.type if field is not None else node.target.type
         if isinstance(field_type, ty.ObjectType):
+            if node.op != '=':
+                self._target_error(node, f'object field compound assignment `{node.op}`')
             prelude, src = self._extract_object_pointer(node.value)
             return [*prelude, *self._object_copy(address, src, field_type, node.loc)]
-        prelude, value = self._extract_expression(node.value)
+        assigned_value = node.value
+        if node.op != '=':
+            symbol = node.op[:-1]
+            dunder = builtins.BINOP_DUNDER_MAP.get(symbol)
+            if dunder is None:
+                self._target_error(node, f'object field compound assignment `{node.op}`')
+            function_type = ty.FunctionType(
+                [
+                    ty.PosOrKwArg('left', field_type),
+                    ty.PosOrKwArg('right', field_type),
+                ],
+                [],
+                None,
+                field_type,
+                [],
+            )
+            assigned_value = hir.FunctionCall(
+                node.loc,
+                field_type,
+                hir.ExpressedIdentifier(node.loc, function_type, dunder),
+                [
+                    self._value_load(address, field_type, node.loc),
+                    node.value,
+                ],
+                {},
+            )
+        prelude, value = self._extract_expression(assigned_value)
         return [*prelude, *self._value_store(value, address, field_type, node.loc)]
 
     def _lower_member_assign(self, node: hir.MemberAssign) -> list[hir.AST]:

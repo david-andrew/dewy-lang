@@ -1,6 +1,6 @@
 from json import loads
 from pathlib import Path
-from re import search
+from re import finditer, search
 
 from udewy.third_party.web.generate_highlighted_udewy import DEFAULT_THEME, highlighted_spans
 
@@ -62,3 +62,34 @@ def test_textmate_highlights_static_words_as_an_intrinsic() -> None:
     grammar = loads(grammar_path.read_text())
 
     assert search(grammar["repository"]["intrinsic"]["match"], "__static_words__")
+
+
+def test_textmate_type_parameter_closes_before_default_assignment() -> None:
+    grammar_path = REPO_ROOT / "udewy" / "vscode-udewy" / "syntaxes" / "udewy.tmLanguage.json"
+    grammar = loads(grammar_path.read_text())
+    end_pattern = grammar["repository"]["type-parameter"]["end"]
+
+    function_default = "<():>int64>=forty_two"
+    nested_default = "<array<int64 length=2>>=[0 2]"
+
+    assert [match.start() for match in finditer(end_pattern, function_default)] == [
+        function_default.index(">=")
+    ]
+    assert [match.start() for match in finditer(end_pattern, nested_default)] == [
+        nested_default.index(">>"),
+        nested_default.index(">=")
+    ]
+
+
+def test_textmate_type_parameter_does_not_close_on_comparison_operators() -> None:
+    grammar_path = REPO_ROOT / "udewy" / "vscode-udewy" / "syntaxes" / "udewy.tmLanguage.json"
+    grammar = loads(grammar_path.read_text())
+    end_pattern = grammar["repository"]["type-parameter"]["end"]
+
+    greater = "<i>?0>"
+    greater_or_equal = "<i>=?0>"
+
+    assert [match.start() for match in finditer(end_pattern, greater)] == [len(greater) - 1]
+    assert [match.start() for match in finditer(end_pattern, greater_or_equal)] == [
+        len(greater_or_equal) - 1
+    ]

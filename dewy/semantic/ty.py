@@ -112,11 +112,14 @@ class QuantityType:
 class PosOrKwArg:
     """One positional slot in a FunctionType, optionally addressable by name.
 
-    Always required (no default). An absent name makes the slot positional-only;
-    otherwise the name is part of the callable contract and permits keyword calls.
+    ``required=False`` means the function supplies a default when a completed
+    call leaves this slot unset. An absent name is reserved for internal
+    callables; source parameters always have names and are therefore
+    addressable by keyword.
     """
     name: str | None
     type: TypeExpr
+    required: bool = True
 
 @dataclass
 class KwOnlyArg:
@@ -912,12 +915,15 @@ class TypeSystem:
         """True if F is usable wherever G is expected (call-shape inclusion).
 
         Parameter types are contravariant; return type is covariant.
-        Optional kwargs on G cannot be required on F; F may add optional extras.
+        Optional parameters on G cannot be required on F; F may add optional
+        keyword-only extras.
         """
         if len(f.pos_or_kw) != len(g.pos_or_kw):
             return False
         for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
             if gp.name is not None and fp.name != gp.name:
+                return False
+            if not gp.required and fp.required:
                 return False
             if not self.is_subtype(gp.type, fp.type):
                 return False
@@ -1058,7 +1064,7 @@ class TypeSystem:
                 return None
 
         if any(
-            param.name not in kw_types
+            param.required and param.name not in kw_types
             for param in m.pos_or_kw[len(pos_types):]
         ):
             return None
@@ -1119,7 +1125,7 @@ class TypeSystem:
                 return False
 
         if any(
-            param.name not in kw_types
+            param.required and param.name not in kw_types
             for param in m.pos_or_kw[len(pos_types):]
         ):
             return False
@@ -1548,7 +1554,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         nested_shadow = {gp.name for gp in t.type_params}
         inner = {k: v for k, v in bindings.items() if k not in nested_shadow}
         return FunctionType(
-            [PosOrKwArg(p.name, substitute_type(p.type, inner)) for p in t.pos_or_kw],
+            [PosOrKwArg(p.name, substitute_type(p.type, inner), p.required) for p in t.pos_or_kw],
             [KwOnlyArg(k.name, substitute_type(k.type, inner), k.required) for k in t.kw_only],
             t.rest,
             substitute_type(t.ret, inner),
@@ -1569,7 +1575,7 @@ def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> Funct
     if not m.type_params:
         return m
     return FunctionType(
-        [PosOrKwArg(p.name, substitute_type(p.type, type_args)) for p in m.pos_or_kw],
+        [PosOrKwArg(p.name, substitute_type(p.type, type_args), p.required) for p in m.pos_or_kw],
         [KwOnlyArg(k.name, substitute_type(k.type, type_args), k.required) for k in m.kw_only],
         m.rest,
         substitute_type(m.ret, type_args),

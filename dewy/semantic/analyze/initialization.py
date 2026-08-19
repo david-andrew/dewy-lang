@@ -597,6 +597,16 @@ class _InitializationChecker:
                         parameter_effects[param.binding_id] = CallableEffect(
                             tuple(targets)
                         )
+                elif isinstance(param, hir.BoundParam):
+                    targets = self._callable_targets(
+                        param.value,
+                        outer_parameters,
+                        set(),
+                    )
+                    if targets is not None:
+                        parameter_effects[param.binding_id] = CallableEffect(
+                            tuple(targets)
+                        )
         for param in function.kw_only_args:
             if param.binding_id is not None:
                 available.add(param.binding_id)

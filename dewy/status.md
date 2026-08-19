@@ -84,8 +84,8 @@ The type system instantiates generic function types for built-in operator overlo
 ## Function signatures and calls
 
 - [x] Positional parameters and arguments, named parameter contracts in structural function types, and pipe calls.
-- [x] Keyword-only parameters and defaults participate in semantic checking and initialization analysis.
-- [x] Keyword arguments and per-call defaults lower through a positional udewy ABI for direct, piped, overload-selected, indirect, and method calls.
+- [x] Positional-or-named parameters may have per-call defaults; explicit post-`...` parameters are keyword-only and participate in semantic checking and initialization analysis.
+- [x] Positional or named arguments and per-call defaults lower through a positional udewy ABI for direct, piped, overload-selected, indirect, and method calls.
 - [ ] Rest parameters, argument spreading, and partial application do not yet lower to udewy calls.
 
 ## Integer representations and operations
@@ -140,6 +140,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] udewy lowering for finite ranges whose values and iteration arithmetic fit the supported `int64` representation.
 - [x] Default one-grapheme character ranges, including descending and stepped forms, scalar-order iteration, and skipping the Unicode surrogate gap.
 - [x] Explicit `range<uint32>` context for one-scalar string endpoints.
+- [x] Exact-integer membership with `in?`, the contextual `end` index, direct bound-delimited string slices such as `text[3..12)`, and fixed-range slicing of exact-length array bindings.
 - [ ] Runtime-computed range anchors and steps.
 - [ ] Bigint lowering for right-unbounded or finite out-of-`int64` ranges.
 - [ ] Using general range values beyond the currently supported iterator normalization.
@@ -172,7 +173,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Structural object types and named compile-time `type` aliases used in annotations.
 - [x] Field read and write, nested objects, and exact name/type/order matching.
 - [x] Object parameters, returns, and constructors (functions that return literals), with value-semantics copies.
-- [x] Function fields, including parenthesis-free zero-argument calls on member access, and object-local reads of sibling fields.
+- [x] Function fields, including parenthesis-free zero-argument calls on member access, and object-local reads or compound assignment of sibling fields.
 - [x] Sequential udewy layout for `bool`, fixed-width integers, function pointers, string/array handles, and nested objects of those types.
 - [ ] Dictionary and bidictionary `[]` forms.
 - [ ] sets `set[1 2 3 4]`

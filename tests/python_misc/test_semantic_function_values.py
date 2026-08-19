@@ -42,19 +42,32 @@ def test_structural_function_type_display() -> None:
     ) == '<(int64 bool):>int64>'
 
 
+def test_bare_function_type_identifier_is_a_parameter_name() -> None:
+    root = check.typecheck_and_resolve(
+        SrcFile(None, 'let Callback:type = <x:>int64>')
+    )
+    assert isinstance(root, hir.Block)
+    declaration = root.items[0]
+    assert isinstance(declaration, hir.Declare)
+    assert isinstance(declaration.expr, hir.TypeValue)
+    callback = declaration.expr.value
+    assert isinstance(callback, ty.FunctionType)
+    assert callback.pos_or_kw == [ty.PosOrKwArg('x', ty.TOP_TYPE)]
+
+
 def test_callable_values_and_pipe_share_function_call_hir() -> None:
     source = """
 let double = (x:int64):>int64 => {
     return x * 2
 }
-let choose = ():><int64:>int64> => {
+let choose = ():><(x:int64):>int64> => {
     return double
 }
-let apply = (fn:<int64:>int64> value:int64):>int64 => {
+let apply = (fn:<(x:int64):>int64> value:int64):>int64 => {
     return fn(value)
 }
 let main = ():>int64 => {
-    let fn_ptr:<int64:>int64> = choose()
+    let fn_ptr:<(x:int64):>int64> = choose()
     let indirect:int64 = (fn_ptr)(5)
     let piped:int64 = 6 |> fn_ptr
     return apply(fn_ptr indirect + piped)
@@ -66,7 +79,7 @@ let main = ():>int64 => {
     main = root.items[-1]
     assert isinstance(choose, hir.Declare)
     assert isinstance(choose.expr, hir.FunctionLiteral)
-    assert choose.expr.rettype == _function_type()
+    assert choose.expr.rettype == _function_type('x')
     assert isinstance(main, hir.Declare)
     assert isinstance(main.expr, hir.FunctionLiteral)
     assert isinstance(main.expr.body, hir.Block)

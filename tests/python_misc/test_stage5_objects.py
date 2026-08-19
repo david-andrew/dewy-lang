@@ -1,8 +1,13 @@
+from pathlib import Path
+from shutil import which
+
 import pytest
 
+from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
 from dewy.semantic.errors import NotImplementedYet, TypeCheckError, UserError
+from udewy.frontend import entry_point
 
 
 def _check(source: str) -> hir.Block:
@@ -78,7 +83,7 @@ def test_named_object_type_alias_matches_literal() -> None:
 
 def test_object_type_desugars_colon_function_fields() -> None:
     root = _check(
-        'let Box:type = [fn:(int64):>int64]\n'
+        'let Box:type = [fn:(x:int64):>int64]\n'
         'let f = ():>int64 => {\n'
         '    let o:Box = [fn = (x:int64):>int64 => x]\n'
         '    return o.fn(42)\n'
@@ -129,6 +134,86 @@ def test_zero_arg_member_is_auto_called() -> None:
     assert isinstance(returned.item.func, hir.MemberAccess)
     assert returned.item.func.name == 'fn2'
     assert returned.item.pos_args == []
+
+
+def test_expression_function_body_allows_grouped_compound_assignment() -> None:
+    body = _function_body(
+        'let f = ():>int64 => {\n'
+        '    let value:int64 = 40\n'
+        '    let increment = () => (value += 1)\n'
+        '    return value\n'
+        '}'
+    )
+    declaration = body.items[1]
+    assert isinstance(declaration, hir.Declare)
+    assert isinstance(declaration.expr, hir.FunctionLiteral)
+    assert isinstance(declaration.expr.body, hir.Block)
+    assert len(declaration.expr.body.items) == 1
+    assignment = declaration.expr.body.items[0]
+    assert isinstance(assignment, hir.Assign)
+    assert assignment.op == '+='
+
+
+def test_ungrouped_compound_assignment_function_body_suggests_grouping() -> None:
+    source = (
+        'let f = ():>int64 => {\n'
+        '    let value:int64 = 40\n'
+        '    let increment = () => value += 1\n'
+        '    return value\n'
+        '}'
+    )
+
+    with pytest.raises(UserError) as caught:
+        _check(source)
+
+    report = caught.value.report
+    assert report.title == 'function literal is not a valid compound assignment target'
+    assert report.hint is not None
+    assert 'wrap the in-place assignment in parentheses' in report.hint
+    assert '() => (value += 1)' in report.hint
+
+
+def test_object_method_can_compound_assign_a_sibling_field() -> None:
+    emitted = codegen(SrcFile(None, '''
+let counter = (start:int64=0) => [
+    value = start
+    increment = () => (value += 1)
+]
+let count = counter(40)
+count.increment
+count.increment
+let main = ():>int64 => count.value
+'''))
+
+    assert '__store_i64__(__load_i64__(__dewy_object_self_' in emitted
+    assert ' + 1 __dewy_object_self_' in emitted
+    assert 'let main = ():>int64' in emitted
+
+
+@pytest.mark.skipif(
+    which('as') is None or which('ld') is None,
+    reason='as/ld not available',
+)
+def test_homepage_counter_example_compiles_and_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = '''
+counter = (start=0) => [
+    value = start
+    increment = () => (value += 1)
+]
+
+count = counter(40)
+count.increment
+count.increment
+
+main = ():>int64 => count.value
+'''
+    path = tmp_path / 'counter.udewy'
+    path.write_text(codegen(SrcFile(None, source)))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 42
 
 
 def test_zero_arg_member_call_target_is_not_double_called() -> None:

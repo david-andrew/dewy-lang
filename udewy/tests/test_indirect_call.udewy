@@ -3,12 +3,12 @@ let double = (x:int64):>int64 => {
     return x * 2
 }
 
-let choose = ():> <int64:>int64> => {
+let choose = ():> <(x:int64):>int64> => {
     return double
 }
 
 let main = ():>int64 => {
-    let fn_ptr:<int64:>int64> = choose()
+    let fn_ptr:<(x:int64):>int64> = choose()
     let indirect:int64 = (fn_ptr)(5)
     let piped:int64 = 6 |> fn_ptr
     return indirect + piped

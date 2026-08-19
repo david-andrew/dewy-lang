@@ -362,7 +362,7 @@ class BoundParam(Param):
 
 @dataclass
 class FunctionLiteral(AST):
-    pos_or_kw_args: list[Param]  # all `default` should be None...
+    pos_or_kw_args: list[Param|BoundParam]
     kw_only_args: list[Param|BoundParam]
     rest_args: Param | BoundParam | None
     rettype: ty.Type
@@ -371,7 +371,9 @@ class FunctionLiteral(AST):
     object_fields: tuple[tuple[int, str], ...] = ()
     object_type: ty.ObjectType | None = None
 
-#TODO: partial eval is basically like a stack of function calls (though need to be careful about eager vs lazy evaluation of parameters (since they probably should be eager))
+# TODO: Partial evaluation is roughly a stack of function calls. Explicitly
+# supplied values are evaluated and saved immediately; signature defaults stay
+# as per-call fallbacks until a completed call needs them.
 
 @dataclass
 class OverloadedFunction(AST):
@@ -380,94 +382,98 @@ class OverloadedFunction(AST):
 
 
 """
-syntax for various types of function signature arguments:
+Function signature and call-binding design
+==========================================
 
+Required parameters before `...` are positional-or-keyword. Call arguments
+are processed from left to right:
 
-# ─── DECLARATION ────────────────────────────────────────────────────────
-# No position-only args: every parameter is always addressable by name,
-# which is what keeps partial-eval-by-name working everywhere.
+1. A positional argument binds the first parameter still available by
+   position.
+2. A named argument binds the parameter with that name and removes it from
+   the remaining positional sequence.
+3. One call cannot supply the same parameter twice.
 
-let F = (
+For example:
 
-    # positional-or-keyword, required. may be passed by position or by name.
-    a b c
+    let combine = (a b=10 c) => [a b c]
 
-    # a bound arg (has a default) drops OUT of the positional running, so it
-    # becomes keyword-only automatically. placement is free: `d` sits between
-    # positional-or-keyword args but is skipped by positional calls.
-    #   F(1 2 3)      -> a=1 b=2 c=3, d defaulted
-    #   F(1 2 3 d=9)  -> d overridden by name
-    a b d=10 c        # (same idea, just showing default interleaved is fine)
+    combine(1 2 3)       # a=1, b=2,  c=3
+    combine(1 c=3)       # a=1, b=10, c=3
+    combine(b=2 1 3)     # b=2, then a=1 and c=3
+    combine(1 3)         # error: a=1, b=3, required c is missing
 
-    # destructure a single positional aggregate. polymorphic on the caller:
-    #   caller passes an array  -> bound by ORDER (names free, order matters)
-    #   caller passes an object -> bound by NAME  (names must match, order free)
-    # untyped like this is ALLOWED but UNIDIOMATIC; emits a
-    # "array-vs-object is caller-determined" warning at this definition.
-    [p q r]
+A signature default is a per-call fallback. It does not bind the parameter
+when the function is defined, and it does not remove that parameter's
+positional slot. A normal call evaluates the default separately if the
+parameter is still unset after all explicit arguments have been processed.
+This gives mutable defaults a fresh value for each call.
 
-    # pin it to object form with an annotation -> no warning; a caller that
-    # passes an array (or wrong field names) is an error.
-    [m n]:[m:int n:string]
-    # (pinning to array form uses its array type annotation)
-    [s t u]:<string int bool>
-    [v w x]:[int int int]
-    [y z ...inner_rest]:array<int>
+Partial evaluation uses the same argument-ordering rule, but an explicitly
+supplied value is evaluated and saved when the `@function(...)` expression is
+evaluated. That parameter then leaves the resulting function's positional
+sequence. Its name remains available for a later explicit replacement.
+Defaults that have not been needed yet remain per-call fallbacks rather than
+being evaluated during partial evaluation.
 
-    # the divider. positionals are closed here; everything after is
-    # required keyword-only. use bare `...` when you want the boundary
-    # WITHOUT collecting anything.
-    ...
-    flag
-    mode
+    let configured = @combine(b=20)  # 20 is evaluated and saved now
+    configured(1 3)                  # a=1, b=20, c=3
+    configured(1 3 b=30)             # explicitly replaces saved b
 
-):>T => { ... }
+A bare `...` closes the positional sequence without collecting arguments.
+Parameters after it are keyword-only: those without defaults are required,
+while those with defaults are optional.
 
+    let render = (value ... width:int64 theme="light") => {...}
+    render(text width=80)
 
+The planned `...rest` form both closes the positional sequence and captures
+otherwise unmatched positional and named arguments. The captured arguments
+form an opaque bundle intended for forwarding, not direct inspection.
 
-# ─── CAPTURE + DELEGATION ───────────────────────────────────────────────
-# `...rest` captures every leftover arg (positional AND keyword) that didn't
-# match a declared param. it's an opaque bundle: you forward it, you
-# never read it. it also serves as the positional/keyword divider, so any
-# bare param after it is keyword-only.
+    let wrapper = (a b ...rest trace=false) => {
+        log(trace)
+        target(a b ...rest)
+    }
 
-let wrapper = (a b ...rest opts=false) => {
-    # peel-and-forward: intercept what you name, forward the rest to ONE callee.
-    F(a b)
-    G(...rest)
-}
+Forwarding the same bundle to more than one function is valid only when every
+destination accepts every captured argument. Dewy deliberately does not split
+one captured bundle among several destinations; arguments that need different
+destinations should be named explicitly in the wrapper signature.
 
-# broadcast: forward the same bundle to MULTIPLE callees.
-# legal iff every callee accepts ALL of rest:  row(rest) ⊆ params(F) ∩ params(G)
-# (partitioning rest between callees is intentionally NOT supported — that
-#  would require naming the split, so just name it in the signature instead.)
-let tee = (...rest) => {
-    F(...rest)
-    G(...rest)
-}
+Source signatures currently require names for all parameters before `...`.
+Because parameter names and type names are both ordinary identifiers, a bare
+identifier is always a parameter name rather than an unnamed type annotation.
+The intended explicit positional-only form is `<name:type>`:
 
-# partial application via `@`: produce the function-value without firing it.
-let configured = @F(x=10 ...rest)
-#   - rest carries a field not in F   -> compile-time error (row ⊄ params(F))
-#   - rest fills every remaining slot -> fine; result is a fully-bound value,
-#     still re-bindable by name:   let tweaked = @configured(a=99)
+    let increment = <value:int64> => value + 1
+    let something = (<a:int64> b:string <c:bool> ...) => ...  # mixing positional and keyword-or-positional arguments is allowed
 
+Here `value` is available in the body but callers cannot write `value=...`.
+This syntax is planned and is not yet accepted by the current compiler.
+Note that position only arguments may not come after a `...`
 
+Destructured parameters are also planned. An unannotated `[a b c]` parameter
+could accept an array by position or an object by field name; an explicit
+annotation removes that ambiguity:
 
+    [a b]:[a:int b:string]       # object fields matched by name
+    [a b]:<int string>           # fixed sequence matched by position
+    [a b ...items]:array<int>    # array prefix plus remaining elements
 
+Generic parameters can be understood as declarations in a scope surrounding
+the function signature and body:
 
+    let F = <T of number U V>(a:T b:T u:U v:V):>T => {...}
 
-misc note: making generic is basically the same as making a scope to declare the thing in:
-```
-let F = <T of number U V>(a:T b:T u:U v:V):>T => {...}
-let F = {
-    let T:type = generic_param(root=number)
-    let U:type = generic_param()
-    let V:type = generic_param()
-    (a:T b:T u:U v:V):>T => {...}
-}
-```
+is conceptually equivalent to:
 
+    let F = {
+        let T:type = generic_param(root=number)
+        let U:type = generic_param()
+        let V:type = generic_param()
+        (a:T b:T u:U v:V):>T => {...}
+    }
 """
 
 @dataclass

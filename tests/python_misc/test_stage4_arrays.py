@@ -110,6 +110,41 @@ def test_array_length_is_an_exact_integer_and_proves_constant_expression() -> No
     assert length.type == ty.IntegerLiteralType(3)
 
 
+def test_end_names_the_last_index_and_static_array_ranges_copy_a_slice() -> None:
+    body = _function_body('''
+let f = ():>int64 => {
+    let values = [10 20 30 40 50]
+    let last = values[end]
+    let tail = values[end-3..]
+    return last + tail[0]
+}
+''')
+    last = body.items[1]
+    tail = body.items[2]
+    assert isinstance(last, hir.Declare)
+    assert isinstance(last.expr, hir.Index)
+    assert last.expr.constant_index == 4
+    assert isinstance(tail, hir.Declare)
+    assert isinstance(tail.expr, hir.ArrayLiteral)
+    assert [
+        item.constant_index
+        for item in tail.expr.items
+        if isinstance(item, hir.Index)
+    ] == [1, 2, 3, 4]
+
+
+def test_static_array_range_slice_lowers() -> None:
+    emitted = codegen(SrcFile(None, '''
+let main = ():>int64 => {
+    let values = [10 20 30 40 50]
+    let tail = values[end-3..]
+    return tail[0] + tail[3]
+}
+'''))
+
+    assert 'end' not in emitted
+
+
 def test_const_integer_index_is_proven() -> None:
     body = _function_body(
         'let f = ():>int64 => { '

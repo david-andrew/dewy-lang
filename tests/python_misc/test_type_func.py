@@ -90,6 +90,38 @@ def test_required_expected_accepts_optional_or_required_provided():
     assert function_subtype(f_req, g)
 
 
+def test_optional_positional_expected_rejects_required_provided():
+    expected = FunctionType(
+        [PosOrKwArg('value', 'int', required=False)],
+        [],
+        None,
+        'void',
+    )
+    provided = FunctionType(
+        [PosOrKwArg('value', 'int', required=True)],
+        [],
+        None,
+        'void',
+    )
+    assert not function_subtype(provided, expected)
+
+
+def test_required_positional_expected_accepts_optional_provided():
+    expected = FunctionType(
+        [PosOrKwArg('value', 'int', required=True)],
+        [],
+        None,
+        'void',
+    )
+    provided = FunctionType(
+        [PosOrKwArg('value', 'int', required=False)],
+        [],
+        None,
+        'void',
+    )
+    assert function_subtype(provided, expected)
+
+
 def test_extra_optional_on_f_ok():
     g = F([('x', 'int')], ret='void')
     f = F([('x', 'int')], kw=[('debug', 'bool', False)], ret='void')

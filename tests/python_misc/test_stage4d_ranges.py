@@ -81,6 +81,34 @@ loop i in first,second..10 {}
     )
 
 
+@pytest.mark.parametrize(
+    ('expression', 'expected'),
+    [
+        ('16 in? (5..15]', False),
+        ('15 in? (5..15]', True),
+        ('5 in? (5..15]', False),
+        ('8 in? 0,2..10', True),
+        ('9 in? 0,2..10', False),
+        ('100 in? ..', True),
+        ('10 in? [..10)', False),
+    ],
+)
+def test_exact_integer_range_membership_is_folded(
+    expression: str,
+    expected: bool,
+) -> None:
+    root = _check(f'let result = {expression}')
+    declaration = root.items[0]
+    assert isinstance(declaration, hir.Declare)
+    assert isinstance(declaration.expr, hir.Bool)
+    assert declaration.expr.value is expected
+
+
+def test_exact_integer_range_membership_lowers() -> None:
+    emitted = codegen(SrcFile(None, 'let result = 16 in? (5..15]'))
+    assert 'let result:bool = false' in emitted
+
+
 def test_right_unbounded_ranges_have_bigint_targets() -> None:
     ascending = _iterator('0..')
     descending = _iterator('5,3..')

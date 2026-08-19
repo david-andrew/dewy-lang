@@ -95,7 +95,12 @@ let add7 = @add(a=7)
 - Positional args fill leftover positional-only slots first, then leftover pkwargs. Each filled slot is removed from the positional side and appended as keyword-only with a suspended value.
 - Too many positionals is an error.
 
-`suspend(ast, scope)` is `Closure(fn=(() => ast), scope=scope)` — a zero-arg thunk over the partial-application site. Bound values are therefore re-evaluated when the *resulting* function is later called, not when `@fn(...)` runs.
+`suspend(ast, scope)` is `Closure(fn=(() => ast), scope=scope)` — a deferred
+zero-argument expression carrying the partial-application scope. In this old
+implementation, saved expressions were therefore re-evaluated when the
+*resulting* function was later called, rather than when `@fn(...)` ran. The
+current language design instead evaluates explicitly supplied partial values
+immediately.
 
 `resolve_calling_args` (used by a real call):
 
@@ -105,7 +110,8 @@ let add7 = @add(a=7)
 - Remaining positional/pkwarg slots pair with leftover positionals; anything still unbound must be an `Assign` default, also evaluated in the closure scope.
 - Too many positionals is an error. A leftover required parameter (not an `Assign`) is an error.
 
-Because suspended bindings are themselves closures, `evaluate` of a default that is a thunk *calls* that thunk at bind time.
+Because suspended bindings are themselves closures, evaluating a deferred
+default also evaluates its saved expression at bind time.
 
 ### `@` vs not-`@` on a passed function
 
@@ -114,7 +120,7 @@ From `examples/closure.dewy`:
 ```dewy
 B = () => '@Blueberry'
 A = () => '@Apricot'
-@fn(b=B)     # B is looked up now; the thunk calls B when fn is called; parameter `b` is already a string
+@fn(b=B)     # B is looked up now; the saved expression calls B when fn is called; parameter `b` is already a string
 @fn(a=@A)    # `@A` stays a handle; parameter `a` is the function; the body IString calls it while interpolating
 ```
 

@@ -153,6 +153,17 @@ let later = ():>int64 => 42
         _check(source)
 
 
+def test_positional_default_callback_uses_its_call_site_effects() -> None:
+    source = """
+let callback = ():>int64 => later()
+let invoke = (fn:<():>int64>=callback):>int64 => fn()
+invoke()
+let later = ():>int64 => 42
+"""
+    with pytest.raises(UserError, match='`later` used before initialization'):
+        _check(source)
+
+
 def test_deferred_function_body_can_read_a_later_initialized_value() -> None:
     source = """
 let read = ():>int64 => value

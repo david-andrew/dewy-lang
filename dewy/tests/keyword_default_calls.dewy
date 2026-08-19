@@ -8,6 +8,7 @@ let forty_two = ():>int64 => 42
 let invoke = (... fn:<():>int64>=forty_two):>int64 => fn()
 let add = (x:int64 y:int64=2):>int64 => x + y
 let inferred = (x:int64 y=2):>int64 => x + y
+let interleaved = (x:int64 y:int64=2 z:int64):>int64 => x + y + z
 let subtract = (x:int64 y:int64):>int64 => x - y
 let required = (x:int64 ... y:int64):>int64 => x + y
 let integer = (x:int64 y:int64=2):>int64 => x + y
@@ -28,7 +29,11 @@ let main = ():>int64 => {
     ]
     let direct:int64 = add(40)
     let inferred_default:int64 = inferred(40)
+    let positional_default:int64 = interleaved(20 2 20)
+    let omitted_default:int64 = interleaved(20 z=20)
+    let named_then_positional:int64 = interleaved(y=2 20 20)
     let override:int64 = add(39 y=3)
+    let positional_override:int64 = add(39 3)
     let reordered:int64 = subtract(y=0 x=42)
     let piped:int64 = 40 |> add
     let indirect:int64 = (fn)(40)
@@ -42,7 +47,10 @@ let main = ():>int64 => {
     let supplied_result:int64 = fresh(items=supplied)
     let first_fresh:int64 = fresh()
     let second_fresh:int64 = fresh()
-    if direct =? 42 and inferred_default =? 42 and override =? 42
+    if direct =? 42 and inferred_default =? 42
+        and positional_default =? 42 and omitted_default =? 42
+        and named_then_positional =? 42
+        and override =? 42 and positional_override =? 42
         and reordered =? 42 and piped =? 42
         and indirect =? 42 and overloaded =? 42
         and method =? 42 and keyword_only =? 42

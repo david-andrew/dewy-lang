@@ -118,6 +118,7 @@ def test_string_length_index_slice_and_equality_hir() -> None:
         'let count = text.length '
         'let family = text[5] '
         'let prefix = text[[0..3]] '
+        'let direct = text[3..7) '
         'let same = prefix =? "café"'
     )
     declarations = _declarations(root)
@@ -127,6 +128,9 @@ def test_string_length_index_slice_and_equality_hir() -> None:
     assert declarations['family'].expr.type == ty.StringType(1)
     assert isinstance(declarations['prefix'].expr, hir.StringSlice)
     assert declarations['prefix'].expr.type == ty.StringType(4)
+    assert isinstance(declarations['direct'].expr, hir.StringSlice)
+    assert declarations['direct'].expr.type == ty.StringType(4)
+    assert declarations['direct'].expr.range.bounds == '[)'
     assert isinstance(declarations['same'].expr, hir.StringEqual)
 
 

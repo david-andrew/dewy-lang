@@ -58,14 +58,73 @@ let result = add(40)
 
     function = declarations['add']
     assert isinstance(function, hir.FunctionLiteral)
-    assert len(function.kw_only_args) == 1
-    default = function.kw_only_args[0]
+    assert len(function.pos_or_kw_args) == 2
+    assert function.kw_only_args == []
+    default = function.pos_or_kw_args[1]
     assert isinstance(default, hir.BoundParam)
-    assert default.type == ty.IntegerLiteralType(2)
+    assert default.type == 'int64'
 
     call = declarations['result']
     assert isinstance(call, hir.FunctionCall)
     assert call.kw_args == {}
+
+
+def test_default_parameter_can_be_overridden_by_position_or_name() -> None:
+    declarations = _declarations('''
+let add = (x:int64 y=2):>int64 => x + y
+let named = add(40 y=2)
+let positional = add(40 2)
+''')
+
+    named = declarations['named']
+    assert isinstance(named, hir.FunctionCall)
+    assert list(named.kw_args) == ['y']
+
+    positional = declarations['positional']
+    assert isinstance(positional, hir.FunctionCall)
+    assert len(positional.pos_args) == 2
+
+
+def test_interleaved_default_keeps_its_positional_slot() -> None:
+    declarations = _declarations('''
+let combine = (left:int64 scale:int64=2 right:int64):>int64 => left + right * scale
+let positional = combine(10 2 16)
+let defaulted = combine(10 right=16)
+''')
+
+    function = declarations['combine']
+    assert isinstance(function, hir.FunctionLiteral)
+    assert [param.name for param in function.pos_or_kw_args] == ['left', 'scale', 'right']
+    assert function.kw_only_args == []
+
+    positional = declarations['positional']
+    assert isinstance(positional, hir.FunctionCall)
+    assert len(positional.pos_args) == 3
+
+    defaulted = declarations['defaulted']
+    assert isinstance(defaulted, hir.FunctionCall)
+    assert len(defaulted.pos_args) == 1
+    assert list(defaulted.kw_args) == ['right']
+
+
+def test_named_binding_removes_a_parameter_from_the_remaining_positional_sequence() -> None:
+    declarations = _declarations('''
+let combine = (left:int64 scale:int64=2 right:int64):>int64 => left + right * scale
+let result = combine(scale=2 10 16)
+''')
+
+    call = declarations['result']
+    assert isinstance(call, hir.FunctionCall)
+    assert len(call.pos_args) == 3
+    assert call.kw_args == {}
+
+
+def test_omitted_interleaved_default_does_not_skip_a_missing_required_parameter() -> None:
+    with pytest.raises(UserError, match='no matching method'):
+        _declarations('''
+let combine = (left:int64 scale:int64=2 right:int64):>int64 => left + right * scale
+let result = combine(10 16)
+''')
 
 
 def test_named_argument_selects_overload() -> None:

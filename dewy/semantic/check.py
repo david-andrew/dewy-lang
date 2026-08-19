@@ -635,6 +635,32 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
     if symbol not in builtins.BINOP_DUNDER_MAP:
         not_implemented(ctx.srcfile, ast.op.loc, f'compound assignment operator `{symbol}=`')
 
+    if (
+        isinstance(ast.left, p0.BinOp)
+        and isinstance(ast.left.op, t1.Operator)
+        and ast.left.op.symbol == '=>'
+    ):
+        # TODO: Link to the operator-precedence table once it has a stable URL.
+        user_error(
+            ctx.srcfile,
+            'function literal is not a valid compound assignment target',
+            Pointer(
+                span=ast.left.loc,
+                message=(
+                    f'`=>` binds more tightly than `{symbol}=`, so this '
+                    'function literal became the assignment target'
+                ),
+            ),
+            Pointer(
+                span=ast.op.loc,
+                message='this operator applies to the entire function literal on its left',
+            ),
+            hint=(
+                'you might need to wrap the in-place assignment in '
+                f'parentheses, for example `() => (value {symbol}= 1)`'
+            ),
+        )
+
     target = tcr_assignment_target(ast.left, ctx=ctx, refined=True)
     if isinstance(target, hir.Index):
         not_implemented(
@@ -1168,6 +1194,58 @@ def _normalize_integer_range(
         else 'int'
     )
     return _NormalizedIntegerRange(first, step, last, count, target_type)
+
+
+def _tcr_static_range_membership(
+    value: hir.AST,
+    range_: hir.Range,
+    *,
+    ctx: Context,
+) -> hir.Bool:
+    """Fold membership when both the value and range anchors are exact integers."""
+
+    candidate = _constant_integer(value, ctx=ctx)
+    if candidate is None:
+        not_implemented(
+            ctx.srcfile,
+            value.loc,
+            'runtime-valued range membership',
+        )
+    if range_.left is None:
+        if range_.step_pair is not None:
+            not_implemented(
+                ctx.srcfile,
+                range_.loc,
+                'left-unbounded stepped range membership',
+            )
+        right = (
+            _constant_integer(range_.right, ctx=ctx)
+            if range_.right is not None
+            else None
+        )
+        if range_.right is not None and right is None:
+            not_implemented(
+                ctx.srcfile,
+                range_.right.loc,
+                'runtime-valued range membership bounds',
+            )
+        included = True
+        if right is not None:
+            included = (
+                candidate <= right
+                if (range_.bounds or '[]')[1] == ']'
+                else candidate < right
+            )
+        return hir.Bool(value.loc, 'bool', included)
+
+    normalized = _normalize_integer_range(range_, ctx=ctx)
+    delta = candidate - normalized.first
+    aligned = delta % abs(normalized.step) == 0
+    ordinal = delta // normalized.step if aligned else -1
+    included = aligned and ordinal >= 0 and (
+        normalized.count is None or ordinal < normalized.count
+    )
+    return hir.Bool(value.loc, 'bool', included)
 
 
 def _tcr_range_iterator(
@@ -2529,13 +2607,13 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
                 and expression.op.symbol == '=>'
             ):
                 continue
-            deferred_functions.add(id(item))
             try:
                 signature = signature_of(expression, ctx=ctx)
             except ReportException:
                 continue
             if signature is None:
                 continue
+            deferred_functions.add(id(item))
             binding = ctx.binding_registry.by_syntax[id(item)]
             binding.type = signature
             binding.literal_path_parameter = _literal_path_parameter(expression)
@@ -3022,44 +3100,58 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 message=f'this has type `{type_to_dewy(array.type)}`',
             ),
         )
-    if not (
-        isinstance(binop.right, p0.Block)
-        and binop.right.kind == '[]'
-        and len(binop.right.inner) == 1
-    ):
+    if not isinstance(binop.right, p0.Block) or len(binop.right.inner) != 1:
         user_error(
             ctx.srcfile,
             'Stage 4a indexing requires one scalar index',
             Pointer(span=binop.right.loc, message='expected exactly one index expression'),
         )
-    index = typecheck_and_resolve_inner(binop.right.inner[0], ctx=ctx)
+    length = (
+        array.type.length
+        if isinstance(array.type, ty.ArrayType)
+        else _known_string_length(array.type)
+    )
+    index_ctx = ctx
+    if length is not None:
+        index_ctx = replace(
+            ctx,
+            declarations=ctx.declarations.new_child(
+                {'end': ty.IntegerLiteralType(length - 1)}
+            ),
+            binding_scopes=ctx.binding_scopes.new_child(),
+        )
+    index_ast: p0.AST = (
+        binop.right.inner[0]
+        if binop.right.kind == '[]'
+        else binop.right
+    )
+    index = typecheck_and_resolve_inner(index_ast, ctx=index_ctx)
     if isinstance(index, hir.Range):
-        if not _is_string_type(array.type):
-            not_implemented(ctx.srcfile, index.loc, 'array range slicing')
         if index.step_pair is not None:
-            not_implemented(ctx.srcfile, index.loc, 'stepped string slicing')
-        length = _known_string_length(array.type)
+            not_implemented(ctx.srcfile, index.loc, 'stepped sequence slicing')
         slice_length: int | None = None
         if length is None and (index.left is not None or index.right is not None):
             user_error(
                 ctx.srcfile,
-                'string slice is not proven in bounds',
+                'sequence slice is not proven in bounds',
                 Pointer(
                     span=index.loc,
-                    message='bounded slicing requires a known string length',
+                    message='bounded slicing requires a known sequence length',
                 ),
             )
+        start = 0
+        stop = -1
         if length is not None:
-            left = 0 if index.left is None else _constant_integer(index.left, ctx=ctx)
+            left = 0 if index.left is None else _constant_integer(index.left, ctx=index_ctx)
             right = (
                 length - 1
                 if index.right is None
-                else _constant_integer(index.right, ctx=ctx)
+                else _constant_integer(index.right, ctx=index_ctx)
             )
             if left is None or right is None:
                 user_error(
                     ctx.srcfile,
-                    'string slice is not proven in bounds',
+                    'sequence slice is not proven in bounds',
                     Pointer(
                         span=index.loc,
                         message='slice endpoints must have compile-time integer values',
@@ -3072,18 +3164,46 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 if start < 0 or stop >= length:
                     user_error(
                         ctx.srcfile,
-                        'string slice is out of bounds',
+                        'sequence slice is out of bounds',
                         Pointer(
                             span=index.loc,
                             message=f'this slice is outside `0..{length - 1}`',
                         ),
                     )
                 slice_length = max(0, stop - start + 1)
-        return hir.StringSlice(
+        if _is_string_type(array.type):
+            return hir.StringSlice(
+                binop.loc,
+                ty.StringType(slice_length),
+                array,
+                index,
+            )
+        assert isinstance(array.type, ty.ArrayType)
+        if not isinstance(array, hir.ExpressedIdentifier):
+            not_implemented(
+                ctx.srcfile,
+                array.loc,
+                'slicing an array expression with runtime evaluation',
+            )
+        items = [
+            hir.Index(
+                index.loc,
+                array.type.element,
+                array,
+                hir.Integer(
+                    index.loc,
+                    ty.IntegerLiteralType(position),
+                    t0.base10,
+                    position,
+                ),
+                position,
+            )
+            for position in range(start, stop + 1)
+        ]
+        return hir.ArrayLiteral(
             binop.loc,
-            ty.StringType(slice_length),
-            array,
-            index,
+            ty.ArrayType(array.type.element, len(items)),
+            items,
         )
     if not (
         isinstance(index.type, ty.IntegerLiteralType)
@@ -3100,12 +3220,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 message=f'this has type `{type_to_dewy(index.type)}`',
             ),
         )
-    constant_index = _constant_integer(index, ctx=ctx)
-    length = (
-        array.type.length
-        if isinstance(array.type, ty.ArrayType)
-        else _known_string_length(array.type)
-    )
+    constant_index = _constant_integer(index, ctx=index_ctx)
     if length is None:
         user_error(
             ctx.srcfile,
@@ -3269,6 +3384,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         ctx=right_ctx,
         type_block=type_block,
     )
+
+    if symbol == 'in?' and isinstance(right, hir.Range):
+        return _tcr_static_range_membership(left, right, ctx=ctx)
     
     match binop.op:
         case t2.QJuxtapose():
@@ -3659,12 +3777,19 @@ def tcr_bare_range(ast: p0.Flat, *, ctx: Context, expected: ty.Type|None=None) -
 
 
 def typefunc_from_hir_params(
-    pos_or_kw_args: list[hir.Param],
+    pos_or_kw_args: list[hir.Param | hir.BoundParam],
     kw_only_args: list[hir.Param | hir.BoundParam],
     rest_args: hir.Param | hir.BoundParam | None,
     rettype: ty.Type,
 ) -> ty.FunctionType:
-    pos = [ty.PosOrKwArg(p.name, p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE) for p in pos_or_kw_args]
+    pos = [
+        ty.PosOrKwArg(
+            p.name,
+            p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE,
+            required=not isinstance(p, hir.BoundParam),
+        )
+        for p in pos_or_kw_args
+    ]
     kw: list[ty.KwOnlyArg] = []
     for p in kw_only_args:
         ptype = p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE
@@ -3828,7 +3953,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
 
 def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
-    """Parse the required positional slots to the left of a function type's `:>`."""
+    """Parse named parameter contracts to the left of a function type's `:>`."""
     items = ast.inner if isinstance(ast, p0.Block) and ast.kind == '()' else [ast]
     args: list[ty.PosOrKwArg] = []
     for item in items:
@@ -3840,8 +3965,18 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
             and isinstance(item.left.item, t1.Identifier)
         ):
             args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=ctx)))
+        elif isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
+            # Types and parameter names share the identifier syntax. A bare
+            # identifier is therefore a parameter name with an unconstrained
+            # type, matching the same spelling in a function literal.
+            args.append(ty.PosOrKwArg(item.item.name, ty.TOP_TYPE))
         else:
-            args.append(ty.PosOrKwArg(None, ast_to_type(item, ctx=ctx)))
+            user_error(
+                ctx.srcfile,
+                'function type parameter requires a name',
+                Pointer(span=item.loc, message='write this parameter as `name:type`'),
+                hint='anonymous and positional-only source parameters do not yet have a syntax',
+            )
     return args
 
 
@@ -4230,12 +4365,12 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         case _:
             not_implemented(ctx.srcfile, ast.loc, f'{type(ast).__name__} in type position')
 
-def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple[list[hir.Param], list[hir.Param|hir.BoundParam], hir.Param|hir.BoundParam|None]:
+def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple[list[hir.Param|hir.BoundParam], list[hir.Param|hir.BoundParam], hir.Param|hir.BoundParam|None]:
     """
     collect the parameters from a function signature
     
     Returns:
-        list of positional or keyword parameters (all unbound)
+        list of positional-or-keyword parameters (required or defaulted)
         list of keyword only parameters (bound or unbound)
         ...rest parameter (if any) or None (bound or unbound)
     """
@@ -4243,7 +4378,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     # make sure we are operating on a block at the top level
     if not isinstance(signature, p0.Block): return collect_function_signature_args(p0.Block(signature.loc, [signature], kind='()'))
 
-    pos_or_kw_args: list[hir.Param] = []
+    pos_or_kw_args: list[hir.Param|hir.BoundParam] = []
     kw_only_args: list[hir.Param|hir.BoundParam] = []
     saw_rest: bool = False
     rest_args: hir.Param|hir.BoundParam|None = None
@@ -4261,9 +4396,24 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
                 (kw_only_args if saw_rest else pos_or_kw_args).append(hir.Param(name, type=ast_to_type(item.right, ctx=ctx)))
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
                 value = typecheck_and_resolve_inner(right, ctx=ctx)
-                kw_only_args.append(hir.BoundParam(name, type=value.type, value=value))
+                param_type: ty.Type = (
+                    'int64'
+                    if isinstance(value.type, ty.IntegerLiteralType)
+                    else value.type
+                )
+                (kw_only_args if saw_rest else pos_or_kw_args).append(
+                    hir.BoundParam(name, type=param_type, value=value)
+                )
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as right):
-                kw_only_args.append(hir.BoundParam(name, type=ast_to_type(typeexpr, ctx=ctx), value=typecheck_and_resolve_inner(right, ctx=ctx)))
+                param_type = ast_to_type(typeexpr, ctx=ctx)
+                value = check_against(
+                    typecheck_and_resolve_inner(right, ctx=ctx, expected=param_type),
+                    param_type,
+                    ctx=ctx,
+                )
+                (kw_only_args if saw_rest else pos_or_kw_args).append(
+                    hir.BoundParam(name, type=param_type, value=value)
+                )
             case p0.BinOp(op=t2.EllipsisJuxtapose(), left=p0.Atom(item=t1.Identifier(name='...')), right=p0.Atom(item=t1.Identifier(name=name))):
                 if saw_rest:
                     user_error(ctx.srcfile, 'multiple `...` in function signature',
@@ -4286,8 +4436,8 @@ def parse_call_arguments(
     *,
     ctx: Context,
     method: ty.FunctionType | None = None,
-) -> tuple[list[hir.AST], dict[str, hir.AST]]:
-    """Typecheck call args from p0, splitting positional vs `name=value` keywords."""
+) -> tuple[list[hir.AST], dict[str, hir.AST], list[str | None]]:
+    """Typecheck call args while retaining their left-to-right binding order."""
     if isinstance(right, p0.Block):
         items = list(right.inner)
     else:
@@ -4295,6 +4445,8 @@ def parse_call_arguments(
 
     pos_args: list[hir.AST] = []
     kw_args: dict[str, hir.AST] = {}
+    order: list[str | None] = []
+    bound_positional_indices: set[int] = set()
     for item in items:
         match item:
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)) as target, right=value):
@@ -4307,12 +4459,110 @@ def parse_call_arguments(
                 expected_arg = param.type if param is not None else None
                 arg = typecheck_and_resolve_inner(value, ctx=ctx, expected=expected_arg)
                 kw_args[name] = check_against(arg, expected_arg, ctx=ctx) if expected_arg is not None else arg
+                order.append(name)
+                if method is not None:
+                    index = next(
+                        (i for i, candidate in enumerate(method.pos_or_kw) if candidate.name == name),
+                        None,
+                    )
+                    if index is not None:
+                        bound_positional_indices.add(index)
             case _:
-                index = len(pos_args)
-                expected_arg = method.pos_or_kw[index].type if method is not None and index < len(method.pos_or_kw) else None
+                index = next(
+                    (
+                        i for i in range(len(method.pos_or_kw))
+                        if i not in bound_positional_indices
+                    ),
+                    None,
+                ) if method is not None else None
+                expected_arg = method.pos_or_kw[index].type if method is not None and index is not None else None
                 arg = typecheck_and_resolve_inner(item, ctx=ctx, expected=expected_arg)
                 pos_args.append(check_against(arg, expected_arg, ctx=ctx) if expected_arg is not None else arg)
-    return pos_args, kw_args
+                order.append(None)
+                if index is not None:
+                    bound_positional_indices.add(index)
+    return pos_args, kw_args, order
+
+
+def _arguments_in_source_order(
+    pos_args: list[hir.AST],
+    kw_args: dict[str, hir.AST],
+    order: list[str | None],
+) -> list[tuple[str | None, hir.AST]]:
+    positional = iter(pos_args)
+    return [
+        (name, next(positional) if name is None else kw_args[name])
+        for name in order
+    ]
+
+
+def _bind_ordered_call_arguments(
+    method: ty.FunctionType,
+    arguments: list[tuple[str | None, hir.AST]],
+) -> tuple[list[hir.AST], dict[str, hir.AST]] | None:
+    """Apply Dewy's left-to-right parameter binding rule to one method."""
+
+    remaining_indices = list(range(len(method.pos_or_kw)))
+    bound_slots: dict[int, hir.AST] = {}
+    bound_keywords: dict[str, hir.AST] = {}
+    extra_positional: list[hir.AST] = []
+    pos_by_name = {
+        param.name: index
+        for index, param in enumerate(method.pos_or_kw)
+        if param.name is not None
+    }
+    kw_names = {param.name for param in method.kw_only}
+
+    for name, argument in arguments:
+        if name is None:
+            if remaining_indices:
+                index = remaining_indices.pop(0)
+                bound_slots[index] = argument
+            elif method.rest is not None:
+                extra_positional.append(argument)
+            else:
+                return None
+            continue
+
+        if name in pos_by_name:
+            index = pos_by_name[name]
+            if index in bound_slots:
+                return None
+            bound_slots[index] = argument
+            if index in remaining_indices:
+                remaining_indices.remove(index)
+            continue
+        if name in kw_names:
+            if name in bound_keywords:
+                return None
+            bound_keywords[name] = argument
+            continue
+        if method.rest is not None:
+            bound_keywords[name] = argument
+            continue
+        return None
+
+    if any(method.pos_or_kw[index].required for index in remaining_indices):
+        return None
+    if any(param.required and param.name not in bound_keywords for param in method.kw_only):
+        return None
+
+    canonical_pos: list[hir.AST] = []
+    canonical_kw = dict(bound_keywords)
+    saw_gap = False
+    for index, param in enumerate(method.pos_or_kw):
+        argument = bound_slots.get(index)
+        if argument is None:
+            saw_gap = True
+            continue
+        if not saw_gap:
+            canonical_pos.append(argument)
+        elif param.name is not None:
+            canonical_kw[param.name] = argument
+        else:
+            return None
+    canonical_pos.extend(extra_positional)
+    return canonical_pos, canonical_kw
 
 
 def _contextualize_flow_result(
@@ -4498,7 +4748,11 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
             Pointer(span=left.loc, message=f'this has type `{type_to_dewy(left.type)}`, which is not callable'))
 
     contextual_method = methods[0] if len(methods) == 1 and not methods[0].type_params else None
-    pos_args, kw_args = parse_call_arguments(right, ctx=ctx, method=contextual_method)
+    pos_args, kw_args, argument_order = parse_call_arguments(
+        right,
+        ctx=ctx,
+        method=contextual_method,
+    )
     for name, arg in kw_args.items():
         if not any(
             method.rest is not None
@@ -4508,20 +4762,152 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         ):
             user_error(ctx.srcfile, f'unknown keyword argument `{name}`',
                 Pointer(span=arg.loc, message='no method has a parameter with this name'))
+    ordered_arguments = _arguments_in_source_order(pos_args, kw_args, argument_order)
+    interleaved = any(
+        name is None and any(previous is not None for previous in argument_order[:index])
+        for index, name in enumerate(argument_order)
+    )
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:
         expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
-        result = ctx.type_system.match_best_function(
-            methods,
-            pos_types,
-            kw_types,
-            expected_return=expected_return,
-        )
+        if not interleaved:
+            result = ctx.type_system.match_best_function(
+                methods,
+                pos_types,
+                kw_types,
+                expected_return=expected_return,
+            )
+        else:
+            applicable: list[
+                tuple[
+                    int,
+                    ty.FunctionType,
+                    list[hir.AST],
+                    dict[str, hir.AST],
+                    list[ty.TypeExpr | None],
+                ]
+            ] = []
+            for method_index, method in enumerate(methods):
+                bound = _bind_ordered_call_arguments(method, ordered_arguments)
+                if bound is None:
+                    continue
+                candidate_pos, candidate_kw = bound
+                candidate_pos_types = [
+                    require_valued(arg.type, ctx.srcfile, arg.loc, 'function call argument')
+                    for arg in candidate_pos
+                ]
+                candidate_kw_types = {
+                    name: require_valued(
+                        arg.type,
+                        ctx.srcfile,
+                        arg.loc,
+                        f'keyword argument `{name}`',
+                    )
+                    for name, arg in candidate_kw.items()
+                }
+                instantiated = ctx.type_system.try_instantiate_for_call(
+                    method,
+                    candidate_pos_types,
+                    candidate_kw_types,
+                    expected_return,
+                )
+                if instantiated is not None:
+                    applicable.append((
+                        method_index,
+                        instantiated,
+                        candidate_pos,
+                        candidate_kw,
+                        [None] * len(candidate_pos),
+                    ))
+            if not applicable:
+                for method_index, method in enumerate(methods):
+                    bound = _bind_ordered_call_arguments(method, ordered_arguments)
+                    if bound is None:
+                        continue
+                    candidate_pos, candidate_kw = bound
+                    candidate_pos_types = [
+                        require_valued(
+                            arg.type,
+                            ctx.srcfile,
+                            arg.loc,
+                            'function call argument',
+                        )
+                        for arg in candidate_pos
+                    ]
+                    if not candidate_pos_types or not all(
+                        isinstance(type_, str) for type_ in candidate_pos_types
+                    ):
+                        continue
+                    common: str | None = candidate_pos_types[0]  # type: ignore[assignment]
+                    for type_ in candidate_pos_types[1:]:
+                        assert common is not None
+                        common = ctx.type_system.promote_type(common, type_)
+                        if common is None:
+                            break
+                    if common is None:
+                        continue
+                    promoted_types = [common] * len(candidate_pos_types)
+                    candidate_kw_types = {
+                        name: require_valued(
+                            arg.type,
+                            ctx.srcfile,
+                            arg.loc,
+                            f'keyword argument `{name}`',
+                        )
+                        for name, arg in candidate_kw.items()
+                    }
+                    instantiated = ctx.type_system.try_instantiate_for_call(
+                        method,
+                        promoted_types,
+                        candidate_kw_types,
+                        expected_return,
+                    )
+                    if instantiated is not None:
+                        applicable.append((
+                            method_index,
+                            instantiated,
+                            candidate_pos,
+                            candidate_kw,
+                            [
+                                None if type_ == common else common
+                                for type_ in candidate_pos_types
+                            ],
+                        ))
+            winners = [
+                candidate
+                for candidate in applicable
+                if not any(
+                    ctx.type_system.more_specific(other[1], candidate[1])
+                    for other in applicable
+                    if other[0] != candidate[0]
+                )
+            ]
+            if len(winners) != 1:
+                detail = (
+                    'no matching method for arguments in this order'
+                    if not winners
+                    else f'ambiguous call among {len(applicable)} applicable methods'
+                )
+                raise ty.DispatchError(detail)
+            method_index, selected, pos_args, kw_args, promote_pos = winners[0]
+            result = ty.DispatchResult(
+                selected,
+                method_index,
+                promote_pos,
+            )
     except ty.DispatchError as e:
         type_error(ctx.srcfile, 'no matching method for call',
             Pointer(span=left.loc, message='calling this'),
             Pointer(span=right.loc, message=str(e)))
+
+    if interleaved:
+        # Re-bind once against the selected signature so generic instantiation
+        # cannot leave the HIR call in source-order form.
+        bound = _bind_ordered_call_arguments(result.method, ordered_arguments)
+        if bound is None:
+            raise ValueError('INTERNAL ERROR: selected method no longer accepts ordered call')
+        pos_args, kw_args = bound
 
     contextual_pos_args = [
         check_against(

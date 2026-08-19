@@ -179,10 +179,10 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row" aria-labelledby="obj-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>objects.dewy</span><span class="tag implemented" id="badge-objects">implemented<a class="tag-footnote" href="#note-objects" aria-label="See implementation footnote 5"><sup>5</sup></a> ✓</span></div>
+          <div class="pane-top"><span>objects.dewy</span><span class="tag implemented">implemented ✓</span></div>
           <pre><code><span class="ln"> 1</span>counter = (start=<b class="n">0</b>) =&gt; [
 <span class="ln"> 2</span>    value = start
-<span class="ln"> 3</span>    increment = () =&gt; value += <b class="n">1</b>
+<span class="ln"> 3</span>    increment = () =&gt; (value += <b class="n">1</b>)
 <span class="ln"> 4</span>]
 <span class="ln"> 5</span>
 <span class="ln"> 6</span><b class="c"># make a new counter object</b>
@@ -225,10 +225,9 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="implementation-notes" aria-label="Implementation footnotes">
         <ol>
           <li id="note-units"><a class="note-back" href="#badge-units" aria-label="Back to units example">1.</a><p><a class="note-example-link" href="#badge-units"><code>units.dewy</code></a> — time durations and unit multiplication work today; the broader unit catalog and derived-unit algebra shown here are planned.</p></li>
-          <li id="note-ranges"><a class="note-back" href="#badge-ranges" aria-label="Back to ranges example">2.</a><p><a class="note-example-link" href="#badge-ranges"><code>ranges.dewy</code></a> — the literal range forms shown here run in the current compiler; general range values, runtime-computed anchors, and compound range arithmetic are still ahead.</p></li>
+          <li id="note-ranges"><a class="note-back" href="#badge-ranges" aria-label="Back to ranges example">2.</a><p><a class="note-example-link" href="#badge-ranges"><code>ranges.dewy</code></a> — static membership, <code>end</code>, and the array/string slices shown here work today. Storing general range values, runtime-computed anchors, and compound range arithmetic are still ahead.</p></li>
           <li id="note-loops"><a class="note-back" href="#badge-loops" aria-label="Back to loops example">3.</a><p><a class="note-example-link" href="#badge-loops"><code>loops.dewy</code></a> — dictionary entries using <code>-&gt;</code> and iterator-target unpacking with <code>[show rating]</code> are not implemented. The range/string multiiterator on line 12 works today.</p></li>
           <li id="note-functions"><a class="note-back" href="#badge-functions" aria-label="Back to functions example">4.</a><p><a class="note-example-link" href="#badge-functions"><code>functions.dewy</code></a> — overload construction and dispatch work, but an interpolated string cannot yet be materialized and returned as a first-class <code>string</code>. Streaming interpolation directly through <code>print</code>/<code>printl</code> works.</p></li>
-          <li id="note-objects"><a class="note-back" href="#badge-objects" aria-label="Back to objects example">5.</a><p><a class="note-example-link" href="#badge-objects"><code>objects.dewy</code></a> — widening the unannotated <code>0</code> default, passing that defaulted-only parameter positionally as <code>counter(40)</code>, and captured-field assignment with <code>value += 1</code> are not implemented yet. Structural object construction, field access, defaults, and zero-argument member calls are implemented.</p></li>
         </ol>
       </section>
     </div>

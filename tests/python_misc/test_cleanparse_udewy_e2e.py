@@ -162,7 +162,11 @@ def test_keyword_default_fixture_codegen_shape() -> None:
     assert '__dewy_default_has_y_' in emitted
     assert 'if not __dewy_default_has_y_' in emitted
     assert 'let direct:int64 = add(40 0 false)' in emitted
+    assert 'let positional_default:int64 = interleaved(20 2 true 20)' in emitted
+    assert 'let omitted_default:int64 = interleaved(20 0 false 20)' in emitted
+    assert 'let named_then_positional:int64 = interleaved(20 2 true 20)' in emitted
     assert 'let override:int64 = add(39 3 true)' in emitted
+    assert 'let positional_override:int64 = add(39 3 true)' in emitted
     assert 'let reordered:int64 = subtract(42 0)' in emitted
     assert 'let keyword_only:int64 = required(40 2)' in emitted
     assert '...' not in emitted
@@ -228,8 +232,8 @@ def test_function_values_lower_to_udewy_indirect_calls(
     source_path = repo / 'udewy' / 'tests' / 'test_indirect_call.udewy'
     emitted = codegen(SrcFile.from_path(source_path))
 
-    assert 'let choose = ():><int64:>int64>' in emitted
-    assert 'let fn_ptr:<int64:>int64> = choose()' in emitted
+    assert 'let choose = ():><(x:int64):>int64>' in emitted
+    assert 'let fn_ptr:<(x:int64):>int64> = choose()' in emitted
     assert 'let indirect:int64 = (fn_ptr)(5)' in emitted
     assert 'let piped:int64 = (fn_ptr)(6)' in emitted
 
