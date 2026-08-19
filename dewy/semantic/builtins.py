@@ -166,7 +166,7 @@ def _unary_generic(bound: ty.TypeExpr) -> ty.FunctionType:
 
 def _shift_generic() -> ty.FunctionType:
     return ty.FunctionType(
-        [ty.PosOrKwArg('left', 'T'), ty.PosOrKwArg('right', 'int')],
+        [ty.PosOrKwArg('left', 'T'), ty.PosOrKwArg('right', 'uint')],
         [],
         None,
         'T',

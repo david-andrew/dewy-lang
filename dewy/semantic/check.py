@@ -2806,6 +2806,22 @@ def _dispatch_builtin(
         )
         for arg in args
     ]
+    if (
+        fname in {'__lshift__', '__rshift__'}
+        and len(args) == 2
+        and not ctx.type_system.is_subtype(arg_types[1], 'uint')
+    ):
+        type_error(
+            ctx.srcfile,
+            'shift count must be unsigned',
+            Pointer(
+                span=args[1].loc,
+                message=(
+                    f'this count has type `{type_to_dewy(arg_types[1])}`; '
+                    'negative shifts are not defined'
+                ),
+            ),
+        )
     if fname == '__mul__' and len(args) == 2:
         quantity_result = _quantity_product_type(
             arg_types[0],

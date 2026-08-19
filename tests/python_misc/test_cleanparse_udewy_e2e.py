@@ -6,6 +6,7 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check
+from dewy.semantic.errors import TypeCheckError
 from udewy.frontend import entry_point
 
 here = Path(__file__).parent
@@ -319,8 +320,8 @@ let main = ():>int64 => {
 
     emitted = codegen(SrcFile.from_path(path))
 
-    assert 'return value >> 2' in emitted
-    assert 'return __signed_shr__(value 2)' in emitted
+    assert '= (__dewy_shift_value_1 >> __dewy_shift_count_2)' in emitted
+    assert '__signed_shr__(__dewy_shift_value_3 __dewy_shift_count_4)' in emitted
 
 
 def test_explicit_signed_shift_intrinsic_roundtrips(tmp_path: Path) -> None:
@@ -349,25 +350,146 @@ def test_abstract_integer_right_shift_fails_udewy_lowering(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ('annotation', 'expression', 'message'),
-    [
-        ('uint64', 'value // 2', 'unsigned operation'),
-        ('int8', 'value + 1', 'rollover operation'),
-    ],
+    'annotation',
+    ['int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64'],
 )
-def test_deferred_fixed_width_lowering_fails_explicitly(
+@pytest.mark.parametrize('operator', ['<<', '>>'])
+def test_fixed_width_shifts_emit_explicit_width_guard(
     annotation: str,
-    expression: str,
-    message: str,
-    tmp_path: Path,
+    operator: str,
 ) -> None:
     source = f"""let compute = (value:{annotation}):>{annotation} => {{
-    return {expression}
+    return value {operator} 1
 }}
 let main = ():>{annotation} => compute(8)
 """
-    path = tmp_path / 'unsupported.dewy'
-    path.write_text(source)
+    emitted = codegen(SrcFile(None, source))
 
-    with pytest.raises(NotImplementedError, match=message):
-        codegen(SrcFile.from_path(path))
+    width = int(annotation.removeprefix('uint').removeprefix('int'))
+    assert '__dewy_shift_count_' in emitted
+    assert f' {width})' in emitted
+    assert '__unsigned_gte__(' in emitted
+    assert '= 0' in emitted
+
+
+def test_fixed_width_shift_operands_are_each_evaluated_once() -> None:
+    emitted = codegen(SrcFile(None, '''
+let next_value = ():>uint8 => 1
+let next_count = ():>uint64 => 8
+let shifted = ():>uint8 => next_value() << next_count()
+'''))
+
+    assert emitted.count('= next_value()') == 1
+    assert emitted.count('= next_count()') == 1
+
+
+@pytest.mark.parametrize('source', [
+    'let shifted = ():>uint8 => 1 << -1',
+    'let shifted = (value:uint8 count:int64):>uint8 => value << count',
+])
+def test_potentially_negative_shift_count_is_rejected_during_typechecking(
+    source: str,
+) -> None:
+    with pytest.raises(TypeCheckError, match='shift count must be unsigned'):
+        codegen(SrcFile(None, source))
+
+
+@pytest.mark.parametrize(('annotation', 'expected'), [
+    ('int8', '__signed_shr__((value + value) << 56 56)'),
+    ('int16', '__signed_shr__((value + value) << 48 48)'),
+    ('int32', '__signed_shr__((value + value) << 32 32)'),
+    ('uint8', '(value + value) and 255'),
+    ('uint16', '(value + value) and 65535'),
+    ('uint32', '(value + value) and 4294967295'),
+])
+def test_narrow_integer_width_controls_rollover_lowering(
+    annotation: str,
+    expected: str,
+) -> None:
+    emitted = codegen(SrcFile(None, f'''
+let double = (value:{annotation}):>{annotation} => value + value
+'''))
+
+    assert expected in emitted
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_fixed_width_rollover_and_unsigned_operations_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = '''
+let unsigned_divide = (value:uint64 divisor:uint64):>uint64 => value // divisor
+let unsigned_modulo = (value:uint64 divisor:uint64):>uint64 => value % divisor
+let add_byte = (value:uint8 amount:uint8):>uint8 => value + amount
+let subtract_byte = (value:uint8 amount:uint8):>uint8 => value - amount
+let add_signed_byte = (value:int8 amount:int8):>int8 => value + amount
+let multiply_signed_byte = (value:int8 amount:int8):>int8 => value * amount
+let divide_signed_byte = (value:int8 divisor:int8):>int8 => value // divisor
+let modulo_signed_byte = (value:int8 divisor:int8):>int8 => value % divisor
+let nand_byte = (value:uint8 mask:uint8):>uint8 => value nand mask
+let negate_signed_byte = (value:int8):>int8 => -value
+let invert_byte = (value:uint8):>uint8 => not value
+let shift_byte_left = (value:uint8 count:uint64):>uint8 => value << count
+let shift_byte_right = (value:uint8 count:uint64):>uint8 => value >> count
+let shift_signed_byte_left = (value:int8 count:uint64):>int8 => value << count
+let shift_signed_byte_right = (value:int8 count:uint64):>int8 => value >> count
+let shift_word_left = (value:uint64 count:uint64):>uint64 => value << count
+let shift_signed_word_right = (value:int64 count:uint64):>int64 => value >> count
+
+let main = ():>int64 => {
+    let high:uint64 = 18446744073709551615
+    if unsigned_divide(high 2) =? 9223372036854775807
+        and unsigned_modulo(high 2) =? 1
+        and high >? 1
+        and 1 <? high
+        and high >=? high
+        and 1 <=? high
+        and add_byte(250 10) =? 4
+        and subtract_byte(1 2) =? 255
+        and add_signed_byte(127 1) =? -128
+        and multiply_signed_byte(64 2) =? -128
+        and divide_signed_byte(value=-128 divisor=-1) =? -128
+        and modulo_signed_byte(value=-128 divisor=-1) =? 0
+        and nand_byte(255 15) =? 240
+        and negate_signed_byte(-128) =? -128
+        and invert_byte(0) =? 255
+        and shift_byte_left(1 7) =? 128
+        and shift_byte_left(1 8) =? 0
+        and shift_byte_left(1 9) =? 0
+        and shift_byte_left(255 1) =? 254
+        and shift_byte_right(255 7) =? 1
+        and shift_byte_right(255 8) =? 0
+        and shift_signed_byte_left(64 1) =? -128
+        and shift_signed_byte_left(64 8) =? 0
+        and shift_signed_byte_right(value=-128 count=7) =? -1
+        and shift_signed_byte_right(value=-128 count=8) =? -1
+        and shift_signed_byte_right(127 8) =? 0
+        and shift_word_left(1 63) =? 9223372036854775808
+        and shift_word_left(1 64) =? 0
+        and shift_signed_word_right(value=-1 count=63) =? -1
+        and shift_signed_word_right(value=-1 count=64) =? -1 {
+        return 42
+    } else {
+        return 1
+    }
+}
+'''
+    dewy_path = tmp_path / 'fixed_width.dewy'
+    dewy_path.write_text(source)
+    emitted = codegen(SrcFile.from_path(dewy_path))
+
+    assert '__unsigned_idiv__(value divisor)' in emitted
+    assert '__unsigned_mod__(value divisor)' in emitted
+    assert '__unsigned_gt__(high 1)' in emitted
+    assert '__unsigned_lt__(1 high)' in emitted
+    assert '__unsigned_gte__(high high)' in emitted
+    assert '__unsigned_lte__(1 high)' in emitted
+    assert '(value + amount) and 255' in emitted
+    assert '__signed_shr__((value + amount) << 56 56)' in emitted
+    assert '__unsigned_gte__(' in emitted
+
+    udewy_path = tmp_path / 'fixed_width.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 42

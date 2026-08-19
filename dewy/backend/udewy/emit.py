@@ -37,19 +37,50 @@ UDEWY_PREFIX_DUNDERS = {
     '__not__': 'not',
 }
 
+LOWERED_RAW_SHIFT_DUNDERS = {
+    '__dewy_raw_lshift__': '<<',
+    '__dewy_raw_rshift__': '>>',
+}
+
 SIGNED_FIXED_INTS = {'int8', 'int16', 'int32', 'int64'}
 UNSIGNED_FIXED_INTS = {'uint8', 'uint16', 'uint32', 'uint64'}
 NARROW_FIXED_INTS = {'int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32'}
-UNSUPPORTED_NARROW_DUNDERS = {
+NARROW_WRAPPING_DUNDERS = {
     '__add__',
     '__sub__',
     '__mul__',
     '__floordiv__',
     '__mod__',
-    '__lshift__',
-    '__rshift__',
+    '__and__',
+    '__or__',
+    '__xor__',
+    '__nand__',
+    '__nor__',
+    '__xnor__',
 }
-SIGNED_ONLY_DUNDERS = {'__floordiv__', '__mod__', '__gt__', '__lt__', '__ge__', '__le__'}
+DERIVED_BITWISE_DUNDERS = {
+    '__nand__': 'and',
+    '__nor__': 'or',
+    '__xnor__': 'xor',
+}
+UNSIGNED_DUNDER_INTRINSICS = {
+    '__floordiv__': '__unsigned_idiv__',
+    '__mod__': '__unsigned_mod__',
+    '__gt__': '__unsigned_gt__',
+    '__lt__': '__unsigned_lt__',
+    '__ge__': '__unsigned_gte__',
+    '__le__': '__unsigned_lte__',
+}
+FIXED_INTEGER_WIDTHS = {
+    'int8': 8,
+    'int16': 16,
+    'int32': 32,
+    'int64': 64,
+    'uint8': 8,
+    'uint16': 16,
+    'uint32': 32,
+    'uint64': 64,
+}
 UDEWY_INTRINSICS = set(builtins.udewy_intrinsic_types)
 
 @dataclass
@@ -378,20 +409,41 @@ def _check_supported_integer_operation(call: hir.FunctionCall) -> None:
         raise NotImplementedError(
             f'udewy codegen for abstract `int` operation `{name}` requires range-based lowering'
         )
-    if operand_type in NARROW_FIXED_INTS and (
-        name in UNSUPPORTED_NARROW_DUNDERS or name in {'__unary_sub__', '__not__'}
-    ):
-        raise NotImplementedError(
-            f'udewy codegen for rollover operation `{name}` on `{operand_type}`'
-        )
-    if operand_type in UNSIGNED_FIXED_INTS and name in SIGNED_ONLY_DUNDERS:
-        raise NotImplementedError(
-            f'udewy codegen for unsigned operation `{name}` on `{operand_type}`'
-        )
+
+
+def _wrap_fixed_integer(expression: str, operand_type: ty.TypeExpr | None) -> str:
+    """Reduce a word expression to the source integer width and signedness."""
+
+    if not isinstance(operand_type, str) or operand_type not in NARROW_FIXED_INTS:
+        return expression
+    width = FIXED_INTEGER_WIDTHS[operand_type]
+    if operand_type in UNSIGNED_FIXED_INTS:
+        return f'({expression}) and {(1 << width) - 1}'
+    shift = 64 - width
+    return f'__signed_shr__(({expression}) << {shift} {shift})'
 
 
 def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
     _check_supported_integer_operation(call)
+    if (
+        isinstance(call.func, hir.ExpressedIdentifier)
+        and call.func.name in LOWERED_RAW_SHIFT_DUNDERS
+        and len(call.pos_args) == 2
+        and not call.kw_args
+    ):
+        symbol = LOWERED_RAW_SHIFT_DUNDERS[call.func.name]
+        left, right = call.pos_args
+        return f'({emit_operand(left, ctx)} {symbol} {emit_operand(right, ctx)})'
+    if (
+        isinstance(call.func, hir.ExpressedIdentifier)
+        and call.func.name in UNSIGNED_DUNDER_INTRINSICS
+        and len(call.pos_args) == 2
+        and not call.kw_args
+        and _selected_first_parameter(call) in UNSIGNED_FIXED_INTS
+    ):
+        intrinsic = UNSIGNED_DUNDER_INTRINSICS[call.func.name]
+        left, right = call.pos_args
+        return f'{intrinsic}({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
     if (
         isinstance(call.func, hir.ExpressedIdentifier)
         and call.func.name == '__rshift__'
@@ -409,11 +461,27 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
             )
     if (binop := _binop_call(call)) is not None:
         sym, left, right = binop
-        return f'{emit_operand(left, ctx)} {sym} {emit_operand(right, ctx)}'
+        left_text = emit_operand(left, ctx)
+        right_text = emit_operand(right, ctx)
+        if (
+            isinstance(call.func, hir.ExpressedIdentifier)
+            and call.func.name in DERIVED_BITWISE_DUNDERS
+        ):
+            base = DERIVED_BITWISE_DUNDERS[call.func.name]
+            expression = f'not ({left_text} {base} {right_text})'
+        else:
+            expression = f'{left_text} {sym} {right_text}'
+        if (
+            isinstance(call.func, hir.ExpressedIdentifier)
+            and call.func.name in NARROW_WRAPPING_DUNDERS
+        ):
+            return _wrap_fixed_integer(expression, _selected_first_parameter(call))
+        return expression
     if (prefix := _prefix_call(call)) is not None:
         sym, item = prefix
         separator = ' ' if sym.isalpha() else ''
-        return f'{sym}{separator}{emit_operand(item, ctx)}'
+        expression = f'{sym}{separator}{emit_operand(item, ctx)}'
+        return _wrap_fixed_integer(expression, _selected_first_parameter(call))
     if call.kw_args:
         raise ValueError('INTERNAL ERROR: keyword argument reached udewy emission')
     args = ' '.join(_emit_call_arg(arg, ctx) for arg in call.pos_args)
@@ -444,7 +512,11 @@ def emit_operand(node: hir.AST, ctx: EmitContext) -> str:
 
 
 def _emit_call_arg(node: hir.AST, ctx: EmitContext) -> str:
-    if isinstance(node, hir.Transmute):
+    if (
+        isinstance(node, hir.Transmute)
+        or isinstance(node, hir.Integer) and node.value < 0
+        or isinstance(node, hir.FunctionCall) and _prefix_call(node) is not None
+    ):
         return f'({emit_ast(node, ctx)})'
     return emit_ast(node, ctx)
 

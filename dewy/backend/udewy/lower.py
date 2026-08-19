@@ -106,6 +106,18 @@ STRING_GRAPHEME_LENGTH_OFFSET = 24
 STRING_START_OFFSET = 32
 STRING_DESCRIPTOR_SIZE = 40
 
+FIXED_INTEGER_WIDTHS = {
+    'int8': 8,
+    'int16': 16,
+    'int32': 32,
+    'int64': 64,
+    'uint8': 8,
+    'uint16': 16,
+    'uint32': 32,
+    'uint64': 64,
+}
+SIGNED_FIXED_INTS = {'int8', 'int16', 'int32', 'int64'}
+
 
 @dataclass
 class LoweredFunction:
@@ -227,6 +239,10 @@ class _Lowerer:
         """Initialize per-program identity maps and deterministic counters."""
         self.root = root
         self.srcfile = srcfile
+        self.preserve_raw_udewy_shifts = bool(re.search(
+            r'(?m)^\s*\$no_prelude\s*=\s*true\b',
+            srcfile.body,
+        ))
         self.module_scope = _Scope(None, (), None, {})
         self.next_binding_order = 0
         self.next_function_order = 0
@@ -239,6 +255,7 @@ class _Lowerer:
         self.source_names: set[str] = set()
         self.next_flow_temp = 1
         self.next_eager_temp = 1
+        self.next_shift_temp = 1
         self.next_array_temp = 1
         self.next_string_temp = 1
         self.next_object_temp = 1
@@ -3091,6 +3108,8 @@ class _Lowerer:
         if isinstance(node, hir.FunctionCall):
             if self._is_object_method_func(node.func):
                 return self._extract_method_call(node)
+            if self._is_fixed_width_shift(node):
+                return self._extract_fixed_width_shift(node)
             prelude: list[hir.AST] = []
             func_prelude, func = self._extract_expression(node.func)
             prelude.extend(func_prelude)
@@ -8403,6 +8422,196 @@ class _Lowerer:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, node.type, name)
 
+    def _is_fixed_width_shift(self, node: hir.FunctionCall) -> bool:
+        """Whether ``node`` needs an explicit source-width shift guard."""
+        if (
+            self.preserve_raw_udewy_shifts
+            or not isinstance(node.func, hir.ExpressedIdentifier)
+            or node.func.name not in {'__lshift__', '__rshift__'}
+            or len(node.pos_args) != 2
+            or node.kw_args
+            or not isinstance(node.func.type, ty.FunctionType)
+            or not node.func.type.pos_or_kw
+        ):
+            return False
+        return node.func.type.pos_or_kw[0].type in FIXED_INTEGER_WIDTHS
+
+    def _extract_fixed_width_shift(
+        self,
+        node: hir.FunctionCall,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Lower a fixed-width shift with one-time operands and a width guard.
+
+        udewy's machine-word shifts mask their count modulo 64. Dewy instead
+        accepts only unsigned counts and continues the source shift beyond its
+        width, including sign extension for signed right shifts, so this guard
+        must be represented before source emission.
+        """
+        assert isinstance(node.func, hir.ExpressedIdentifier)
+        assert isinstance(node.func.type, ty.FunctionType)
+        operand_type = node.func.type.pos_or_kw[0].type
+        assert isinstance(operand_type, str)
+        width = FIXED_INTEGER_WIDTHS[operand_type]
+
+        left_prelude, left = self._extract_expression(node.pos_args[0])
+        left_temp = self._new_shift_temp(left, operand_type, 'value')
+        left_declaration = hir.Declare(
+            left.loc,
+            ty.VOID_TYPE,
+            'let',
+            left_temp.name,
+            operand_type,
+            left,
+        )
+
+        count_prelude, count = self._extract_expression(node.pos_args[1])
+        count_temp = self._new_shift_temp(count, 'uint64', 'count')
+        count_declaration = hir.Declare(
+            count.loc,
+            ty.VOID_TYPE,
+            'let',
+            count_temp.name,
+            'uint64',
+            hir.ValueCast(count.loc, 'uint64', count),
+        )
+
+        width_count = hir.Integer(node.loc, 'uint64', t0.base10, width)
+        count_reaches_width = self._intrinsic_call(
+            '__unsigned_gte__',
+            [count_temp, width_count],
+            'bool',
+            node.loc,
+        )
+
+        zero_result = hir.Integer(node.loc, node.type, t0.base10, 0)
+        overshift_result: hir.AST = zero_result
+        if node.func.name == '__rshift__' and operand_type in SIGNED_FIXED_INTS:
+            overshift_result = hir.ValueCast(
+                node.loc,
+                node.type,
+                self._intrinsic_call(
+                    '__signed_shr__',
+                    [
+                        replace(left_temp, type='int64'),
+                        self._int64_literal(node.loc, 63),
+                    ],
+                    'int64',
+                    node.loc,
+                ),
+            )
+
+        wide_type = 'int64' if operand_type in SIGNED_FIXED_INTS else 'uint64'
+        wide_left = replace(left_temp, type=wide_type)
+        if node.func.name == '__rshift__' and wide_type == 'int64':
+            safe_shift: hir.AST = self._intrinsic_call(
+                '__signed_shr__',
+                [wide_left, count_temp],
+                'int64',
+                node.loc,
+            )
+        else:
+            raw_shift = (
+                '__dewy_raw_lshift__'
+                if node.func.name == '__lshift__'
+                else '__dewy_raw_rshift__'
+            )
+            safe_shift = self._typed_binary(
+                raw_shift,
+                wide_left,
+                count_temp,
+                wide_type,
+                'uint64',
+                wide_type,
+                node.loc,
+            )
+
+        if node.func.name == '__lshift__' and width < 64:
+            if wide_type == 'uint64':
+                mask = hir.Integer(
+                    node.loc,
+                    'uint64',
+                    t0.base10,
+                    (1 << width) - 1,
+                )
+                safe_shift = self._typed_binary(
+                    '__and__',
+                    safe_shift,
+                    mask,
+                    'uint64',
+                    'uint64',
+                    'uint64',
+                    node.loc,
+                )
+            else:
+                sign_shift = self._int64_literal(node.loc, 64 - width)
+                safe_shift = self._intrinsic_call(
+                    '__signed_shr__',
+                    [
+                        self._typed_binary(
+                            '__dewy_raw_lshift__',
+                            safe_shift,
+                            sign_shift,
+                            'int64',
+                            'int64',
+                            'int64',
+                            node.loc,
+                        ),
+                        sign_shift,
+                    ],
+                    'int64',
+                    node.loc,
+                )
+
+        guarded = hir.Flow(
+            node.loc,
+            node.type,
+            [
+                hir.IfArm(
+                    node.loc,
+                    node.type,
+                    count_reaches_width,
+                    overshift_result,
+                ),
+            ],
+            hir.ValueCast(node.loc, node.type, safe_shift),
+        )
+        shift_prelude, result = self._extract_expression(guarded)
+        return [
+            *left_prelude,
+            left_declaration,
+            *count_prelude,
+            count_declaration,
+            *shift_prelude,
+        ], result
+
+    @staticmethod
+    def _typed_binary(
+        name: str,
+        left: hir.AST,
+        right: hir.AST,
+        left_type: ty.TypeExpr,
+        right_type: ty.TypeExpr,
+        result_type: ty.Type,
+        loc: Span,
+    ) -> hir.FunctionCall:
+        """Build an already-selected binary call with explicit operand types."""
+        function_type = ty.FunctionType(
+            [
+                ty.PosOrKwArg('left', left_type),
+                ty.PosOrKwArg('right', right_type),
+            ],
+            [],
+            None,
+            result_type,
+        )
+        return hir.FunctionCall(
+            loc,
+            result_type,
+            hir.ExpressedIdentifier(loc, function_type, name),
+            [left, right],
+            {},
+        )
+
     def _new_eager_temp(self, node: hir.AST) -> hir.ExpressedIdentifier:
         """Allocate an argument temporary that forces eager logical-call evaluation."""
         while True:
@@ -8411,6 +8620,20 @@ class _Lowerer:
             if name not in self.source_names:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, 'bool', name)
+
+    def _new_shift_temp(
+        self,
+        node: hir.AST,
+        type_: ty.Type,
+        role: str,
+    ) -> hir.ExpressedIdentifier:
+        """Allocate an operand temporary for a width-checked shift."""
+        while True:
+            name = f'__dewy_shift_{role}_{self.next_shift_temp}'
+            self.next_shift_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(node.loc, type_, name)
 
     def _new_loop_signals(
         self,

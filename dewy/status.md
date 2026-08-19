@@ -95,8 +95,10 @@ The type system instantiates generic function types for built-in operator overlo
 
 - [x] Exact integer-literal types and contextual selection of all signed and unsigned widths from 8 through 64 bits.
 - [x] udewy lowering for the fixed-width scalar operations exercised by the executable fixture suite.
+- [x] Width-correct rollover lowering for narrow add, subtract, multiply, floor-divide, modulo, unary negation/inversion, and bitwise operations.
+- [x] Unsigned floor division, modulo, and ordered comparisons lower through portable udewy intrinsics.
+- [x] Width-correct fixed-width shifts with unsigned counts and one-time operand evaluation. Negative counts are rejected at compile time; counts at or beyond the width continue shifting in zero bits, or sign bits for signed right shifts, rather than inheriting the target CPU's masked-count behavior.
 - [ ] Abstract `int` has arbitrary-precision semantics but no bigint runtime representation in the udewy backend.
-- [ ] Some fixed-width rollover and unsigned scalar operations still stop with focused backend diagnostics.
 
 ## Compile-time numeric range analysis
 
