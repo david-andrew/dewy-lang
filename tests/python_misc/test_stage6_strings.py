@@ -255,6 +255,68 @@ let main = ():>int64 => {
     assert entry_point(path, []) == 42
 
 
+def test_dynamic_string_slice_bounds_require_flow_proof() -> None:
+    source = '''
+let take = (lower:int64 upper:int64):>string => {
+    let text = "abcdef"
+    return text[[lower..upper]]
+}
+'''
+    with pytest.raises(UserError, match='string slice is not proven in bounds'):
+        codegen(SrcFile(None, source))
+
+
+def test_whole_slice_of_runtime_length_string_needs_no_bounds_proof() -> None:
+    emitted = codegen(SrcFile(None, '''
+let whole = (text:string):>string => text[..]
+'''))
+
+    assert 'let whole = (text:int64):>int64' in emitted
+    assert '__dewy_string_slice_first_' in emitted
+
+
+@pytest.mark.parametrize('slice_', ['[7..5]', '[0..-2]'])
+def test_static_string_slice_rejects_invalid_boundary_indexes(slice_: str) -> None:
+    with pytest.raises(UserError, match='sequence slice is out of bounds'):
+        _check(f'let text = "abcdef" let part = text[{slice_}]')
+
+
+@pytest.mark.skipif(
+    which('as') is None or which('ld') is None,
+    reason='as/ld not available',
+)
+def test_flow_proven_dynamic_string_slices_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = '''
+let take = (lower:int64 upper:int64):>string => {
+    let text = "aé👨‍👩‍👧‍👦🍀z"
+    if lower >=? 0 and lower <=? 5 and upper >=? 0 and upper <? 5 {
+        return text[[lower..upper]]
+    }
+    return ""
+}
+
+let main = ():>int64 => {
+    let lower:int64 = 1
+    let upper:int64 = 3
+    let text = "aé👨‍👩‍👧‍👦🍀z"
+    if take(lower upper) =? "é👨‍👩‍👧‍👦🍀"
+        and text[(lower..upper)] =? "👨‍👩‍👧‍👦"
+        and text[[lower..]] =? "é👨‍👩‍👧‍👦🍀z"
+        and text[[..upper)] =? "aé👨‍👩‍👧‍👦" {
+        return 42
+    }
+    return 1
+}
+'''
+    path = tmp_path / 'dynamic_string_slices.udewy'
+    path.write_text(codegen(SrcFile(None, source)))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 42
+
+
 @pytest.mark.skipif(
     which('as') is None or which('ld') is None,
     reason='as/ld not available',

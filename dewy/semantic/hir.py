@@ -520,6 +520,18 @@ class Range(AST):
     right: AST | None
 
 
+@dataclass
+class RangeMembership(AST):
+    """A runtime membership test, optionally with a normalized static step."""
+
+    value: AST
+    range: Range
+    first: int | None = None
+    step: int | None = None
+    last: int | None = None
+    count: int | None = None
+
+
 
 """
 primary language types to make hir nodes from:

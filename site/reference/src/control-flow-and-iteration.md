@@ -17,3 +17,8 @@ Static integer ranges support inclusive and explicit open bounds, descending
 steps, and `first,second..last` notation. Multiiterators combine static range
 iterators using `and`, `or`, `xor`, `nand`, `nor`, or `xnor`. Iterator leaves
 advance eagerly from left to right once per condition evaluation.
+
+`in?` supports runtime `int64` candidates and endpoints for unstepped ranges;
+all runtime operands are evaluated once. A runtime candidate can also be tested
+against a statically anchored stepped range, including descending and unbounded
+forms. Runtime-computed step anchors are not yet supported.

@@ -19,4 +19,6 @@ ordinary member access.
 Strings are immutable sequences of Unicode extended grapheme clusters. Length,
 indexing, slicing, iteration, exact equality, grapheme ranges, UTF-8 byte views,
 Unicode scalar views, and grapheme-array conversion are implemented. Equality
-currently preserves exact scalar spelling rather than normalizing text.
+currently preserves exact scalar spelling rather than normalizing text. Slice
+endpoints may be computed at runtime when flow-sensitive bounds analysis proves
+their effective open or closed boundaries stay within the string.

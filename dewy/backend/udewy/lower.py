@@ -209,7 +209,7 @@ class _FunctionDef:
     definition_scope: _Scope
     overload_member: bool
     symbol: str = ''
-    optional_result_name: str | None = None
+    result_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -256,12 +256,14 @@ class _Lowerer:
         self.next_flow_temp = 1
         self.next_eager_temp = 1
         self.next_shift_temp = 1
+        self.next_range_temp = 1
         self.next_array_temp = 1
         self.next_string_temp = 1
         self.next_object_temp = 1
         self.next_iterator_temp = 1
         self.next_iterator_value = 1
         self.next_optional_temp = 1
+        self.next_result_temp = 1
         self.next_default_temp = 1
         self.next_loop_signal = 1
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
@@ -287,8 +289,10 @@ class _Lowerer:
             tuple[int, int | str],
             ArrayCallBoundaryAnalysis,
         ] = {}
+        self.array_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
+        self.current_array_result: hir.ExpressedIdentifier | None = None
         self.current_object_receiver: hir.ExpressedIdentifier | None = None
         self.current_object_type: ty.ObjectType | None = None
         self.current_object_field_ids: set[int] = set()
@@ -408,6 +412,19 @@ class _Lowerer:
             self._target_error(literal, 'rest parameters and argument spreading')
         result_payload = ty.optional_payload(literal.rettype)
         object_result = isinstance(literal.rettype, ty.ObjectType)
+        array_result = (
+            isinstance(literal.rettype, ty.ArrayType)
+            and literal.rettype.length is not None
+        )
+        if (
+            array_result
+            and isinstance(literal.rettype, ty.ArrayType)
+            and not self._array_result_elements_are_returnable(literal.rettype)
+        ):
+            self._target_error(
+                literal,
+                'exact array returns of handle elements require ownership lowering',
+            )
         if isinstance(result_payload, ty.ArrayType):
             self._target_error(
                 literal,
@@ -415,7 +432,7 @@ class _Lowerer:
             )
         rettype = (
             ty.VOID_TYPE
-            if result_payload is not None or object_result
+            if result_payload is not None or object_result or array_result
             else self._target_scalar_type(literal.rettype, literal)
         )
         lowered_pos: list[hir.Param | hir.BoundParam] = []
@@ -567,28 +584,33 @@ class _Lowerer:
             lowered_pos = [hir.Param(receiver_name, 'int64'), *lowered_pos]
         result_target = None
         object_result_target = None
-        if result_payload is not None or object_result:
-            assert function.optional_result_name is not None
+        array_result_target = None
+        if result_payload is not None or object_result or array_result:
+            assert function.result_name is not None
             lowered_pos.append(
-                hir.Param(function.optional_result_name, 'int64')
+                hir.Param(function.result_name, 'int64')
             )
             target = hir.ExpressedIdentifier(
                 literal.loc,
                 literal.rettype,
-                function.optional_result_name,
+                function.result_name,
             )
             if object_result:
                 object_result_target = target
+            elif array_result:
+                array_result_target = target
             else:
                 result_target = target
         previous_result = self.current_optional_result
         previous_object_result = self.current_object_result
+        previous_array_result = self.current_array_result
         previous_receiver = self.current_object_receiver
         previous_object_type = self.current_object_type
         previous_field_ids = self.current_object_field_ids
         previous_field_names = self.current_object_field_names
         self.current_optional_result = result_target
         self.current_object_result = object_result_target
+        self.current_array_result = array_result_target
         self.current_object_receiver = receiver
         self.current_object_type = literal.object_type
         self.current_object_field_ids = {binding_id for binding_id, _name in literal.object_fields}
@@ -612,6 +634,7 @@ class _Lowerer:
         body = self._lower_function_body(transformed_body, literal.rettype)
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
+        self.current_array_result = previous_array_result
         self.current_object_receiver = previous_receiver
         self.current_object_type = previous_object_type
         self.current_object_field_ids = previous_field_ids
@@ -659,7 +682,14 @@ class _Lowerer:
             if not param.required:
                 pos.append(ty.PosOrKwArg(None, 'bool'))
         rettype: ty.TypeExpr = self._lower_runtime_value_type(type_.ret)
-        if isinstance(type_.ret, ty.ObjectType) or ty.optional_payload(type_.ret) is not None:
+        if (
+            isinstance(type_.ret, ty.ObjectType)
+            or ty.optional_payload(type_.ret) is not None
+            or (
+                isinstance(type_.ret, ty.ArrayType)
+                and type_.ret.length is not None
+            )
+        ):
             pos.append(ty.PosOrKwArg(None, 'int64'))
             rettype = ty.VOID_TYPE
         return replace(
@@ -708,7 +738,10 @@ class _Lowerer:
                 'heterogeneous runtime union containing `undefined`',
             )
         if isinstance(type_, ty.ArrayType):
-            self._target_error(node, 'array return values are not supported by udewy')
+            self._target_error(
+                node,
+                'array return values require an exact compile-time length',
+            )
         if isinstance(type_, ty.QuantityType):
             return self._target_scalar_type(type_.number, node)
         if isinstance(type_, ty.StringLiteralType):
@@ -1125,11 +1158,15 @@ class _Lowerer:
             definition_scope,
             overload_member,
         )
-        if ty.optional_payload(literal.rettype) is not None or isinstance(
-            literal.rettype,
-            ty.ObjectType,
+        if (
+            ty.optional_payload(literal.rettype) is not None
+            or isinstance(literal.rettype, ty.ObjectType)
+            or (
+                isinstance(literal.rettype, ty.ArrayType)
+                and literal.rettype.length is not None
+            )
         ):
-            function.optional_result_name = self._new_optional_name('result')
+            function.result_name = self._new_result_name()
         self.next_function_order += 1
         self.functions.append(function)
         self.function_by_literal[id(literal)] = function
@@ -1328,6 +1365,10 @@ class _Lowerer:
             return
         if isinstance(node, hir.TypeTest):
             self._discover_node(node.value, scope, current_function)
+            return
+        if isinstance(node, hir.RangeMembership):
+            self._discover_node(node.value, scope, current_function)
+            self._discover_node(node.range, scope, current_function)
             return
         if isinstance(node, hir.ArrayLiteral):
             for item in node.items:
@@ -2490,6 +2531,15 @@ class _Lowerer:
                     for item in node.items
                 ],
             )
+        if isinstance(node, hir.RangeMembership):
+            transformed_range = self._transform_node(node.range)
+            if not isinstance(transformed_range, hir.Range):
+                raise TypeError('INTERNAL ERROR: membership range was not preserved')
+            return replace(
+                node,
+                value=self._require_node(self._transform_node(node.value)),
+                range=transformed_range,
+            )
         if isinstance(node, hir.Range):
             originals = [
                 *([] if node.step_pair is None else node.step_pair),
@@ -2607,6 +2657,9 @@ class _Lowerer:
                 if self.current_object_result is not None:
                     items.extend(self._object_result_write(item))
                     continue
+                if self.current_array_result is not None:
+                    items.extend(self._array_result_write(item))
+                    continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
                 items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
@@ -2629,6 +2682,8 @@ class _Lowerer:
             ]
         elif self.current_object_result is not None:
             statements = self._object_result_write(node)
+        elif self.current_array_result is not None:
+            statements = self._array_result_write(node)
         else:
             prelude, value = self._extract_expression(node)
             statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
@@ -2891,6 +2946,10 @@ class _Lowerer:
                 if node.item is None:
                     self._target_error(node, 'object return without a value')
                 return self._object_result_write(node.item)
+            if self.current_array_result is not None:
+                if node.item is None:
+                    self._target_error(node, 'array return without a value')
+                return self._array_result_write(node.item)
             if self.current_optional_result is not None:
                 if node.item is None:
                     self._target_error(node, 'optional return without a value')
@@ -3010,6 +3069,8 @@ class _Lowerer:
             return [declaration, *flow_prelude, flow], target
         if isinstance(node, hir.ShortCircuit):
             return self._extract_expression(self._short_circuit_flow(node))
+        if isinstance(node, hir.RangeMembership):
+            return self._extract_range_membership(node)
         if isinstance(node, hir.String):
             return self._extract_string_literal(node)
         if isinstance(node, hir.BasedString):
@@ -3168,6 +3229,8 @@ class _Lowerer:
                 kw_args[name] = lowered_arg
             if isinstance(node.type, ty.ObjectType):
                 return self._finish_object_call(node, func, pos_args, kw_args, prelude)
+            if isinstance(node.type, ty.ArrayType) and node.type.length is not None:
+                return self._finish_array_call(node, func, pos_args, kw_args, prelude)
             result_payload = ty.optional_payload(node.type)
             if result_payload is not None:
                 result = hir.ExpressedIdentifier(
@@ -3328,6 +3391,125 @@ class _Lowerer:
             ]
         )
         return statements, target
+
+    def _extract_range_membership(
+        self,
+        node: hir.RangeMembership,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Lower one eager range membership value into comparisons."""
+        prelude, value = self._extract_expression(node.value)
+        value_temp = self._new_range_temp(node.value, 'candidate')
+        prelude.append(hir.Declare(
+            node.value.loc,
+            ty.VOID_TYPE,
+            'let',
+            value_temp.name,
+            'int64',
+            hir.ValueCast(node.value.loc, 'int64', value),
+        ))
+
+        conditions: list[hir.AST] = []
+        if node.step is not None:
+            if node.first is None or (
+                node.count is None and node.last is not None
+            ):
+                raise TypeError('INTERNAL ERROR: incomplete stepped membership metadata')
+            if node.count == 0:
+                return prelude, hir.Bool(node.loc, 'bool', False)
+            first = self._int64_literal(node.loc, node.first)
+            if node.step > 0:
+                conditions.append(self._int64_comparison(
+                    '__ge__',
+                    value_temp,
+                    first,
+                    node.loc,
+                ))
+                if node.last is not None:
+                    conditions.append(self._int64_comparison(
+                        '__le__',
+                        value_temp,
+                        self._int64_literal(node.loc, node.last),
+                        node.loc,
+                    ))
+            else:
+                conditions.append(self._int64_comparison(
+                    '__le__',
+                    value_temp,
+                    first,
+                    node.loc,
+                ))
+                if node.last is not None:
+                    conditions.append(self._int64_comparison(
+                        '__ge__',
+                        value_temp,
+                        self._int64_literal(node.loc, node.last),
+                        node.loc,
+                    ))
+            if abs(node.step) != 1:
+                divisor = self._int64_literal(node.loc, node.step)
+                conditions.append(self._typed_equality(
+                    self._int64_binary(
+                        '__mod__',
+                        value_temp,
+                        divisor,
+                        node.loc,
+                    ),
+                    self._int64_binary(
+                        '__mod__',
+                        first,
+                        divisor,
+                        node.loc,
+                    ),
+                    'int64',
+                    node.loc,
+                ))
+        else:
+            bounds = node.range.bounds or '[]'
+            for role, anchor, comparison in (
+                (
+                    'lower',
+                    node.range.left,
+                    '__ge__' if bounds[0] == '[' else '__gt__',
+                ),
+                (
+                    'upper',
+                    node.range.right,
+                    '__le__' if bounds[1] == ']' else '__lt__',
+                ),
+            ):
+                if anchor is None:
+                    continue
+                anchor_prelude, lowered_anchor = self._extract_expression(anchor)
+                prelude.extend(anchor_prelude)
+                anchor_temp = self._new_range_temp(anchor, role)
+                prelude.append(hir.Declare(
+                    anchor.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    anchor_temp.name,
+                    'int64',
+                    hir.ValueCast(anchor.loc, 'int64', lowered_anchor),
+                ))
+                conditions.append(self._int64_comparison(
+                    comparison,
+                    value_temp,
+                    anchor_temp,
+                    node.loc,
+                ))
+
+        if not conditions:
+            return prelude, hir.Bool(node.loc, 'bool', True)
+        condition = conditions[0]
+        for next_condition in conditions[1:]:
+            condition = hir.ShortCircuit(
+                node.loc,
+                'bool',
+                'and',
+                condition,
+                next_condition,
+            )
+        condition_prelude, result = self._extract_expression(condition)
+        return [*prelude, *condition_prelude], result
 
     def _string_data_start(self, string: hir.AST, loc: Span) -> hir.AST:
         return self._int64_binary(
@@ -5384,7 +5566,11 @@ class _Lowerer:
             ],
             None,
         )
-        allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
+        allocator = (
+            '__static_alloca__'
+            if self.lowering_module_startup
+            else '__alloca__'
+        )
         descriptor_word = replace(descriptor, type='int64')
         return [
             *prelude,
@@ -5625,23 +5811,73 @@ class _Lowerer:
             STRING_GRAPHEME_LENGTH_OFFSET,
             node.loc,
         )
-        left = self._literal_index(node.range.left)
-        right = self._literal_index(node.range.right)
         bounds = node.range.bounds or '[]'
-        if node.range.left is not None and left is None:
-            self._target_error(node.range.left, 'dynamic string slice lower bound')
-        if node.range.right is not None and right is None:
-            self._target_error(node.range.right, 'dynamic string slice upper bound')
-        first_value = (left or 0) + (1 if bounds[0] == '(' else 0)
-        first = self._int64_literal(node.loc, first_value)
-        if right is None:
+
+        if node.range.left is None:
+            first_expr: hir.AST = self._int64_literal(node.loc, 0)
+        else:
+            left_prelude, left = self._extract_expression(node.range.left)
+            prelude.extend(left_prelude)
+            first_expr = hir.ValueCast(left.loc, 'int64', left)
+            if bounds[0] == '(':
+                first_expr = self._int64_binary(
+                    '__add__',
+                    first_expr,
+                    self._int64_literal(node.loc, 1),
+                    node.loc,
+                )
+        first = self._new_string_temp(node.loc, 'int64', 'slice_first')
+        prelude.append(hir.Declare(
+            node.loc,
+            ty.VOID_TYPE,
+            'let',
+            first.name,
+            'int64',
+            first_expr,
+        ))
+
+        if node.range.right is None:
             count = self._int64_binary('__sub__', length, first, node.loc)
         else:
-            last = right - (1 if bounds[1] == ')' else 0)
-            count = self._int64_literal(
+            right_prelude, right = self._extract_expression(node.range.right)
+            prelude.extend(right_prelude)
+            last_expr: hir.AST = hir.ValueCast(right.loc, 'int64', right)
+            if bounds[1] == ')':
+                last_expr = self._int64_binary(
+                    '__sub__',
+                    last_expr,
+                    self._int64_literal(node.loc, 1),
+                    node.loc,
+                )
+            last = self._new_string_temp(node.loc, 'int64', 'slice_last')
+            prelude.append(hir.Declare(
                 node.loc,
-                max(0, last - first_value + 1),
+                ty.VOID_TYPE,
+                'let',
+                last.name,
+                'int64',
+                last_expr,
+            ))
+            count_flow = hir.Flow(
+                node.loc,
+                'int64',
+                [
+                    hir.IfArm(
+                        node.loc,
+                        'int64',
+                        self._int64_comparison('__lt__', last, first, node.loc),
+                        self._int64_literal(node.loc, 0),
+                    )
+                ],
+                self._int64_binary(
+                    '__add__',
+                    self._int64_binary('__sub__', last, first, node.loc),
+                    self._int64_literal(node.loc, 1),
+                    node.loc,
+                ),
             )
+            count_prelude, count = self._extract_expression(count_flow)
+            prelude.extend(count_prelude)
         view_prelude, view = self._string_view(
             string,
             first,
@@ -5857,94 +6093,7 @@ class _Lowerer:
                 node,
                 'top-level arrays currently require compile-time-stable elements',
             )
-        element_bytes, _signed = self._array_element_layout(
-            node.type.element,
-            node,
-        )
-        target = self._new_array_temp(node)
-        data_name = self._new_array_name('data')
-        data = hir.ExpressedIdentifier(node.loc, 'int64', data_name)
-        allocator = (
-            '__static_alloca__'
-            if self.lowering_module_startup
-            else '__alloca__'
-        )
-        data_allocation = self._intrinsic_call(
-            allocator,
-            [
-                self._int64_literal(
-                    node.loc,
-                    max(1, node.type.length * element_bytes),
-                )
-            ],
-            'int64',
-            node.loc,
-        )
-        descriptor_allocation = self._intrinsic_call(
-            allocator,
-            [self._int64_literal(node.loc, ARRAY_DESCRIPTOR_SIZE)],
-            'int64',
-            node.loc,
-        )
-        statements: list[hir.AST] = [
-            hir.Declare(
-                node.loc,
-                ty.VOID_TYPE,
-                'let',
-                data_name,
-                'int64',
-                data_allocation,
-            ),
-            hir.Declare(
-                node.loc,
-                ty.VOID_TYPE,
-                'let',
-                target.name,
-                'int64',
-                descriptor_allocation,
-            ),
-        ]
-        descriptor = replace(target, type='int64')
-        statements.extend(
-            [
-                self._store_i64_field(
-                    descriptor,
-                    ARRAY_DATA_OFFSET,
-                    data,
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    ARRAY_LENGTH_OFFSET,
-                    self._int64_literal(node.loc, node.type.length),
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    ARRAY_CAPACITY_OFFSET,
-                    self._int64_literal(node.loc, node.type.length),
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    ARRAY_STRIDE_OFFSET,
-                    self._int64_literal(node.loc, element_bytes),
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    ARRAY_FLAGS_OFFSET,
-                    self._int64_literal(node.loc, ARRAY_MUTABLE),
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    ARRAY_OWNER_OFFSET,
-                    self._int64_literal(node.loc, 0),
-                    node.loc,
-                ),
-            ]
-        )
+        statements, target = self._allocate_array_value(node.type, node.loc)
         for index, item in enumerate(node.items):
             item_prelude, value = self._array_storage_value(
                 item,
@@ -5960,6 +6109,91 @@ class _Lowerer:
             statements.append(
                 self._array_store(value, address, node.type.element, item.loc)
             )
+        return statements, target
+
+    def _allocate_array_value(
+        self,
+        array_type: ty.ArrayType,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Allocate an exact array descriptor and its caller-owned backing data."""
+
+        if array_type.length is None:
+            self._target_error(
+                hir.Void(loc, ty.VOID_TYPE),
+                'array allocation requires an exact compile-time length',
+            )
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            hir.Void(loc, ty.VOID_TYPE),
+        )
+        target = self._new_array_temp(hir.Void(loc, array_type))
+        data_name = self._new_array_name('data')
+        data = hir.ExpressedIdentifier(loc, 'int64', data_name)
+        allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
+        descriptor = replace(target, type='int64')
+        statements: list[hir.AST] = [
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                data_name,
+                'int64',
+                self._intrinsic_call(
+                    allocator,
+                    [self._int64_literal(
+                        loc,
+                        max(1, array_type.length * element_bytes),
+                    )],
+                    'int64',
+                    loc,
+                ),
+            ),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                'int64',
+                self._intrinsic_call(
+                    allocator,
+                    [self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE)],
+                    'int64',
+                    loc,
+                ),
+            ),
+            self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, data, loc),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_LENGTH_OFFSET,
+                self._int64_literal(loc, array_type.length),
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_CAPACITY_OFFSET,
+                self._int64_literal(loc, array_type.length),
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_STRIDE_OFFSET,
+                self._int64_literal(loc, element_bytes),
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_FLAGS_OFFSET,
+                self._int64_literal(loc, ARRAY_MUTABLE),
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_OWNER_OFFSET,
+                self._int64_literal(loc, 0),
+                loc,
+            ),
+        ]
         return statements, target
 
     def _array_storage_value(
@@ -6246,7 +6480,7 @@ class _Lowerer:
             )
         return False
 
-    def _new_array_temp(self, node: hir.ArrayLiteral) -> hir.ExpressedIdentifier:
+    def _new_array_temp(self, node: hir.AST) -> hir.ExpressedIdentifier:
         while True:
             name = f'__dewy_array_{self.next_array_temp}'
             self.next_array_temp += 1
@@ -6266,6 +6500,14 @@ class _Lowerer:
         while True:
             name = f'__dewy_default_{role}_{self.next_default_temp}'
             self.next_default_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return name
+
+    def _new_result_name(self) -> str:
+        while True:
+            name = f'__dewy_result_{self.next_result_temp}'
+            self.next_result_temp += 1
             if name not in self.source_names:
                 self.source_names.add(name)
                 return name
@@ -6451,6 +6693,17 @@ class _Lowerer:
         self._target_error(
             node,
             f'array element layout `{type_to_dewy(element_type)}`',
+        )
+
+    @staticmethod
+    def _array_result_elements_are_returnable(array_type: ty.ArrayType) -> bool:
+        """Whether copying elements cannot retain pointers into a callee frame."""
+
+        return (
+            array_type.length == 0
+            or array_type.element == 'bool'
+            or ty.fixed_integer_layout(array_type.element) is not None
+            or isinstance(array_type.element, ty.FunctionType)
         )
 
     def _array_element_address(
@@ -7056,6 +7309,14 @@ class _Lowerer:
                 kw_args,
                 prelude,
             )
+        if isinstance(node.type, ty.ArrayType) and node.type.length is not None:
+            return self._finish_array_call(
+                node,
+                loaded,
+                pos_args,
+                kw_args,
+                prelude,
+            )
         result_payload = ty.optional_payload(node.type)
         if result_payload is not None:
             result = hir.ExpressedIdentifier(
@@ -7114,6 +7375,34 @@ class _Lowerer:
                 type=ty.VOID_TYPE,
                 func=func,
                 pos_args=[*pos_args, result],
+                kw_args=kw_args,
+            )
+        )
+        return prelude, result
+
+    def _finish_array_call(
+        self,
+        node: hir.FunctionCall,
+        func: hir.AST,
+        pos_args: list[hir.AST],
+        kw_args: dict[str, hir.AST],
+        prelude: list[hir.AST],
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        if not isinstance(node.type, ty.ArrayType) or node.type.length is None:
+            self._target_error(
+                node,
+                'array call results require an exact compile-time length',
+            )
+        result = self.array_result_destinations.pop(id(node), None)
+        if result is None:
+            allocation, result = self._allocate_array_value(node.type, node.loc)
+            prelude.extend(allocation)
+        prelude.append(
+            replace(
+                node,
+                type=ty.VOID_TYPE,
+                func=func,
+                pos_args=[*pos_args, replace(result, type='int64')],
                 kw_args=kw_args,
             )
         )
@@ -7266,6 +7555,99 @@ class _Lowerer:
             *self._object_copy(dest, src, object_type, item.loc),
             hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
         ]
+
+    def _array_result_write(self, item: hir.AST) -> list[hir.AST]:
+        """Copy one exact-length array result into storage owned by the caller."""
+
+        if self.current_array_result is None:
+            raise TypeError('INTERNAL ERROR: missing array result cell')
+        array_type = self.current_array_result.type
+        if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
+            raise TypeError('INTERNAL ERROR: array result does not have an exact layout')
+        dest = replace(self.current_array_result, type='int64')
+        statements: list[hir.AST] = []
+        if isinstance(item, hir.FunctionCall):
+            self.array_result_destinations[id(item)] = replace(
+                self.current_array_result,
+                type=item.type,
+            )
+            prelude, result = self._extract_expression(item)
+            if id(item) in self.array_result_destinations:
+                del self.array_result_destinations[id(item)]
+                raise TypeError('INTERNAL ERROR: array result destination was not consumed')
+            if (
+                not isinstance(result, hir.ExpressedIdentifier)
+                or result.name != self.current_array_result.name
+            ):
+                raise TypeError('INTERNAL ERROR: forwarded array result changed destination')
+            return [
+                *prelude,
+                hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
+            ]
+        if isinstance(item, hir.ArrayLiteral):
+            if len(item.items) != array_type.length:
+                raise TypeError('INTERNAL ERROR: checked array result length changed')
+            for index, element in enumerate(item.items):
+                prelude, value = self._array_storage_value(
+                    element,
+                    array_type.element,
+                )
+                statements.extend(prelude)
+                statements.append(self._array_store(
+                    value,
+                    self._array_element_address(
+                        dest,
+                        index,
+                        array_type.element,
+                        element.loc,
+                    ),
+                    array_type.element,
+                    element.loc,
+                ))
+        else:
+            raw_representation = self._array_use_representation(item)
+            prelude, source = self._extract_expression(item)
+            statements.extend(prelude)
+            element_bytes, _signed = self._array_element_layout(
+                array_type.element,
+                item,
+            )
+            for index in range(array_type.length):
+                source_address = (
+                    self._pointer_element_address(
+                        source,
+                        index,
+                        element_bytes,
+                        item.loc,
+                    )
+                    if raw_representation is not None
+                    else self._array_element_address(
+                        source,
+                        index,
+                        array_type.element,
+                        item.loc,
+                    )
+                )
+                value = self._array_load(
+                    source_address,
+                    array_type.element,
+                    item.loc,
+                )
+                statements.append(self._array_store(
+                    value,
+                    self._array_element_address(
+                        dest,
+                        index,
+                        array_type.element,
+                        item.loc,
+                    ),
+                    array_type.element,
+                    item.loc,
+                ))
+        statements.append(
+            hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE))
+        )
+        return statements
 
     def _lower_iterator_flow(
         self,
@@ -8229,7 +8611,7 @@ class _Lowerer:
 
     @staticmethod
     def _int64_comparison(
-        name: Literal['__lt__'],
+        name: Literal['__lt__', '__le__', '__gt__', '__ge__'],
         left: hir.AST,
         right: hir.AST,
         loc: Span,
@@ -8634,6 +9016,19 @@ class _Lowerer:
             if name not in self.source_names:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, type_, name)
+
+    def _new_range_temp(
+        self,
+        node: hir.AST,
+        role: str,
+    ) -> hir.ExpressedIdentifier:
+        """Allocate a runtime range-membership operand temporary."""
+        while True:
+            name = f'__dewy_range_{role}_{self.next_range_temp}'
+            self.next_range_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return hir.ExpressedIdentifier(node.loc, 'int64', name)
 
     def _new_loop_signals(
         self,

@@ -1,3 +1,6 @@
+from pathlib import Path
+from shutil import which
+
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -5,6 +8,7 @@ from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
 from dewy.semantic.errors import NotImplementedYet, UserError
 from dewy.semantic.hir_display import hir_to_dewy
+from udewy.frontend import entry_point
 
 
 def _check(source: str) -> hir.Block:
@@ -107,6 +111,104 @@ def test_exact_integer_range_membership_is_folded(
 def test_exact_integer_range_membership_lowers() -> None:
     emitted = codegen(SrcFile(None, 'let result = 16 in? (5..15]'))
     assert 'let result:bool = false' in emitted
+
+
+def test_runtime_unstepped_range_membership_is_preserved_in_hir() -> None:
+    root = _check('''
+let candidate:int64 = 7
+let lower:int64 = 5
+let upper:int64 = 10
+let result = candidate in? [lower..upper)
+''')
+    result = root.items[3]
+    assert isinstance(result, hir.Declare)
+    assert isinstance(result.expr, hir.RangeMembership)
+
+
+def test_runtime_range_membership_operands_are_evaluated_once() -> None:
+    emitted = codegen(SrcFile(None, '''
+let next_value = ():>int64 => 7
+let next_lower = ():>int64 => 5
+let next_upper = ():>int64 => 10
+let result = next_value() in? [next_lower()..next_upper())
+'''))
+
+    assert emitted.count('= next_value()') == 1
+    assert emitted.count('= next_lower()') == 1
+    assert emitted.count('= next_upper()') == 1
+
+
+def test_runtime_candidate_in_static_stepped_range_is_preserved_and_lowered() -> None:
+    root = _check('''
+let candidate:int64 = 8
+let result = candidate in? 0,2..10
+''')
+    result = root.items[1]
+    assert isinstance(result, hir.Declare)
+    assert isinstance(result.expr, hir.RangeMembership)
+    assert (
+        result.expr.first,
+        result.expr.step,
+        result.expr.last,
+        result.expr.count,
+    ) == (0, 2, 10, 6)
+
+    emitted = codegen(SrcFile(None, '''
+let next_value = ():>int64 => 8
+let result = next_value() in? 0,2..10
+'''))
+    assert emitted.count('= next_value()') == 1
+    assert ' % 2' in emitted
+
+
+@pytest.mark.skipif(
+    which('as') is None or which('ld') is None,
+    reason='as/ld not available',
+)
+def test_runtime_unstepped_range_membership_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = '''
+let closed_open = (value:int64 lower:int64 upper:int64):>bool =>
+    value in? [lower..upper)
+let open_closed = (value:int64 lower:int64 upper:int64):>bool =>
+    value in? (lower..upper]
+let below = (value:int64 upper:int64):>bool => value in? [..upper)
+let above = (value:int64 lower:int64):>bool => value in? (lower..]
+let even = (value:int64):>bool => value in? 0,2..10
+let open_even = (value:int64):>bool => value in? (0,2..10]
+let descending = (value:int64):>bool => value in? 10,7..1
+let unbounded_even = (value:int64):>bool => value in? 0,2..
+
+let main = ():>int64 => {
+    if closed_open(5 5 10)
+        and closed_open(9 5 10)
+        and not closed_open(10 5 10)
+        and not closed_open(4 5 10)
+        and open_closed(10 5 10)
+        and not open_closed(5 5 10)
+        and below(9 10)
+        and not below(10 10)
+        and above(6 5)
+        and not above(5 5)
+        and even(8)
+        and not even(9)
+        and open_even(2)
+        and not open_even(0)
+        and descending(7)
+        and not descending(8)
+        and unbounded_even(100)
+        and not unbounded_even(101) {
+        return 42
+    }
+    return 1
+}
+'''
+    path = tmp_path / 'runtime_range_membership.udewy'
+    path.write_text(codegen(SrcFile(None, source)))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 42
 
 
 def test_right_unbounded_ranges_have_bigint_targets() -> None:

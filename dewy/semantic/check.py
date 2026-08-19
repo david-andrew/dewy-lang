@@ -1201,49 +1201,103 @@ def _normalize_integer_range(
     return _NormalizedIntegerRange(first, step, last, count, target_type)
 
 
-def _tcr_static_range_membership(
+def _tcr_range_membership(
     value: hir.AST,
     range_: hir.Range,
     *,
     ctx: Context,
-) -> hir.Bool:
-    """Fold membership when both the value and range anchors are exact integers."""
+) -> hir.AST:
+    """Fold exact membership or build runtime checks for unstepped bounds."""
 
     candidate = _constant_integer(value, ctx=ctx)
-    if candidate is None:
-        not_implemented(
-            ctx.srcfile,
-            value.loc,
-            'runtime-valued range membership',
+    if range_.step_pair is None:
+        left = (
+            _constant_integer(range_.left, ctx=ctx)
+            if range_.left is not None
+            else None
         )
-    if range_.left is None:
-        if range_.step_pair is not None:
-            not_implemented(
-                ctx.srcfile,
-                range_.loc,
-                'left-unbounded stepped range membership',
-            )
         right = (
             _constant_integer(range_.right, ctx=ctx)
             if range_.right is not None
             else None
         )
-        if range_.right is not None and right is None:
-            not_implemented(
-                ctx.srcfile,
-                range_.right.loc,
-                'runtime-valued range membership bounds',
-            )
-        included = True
-        if right is not None:
-            included = (
-                candidate <= right
-                if (range_.bounds or '[]')[1] == ']'
-                else candidate < right
-            )
-        return hir.Bool(value.loc, 'bool', included)
+        all_exact = (
+            candidate is not None
+            and (range_.left is None or left is not None)
+            and (range_.right is None or right is not None)
+        )
+        bounds = range_.bounds or '[]'
+        if all_exact:
+            assert candidate is not None
+            included = True
+            if left is not None:
+                included = (
+                    candidate >= left
+                    if bounds[0] == '['
+                    else candidate > left
+                )
+            if included and right is not None:
+                included = (
+                    candidate <= right
+                    if bounds[1] == ']'
+                    else candidate < right
+                )
+            return hir.Bool(value.loc, 'bool', included)
+
+        runtime_value = check_against(value, 'int64', ctx=ctx)
+        runtime_range = replace(
+            range_,
+            left=(
+                check_against(range_.left, 'int64', ctx=ctx)
+                if range_.left is not None
+                else None
+            ),
+            right=(
+                check_against(range_.right, 'int64', ctx=ctx)
+                if range_.right is not None
+                else None
+            ),
+        )
+        return hir.RangeMembership(
+            range_.loc,
+            'bool',
+            runtime_value,
+            runtime_range,
+        )
+
+    if range_.left is None:
+        not_implemented(
+            ctx.srcfile,
+            range_.loc,
+            'left-unbounded stepped range membership',
+        )
 
     normalized = _normalize_integer_range(range_, ctx=ctx)
+    if candidate is None:
+        backend_values = [
+            normalized.first,
+            normalized.step,
+            *([] if normalized.last is None else [normalized.last]),
+        ]
+        if not all(
+            ty.integer_literal_fits(item, 'int64')
+            for item in backend_values
+        ):
+            not_implemented(
+                ctx.srcfile,
+                range_.loc,
+                'runtime stepped range membership requires bigint lowering',
+            )
+        return hir.RangeMembership(
+            range_.loc,
+            'bool',
+            check_against(value, 'int64', ctx=ctx),
+            range_,
+            normalized.first,
+            normalized.step,
+            normalized.last,
+            normalized.count,
+        )
     delta = candidate - normalized.first
     aligned = delta % abs(normalized.step) == 0
     ordinal = delta // normalized.step if aligned else -1
@@ -3162,6 +3216,8 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             )
         start = 0
         stop = -1
+        left: int | None = None
+        right: int | None = None
         if length is not None:
             left = 0 if index.left is None else _constant_integer(index.left, ctx=index_ctx)
             right = (
@@ -3169,20 +3225,11 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 if index.right is None
                 else _constant_integer(index.right, ctx=index_ctx)
             )
-            if left is None or right is None:
-                user_error(
-                    ctx.srcfile,
-                    'sequence slice is not proven in bounds',
-                    Pointer(
-                        span=index.loc,
-                        message='slice endpoints must have compile-time integer values',
-                    ),
-                )
             if left is not None and right is not None:
                 bounds_kind = index.bounds or '[]'
                 start = left + (1 if bounds_kind[0] == '(' else 0)
                 stop = right - (1 if bounds_kind[1] == ')' else 0)
-                if start < 0 or stop >= length:
+                if start < 0 or start > length or stop < -1 or stop >= length:
                     user_error(
                         ctx.srcfile,
                         'sequence slice is out of bounds',
@@ -3200,6 +3247,18 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 index,
             )
         assert isinstance(array.type, ty.ArrayType)
+        if length is None or left is None or right is None:
+            user_error(
+                ctx.srcfile,
+                'sequence slice is not proven in bounds',
+                Pointer(
+                    span=index.loc,
+                    message=(
+                        'dynamic array slices require a runtime-sized array '
+                        'result, which is not implemented yet'
+                    ),
+                ),
+            )
         if not isinstance(array, hir.ExpressedIdentifier):
             not_implemented(
                 ctx.srcfile,
@@ -3420,7 +3479,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     )
 
     if symbol == 'in?' and isinstance(right, hir.Range):
-        return _tcr_static_range_membership(left, right, ctx=ctx)
+        return _tcr_range_membership(left, right, ctx=ctx)
     
     match binop.op:
         case t2.QJuxtapose():

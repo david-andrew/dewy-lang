@@ -281,6 +281,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     if isinstance(node, hir.Range):
         bounds = node.bounds if node.bounds is not None else '[]'
         return f'Range({bounds})'
+    if isinstance(node, hir.RangeMembership):
+        return 'RangeMembership(in?)'
     if isinstance(node, hir.Partial):
         return 'Partial'
     return type(node).__name__
@@ -402,6 +404,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         if node.right is not None:
             out.append(('right', node.right))
         return out
+    if isinstance(node, hir.RangeMembership):
+        return [('value', node.value), ('range', node.range)]
     return []
 
 
@@ -854,6 +858,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         ))
     if isinstance(node, hir.Range):
         return _range_doc(node, min_prec, indent)
+    if isinstance(node, hir.RangeMembership):
+        return _group(_seq(
+            _to_doc(node.value, 0, indent),
+            _text(' in? '),
+            _to_doc(node.range, 0, indent),
+        ))
     if isinstance(node, hir.Partial):
         return _text('<partial>')
     raise TypeError(f'unhandled HIR node in printer: {type(node).__name__}')

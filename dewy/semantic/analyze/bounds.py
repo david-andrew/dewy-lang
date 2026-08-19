@@ -548,7 +548,18 @@ class _BoundsValidator:
             return None
         if isinstance(node, hir.StringSlice):
             self._eval(node.string, state, validate=validate)
-            self._eval(node.range, state, validate=validate)
+            left = (
+                Interval.exact(0)
+                if node.range.left is None
+                else self._eval(node.range.left, state, validate=validate)
+            )
+            length = self._string_length(node.string.type)
+            if node.range.right is None:
+                right = None if length is None else Interval.exact(length - 1)
+            else:
+                right = self._eval(node.range.right, state, validate=validate)
+            if validate:
+                self._validate_string_slice(node, left, right, length)
             return None
         if isinstance(node, hir.StringEqual):
             self._eval(node.left, state, validate=validate)
@@ -607,6 +618,10 @@ class _BoundsValidator:
         if isinstance(node, hir.ShortCircuit):
             self._eval(node.left, state, validate=validate)
             self._eval(node.right, state, validate=validate)
+            return None
+        if isinstance(node, hir.RangeMembership):
+            self._eval(node.value, state, validate=validate)
+            self._eval(node.range, state, validate=validate)
             return None
         if isinstance(node, hir.Range):
             items = [
@@ -816,6 +831,62 @@ class _BoundsValidator:
                 message=f'the index interval here is `{known}`',
             ),
             hint=f'establish both a nonnegative lower bound and an upper bound below the {kind} length',
+        )
+
+    def _validate_string_slice(
+        self,
+        node: hir.StringSlice,
+        left: Interval | None,
+        right: Interval | None,
+        length: int | None,
+    ) -> None:
+        """Require every possible dynamic endpoint to address a valid boundary."""
+        if node.range.left is None and node.range.right is None:
+            return
+        bounds = node.range.bounds or '[]'
+
+        def shifted(interval: Interval | None, delta: int) -> Interval:
+            if interval is None:
+                return UNKNOWN_INTERVAL
+            return Interval(
+                _add(interval.lower, delta),
+                _add(interval.upper, delta),
+            )
+
+        first = shifted(left, 1 if bounds[0] == '(' else 0)
+        last = shifted(right, -1 if bounds[1] == ')' else 0)
+        if (
+            length is not None
+            and first.lower is not None
+            and first.upper is not None
+            and last.lower is not None
+            and last.upper is not None
+            and 0 <= first.lower
+            and first.upper <= length
+            and -1 <= last.lower
+            and last.upper < length
+        ):
+            return
+
+        def describe(interval: Interval) -> str:
+            return (
+                f'{interval.lower if interval.lower is not None else "-∞"}'
+                f'..{interval.upper if interval.upper is not None else "∞"}'
+            )
+
+        known_first = describe(first)
+        known_last = describe(last)
+        user_error(
+            self.srcfile,
+            'string slice is not proven in bounds',
+            Pointer(
+                span=node.range.loc,
+                message=(
+                    f'effective endpoint intervals are `{known_first}` and '
+                    f'`{known_last}`'
+                ),
+            ),
+            hint='establish that both endpoints stay within the string boundaries',
         )
 
     def _refine(

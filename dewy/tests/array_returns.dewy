@@ -1,0 +1,21 @@
+make_pair = (first:int64 second:int64):>array<int64 length=2> => [first second]
+
+forward_pair = ():>array<int64 length=2> => make_pair(10 1)
+
+local_pair = ():>array<int64 length=2> => {
+    local = [20 1]
+    return local
+}
+
+factory = [
+    make = ():>array<int64 length=2> => [9 1]
+]
+
+main = ():>int64 => {
+    forwarded = forward_pair()
+    local = local_pair()
+    method = factory.make
+    return forwarded[0] + forwarded[1]
+         + local[0] + local[1]
+         + method[0] + method[1]
+}

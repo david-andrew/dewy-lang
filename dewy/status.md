@@ -132,9 +132,10 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Bounds facts from comparisons, arithmetic, loops, and range iterators.
 - [x] `bool`, string/grapheme, function, nested-array, and object-handle element layouts.
 - [x] Non-escaping function-local `let` and `const` bindings initialized by an exact-length array literal use only a fresh stack element buffer when every use is `.length`, an indexed read, or an indexed write.
+- [x] Exact-length scalar/function array return values use caller-owned descriptor and element storage, including direct literals, returned locals, forwarding calls, and indirect or method calls with an exact return type.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
-- [ ] Returning arrays and allowing stack-allocated arrays to escape their defining function.
+- [ ] Returning arrays whose storage requirement is not known at the call site, arrays of handles that require nested ownership handling, and other escapes into longer-lived storage.
 
 ## Ranges and range iteration
 
@@ -145,8 +146,10 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] udewy lowering for finite ranges whose values and iteration arithmetic fit the supported `int64` representation.
 - [x] Default one-grapheme character ranges, including descending and stepped forms, scalar-order iteration, and skipping the Unicode surrogate gap.
 - [x] Explicit `range<uint32>` context for one-scalar string endpoints.
-- [x] Exact-integer membership with `in?`, the contextual `end` index, direct bound-delimited string slices such as `text[3..12)`, and fixed-range slicing of exact-length array bindings.
-- [ ] Runtime-computed range anchors and steps.
+- [x] Exact and runtime `int64` membership in unstepped ranges with `in?`, plus runtime candidates against statically anchored stepped ranges. Runtime operands are evaluated once.
+- [x] The contextual `end` index, direct bound-delimited string slices such as `text[3..12)`, and fixed-range slicing of exact-length array bindings.
+- [x] Runtime-computed string-slice endpoints when flow-sensitive interval analysis proves every effective boundary remains in range, including open and closed bound adjustments.
+- [ ] Runtime-computed stepped-range anchors and general runtime range iteration.
 - [ ] Bigint lowering for right-unbounded or finite out-of-`int64` ranges.
 - [ ] Using general range values beyond the currently supported iterator normalization.
 
@@ -192,7 +195,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Exact string-literal types with contextual materialization as immutable grapheme strings, `array<uint8>`, `array<uint32>`, or `array<grapheme>`. `char` is the one-grapheme string refinement.
 - [x] Unicode 16.0.0 UAX #29 extended-grapheme segmentation from checked-in generated property tables, including combining marks, Hangul, emoji ZWJ sequences, regional indicators, modifiers, and Indic conjuncts.
 - [x] One-word udewy string descriptors over immutable UTF-8 plus byte-offset grapheme boundaries. Literals, calls, returns, globals, objects, optionals, and handle-element arrays use the descriptor ABI.
-- [x] Grapheme `.length`, indexing, slicing with all bound forms, iteration, exact byte equality, and supported character ranges.
+- [x] Grapheme `.length`, indexing, static and flow-proven dynamic slicing with all bound forms, iteration, exact byte equality, and supported character ranges.
 - [x] `string as array<uint8>` borrowing with copy-on-write mutation, materialized `array<uint32>` scalar views, string-to-grapheme arrays, and grapheme-array-to-string conversion with UAX #29 re-segmentation.
 - [x] `as` performs representation-changing conversions; `transmute` remains bit-preserving and rejects string/array layout reinterpretation.
 - [x] Runtime re-segmentation uses current grapheme-array values, including mutations that cause adjacent clusters to merge.
@@ -220,7 +223,7 @@ The current backend still uses a canonical pointer to a 48-byte descriptor conta
 
 For a statically resolved direct or selected-overload call, a parameter whose alias closure only observes length or indexed reads/writes is adapter-safe. Lowering wraps raw local/static data in a temporary canonical descriptor in the call prelude without copying elements; the callee ABI and indexing remain descriptor-based. Read-only exact static bytes use borrowed-static flags.
 
-Whole-array assignment, object storage, returns or other escapes, casts, parameter forwarding, indirect or method calls, nonliteral/control-flow initializers, aliases outside one function, and unclassified uses conservatively retain the descriptor. Static-byte mutation retains the descriptor and copy-on-write path. Control-flow representation joins, general or transitive effect analysis, indirect/method adapters, and descriptor-free specialized direct-call ABIs remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
+Exact-length scalar/function array returns use a hidden destination supplied by the caller. The caller allocates the descriptor and element buffer in its own frame, and the callee initializes or copies into that storage before returning; a directly returned call forwards the same destination through wrapper functions. No callee-local array storage escapes. Handle elements remain rejected until their nested backing storage can receive the same ownership treatment. Whole-array assignment, object storage, other escapes, casts, parameter forwarding, nonliteral/control-flow initializers, aliases outside one function, and unclassified uses conservatively retain the descriptor. Static-byte mutation retains the descriptor and copy-on-write path. Control-flow representation joins, general or transitive effect analysis, indirect/method adapters, and descriptor-free specialized direct-call ABIs remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
 
 The intended rule is that each value receives the least runtime representation needed by all of its reachable uses. For arrays this includes:
 
@@ -260,6 +263,7 @@ Incremental implementation work:
 - [x] Emit eligible module `const` arrays of stable 64-bit words, compatible non-extern function references, or exact based bytes as raw static data with compile-time length and stride.
 - [x] Scalar-replace eligible non-escaping exact local array literals with a fresh raw stack-data buffer, direct width-aware indexed reads and writes, and compile-time `.length`.
 - [x] Propagate raw stack data through simple same-function alias chains and materialize canonical descriptors without copying for proven-safe direct and selected-overload call boundaries.
+- [x] Return exact-length scalar/function arrays through caller-owned result storage, copying direct literals or existing arrays and forwarding destinations through wrapper calls without exposing callee-local allocations.
 - [ ] Generalize representation requirements across control-flow joins, general/transitive effects, cross-function aliases, indirect or method calls, and additional element/storage classes.
 - [ ] Elide array length, capacity, stride, flags, and ownership metadata for additional runtime array representations when each fact is unused or available statically.
 - [ ] Add indirect/method boundary adapters and descriptor-free direct-call ABI specialization where profitable.

@@ -269,17 +269,27 @@ let f = ():>{type_name} => {{
     ) in emitted
 
 
-def test_udewy_rejects_array_returns_and_local_array_escapes() -> None:
-    with pytest.raises(NotImplementedYet, match='array return values'):
+def test_udewy_exact_array_returns_use_caller_owned_storage() -> None:
+    with pytest.raises(NotImplementedYet, match='exact compile-time length'):
         codegen(SrcFile(None, 'let make = ():>array<int64> => [1]'))
 
-    with pytest.raises(NotImplementedYet, match='array return values'):
-        codegen(SrcFile(None, '''
+    emitted = codegen(SrcFile(None, '''
 let make = ():>array<int64 length=1> => {
     let local = [42]
     return local
 }
+let main = ():>int64 => {
+    let result = make()
+    return result[0]
+}
 '''))
+
+    assert 'let make = (__dewy_result_' in emitted
+    assert 'make(__dewy_array_' in emitted
+    assert '__store_i64__(42 ' in emitted
+
+
+def test_udewy_still_rejects_local_array_escape_to_module_storage() -> None:
 
     with pytest.raises(NotImplementedYet, match='cannot escape'):
         codegen(SrcFile(None, """
@@ -289,6 +299,13 @@ let replace_saved = ():>void => {
     saved = local
 }
 """))
+
+
+def test_exact_array_returns_defer_handle_element_ownership() -> None:
+    with pytest.raises(NotImplementedYet, match='handle elements require ownership'):
+        codegen(SrcFile(None, '''
+let make = ():>array<string length=1> => ["local"]
+'''))
 
 
 def test_dynamic_index_uses_precise_source_position_facts() -> None:
