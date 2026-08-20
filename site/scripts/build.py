@@ -68,7 +68,7 @@ def build_playground() -> None:
 
 
 def write_sitemap() -> None:
-    base = "https://david-andrew.github.io/dewy-lang"
+    base = "https://dewy-lang.org"
     routes = [
         "",
         "learn/",

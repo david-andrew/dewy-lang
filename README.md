@@ -99,4 +99,4 @@ Several example programs are available in [examples/](examples/). Here is a brea
 
 The language website, learning guide, reference, examples, and µDewy playground
 are built from [`site/`](site/) and published at
-https://david-andrew.github.io/dewy-lang/.
+https://dewy-lang.org/.
