@@ -133,14 +133,12 @@ def op_equals(left: Operator, right: Operator) -> bool:
 
 """
 keywords:
-'loop', 'do', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
+'loop', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
 'import', 'from', 'let', 'const', 'local_const', 'overload_only',
 
 patterns:
 flows # note that if-else-if/if-else-loop/etc. should all be bundled up into one higher level token
   <loop><expr><expr>
-  <do><expr><loop><expr>
-  <do><expr><loop><expr><do><expr>
   <if><expr><expr>
 <match><expr><expr>
 <return>
@@ -587,7 +585,7 @@ def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
 
     `stop` is a set of keyword names that act as delimiters for `collect_expr`/`collect_chunk`:
     when collecting an expression slice, we stop *before* these keywords so the caller can
-    interpret them structurally (e.g. `else`, `from`, `import`, `loop`, `do`).
+    interpret them structurally (e.g. `else`, `from`, `import`, `loop`).
     """
     return isinstance(token, t1.Keyword) and token.name in stop
 
@@ -659,7 +657,7 @@ def _throw_expected_chunk_error(*, ctx: Context, tokens: list[t1.Token], start: 
         (
             t
             for t in reversed(tokens[:start])
-            if isinstance(t, t1.Keyword) and t.name in {"loop", "if", "match", "do"}
+            if isinstance(t, t1.Keyword) and t.name in {"loop", "if", "match"}
         ),
         None,
     )
@@ -690,29 +688,6 @@ def _throw_expected_chunk_error(*, ctx: Context, tokens: list[t1.Token], start: 
         srcfile=ctx.srcfile,
         title=title,
         message=message,
-        pointer_messages=pointer_messages,
-        hint=hint,
-    ).throw()
-
-
-def _throw_expected_loop_after_do(*, ctx: Context, do_kw: t1.Keyword, pre: Chain, tokens: list[t1.Token], i: int) -> None:
-    expected_at = pre.loc.stop
-    pointer_messages: list[Pointer] = [
-        Pointer(span=Span(do_kw.loc.start, do_kw.loc.stop), message="`do` starts a do-loop"),
-        Pointer(span=Span(expected_at, expected_at), message="expected keyword 'loop' here"),
-    ]
-
-    if i < len(tokens):
-        found = tokens[i]
-        pointer_messages.append(Pointer(span=Span(found.loc.start, found.loc.stop), message=f"found {_token_summary(found)}"))
-        hint = f"Use `do <body> loop <condition>`; insert `loop` before {_token_summary(found)}"
-    else:
-        hint = "Use `do <body> loop <condition>`; add the missing `loop <condition>`"
-
-    Error(
-        srcfile=ctx.srcfile,
-        title="Expected `loop` after `do`",
-        message="A `do` loop must be followed by the keyword `loop` and a condition expression.",
         pointer_messages=pointer_messages,
         hint=hint,
     ).throw()
@@ -831,7 +806,7 @@ def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str],
 
 def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[KeywordExpr, int]:
     """
-    Collect a single flow arm (if/loop/match/do-loop) into a `FlowArm`.
+    Collect a single flow arm (if/loop/match) into a `FlowArm`.
 
     The result is a mostly-unstructured "syntax skeleton":
       FlowArm.parts := [Keyword, expr, Keyword, expr, ...]
@@ -846,21 +821,6 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
         raise ValueError(f"INTERNAL ERROR: expected flow keyword, got {kw=}")
     i = start + 1
 
-    if kw.name == "do":
-        pre, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"loop"}, ctx=ctx)
-        if i >= len(tokens) or not (isinstance(tokens[i], t1.Keyword) and tokens[i].name == "loop"):
-            _throw_expected_loop_after_do(ctx=ctx, do_kw=kw, pre=pre, tokens=tokens, i=i)
-        loop_kw = tokens[i]
-        i += 1
-        cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"do"}, ctx=ctx)
-        parts: list[t1.Keyword | Chain] = [kw, pre, loop_kw, cond]
-        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name == "do":
-            do2 = tokens[i]
-            i += 1
-            post, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
-            parts.extend([do2, post])
-        return KeywordExpr(Span(kw.loc.start, tokens[i - 1].loc.stop), parts), i
-
     if kw.name in {"if", "match", "loop"}:
         cond, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         clause, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
@@ -872,7 +832,7 @@ def collect_flow_arm(tokens: list[t1.Token], start: int, *, stop_keywords: set[s
 
 def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[Flow, int]:
     """
-    Collect an entire flow expression (if/loop/match/do-loop with optional else chains).
+    Collect an entire flow expression (if/loop/match with optional else chains).
 
     Structure:
     - `Flow.arms` is a list of `KeywordExpr` tokens (each arm retains its own keywords).
@@ -892,7 +852,7 @@ def collect_flow(tokens: list[t1.Token], start: int, *, stop_keywords: set[str],
             break
         i += 1  # consume else (not stored; `else` is structural)
 
-        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name in {"if", "loop", "match", "do"}:
+        if i < len(tokens) and isinstance(tokens[i], t1.Keyword) and tokens[i].name in {"if", "loop", "match"}:
             continue
 
         default, i = collect_expr(tokens, i, stop_keywords=stop_keywords | {"else"}, ctx=ctx)
@@ -913,7 +873,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
       (atom_token, next_index)
 
     The returned atom token is either:
-    - `Flow` for flow keywords (`if`, `loop`, `match`, `do`)
+    - `Flow` for flow keywords (`if`, `loop`, `match`)
     - `KeywordExpr` for other keywords
 
     `KeywordExpr.parts` is a "syntax skeleton" alternating between structural keywords
@@ -925,7 +885,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
     if not isinstance(kw, t1.Keyword):
         raise ValueError(f"INTERNAL ERROR: expected keyword, got {kw=}")
 
-    if kw.name in {"if", "loop", "match", "do"}:
+    if kw.name in {"if", "loop", "match"}:
         return collect_flow(tokens, start, stop_keywords=stop_keywords, ctx=ctx)
 
     i = start + 1

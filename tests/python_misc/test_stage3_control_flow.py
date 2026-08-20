@@ -89,10 +89,6 @@ def test_loop_exits_require_an_enclosing_loop(keyword: str) -> None:
     ('source', 'message'),
     [
         (
-            'let main = ():>int64 => { do { return 42 } loop false { return 0 } }',
-            '`do` flow',
-        ),
-        (
             'let main = ():>int64 => { match true { return 42 } }',
             '`match` flow',
         ),
@@ -108,6 +104,10 @@ def test_deferred_flow_forms_have_focused_diagnostics(
 ) -> None:
     with pytest.raises(NotImplementedYet, match=message):
         _check(source)
+
+
+def test_do_is_an_ordinary_identifier() -> None:
+    _check('let main = ():>int64 => { let do:int64 = 42 return do }')
 
 
 def test_return_coverage_descends_through_exhaustive_flow() -> None:

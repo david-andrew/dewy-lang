@@ -1,3 +1,117 @@
+# Defining a parser in dewy with types
+
+```dewy
+# Based on https://github.com/david-andrew/turtles/blob/master/turtles/examples/csv.py
+from p'turtles.dewy' import Rule, repeat, at_least, separator, cc
+# Rule = (rule:type|Rule) => [
+#    let rule = rule
+#    longest_match:bool = false
+#    # etc. meta settings
+# ] | <Rule | Rule>
+
+# CSV grammar as defined by RFC 4180.
+# Supports all CSV features: quoted fields, unquoted fields, empty fields, multiple record separators, etc.
+
+BOM = <"\ufeff">  # UTF-8 BOM if present
+
+# --- Record separators (accept CRLF, LF, or CR) ---
+CRLF = <"\r\n">
+LF = <"\n">
+CR = <"\r">
+
+RecordSep = Rule(CRLF | LF | CR)
+RecordSep.longest_match = True
+
+# --- Delimiter (default comma) ---
+Delim = <",">
+
+
+# Optional: allow whitespace after delimiter before *next field*
+# This mimics a common "skipinitialspace" behavior.
+DelimSkipInitialSpace = <["," <'\x20'|'\x09'>...]>  # swallow spaces (0x20) and tabs (0x09) after delimiter
+
+
+# --- Quoting ---
+EscapedQuote = <'""'>  # doubled quote inside a quoted field
+
+
+# Any char except a double quote. Includes CR/LF, commas, etc.
+# (that’s what allows multiline quoted fields)
+QuotedChar = <ch:cc"\x00-\x21\x23-\U0010FFFF">   #TBD about this syntax (named literal types)
+# capture named value `ch` which is a character class [\x00-\x21\x23-\U0010FFFF]
+
+
+QuotedField = Rule<['"' content:QuotedFieldContent '"']>
+# QuotedField.longest_match = True  # TBD why this was commented out
+
+QuotedFieldContent = Rule<[(EscapedQuote | QuotedChar)...]>
+# QuotedFieldContent.longest_match = True  # TBD why this was commented out 
+QuotedFieldContent.postconvert = x => x as string
+
+# --- Unquoted fields ---
+# Typical CSV: unquoted fields end at delimiter or record separator.
+# Also disallow raw quotes in unquoted fields (common strict-ish behavior).
+# 
+# UnquotedChar matches any character except: comma, newline, CR, and quote.
+# This ensures the field naturally stops at delimiters and record separators.
+UnquotedChar = <
+    ch:<
+        cc"\x00-\x09"         # include tabs and control chars except LF/CR       # noqa
+        + "\x0B-\x0C"
+        + "\x0E-\x21"         # up to '!' (0x21), excludes '"'(0x22)
+        + "\x23-\x2B"         # '#'..'+'
+        + "\x2D-\U0010FFFF"   # '-'..unicode max (excludes ',' 0x2C)
+    >
+
+
+# UnquotedField: one or more UnquotedChar characters.
+# This will naturally stop when it encounters a comma, newline, CR, or quote
+# because UnquotedChar excludes those characters.
+# Note: we require at_least[1] so that truly empty fields return None from optional[Field]
+UnquotedField = <value: [UnquotedChar UnquotedChar...]>
+# UnquotedField.longest_match = True
+UnquotedField.postconvert = x => x as string
+
+Field = QuotedField | UnquotedField
+
+# --- Records (this is the key part to support empty fields cleanly) ---
+# record := [field] (delim [field])*
+#
+# That means:
+#   ""         -> one empty unquoted field (Field present but length 0)
+#   ,a,        -> first optional[Field] is missing => leading empty field
+#                then ",a" then "," with missing field => trailing empty
+#
+# We structure this as: first field (optional), then zero or more delimiter+field pairs
+Record = <fields: repeat<Field? separator=Delim>>
+
+
+
+# --- Top-level file ---
+# Structured so separators are required between records, making the grammar unambiguous.
+# First record has no leading separator; subsequent records require a separator before them.
+# This prevents trailing newlines from creating spurious empty records.
+
+CSV = <
+    BOM?
+    records: repeat<Record separator=RecordSep>
+    RecordSep?  # trailing separator
+>
+
+# Variant that allows spaces/tabs after commas (like skipinitialspace):
+RecordSkipInitialSpace = <fields: repeat<Field separator=DelimSkipInitialSpace>
+
+
+CSVSkipInitialSpace = <
+    BOM?
+    records: repeat<RecordSkipInitialSpace separator=RecordSep>
+    RecordSep?  # trailing separator
+>
+```
+
+----------
+
+> NOTE: below is old and out of date
 # Meta Syntax
 
 One of the interesting features of Dewy is that all regular features of the language are bootstrapped out of a much simpler meta language. Using the meta language, you can do anything from define new operators, to (more stuff...), to modifying the syntax rules of the language.

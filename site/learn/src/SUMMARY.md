@@ -39,7 +39,7 @@
     - [Basic Math](ch03/basic-math.md)
     - [Linear Algebra](ch03/linear-algebra.md)
     - [Functional Programming](ch03/functional-programming.md)
-    - [Meta Programming](ch03/meta-programming.md)
+    <!-- - [Meta Programming](ch03/meta-programming.md) -->
     - [Flow Control](ch03/flow-control.md)
     - [One Loop to Rule them All](ch03/loops.md)
     - [Imports](ch03/imports.md)

@@ -23,8 +23,8 @@ where `<condition>` must result in a boolean value, and `<expression>` can be an
 ```dewy
 if a >? b
 {
-    %do something
-    %do another thing
+    #do something
+    #do another thing
 }
 ```
 
@@ -48,6 +48,8 @@ loop <condition> <expression>
 ```
 
 where `<condition>` must be an expression that evaluates to a boolean value, and `<expression>` can be anything.
+
+There is no separate do-while form. To run a body at least once, or to decide in the middle of the body, use `break` inside `loop true`. See [Early Exit](loops.md#early-exit).
 
 Loops will be explored in more detail in [One Loop To Rule Them All](loops.md).
 

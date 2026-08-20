@@ -97,10 +97,10 @@ most binary operators can be appended with an `=` sign to make them into an assi
 e.g.
 
 ```dewy
-a += 5  %is equivalent to a = a + 5
-a <?= 5  %is equivalent to a = a <? 5
-a !>>= 5  %is equivalent to a = a !>> 5
-a xor= false  %is equivalent to a = a xor false
+a += 5  #is equivalent to a = a + 5
+a <?= 5  #is equivalent to a = a <? 5
+a !>>= 5  #is equivalent to a = a !>> 5
+a xor= false  #is equivalent to a = a xor false
 ```
 
 (TODO: This should also probably be able to be combined with element-wise/vectorized `.` operations where each element in the list is updated according to the operation (can be done in parallel))

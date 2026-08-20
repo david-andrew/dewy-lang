@@ -20,8 +20,8 @@ let point = [
     sum = ():>int64 => x + y
 ]
 point.x
-point.sum          % zero-argument function fields are called
-point.sum()        % explicit call of the same field
+point.sum          # zero-argument function fields are called
+point.sum()        # explicit call of the same field
 ```
 
 Constructors are ordinary functions that return object literals. Assignment,
@@ -47,8 +47,8 @@ my_obj = [
 You can access the members of the object using the `.` accessor
 
 ```dewy
-my_obj.a  %returns 'apple'
-my_obj.c  %returns 'cat'
+my_obj.a  #returns 'apple'
+my_obj.c  #returns 'cat'
 ```
 
 To create an object constructor (like many languages have classes that you can instantiate) we create a function that returns an object
@@ -62,8 +62,8 @@ constructor = (param1 param2) => {
 }
 
 my_obj = constructor(42 'pi')
-my_obj.p1  %returns 42
-my_obj.p2  %returns 'pi'
+my_obj.p1  #returns 42
+my_obj.p2  #returns 'pi'
 ```
 
 You can also store functions inside of objects, allowing objects to completely cover regular object behaviors from other languages
@@ -96,20 +96,20 @@ that is, just a function that returns an object literal, no need for braces or `
 Similar to python, objects can define custom so-called "double-underscore" or "dunder" methods, which hook into the language's built-in functionality.
 
 ```dewy
-% Define a point class with a custom add method
+# Define a point class with a custom add method
 Point = (x:number y:number) => [
-    x = x  %TBD if these are necessary since x/y are already in scope
+    x = x  #TBD if these are necessary since x/y are already in scope
     y = y
     __add__ = other:Point => Point(x+other.x y+other.y)
     __repr__ = () => 'Point({x}, {y})'
     __str__ = () => '({x}, {y})'
 ]
 
-% Create two points and add them together
+# Create two points and add them together
 p1 = Point(1 2)
 p2 = Point(3 4)
 p3 = p1 + p2
-printl(p3)  %prints Point(4 6)
+printl(p3)  #prints Point(4 6)
 ```
 
 Though actually for `__add__`, it might make more sense for it to be global, and you add an alternate that gets dispatched on rather than including it in the object itself:

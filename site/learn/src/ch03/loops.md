@@ -8,7 +8,7 @@ Syntactically, loops are quite simple. The syntax for a loop is:
 loop <condition> <expression>
 ```
 
-Where `<condition>` must result in a boolean determines if the loop continues, and `<expression>` which can be anything is executed each time the loop repeats.
+Where `<condition>` (which must result in a boolean) determines if the loop continues, and `<expression>` (which can be anything) is executed each time the loop repeats.
 
 The various types of loops seen in other languages are formed simply by changing the `<condition>` part of the loop.
 
@@ -19,7 +19,7 @@ An infinite loop is one that never ends. They are constructed by hardcoding the 
 ```dewy
 loop true
 {
-    %do something repeatedly forever
+    #do something repeatedly forever
 }
 ```
 
@@ -32,7 +32,7 @@ A while loop is a loop that executes "while" some condition is true. A simple bo
 ```dewy
 loop i >? 0
 {
-    %while i is greater than 0, do something
+    #while i is greater than 0, do something
 }
 ```
 
@@ -213,66 +213,47 @@ loop batch in batches and t in timer(5(minutes))
 }
 ```
 
-## Do Loop Do
+## Early Exit
 
-The do-while version of the loop can be constructed by putting the `do` keyword before the body, and putting the `loop` keyword and its condition after the body. This means loop body is executed at least once before the condition is checked, at which point the loop could exit or continue.
+There is no separate do-while or mid-test loop. The condition always sits in front of the body. To run some work before deciding whether to continue, use `loop true` and `break`.
 
-Basic do-while loop:
+A loop that should run at least once looks like this:
 
 ```dewy
 i = 0
-do
-{
-    i += 1
-    printl'this is a do-while loop'
-}
-loop i <? 20
-```
-
-do-loop over an iterator. On the first iteration, `i` will be undefined, while it will be available on subsequent iterations
-
-```dewy
-do printl'this is a do-for loop. i={i}'
-loop i in [0..5]
-```
-
-Which prints
-
-```
-this is a do-for loop. i=undefined
-this is a do-for loop. i=0
-this is a do-for loop. i=1
-this is a do-for loop. i=2
-this is a do-for loop. i=3
-this is a do-for loop. i=4
-this is a do-for loop. i=5
-```
-
-Technically you can construct an infinite do-while loop, but it's basically identical to a regular infinite loop
-
-```dewy
-do printl'this is a do-infinite loop'
 loop true
+{
+    i += 1
+    printl'this runs at least once'
+    if i >=? 20 break
+}
 ```
 
-Lastly you can sandwich `loop` between two blocks using two `do` keywords (one before the first block, and one after the loop condition). This will give you a block executed before the condition and a block executed after the condition
-
-> Note: the syntax for do-loop-do is still being finalized, and may change from this example
+The same shape covers a decision in the middle of the body, including advancing an iterator with `in`. A flow condition has its own scope, so `if item in items ...` would keep `item` inside that `if`. Bind in the surrounding body when later statements need the item:
 
 ```dewy
-i = 0
-do
+loop true
 {
-    printl'before condition is checked'
-}
-loop i <? 20 do
-{
-    printl'after condition is checked'
-    i += 1
+    prepare()
+    got_item = item in items
+    if not got_item break
+    process(item)
 }
 ```
 
-In this loop, the first block is guaranteed to execute at least once. Then we check the condition, and then if true, we execute the second block, then repeat the loop, execute the first block, and then check the condition again, repeating until the condition is false, or we have iterated over all elements.
+`in` assigns the next value (or `undefined` when the iterator is exhausted) and returns whether a value was produced. After `if not got_item break`, `item` is defined for the rest of the body.
+
+When the taken work is a single expression, a compact `if`/`else` is also fine:
+
+```dewy
+loop true
+{
+    prepare()
+    if item in items process(item) else break
+}
+```
+
+Once `process` is more than one expression, prefer the `got_item` form from above so the rest of the body stays at the happy-path indent.
 
 ## Break, Continue, Return inside Loops
 
@@ -343,7 +324,7 @@ This "generates" the array `[1 2 3 4 5 6 7 8 9 10]`, which we can then store int
 ```dewy
 my_array = [loop i in [1..10] {i}]
 
-%optional to omit the braces since only a single expression is in the body
+#optional to omit the braces since only a single expression is in the body
 my_array = [loop i in [1..10] i]
 ```
 
@@ -354,7 +335,7 @@ And thus we have created the simplest list generator.
 Generators can do a lot of interesting things. For example we can express multiple values on a single loop iteration
 
 ```dewy
-%note the braces are not optional in this case
+#note the braces are not optional in this case
 my_array = [loop i in [1..5] { i i^2 }]
 ```
 
