@@ -1,10 +1,9 @@
 # Flow Control
 
-In Dewy, the two main methods of conditionally executing code are `if` and `loop` expressions.
+The two main ways to choose what runs next are `if` and `loop`. Both are
+expressions.
 
 ## If Expressions
-
-If expressions allow you to conditionally evaluate code based on whether or not some condition is met.
 
 ```dewy
 my_var = 10
@@ -12,25 +11,17 @@ if my_var =? 10
     printl"my_var is ten"
 ```
 
-The syntax for an `if` expression is:
-
-```dewy
-if <condition> <expression>
-```
-
-where `<condition>` must result in a boolean value, and `<expression>` can be anything. Commonly, `<expression>` will be a block containing multiple expressions.
+The form is `if <condition> <expression>`. The condition has to be a
+boolean. The body is often a block:
 
 ```dewy
 if a >? b
 {
-    #do something
-    #do another thing
+    # do something
 }
 ```
 
 ## Loop Expressions
-
-Loop expressions allow you to repeat the execution of some code while some condition is met.
 
 ```dewy
 i = 0
@@ -41,21 +32,16 @@ loop i <? 10
 }
 ```
 
-The syntax for a `loop` expression is:
+There is no separate do-while form. To run a body at least once, or to
+decide in the middle, use `break` inside `loop true`. See
+[Early Exit](loops.md#early-exit).
 
-```dewy
-loop <condition> <expression>
-```
-
-where `<condition>` must be an expression that evaluates to a boolean value, and `<expression>` can be anything.
-
-There is no separate do-while form. To run a body at least once, or to decide in the middle of the body, use `break` inside `loop true`. See [Early Exit](loops.md#early-exit).
-
-Loops will be explored in more detail in [One Loop To Rule Them All](loops.md).
+Loops are covered in more detail in
+[One Loop to Rule Them All](loops.md).
 
 ## Flow Chains
 
-Multiple flow expressions can be chained together via the `else` operator, along with an optional final default case that need not be a flow expression. In normal languages, this would be `if-else-if` kinds of sequences, which are certainly possible in Dewy:
+`else` chains them. The last piece does not have to be `if` or `loop`:
 
 ```dewy
 my_var = 'apple'
@@ -64,8 +50,6 @@ if my_var =? 'banana'
 else
     printl'monkeys don\'t like {my_var}, only bananas!'
 ```
-
-or even
 
 ```dewy
 my_var = 42
@@ -77,7 +61,7 @@ else
     printl'a number larger than 50'
 ```
 
-But Dewy also allows `loop` expressions to be combined in this way as well:
+`loop` can sit in the chain as well:
 
 ```dewy
 if a >? b
@@ -95,44 +79,50 @@ else
 }
 ```
 
-In the above example, if `a` is greater than `b`, the first block would be executed, and the rest of the blocks are skipped. If `a` is less than `b`, the loop in the second block executes, incrementing `a` until it is equal to `b`, at which point the rest of the chain is skipped. Only if `a` is neither greater than nor less than `b` (i.e. `a` equals `b`) will the final block be executed exclusively.
+The conditions share a scope. A binding introduced in an earlier
+condition is visible to later conditions, and to a later body, if they
+run.
 
-(TODO: add an example for how all conditions share the same scope, so variables defined in one condition will be available in later bodies if they execute)
-
-(TODO: probably add a `finally` operator which can be used to always execute code at the end)
+```dewy
+if (got = item in items got)
+    process(item)
+else
+    printl'no item'
+```
 
 ## Capturing Values
 
-Unlike if statements from other languages, `if`s and `loop`s in Dewy are themselves expressions, allowing any expressed values to be captured. `if` expressions basically act like Dewy's version of the ternary operator
+`if` is Dewy's ternary. The branch you take is the value of the whole
+expression:
 
 ```dewy
 my_fruit = 'kiwi'
 tropical_fruits = ['banana' 'pineapple' 'kiwi' 'papaya']
-my_var = if my_fruit in? tropical_fruit
+my_var = if my_fruit in? tropical_fruits
     'a tropical fruit'
 else
     'some other type of fruit'
 ```
 
-`my_var` would have a value of `'a tropical fruit'` at the end of the above example.
+`my_var` is `'a tropical fruit'`. An `if` with no `else`, used as a
+statement, is `void`.
 
-Values from loops can be captured to construct sequences, which is explored more in [One Loop To Rule Them All](loops.md#loop-generators).
+Values from a loop become a sequence when you capture them. See
+[Loop Generators](loops.md#loop-generators).
 
-## Match Expressions
+## `break`, `continue`, `return`
 
-(TODO) switch statement equivalent
+`break` and `continue` can name an outer loop with `$outer`. The rules
+are on
+[the loops page](loops.md#break-continue-return-inside-loops).
 
-## Break, Continue, Return, <expr-return>
+`return` leaves the function.
 
-`break` and `continue` can select an enclosing loop through a scope metatag,
-such as `break $outer`. See
-[Break, Continue, Return inside Loops](loops.md#break-continue-return-inside-loops)
-for the target and visibility rules.
+## Match
 
-`return` exits the containing function and may be used from inside conditional
-or loop bodies.
+There will be a `match` for picking among patterns. The syntax is not
+yet determined.
 
-## Advanced Flow Control
+## Finally
 
-(TODO) combining conditionals
-(TODO) list and dictionary generators
+A `finally` that always runs at the end of a chain is not yet determined.

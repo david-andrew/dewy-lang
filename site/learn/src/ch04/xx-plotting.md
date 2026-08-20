@@ -1,13 +1,7 @@
 # Plotting
-> Work in progress
 
-## Types of plots to include out of the box:
-- ridgeline plot
-- sankey plots (should be buildable directly from graph network data structure/etc.)
-- TODO: more
+The standard library should include common plots out of the box,
+including ridgeline plots and Sankey diagrams that can be built from
+graph data.
 
-## Animating plots
-TODO
-
-## Blocking vs non-blocking plots
-TODO
+Animation, and whether a plot blocks the caller, are not yet determined.

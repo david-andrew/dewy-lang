@@ -1,2 +1,5 @@
 # Advanced Case Studies
-This is a collection of real-world use cases demonstrating language usage
+
+This chapter holds longer programs that show the language at work. A
+Dewy compiler, scientific pipelines, and similar pages live here as
+outlines.

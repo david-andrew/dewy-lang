@@ -1,30 +1,63 @@
 # Welcome to Dewy
 
-Welcome to the learning guide for the Dewy programming language. This book is
-an example-led path through the language, its programming model, and the ideas
-that motivate it.
+This book is an example-led walk through Dewy, covering the syntax,
+programming model, and overall ideas behind it.
 
-> **Development edition:** Dewy is an early language. This guide mixes
-> implemented features with the language's intended direction. Pages should
-> call out that distinction; for exact current behavior, use the
-> [language reference](../reference/) and
+> **Development edition.** Dewy is an early language and the compiler is
+> still catching up. Many examples in this guide may not run yet. For
+> exact current behavior, see the [language reference](../reference/) and
 > [implementation status](../status/).
 
-## What is Dewy
+## What Is Dewy
 
-The Dewy Programming Language is a simple yet powerful general purpose language designed with engineering applications in mind. Think the functionality and ease of use of matlab or python combined with the speed of a compiled language like C or Rust
+Dewy is a compiled, strongly typed general-purpose language aimed at
+engineering. Think the ease of Python or MATLAB with the speed of C or
+Rust.
 
-## Who is Dewy for
+Programs are ordinary source files. Top-level code runs in order.
+Everything is an expression, so `if`, `loop`, and blocks produce values
+instead of living in a separate statement language.
 
-Dewy is for everyone! Dewy is designed to be easy to learn and use, while still being powerful enough to be used for real world applications. Dewy is designed to be a general purpose language, and can be used for anything from simple scripting to complex engineering applications.
+## Who Dewy Is For
+
+Dewy is meant to be easy to start and strong enough for real work.
+Scripts, numerical code, systems programs, and engineering problems that
+care about units, arrays, and precise types.
+
+## What's in This Book
+
+- [Dewy at a Glance](pitch.md) for a quick look at the language
+- A [feature index](01-features-list.md) that links into the chapters
+- [Getting Started](ch01/00-getting-started.md). Install and print hello
+- [Hello, Many Worlds!](ch02/00-hello-many-worlds.md). Short domain
+  sketches, still stubbed
+- [Language Features](ch03/00-features.md). The main tutorial
+- Later chapters on the standard library, general concepts, and case
+  studies
 
 ## Features
 
-Dewy has many unique and uncommon features allowing it to be powerful and easy to use. Some key features include:
+Dewy is ordinary step-by-step code, and functions are values you can
+pass around when you want them.
 
-- **Functional and Imperative** - Dewy is an imperative language with strong support for functional programming. This allows for a very flexible programming style, where you can use the best tool for the job.
-- **Expression based syntax** - Dewy uses an expression based syntax, meaning that everything is an expression. This allows for a very simple yet powerful syntax, where common language features often are just a free consequence of the syntax
-- **Garbage-collector-free memory management** - Dewy uses a unique memory management system, allowing for fast and efficient memory management without the need for a garbage collector.
-- **Strong type system** - Dewy has a powerful static type system with inference, reminiscent of those in Typescript and Julia.
-- **Built in unit system** - Dewy has a built in unit system, allowing you to easily work with units and convert between them. This is especially useful for engineering applications.
-- **Strong math support** - Dewy has strong support many math features, including complex numbers, quaternions, vectors, matrices, and more. This is especially useful for engineering applications.
+`if`, `loop`, and `{ }` blocks are values. Many familiar features fall
+out of that, rather than needing extra syntax.
+
+There is one `loop`. Infinite, while, for-each, and walking several
+lists together are the same construct with different conditions.
+
+Types are checked when you compile, and you can leave them out. Write
+one when you want it. Types can carry extra facts, called refinements.
+
+Numbers can have units. `10kg * (30m/s)^2` is energy, and `2kg + 3m` is
+a type error.
+
+Strings are grapheme sequences. Indexing, slicing, and iteration walk
+clusters, not bytes.
+
+Complex numbers, quaternions, arrays, and broadcasting are part of the
+language, not a separate package.
+
+There is no garbage collector walking memory later. How a value is
+stored depends on how you use it, and the compiler is meant to keep
+that safe.

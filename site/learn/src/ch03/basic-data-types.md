@@ -1,142 +1,121 @@
 # Basic Data Types
 
-## Numeric
+Dewy checks types when you compile. Literals and context usually supply
+enough information that you can omit annotations. When you write a type,
+you are naming what the value *is*, not only how it is stored.
 
-Numeric data is what it sounds like, values that represent a number
+## Integers
 
-### Numbers
-
-Numbers are the base case for numerical values, with each subsequent type being a more specific / restricted version of the number class.
-
-```dewy
-my_number = 10
-```
-
-### Integers
-
-Integers are numbers that do not contain any decimal component. By default, integers can be arbitrarily large, but fixed width integers are also possible
+An integer with no type written down has type `int`, a signed integer
+that can be as big as you need. Fixed-width integers are available when
+you want a specific size.
 
 ```dewy
-my_int = -12 as int
+my_int = -12                    # int
 my_int32 = 42 as int32
-
 my_uint = 15 as uint
 my_uint64 = 2001 as uint64
 ```
 
-The full list of integer types includes
+A literal is exactly the number you wrote, then it has to fit wherever
+you put it. `let byte:uint8 = 255` is fine. A value that does not fit is
+an error.
 
-| Type    | Description                          | Range                                                                                        |
-| ------- | ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| int     | Arbitrary precision signed integer   | `(-inf..inf)`                                                                                |
-| int8    | 8-bit signed integer                 | `[-128..127]`                                                                                |
-| int16   | 16-bit signed integer                | `[-32768..32767]`                                                                            |
-| int32   | 32-bit signed integer                | `[-2147483648..2147483647]`                                                                  |
-| int64   | 64-bit signed integer                | `[-9223372036854775808..9223372036854775807]`                                                |
-| int128  | 128-bit signed integer               | `[-170141183460469231731687303715884105728`&shy;`..170141183460469231731687303715884105727]` |
-| uint    | Arbitrary precision unsigned integer | `[0..inf)`                                                                                   |
-| uint8   | 8-bit unsigned integer               | `[0..255]`                                                                                   |
-| uint16  | 16-bit unsigned integer              | `[0..65535]`                                                                                 |
-| uint32  | 32-bit unsigned integer              | `[0..4294967295]`                                                                            |
-| uint64  | 64-bit unsigned integer              | `[0..18446744073709551615]`                                                                  |
-| uint128 | 128-bit unsigned integer             | `[0..340282366920938463463374607431768211455]`                                               |
+| Type | Description | Range |
+| ---- | ----------- | ----- |
+| `int` | Arbitrary-precision signed | `(-inf..inf)` |
+| `int8` | 8-bit signed | `[-128..127]` |
+| `int16` | 16-bit signed | `[-32768..32767]` |
+| `int32` | 32-bit signed | `[-2147483648..2147483647]` |
+| `int64` | 64-bit signed | `[-9223372036854775808..9223372036854775807]` |
+| `int128` | 128-bit signed | `[-2^127..2^127-1]` |
+| `uint` | Arbitrary-precision unsigned | `[0..inf)` |
+| `uint8` | 8-bit unsigned | `[0..255]` |
+| `uint16` | 16-bit unsigned | `[0..65535]` |
+| `uint32` | 32-bit unsigned | `[0..4294967295]` |
+| `uint64` | 64-bit unsigned | `[0..18446744073709551615]` |
+| `uint128` | 128-bit unsigned | `[0..2^128-1]` |
 
-### Custom Ranged Integers
+[Number Bases](number-bases.md) covers `0b`, `0x`, and friends.
 
-You can create integer types with a custom range by specifying the range as part of the type annotation
+### Custom-Ranged Integers
+
+You can refine an integer type with a range:
 
 ```dewy
 my_custom_number:int<range=[42..)> = 42
 ```
 
-TBD for behavior when value goes out of bounds. Perhaps result will be undefined, or there can be a type setting for wrap around
+What happens if a value leaves that range (error, wrap, or `undefined`)
+is not yet determined.
 
-### Fixed Point
+## Rationals and Reals
 
-Fixed point will be stored as two integers, `digits` and `shift` where the value is `digits * 10^shift`
-
-TBD on the syntax for declaring a fixed point number. likely to be a function call e.g.
-
-```dewy
-my_fixed_point = fixed_point(3141592 -6)
-```
-
-### Rational
-
-Rational numbers are stored as two integers, the `numerator` and the `denominator`, where the value is `numerator / denominator`
-
-TBD on the syntax for declaring a rational number. likely to be a function call e.g.
+A rational is an exact ratio of integers. A real is a floating-point
+number. The default real is 64-bit.
 
 ```dewy
-my_rational = rational(22 7) #rational approximation of pi
-```
-
-### Real
-
-Real numbers are positive and negative numbers that can have a decimal component to them. The default real will be stored as a `float64` i.e. a 64-bit floating point number, but other widths (and potentially arbitrary precision) are possible
-
-```dewy
+my_rational = rational(22 7)
 my_real = 3.1415
 my_real32 = 54.54 as real32
 my_real64 = 233.511534 as real64
 ```
 
-### Boolean
+`int of rational`. `rational of real`. `real of number`. `float32` /
+`float64` are the IEEE names. `real32` / `real64` are the matching real
+aliases.
 
-Standard true/false type
+### Fixed-Point
+
+Fixed-point numbers store digits and a decimal shift. How you write a
+literal is not yet determined.
+
+## Booleans
 
 ```dewy
 my_bool = true
+ready = false
 ```
 
-### Undefined and optional values
+The operators are the English words `and`, `or`, `not`, and the rest. See
+[Operators](operators.md).
 
-`undefined` is a first-class singleton value. It is distinct from `void`, which
-means that an expression produces no value, and from a binding that has not yet
-been initialized.
+## `void`, `never`, and `undefined`
 
-An optional value has type `T | undefined`. Test its runtime type with `is?` or
-`isnt?` before using it as `T`; the matching control-flow edge narrows the
-binding:
+`void` means nothing came out. Declarations, assignments, and `printl`
+are `void`.
 
-```dewy
-let answer:int64|undefined = find_answer()
+`never` means this path cannot happen. There is no value of that type.
+After you have already handled every case, what is left is `never`.
 
-if answer isnt? undefined {
-    print(answer + 1)
-}
-```
+`noreturn` is different. It marks a function that does not come back to
+the caller, such as `exit`.
 
-`value is? T` asks whether the runtime type of `value` is compatible with `T`;
-`value isnt? T` is its inverse. The initial udewy target supports optional
-booleans, fixed-width integers, array handles, and function pointers.
+`undefined` is a real value you can store and pass around. It is not
+`void`, and it is not a name you forgot to set.
 
-### Complex
+Optionals are `T | undefined`. They have [their own page](optional-types.md).
 
-complex numbers
+## Complex Numbers and Quaternions
 
 ```dewy
 my_complex0 = 2^/2 + 2i^/2
 my_complex1 = complex(2^/2 2^/2)
 my_complex2 = complex(1 45°)
 my_complex3 = 1 ∠ 45°
+
+q = 1 + 2i + 3j + 4k
+Q = 1 + 2I + 3J + 4K
 ```
 
-### Quaternions
+`i`, `j`, and `k` are the imaginary units. Uppercase forms work too.
 
-Quaternions
+## Other Types
+
+Strings, ranges, arrays, objects, functions, and units each have a page.
+Types themselves are expressions. You can bind an alias and use it in
+annotations.
 
 ```dewy
-q = 1 + 2i + 3j + 4k
-Q = 1 + 2I + 3J + 4K   # can use lower or uppercase
+let Pair:type = [left:int64 right:int64]
 ```
-
-## MISC.
-
-Other datatypes (probably include on this page)
-
-- strings
-- symbolics
-- units
-- types
-- enums or tokens

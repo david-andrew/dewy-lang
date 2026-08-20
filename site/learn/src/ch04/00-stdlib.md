@@ -1,13 +1,20 @@
 # Standard Library
 
-Dewy is 100% batteries included, and provides a comprehensive standard library over most common programming facets.
+Dewy ships a batteries-included standard library. It covers paths, I/O,
+time, collections, and more.
 
-> **Note:** This is a work in progress. The standard library is not yet implemented. For now this is just a record of the planned standard library features.
+Ordinary modules see a source prelude of Dewy files. Those bindings are
+fallback names; a local declaration or an explicit import wins. The
+prelude includes:
 
-## Standard Library Reference
-- [Data Structures](xx-data-structures.md)
-- [Time](xx-time.md)
-- [Plotting](xx-plotting.md)
-- [Parsing](xx-parsing.md)
-- [Parallelism](xx-parallelism.md)
-- TODO: more
+- `Path` and `p` for file paths used by [Imports](../ch03/imports.md)
+- `print` and `printl`
+- `Duration`, `ns`, `ms`, `s`, and `sleep`
+
+A module can set `$no_prelude = true` to opt out of those names without
+changing anything it imports.
+
+The rest of this chapter sketches areas the library covers.
+Language-level containers live in
+[Container Types](../ch03/container-types.md); the library builds richer
+structures on those.

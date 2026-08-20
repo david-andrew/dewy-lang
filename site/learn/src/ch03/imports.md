@@ -1,9 +1,9 @@
 # Imports
 
 Dewy imports typed top-level bindings from another source file. Filename
-extensions have no semantics: a path such as `p"stuff.txt"` works when that file
-contains Dewy source. Relative paths are resolved from the file containing the
-import, not from the process working directory.
+extensions have no semantics. `p"stuff.txt"` works when that file
+contains Dewy source. Relative paths resolve from the file that contains
+the import, not from the process working directory.
 
 ```dewy
 # Import one binding.
@@ -15,8 +15,8 @@ import myfun from p"stuff.dewy"
 # Rename one binding.
 from p"../some/other/path/to/stuff.dewy" import myfun as myfun2
 
-# Import several unrenamed bindings. Commas and parenthesized whitespace are
-# equivalent collection spellings.
+# Import several unrenamed bindings. Commas and parenthesized whitespace
+# are equivalent collection spellings.
 from p"stuff.dewy" import first, second, third
 from p"stuff.dewy" import (first second third)
 
@@ -24,7 +24,7 @@ from p"stuff.dewy" import (first second third)
 from p"stuff.dewy" import (first second as other_second third)
 import (first second as other_second third) from p"stuff.dewy"
 
-# Capture every top-level binding under a compile-time namespace.
+# Capture every top-level name under a namespace.
 import p"mylib.dewy" as mylib
 let result = mylib.myfun()
 let value:mylib.MyType = mylib.default_value
@@ -34,29 +34,33 @@ import p"mylib.dewy"
 let result = myfun()
 ```
 
-`p` is an ordinary function defined by the standard source prelude. It
-constructs a thin `[path:string]` object, so `p"stuff.dewy"` is call
-juxtaposition equivalent to `p("stuff.dewy")`.
+`p` is an ordinary prelude function. It builds a `[path:string]`
+object, so `p"stuff.dewy"` is a call, the same as `p("stuff.dewy")`.
 
-Import sources use a smaller structural protocol rather than requiring the
-standard `Path` alias. They need a `path` field containing an exact compile-time
-string:
+An import source does not need the full `Path` type. It needs a `path`
+field that is a fixed string known when you compile.
 
 ```dewy
 from [path="stuff.dewy"] import myfun
 ```
 
-An equivalent source-defined constructor preserves literal paths as well.
-Dynamically computed strings cannot determine the module graph.
+A string you compute while the program runs cannot choose the file. The
+compiler has to know every imported file up front.
 
-## Source prelude
+Values, functions, overloads, constants, and type aliases are all
+importable. Repeated imports of the same resolved file
+load and initialize it once. Name collisions and import cycles are
+compile errors.
 
-The compiler checks an ordered list of Dewy source prelude files once and makes
-their top-level bindings available as fallback names in ordinary modules.
-Module declarations and explicit imports may shadow those names.
+## Source Prelude
 
-The current prelude contains `library/path.dewy`, which defines `Path` and `p`.
-A module can opt out independently without changing any imported module:
+The compiler makes an ordered list of Dewy source prelude files
+available as fallback names. Module declarations and explicit imports
+may shadow those names.
+
+The prelude includes `Path` and `p`, `print` / `printl`, `Duration` /
+`ns` / `ms` / `s`, and host helpers such as `sleep`. A module can opt
+out without changing any imported module:
 
 ```dewy
 $no_prelude = true
@@ -66,14 +70,9 @@ let p = (path:string):>Path => [path=path]
 from p"stuff.dewy" import myfun
 ```
 
-A prelude-free module can also import directly from `[path="stuff.dewy"]`.
-Strict project-wide freestanding compilation is separate future work.
+A prelude-free module can also import from `[path="stuff.dewy"]`.
 
-Every top-level binding is importable for now, including values, functions,
-overloads, constants, and type aliases. Repeated imports of the same resolved
-file load and initialize it once. Name collisions and import cycles are compile
-errors.
+## Export and Packages
 
-Installed package lookup, directory and glob imports, explicit export control,
-non-source artifact loading, and incremental per-module artifacts remain future
-work.
+`export`, installed package lookup, directory and glob imports, and
+versioned package names are not yet determined.

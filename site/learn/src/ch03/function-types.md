@@ -1,67 +1,39 @@
 # Function Types
 
-Functions are first class citizens in Dewy. In fact many concepts from functional programming are included in Dewy, as they frequently allow for cleaner and more concise code.
-
-## Function Literals
-
-To create a function, simply bind a function literal to a variable
+Functions are values. A function literal is the parameters, `=>`, and a
+body expression.
 
 ```dewy
 my_function = () => { printl'You called my function!' }
-
-my_function  #calls the function
+my_function
 ```
 
-A function literal consists of the arguments, followed by the `=>` operator, followed by a single expression that is the function body. In the above example, the function takes no input arguments, and doesn't return any values. Instead is simply prints a string to the terminal.
-
-Here's an example that takes two arguments
-
-```dewy
-pythag_length = (a b) => { return (a^2 + b^2)^/2 }
-```
-
-In fact we can simplify the above function's declaration quite a bit since blocks return expressions present in the body.
+The body can be a block or a single expression. One argument may omit
+the parentheses. Zero arguments need `()`.
 
 ```dewy
 pythag_length = (a b) => (a^2 + b^2)^/2
-```
-
-When there is a single argument, you may omit the parenthesis around the argument list
-
-```dewy
 square = x => x^2
-```
-
-Zero arguments functions require an empty pair of parenthesis:
-
-```dewy
 foo = () => printl'bar'
 ```
 
-### Default Arguments
-
-Function arguments can have default values, which are used if the argument is not specified in the function call.
+Return type is `:>`:
 
 ```dewy
-let foo = (a:int64 b:int64=5):>int64 => a + b
-foo(3)      #returns 8
-foo(3 b=2)  #returns 5
-foo(3 2)    #returns 5
-
-let bar = (a:int64 b:int64=5 c:int64):>int64 => a + b + c
-bar(3 5 10)    # a=3, b=5, c=10; returns 18
-bar(3 c=10)    # a=3, b uses its default, c=10; returns 18
+let add = (left:int64 right:int64=2):>int64 => left + right
 ```
 
-Defaults are fallbacks, so their parameters keep their declared positional
-slots. They may be omitted or supplied by position or name. A default
-expression runs each time that parameter is omitted from a completed call, so
-mutable defaults such as arrays are fresh for every call.
+A function type writes the same contract:
 
-## Calling functions
+```dewy
+let callback:<(value:int64):>int64> = add
+```
 
-Unbound parameters before the `...` divider may be supplied positionally or by
-name. Keyword arguments can be reordered:
+## Calling Functions
+
+Each argument you write binds one parameter that is not set yet.
+Positional takes the first one still open. Named takes that name, in any
+order.
 
 ```dewy
 let subtract = (x:int64 y:int64):>int64 => x - y
@@ -69,80 +41,78 @@ subtract(5 2)
 subtract(y=2 x=5)
 ```
 
-A bare `...` closes the positional run and makes the following parameters
-required keyword-only:
+Defaults are fallbacks. They keep their slots. The default expression
+runs every time that call leaves the parameter out, so a mutable default
+like an array is new each time.
+
+```dewy
+let foo = (a:int64 b:int64=5):>int64 => a + b
+foo(3)          # 8
+foo(3 b=2)      # 5
+foo(3 2)        # 5
+
+let bar = (a:int64 b:int64=5 c:int64):>int64 => a + b + c
+bar(3 5 10)
+bar(3 c=10)
+```
+
+`foo(3 2)` fills `a` and `b`. It does not skip a default in the middle.
+`combine(10 16)` would bind `left` and `scale`, then complain that
+`right` is missing.
+
+A bare `...` ends the positional run. After that, arguments are
+keyword-only:
 
 ```dewy
 let configure = (value:int64 ... scale:int64):>int64 => value * scale
 configure(6 scale=7)
 ```
 
-Rest capture, argument spreading, and partial application are not yet
-implemented by the cleanparse compiler.
-
-## Saved, name-only, and positional-only arguments
-
-Parameters before `...` may be supplied by position or by name. Defaults do not
-change that: they are used only if a completed call leaves the parameter
-unset. Planned partial evaluation is different because an explicitly supplied
-value is evaluated and saved immediately; that parameter then leaves the
-remaining positional sequence. A bare `...` can force later parameters to be
-name-only.
-
-Dewy does not currently define source syntax for positional-only or anonymous
-parameters. In particular, a bare identifier is always a parameter name, not
-an unnamed type annotation.
-
-## Scope Capture
-
-TODO
-
-- what variables are available to a function's body
-
-## Partial Function Evaluation
-
-First note that if you want to pass a function around as an object, you need to get a handle to the function using the `@` ("handle") operator.
+Pipes are ordinary calls:
 
 ```dewy
-my_func = () => printl'foo'
-
-reference_to_my_func = @my_func
+40 |> add
 ```
 
-If you don't include the `@` operator, then the evaluation of the right-hand side would be stored into the left side
+## Overloads
+
+`&` combines functions into a set. Argument types pick the branch:
 
 ```dewy
-reference_to_my_func = my_func  #this doesn't work
+format = ((value:int):>string => 'integer')
+       & ((value:string):>string => value)
+
+format(42)
+format('life the universe and everything')
 ```
 
-what happens is `my_func` prints out "foo" to the command line, and then since it returns no value, `reference_to_my_func` is not able to be assigned, causing a compiler error. We'd also get a compiler error if `my_func` required arguments, as we essentially are trying to call my_func without an arguments.
+## Handles and Frozen Arguments
+
+A bare function name *calls* it if that would be a valid call. `@` gives
+you a handle, and you can freeze some arguments:
 
 ```dewy
-another_func = (a b c x) => a^2*x + b*x + c
+sum = (a b) => a + b
+add5 = @sum(5)
+add5(24)            # 29
 
-good_reference = @another_func
-bad_reference = another_func  #this causes a compilation error
+reference = @sum
+thirtyseven = @add5(32)
+thirtyseven         # 37
 ```
 
-Now, using the `@` operator, we can not only create a new reference to an existing function, but we can also **apply arguments to the reference**. What this means is we can fix the value of given arguments, allowing us to create a new function.
+Leave off `@` and `sum` with no arguments is a call, not a value.
 
-```dewy
-sum = (a b) => a + b   #simple addition function
-add5 = @sum(5)          #partially evaluate sum with a=5
-```
+## Scope
 
-Here we've created a new function `add5` which takes a single argument, and return the result of that argument plus 5.
+The body can see the names around it. Bodies can also mention names
+declared later. See [Bindings and Scope](bindings-and-scope.md).
 
-```dewy
-add5(24)        #returns 29
-add5(-7)        #returns -2
+## Rest, Spread, and Positional-Only Parameters
 
-thirtyseven = @add5(32) #new function that takes 0 arguments
-thirtyseven   #returns 37
-```
+A `...rest` parameter that captures leftover arguments, and spreading a
+bundle into a call with `...`, are not yet determined.
 
-TODO->explain about overwriting arguments.
-
-```dewy
-new_sum = (x y) => thirtyseven(a=x b=y)
-```
+Positional-only and anonymous parameter syntax are not yet determined
+either. A bare identifier in a signature is always a parameter name,
+never an unnamed type annotation.

@@ -1,6 +1,8 @@
 # Learning Dewy
 
 [Introduction](00-introduction.md)
+[Dewy at a Glance](pitch.md)
+[Features](01-features-list.md)
 
 ## Getting Started
 
@@ -26,24 +28,24 @@
 
 - [Language Features](ch03/00-features.md)
     - [Expressions, Statements, and Blocks](ch03/expressions-statements-blocks.md)
-    - [Units](ch03/units.md)
-    - [String Types](ch03/string-types.md)
-    - [String Interpolation](ch03/string-interpolation.md)
+    - [Bindings and Scope](ch03/bindings-and-scope.md)
     - [Basic Data Types](ch03/basic-data-types.md)
-    - [Container Types](ch03/container-types.md)
-    - [Range Types](ch03/range-types.md)
-    - [Object Types](ch03/object-types.md)
-    - [Function Types](ch03/function-types.md)
-    - [Operators](ch03/operators.md)
     - [Number Bases](ch03/number-bases.md)
+    - [Operators](ch03/operators.md)
+    - [String Types](ch03/string-types.md)
+    - [Range Types](ch03/range-types.md)
+    - [Container Types](ch03/container-types.md)
+    - [Object Types](ch03/object-types.md)
+    - [Optional Types](ch03/optional-types.md)
+    - [Function Types](ch03/function-types.md)
+    - [Flow Control](ch03/flow-control.md)
+    - [One Loop to Rule Them All](ch03/loops.md)
+    - [Units](ch03/units.md)
+    - [Imports](ch03/imports.md)
+    - [Functional Programming](ch03/functional-programming.md)
     - [Basic Math](ch03/basic-math.md)
     - [Linear Algebra](ch03/linear-algebra.md)
-    - [Functional Programming](ch03/functional-programming.md)
-    <!-- - [Meta Programming](ch03/meta-programming.md) -->
-    - [Flow Control](ch03/flow-control.md)
-    - [One Loop to Rule them All](ch03/loops.md)
-    - [Imports](ch03/imports.md)
-    <!-- - [Meta Syntax](meta-syntax.md) -->
+    - [Refinements](ch03/refinements.md)
 
 - [Standard Library](ch04/00-stdlib.md)
     - [Data Structures](ch04/xx-data-structures.md)

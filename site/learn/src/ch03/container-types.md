@@ -1,23 +1,46 @@
 # Container Types
 
-Container types are things like arrays, dictionaries, and sets. all containers are specified using square brackets `[]`, while the contents (or other factors) determine the type of container
+Arrays, dictionaries, and sets all use square brackets `[]`. The contents
+decide which container you get. Objects also use `[]`; they have
+[their own page](object-types.md).
+
+Values in a container are separated by whitespace, not commas.
 
 ## Arrays
 
-An array is simple a list of values inside a container
+An array is an ordered list of values:
 
 ```dewy
 my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
-printl(my_array[3])  #prints '3'
+printl'{my_array[3]}'    # 3
 ```
 
-> Note: values do not need commas to separate them. Also arrays can contain objects of different types, though arrays where all values are just a single type will be more efficient. Arrays are 0-indexed (with potentially the option to set an arbitrary index)
+Arrays are 0-indexed. Same-type arrays are the common case and the fast
+one. You can write the type explicitly:
 
-TODO->explain how to make matrices and other linear algebra stuff.
+```dewy
+names:array<string> = ['Ada' 'Grace']
+let pair:array<int64 length=2> = [10 20]
+pair.length
+pair[end]
+pair[0..1]
+```
+
+A semicolon starts a new dimension. Matrices are still arrays:
+
+```dewy
+A = [
+    1 2
+    3 4
+]
+B = [0 1 ; 1 0]
+```
+
+[Linear Algebra](linear-algebra.md) covers multiply and broadcast.
 
 ## Dictionaries
 
-A dictionary is a list of key-value pairs
+A dictionary is a list of key-value pairs joined by `->`:
 
 ```dewy
 my_dictionary = [
@@ -26,12 +49,11 @@ my_dictionary = [
     'peach' -> 3
     'pear' -> 6
 ]
-printl(my_dictionary['peach'])  #prints '3'
+printl'{my_dictionary['peach']}'    # 3
 ```
 
-Again note the lack of a need for comma separation between key-value pairs.
-
-Additionally if you wish, you can define a bi-directional dictionary using a double-ended arrow:
+`<->` makes it bidirectional. Every pair in that literal has to be
+`<->`. Lookup works from either side:
 
 ```dewy
 my_bidictionary = [
@@ -40,35 +62,31 @@ my_bidictionary = [
     'two' <-> 2
     3 <-> 'three'
 ]
-printl(my_bidictionary['three'])  #prints '3'
-printl(my_bidictionary[3])        #prints 'three'
+my_bidictionary['three']    # 3
+my_bidictionary[3]          # 'three'
 ```
-
-> Note: when creating a bidictionary, every arrow must by double-ended. As new elements are added, the bidictionary will maintain the bidirectional links between each element. Regular dictionaries will not maintin such links.
 
 ## Sets
 
-A set is an unordered collection of elements
+A set is an unordered collection:
 
 ```dewy
 my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
-printl(3 in? my_set)  #prints 'true'
-printl('pear' in? my_set)  #prints 'false'
+3 in? my_set        # true
+'pear' in? my_set   # false
 ```
-
 
 ## Objects
 
-See the entry on **Object and Class Types** for more details. But breifly, an object can be created by wrapping declarations in a container
+An object is a container of named fields. Field assignments use `=` at
+the top level of `[]`. Empty `[]` is not an object.
 
 ```dewy
 my_obj = [
-    apple = 5
+    apples = 5
     bananas = 0.89
-    buy_apples = q => q * apples
     buy_bananas = q => q * bananas
 ]
-
-printl(my_obj.apples) #prints out 5
-printl(my_obj.buy_bananas(10))  #prints out 8.9
+my_obj.apples
+my_obj.buy_bananas(10)
 ```

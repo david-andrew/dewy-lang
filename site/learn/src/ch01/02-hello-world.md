@@ -1,49 +1,44 @@
 # Hello, World!
 
-It's traditional in most languages to write a small program that prints "Hello, World!" to the screen. Achieving this is super simple in Dewy!
+Most languages start by printing `Hello, World!`. Dewy makes that a
+one-liner.
 
 ## Put Your Code in a Directory
 
-It's probably a good idea to put your code in a dedicated folder.
-
 ```bash
-$ mkdir -p ~/code
-$ cd ~/code
-$ mkdir hello_world
-$ cd hello_world
+mkdir -p ~/code/hello_world
+cd ~/code/hello_world
 ```
 
-## Write the Source Code
+## Write the Source
 
-Next we'll create the source file. In a text editor of your choosing, create a file called `hello.dewy`.
-
-Then in the text editor, enter the following code
+Create `hello.dewy` and enter:
 
 ```dewy
 printl'Hello, World!'
 ```
 
-When you are done in the text editor, save and close the file.
+`printl` writes a string to the terminal and adds a newline. Juxtaposing
+`printl` with a string is a function call, the same as
+`printl('Hello, World!')`. `print` does the same thing without the
+newline.
 
-## Run the Code
-
-Running a dewy file is as simple as invoking the file with the `dewy` command
+## Run It
 
 ```bash
-$ dewy hello.dewy
+dewy hello.dewy
 ```
 
-Which should print `Hello, World!` in the terminal. 
+That should print `Hello, World!`.
 
 ## Top-Level Execution and `main`
 
-Dewy executes top-level code in source order. A program does not need a
-`main` function, as the example above demonstrates.
+Dewy runs top-level code in source order. A program does not need a
+`main` function.
 
-When a module declares `main`, Dewy runs the complete top level first and then
-automatically invokes `main`. For now, an automatically invoked `main` takes no
-arguments and returns either an integer exit code or `void`; its return type may
-be inferred.
+When a module declares `main`, the top level still runs first, then Dewy
+invokes `main`. `main` takes no arguments and returns an integer exit
+code or `void`.
 
 ```dewy
 let message = 'Hello'
@@ -55,22 +50,14 @@ let main = () => {
 }
 ```
 
-An explicit `main()` at the top level is an ordinary call. It does not suppress
-the automatic invocation, so that program calls `main` once in sequence and
-once again after top-level execution finishes.
-
-
-## How it Works
-
-This code invokes the `printl` function with the string `'Hello, World!'`. `printl` is a commonly used function that takes text and prints it to the terminal, followed by a newline. `print` and `printl` currently work on Linux x86_64 only.
-
+An explicit `main()` at the top level is an ordinary call. Dewy still
+invokes `main` after the top level finishes, so that program would call
+`main` twice.
 
 ## Compiling and Running Are the Same Step
 
-When you run the program, you are actually doing two things: first compiling, and then running.
+`dewy` compiles the source and then runs it. You do not need a separate
+compile command for ordinary use.
 
-Compiling is the process that translates the code from Dewy, which your computer doesn't understand natively, to machine language which it does understand. The resulting translation is saved to a file, called an **executable**, that your computer can run directly. Once the executable is created, the `dewy` command then automatically runs it for you.
-
-The hosted compiler first writes equivalent µDewy source, then asks the µDewy
-backend to compile and run it. Intermediate source, assembly, and executable
-artifacts are written under `__dewycache__/`.
+The hosted compiler lowers Dewy to µDewy, then the µDewy backend
+assembles and runs it. Intermediate files go under `__dewycache__/`.

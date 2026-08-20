@@ -1,8 +1,8 @@
-# Dewy
+# Dewy at a Glance
 
-A strongly-typed, compiled, general-purpose language with strong STEM support.
+A strongly typed, compiled, general-purpose language with strong STEM support.
 
-## Everything is an expression
+## Everything Is an Expression
 
 ```dewy
 phase = if temperature <? freezing
@@ -20,7 +20,7 @@ circumference = {
 }
 ```
 
-## One loop to rule them all
+## One Loop to Rule Them All
 
 ```dewy
 loop true printl'hello'                     # infinite loop
@@ -34,7 +34,7 @@ loop i in 0.. and fruit in fruits           # combine iterators with `and`, `or`
     printl'{i}) {fruit}'
 ```
 
-## Whitespace, not commas
+## Whitespace, Not Commas
 
 ```dewy
 my_array = [1 2 3 4 5]
@@ -50,7 +50,7 @@ add = (a b) => a + b
 add(40 2)
 ```
 
-## Physical units built in
+## Physical Units Built In
 
 ```dewy
 mass = 10kg
@@ -61,10 +61,10 @@ W = 20N * 10m * cos(45°)            # 141.42 J
 8(km/h) + 20(m/s)                   # mixed units convert
 2kg + 3m                            # error: mismatched dimensions
 
-system.sleep(10seconds)
+sleep(10s)
 ```
 
-## Mathematics is ordinary code
+## Mathematics Is Ordinary Code
 
 ```dewy
 quadratic = (a b c x) => a(x^2) + b(x) + c    # juxtaposition multiplies
@@ -84,11 +84,11 @@ B = [0 1 ; 1 0]
 C = A * B                                     # matrix multiplication
 ```
 
-## Ranges are nice
+## Ranges Are Nice
 
 ```dewy
 [1..5]      # 1 2 3 4 5     inclusive bounds
-[1..5)      # 1 2 3 4       exclusive right (python style)
+[1..5)      # 1 2 3 4       exclusive right
 (1..5]      # 2 3 4 5       exclusive left
 1..5        # bare range, same as [1..5]
 
@@ -104,17 +104,17 @@ fullstring = 'this is a string'
 substring = fullstring[3..end-3]    # 's is a str'
 ```
 
-## Easy functional programming
+## Easy Functional Programming
 
 ```dewy
 square = x => x^2
 
 sum = (a b) => a + b
-add5 = @sum(5)          # partial application
+add5 = @sum(5)          # freeze the first argument
 add5(24)                # 29
 ```
 
-## Objects without a class sublanguage
+## Objects Without a Class Sublanguage
 
 ```dewy
 Point = (x:number y:number) => [
@@ -126,11 +126,11 @@ p = Point(3 4)
 p.mag                   # 5
 ```
 
-## Types establish meaning
+## Types Establish Meaning
 
 ```dewy
 count = 42                            # inferred as int
-ratio:rational = 3/4                  # int <: rational <: real <: number
+ratio:rational = 3/4                  # int of rational. rational of real. real of number
 
 scale = (value:number factor:number):>number => value * factor
 names:array<string> = ['Ada' 'Grace']
@@ -140,14 +140,14 @@ identity = <T>(value:T):>T => value   # generic function
 
 # overload a function
 format = ((value:int):>string => 'integer')
-       & ((value:string):>string => value)   
+       & ((value:string):>string => value)
 
-# overloads dispatch by argument type
-format(42) 
+# the argument types pick which one runs
+format(42)
 format('life the universe and everything')
 ```
 
-## Generators fall out of loops
+## Generators Fall Out of Loops
 
 ```dewy
 { 1 2 3 }                       # a block expresses each value inside it

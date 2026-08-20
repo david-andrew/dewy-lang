@@ -1,7 +1,10 @@
 # Dewy Compiler
-The bootstrapped compiler for the language
-1. tokenizing
-1. parsing
-1. type checking
-1. code gen
-1. etc.
+
+A compiler for Dewy, written in Dewy. The usual pipeline:
+
+1. Tokenizing
+2. Parsing
+3. Type checking
+4. Code generation
+
+This page is a placeholder for a full case study of that program.
