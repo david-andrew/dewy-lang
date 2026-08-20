@@ -1,4 +1,38 @@
 (() => {
+  const THEME_KEY = "dewy-theme";
+  const themeColors = { light: "#f3faf6", dark: "#112b20" };
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+
+  const currentTheme = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+
+  const applyTheme = (theme) => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    if (themeColor) themeColor.setAttribute("content", themeColors[theme]);
+    document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+      const next = theme === "dark" ? "light" : "dark";
+      const label = `Switch to ${next} theme`;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("title", label);
+    });
+  };
+
+  applyTheme(currentTheme());
+
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const theme = currentTheme() === "dark" ? "light" : "dark";
+      localStorage.setItem(THEME_KEY, theme);
+      applyTheme(theme);
+    });
+  });
+
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") return;
+    applyTheme(event.matches ? "dark" : "light");
+  });
+
   const navToggle = document.querySelector("[data-nav-toggle]");
   const nav = document.querySelector("[data-nav]");
   if (navToggle && nav) {
