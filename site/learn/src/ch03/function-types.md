@@ -115,6 +115,15 @@ declared later. See [Bindings and Scope](bindings-and-scope.md).
 A `...rest` parameter that captures leftover arguments, and spreading a
 bundle into a call with `...`, are not yet determined.
 
-Positional-only and anonymous parameter syntax are not yet determined
-either. A bare identifier in a signature is always a parameter name,
-never an unnamed type annotation.
+Wrapping a parameter in `<>` makes it position-only while preserving its
+local name in the function body:
+
+```dewy
+let increment = (<value:int64>):>int64 => value + 1
+
+increment(41)
+# increment(value=41)  # error
+```
+
+A bare identifier in a signature is always a parameter name, never an
+unnamed type annotation.

@@ -7659,6 +7659,8 @@ class _Lowerer:
         iterator = arm.condition
         if not isinstance(iterator, hir.IteratorExpression):
             raise TypeError('INTERNAL ERROR: iterator loop has no iterator condition')
+        if isinstance(iterator.iterable.type, ty.ArrayType):
+            return self._lower_array_iterator_flow(node, arm, iterator)
         if not isinstance(iterator.iterable, hir.Range):
             return self._lower_string_iterator_flow(node, arm, iterator)
         self._require_finite_udewy_iterator(iterator)
@@ -7736,6 +7738,127 @@ class _Lowerer:
             None,
         )
         return [offset_declaration, *target_declarations, loop]
+
+    def _lower_array_iterator_flow(
+        self,
+        node: hir.Flow,
+        arm: hir.LoopArm,
+        iterator: hir.IteratorExpression,
+    ) -> list[hir.AST]:
+        """Lower left-to-right reads from an array without choosing alias semantics."""
+
+        array_type = iterator.iterable.type
+        if not isinstance(array_type, ty.ArrayType):
+            raise TypeError('INTERNAL ERROR: array iterator has no array type')
+        raw_representation = self._array_use_representation(iterator.iterable)
+        prelude, array = self._extract_expression(iterator.iterable)
+        offset = self._new_iterator_temp(iterator)
+        offset_value = replace(offset, loc=iterator.loc)
+        runtime_target_type = self._lower_runtime_value_type(array_type.element)
+        target = replace(
+            iterator.target,
+            loc=iterator.loc,
+            type=runtime_target_type,
+        )
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            iterator,
+        )
+        address = (
+            self._pointer_element_address(
+                array,
+                offset_value,
+                element_bytes,
+                iterator.loc,
+            )
+            if raw_representation is not None
+            else self._array_element_address(
+                array,
+                offset_value,
+                array_type.element,
+                iterator.loc,
+            )
+        )
+        value = self._array_load(address, array_type.element, iterator.loc)
+        updates = [
+            hir.Assign(
+                iterator.loc,
+                ty.VOID_TYPE,
+                target,
+                '=',
+                value,
+            ),
+            hir.Assign(
+                iterator.loc,
+                ty.VOID_TYPE,
+                offset_value,
+                '+=',
+                self._int64_literal(iterator.loc, 1),
+            ),
+        ]
+        self.lower_loop_depth += 1
+        lowered_body = self._lower_statement_body(arm.body)
+        self.lower_loop_depth -= 1
+        body_items = (
+            lowered_body.items
+            if isinstance(lowered_body, hir.Block)
+            else [lowered_body]
+        )
+        length = (
+            self._int64_literal(iterator.loc, iterator.count)
+            if iterator.count is not None
+            else self._load_i64_field(array, ARRAY_LENGTH_OFFSET, iterator.loc)
+        )
+        loop = hir.Flow(
+            node.loc,
+            ty.VOID_TYPE,
+            [
+                hir.LoopArm(
+                    arm.loc,
+                    ty.VOID_TYPE,
+                    self._int64_comparison(
+                        '__lt__',
+                        offset_value,
+                        length,
+                        iterator.loc,
+                    ),
+                    hir.Block(
+                        arm.body.loc,
+                        ty.VOID_TYPE,
+                        [*updates, *body_items],
+                        True,
+                    ),
+                )
+            ],
+            None,
+        )
+        placeholder = (
+            self._int64_literal(iterator.loc, 0)
+            if runtime_target_type == 'int64'
+            and not isinstance(array_type.element, ty.IntegerLiteralType)
+            else self._default_placeholder(array_type.element, iterator.loc)
+        )
+        return [
+            *prelude,
+            hir.Declare(
+                iterator.loc,
+                ty.VOID_TYPE,
+                'let',
+                offset.name,
+                'int64',
+                self._int64_literal(iterator.loc, 0),
+            ),
+            hir.Declare(
+                iterator.target.loc,
+                ty.VOID_TYPE,
+                'let',
+                iterator.target.name,
+                runtime_target_type,
+                placeholder,
+                binding_id=iterator.target.binding_id,
+            ),
+            loop,
+        ]
 
     def _lower_string_iterator_flow(
         self,
@@ -8182,13 +8305,26 @@ class _Lowerer:
         updates: list[hir.AST] = []
         active_values: list[hir.ExpressedIdentifier] = []
         for iterator in condition.iterators:
-            string_iterator = not isinstance(iterator.iterable, hir.Range)
+            range_iterator = isinstance(iterator.iterable, hir.Range)
+            array_iterator = isinstance(iterator.iterable.type, ty.ArrayType)
+            string_iterator = not range_iterator and not array_iterator
             string_value: hir.AST | None = None
+            array_value: hir.AST | None = None
+            array_representation: ArrayRepresentation | None = None
             if string_iterator:
                 string_prelude, string_value = self._extract_expression(
                     iterator.iterable
                 )
                 declarations.extend(string_prelude)
+            elif array_iterator:
+                array_representation = self._array_use_representation(
+                    iterator.iterable
+                )
+                array_prelude, array_value = self._extract_expression(
+                    iterator.iterable
+                )
+                declarations.extend(array_prelude)
+                assert iterator.count is not None
             else:
                 assert iterator.count is not None
             offset = self._new_iterator_temp(iterator)
@@ -8219,6 +8355,10 @@ class _Lowerer:
             ])
             payload = ty.optional_payload(iterator.target.type)
             target = replace(iterator.target, loc=iterator.loc)
+            semantic_target_type = payload or iterator.target.type
+            runtime_target_type = self._lower_runtime_value_type(
+                semantic_target_type
+            )
             value_target: hir.AST = target
             if payload is not None:
                 target = replace(target, type='int64')
@@ -8269,13 +8409,26 @@ class _Lowerer:
                         )
                     )
             else:
+                placeholder = (
+                    self._int64_literal(iterator.loc, 0)
+                    if array_iterator and runtime_target_type == 'int64'
+                    else self._default_placeholder(
+                        semantic_target_type,
+                        iterator.loc,
+                    )
+                    if array_iterator
+                    else self._int64_literal(
+                        iterator.loc,
+                        iterator.first,
+                    )
+                )
                 declarations.append(
                     hir.Declare(
                         iterator.loc,
                         ty.VOID_TYPE,
                         'let',
                         target.name,
-                        'int64',
+                        runtime_target_type,
                         (
                             self._intrinsic_call(
                                 '__alloca__',
@@ -8289,10 +8442,7 @@ class _Lowerer:
                                 iterator.loc,
                             )
                             if string_iterator
-                            else self._int64_literal(
-                                iterator.loc,
-                                iterator.first,
-                            )
+                            else placeholder
                         ),
                         binding_id=iterator.target.binding_id,
                     )
@@ -8306,6 +8456,8 @@ class _Lowerer:
                     iterator.loc,
                 )
                 if string_value is not None
+                else self._int64_literal(iterator.loc, iterator.count)
+                if array_value is not None
                 else self._int64_literal(iterator.loc, iterator.count)
             )
             active_test = self._int64_comparison(
@@ -8331,6 +8483,30 @@ class _Lowerer:
                     offset_value,
                     iterator.loc,
                 )
+            elif array_value is not None:
+                assert isinstance(iterator.iterable.type, ty.ArrayType)
+                element_type = iterator.iterable.type.element
+                element_bytes, _signed = self._array_element_layout(
+                    element_type,
+                    iterator,
+                )
+                address = (
+                    self._pointer_element_address(
+                        array_value,
+                        offset_value,
+                        element_bytes,
+                        iterator.loc,
+                    )
+                    if array_representation is not None
+                    else self._array_element_address(
+                        array_value,
+                        offset_value,
+                        element_type,
+                        iterator.loc,
+                    )
+                )
+                value = self._array_load(address, element_type, iterator.loc)
+                value_updates = []
             else:
                 value = self._iterator_value(iterator, offset_value)
                 value_updates = []
@@ -8357,7 +8533,7 @@ class _Lowerer:
                     defined_body.append(hir.Assign(
                         iterator.loc,
                         ty.VOID_TYPE,
-                        replace(target, type='int64'),
+                        replace(target, type=runtime_target_type),
                         '=',
                         value,
                     ))

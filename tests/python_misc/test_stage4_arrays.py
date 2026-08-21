@@ -451,6 +451,30 @@ let f = ():>int64 => {{
     )
 
 
+def test_array_iterator_infers_the_element_type_and_length() -> None:
+    body = _function_body('''
+let f = ():>int16 => {
+    let values:array<int16> = [10 20 12]
+    loop value in values { return value }
+    return 0
+}
+''')
+    flow = body.items[1]
+    assert isinstance(flow, hir.Flow)
+    condition = flow.arms[0].condition
+    assert isinstance(condition, hir.IteratorExpression)
+    assert condition.target.type == 'int16'
+    assert condition.count == 3
+
+
+def test_array_iteration_defers_unsettled_handle_identity() -> None:
+    with pytest.raises(NotImplementedYet, match='unsettled identity semantics'):
+        _check('''
+let nested = [[1] [2]]
+loop value in nested {}
+''')
+
+
 def test_range_target_proves_indices_and_is_scoped_to_the_loop() -> None:
     _check("""
 let sum = ():>int64 => {

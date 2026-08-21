@@ -18,5 +18,19 @@ let optional:int64 | undefined = undefined
 
 `as` performs a checked representation-changing conversion supported by the
 compiler. `transmute` preserves bits and requires compatible implemented
-representations. Type aliases are currently written with an explicit `:type`
-annotation.
+representations.
+
+A standalone `<>` block contains one type expression and produces a
+compile-time type value. This lets an ordinary inferred declaration introduce
+an alias; the explicit `:type` spelling remains available too.
+
+```dewy
+const Index = <int64>
+const Result = <int64 | undefined>
+const Name:type = string
+
+let offset:Index = 42
+```
+
+Separate alternatives inside `<>` use the ordinary type operator rather than
+whitespace: write `<int64 | string>`, not `<int64 string>`.

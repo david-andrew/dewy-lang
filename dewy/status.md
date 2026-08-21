@@ -18,8 +18,8 @@ This document tracks language features in the cleanparse compiler. Checked items
 
 - [x] Explicit compile-time aliases using `let T:type = ...` or `const T:type = ...`, including a single type expression grouped as `<...>` in that expected type position.
 - [x] Contextual value typing from annotations, function parameters and returns, and supported container element or field types.
-- [ ] Standalone non-juxtaposed `<...>` expressions producing compile-time values of type `type`.
-- [ ] Inferring `let T = <...>` as a compile-time type alias without requiring the explicit `:type` annotation.
+- [x] Standalone non-juxtaposed `<...>` expressions producing compile-time values of type `type`.
+- [x] Inferring `let T = <...>` as a compile-time type alias without requiring the explicit `:type` annotation.
 - [ ] Runtime type values, reflection, and general compile-time evaluation of type expressions.
 
 ## Generics
@@ -87,6 +87,7 @@ The type system instantiates generic function types for built-in operator overlo
 ## Function signatures and calls
 
 - [x] Positional parameters and arguments, named parameter contracts in structural function types, and pipe calls.
+- [x] Explicit position-only parameters written as `<name:type>`. The name remains available inside the body but is absent from the keyword-call interface; required and defaulted forms use the ordinary positional/default rules.
 - [x] Positional-or-named parameters may have per-call defaults; explicit post-`...` parameters are keyword-only and participate in semantic checking and initialization analysis.
 - [x] Positional or named arguments and per-call defaults lower through a positional udewy ABI for direct, piped, overload-selected, indirect, and method calls.
 - [ ] Rest parameters, argument spreading, and partial application do not yet lower to udewy calls.
@@ -134,6 +135,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] `bool`, string/grapheme, function, nested-array, and object-handle element layouts.
 - [x] Non-escaping function-local `let` and `const` bindings initialized by an exact-length array literal use only a fresh stack element buffer when every use is `.length`, an indexed read, or an indexed write.
 - [x] Exact-length scalar/function array return values use caller-owned descriptor and element storage, including direct literals, returned locals, forwarding calls, and indirect or method calls with an exact return type.
+- [x] Left-to-right iteration over arrays of settled scalar, function, and immutable string-like elements. Dynamic-length arrays work as single iterators, and exact-length arrays compose with other multiiterator leaves.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
 - [ ] Returning arrays whose storage requirement is not known at the call site, arrays of handles that require nested ownership handling, and other escapes into longer-lived storage.
@@ -172,7 +174,8 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Literal post-exhaustion truth-table behavior and labeled exits.
 - [x] Grapheme iteration over strings.
 - [x] Mixed range/string multiiteration, including pairing a right-unbounded counter with finite grapheme iteration as in `loop i in 0.. and c in text`.
-- [ ] Multiiterator sources other than normalized integer ranges and strings.
+- [x] Exact-length array leaves in multiiterator formulas.
+- [ ] Dynamic-length array leaves and multiiterator sources other than normalized integer ranges, strings, and exact-length arrays.
 - [ ] Conditions that mix iterator clauses with ordinary Boolean predicates.
 - [ ] Iterator fusion and scalar replacement of the baseline per-leaf state.
 

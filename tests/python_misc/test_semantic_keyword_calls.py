@@ -31,6 +31,48 @@ let result = subtract(y=2 x=5)
     )
 
 
+def test_position_only_parameter_keeps_its_local_name() -> None:
+    declarations = _declarations("""
+let increment = (<value:int64>):>int64 => value + 1
+let result = increment(41)
+""")
+
+    function = declarations['increment']
+    assert isinstance(function, hir.FunctionLiteral)
+    assert function.pos_or_kw_args[0].name == 'value'
+    assert function.pos_or_kw_args[0].position_only
+    assert isinstance(function.type, ty.FunctionType)
+    assert function.type.pos_or_kw == [ty.PosOrKwArg(None, 'int64')]
+
+    call = declarations['result']
+    assert isinstance(call, hir.FunctionCall)
+    assert len(call.pos_args) == 1
+
+
+def test_position_only_parameter_cannot_be_called_by_name() -> None:
+    with pytest.raises(UserError, match='unknown keyword argument `value`'):
+        _declarations("""
+let increment = (<value:int64>):>int64 => value + 1
+let result = increment(value=41)
+""")
+
+
+def test_position_only_default_is_a_per_call_fallback() -> None:
+    declarations = _declarations("""
+let increment = (<value:int64=41>):>int64 => value + 1
+let defaulted = increment()
+let supplied = increment(40)
+""")
+
+    function = declarations['increment']
+    assert isinstance(function, hir.FunctionLiteral)
+    default = function.pos_or_kw_args[0]
+    assert isinstance(default, hir.BoundParam)
+    assert default.position_only
+    assert isinstance(function.type, ty.FunctionType)
+    assert function.type.pos_or_kw == [ty.PosOrKwArg(None, 'int64', required=False)]
+
+
 @pytest.mark.parametrize(
     ('arguments', 'message'),
     [

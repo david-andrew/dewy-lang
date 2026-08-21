@@ -349,6 +349,7 @@ class Param:
     name: str  #TODO: list/dict/obj unpack might go here too? also multi-arg collections could go here
     type: ty.Type
     binding_id: int | None = field(default=None, kw_only=True)
+    position_only: bool = field(default=False, kw_only=True)
 
     def __repr__(self) -> str:
         from .hir_display import hir_to_tree_str
@@ -448,15 +449,16 @@ destination accepts every captured argument. Dewy deliberately does not split
 one captured bundle among several destinations; arguments that need different
 destinations should be named explicitly in the wrapper signature.
 
-Source signatures currently require names for all parameters before `...`.
-Because parameter names and type names are both ordinary identifiers, a bare
-identifier is always a parameter name rather than an unnamed type annotation.
-The intended explicit positional-only form is `<name:type>`:
+Source signatures require local names for all parameters. Because parameter
+names and type names are both ordinary identifiers, a bare identifier is
+always a parameter name rather than an unnamed type annotation. Wrapping one
+parameter in `<>` makes it position-only:
 
     let increment = (<value:int64>) => value + 1
 
 Here `value` is available in the body but callers cannot write `value=...`.
-This syntax is planned and is not yet accepted by the current compiler.
+The same required, annotated, and defaulted parameter forms work inside `<>`;
+only their availability by name at the call site changes.
 
 Destructured parameters are also planned. An unannotated `[a b c]` parameter
 could accept an array by position or an object by field name; an explicit

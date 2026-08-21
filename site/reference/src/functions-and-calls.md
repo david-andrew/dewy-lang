@@ -70,7 +70,29 @@ offset(40 amount=2)
 Here `value` remains positional-or-keyword, while `amount` is required and
 keyword-only.
 
-### Function type contracts remain named
+### Position-only
+
+Wrapping a parameter in `<>` keeps its name inside the function but removes
+that name from the call interface. It must be supplied by position.
+
+```dewy
+let increment = (<value:int64>):>int64 => value + 1
+
+increment(41)
+# increment(value=41)  # error: `value` is not a keyword parameter
+```
+
+Annotations and defaults work normally inside the wrapper. A position-only
+default remains a per-call fallback:
+
+```dewy
+let increment = (<value:int64=0>):>int64 => value + 1
+
+increment()   # 1
+increment(9)  # 10
+```
+
+### Function type contracts
 
 Types and parameter names use the same identifier syntax. A bare identifier in
 a function signature is therefore a parameter name, not an unnamed parameter
@@ -85,9 +107,10 @@ callback(41)
 callback(value=41)
 ```
 
-Dewy does not currently have source syntax for positional-only or anonymous
-parameters. A future explicit form may add them, but a bare identifier will not
-be reinterpreted as a type.
+A structural contract may omit a parameter name to require positional access,
+as in `<int64:>int64>`. Source function literals still give every parameter a
+local name; `<value:int64>` makes that name private to the function rather than
+reinterpreting a bare identifier as a type.
 
 ### Rest parameters and spreading
 

@@ -373,6 +373,19 @@ class _BoundsValidator:
 
     @staticmethod
     def _iterator_interval(iterator: hir.IteratorExpression) -> Interval:
+        if isinstance(iterator.iterable.type, ty.ArrayType):
+            target_type = ty.optional_payload(iterator.target.type)
+            if target_type is None:
+                target_type = iterator.target.type
+            layout = ty.fixed_integer_layout(target_type)
+            if layout is None:
+                return UNKNOWN_INTERVAL
+            width, signed = layout
+            return (
+                Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1)
+                if signed
+                else Interval(0, (1 << width) - 1)
+            )
         if iterator.count is None:
             return (
                 Interval(iterator.first, None)

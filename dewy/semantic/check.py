@@ -426,6 +426,8 @@ def _complete_binding(
         else 'value'
     )
     binding.type = declaration.expr.type
+    if isinstance(declaration.expr, hir.TypeValue):
+        binding.type_value = declaration.expr.value
     declaration = replace(declaration, binding_id=binding.id)
     binding.declaration = declaration
     if isinstance(declaration.expr, hir.FunctionLiteral):
@@ -1326,8 +1328,31 @@ def _tcr_range_iterator(
     identifier = condition_ast.left.item
     iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=ctx)
     if not isinstance(iterable, hir.Range):
+        target_type: ty.TypeExpr | None = None
+        count: int | None = None
         if _is_string_type(iterable.type):
             target_type = ty.StringType(1)
+            count = _known_string_length(iterable.type)
+        elif isinstance(iterable.type, ty.ArrayType):
+            element_type = iterable.type.element
+            if not (
+                element_type == 'bool'
+                or ty.fixed_integer_layout(element_type) is not None
+                or isinstance(
+                    element_type,
+                    (ty.FunctionType, ty.StringLiteralType, ty.StringType),
+                )
+                or isinstance(element_type, str)
+                and element_type in {'string', 'grapheme', 'char'}
+            ):
+                not_implemented(
+                    ctx.srcfile,
+                    condition_ast.right.loc,
+                    'array iteration over elements with unsettled identity semantics',
+                )
+            target_type = element_type
+            count = iterable.type.length
+        if target_type is not None:
             binding = ctx.binding_registry.allocate_param(
                 identifier.name,
                 target_type,
@@ -1348,7 +1373,6 @@ def _tcr_range_iterator(
                 identifier.name,
                 binding_id=binding.id,
             )
-            length = _known_string_length(iterable.type)
             return (
                 hir.IteratorExpression(
                     condition_ast.loc,
@@ -1357,8 +1381,8 @@ def _tcr_range_iterator(
                     iterable,
                     0,
                     1,
-                    None if length is None else length - 1,
-                    length,
+                    None if count is None else count - 1,
+                    count,
                 ),
                 iterator_ctx,
             )
@@ -1505,6 +1529,22 @@ def _tcr_loop_iterator(
     formula, iterator_ctx = collected
     if len(iterators) == 1:
         return iterators[0], iterator_ctx
+
+    dynamic_array = next(
+        (
+            iterator
+            for iterator in iterators
+            if isinstance(iterator.iterable.type, ty.ArrayType)
+            and iterator.count is None
+        ),
+        None,
+    )
+    if dynamic_array is not None:
+        not_implemented(
+            ctx.srcfile,
+            dynamic_array.iterable.loc,
+            'dynamic-length arrays in multiiterator formulas',
+        )
 
     counts = [iterator.count for iterator in iterators]
     stop: int | None = None
@@ -1788,7 +1828,10 @@ def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
         isinstance(expression, p0.BinOp)
         and isinstance(expression.op, t1.Operator)
         and expression.op.symbol in {'=', '::', ':='}
-        and isinstance(expression.left, p0.BinOp)
+    ):
+        return None
+    if (
+        isinstance(expression.left, p0.BinOp)
         and isinstance(expression.left.op, t1.Operator)
         and expression.left.op.symbol == ':'
         and isinstance(expression.left.left, p0.Atom)
@@ -1797,8 +1840,16 @@ def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
         and isinstance(expression.left.right.item, t1.Identifier)
         and expression.left.right.item.name == 'type'
     ):
-        return None
-    return expression.left.left.item.name, expression.right
+        return expression.left.left.item.name, expression.right
+    if (
+        isinstance(expression.left, p0.Atom)
+        and isinstance(expression.left.item, t1.Identifier)
+        and isinstance(expression.right, p0.Block)
+        and expression.right.kind == '<>'
+        and len(expression.right.inner) == 1
+    ):
+        return expression.left.item.name, expression.right
+    return None
 
 
 def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
@@ -2612,10 +2663,25 @@ def _literal_path_parameter(expression: p0.BinOp) -> str | None:
 
 
 def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
-    # TODO: if kind=='<>' then typecheck and resolve needs to behave differently, e.g. because `|` means `type union`, not regular `or`
+    if block.kind == '<>':
+        if len(block.inner) != 1:
+            user_error(
+                ctx.srcfile,
+                'type block requires one type expression',
+                Pointer(
+                    span=block.loc,
+                    message=f'found {len(block.inner)} separate expressions',
+                ),
+                hint='combine alternatives with `|`, for example `<int64 | string>`',
+            )
+        return hir.TypeValue(
+            block.loc,
+            ty.TYPE_TYPE,
+            ast_to_type(block.inner[0], ctx=ctx),
+        )
 
     # open a new scope if the block is a scoped block
-    type_block = block.kind == '<>'
+    type_block = False
     if block.kind == '{}':
         ctx = replace(
             ctx,
@@ -2744,9 +2810,6 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
                     Pointer(span=block.loc, message=f'`{block.kind}` may only contain a single bare range expression, got {len(results)} expressions'),
                     hint='e.g. `[1..10)`. use `[]` for arrays or `()` for grouping')
             return replace(results[0], loc=block.loc, bounds=block.kind)
-        case '<>':
-            # return hir.TypeBlock(block.loc, type..., results) #TODO: handling type of type block based on contained inner items
-            not_implemented(ctx.srcfile, block.loc, 'type block')
         case _:
             # unreachable
             raise ValueError(f'INTERNAL ERROR: invalid block kind: {block.kind}')
@@ -3876,7 +3939,7 @@ def typefunc_from_hir_params(
 ) -> ty.FunctionType:
     pos = [
         ty.PosOrKwArg(
-            p.name,
+            None if p.position_only else p.name,
             p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE,
             required=not isinstance(p, hir.BoundParam),
         )
@@ -4474,18 +4537,17 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     kw_only_args: list[hir.Param|hir.BoundParam] = []
     saw_rest: bool = False
     rest_args: hir.Param|hir.BoundParam|None = None
-    for item in signature.inner:
+
+    def collect_param(item: p0.AST, *, position_only: bool = False) -> hir.Param | hir.BoundParam:
         match item:
-            case p0.Atom(item=t1.Identifier(name='...')):
-                if saw_rest:
-                    user_error(ctx.srcfile, 'multiple `...` in function signature',
-                        Pointer(span=item.loc, message='second `...` here'),
-                        hint='a function signature may contain at most one `...` divider/rest parameter')
-                saw_rest = True
             case p0.Atom(item=t1.Identifier(name=name)):
-                (kw_only_args if saw_rest else pos_or_kw_args).append(hir.Param(name, type=ty.INFERRED_TYPE))
+                return hir.Param(name, type=ty.INFERRED_TYPE, position_only=position_only)
             case p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name))):
-                (kw_only_args if saw_rest else pos_or_kw_args).append(hir.Param(name, type=ast_to_type(item.right, ctx=ctx)))
+                return hir.Param(
+                    name,
+                    type=ast_to_type(item.right, ctx=ctx),
+                    position_only=position_only,
+                )
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
                 value = typecheck_and_resolve_inner(right, ctx=ctx)
                 param_type: ty.Type = (
@@ -4493,8 +4555,11 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
                     if isinstance(value.type, ty.IntegerLiteralType)
                     else value.type
                 )
-                (kw_only_args if saw_rest else pos_or_kw_args).append(
-                    hir.BoundParam(name, type=param_type, value=value)
+                return hir.BoundParam(
+                    name,
+                    type=param_type,
+                    value=value,
+                    position_only=position_only,
                 )
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as right):
                 param_type = ast_to_type(typeexpr, ctx=ctx)
@@ -4503,9 +4568,33 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
                     param_type,
                     ctx=ctx,
                 )
-                (kw_only_args if saw_rest else pos_or_kw_args).append(
-                    hir.BoundParam(name, type=param_type, value=value)
+                return hir.BoundParam(
+                    name,
+                    type=param_type,
+                    value=value,
+                    position_only=position_only,
                 )
+            case _:
+                not_implemented(ctx.srcfile, item.loc, f'{type(item).__name__} in function signature')
+
+    for item in signature.inner:
+        match item:
+            case p0.Atom(item=t1.Identifier(name='...')):
+                if saw_rest:
+                    user_error(ctx.srcfile, 'multiple `...` in function signature',
+                        Pointer(span=item.loc, message='second `...` here'),
+                        hint='a function signature may contain at most one `...` divider/rest parameter')
+                saw_rest = True
+            case p0.Block(kind='<>', inner=[inner]):
+                if saw_rest:
+                    user_error(ctx.srcfile, 'position-only parameter after `...`',
+                        Pointer(span=item.loc, message='position-only parameters must be before the keyword-only divider'))
+                pos_or_kw_args.append(collect_param(inner, position_only=True))
+            case p0.Block(kind='<>'):
+                user_error(ctx.srcfile, 'invalid position-only parameter',
+                    Pointer(span=item.loc, message='`<>` must contain exactly one named parameter'))
+            case p0.Atom(item=t1.Identifier()) | p0.BinOp(op=t1.Operator(symbol=':'|'=')):
+                (kw_only_args if saw_rest else pos_or_kw_args).append(collect_param(item))
             case p0.BinOp(op=t2.EllipsisJuxtapose(), left=p0.Atom(item=t1.Identifier(name='...')), right=p0.Atom(item=t1.Identifier(name=name))):
                 if saw_rest:
                     user_error(ctx.srcfile, 'multiple `...` in function signature',

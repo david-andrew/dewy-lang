@@ -113,9 +113,9 @@ class PosOrKwArg:
     """One positional slot in a FunctionType, optionally addressable by name.
 
     ``required=False`` means the function supplies a default when a completed
-    call leaves this slot unset. An absent name is reserved for internal
-    callables; source parameters always have names and are therefore
-    addressable by keyword.
+    call leaves this slot unset. An absent name makes the slot position-only;
+    this represents both internal callables and source parameters written as
+    ``<name:type>``.
     """
     name: str | None
     type: TypeExpr

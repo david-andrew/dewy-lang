@@ -990,7 +990,12 @@ def _flow_doc(node: hir.Flow, min_prec: int, indent: int) -> Doc:
 
 def _function_literal_doc(node: hir.FunctionLiteral, min_prec: int, indent: int) -> Doc:
     """Render a function literal as `(args):>ret => body`."""
-    args: list[Doc] = [_param_doc(p, indent) for p in node.pos_or_kw_args]
+    args: list[Doc] = [
+        _seq(_text('<'), _param_doc(p, indent), _text('>'))
+        if p.position_only
+        else _param_doc(p, indent)
+        for p in node.pos_or_kw_args
+    ]
     if node.rest_args is not None or node.kw_only_args:
         if node.rest_args is not None:
             args.append(_seq(_text('...'), _param_doc(node.rest_args, indent)))
