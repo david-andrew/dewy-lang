@@ -14,6 +14,7 @@
   --icons: #5b7169;
   --icons-hover: #17312a;
   --links: #0a6b4a;
+  --link-hover: #0d8a5f;
   --inline-code-color: #0a6b4a;
   --theme-popup-bg: #ffffff;
   --theme-popup-border: #bed7ca;
@@ -51,7 +52,8 @@
   --scrollbar: #7a8d84;
   --icons: #a3b0aa;
   --icons-hover: #e6ebe7;
-  --links: #6ee0b8;
+  --links: #86f4cf;
+  --link-hover: #6ee0b8;
   --inline-code-color: #86f4cf;
   --theme-popup-bg: #191a1c;
   --theme-popup-border: #3a5348;
@@ -114,6 +116,40 @@
 
 code {
   font-variant-ligatures: none;
+}
+
+.dewy-light pre > code.hljs {
+  background: #1c2822;
+  color: #d8e4dd;
+}
+
+.dewy-light :not(pre) > .hljs {
+  background: #d3f1e4;
+}
+
+.dewy-light .content a,
+.dewy-dark .content a {
+  text-decoration: underline;
+  text-decoration-thickness: 0.07em;
+  text-underline-offset: 0.18em;
+}
+
+.dewy-light .content a:hover,
+.dewy-light .content a:visited:hover,
+.dewy-dark .content a:hover,
+.dewy-dark .content a:visited:hover {
+  color: var(--link-hover);
+}
+
+.dewy-light .content a:hover > .hljs,
+.dewy-dark .content a:hover > .hljs {
+  color: var(--link-hover);
+}
+
+.dewy-light .content a.header,
+.dewy-dark .content a.header {
+  color: var(--fg);
+  text-decoration: none;
 }
 
 blockquote:first-of-type {

@@ -60,8 +60,9 @@
 
   const syncHighlight = () => {
     if (!sheets.night || !sheets.light || !sheets.ayu) return;
-    const dark = document.documentElement.classList.contains("dewy-dark");
-    if (!dark) return;
+    const html = document.documentElement;
+    const dewy = html.classList.contains("dewy-light") || html.classList.contains("dewy-dark");
+    if (!dewy) return;
     sheets.ayu.disabled = true;
     sheets.night.disabled = false;
     sheets.light.disabled = true;
