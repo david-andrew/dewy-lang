@@ -90,6 +90,7 @@ The type system instantiates generic function types for built-in operator overlo
 - [x] Positional-or-named parameters may have per-call defaults; explicit post-`...` parameters are keyword-only and participate in semantic checking and initialization analysis.
 - [x] Positional or named arguments and per-call defaults lower through a positional udewy ABI for direct, piped, overload-selected, indirect, and method calls.
 - [ ] Rest parameters, argument spreading, and partial application do not yet lower to udewy calls.
+- [ ] Vectorized function calls. `.` with a non-identifier right-hand side (`f.(xs)`, `putchar."text"`, `f.[1 2 3]`) applies the left-hand callable to each element of the right-hand side, equivalent to `[loop xi in rhs f(xi)]`. A bare identifier on the right remains member access (`obj.field`), so a sequence in a variable is written `f.(xs)`, not `f.xs`. The parser already produces `BinOp(.)` for these forms; only `.` glued to a following operator becomes `BroadcastOp` (`.*`, `.|>`). Semantic analysis currently rejects non-identifier RHS as unimplemented computed member access. No parser change.
 
 ## Integer representations and operations
 
@@ -292,7 +293,7 @@ In no particular order
 - [ ] Pattern matching (`match`)
 - [ ] Partial application (`@`)
 - [ ] expression returning assignment (`:=`) (i.e. python walrus operator) and compile-time assignment (`::`)
-- [ ] General juxtaposition multiplication and broadcasting beyond the implemented number/physical-quantity case
+- [ ] General juxtaposition multiplication and broadcasting beyond the implemented number/physical-quantity case. Vectorized calls (`f.(xs)`) are a `BinOp(.)` interpretation, not operator broadcasting; see Function signatures and calls.
 - [ ] Math
   - [ ] Linear algebra, multidimensional array syntax, etc.
   - [ ] Geometric algebra

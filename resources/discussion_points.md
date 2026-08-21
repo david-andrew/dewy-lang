@@ -2336,28 +2336,6 @@ Const:
 - `pi`, `tau`
 - `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
 
-## Security design
-
-The language should be secure by default and users have to opt in (usually with long obnoxious flags) to unsecure execution
-
-
-TODO
-in general memory safety is a given but other areas not handled by rust are important to consider:
-
-- https://www.horizon3.ai/attack-research/attack-blogs/analysis-of-2023s-known-exploited-vulnerabilities/
-- https://owasp.org/www-project-top-ten/
-- https://www.ibm.com/reports/threat-intelligence
-- jonathan blow on mitigating buffer overflow risks: https://www.youtube.com/watch?v=EJRdXxS_jqo
-- on qmail's strong security record: https://blog.acolyer.org/2018/01/17/some-thoughts-on-security-after-ten-years-of-qmail-1-0/
-    - high level idea is reduce amount of trusted code, trade speed for security within trusted code, etc.
-
-TODO: any other logical errors that come up, note them here. Basically we need to treat this the same way airplane crash investigations are handled (Root Cause Analysis / Safety Management System). Collect basically all case studies of known security vulnerabilities, categorize them by their root cause/flavor, and then adjust OS design, and language security features to mitigate them.
-
-Logical errors that we can help with:
-- https://www.youtube.com/watch?v=CDtIS8XaJDY
-    - basically I think the OS should know what things are trusted vs untrusted, and then perhaps there are libraries that when interacting with the OS (e.g. getting environment variables) that hooks into the security model for the language, and you would get a compile time security error if you tried to do something like use environment variables in a context marked as privileged. note that the security checker would probably be compile-time running code
-    - I think in general, having a good model of trusted vs untrusted side effects (inputs), and a good security model in the language where you can mark sections as privileged. For example I think the type system will already have a good notion of what is internal vs external (e.g. for being able to determine what can be precomputed vs what touches non-deterministic/external input). So I think having hooks into that kind of internal vs external source information should be a solid part of the security structure
-
 
 ### Idea: Untrusted type, and canonical sanitizers
 this github bug example: https://www.youtube.com/watch?v=m5t08CREHcE

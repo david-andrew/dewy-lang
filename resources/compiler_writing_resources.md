@@ -11,13 +11,11 @@
   - https://www.youtube.com/watch?v=QdnxjYj1pS0
   - high level overview
 
-
 - creating a compiler in C++
   - https://www.youtube.com/watch?v=vcSijrRsrY0&list=PLUDlas_Zy_qC7c5tCgTMYq2idyyT241qs
   - shows good stuff e.g. the most basic x86_64 program (exit 42)
   - decent in that it doesn't gloss over much (but the compiler made is pretty simple)
   - pretty off the cuff. C++ is not great
-
 
 - Porth
   - https://www.youtube.com/watch?v=8QP2fDBIxjM&list=PLpM-Dvs8t0VbMZA7wW9aR3EtBqe2kinu4
@@ -27,12 +25,10 @@
 - Mixing C++ and Rust for Fun and Profit: Part 1
   - https://www.kdab.com/mixing-c-and-rust-for-fun-and-profit-part-1/
   - mostly just for the idea of having good support for talking to other languages
-  - the consensus I've reached is Dewy should let you use flags to specify a name-mangling scheme so that dewy binaries can talk natively to other language binaries, etc. 
-
-
-
+  - the consensus I've reached is Dewy should let you use flags to specify a name-mangling scheme so that dewy binaries can talk natively to other language binaries, etc.
 
 # Standard Library Resources/Ideas:
+
 - Printf and Non-Blocking C & C++ Logging for Debugging Concurrency Issues
   - https://www.youtube.com/watch?v=QeXrPVD5LJA
   - basically how to do logging at ~1 nanosecond scale by fancy mapping to data segments in compiled file
@@ -42,13 +38,14 @@
   - https://www.youtube.com/watch?v=sX2nF1fW7kI
 
 # Libraries to support
+
 - Clay: https://github.com/nicbarker/clay
 - Riley's General Framework for Windowing (RGFW): https://github.com/ColleagueRiley/RGFW
 
-
-
 # Various features from zig/rust:
+
 Zig is better than Rust (sometimes): https://www.youtube.com/watch?v=l9eFGToyjf8
+
 - optionals (stick with my `type|undefined` and `type|void` types)
 - `unreachable` keyword
 - consider `!!` operator as opposite of `??` for panicing on something being null. Though honestly could just do `thing ?? panic"shouldn't be possible"`
@@ -58,9 +55,3 @@ Zig is better than Rust (sometimes): https://www.youtube.com/watch?v=l9eFGToyjf8
 - TBD how to handle pointers in Dewy! I think in general the idea is to not have pointers from a developer point of view and things are reference and dereferenced automatically. But there certainly could be instances where being able to deal in pointers would be valuable
 - compiletime: basically taking from zig/jai
 - C interop: should add nice support for working with C. perhaps we could build in a C compiler and let it be as easy as calling C in zig? Or let the user point to a C compiler, and automatically generate shim C code for calling the C code from dewy
-
-
-
-
-# Security
-- e.g. Go's secret mode: https://www.youtube.com/watch?v=GhYpMFRiw34

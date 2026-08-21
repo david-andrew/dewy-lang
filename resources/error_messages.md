@@ -1,26 +1,28 @@
 ## ranges with tuples that are not size 2
+
 ```
 a, myrange = 1, 2,4..10
 ```
+
 ranges may have either an expression that evaluates to a single rangable value, or a tuple of size 2. If we ever parse a tuple with a different size juxtaposed to a range, it is an error. **Point out** that the user probably meant to wrap their range so that the extra tuple part is separated from the range
+
 ```
 a, myrange = 1, [2,4..10]
 ```
 
-
-
 ## Using commas when providing arguments to a function
+
 ```dewy
 f3 = (x y z) => x + y + z
 
 ```
-In most languages the call for `f3` would look like `f3(5, 6, 7)`. But in dewy, commas construct a tuple, and are not used for separating arguments to a function. Arguments are separated with spaces e.g. `f3(5 6 7)`. **Point out** If the user calls a function with not enough arguments, and the argument they passed in is a tuple, then they probably didn't mean to put the commas
 
+In most languages the call for `f3` would look like `f3(5, 6, 7)`. But in dewy, commas construct a tuple, and are not used for separating arguments to a function. Arguments are separated with spaces e.g. `f3(5 6 7)`. **Point out** If the user calls a function with not enough arguments, and the argument they passed in is a tuple, then they probably didn't mean to put the commas
 
 Actually no that we've made commas just syntactic sugar for groups i.e. `a, b, c` -> `(a b c)`, this error might not be relevant anymore, TBD how the parser handles it. Basically if someone does `f3(5, 6, 7)` that becomes `f3((5 6 7))` which may or may not be valid. Keep an eye on this.
 
-
 ## Shadowing a variable after using it in a given scope
+
 ```dewy
 let x: int = 5
 
@@ -34,9 +36,11 @@ let x: int = 5
 Basically this should emit a warning, as in most cases user's probably want to use the value declared in the local scope. In the rare case that they wanted to use the outer value first, and then redeclare/shadow it, this works, but I think it's unidiomatic
 
 ## inserting a new variable that shadows something used later
+
 since dewy should be stored as an AST, it should be straightforward to identify instances when the user is inserting a new variable into some context, and the variable shadows something that comes later. Ths should be a warning that shows up until the user dismisses it.
 
 For example, in the compiler, I was modifying the `compile_fn_literal` function, to take an extra parameter, and it turned out a same-named parameter was used later. So getting a warning there would have been good. In dewy it might look like:
+
 ```dewy
 % original version
 compile_fn_literal = (ast:FunctionLiteral|Closure scope:Scope module:QbeModule current_func:QbeFunction) => {
@@ -67,13 +71,14 @@ compile_fn_literal = (ast:FunctionLiteral|Closure scope:Scope module:QbeModule c
     )
 }
 ```
+
 Adding the name parameter and using it above should generate a warning since there is already usage of it below. Note that this kind of warning is sort of ephemeral, e.g. if the code had been written this way from scratch, no such warning would be generated. It is only because of new stuff shadowing existing stuff that the warning would show up.
-> note even though the warning is ephemeral, it should be present until the user explicitly dismisses it. So it should remain between sessions (perhaps in __dewycache__ there can live a file tracking such ephemeral warnings/errors, and also probably keeping a history of those that were dismissed/fixed)
+
+> note even though the warning is ephemeral, it should be present until the user explicitly dismisses it. So it should remain between sessions (perhaps in **dewycache** there can live a file tracking such ephemeral warnings/errors, and also probably keeping a history of those that were dismissed/fixed)
 
 ## TBD other shadowing warnings
+
 ...
-
-
 
 ## prefix operators that can also be binary operators causing confusing parse
 
@@ -83,6 +88,7 @@ putl = () => __syscall3__(1 1 '\n' 1)
 ```
 
 these seem like unrelated lines, but actually because `-123456789` starts with a negative sign, it actually interpreted the negative as a binary operator rather than the unary negative sign. Unfortunately at the moment, the only ways of correcting the parse are either of these:
+
 ```dewy
 putl = () => __syscall3__(1 1 '\n' 1);
 -1234567890 |> put_int
@@ -94,3 +100,11 @@ putl = () => __syscall3__(1 1 '\n' 1)
 This seems bad, because it means we basically can't use unary negative in any real programs without manually breaking the previous expression
 
 TBD if we'll adjust the syntax, or if we'll have a warning for this kind of situation
+
+## expressing a fn and it's args separately rather than calling
+
+```dewy
+somefn (arg1 arg2 arg3)    #wouldn't actually do the call because they are not juxtaposed
+```
+
+in most cases this will lead to a compilation error because `somefn` was tried to be called with zero arguments. That error should be caught and identify if the function was next to arguments, and NOTE that the space needs to be removed. In the case where `somefn` has a zero argument overload, there should be a warning even if it compiles. probably say that it should be wrapped in parenthesis so that it's clear it's meant to be calling the zero arg case and the following argument looking stuff is meant to be a separate expression of those things
