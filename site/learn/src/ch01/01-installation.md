@@ -4,7 +4,7 @@ On Linux x86-64, the installer puts the `udewy` bootstrap compiler and
 the Python-hosted `dewy` compiler in `~/.dewy`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash
+curl -fsSL https://dewy-lang.org/install.sh | bash
 ```
 
 Open a new terminal, then:

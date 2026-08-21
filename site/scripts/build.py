@@ -15,6 +15,7 @@ STATIC = SITE_ROOT / "static"
 LEARN = SITE_ROOT / "learn"
 REFERENCE = SITE_ROOT / "reference"
 PLAYGROUND_SOURCE = REPO_ROOT / "udewy" / "tests" / "web" / "playground.udewy"
+INSTALL_SCRIPT = REPO_ROOT / "install.sh"
 CACHE = REPO_ROOT / "__dewycache__"
 
 
@@ -40,6 +41,11 @@ def copy_static_site() -> None:
         shutil.rmtree(DIST)
     shutil.copytree(STATIC, DIST, ignore=shutil.ignore_patterns("designs"))
     (DIST / ".nojekyll").write_text("")
+    copy_install_script()
+
+
+def copy_install_script() -> None:
+    shutil.copy2(INSTALL_SCRIPT, DIST / "install.sh")
 
 
 def build_book(source: Path, destination: Path, mdbook: str) -> None:

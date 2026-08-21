@@ -26,7 +26,7 @@ Linux x86_64. This installs the `udewy` bootstrap compiler and the current
 Python-backed `dewy` compiler into `~/.dewy`:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/david-andrew/dewy-lang/master/install.sh | bash
+curl -fsSL https://dewy-lang.org/install.sh | bash
 ```
 
 The first `dewy` invocation checks for Python 3.12 or newer and caches the

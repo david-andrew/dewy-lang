@@ -14,7 +14,7 @@ import build
 PORT = 8080
 POLL = 0.4
 SKIP_DIRS = {".git", "__pycache__", "book", "dist", "designs"}
-WATCH = [build.STATIC, build.LEARN, build.REFERENCE, build.PLAYGROUND_SOURCE]
+WATCH = [build.STATIC, build.LEARN, build.REFERENCE, build.PLAYGROUND_SOURCE, build.INSTALL_SCRIPT]
 RELOAD_SNIPPET = (
     b'<script>(()=>{const e=new EventSource("/__watch__/events");'
     b"e.onmessage=()=>location.reload()})()</script>"
@@ -49,6 +49,7 @@ def sync_static() -> None:
         ignore=shutil.ignore_patterns("designs"),
     )
     (build.DIST / ".nojekyll").write_text("")
+    build.copy_install_script()
 
 
 def rebuild(changed: set[Path]) -> None:
