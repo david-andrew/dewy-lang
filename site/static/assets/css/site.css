@@ -40,29 +40,30 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #112b20;
-  --card: #191a1c;
-  --ink: #e6ebe7;
-  --ink-soft: #c8d0cb;
-  --muted: #a3b0aa;
-  --edge: #2a4036;
-  --edge-strong: #3a5348;
-  --green: #6ee0b8;
-  --green-deep: #86f4cf;
-  --aqua: #1a3d32;
-  --aqua-soft: #153328;
-  --slate: #15201a;
-  --slate-edge: #243830;
-  --slate-text: #d8e4dd;
-  --gutter: #7a8d84;
-  --cta: #0a6e4c;
-  --cta-hover: #0c7d57;
-  --header-bg: rgba(17, 43, 32, .92);
-  --code-out-bg: #19332a;
-  --shadow: rgba(0, 0, 0, .35);
-  --drop-end: #1a3d32;
-  --badge-planned-bg: #1a3340;
-  --badge-planned-fg: #7fc4e8;
+  --bg: #0e241b;
+  --card: #17352a;
+  --ink: #e8f3ed;
+  --ink-soft: #c5d6ce;
+  --muted: #93a89e;
+  --edge: #2c4a3e;
+  --edge-strong: #3e6153;
+  --green: #7ee8c0;
+  --green-deep: #9af0d0;
+  --aqua: #1e4337;
+  --aqua-soft: #16382d;
+  --slate: #07140f;
+  --slate-edge: #1a3329;
+  --slate-text: #d5e8dd;
+  --gutter: #6e857b;
+  --cta: #7ee8c0;
+  --cta-hover: #9af0d0;
+  --on-cta: #082018;
+  --header-bg: rgba(14, 36, 27, .92);
+  --code-out-bg: #123028;
+  --shadow: rgba(3, 12, 8, .5);
+  --drop-end: #1f4a3c;
+  --badge-planned-bg: #173544;
+  --badge-planned-fg: #8ecdee;
 }
 
 * { box-sizing: border-box; }
@@ -383,6 +384,95 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
 .note-example-link code { color: inherit; }
 .next-row { border-bottom: 1px solid var(--slate-edge); }
 
+html:has(.lost-page),
+html:has(.lost-page) body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.lost-page {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  isolation: isolate;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+}
+.lost-page::before,
+.lost-page::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.lost-page::before {
+  z-index: -2;
+  inset: -1.5rem;
+  background: url("../images/404-background.jpg") center / cover no-repeat;
+  filter: blur(1px) saturate(.68) hue-rotate(24deg) brightness(.88) contrast(1.08);
+}
+.lost-page::after {
+  z-index: -1;
+  background: var(--green-deep);
+  mix-blend-mode: multiply;
+  opacity: .38;
+}
+[data-theme="dark"] .lost-page::before {
+  filter: blur(1px) saturate(.7) hue-rotate(14deg) brightness(.62);
+}
+[data-theme="dark"] .lost-page::after {
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+.lost-page .site-header {
+  flex: none;
+  position: relative;
+}
+.lost-main {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-height: 0;
+  padding: 1.5rem 0;
+  overflow: auto;
+  overscroll-behavior: none;
+}
+.lost-card {
+  width: min(var(--reading), calc(100% - 3rem));
+  padding: clamp(2rem, 5vw, 3.2rem) clamp(1.4rem, 4vw, 2.6rem);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 44px var(--shadow);
+}
+.lost-card h1 {
+  margin: 0;
+  color: var(--green-deep);
+  font-size: clamp(2.2rem, 6vw, 3.6rem);
+  font-weight: 850;
+  letter-spacing: -.045em;
+  line-height: 1.05;
+}
+.lost-card p:not(.eyebrow) {
+  max-width: 32rem;
+  margin: 1.15rem 0 0;
+  color: var(--muted);
+  font-size: clamp(1.02rem, 2vw, 1.15rem);
+}
+.lost-card .button:not(.primary) {
+  border-color: var(--green);
+  background: var(--aqua-soft);
+  color: var(--green-deep);
+}
+.lost-card .button:not(.primary):hover {
+  border-color: var(--green-deep);
+  background: var(--aqua);
+}
+.lost-page .site-footer { display: none; }
+
 /* Interior pages */
 .page-hero { max-width: var(--reading); padding: clamp(4rem, 9vw, 7rem) 0 3.8rem; }
 .eyebrow { margin: 0 0 .85rem; color: var(--green); font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
@@ -530,6 +620,7 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
   .pane-top { padding-inline: .85rem; }
   .ln { margin-right: .65em; }
   .page-hero { padding-top: 3.5rem; }
+  .lost-card { width: calc(100% - 1.5rem); }
   .footer-links { grid-template-columns: 1fr; }
 }
 

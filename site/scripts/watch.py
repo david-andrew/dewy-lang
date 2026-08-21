@@ -11,7 +11,7 @@ from pathlib import Path
 
 import build
 
-PORT = 8080
+PORT = 9000
 POLL = 0.4
 SKIP_DIRS = {".git", "__pycache__", "book", "dist", "designs"}
 WATCH = [build.STATIC, build.LEARN, build.REFERENCE, build.PLAYGROUND_SOURCE, build.INSTALL_SCRIPT]
@@ -101,23 +101,37 @@ class QuietHandler(SimpleHTTPRequestHandler):
             self._sse()
             return
         html = self._html_file()
-        if html is None:
-            super().do_GET()
+        if html is not None:
+            self._send_html(html, 200)
             return
+        if self._existing_file() is None:
+            fallback = build.DIST / "404.html"
+            if fallback.is_file():
+                self._send_html(fallback, 404)
+                return
+        super().do_GET()
+
+    def _send_html(self, html: Path, status: int) -> None:
         data = inject_reload(html.read_bytes())
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 
-    def _html_file(self) -> Path | None:
+    def _existing_file(self) -> Path | None:
         path = Path(self.translate_path(self.path.split("?", 1)[0]))
+        if path.is_file():
+            return path
         if path.is_dir():
             index = path / "index.html"
             return index if index.is_file() else None
-        if path.is_file() and path.suffix.lower() in {".html", ".htm"}:
+        return None
+
+    def _html_file(self) -> Path | None:
+        path = self._existing_file()
+        if path is not None and path.suffix.lower() in {".html", ".htm"}:
             return path
         return None
 
