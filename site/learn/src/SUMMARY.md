@@ -38,6 +38,7 @@
     - [Object Types](ch03/object-types.md)
     - [Optional Types](ch03/optional-types.md)
     - [Function Types](ch03/function-types.md)
+    - [Effects](ch03/effects.md)
     - [Flow Control](ch03/flow-control.md)
     - [One Loop to Rule Them All](ch03/loops.md)
     - [Units](ch03/units.md)

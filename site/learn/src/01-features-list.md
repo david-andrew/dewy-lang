@@ -15,7 +15,8 @@ rules are still open.
 ## Types and Values
 
 - [Basic Data Types](ch03/basic-data-types.md). `int`, fixed widths,
-  `real`, `rational`, `bool`, `void`, `undefined`, complex, quaternion
+  `real`, `rational`, `float32` / `float64`, `bool`, `void`,
+  `undefined`, complex, quaternion
 - [Number Bases](ch03/number-bases.md) and packed based strings
 - [Optional Types](ch03/optional-types.md). `T | undefined`, `is?` / `isnt?`
 - [String Types](ch03/string-types.md). Graphemes, interpolation, views
@@ -23,8 +24,9 @@ rules are still open.
 - [Containers](ch03/container-types.md). Arrays, dictionaries, bidicts, sets
 - [Objects](ch03/object-types.md)
 - [Refinements](ch03/refinements.md). `T<conditions>`, `unsafe`
-- Type inference and type aliases
+- Type inference and [type aliases](ch03/basic-data-types.md#type-declarations)
 - Fixed-point literals. Not yet determined
+- Symbolic values. Not yet determined
 - Custom-ranged integer overflow. Not yet determined
 - String collation and normalization. Not yet determined
 
@@ -40,6 +42,8 @@ rules are still open.
 
 - [Function Types](ch03/function-types.md). Literals, defaults, named and
   keyword-only arguments, overloads with `&`
+- [Effects](ch03/effects.md), including `noreturn`. Other effects are
+  not yet determined
 - Partial function evaluation with `@`
 - [Functional Programming](ch03/functional-programming.md)
 - [Flow Control](ch03/flow-control.md)

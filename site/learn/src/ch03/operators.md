@@ -1,18 +1,14 @@
 # Operators
 
-Dewy builds expressions from prefix, infix, and postfix operators.
-What an operator means depends on the types. `and` is logical on
-booleans and bitwise on integers.
+Dewy builds expressions from prefix, infix, and postfix operators. What an operator means depends on the input types (e.g. `and` is logical on booleans and bitwise on integers)
 
 ## Arithmetic
 
-- `+` `-` `*` `/` `//` `%` `\` add, subtract, multiply, divide, floor
-  divide, modulus, integer divide
+- `+` `-` `*` `/` `//` `%` `\` add, subtract, multiply, divide, floor divide, modulus, integer divide
 - `^` exponent
 - Prefix `+` `-` `*` `/` `//` unary plus/minus, and `/x` for `1/x`
 
-A chain like `n^/2` keeps the precedence of the first operator, so that
-is `n^(1/2)`. `5+-1` is `5 + (-1)`.
+A chain like `n^/2` keeps the precedence of the first operator, so that is `n^(1/2)`. `5+-1` is `5 + (-1)`.
 
 `+` also concatenates strings.
 
@@ -31,8 +27,7 @@ Comparisons end in `?` and return a boolean. There is no `==`.
 
 ## Boolean and Bitwise
 
-On booleans these are logical, and they short-circuit when that makes
-sense. On integers they are bitwise, using the wider operand's width.
+On booleans these are logical, and they short-circuit when that makes sense. On integers they are bitwise, using the wider operand's width.
 
 - `and` `or` `xor` `nand` `nor` `xnor`
 - `not` invert
@@ -43,21 +38,16 @@ sense. On integers they are bitwise, using the wider operand's width.
 
 - `<<` `>>` shift
 - `<<<` `>>>` rotate
-- `<<!` `!>>` rotate through carry
 
-Once the count hits the width, a left shift or logical right shift is
-zero. A signed right shift keeps filling in the sign bit.
+Once the count hits the width, a left shift or logical right shift is zero. A signed right shift keeps filling in the sign bit.
 
 ## Juxtaposition
 
-Two expressions next to each other are a juxtaposition. What that
-*means* depends on the types:
+Two expressions next to each other are a juxtaposition. What that _means_ depends on the types:
 
-- Call is high precedence, above `^`. `sin(x)`, `printl"Hello"`,
-  `f arg` when the left side is callable.
+- Call is high precedence, above `^`. `sin(x)`, `printl"Hello"`, `f(arg)` when the left side is callable.
 - Index is `values[i]`, `text[3..7)`.
-- Multiply sits just under `^` and just over `*`. `2(x + 1)`, `10kg`,
-  `a(b)` when both sides are numbers.
+- Multiply sits just under `^` and just over `*`. `2(x + 1)`, `10kg`, `a(b)` when both sides are numbers.
 - Range juxtaposition is how `1..10` picks up its ends.
 
 ```dewy
@@ -68,8 +58,7 @@ printl'{n}'             # call
 arr[i]                  # index
 ```
 
-If the parser cannot decide, that is a compile error, not a silent
-guess.
+If the parser cannot decide, that is a compile error.
 
 ## Pipes, Conversion, and Functions
 
@@ -94,7 +83,7 @@ let bits:uint64 = duration transmute uint64
 
 - `=` bind. Result is `void`
 - `:=` bind and also yield the value
-- `::` bind when you compile
+- `::` compiletime assignment (kicks off compiletime executions)
 - Most infix ops take a trailing `=`
 
 ```dewy
@@ -116,31 +105,28 @@ is_factor = mods .=? 0
 p_factors = primes[is_factor]
 ```
 
-This works if either side is an array, or both are and they have the
-same shape. Precedence stays with the inner operator.
+This works if either side is an array, or both are and they have the same shape. Precedence stays with the inner operator.
 
 ## Precedence
 
-Highest first. Associativity is left, right, prefix, postfix, flat, or
-fail. Fail means two of the same operator in a row is an error. Flat
-means one n-ary node instead of a tree.
+Highest first. Associativity is left, right, prefix, postfix, flat, or fail. Fail means two of the same operator in a row is an error. Flat means one n-ary node instead of a tree.
 
 | Associativity | Operators |
-| ------------- | --------- |
+| --- | --- |
 | prefix | `@` |
 | left | `.` call-juxtapose index-juxtapose |
-| fail | type-parameter juxtapose |
+| fail | type-parameter juxtapose (`<T>(...)=>...`) |
 | fail | ellipsis juxtapose (`A...` `...B`) |
 | postfix / prefix | `` ` `` |
 | prefix | `not` `~` |
 | postfix | `?` |
 | right | `^` |
-| left | multiply-juxtapose |
+| left | multiply-juxtapose (`a(b)` `2x`) |
 | prefix | `*` `/` `//` |
 | left | `*` `/` `//` `%` `\` |
 | prefix | `+` `-` |
 | left | `+` `-` |
-| left | `<<` `>>` `<<<` `>>>` `<<!` `!>>` |
+| left | `<<` `>>` `<<<` `>>>` |
 | flat | `,` |
 | flat | range juxtapose (`1..2`) |
 | fail | `in` |
@@ -156,8 +142,7 @@ means one n-ary node instead of a tree.
 | left | `\|>` |
 | right | `<\|` |
 | fail | `->` `<->` |
-| fail | `=` `::` `:=` and combined assignment |
-| left | semicolon juxtapose |
+| fail | `=` `::` `:=` and combined assignment (`+=` etc.) |
+| left | semicolon juxtapose (`x;`) |
 
-`else` hangs a flow alternative under all of that. See
-[Flow Control](flow-control.md).
+`else` hangs a flow alternative under all of that. See [Flow Control](flow-control.md).

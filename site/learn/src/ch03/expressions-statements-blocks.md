@@ -4,6 +4,20 @@ Dewy is expression-based. An expression is a value, or something that
 evaluates to one. You can bind it, pass it to a function, or build a
 larger expression from it.
 
+## Comments
+
+`#` starts a line comment. `#{` and `}#` wrap a block comment. Block comments nest, so you can wrap code that already has comments in it.
+
+```dewy
+# one line
+#{
+    still commented
+    #{ even this }#
+}#
+```
+
+comments can be put almost anywhere, with the main exception being inside of [strings](string-types.md) (where  `#` and `#{` are just characters).
+
 ## Expressions
 
 The simplest expression is a literal:
@@ -41,8 +55,9 @@ my_var = printl'Hello'  # error: can't assign void
 
 Declarations and ordinary assignments are `void` too.
 
-Appending `;` discards the value. The expression still runs. That is
-useful when a block or array would otherwise capture every result:
+A `;` touching an expression discards the value. The expression still
+runs. That is juxtaposition, and it is useful when a block or array
+would otherwise capture every result:
 
 ```dewy
 my_expression = [
@@ -57,10 +72,15 @@ my_expression = [
 ]
 ```
 
-The semicolons suppress those `sqrt` results, so the array is `[2 4 8]`.
+The attached semicolons suppress those `sqrt` results, so the array is
+`[2 4 8]`.
 
-In a multidimensional array literal, `;` starts a new dimension instead
-of suppressing values. Those elements are still captured.
+A free-floating `;` does not suppress anything:
+
+```dewy
+sqrt(16);     # discarded
+sqrt(16) ;    # still expressed
+```
 
 ## Blocks
 
@@ -89,14 +109,17 @@ it in `[]` to capture them, the same idea as a generator.
 ```dewy
 { 1 2 3 4 5 6 7 8 9 10 }
 [ { 1 2 3 4 5 } ]           # [1 2 3 4 5]
+```
+
+Assignments are `void`, so they do not add a value. The block below
+only expresses `pi * diameter`. `circumference` is one number because
+that is the only value the block produced.
+
+```dewy
 circumference = {
-    diameter = 2 * radius
-    pi * diameter
+    diameter = 2 * radius    # void, so not expressed
+    pi * diameter            # this is what the block actually produces
 }
 ```
 
-`diameter` is local to the `{ }` block. Treat the block as a single
-result and the last expression is the value, as in `circumference`.
-
-`if` and `loop` take a following expression, often a block. See
-[Flow Control](flow-control.md) and [Loops](loops.md).
+`diameter` is local to the `{ }` block.

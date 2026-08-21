@@ -23,6 +23,8 @@ Return type is `:>`:
 let add = (left:int64 right:int64=2):>int64 => left + right
 ```
 
+[Effects](effects.md) such as `noreturn` also go in that slot.
+
 A function type writes the same contract:
 
 ```dewy
