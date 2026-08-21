@@ -1,0 +1,27 @@
+<script>
+(() => {
+  const linkKey = "dewy-theme-link";
+  const siteKey = "dewy-theme";
+  const bookKey = "mdbook-theme";
+  const toBook = { light: "dewy-light", dark: "dewy-dark" };
+  const oldBook = { light: "dewy-light", navy: "dewy-dark", coal: "dewy-dark" };
+  try {
+    let book = localStorage.getItem(bookKey);
+    if (book && oldBook[book]) {
+      book = oldBook[book];
+      localStorage.setItem(bookKey, book);
+    }
+    if (book === "rust" || book === "ayu") {
+      localStorage.setItem(linkKey, "off");
+      return;
+    }
+    if (localStorage.getItem(linkKey) === "off") return;
+    const site = localStorage.getItem(siteKey);
+    if (site === "light" || site === "dark") {
+      localStorage.setItem(bookKey, toBook[site]);
+    }
+  } catch {
+    // ignore
+  }
+})();
+</script>

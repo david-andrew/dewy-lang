@@ -1,6 +1,6 @@
 # Welcome to Dewy
 
-This book is an example-led walk through Dewy, covering the syntax,
+This book is an example-led walk through The Dewy Programming Language, covering the syntax,
 programming model, and overall ideas behind it.
 
 > **Development edition.** Dewy is an early language and the compiler is

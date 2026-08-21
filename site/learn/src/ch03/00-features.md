@@ -22,6 +22,3 @@ Read in order the first time if you want; later you can jump from the
 16. [Functional Programming](functional-programming.md)
 17. [Basic Math](basic-math.md) and [Linear Algebra](linear-algebra.md)
 18. [Refinements](refinements.md)
-
-Meta-programming and a language-defined grammar are not yet determined,
-so they are not in this list.

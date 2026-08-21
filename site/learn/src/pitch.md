@@ -68,9 +68,11 @@ sleep(10s)
 
 ```dewy
 quadratic = (a b c x) => a(x^2) + b(x) + c    # juxtaposition multiplies
+
+(a b c x) = (1 0 -1 3)                        # set some values
+
 root1 = (-b + (b^2 - (4a)c)^/2) / 2a          # ^/2 is square root
 root2 = (-b - (b^2 - (4a)c)^/2) / 2a
-
 identity = sin(x)^2 + cos(x)^2                # juxtaposition calls
 
 primes = [2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97]
@@ -124,6 +126,7 @@ Point = (x:number y:number) => [
 
 p = Point(3 4)
 p.mag                   # 5
+p.show                  # (3, 4)
 ```
 
 ## Types Establish Meaning
@@ -143,24 +146,25 @@ format = ((value:int):>string => 'integer')
        & ((value:string):>string => value)
 
 # the argument types pick which one runs
-format(42)
-format('life the universe and everything')
+format(42)                                    # 'integer'
+format('life the universe and everything')    # 'life the universe and everything'
 ```
 
 ## Generators Fall Out of Loops
 
 ```dewy
-{ 1 2 3 }                       # a block expresses each value inside it
+{ 1 2 3 }                       # several values, like an iterable
 loop i in [1..5] i              # a loop expresses one value per iteration
 
 [loop i in [1..5] i]            # [] captures what was expressed: [1 2 3 4 5]
-sum([loop i in [1..5] i])       # or consume it directly: 15
+[loop i in [1..5] i].sum        # or consume it directly: 15
 
 [loop i in [1..3] { i i^2 }]    # multiple values per iteration: [1 1 2 4 3 9]
 [loop i in [1..5] { i -> i^2 }] # -> pairs build a dict instead of an array
 
-[                               # nesting builds higher dimensions
-    loop i in [1..3]
-    [loop j in [1..3] [i j]]
+[loop i in [1..3]               # nesting builds higher dimensions
+    [loop j in [1..3]
+        [i j]
+    ]
 ]
 ```

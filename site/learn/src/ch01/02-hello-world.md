@@ -50,7 +50,7 @@ let main = () => {
 }
 ```
 
-An explicit `main()` at the top level is an ordinary call. Dewy still
+An explicit call to `main()` at the top level is an ordinary call. Dewy still
 invokes `main` after the top level finishes, so that program would call
 `main` twice.
 

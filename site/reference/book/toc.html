@@ -1,0 +1,60 @@
+<!DOCTYPE HTML>
+<html lang="en" class="dewy-light" dir="ltr">
+    <head>
+        <!-- sidebar iframe generated using mdBook
+
+        This is a frame, and not included directly in the page, to control the total size of the
+        book. The TOC contains an entry for each page, so if each page includes a copy of the TOC,
+        the total size of the page becomes O(n**2).
+
+        The frame is only used as a fallback when JS is turned off. When it's on, the sidebar is
+        instead added to the main page by `toc.js` instead. The JavaScript mode is better
+        because, when running in a `file:///` URL, the iframed page would not be Same-Origin as
+        the rest of the page, so the sidebar and the main page theme would fall out of sync.
+        -->
+        <meta charset="UTF-8">
+        <meta name="robots" content="noindex">
+        <!-- Custom HTML head -->
+        <script>
+        (() => {
+          const linkKey = "dewy-theme-link";
+          const siteKey = "dewy-theme";
+          const bookKey = "mdbook-theme";
+          const toBook = { light: "dewy-light", dark: "dewy-dark" };
+          const oldBook = { light: "dewy-light", navy: "dewy-dark", coal: "dewy-dark" };
+          try {
+            let book = localStorage.getItem(bookKey);
+            if (book && oldBook[book]) {
+              book = oldBook[book];
+              localStorage.setItem(bookKey, book);
+            }
+            if (book === "rust" || book === "ayu") {
+              localStorage.setItem(linkKey, "off");
+              return;
+            }
+            if (localStorage.getItem(linkKey) === "off") return;
+            const site = localStorage.getItem(siteKey);
+            if (site === "light" || site === "dark") {
+              localStorage.setItem(bookKey, toBook[site]);
+            }
+          } catch {
+            // ignore
+          }
+        })();
+        </script>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="theme/dewy-book.css">
+    </head>
+    <body class="sidebar-iframe-inner">
+        <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html" target="_parent">Reference status</a></li><li class="chapter-item expanded "><a href="lexical-structure.html" target="_parent"><strong aria-hidden="true">1.</strong> Lexical structure</a></li><li class="chapter-item expanded "><a href="execution.html" target="_parent"><strong aria-hidden="true">2.</strong> Source files and execution</a></li><li class="chapter-item expanded "><a href="bindings-and-scope.html" target="_parent"><strong aria-hidden="true">3.</strong> Bindings and scope</a></li><li class="chapter-item expanded "><a href="types-and-conversions.html" target="_parent"><strong aria-hidden="true">4.</strong> Types and conversions</a></li><li class="chapter-item expanded "><a href="expressions-and-operators.html" target="_parent"><strong aria-hidden="true">5.</strong> Expressions and operators</a></li><li class="chapter-item expanded "><a href="functions-and-calls.html" target="_parent"><strong aria-hidden="true">6.</strong> Functions and calls</a></li><li class="chapter-item expanded "><a href="control-flow-and-iteration.html" target="_parent"><strong aria-hidden="true">7.</strong> Control flow and iteration</a></li><li class="chapter-item expanded "><a href="values.html" target="_parent"><strong aria-hidden="true">8.</strong> Arrays, objects, and strings</a></li><li class="chapter-item expanded "><a href="modules-and-imports.html" target="_parent"><strong aria-hidden="true">9.</strong> Modules and imports</a></li><li class="chapter-item expanded "><a href="interoperability.html" target="_parent"><strong aria-hidden="true">10.</strong> µDewy and host interoperability</a></li><li class="chapter-item expanded "><a href="compatibility.html" target="_parent"><strong aria-hidden="true">11.</strong> Implementation compatibility</a></li></ol>
+    </body>
+</html>

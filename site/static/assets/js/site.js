@@ -23,6 +23,9 @@
     button.addEventListener("click", () => {
       const theme = currentTheme() === "dark" ? "light" : "dark";
       localStorage.setItem(THEME_KEY, theme);
+      if (localStorage.getItem("dewy-theme-link") !== "off") {
+        localStorage.setItem("mdbook-theme", theme === "dark" ? "dewy-dark" : "dewy-light");
+      }
       applyTheme(theme);
     });
   });
