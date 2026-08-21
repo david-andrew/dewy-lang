@@ -12,11 +12,18 @@ The complete language website lives under `site/` and builds into the ignored
 Build and serve the site from the repository root:
 
 ```sh
+python site/scripts/watch.py
+```
+
+That rebuilds into `site/dist/` when sources change and serves <http://localhost:8080/>.
+Open pages from that server reload after a successful rebuild.
+
+A one-shot build is still:
+
+```sh
 python site/scripts/build.py
 python -m http.server --directory site/dist 8000
 ```
-
-Then open <http://localhost:8000/>.
 
 ## Source layout
 
@@ -24,7 +31,7 @@ Then open <http://localhost:8000/>.
 - `learn/` is the narrative guide built with mdBook.
 - `reference/` is the concise language reference built with mdBook.
 - `playground/` documents the generated µDewy browser playground.
-- `scripts/` contains the single build entry point and output checks.
+- `scripts/` contains the build, a file watcher, and output checks.
 
 The GitHub Pages workflow runs the same build command. Do not edit `dist/`
 directly.
