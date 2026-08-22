@@ -117,7 +117,6 @@ SINGLE_CHAR_TOKEN_TEXT = {
     t1.Kind.TK_MUL: "*",
     t1.Kind.TK_MOD: "%",
     t1.Kind.TK_ASSIGN: "=",
-    t1.Kind.TK_EXPR_CALL: "(",
 }
 
 MULTI_CHAR_TOKEN_TEXT = {
@@ -169,6 +168,9 @@ def _token_end(src: str, token: t1.Token) -> int:
 
     if token.kind == t1.Kind.TK_IDENT_CALL:
         return token.location + int(token.value) + 1
+
+    if token.kind == t1.Kind.TK_EXPR_CALL:
+        return token.location + 2
 
     if token.kind == t1.Kind.TK_NUMBER:
         if src.startswith("true", token.location):
@@ -568,6 +570,12 @@ def _highlight_t1_spans(src: str, theme: dict[str, str]) -> list[HighlightSpan]:
 
     for token in tokens:
         start = token.location
+        if token.kind == t1.Kind.TK_EXPR_CALL:
+            end = start + 2
+            if cursor < end:
+                spans.append(HighlightSpan(src[cursor:end], theme["punctuation"]))
+            cursor = end
+            continue
         end = _token_end(src, token)
         span_start = start
         if token.kind == t1.Kind.TK_TYPE and start > 0 and src[start - 1] == ":":

@@ -13,6 +13,5 @@ The source suffix is conventional rather than semantic: Dewy's type checker
 does not choose a weaker mode merely because a file ends in `.udewy`. µDewy's
 own compiler accepts only the strict subset defined by its specification.
 
-See the
-[µDewy specification](https://github.com/david-andrew/dewy-lang/blob/master/udewy/README.md)
-for the definitive subset language and backend contracts.
+See the [µDewy specification](/udewy/reference/) for the definitive subset
+language and backend contracts.

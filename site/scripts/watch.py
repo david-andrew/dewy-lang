@@ -13,11 +13,22 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import build
+from udewy_showcase import DEMOS, demo_for_path
 
 DEFAULT_PORT = 9000
 POLL = 0.4
 SKIP_DIRS = {".git", "__pycache__", "book", "dist", "designs"}
-WATCH = [build.STATIC, build.LEARN, build.REFERENCE, build.PLAYGROUND_SOURCE, build.INSTALL_SCRIPT]
+WATCH = [
+    build.STATIC,
+    build.LEARN,
+    build.REFERENCE,
+    build.UDEWY_REFERENCE / "book.toml",
+    build.UDEWY_REFERENCE / "theme",
+    build.UDEWY_README,
+    *build.PLAYGROUND_PAGE_INPUTS,
+    build.INSTALL_SCRIPT,
+    *[demo.watch for demo in DEMOS],
+]
 RELOAD_SNIPPET = (
     b'<script>(()=>{const e=new EventSource("/__watch__/events");'
     b"e.onmessage=()=>location.reload()})()</script>"
@@ -60,7 +71,18 @@ def rebuild(changed: set[Path]) -> None:
     sync_static()
     build.build_book(build.LEARN, build.DIST / "learn", mdbook)
     build.build_book(build.REFERENCE, build.DIST / "reference", mdbook)
-    if build.PLAYGROUND_SOURCE in changed:
+    build.build_udewy_spec(mdbook)
+    build.highlight_tree(build.DIST / "udewy")
+    demo_slugs = {
+        demo.slug
+        for path in changed
+        if (demo := demo_for_path(path)) is not None
+    }
+    if demo_slugs:
+        build.require_tool("wat2wasm")
+        build.compile_showcase_demos(demo_slugs)
+    playground_inputs = {path.resolve() for path in build.PLAYGROUND_PAGE_INPUTS}
+    if playground_inputs & {path.resolve() for path in changed}:
         build.require_tool("wat2wasm")
         build.build_playground()
     build.write_sitemap()

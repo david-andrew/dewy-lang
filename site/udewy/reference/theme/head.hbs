@@ -1,0 +1,28 @@
+<script>
+(() => {
+  const linkKey = "udewy-theme-link";
+  const siteKey = "dewy-theme";
+  const bookKey = "mdbook-theme";
+  const toBook = { light: "udewy-light", dark: "udewy-dark" };
+  const oldBook = { light: "udewy-light", navy: "udewy-dark", coal: "udewy-dark", "dewy-light": "udewy-light", "dewy-dark": "udewy-dark" };
+  try {
+    let book = localStorage.getItem(bookKey);
+    if (book && oldBook[book]) {
+      book = oldBook[book];
+      localStorage.setItem(bookKey, book);
+    }
+    if (book === "rust" || book === "ayu") {
+      localStorage.setItem(linkKey, "off");
+      return;
+    }
+    if (localStorage.getItem(linkKey) === "off") return;
+    const site = localStorage.getItem(siteKey);
+    if (site === "light" || site === "dark") {
+      localStorage.setItem(bookKey, toBook[site]);
+    }
+  } catch {
+    // ignore
+  }
+})();
+</script>
+<link rel="icon" href="{{ path_to_root }}favicon.png">

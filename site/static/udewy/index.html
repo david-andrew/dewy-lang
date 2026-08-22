@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en" data-site="udewy">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>µDewy — Just Enough Language</title>
+  <meta name="description" content="µDewy is a strict Dewy subset for bootstrapping: small enough to implement, large enough to write a real compiler.">
+  <meta name="theme-color" content="#eef7fa">
+  <meta property="og:title" content="µDewy — Just Enough Language">
+  <meta property="og:description" content="A strict Dewy subset for bootstrapping compilers and trusted computing.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dewy-lang.org/udewy/">
+  <meta property="og:image" content="https://dewy-lang.org/assets/images/udewy-logo-128.png">
+  <meta property="og:image:alt" content="µDewy — Just Enough Language">
+  <meta property="og:site_name" content="µDewy">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="µDewy — Just Enough Language">
+  <meta name="twitter:description" content="A strict Dewy subset for bootstrapping compilers and trusted computing.">
+  <meta name="twitter:image" content="https://dewy-lang.org/assets/images/udewy-logo-128.png">
+  <link rel="canonical" href="https://dewy-lang.org/udewy/">
+  <link rel="icon" href="../assets/images/udewy-logo-128.png">
+  <script src="../assets/js/theme-init.js"></script>
+  <link rel="stylesheet" href="../assets/css/site.css?v=20260822-5">
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body class="home-page udewy-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-header>
+    <nav class="nav-wrap" aria-label="Primary navigation">
+      <a class="brand" href="./"><img src="../assets/images/udewy-logo-128.png" alt=""><span>µDewy</span></a>
+      <div class="nav-end">
+        <div class="nav-links" id="site-nav" data-nav>
+          <a href="showcase/">Showcase</a>
+          <a href="reference/">Spec</a>
+          <a href="../playground/">Playground</a>
+          <a href="https://github.com/david-andrew/dewy-lang/tree/master/udewy">GitHub</a>
+          <a class="nav-cta" href="showcase/">See it run</a>
+        </div>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme" title="Switch to dark theme"></button>
+        <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="home-hero">
+      <div class="drop drop-a" aria-hidden="true"></div>
+      <div class="drop drop-b" aria-hidden="true"></div>
+      <div class="drop drop-c" aria-hidden="true"></div>
+      <div class="hero-brand" data-hero-brand>
+        <img src="../assets/images/udewy-logo-128.png" alt="">
+        <span>µDewy</span>
+      </div>
+      <h1>Just Enough Language</h1>
+      <p class="lead">µDewy is a strict subset of <a href="../">Dewy</a> for bootstrapping. Small enough to be implemented in assembly but large enough to be useful. A well-formed µDewy program behaves the same under both compilers.</p>
+
+      <div class="dewline" aria-label="Install command">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code id="install-cmd">curl -fsSL https://dewy-lang.org/install.sh | bash</code>
+        <button type="button" class="copy" data-copy="curl -fsSL https://dewy-lang.org/install.sh | bash">Copy</button>
+      </div>
+      <p class="dewline-note">The install gives you <code>udewy</code> — or <a href="../playground/">run it in the browser</a>.</p>
+
+      <div class="hero-code" aria-label="µDewy source example">
+        <div class="code-top"><span>hello.udewy</span><span class="runs">runs today ✓</span></div>
+        <div class="hero-code-body">
+          <pre class="hero-source"><code class="language-udewy">let main = ():&gt;int =&gt; {
+    let msg:int = "Hello from udewy!\n"
+    let len:int = __load__(msg - 8)
+    __syscall3__(SYS_WRITE STDOUT msg len)
+    return 0
+}</code></pre>
+          <div class="code-out">
+            <span class="output-label">Output</span>
+            <pre class="output-lines"><code>Hello from udewy!</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <p class="caveat">µDewy is the trusted computing base while Dewy is the everyday language built on top.</p>
+    </section>
+
+    <div class="showcase">
+      <div class="showcase-intro">
+        <h2>Small on purpose</h2>
+        <p>No types, everything is a 64-bit word, and explicit memory.</p>
+      </div>
+
+      <section class="showcase-row" aria-labelledby="targets-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>targets</span><span class="tag implemented">implemented ✓</span></div>
+          <pre><code class="language-udewy lined">$supported_targets = ["x86_64" "wasm32" "riscv" "arm" "c"]
+
+if $target =? "wasm32" {
+    import p"./entry_wasm.udewy"
+}
+if $target =? "x86_64" {
+    import p"./entry_sdl.udewy"
+}</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">backends</span>
+          <h2 id="targets-heading">One program, several machines</h2>
+          <p>Linux x86_64, WebAssembly, RISC-V, AArch64, and C share the same source. Target conditionals pick the host surface; the language in the middle stays the same.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="intrinsics-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>memory.udewy</span><span class="tag implemented">implemented ✓</span></div>
+          <pre><code class="language-udewy lined">let p:int = __alloca__(16)
+__store__(42 p)
+let n:int = __load__(p)
+
+# Width is explicit. Nothing is implied.
+__store_u8__(255 p)
+let byte:int = __load_u8__(p)</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">intrinsics</span>
+          <h2 id="intrinsics-heading">Memory you can point at</h2>
+          <p>Loads, stores, syscalls, and host functions are named operations. A backend maps each one to the machine. There is no garbage collector walking later.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="bootstrap-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>bootstrap</span><span class="tag implemented">implemented ✓</span></div>
+          <pre><code><span class="ln">1</span><b class="c"># The µDewy compiler, written in µDewy</b>
+<span class="ln">2</span>python -m udewy -c udewy/bootstrap/main.udewy
+<span class="ln">3</span>
+<span class="ln">4</span><b class="c"># Then the binary compiles itself</b>
+<span class="ln">5</span>./__dewycache__/main -c udewy/bootstrap/main.udewy</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">trusted base</span>
+          <h2 id="bootstrap-heading">The compiler compiles itself</h2>
+          <p>The Python reference implementation is how you start. The bootstrap under <code>udewy/bootstrap/</code> is the same compiler in µDewy, and it already self-hosts on x86_64 and C.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="games-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>showcase</span><span class="tag implemented">in the browser ✓</span></div>
+          <pre><code><span class="ln">1</span><b class="c"># Plasma, water, slime volleyball</b>
+<span class="ln">2</span><b class="c"># μCrypt, μZero2</b>
+<span class="ln">3</span>
+<span class="ln">4</span>python -m udewy \
+<span class="ln">5</span>    --target wasm32 \
+<span class="ln">6</span>    udewy/tests/uzero2/uzero2.udewy</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">in the browser</span>
+          <h2 id="games-heading">Games from the same subset</h2>
+          <p>Raycasters, racers, and shaders compile to a single HTML file. <a href="showcase/">Open the showcase</a> and run them here.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row next-row" aria-labelledby="next-heading">
+        <div class="showcase-pane code-pane">
+          <pre><code><span class="ln">1</span><b class="c"># Dewy → typed HIR → µDewy → machine</b>
+<span class="ln">2</span><b class="c"># The spec in udewy/README.md is this book.</b></code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">next</span>
+          <h2 id="next-heading">Where to go next</h2>
+          <ul class="next-list">
+            <li><a href="showcase/">Showcase</a> — compiled demos in the browser</li>
+            <li><a href="reference/">Spec</a> — the µDewy language specification</li>
+            <li><a href="../playground/">Playground</a> — type and run µDewy</li>
+            <li><a href="https://marketplace.visualstudio.com/items?itemName=RedFoxLabs.udewy">VS Code</a> — syntax highlighting</li>
+            <li><a href="../">Dewy</a> — the everyday language</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-wrap">
+      <div class="footer-brand"><a class="brand" href="./"><img src="../assets/images/udewy-logo-128.png" alt=""><span>µDewy</span></a><p>Just enough language to bootstrap a compiler.</p></div>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="showcase/">Showcase</a>
+        <a href="reference/">Spec</a>
+        <a href="../playground/">Playground</a>
+        <a href="../">Dewy</a>
+        <a href="https://github.com/david-andrew/dewy-lang/tree/master/udewy">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

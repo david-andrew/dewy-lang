@@ -455,7 +455,7 @@ let hl_token_end = (src:int n:int loc:int val:int kind:int):>int => {
     if kind =? TK_RIGHT_BRACE { return loc + 1 }
     if kind =? TK_LEFT_BRACKET { return loc + 1 }
     if kind =? TK_RIGHT_BRACKET { return loc + 1 }
-    if kind =? TK_EXPR_CALL { return loc + 1 }
+    if kind =? TK_EXPR_CALL { return loc + 2 }
     if kind =? TK_PLUS { return loc + 1 }
     if kind =? TK_MINUS { return loc + 1 }
     if kind =? TK_MUL { return loc + 1 }
@@ -504,6 +504,15 @@ let hl_emit_t1 = (parent:int src:int n:int):>void => {
         let kind:int = ts_kind(ts i)
         let val:int = ts_value(ts i)
         let loc:int = ts_location(ts i)
+        if kind =? TK_EXPR_CALL {
+            let call_end:int = loc + 2
+            if cursor <? call_end {
+                hl_emit_color(parent src cursor call_end HL_PUNCTUATION)
+            }
+            cursor = call_end
+            i = i + 1
+            continue
+        }
         let span_start:int = loc
 
         # Reach back for the operator that the t1 tokenizer dropped on the

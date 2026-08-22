@@ -1,6 +1,8 @@
 (() => {
   const THEME_KEY = "dewy-theme";
-  const themeColors = { light: "#f3faf6", dark: "#0e241b" };
+  const themeColors = document.documentElement.dataset.site === "udewy"
+    ? { light: "#eef7fa", dark: "#0c1c22" }
+    : { light: "#f3faf6", dark: "#0e241b" };
   const themeColor = document.querySelector('meta[name="theme-color"]');
 
   const currentTheme = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");

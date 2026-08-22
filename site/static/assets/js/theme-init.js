@@ -27,5 +27,11 @@
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   const themeColor = document.querySelector('meta[name="theme-color"]');
-  if (themeColor) themeColor.setAttribute("content", theme === "dark" ? "#0e241b" : "#f3faf6");
+  if (themeColor) {
+    const udewy = document.documentElement.dataset.site === "udewy";
+    const colors = udewy
+      ? { light: "#eef7fa", dark: "#0c1c22" }
+      : { light: "#f3faf6", dark: "#0e241b" };
+    themeColor.setAttribute("content", colors[theme]);
+  }
 })();

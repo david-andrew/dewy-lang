@@ -421,7 +421,7 @@ let draw_char = (code:int x:int y:int scale:int r:int g:int b:int):>int => {
         let col:int = 0
         loop col <? 3 {
             let mask:int = 1 << (2 - col)
-            if pattern and mask {
+            if (pattern and mask) not=? 0 {
                 fill_rect((x + col * scale) (y + row * scale) scale scale r g b)
             }
             col = col + 1
@@ -564,8 +564,12 @@ let sample_input_buffers = ():>int => {
     if key_pressed(key_w) {
         left_jump_buffer = JUMP_BUFFER_FRAMES
     }
-    if key_pressed(key_up) {
-        right_jump_buffer = JUMP_BUFFER_FRAMES
+    if player_mode =? MODE_TWO_PLAYER {
+        if key_pressed(key_up) {
+            right_jump_buffer = JUMP_BUFFER_FRAMES
+        }
+    } else if key_pressed(key_up) {
+        left_jump_buffer = JUMP_BUFFER_FRAMES
     }
     return 0
 }
@@ -614,6 +618,14 @@ let update_left_player = ():>int => {
     }
     if key_down(key_d) {
         left_move_dir = 1
+    }
+    if player_mode not=? MODE_TWO_PLAYER {
+        if key_down(key_left) {
+            left_move_dir = -1
+        }
+        if key_down(key_right) {
+            left_move_dir = 1
+        }
     }
     if left_y =? GROUND_Y {
         if left_jump_buffer >? 0 {

@@ -27,11 +27,14 @@ python -m http.server --directory site/dist 8000
 
 ## Source layout
 
-- `static/` contains the landing page and top-level information pages.
+- `static/` contains the landing page, the µDewy home and showcase chrome, and top-level information pages.
 - `learn/` is the narrative guide built with mdBook.
-- `reference/` is the concise language reference built with mdBook.
+- `reference/` is the concise Dewy language reference built with mdBook.
+- `udewy/reference/` is the µDewy spec book. Its `src/` is generated from `udewy/README.md` at build time.
+- The showcase compiles selected µDewy wasm demos into `dist/udewy/showcase/demos/`.
 - `playground/` documents the generated µDewy browser playground.
 - `scripts/` contains the build, a file watcher, and output checks.
+- µDewy code blocks are prerendered from the tokenizer highlighter during the site build.
 
 The GitHub Pages workflow runs the same build command. Do not edit `dist/`
 directly.
