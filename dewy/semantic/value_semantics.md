@@ -110,3 +110,30 @@ Representation stays use-dependent. Two values with the same Dewy type may use d
 Proven cases already point this way: caller-owned exact-length array returns, borrowed read-only parameter adapters, `string as array<uint8>` copy-on-write, and fresh default arrays per call. Local raw-pointer alias chains for non-escaping exact arrays must be justified as unobservable copies, or replaced when both bindings can be written.
 
 A descriptor, capacity, owner, or runtime stride appears only when some reachable use needs it. Places compile as a borrow of the named binding's storage, with writeback of any rebinding.
+
+## Performance
+
+A possible slight deviation from the above, one of Dewy's goals is to be usable in systems programming contexts. So hidden, potentially unbounded copies are something to avoid. For example, if:
+
+```dewy
+b = a
+```
+
+could silently memcpy a 200 MB buffer at an unpredictable point, that would be unacceptable for many systems workloads.
+
+A better rule:
+
+Assignment has value behavior, but the implementation must be able to realize it through moves, ownership transfer, sharing of immutable storage, or explicit copy operations.
+
+probably avoid making copy-on-write the universal mechanism. It is excellent for usability, but it can introduce hidden refcount traffic, branches, and latency spikes when mutation forces a copy. For systems work, move + borrow + explicit clone/copy is usually more predictable.
+
+A good design probably would use different strategies by type:
+
+- Small structs/scalars: just copy them.
+- Large uniquely owned buffers: move them.
+- Read-only/shared data: share storage.
+- Strings/arrays: optionally use CoW where that tradeoff is good.
+- Systems-facing types: expose explicit ownership/borrowing so there are no surprise CoW copies.
+- User-defined types: perhaps let library authors choose whether a value type is plain-copy, move-only, or CoW-backed.
+
+Dewy doesn't necessarily need to use exactly this breakdown, but the goal is for consistent/predictable performance suitable for low level work

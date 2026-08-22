@@ -8,29 +8,27 @@ Dewy is a general purpose programming language with a focus on engineering.
 
 > **NOTE: Still very work in progress, and the docs (including this README) are frequently out of date!**
 
-
 ## Current Status
 
 ### dewy
+
 The main compiler lives under [dewy/](dewy/)
 
 ### udewy
+
 The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). Currently only supports linux x86_64.
 
 A vscode extension for syntax highlighting is available at https://marketplace.visualstudio.com/items?itemName=RedFoxLabs.udewy
 
-
 ## Installation
 
-Linux x86_64. This installs the `udewy` bootstrap compiler and the current
-Python-backed `dewy` compiler into `~/.dewy`:
+Linux x86_64. This installs the `udewy` bootstrap compiler and the current Python-backed `dewy` compiler into `~/.dewy`:
 
 ```
 curl -fsSL https://dewy-lang.org/install.sh | bash
 ```
 
-The first `dewy` invocation checks for Python 3.12 or newer and caches the
-compatible interpreter path for later runs. You can then run a program with:
+The first `dewy` invocation checks for Python 3.12 or newer and caches the compatible interpreter path for later runs. You can then run a program with:
 
 ```
 dewy path/to/my_script.dewy
@@ -44,7 +42,7 @@ python -m dewy path/to/my_script.dewy
 
 `udewy` programs can also be run with `python -m udewy` from a checkout.
 
-### Examples
+## Examples
 
 Several example programs are available in [examples/](examples/). Here is a breakdown of which ones work with the current progress:
 
@@ -95,8 +93,29 @@ Several example programs are available in [examples/](examples/). Here is a brea
 | [syntax.dewy](examples/syntax.dewy)                             | [✗]    |
 | [tokenizer.dewy](examples/tokenizer.dewy)                       | [✗]    |
 
+## Buzzwords
+
+Just an (unsorted) collection of common buzzwords that apply to Dewy
+
+- expression oriented
+- statically compiled
+- strongly typed
+- type inference
+- parametric polymorphism
+- refinement types / liquid types
+- effects system
+- first-class types
+- value semantics
+- hybrid nominal-structural type system
+- first-class functions
+- function overloading
+- array programming / broadcasting
+- units of measure
+- (mostly) automatic memory management, no GC
+- ergonomic strings (extended grapheme clusters, interpolation, multilin, flexible delimiters)
+- compiletime evaluation for metaprogramming
+- juxtaposition (type-directed call, multiply, index)
+
 ## Documentation
 
-The language website, learning guide, reference, examples, and µDewy playground
-are built from [`site/`](site/) and published at
-https://dewy-lang.org/.
+The language website, learning guide, reference, examples, and µDewy playground are built from [`site/`](site/) and published at https://dewy-lang.org/.
