@@ -9,18 +9,26 @@ import sys
 # ============================================================================
 
 
+USAGE = """\
+Usage: python -m udewy [-c] [--target TARGET] [--split-wasm] [--serve-wasm] <file.udewy> [args...]
+  -c              Compile only, don't run
+  --target TARGET Target backend (x86_64, wasm32, riscv, arm, c)
+  --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML
+  --serve-wasm    For wasm32: serve the generated HTML over HTTP
+  -h, --help      Show this help and exit"""
+
+
 if len(sys.argv) < 2:
-    print("Usage: python -m udewy [-c] [--target TARGET] [--split-wasm] [--serve-wasm] <file.udewy> [args...]")
-    print("  -c              Compile only, don't run")
-    print("  --target TARGET Target backend (x86_64, wasm32, riscv, arm, c)")
-    print("  --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML")
-    print("  --serve-wasm    For wasm32: serve the generated HTML over HTTP")
+    print(USAGE)
     sys.exit(1)
 
 options = EntryPointOptions()
 arg_idx = 1
 
 while arg_idx < len(sys.argv) and sys.argv[arg_idx].startswith("-"):
+    if sys.argv[arg_idx] in ("-h", "--help"):
+        print(USAGE)
+        sys.exit(0)
     if sys.argv[arg_idx] == "-c":
         options.compile_only = True
         arg_idx += 1
