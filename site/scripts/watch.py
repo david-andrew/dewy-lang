@@ -27,6 +27,7 @@ WATCH = [
     build.UDEWY_README,
     *build.PLAYGROUND_PAGE_INPUTS,
     build.INSTALL_SCRIPT,
+    build.UDEWY_INSTALL_SCRIPT,
     *[demo.watch for demo in DEMOS],
 ]
 RELOAD_SNIPPET = (

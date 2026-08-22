@@ -32,6 +32,7 @@ PLAYGROUND_PAGE_INPUTS = (
 )
 BOOTSTRAP = REPO_ROOT / "udewy" / "bootstrap"
 INSTALL_SCRIPT = REPO_ROOT / "install.sh"
+UDEWY_INSTALL_SCRIPT = REPO_ROOT / "udewy" / "install.sh"
 CACHE = REPO_ROOT / "__dewycache__"
 SHOWCASE_HASHES = CACHE / "showcase-hashes.json"
 
@@ -63,6 +64,9 @@ def copy_static_site() -> None:
 
 def copy_install_script() -> None:
     shutil.copy2(INSTALL_SCRIPT, DIST / "install.sh")
+    udewy_dest = DIST / "udewy"
+    udewy_dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(UDEWY_INSTALL_SCRIPT, udewy_dest / "install.sh")
 
 
 def build_book(source: Path, destination: Path, mdbook: str) -> None:

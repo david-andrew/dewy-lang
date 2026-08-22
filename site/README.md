@@ -34,6 +34,7 @@ python -m http.server --directory site/dist 8000
 - The showcase compiles selected µDewy wasm demos into `dist/udewy/showcase/demos/`.
 - `playground/` documents the generated µDewy browser playground.
 - `scripts/` contains the build, a file watcher, and output checks.
+- The repo-root `install.sh` is copied to the site root; `udewy/install.sh` is copied to `/udewy/install.sh`.
 - µDewy code blocks are prerendered from the tokenizer highlighter during the site build.
 
 The GitHub Pages workflow runs the same build command. Do not edit `dist/`

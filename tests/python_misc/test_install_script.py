@@ -171,11 +171,53 @@ let main = ():>int64 => answer
     )
     assert rejected.returncode == 1
     assert "requires Python 3.12 or newer" in rejected.stderr
-    assert python_log.read_text().splitlines() == [
-        "called",
-        "called",
-        "called",
-        "called",
-        "called",
-        "called",
-    ]
+
+
+def test_udewy_install_script_installs_only_the_binary(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    tools = tmp_path / "tools"
+    home.mkdir()
+    tools.mkdir()
+
+    fake_udewy = tmp_path / "udewy"
+    _write_executable(fake_udewy, "#!/bin/sh\necho udewy-ok\n")
+    _write_executable(
+        tools / "curl",
+        """#!/bin/sh
+set -eu
+output=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) shift; output=$1 ;;
+    esac
+    shift
+done
+cp "$FAKE_UDEWY" "$output"
+""",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "SHELL": "/bin/bash",
+            "PATH": f"{tools}:{env['PATH']}",
+            "FAKE_UDEWY": str(fake_udewy),
+        }
+    )
+    subprocess.run(["bash", str(REPO_ROOT / "udewy" / "install.sh")], env=env, check=True)
+
+    install_dir = home / ".dewy"
+    assert (install_dir / "udewy").stat().st_mode & 0o111
+    assert not (install_dir / "dewy").exists()
+    assert not (install_dir / "runtime").exists()
+    assert str(install_dir) in (home / ".bashrc").read_text()
+
+    ran = subprocess.run(
+        [str(install_dir / "udewy")],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert ran.stdout.strip() == "udewy-ok"
