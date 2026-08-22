@@ -30,7 +30,7 @@ def target_path(root: Path, page: Path, value: str) -> Path | None:
     if path.startswith("/dewy-lang/"):
         candidate = root / path.removeprefix("/dewy-lang/")
     elif path.startswith("/"):
-        return None
+        candidate = root / path[1:]
     else:
         candidate = page.parent / path
     if candidate.is_dir() or path.endswith("/"):
