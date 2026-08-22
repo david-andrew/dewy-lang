@@ -185,6 +185,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Structural object types and named compile-time `type` aliases used in annotations.
 - [x] Field read and write, nested objects, and exact name/type/order matching.
 - [x] Object parameters, returns, and constructors (functions that return literals), with value-semantics copies.
+  - [ ] The intended rule for arrays, objects, and places is recorded in [`semantic/value_semantics.md`](semantic/value_semantics.md); `@` places are not implemented.
 - [x] Function fields, including parenthesis-free zero-argument calls on member access, and object-local reads or compound assignment of sibling fields.
 - [x] Sequential udewy layout for `bool`, fixed-width integers, function pointers, string/array handles, and nested objects of those types.
 - [ ] Dictionary and bidictionary `[]` forms.
@@ -217,6 +218,8 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [ ] Multi-value conditional results.
 
 ## Array, object, and other compile-time versus runtime representations
+
+Language-level assignment, passing, and return are copies; `@` is the spelled place. See [`semantic/value_semantics.md`](semantic/value_semantics.md). Sharing a pointer for `let b = a` is an elided copy, not the user-visible rule.
 
 The source-level type of a value describes its semantics, not a mandatory machine layout. Lowering should retain only information that can affect the program at runtime. Facts already established by typing, refinement, control-flow, or effect analysis should normally become constants in the emitted program rather than fields stored beside every value.
 
@@ -294,7 +297,7 @@ In no particular order
 - [ ] Floating-point, rational, and real numbers
 - [ ] Dictionaries, bidirectional maps, and sets
 - [ ] Pattern matching (`match`)
-- [ ] Partial application (`@`)
+- [ ] Partial application (`@`), and `@` as a place for arrays, objects, and other non-function values. Function `@fn` is already the handle and the original location; see [`semantic/value_semantics.md`](semantic/value_semantics.md).
 - [ ] expression returning assignment (`:=`) (i.e. python walrus operator) and compile-time assignment (`::`)
 - [ ] General juxtaposition multiplication and broadcasting beyond the implemented number/physical-quantity case. Vectorized calls (`f.(xs)`) are a `BinOp(.)` interpretation, not operator broadcasting; see Function signatures and calls.
 - [ ] Math

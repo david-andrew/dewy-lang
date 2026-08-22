@@ -70,8 +70,8 @@ If the parser cannot decide, that is a compile error.
 - `:` type annotation
 - `:>` return type
 - `->` / `<->` dictionary pointers
-- `@` handle, and freeze some arguments
-- `@?` reference identity. Not yet determined
+- `@` handle, freeze some arguments, and name the place a value lives
+- `@?` same place, not two copies that happen to share storage
 
 ```dewy
 40 |> add
