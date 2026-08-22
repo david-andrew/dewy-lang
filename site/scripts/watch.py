@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
+import os
 import shutil
+import signal
 import threading
 import time
 from functools import partial
@@ -11,7 +14,7 @@ from pathlib import Path
 
 import build
 
-PORT = 9000
+DEFAULT_PORT = 9000
 POLL = 0.4
 SKIP_DIRS = {".git", "__pycache__", "book", "dist", "designs"}
 WATCH = [build.STATIC, build.LEARN, build.REFERENCE, build.PLAYGROUND_SOURCE, build.INSTALL_SCRIPT]
@@ -150,18 +153,104 @@ class QuietHandler(SimpleHTTPRequestHandler):
             return
 
 
-def serve() -> ThreadingHTTPServer:
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "port",
+        nargs="?",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"port to serve on (default: {DEFAULT_PORT})",
+    )
+    return parser.parse_args()
+
+
+def _cmdline(pid: int) -> bytes:
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return b""
+
+
+def _pid_file(port: int) -> Path:
+    return Path(f"/tmp/dewy-watch-{port}.pid")
+
+
+def _listen_inode(port: int) -> str | None:
+    wanted = f"{port:04X}"
+    for table in (Path("/proc/net/tcp"), Path("/proc/net/tcp6")):
+        try:
+            rows = table.read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            cols = row.split()
+            if cols[3] == "0A" and cols[1].rsplit(":", 1)[-1].upper() == wanted:
+                return cols[9]
+    return None
+
+
+def _listening_watch_pid(port: int) -> int | None:
+    inode = _listen_inode(port)
+    if inode is None:
+        return None
+    needle = f"socket:[{inode}]"
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            fds = proc.joinpath("fd").iterdir()
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                if os.readlink(fd) == needle and b"watch.py" in _cmdline(int(proc.name)):
+                    return int(proc.name)
+            except OSError:
+                continue
+    return None
+
+
+def _recorded_watch_pid(port: int) -> int | None:
+    try:
+        pid = int(_pid_file(port).read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if pid != os.getpid() and b"watch.py" in _cmdline(pid):
+        return pid
+    return None
+
+
+def reclaim_port(port: int) -> None:
+    pid = _recorded_watch_pid(port) or _listening_watch_pid(port)
+    if pid is None:
+        return
+    print(f"replacing watch.py on port {port} (pid {pid})", flush=True)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    time.sleep(0.25)
+
+
+def serve(port: int) -> ThreadingHTTPServer:
+    reclaim_port(port)
     handler = partial(QuietHandler, directory=str(build.DIST))
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), handler)
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    except OSError as error:
+        raise SystemExit(f"could not bind 127.0.0.1:{port}: {error}") from error
+    _pid_file(port).write_text(f"{os.getpid()}\n")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
 
 
 def main() -> None:
+    args = parse_args()
     print("initial build", flush=True)
     build.main()
-    serve()
-    print(f"serving http://127.0.0.1:{PORT}/  (ctrl-c to stop)", flush=True)
+    serve(args.port)
+    print(f"serving http://127.0.0.1:{args.port}/  (ctrl-c to stop)", flush=True)
     previous = snapshot(WATCH)
     try:
         while True:
