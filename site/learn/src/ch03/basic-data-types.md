@@ -1,6 +1,6 @@
 # Basic Data Types
 
-Dewy checks types when you compile. Literals and context usually supply enough information that you can omit annotations. When you write a type, you are naming what the value _is_, not only how it is stored.
+Dewy verifies a program's types when you compile. Literals and context usually supply enough information that you can omit annotations. When you write a type, you are naming what the value _is_, not only how it is stored.
 
 ## Integers
 
@@ -40,7 +40,7 @@ You can refine an integer type with a range:
 my_custom_number:int<range=[42..)> = 42
 ```
 
-The compiler will guarantee that
+The compiler will guarantee that the value assigned to `my_custom_number` is always `42` or greater
 
 ## Rationals and Reals
 
@@ -57,6 +57,8 @@ small: float32 = 54.54
 ```
 
 `int is a rational`. `rational is a real`. `real is a number`.
+
+> NOTE: In most cases, the regular division operator `/` will return a rational result. e.g. `my_rational = 22 / 7` would be the same as the above `my_rational = rational(22 7)` . Unless the inputs are not a compatible type with rationals.
 
 ### Fixed-Point
 
@@ -82,7 +84,7 @@ my_bool = true
 ready = false
 ```
 
-The operators are the English words `and`, `or`, `not`, and the rest. See [Operators](operators.md).
+The operators are the English words `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor`. See [Operators](operators.md).
 
 ## `void`, `never`, and `undefined`
 
@@ -92,7 +94,7 @@ The operators are the English words `and`, `or`, `not`, and the rest. See [Opera
 
 `undefined` is a real value you can store and pass around. It is not `void`, and it is not a name you forgot to set.
 
-Optionals are `T | undefined`. They have [their own page](optional-types.md).
+Optionals are `T | undefined`. See [Optional Types](optional-types.md).
 
 ## Complex Numbers and Quaternions
 
@@ -110,7 +112,7 @@ Q = 1 + 2I + 3J + 4K
 
 ## Type Declarations
 
-A type is itself a value, and its type is `type`. Bind one to a name when you want to reuse it in annotations.
+A type is itself a value of type `type`. Bind one to a name when you want to reuse it in annotations.
 
 The `:type` annotation is what tells the compiler the right-hand side is a type, not a runtime value.
 
@@ -126,7 +128,26 @@ let Pair:type = [left:int64 right:int64]
 let origin:Pair = [left = 0 right = 0]
 ```
 
-You can still write the type inline. `let count:int = 10` does not need an alias.
+You can specify something is one of multiple types with `|` (commonly referred to as a union)
+
+```dewy
+let twotypes:type = string|int
+let mything:twotypes = 42
+```
+
+you can also use literal values to represent a type
+
+```
+let TheNumberThree:type = 3
+let mythree:TheNumberThree = 3   # cannot be any value other than `3`
+```
+
+> NOTE: depending on the context, you may need to wrap a literal in a type expression in `<>` so the compiler knows its supposed to be a type and not a value. e.g.
+>
+> ```dewy
+> let SmallPrimesOrString:type = <2 | 3 | 5 | 7 | string>
+> let mything:SmallPrimesOrString = 'this is a string'
+> ```
 
 A parameterized alias takes type parameters before the body, such as `<T of real>(...)`. See [Time](../ch04/xx-time.md) for `Duration`, and [Objects](object-types.md) for more on structural types.
 

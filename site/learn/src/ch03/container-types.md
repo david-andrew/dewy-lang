@@ -1,8 +1,6 @@
 # Container Types
 
-Arrays, dictionaries, and sets all use square brackets `[]`. The contents
-decide which container you get. Objects also use `[]`; they have
-[their own page](object-types.md).
+Arrays, dictionaries, sets, and objects all use square brackets `[]`. The contents decide which container you get.
 
 Values in a container are separated by whitespace, not commas.
 
@@ -15,18 +13,17 @@ my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
 printl'{my_array[3]}'    # 3
 ```
 
-Arrays are 0-indexed. Same-type arrays are the common case and the fast
-one. You can write the type explicitly:
+Arrays are 0-indexed. Same-type arrays are the common case and the fast one. You can write the type explicitly:
 
 ```dewy
 names:array<string> = ['Ada' 'Grace']
-let pair:array<int64 length=2> = [10 20]
-pair.length
-pair[end]
-pair[0..1]
+let triple:array<int64 length=3> = [10 20 30]
+triple.length  # 3
+triple[end]    # 30
+triple[0..1]   # [10 20]
 ```
 
-A semicolon starts a new dimension. Matrices are still arrays:
+A semicolon or newline starts a new dimension. Matrices are still arrays:
 
 ```dewy
 A = [
@@ -52,8 +49,7 @@ my_dictionary = [
 printl'{my_dictionary['peach']}'    # 3
 ```
 
-`<->` makes it bidirectional. Every pair in that literal has to be
-`<->`. Lookup works from either side:
+`<->` makes it bidirectional. Every pair in that literal has to be `<->`. Lookup works from either side:
 
 ```dewy
 my_bidictionary = [
@@ -78,8 +74,7 @@ my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
 
 ## Objects
 
-An object is a container of named fields. Field assignments use `=` at
-the top level of `[]`. Empty `[]` is not an object.
+An object is a container of named fields. Field assignments use `=` at the top level of `[]`. Empty `[]` is not an object.
 
 ```dewy
 my_obj = [
@@ -90,3 +85,5 @@ my_obj = [
 my_obj.apples
 my_obj.buy_bananas(10)
 ```
+
+See the full page on [Objects](object-types.md)

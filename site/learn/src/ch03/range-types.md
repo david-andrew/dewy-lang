@@ -1,10 +1,8 @@
 # Ranges
 
-A range is a span over numbers, characters, or another ordered type.
-Ranges show up in loops, indexing, and membership tests.
+A range is a span over numbers, characters, or another ordered type. Ranges show up in loops, indexing, and membership tests.
 
-A range always contains `..`. Endpoints juxtapose with `..`. A second
-anchor next to the first sets the step.
+A range always contains `..`. Endpoints juxtapose with `..`. An optional `first,second` pattern sets the step size.
 
 ## Syntax
 
@@ -21,11 +19,9 @@ anchor next to the first sets the step.
 
 `[first..2ndlast,last]` is not allowed. Use `[first,second..last]` instead.
 
-The inferred step may be positive or negative. A zero step such as `1,1..10`
-is invalid for iteration.
+The inferred step may be positive or negative. A zero step such as `1,1..10` is invalid.
 
-Bounds are inclusive by default. Square brackets include an end; parentheses
-exclude it. The two ends are independent.
+Bounds are inclusive by default. Square brackets include an end; parentheses exclude it. The two ends are independent.
 
 ```dewy
 [first..last]   # include both
@@ -46,15 +42,12 @@ first.. last    # first to inf
 first .. last   # -inf to inf
 ```
 
-Range juxtaposition is low precedence, so `first..last+1` is first through
-`last+1`. An `in` expression must wrap the range so `in` does not steal the
-left endpoint. Write `a in [A..B]`, not `a in A..B` (that parses as
-`(a in A)..B`).
+Range juxtaposition is medium-low precedence, so `first..last + 1` is `first` through `last+1`.
 
 ```dewy
 first..last+1
 first,second..last/2
-a in [first..last]
+a in first..last
 ```
 
 ## Numeric Ranges
@@ -67,16 +60,11 @@ a in [first..last]
 1..5    # 1 2 3 4 5
 ```
 
-A right-unbounded range such as `0..` has a first value and iterates
-forever. A left-unbounded range such as `..10` is a valid range value but
-cannot be iterated, because it has no first value. The same is true of
-`..` and `..3,5`.
+A right-unbounded range such as `0..` has a first value and iterates forever. A left-unbounded range such as `..10` is a valid range value but cannot be iterated, because it has no first value. The same is true of `..` and `..3,5`.
 
 ## Character Ranges
 
-Unannotated string bounds use one-grapheme strings. Iteration is defined
-when each supplied anchor is a grapheme containing exactly one Unicode
-scalar. Values advance in scalar order and skip the surrogate interval.
+Unannotated string bounds use one-grapheme strings. Iteration is defined when each supplied anchor is a grapheme containing exactly one Unicode scalar. Values advance in scalar order and skip the surrogate interval.
 
 ```dewy
 ord_range = 'a'..'z'
@@ -85,23 +73,21 @@ loop letter in 'z','y'..'a' { ... }
 let ascii_scalars:range<uint32> = 'A'..'Z'
 ```
 
-Enumerating multi-scalar graphemes is not yet determined. See
-[string types](string-types.md).
+Enumerating multi-scalar graphemes is not yet determined. See [string types](string-types.md).
 
 ## Uses
 
 ### Loops
 
 ```dewy
-loop i in [0..5] print'{i} '
+loop i in 0..5 print'{i} '
 # 0 1 2 3 4 5
 
-loop i in [5,4..0] print'{i} '
+loop i in 5,4..0 print'{i} '
 # 5 4 3 2 1 0
 ```
 
-A reversed range needs an explicit step. `[5..0]` is empty, because the
-default step is positive.
+A reversed range **requires** an explicit step. `5..0` results in an empty range.
 
 ### Range Arithmetic
 
@@ -111,8 +97,7 @@ loop i in [0..4]*0.25 print'{i} '
 # both: 0 0.25 0.5 0.75 1
 ```
 
-Same as writing `[0,0.25..1]`. Dedicated `linspace` / `logspace` helpers
-are not yet determined.
+Same as writing `[0,0.25..1]`. Dedicated `linspace` / `logspace` helpers are not yet determined.
 
 ### Compound Ranges
 
@@ -142,8 +127,7 @@ substring = full_string[3..12]
 printl(substring)    # 's is a str'
 ```
 
-Because indexing is juxtaposition, the range's own brackets choose inclusive
-or exclusive ends:
+Because indexing is juxtaposition, the range's own brackets choose inclusive or exclusive ends:
 
 ```dewy
 full_string(3..12)   # ' is a st'

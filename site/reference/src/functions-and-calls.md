@@ -41,7 +41,7 @@ combine(scale=3 10 16) # scale=3, then left=10 and right=16
 
 Named arguments remove their parameters from the remaining positional sequence. Arguments are processed from left to right, which is why the last example is unambiguous. The shorter `combine(10 16)` does _not_ skip `scale`: it supplies `left` and `scale`, then reports that required `right` is missing.
 
-The default expression is evaluated separately for every completed call that omits it. Consequently, a mutable default such as an array produces a fresh value for each call rather than one shared object.
+The default expression is evaluated separately for every completed call that omits it, and binds a value like any other argument.
 
 ### Required keyword-only
 

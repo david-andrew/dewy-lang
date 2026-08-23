@@ -1,16 +1,13 @@
 # Object Types
 
-Objects are containers of named fields, values and functions, in source
-order. Field names and order are part of the type. A `type` alias is a
-name for that structure, not a class object sitting in memory.
+Objects are containers of named fields, values and functions, in source order. Field names and order are part of the type. A `type` alias is a name for that structure, not a class object sitting in memory.
 
 ```dewy
 let Pair:type = [left:int64 right:int64]
 let origin:Pair = [left = 0 right = 0]
 ```
 
-Anonymous literals use `=` at the top level of `[]`. `->` and `<->` make
-a dictionary instead.
+Objects are distinguished by any `=` assignments at the top level of `[]`. `->` and `<->` make a dictionary instead. And none of those appearing in the top level makes an array.
 
 ```dewy
 let point = [
@@ -25,8 +22,7 @@ point.sum()         # same thing, spelled out
 
 ## Constructors
 
-There is no `class` keyword. A constructor is a function that returns an
-object.
+There is no `class` keyword. A constructor is just a regular function that returns an object.
 
 ```dewy
 let make = (x:int64 y:int64):>Pair => [left = x right = y]
@@ -41,9 +37,7 @@ let copy = original
 copy.x = 32         # original.x is still 10
 ```
 
-Functions inside can see sibling fields. There is no `self` or `this`;
-they are in the same scope. You cannot take a method out as a naked
-function value.
+Functions inside can see sibling fields. There is no `self` or `this`; they are in the same scope. You cannot take a method out as a naked function value.
 
 A compact constructor looks like this:
 
@@ -76,8 +70,7 @@ p3 = p1 + p2
 printl(p3)          # Point(4 6)
 ```
 
-Or hang the operator on a shared function and let the argument types
-pick which one runs, instead of putting `__add__` on every instance:
+Or hang the operator on a shared function and let the argument types pick which one runs, instead of putting `__add__` on every instance:
 
 ```dewy
 __add__ = __add__ & ((a:Point b:Point) => Point(a.x+b.x a.y+b.y))

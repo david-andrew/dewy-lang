@@ -5,6 +5,7 @@ Functions are values. A function literal is the parameters, `=>`, and a body exp
 ```dewy
 my_function = () => { printl'You called my function!' }
 my_function
+# You called my function!
 ```
 
 The body can be a block or a single expression. One argument may omit the parentheses. Zero arguments need `()`.
@@ -15,13 +16,13 @@ square = x => x^2
 foo = () => printl'bar'
 ```
 
-Return type is `:>`:
+Return type can be annotated with `:>`:
 
 ```dewy
 let add = (left:int64 right:int64=2):>int64 => left + right
 ```
 
-[Effects](effects.md) such as `noreturn` also go in that slot.
+[Effects](effects.md) such as `noreturn` also go in that slot or can be `|` unioned with a return type.
 
 A function type writes the same contract:
 
@@ -39,7 +40,7 @@ subtract(5 2)
 subtract(y=2 x=5)
 ```
 
-Defaults are fallbacks. They keep their slots. The default expression runs every time that call leaves the parameter out, so a mutable default like an array is new each time.
+If you leave a parameter out of the call, Dewy uses its default. A default does not fill that parameter slot: later positional arguments still fill from left to right.
 
 ```dewy
 let foo = (a:int64 b:int64=5):>int64 => a + b
@@ -61,15 +62,17 @@ let configure = (value:int64 ... scale:int64):>int64 => value * scale
 configure(6 scale=7)
 ```
 
-Pipes are ordinary calls:
+Pipes are ordinary calls (including the ability to provide multiple arguments):
 
 ```dewy
-40 |> add
+3 |> foo
+(3 2) |> foo
+{3 b=2} |> foo  # note the scope so `b` doesn't leak into the surrounding scope
 ```
 
 ## Overloads
 
-`&` combines functions into a set. Argument types pick the branch:
+`&` combines functions into a set. Argument types at the call site pick the version used:
 
 ```dewy
 format = ((value:int):>string => 'integer')
@@ -79,7 +82,7 @@ format(42)
 format('life the universe and everything')
 ```
 
-## Handles and Frozen Arguments
+## Partial Evaluation and Handles
 
 A bare function name _calls_ it if that would be a valid call. `@` gives you a handle, and you can freeze some arguments:
 
@@ -93,7 +96,7 @@ thirtyseven = @add5(32)
 thirtyseven         # 37
 ```
 
-Leave off `@` and `sum` with no arguments is a call, not a value. `@fn` is both the handle and the original function's location, so `reference = @sum` does not copy. A parameter whose type is a function already wants that handle; writing `@f` in the signature is optional.
+Leave off the `@`, and `sum` with no arguments is a call, not a value. `@fn` is both the handle and the original function's location, so `reference = @sum` does not copy. A parameter whose type is a function already wants that handle; writing `@f` in the signature is optional.
 
 ## Scope
 
@@ -113,3 +116,20 @@ increment(41)
 ```
 
 A bare identifier in a signature is always a parameter name, never an unnamed type annotation.
+
+An anonymous position only argument can be specified with `<>`.
+
+```dewy
+let A = ():>ProofYouCalledA => { ... }
+let B = <ProofYouCalledA>:>ProofYouCalledB => { ... }
+let C = ():>ProofYouCalledC => { ... }
+let D = (<ProofYouCalledB> <ProofYouCalledC>) => { ... }
+
+
+proof_a = A()
+proof_b = B(proof_a)
+proof_c = C()
+D(proof_b proof_c)
+```
+
+Useful for proving some condition is true but don't actually need the values

@@ -31,13 +31,18 @@ On booleans these are logical, and they short-circuit when that makes sense. On 
 
 - `and` `or` `xor` `nand` `nor` `xnor`
 - `not` invert
-- `&` `|` same family as `and` / `or`
-- `~` bitwise not
+- `&` is equivalent to `and`
+- `|` is equivalent to `or`
+- `~` is equivalent to `not`
+
+> NOTE: `&` vs `and`, `|` vs `or`, and `~` vs `not` are all interchangeable. The symbolic version means the exact same thing as the word. The convention is to use `&`/`|`/`~` when describing types (e.g. `(T|~U) & SomeType`) whereas `and`/`or`/`not` should be used for all other situations.
 
 ## Shifts
 
 - `<<` `>>` shift
 - `<<<` `>>>` rotate
+
+> NOTE: `>>` is arithmetic for signed inputs, and logical for unsigned inputs.
 
 Once the count hits the width, a left shift or logical right shift is zero. A signed right shift keeps filling in the sign bit.
 
@@ -114,7 +119,7 @@ Highest first. Associativity is left, right, prefix, postfix, flat, or fail. Fai
 | Associativity | Operators |
 | --- | --- |
 | prefix | `@` |
-| left | `.` call-juxtapose index-juxtapose |
+| left | `.` call-juxtapose (`fn(x)`), index-juxtapose (`x[42]`) |
 | fail | type-parameter juxtapose (`<T>(...)=>...`) |
 | fail | ellipsis juxtapose (`A...` `...B`) |
 | postfix / prefix | `` ` `` |
