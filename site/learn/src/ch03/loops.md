@@ -1,14 +1,12 @@
 # One Loop to Rule Them All
 
-Other languages split looping across `for`, `while`, `do-while`, and
-for-each. Dewy uses one keyword, `loop`.
+Other languages split looping across `for`, `while`, `do-while`, and `for-each`. Dewy uses one keyword, `loop`.
 
 ```dewy
 loop <condition> <expression>
 ```
 
-The condition must be a boolean. The expression is the body. Changing
-the condition is how you get every familiar loop shape.
+The condition must be a boolean. The expression is the body. Changing the condition is how you get every familiar loop shape.
 
 ## Infinite Loops
 
@@ -34,31 +32,26 @@ loop i >? 0
 
 `in` does two things:
 
-1. The name on the left gets the next value of the iterable on the right,
-   or `undefined` if there is nothing left.
-2. The expression is `true` when a value was produced, `false` when the
-   iterable is exhausted.
+1. The name on the left gets the next value of the iterable on the right, or `undefined` if there is nothing left.
+2. The expression is `true` when a value was produced, `false` when the iterable is exhausted.
 
 That is enough to write a for-each:
 
 ```dewy
-loop i in [1..5]
+loop i in 1..5
 {
     print('{i}, ')
 }
 ```
 
-This prints `1, 2, 3, 4, 5, `. Integer ranges default to a unit step. A
-second anchor sets another step, including a negative one:
+This prints `1, 2, 3, 4, 5, `. Integer ranges default to a unit step. A second anchor sets another step, including a negative one:
 
 ```dewy
 loop even in 0,2..10 { printl(even) }
 loop descending in 5,4..0 { printl(descending) }
 ```
 
-The step is the second anchor minus the first. A zero step is an iteration
-error. `0..` starts at 0 and never ends. `..10` has no first value and
-cannot be iterated.
+The step is the second anchor minus the first. A step-size of zero is an iteration error. `0..` starts at 0 and never ends. `..10` has no first value and cannot be iterated.
 
 Any container works:
 
@@ -86,13 +79,11 @@ loop [show rating] in ratings
 }
 ```
 
-General unpack-and-collect syntax is not yet determined. This pair unpack
-is just how dictionary iteration looks.
+General unpack-and-collect syntax is not yet determined.
 
 ## Multiple Conditions
 
-Because `in` returns a boolean, you can combine iterators with logical
-operators. `and` is zip. The loop stops when the first sequence ends.
+Because `in` returns a boolean, you can combine iterators with logical operators. `and` is zip. The loop stops when the first sequence ends.
 
 ```dewy
 names = ['Alice' 'Bob' 'Charlie']
@@ -111,7 +102,7 @@ Charlie chose Green
 Enumerate by zipping an infinite range:
 
 ```dewy
-loop i in [0..] and fruit in ['apple' 'banana' 'peach' 'pear']
+loop i in 0.. and fruit in ['apple' 'banana' 'peach' 'pear']
     printl'{i}) {fruit}'
 ```
 
@@ -122,8 +113,7 @@ loop i in [0..] and fruit in ['apple' 'banana' 'peach' 'pear']
 3) pear
 ```
 
-`or` continues while either side still has values. Exhausted names become
-`undefined`:
+`or` continues while either side still has values. Exhausted names become `undefined`:
 
 ```dewy
 A = [1 2 3]
@@ -140,26 +130,33 @@ loop a in A or b in B
 [undefined 8]
 ```
 
-Any boolean formula is allowed. Multiiterator conditions are eager even
-though ordinary `and` and `or` short-circuit. Each `in` leaf advances once,
-left to right, then the formula is evaluated. An exhausted leaf assigns
-`undefined` and contributes `false`. The formula then uses the truth table
-for `and`, `or`, `xor`, `nand`, `nor`, and `xnor`. A formula such as `nor`
-can stay true after every input is exhausted until the body `break`s.
+Any boolean formula is allowed. Multiiterator conditions are eager even though ordinary `and` and `or` short-circuit. Each `in` leaf advances once, left to right, then the formula is evaluated. An exhausted leaf assigns `undefined` and contributes `false`. The formula then uses the truth table for `and`, `or`, `xor`, `nand`, `nor`, and `xnor`.
 
-The compiler types each target as plain `T` when it is defined on every
-reachable body iteration, and as `T | undefined` when an iteration can
-happen after that input is exhausted. Narrow optionals before use:
+> NOTE: A formula such as `xnor` can stay true after every input is exhausted, creating an infinite loop unless `break` is hit.
+>
+> ```dewy
+> loop i in 1..26 xnor c in 'a'..'z' {
+>     # never exits, even after `i` and `c` run out
+> }
+> ```
+>
+> In general one should stick to `and`, and `or` when combining iterators.
+
+The compiler types each target as plain `T` when it is defined on every reachable body iteration, and as `T | undefined` when an iteration can happen after that input is exhausted. Narrow optionals before use:
 
 ```dewy
-loop short_item in short_items or long_item in long_items
+short_list = [1 2 3]
+long_list = ['this' 'is' 'a' 'long' 'list' 'of' 'values']
+loop short in short_list or long in long_list
 {
-    if short_item isnt? undefined {
-        process(short_item)
+    if short isnt? undefined {
+        process(short)
     }
-    process(long_item)
+    process(long)
 }
 ```
+
+You can also combine iterators with arbitrary conditions
 
 ```dewy
 limit = time.now + 5(minutes)
@@ -167,10 +164,17 @@ loop batch in batches and time.now <? limit
     process(batch)
 ```
 
+> NOTE: iterators combined with conditions DO short circuit. e.g.
+>
+> ```dewy
+> loop i in task_list or time.now <? limit {
+>    # `time.now <? limit` is only checked after the task list is exhausted
+> }
+> ```
+
 ## Early Exit
 
-The condition always sits in front of the body. For work before the
-decision, use `loop true` and `break`.
+The condition always sits in front of the body. For work before the decision, use `loop true` and `break`.
 
 ```dewy
 i = 0
@@ -182,15 +186,13 @@ loop true
 }
 ```
 
-A flow condition has its own scope, so `if item in items ...` would keep
-`item` inside that `if`. Bind in the surrounding body when later statements
-need the item:
+A flow condition has its own scope, so `if item in items ...` would keep `item` inside that `if`. Bind in the surrounding body when later statements need the item:
 
 ```dewy
 loop true
 {
     prepare()
-    got_item = item in items
+    got_item = item in items  # save bool: there are more values | exhausted
     if not got_item break
     process(item)
 }
@@ -198,8 +200,7 @@ loop true
 
 After `if not got_item break`, `item` is defined for the rest of the body.
 
-When the taken work is a single expression, a compact `if` / `else` is
-fine:
+When the taken work is a single expression, a compact `if` / `else` is fine:
 
 ```dewy
 loop true
@@ -209,13 +210,11 @@ loop true
 }
 ```
 
-Once `process` is more than one expression, prefer the `got_item` form so
-the rest of the body stays at the happy-path indent.
+Once `process` is more than one expression, prefer the `got_item` form so the rest of the body stays at the happy-path indent.
 
 ## Break, Continue, Return Inside Loops
 
-`break` leaves the nearest enclosing loop. `continue` starts that loop's
-next iteration. `return` leaves the containing function.
+`break` leaves the nearest enclosing loop. `continue` starts that loop's next iteration. `return` leaves the containing function.
 
 ```dewy
 loop running
@@ -226,8 +225,7 @@ loop running
 }
 ```
 
-`$name` names the surrounding `{ }` or file scope. `break $name` or
-`continue $name` then hits the nearest loop inside that scope.
+`$name` names the surrounding `{ }` or file scope. `break $name` or `continue $name` then hits the nearest loop inside that scope.
 
 ```dewy
 $rows
@@ -242,25 +240,18 @@ loop next_row()
 }
 ```
 
-`$rows` is not attached to the next loop. It labels every loop directly
-inside that scope, so two loops next to each other may share it. Putting
-`$rows` just before the first loop that uses it is the usual style.
+`$rows` is not attached to the next loop. It labels every loop directly inside that scope, so two loops next to each other may share it. Putting `$rows` just before the first loop that uses it is the usual style.
 
-The name is visible throughout its scope, even on lines above it. Two
-`$rows` in the same scope is an error, and a nested scope cannot hide
-an outer one that is still active. A sibling block may reuse the name.
-Labels do not cross function boundaries.
+The name is visible throughout its scope, even on lines above it. Two `$rows` in the same scope is an error, and a nested scope cannot hide an outer one that is still active. A sibling block may reuse the name. Labels do not cross function boundaries.
 
 ## Loop Generators
 
-A loop *expresses* the value of its body each iteration. Wrap the loop in
-`[]` to capture those values:
+A loop _expresses_ the value of its body each iteration. Wrap the loop in `[]` to capture those values:
 
 ```dewy
-loop i in [1..10] {i}
+loop i in 1..10 {i}
 
-my_array = [loop i in [1..10] {i}]
-my_array = [loop i in [1..10] i]
+my_array = [loop i in 1..10 {i}]  # `{}` are not necessary for a single value
 ```
 
 That produces `[1 2 3 4 5 6 7 8 9 10]`.
@@ -268,29 +259,24 @@ That produces `[1 2 3 4 5 6 7 8 9 10]`.
 Several values per iteration:
 
 ```dewy
-my_array = [loop i in [1..5] { i i^2 }]
+my_array = [loop i in 1..5 { i i^2 }]
 # [1 1 2 4 3 9 4 16 5 25]
 ```
 
 `->` builds a dictionary instead:
 
 ```dewy
-squares = [loop i in [1..5] { i -> i^2 }]
+squares = [loop i in 1..5 i -> i^2 ]
 # [1->1 2->4 3->9 4->16 5->25]
 ```
 
 Nested loops build higher dimensions:
 
 ```dewy
-indices =
-[
-    loop i in [1..5]
-    [
-        loop j in [1..5]
-        [
-            i
-            j
-        ]
+indices = [
+    loop i in 1..5 [
+        loop j in 1..5
+            [i j]
     ]
 ]
 ```

@@ -84,7 +84,7 @@ format('life the universe and everything')
 
 ## Partial Evaluation and Handles
 
-A bare function name _calls_ it if that would be a valid call. `@` gives you a handle, and you can freeze some arguments:
+A bare function name _calls_ it if that would be a valid call (or fails to compile). `@` gives you a handle, and you can freeze some arguments:
 
 ```dewy
 sum = (a b) => a + b
@@ -96,7 +96,7 @@ thirtyseven = @add5(32)
 thirtyseven         # 37
 ```
 
-Leave off the `@`, and `sum` with no arguments is a call, not a value. `@fn` is both the handle and the original function's location, so `reference = @sum` does not copy. A parameter whose type is a function already wants that handle; writing `@f` in the signature is optional.
+Leave off the `@`, and `sum` with no arguments is a call, not a the function object. `@fn` is both the handle and the original function's location, so `reference = @sum` does not copy. A parameter whose type is a function already wants that handle; writing `@f` in the signature is optional.
 
 ## Scope
 
