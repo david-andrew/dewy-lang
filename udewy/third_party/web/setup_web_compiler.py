@@ -11,7 +11,7 @@ Once this script has been run, building the playground itself is just:
 
     python -m udewy -c --target wasm32 udewy/tests/web/playground.udewy
 
-which writes the self-contained `__dewycache__/playground.html`.
+which writes `__dewycache__/udewy/tests/web/playground.html`.
 """
 
 import shutil
@@ -21,6 +21,8 @@ from hashlib import sha256
 from os import environ
 from pathlib import Path
 from urllib.request import urlopen
+
+from udewy.cache import cache_artifact
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent.parent.parent
@@ -68,7 +70,7 @@ def build_web_compiler(dest: Path) -> None:
         check=True,
         env=env,
     )
-    shutil.copy(REPO_ROOT / "__dewycache__" / "web_compiler.wasm", dest)
+    shutil.copy(cache_artifact(WEB_COMPILER_SRC, ".wasm", cwd=REPO_ROOT), dest)
 
 
 def main() -> None:

@@ -3083,7 +3083,7 @@ let w_open_browser = (url:int):>void => {
 }
 
 let w_compile_and_link = (code:int input_name:int cache_dir:int options:int):>int => {
-    fs_mkdir_p(path_to_cstr(cache_dir))
+    fs_mkdir_p(cache_dir)
 
     let wat_path:int = w_path_with(cache_dir input_name ".wat")
     let wasm_path:int = w_path_with(cache_dir input_name ".wasm")

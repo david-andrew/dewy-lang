@@ -1,6 +1,7 @@
 from . import t0, t1, p0
 from .backend import BackendName, get_backend
 from .backend.common import RunOptions
+from .cache import cache_layout
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -37,13 +38,13 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
     asm = p0.parse(toks, loaded.source, backend)
 
     
-    cache_dir = Path("__dewycache__")
-    cache_dir.mkdir(exist_ok=True)
-    
+    cache_dir, input_name = cache_layout(input_file)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
     # Use the backend to compile and link
     output_path = backend.compile_and_link(
-        asm, 
-        input_file.stem, 
+        asm,
+        input_name,
         cache_dir,
         split_wasm=options.split_wasm,
         link_artifacts=loaded.link_artifacts,

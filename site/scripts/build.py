@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from highlight_udewy import highlight_tree
+from udewy.cache import cache_artifact
 from udewy_showcase import DEMOS
 from udewy_spec_book import generate as generate_udewy_spec
 
@@ -113,7 +114,7 @@ def compile_showcase_demos(slugs: set[str] | None = None) -> None:
     for demo in DEMOS:
         if slugs is not None and demo.slug not in slugs:
             continue
-        generated = CACHE / f"{demo.source.stem}.html"
+        generated = cache_artifact(demo.source, ".html", cwd=REPO_ROOT)
         destination = dest_root / demo.slug
         destination.mkdir(parents=True, exist_ok=True)
         digest = demo.source_digest()
@@ -140,7 +141,7 @@ def compile_showcase_demos(slugs: set[str] | None = None) -> None:
 
 
 def build_playground() -> None:
-    generated = CACHE / "playground.html"
+    generated = cache_artifact(PLAYGROUND_SOURCE, ".html", cwd=REPO_ROOT)
     destination = DIST / "playground"
     destination.mkdir(parents=True, exist_ok=True)
     hashes = _load_showcase_hashes()

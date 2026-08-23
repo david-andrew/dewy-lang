@@ -1023,6 +1023,7 @@ class X86_64Backend(Backend):
         """Compile and link x86_64 assembly to ELF executable."""
         import subprocess
         
+        cache_dir.mkdir(parents=True, exist_ok=True)
         asm_path = cache_dir / f"{input_name}.s"
         obj_path = cache_dir / f"{input_name}.o"
         exe_path = cache_dir / input_name

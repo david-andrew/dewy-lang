@@ -98,7 +98,9 @@ def bootstrap_binary(tmp_path_factory) -> Path:
         ["python", "-m", "udewy", "-c", str(BOOTSTRAP_MAIN)],
         cwd=out_dir, check=True, env=env,
     )
-    binary = out_dir / "__dewycache__" / "main"
+    from udewy.cache import cache_artifact
+
+    binary = out_dir / cache_artifact(BOOTSTRAP_MAIN, cwd=out_dir)
     assert binary.exists()
     return binary
 

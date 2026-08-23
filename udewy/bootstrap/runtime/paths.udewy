@@ -190,3 +190,154 @@ let path_from_cstr = (s:int):>int => {
     bb_push_bytes(bb s n)
     return bb_finalize_as_string(bb)
 }
+
+let path_is_absolute = (p:int):>int => {
+    if str_len(p) <=? 0 { return false }
+    return __load_u8__(p) =? CH_SLASH
+}
+
+let path_slice = (p:int start:int end:int):>int => {
+    let n:int = end - start
+    let bb:int = bb_new(n + 1)
+    bb_push_bytes(bb p + start n)
+    return bb_finalize_as_string(bb)
+}
+
+let path_has_prefix = (s:int prefix:int):>int => {
+    if str_len(s) <? str_len(prefix) { return false }
+    return str_prefix(s prefix)
+}
+
+let path_cwd = ():>int => {
+    let buf:int = host_mmap_rw(4096)
+    host_getcwd(buf 4096)
+    return path_from_cstr(buf)
+}
+
+let path_absolute = (input:int):>int => {
+    let p:int = path_normalize(input)
+    if path_is_absolute(p) { return p }
+    return path_resolve(path_cwd() p)
+}
+
+# Longest shared directory prefix of `a` and `b`. Root is "/".
+let path_common_prefix = (a:int b:int):>int => {
+    let an:int = str_len(a)
+    let bn:int = str_len(b)
+    let n:int = an
+    if bn <? n { n = bn }
+    let i:int = 0
+    let last_slash:int = -1
+    loop i <? n {
+        let ca:int = __load_u8__(a + i)
+        if ca not=? __load_u8__(b + i) { break }
+        if ca =? CH_SLASH { last_slash = i }
+        i = i + 1
+    }
+    if i =? an {
+        if (i =? bn) or ((i <? bn) and (__load_u8__(b + i) =? CH_SLASH)) {
+            return path_slice(a 0 an)
+        }
+    }
+    if i =? bn {
+        if (i <? an) and (__load_u8__(a + i) =? CH_SLASH) {
+            return path_slice(b 0 bn)
+        }
+    }
+    if last_slash <? 0 {
+        let empty:int = bb_new(1)
+        return bb_finalize_as_string(empty)
+    }
+    if last_slash =? 0 {
+        return path_slice(a 0 1)
+    }
+    return path_slice(a 0 last_slash)
+}
+
+let path_after_prefix = (p:int prefix:int):>int => {
+    let pn:int = str_len(prefix)
+    let n:int = str_len(p)
+    if n <=? pn { return path_basename(p) }
+    let start:int = pn
+    if __load_u8__(p + pn) =? CH_SLASH {
+        start = pn + 1
+    }
+    if start >=? n { return path_basename(p) }
+    return path_slice(p start n)
+}
+
+let path_fnv1a = (p:int):>int => {
+    let h:int = 0xcbf29ce484222325
+    let n:int = str_len(p)
+    let i:int = 0
+    loop i <? n {
+        h = h xor __load_u8__(p + i)
+        h = h * 0x100000001b3
+        i = i + 1
+    }
+    return h
+}
+
+let path_hex_digit = (d:int):>int => {
+    if d <? 10 { return d + 48 }
+    return d - 10 + 97
+}
+
+# High 48 bits of FNV-1a as 12 lowercase hex digits.
+let path_hash12 = (p:int):>int => {
+    let h:int = path_fnv1a(p)
+    let tmp:int = __alloca__(8)
+    __store__(h tmp)
+    let bb:int = bb_new(13)
+    let i:int = 0
+    loop i <? 6 {
+        let b:int = __load_u8__(tmp + 7 - i)
+        bb_push_byte(bb path_hex_digit((b >> 4) and 0xf))
+        bb_push_byte(bb path_hex_digit(b and 0xf))
+        i = i + 1
+    }
+    return bb_finalize_as_string(bb)
+}
+
+# Relative path of `input` from cwd when it is inside cwd. Outside paths
+# become `__external__/<hash12>/<tail-after-common-ancestor>`.
+let path_relative_to_cwd = (input:int):>int => {
+    let abs:int = path_absolute(input)
+    let cwd:int = path_cwd()
+    let cn:int = str_len(cwd)
+    if path_has_prefix(abs cwd) {
+        let an:int = str_len(abs)
+        if an =? cn { return path_basename(abs) }
+        if __load_u8__(abs + cn) =? CH_SLASH {
+            return path_slice(abs cn + 1 an)
+        }
+    }
+    let tail:int = path_after_prefix(abs path_common_prefix(abs cwd))
+    return path_join(path_join("__external__" path_hash12(abs)) tail)
+}
+
+# Strip a leading `__dewycache__/` so a generated intermediate does not nest.
+let path_strip_cache_prefix = (rel:int):>int => {
+    let prefix:int = "__dewycache__"
+    let pn:int = str_len(prefix)
+    if not path_has_prefix(rel prefix) { return rel }
+    let n:int = str_len(rel)
+    if n =? pn { return path_basename(rel) }
+    if __load_u8__(rel + pn) not=? CH_SLASH { return rel }
+    if n =? pn + 1 { return path_basename(rel) }
+    return path_slice(rel pn + 1 n)
+}
+
+# Source path used as the cache key: cwd-relative, cache prefix removed.
+let path_cache_source = (input:int):>int => {
+    return path_strip_cache_prefix(path_relative_to_cwd(input))
+}
+
+# `__dewycache__` or `__dewycache__/<parent of mirrored source>`.
+let path_cache_dir = (input:int):>int => {
+    let rel:int = path_cache_source(input)
+    let parent:int = path_dirname(rel)
+    let root:int = "__dewycache__"
+    if str_len(parent) =? 0 { return root }
+    return path_join(root parent)
+}

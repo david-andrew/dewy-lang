@@ -44,10 +44,18 @@ let fs_write_string = (path_cstr:int s:int):>int => {
     return fs_write_file(path_cstr s str_len(s))
 }
 
-# Create a directory (mode 0755). Succeeds if it already exists.
-let fs_mkdir_p = (path_cstr:int):>int => {
-    let rc:int = host_mkdir(path_cstr 0x1ed)
-    return rc
+# Create a directory and any missing parents (mode 0755). `p` is a
+# length-prefixed path. Existing directories are ignored.
+let fs_mkdir_p = (p:int):>int => {
+    let n:int = str_len(p)
+    let i:int = 0
+    loop i <? n {
+        if (__load_u8__(p + i) =? 47) and (i >? 0) {
+            host_mkdir(path_to_cstr(path_slice(p 0 i)) 0x1ed)
+        }
+        i = i + 1
+    }
+    return host_mkdir(path_to_cstr(p) 0x1ed)
 }
 
 # Probe whether a path exists by trying to open it for reading.

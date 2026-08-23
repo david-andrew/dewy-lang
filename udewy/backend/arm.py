@@ -1096,6 +1096,7 @@ class ArmBackend(Backend):
         """Compile and link AArch64 assembly to executable."""
         import subprocess
         
+        cache_dir.mkdir(parents=True, exist_ok=True)
         asm_path = cache_dir / f"{input_name}.s"
         obj_path = cache_dir / f"{input_name}.o"
         exe_path = cache_dir / input_name

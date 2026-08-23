@@ -16,6 +16,8 @@ from shutil import which
 
 import pytest
 
+from udewy.cache import cache_artifact
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WEB_COMPILER_SRC = REPO_ROOT / "udewy" / "bootstrap" / "web_compiler.udewy"
 WABT_JS = REPO_ROOT / "udewy" / "third_party" / "web" / "artifacts" / "wabt.js"
@@ -114,14 +116,14 @@ def compiler_wasm(tmp_path_factory) -> Path:
         [sys.executable, "-m", "udewy", "-c", "--target", "wasm32", str(WEB_COMPILER_SRC)],
         cwd=out_dir, check=True, env=env,
     )
-    html = (out_dir / "__dewycache__" / f"{WEB_COMPILER_SRC.stem}.html").read_text()
+    html = (out_dir / cache_artifact(WEB_COMPILER_SRC, ".html", cwd=out_dir)).read_text()
     import base64
     import re
     m = re.search(r'<script id="wasm-module"[^>]*>([\s\S]*?)</script>', html)
     assert m, "no wasm-module in compiler HTML"
     wasm_path = out_dir / "compiler.wasm"
     wasm_path.write_bytes(base64.b64decode(m.group(1).strip()))
-    wat_path = out_dir / "__dewycache__" / f"{WEB_COMPILER_SRC.stem}.wat"
+    wat_path = out_dir / cache_artifact(WEB_COMPILER_SRC, ".wat", cwd=out_dir)
     return wasm_path, wat_path
 
 
@@ -172,7 +174,7 @@ def test_single_file_bundle_contains_everything() -> None:
          str(REPO_ROOT / "udewy" / "tests" / "web" / "playground.udewy")],
         cwd=REPO_ROOT, check=True, env=env, capture_output=True,
     )
-    html = (REPO_ROOT / "__dewycache__" / "playground.html").read_text()
+    html = (REPO_ROOT / "__dewycache__" / "udewy" / "tests" / "web" / "playground.html").read_text()
     assert '<script data-wasm-artifact="web_compiler.wasm"' in html
     assert "WabtModule" in html
     assert "beforeUdewyInstantiate" in html

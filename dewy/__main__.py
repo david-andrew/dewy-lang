@@ -4,6 +4,7 @@ from argparse import ArgumentParser, REMAINDER
 from .reporting import SrcFile
 from .targets import TARGETS, identify_host_target
 from .backend.udewy import codegen
+from udewy.cache import cache_artifact
 from udewy.frontend import entry_point, EntryPointOptions
 from udewy.backend import BackendName
 from typing import cast
@@ -42,9 +43,8 @@ options = EntryPointOptions(
     target=cast(BackendName, args.target or identify_host_target()),
     #TODO: for now wasm extra args are ignored
 )
-cache_dir = Path("__dewycache__")
-cache_dir.mkdir(exist_ok=True)
-udewy_path = cache_dir / f"{path.stem}.udewy"   #TODO: what if the file is nested in various directories? perhaps __dewycache__ should mirror that structure
+udewy_path = cache_artifact(path, ".udewy")
+udewy_path.parent.mkdir(parents=True, exist_ok=True)
 udewy_path.write_text(udewy_src)
 
 # run the udewy compiler/executor

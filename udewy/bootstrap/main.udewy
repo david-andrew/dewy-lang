@@ -152,8 +152,13 @@ let main = (argc:int argv:int):>int => {
     be_opt_set_serve_wasm(opts g_serve_wasm)
     be_opt_set_input_file(opts g_input_path)
 
-    let cache_dir:int = x86_str("__dewycache__")
-    let input_stem:int = path_stem(path_basename(g_input_path))
+    let cache_rel:int = path_cache_source(g_input_path)
+    let cache_parent:int = path_dirname(cache_rel)
+    let cache_dir:int = "__dewycache__"
+    if str_len(cache_parent) >? 0 {
+        cache_dir = path_join(cache_dir cache_parent)
+    }
+    let input_stem:int = path_stem(cache_rel)
     let exe_path:int = (be_compile_and_link)(asm input_stem cache_dir opts)
 
     if g_compile_only {

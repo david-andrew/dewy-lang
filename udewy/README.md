@@ -27,7 +27,11 @@ python -m udewy.p0 --target riscv udewy/tests/test_hello.udewy
 python -m udewy.p0 --target arm udewy/tests/test_hello.udewy
 ```
 
-The compiler produces artifacts in `__dewycache__/`.
+The compiler writes artifacts under `__dewycache__/`, mirroring the source
+path relative to the current directory. `udewy path/to/main.udewy` produces
+`__dewycache__/path/to/main`. A path already under `__dewycache__/` is not
+nested again. Sources outside the current directory go under
+`__dewycache__/__external__/<12-hex>/…`.
 
 > NOTE: long-term goals is for the default compile target to match the host machine/OS
 
@@ -2087,7 +2091,7 @@ Longer term, browser hosting might move up to full Dewy instead of living in the
 # Compile the bootstrap to a native binary (via the Python compiler)
 python -m udewy --target x86_64 -c udewy/bootstrap/main.udewy
 # Now use the bootstrap to compile programs
-./__dewycache__/main --target wasm32 -c udewy/tests/test_hello.udewy
+./__dewycache__/udewy/bootstrap/main --target wasm32 -c udewy/tests/test_hello.udewy
 # Self-host: bootstrap compiles itself
-./__dewycache__/main --target x86_64 -c udewy/bootstrap/main.udewy
+./__dewycache__/udewy/bootstrap/main --target x86_64 -c udewy/bootstrap/main.udewy
 ```

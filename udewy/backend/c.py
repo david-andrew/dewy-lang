@@ -1468,6 +1468,7 @@ class CBackend(Backend):
     # ========================================================================
 
     def compile_and_link(self, code: str, input_name: str, cache_dir: Path, **options) -> Path:
+        cache_dir.mkdir(parents=True, exist_ok=True)
         c_path = cache_dir / f"{input_name}.c"
         exe_path = cache_dir / input_name
         self.set_imported_sources([Path(path) for path in options.get("imported_sources", [])])

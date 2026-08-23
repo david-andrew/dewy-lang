@@ -1445,6 +1445,7 @@ class Wasm32Backend(Backend):
         split_wasm = options.get('split_wasm', False)
         link_artifacts = [Path(path) for path in options.get("link_artifacts", [])]
         
+        cache_dir.mkdir(parents=True, exist_ok=True)
         wat_path = cache_dir / f"{input_name}.wat"
         wasm_path = cache_dir / f"{input_name}.wasm"
         html_path = cache_dir / f"{input_name}.html"
