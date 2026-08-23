@@ -1,8 +1,6 @@
 # Units
 
-Dewy includes physical units in the type system. Writing a number next
-to a unit multiplies them. `10kg` is not the same type as `10m`, and
-adding them is an error.
+Dewy includes physical units in the type system. Writing a number next to a unit multiplies them. `10kg` is not the same type as `10m`, and adding them is an error.
 
 ## A Simple Example
 
@@ -12,8 +10,7 @@ velocity = 30m/s
 energy = 1/2 * mass * velocity^2
 ```
 
-`energy` is `4500 J`. Group the messy ones with parens. See
-[operator precedence](operators.md).
+`energy` is `4500 J`. Group the messy ones with parens. See [operator precedence](operators.md).
 
 ```dewy
 7kg * 10(m/s/s)
@@ -30,8 +27,7 @@ U = 75kg * 9.81(m/s^2) * 5m         # 3678.75 J
 P = (2mol * 8.314(J/(mol * K)) * 300K) / 0.01m^3    # 498420 Pa
 ```
 
-Time works the same way. `Duration<T>` keeps the number you chose. The
-unit constants carry an exact scale.
+Time works the same way. `Duration<T>` keeps the number you chose. The unit constants carry an exact scale.
 
 ```dewy
 pause = 300ms
@@ -40,36 +36,32 @@ sleep(10s)
 
 ## SI Prefixes
 
-SI prefixes apply to SI base and derived units (and a few exceptions
-below). Abbreviated prefixes combine only with abbreviated units, and
-written-out prefixes only with written-out units. `kilograms` and `kg` are
-valid; `kgrams` and `kilog` are not.
+SI prefixes apply to SI base and derived units (and a few exceptions below). Abbreviated prefixes combine only with abbreviated units, and written-out prefixes only with written-out units. `kilograms` and `kg` are valid; `kgrams` and `kilog` are not.
 
-| Prefix  | Abbrev. | Scale |
-| ------- | ------- | ----- |
-| `yotta` | `Y` | 10^24 |
-| `zetta` | `Z` | 10^21 |
-| `exa` | `E` | 10^18 |
-| `peta` | `P` | 10^15 |
-| `tera` | `T` | 10^12 |
-| `giga` | `G` | 10^9 |
-| `mega` | `M` | 10^6 |
-| `kilo` | `k` | 10^3 |
-| `hecto` | `h` | 10^2 |
-| `deca` | `da` | 10^1 |
-| `deci` | `d` | 10^−1 |
-| `centi` | `c` | 10^−2 |
-| `milli` | `m` | 10^−3 |
-| `micro` | `μ` / `u` | 10^−6 |
-| `nano` | `n` | 10^−9 |
-| `pico` | `p` | 10^−12 |
-| `femto` | `f` | 10^−15 |
-| `atto` | `a` | 10^−18 |
-| `zepto` | `z` | 10^−21 |
-| `yocto` | `y` | 10^−24 |
+| Prefix  | Abbrev.   | Scale  |
+| ------- | --------- | ------ |
+| `yotta` | `Y`       | 10^24  |
+| `zetta` | `Z`       | 10^21  |
+| `exa`   | `E`       | 10^18  |
+| `peta`  | `P`       | 10^15  |
+| `tera`  | `T`       | 10^12  |
+| `giga`  | `G`       | 10^9   |
+| `mega`  | `M`       | 10^6   |
+| `kilo`  | `k`       | 10^3   |
+| `hecto` | `h`       | 10^2   |
+| `deca`  | `da`      | 10^1   |
+| `deci`  | `d`       | 10^−1  |
+| `centi` | `c`       | 10^−2  |
+| `milli` | `m`       | 10^−3  |
+| `micro` | `μ` / `u` | 10^−6  |
+| `nano`  | `n`       | 10^−9  |
+| `pico`  | `p`       | 10^−12 |
+| `femto` | `f`       | 10^−15 |
+| `atto`  | `a`       | 10^−18 |
+| `zepto` | `z`       | 10^−21 |
+| `yocto` | `y`       | 10^−24 |
 
-Non-SI units that may receive SI prefixes include `psi`, `torr`, `bar`,
-`eV`, `cal` (for example `kpsi`, `mTorr`, `keV`, `kcal`).
+Non-SI units that may receive SI prefixes include `psi`, `torr`, `bar`, `eV`, `cal` (for example `kpsi`, `mTorr`, `keV`, `kcal`).
 
 ## Binary Prefixes
 
@@ -77,27 +69,23 @@ These prefixes apply only to units of information (`bit` / `byte`).
 
 | Prefix | Abbrev. | Scale |
 | ------ | ------- | ----- |
-| `kibi` | `Ki` | 2^10 |
-| `mebi` | `Mi` | 2^20 |
-| `gibi` | `Gi` | 2^30 |
-| `tebi` | `Ti` | 2^40 |
-| `pebi` | `Pi` | 2^50 |
-| `exbi` | `Ei` | 2^60 |
-| `zebi` | `Zi` | 2^70 |
-| `yobi` | `Yi` | 2^80 |
+| `kibi` | `Ki`    | 2^10  |
+| `mebi` | `Mi`    | 2^20  |
+| `gibi` | `Gi`    | 2^30  |
+| `tebi` | `Ti`    | 2^40  |
+| `pebi` | `Pi`    | 2^50  |
+| `exbi` | `Ei`    | 2^60  |
+| `zebi` | `Zi`    | 2^70  |
+| `yobi` | `Yi`    | 2^80  |
 
 ## Base Units
 
-Abbreviated units and prefixes are **case sensitive**. Fully written-out
-units and prefixes are **case insensitive**.
+Abbreviated units and prefixes are **case sensitive**. Fully written-out units and prefixes are **case insensitive** (TBD this might actually change to everything being case sensitive).
 
-In SI the mass base is `kg` / `kilograms`, not `g`. `k` / `kilo` is a
-convenience so a mass base can appear without a prefix.
-
-The plural of `kelvin` is `kelvin`.
+In SI the mass base is `kg` / `kilograms`, not `g`. `k` / `kilo` is a convenience so a mass base can appear without a prefix.
 
 | Quantity | Symbol | Abbrev. units | Full units |
-| -------- | ------ | ------------- | ---------- |
+| --- | --- | --- | --- |
 | Mass | `[M]` | `g`, `k`, `lbm` | `gram`/`grams`, `kilo`/`kilos`, `pound-mass`/`pounds-mass`, `slug`/`slugs` |
 | Length | `[L]` | `m`, `ft`, `yd`, `mi`, `AU` | `meter`/`metre`, `inch`/`inches`, `foot`/`feet`, `yard`/`yards`, `mile`/`miles`, `nautical_mile`, `astronomical_unit`, `light_year`, `parsec` |
 | Time | `[T]` | `s` | `second`/`seconds`, `minute`/`minutes`, `hour`/`hours`, `day`/`days`, `week`/`weeks`, `month`/`months`, `year`/`years`, `decade`, `century`, `millennium` |
@@ -106,14 +94,14 @@ The plural of `kelvin` is `kelvin`.
 | Amount of substance | `[N]` | `mol` | `mole`/`moles` |
 | Luminous intensity | `[J]` | `cd` | `candela` |
 
-Exact durations of calendar-style units, sidereal vs solar day and so on,
-are not yet determined. A project-wide unit system like MKS vs CGS isn't
-either.
+> The plural of `kelvin` is `kelvin`.
+
+Exact durations of calendar-style units, sidereal vs solar day and so on, are not yet determined. A project-wide unit system like MKS vs CGS also is TBD.
 
 ## Named Derived Units
 
 | Quantity | Abbrev. units | Full units |
-| -------- | ------------- | ---------- |
+| --- | --- | --- |
 | Plane angle | `rad`, `°` | `radian`, `degree` |
 | Solid angle | `sr` | `steradian` |
 | Frequency | `Hz` | `hertz` |
@@ -140,10 +128,8 @@ either.
 
 ## Other Units
 
-| Quantity | Abbrev. units | Full units |
-| -------- | ------------- | ---------- |
+| Quantity    | Abbrev. units         | Full units                   |
+| ----------- | --------------------- | ---------------------------- |
 | Information | `b`/`bit`, `B`/`byte` | `bit`/`bits`, `byte`/`bytes` |
 
-How unit catalogs get imported by domain, `si`, `information`, and so on,
-is not yet determined. Same question for clashes like `B` meaning byte vs
-bel.
+How unit catalogs get imported by domain, `si`, `information`, and so on, is not yet determined. Same question for clashes like `B` meaning byte vs bel. (likely there will be subset of units that can be imported, e.g. `import units.SI`, `from units.US import inch`, `from units.misc import decibel`, etc.)
