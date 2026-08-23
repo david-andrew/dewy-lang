@@ -354,15 +354,19 @@ async
 mutates<state>
 ```
 
-The surface syntax may use a single top-level `|` for both types and effects:
+A return annotation attaches a type expression to an effect expression with `&`. Parenthesize the type side (or both) so the `&` is not parsed as type intersection:
 
 ```dewy
 let loadInvoice = (id: InvoiceId)
-    :> Invoice
-     | NotFoundError
-     | DatabaseError
-     | reads<database>
-     | async
+    :> (Invoice | NotFoundError | DatabaseError) & reads<database> & async
+```
+
+Several effects also combine with `&`. They are all part of the contract, not alternatives. `|` is only for value and error alternatives.
+
+A convenience form may list several effects without `&` between them:
+
+```dewy
+:> (Invoice | NotFoundError | DatabaseError) & Effects<reads<database> async>
 ```
 
 The type checker separates the terms by kind.
@@ -382,7 +386,7 @@ Effects:
     async
 ```
 
-The systems do not combine inside nested type expressions.
+The systems do not combine inside nested type expressions, and they do not share `|`.
 
 ```dewy
 Array<Invoice | DatabaseError>
@@ -395,6 +399,13 @@ reads<database>
 ```
 
 is an effect expression and cannot appear inside that union.
+
+These are invalid:
+
+```dewy
+:> Invoice | NotFoundError | async
+:> (Invoice | reads<database>) & (NotFoundError | async)
+```
 
 ### Assignments and Boolean Contexts
 
@@ -465,8 +476,8 @@ Matching and recovery:
     Handle selected error or union alternatives explicitly.
 
 Effects:
-    Remain separate from return alternatives despite optionally sharing
-    top-level signature syntax.
+    Remain a separate row. Surface syntax attaches them to a return
+    type with `&`, never with `|`.
 ```
 
 The resulting model treats failure propagation as type-directed forwarding through expressions rather than as unwrapping a result container.

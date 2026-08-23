@@ -22,7 +22,7 @@ Return type can be annotated with `:>`:
 let add = (left:int64 right:int64=2):>int64 => left + right
 ```
 
-[Effects](effects.md) such as `noreturn` also go in that slot or can be `|` unioned with a return type.
+[Effects](effects.md) such as `noreturn` also go in that slot, alone or attached to a return type with `&`.
 
 A function type writes the same contract:
 
