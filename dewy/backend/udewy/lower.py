@@ -1739,8 +1739,19 @@ class _Lowerer:
                 parameter,
                 group,
                 uses,
-                uses <= allowed_uses,
+                uses <= allowed_uses
+                and not self._array_type_contains_object(parameter.type),
             )
+
+    @classmethod
+    def _array_type_contains_object(cls, array_type: ty.ArrayType) -> bool:
+        """Whether element mutation can be hidden behind an object handle."""
+
+        element = array_type.element
+        return isinstance(element, ty.ObjectType) or (
+            isinstance(element, ty.ArrayType)
+            and cls._array_type_contains_object(element)
+        )
 
     def _analyze_array_call_boundaries(self) -> dict[int, set[ArrayUse]]:
         boundary_uses: dict[int, set[ArrayUse]] = defaultdict(set)
@@ -6401,6 +6412,26 @@ class _Lowerer:
         array_type = node.target.type
         if not isinstance(array_type, ty.ArrayType):
             raise TypeError('INTERNAL ERROR: array assignment target lost its type')
+        place_cell = (
+            self.current_place_parameter_cells.get(node.target.binding_id)
+            if node.target.binding_id is not None
+            else None
+        )
+        if place_cell is not None:
+            if array_type.length is None:
+                self._target_error(
+                    node,
+                    'whole-array rebinding through a runtime-length place',
+                )
+            # The local parameter contains the descriptor for storage prepared by
+            # the caller.  Replacing that descriptor with one allocated in this
+            # function would leave the caller holding pointers into an expired
+            # stack frame, so copy recursively into the existing storage tree.
+            return self._write_array_result_value(
+                replace(node.target, type='int64'),
+                node.value,
+                array_type,
+            )
         if self._array_use_representation(node.target) == 'stack_data':
             prelude, copied = self._clone_array_to_raw(node.value, array_type)
         else:
@@ -6409,23 +6440,7 @@ class _Lowerer:
                 array_type,
             )
         assignment = replace(node, value=copied)
-        place_cell = (
-            self.current_place_parameter_cells.get(node.target.binding_id)
-            if node.target.binding_id is not None
-            else None
-        )
-        if place_cell is None:
-            return [*prelude, assignment]
-        return [
-            *prelude,
-            assignment,
-            self._intrinsic_call(
-                '__store_i64__',
-                [replace(node.target, type='int64'), place_cell],
-                ty.VOID_TYPE,
-                node.loc,
-            ),
-        ]
+        return [*prelude, assignment]
 
     @staticmethod
     def _copy_source_expression(node: hir.AST) -> hir.AST:

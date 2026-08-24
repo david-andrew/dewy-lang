@@ -1,0 +1,48 @@
+let Pair:type = [left:int64 right:int64]
+
+let mutate_pairs = (items:array<Pair length=2>):>int64 => {
+    items[0].left = 20
+    return items[0].left + items[0].right
+}
+
+let copy_pairs = (
+    items:array<Pair length=2>
+):>array<Pair length=2> => {
+    return items
+}
+
+let main = ():>int64 => {
+    let source:Pair = [left = 1 right = 2]
+    let other:Pair = [left = 3 right = 4]
+    let pairs = [source other]
+    source.left = 99
+    let insertion_copied:bool = (pairs[0].left =? 1)
+
+    let copied = pairs
+    copied[0].right = 20
+    let array_copy_is_independent:bool = (pairs[0].right =? 2)
+
+    let replacement:Pair = [left = 30 right = 12]
+    copied[1] = replacement
+    replacement.left = 0
+    let replacement_copied:bool = (copied[1].left =? 30)
+
+    let call_result:int64 = mutate_pairs(pairs)
+    let argument_copied:bool = (pairs[0].left =? 1 and call_result =? 22)
+
+    let returned = copy_pairs(pairs)
+    returned[0].left = 40
+    let return_copied:bool = (returned[0].left =? 40 and pairs[0].left =? 1)
+
+    if not insertion_copied
+        return 1
+    if not array_copy_is_independent
+        return 2
+    if not replacement_copied
+        return 3
+    if not argument_copied
+        return 4
+    if not return_copied
+        return 5
+    return 42
+}

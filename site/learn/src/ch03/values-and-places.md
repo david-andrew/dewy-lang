@@ -35,7 +35,7 @@ Think of `@` as starting at a named storage location. Every field or index after
 ```dewy
 set(@point.x)
 set(@values[i])
-set(@scene.layers[layer].opacity)
+set(@grid.rows[row][column])
 ```
 
 For example, `@point.x` follows these steps:

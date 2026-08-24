@@ -66,10 +66,16 @@ let main = ():>int64 => {
     let matrix = [first_row second_row]
     replace_row(@matrix[0])
 
+    let first_pair:Pair = [left = 1 right = 2]
+    let second_pair:Pair = [left = 3 right = 4]
+    let pairs = [first_pair second_pair]
+    replace_pair(@pairs[1])
+
     if value =? 40 and enabled and byte =? 42 and mutated =? 42
         and values[0] =? 20 and values[1] =? 22
         and box.pair.left =? 20 and box.values[1] =? 22
         and matrix[0][0] =? 20 and matrix[0][1] =? 22
+        and pairs[1].left =? 30 and pairs[1].right =? 12
         and pair.left =? 30 and pair.right =? 12 {
         return 42
     } else {

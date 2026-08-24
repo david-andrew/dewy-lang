@@ -76,7 +76,7 @@ If the parser cannot decide, that is a compile error.
 - `:>` return type
 - `->` / `<->` dictionary pointers
 - `@` select the place a value lives; following fields and indices project it along a route
-- `@?` same place, not two copies that happen to share storage
+- `@?` same place, not two copies that happen to share storage (planned)
 
 ```dewy
 40 |> add

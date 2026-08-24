@@ -2639,6 +2639,7 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
             (
                 ty.ArrayType,
                 ty.FunctionType,
+                ty.ObjectType,
                 ty.StringLiteralType,
                 ty.StringType,
             ),
