@@ -36,10 +36,11 @@ Dewy does not require a separate class declaration syntax.
 
 A function field may use sibling fields from the object literal's scope:
 
+<!-- dewy-example: compiler -->
 ```dewy
 let counter = (start:int64=0) => [
     value = start
-    increment = () => value += 1
+    increment = () => (value += 1)
 ]
 ```
 
@@ -49,6 +50,6 @@ Extracting a method as a stored naked function, escaping captures, and full func
 
 ## Places Through Fields
 
-`@object.field` starts from the object's place and projects it to the field at the end of the route. `@(object.field)` is equivalent. There is no separate `object.@field` syntax.
+`@object.field` selects the place occupied by the field at the end of the complete route. Although the parser groups the prefix first, the language does not expose an intermediate reference value for `object`. `@(object.field)` selects the same place. There is no separate `object.@field` syntax.
 
 See [Values, Copies, and Places](values.md) for aliasing and overlap rules.

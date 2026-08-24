@@ -4,16 +4,16 @@ An effect describes an observable interaction a function may perform beyond prod
 
 ## `noreturn`
 
-`noreturn` is a settled effect marking a function that does not return to its caller:
+`noreturn` is the settled semantic effect of a function that does not return to its caller. The result of calling such a function has type `never`:
 
 ```dewy
-let die = (message:string):>noreturn => {
+let die = (message:string):>never => {
     printl(message)
     exit(1)
 }
 ```
 
-It is not the same as `never`. `noreturn` describes what the call does; `never` is the type of a path with no resulting value.
+The two ideas remain distinct: `noreturn` describes what the call does, while `never` is the type of the path after that call. The spelling for declaring `noreturn` in a general effect contract has not been selected, so this book does not place it in the return-type position.
 
 ## Why Effects Belong in Contracts
 

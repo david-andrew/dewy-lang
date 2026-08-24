@@ -91,6 +91,9 @@ A reversed range **requires** an explicit step. `5..0` results in an empty range
 
 ### Range Arithmetic
 
+> **Provisional design:** Applying arithmetic to a complete range and combining several ranges are selected directions, but their result types, normalization, empty-span behavior, and runtime representation are not yet fully specified. The following examples illustrate that direction rather than defining the remaining edge cases.
+
+<!-- dewy-example: design-only -->
 ```dewy
 loop i in [0..4]/4 print'{i} '
 loop i in [0..4]*0.25 print'{i} '
@@ -101,6 +104,7 @@ This expresses the same intended values as `[0,0.25..1]`. Numerical libraries ca
 
 ### Compound Ranges
 
+<!-- dewy-example: design-only -->
 ```dewy
 complex_range = [1..5] + (15..20)
 loop i in complex_range
@@ -116,7 +120,7 @@ complex_range = [1..20) - (5..15]
 ```dewy
 5 in? [1..5]         # true
 5 in? (1..5)         # false
-3.1415 in? (1..5)    # true
+3 in? (1..5)         # true
 ```
 
 ### Indexing

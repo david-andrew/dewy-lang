@@ -36,13 +36,13 @@ The books may share tested examples, terminology, and small syntax tables. They 
 
 ## Examples
 
-Examples should be marked in source metadata as one of:
+Published `dewy` fences are parser-checked by default. An immediately preceding invisible marker can select another classification:
 
-- compiler-checked;
-- parser-checked;
-- design-only.
+- `<!-- dewy-example: compiler -->` type-checks a self-contained example;
+- `<!-- dewy-example: parser -->` explicitly requests the default parser check;
+- `<!-- dewy-example: design-only -->` records syntax that intentionally depends on a provisional design and therefore cannot yet be checked.
 
-That metadata need not be shown to readers. A design-only example must still follow settled syntax, or be placed under a clearly provisional design section.
+The marker is not shown to readers. A design-only example must be placed under a clearly provisional design section and follow every settled part of the syntax. `site/scripts/check_dewy_examples.py` checks the published pages selected by each book's `SUMMARY.md`, and the complete site build runs it automatically.
 
 ## Unpublished project queue
 

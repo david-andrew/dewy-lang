@@ -260,9 +260,9 @@ def serve(port: int) -> ThreadingHTTPServer:
     reclaim_port(port)
     handler = partial(QuietHandler, directory=str(build.DIST))
     try:
-        httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+        httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     except OSError as error:
-        raise SystemExit(f"could not bind 127.0.0.1:{port}: {error}") from error
+        raise SystemExit(f"could not bind 0.0.0.0:{port}: {error}") from error
     _pid_file(port).write_text(f"{os.getpid()}\n")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
@@ -273,7 +273,7 @@ def main() -> None:
     print("initial build", flush=True)
     build.main()
     serve(args.port)
-    print(f"serving http://127.0.0.1:{args.port}/  (ctrl-c to stop)", flush=True)
+    print(f"serving http://0.0.0.0:{args.port}/  (ctrl-c to stop)", flush=True)
     previous = snapshot(WATCH)
     try:
         while True:

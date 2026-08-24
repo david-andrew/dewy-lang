@@ -116,7 +116,7 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row" aria-labelledby="ranges-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>ranges.dewy</span><span class="tag partial" id="badge-ranges">partially supported<a class="tag-footnote" href="#note-ranges" aria-label="See implementation footnote 2"><sup>2</sup></a></span></div>
+          <div class="pane-top"><span>ranges.dewy</span><span class="tag implemented">implemented ✓</span></div>
           <pre><code><span class="ln">1</span><b class="c"># Bounds are visible: [ ] includes, ( ) excludes.</b>
 <span class="ln">2</span>window = [<b class="n">0</b>..<b class="n">10</b>)              <b class="c"># 0 1 ... 9</b>
 <span class="ln">3</span>evens = <b class="n">0</b>,<b class="n">2</b>..<b class="n">100</b>              <b class="c"># step inferred from the pair</b>
@@ -134,7 +134,7 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row" aria-labelledby="loop-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>loops.dewy</span><span class="tag implemented" id="badge-loops">implemented<a class="tag-footnote" href="#note-loops" aria-label="See implementation footnote 3"><sup>3</sup></a> ✓</span></div>
+          <div class="pane-top"><span>loops.dewy</span><span class="tag implemented">implemented ✓</span></div>
           <pre><code><span class="ln">1</span>ratings = [
 <span class="ln">2</span>    <b class="s">'star wars'</b> -&gt; <b class="n">73</b>
 <span class="ln">3</span>    <b class="s">'star trek'</b> -&gt; <b class="n">89</b>
@@ -177,7 +177,7 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row" aria-labelledby="fn-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>functions.dewy</span><span class="tag implemented" id="badge-functions">implemented<a class="tag-footnote" href="#note-functions" aria-label="See implementation footnote 4"><sup>4</sup></a> ✓</span></div>
+          <div class="pane-top"><span>functions.dewy</span><span class="tag implemented">implemented ✓</span></div>
           <pre><code><span class="ln">1</span><b class="c"># `&amp;` combines implementations into one overload set.</b>
 <span class="ln">2</span>format = ((value:int64):&gt;string =&gt; <b class="s">"integer: <span class="interp"><span class="interp-brace">{</span>value<span class="interp-brace">}</span></span>"</b>)
 <span class="ln">3</span>       &amp; ((value:string):&gt;string =&gt; <b class="s">"text: <span class="interp"><span class="interp-brace">{</span>value<span class="interp-brace">}</span></span>"</b>)
@@ -241,9 +241,6 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="implementation-notes" aria-label="Implementation footnotes">
         <ol>
           <li id="note-units"><a class="note-back" href="#badge-units" aria-label="Back to units example">1.</a><p><a class="note-example-link" href="#badge-units"><code>units.dewy</code></a> — time durations and unit multiplication work today; the broader unit catalog and derived-unit algebra shown here are planned.</p></li>
-          <li id="note-ranges"><a class="note-back" href="#badge-ranges" aria-label="Back to ranges example">2.</a><p><a class="note-example-link" href="#badge-ranges"><code>ranges.dewy</code></a> — unstepped membership supports runtime values, and <code>end</code> plus the array/string slices shown here work today; string-slice endpoints may also be runtime values when their bounds are proven. Storing general range values, runtime iterator anchors, and compound range arithmetic are still ahead.</p></li>
-          <li id="note-loops"><a class="note-back" href="#badge-loops" aria-label="Back to loops example">3.</a><p><a class="note-example-link" href="#badge-loops"><code>loops.dewy</code></a> — dictionary entries using <code>-&gt;</code> and iterator-target unpacking with <code>[show rating]</code> are not implemented. The range/string multiiterator on line 12 works today.</p></li>
-          <li id="note-functions"><a class="note-back" href="#badge-functions" aria-label="Back to functions example">4.</a><p><a class="note-example-link" href="#badge-functions"><code>functions.dewy</code></a> — overload construction and dispatch work, but an interpolated string cannot yet be materialized and returned as a first-class <code>string</code>. Streaming interpolation directly through <code>print</code>/<code>printl</code> works.</p></li>
         </ol>
       </section>
     </div>

@@ -43,7 +43,7 @@ See [Operators and Precedence](operators-and-precedence.md), [Bindings](bindings
 
 ## Place Projection
 
-The prefix `@` selects a place. Following member and index expressions project the place to the location at the end of the route:
+The prefix `@` must begin a place route and selects the location at the end of the complete member-and-index route:
 
 ```dewy
 @pair.left
@@ -51,4 +51,4 @@ The prefix `@` selects a place. Following member and index expressions project t
 @box.rows[row][column]
 ```
 
-These parse as projections from the prefixed root. `@(pair.left)` is equivalent to `@pair.left`; Dewy has no `pair.@left` form.
+The parser groups the prefix before the selectors, but that grouping does not make the root place an independently observable intermediate value. `@(pair.left)` selects the same final place as `@pair.left`; Dewy has no `pair.@left` form.

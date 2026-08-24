@@ -7,11 +7,11 @@ let greet = (name:string):>void =>
     printl"Hello, {name}!"
 ```
 
-`:>void` is the return contract. When context makes the result clear, Dewy can infer it:
+`:>void` is the return contract. Dewy can infer a result from a body whose parameter types are already known:
 
 ```dewy
-let square = value => value^2
-let add = (left right) => left + right
+let square = (value:int64) => value^2
+let add = (left:int64 right:int64) => left + right
 ```
 
 One parameter can omit parentheses. Zero parameters use `()`.
@@ -90,7 +90,7 @@ let apply = (
 ):>int64 => transform(value)
 ```
 
-Names in a contract determine which keyword calls it accepts. A position-only structural contract can omit a public name where no body needs to refer to it.
+Names in a contract determine which keyword calls it accepts. Position-only parameters use the same `<name:type>` form in a function type as in a function literal. Dewy does not reinterpret a bare identifier as an unnamed type annotation.
 
 ## Overloads
 
@@ -124,7 +124,7 @@ Grouping several piped arguments keeps any named bindings local to the group.
 A bare function name calls it whenever a valid call exists. `@` selects the function binding as a callable value:
 
 ```dewy
-let sum = (a b) => a + b
+let sum = (a:int64 b:int64) => a + b
 let reference = @sum
 let add5 = @sum(5)
 
@@ -133,6 +133,8 @@ add5(24)       # 29
 
 Explicitly supplied partial arguments are saved immediately. Defaults remain per-call fallbacks until the resulting function is called.
 
-The route rule is the same as for data places: `@worker.callback` means `(@worker).callback`, not `worker.@callback`.
+The route rule is the same as for data places: `@worker.callback` selects the function-valued place at the end of the entire route, and `@` cannot appear as `worker.@callback`. The parser's intermediate `(@worker).callback` grouping does not make `@worker` the semantic result.
+
+> **Open edge:** Dewy's automatic call behavior still needs an exact rule for member access when a function-valued node occurs before the end of a route. In particular, the language must distinguish deliberately selecting a member of a function value from calling the function and selecting a member of its result. The leading-`@` whole-route rule above is settled; that auto-call interaction is not.
 
 Rest capture, spreading, and complete handle semantics are summarized in the [design appendix](../appendices/language-and-compiler.md). Exact argument binding is defined in the [Reference](../../reference/functions-and-calls.html).

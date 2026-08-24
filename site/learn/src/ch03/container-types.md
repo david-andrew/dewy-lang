@@ -52,11 +52,25 @@ Arrays are also the foundation for vectors, matrices, and tensors. Dewy's shape 
 
 A dictionary collects key/value pairs written with `->`:
 
+<!-- dewy-example: compiler -->
 ```dewy
 let ratings = [
     "star trek" -> 89
     "star wars" -> 73
 ]
+```
+
+Dictionaries retain insertion order. Iteration yields key/value pairs in that order:
+
+<!-- dewy-example: compiler -->
+```dewy
+let ratings = [
+    "star trek" -> 89
+    "star wars" -> 73
+]
+
+loop [title score] in ratings
+    printl"{title}: {score}"
 ```
 
 `<->` describes a bidirectional mapping whose values can be looked up from either side.
@@ -65,11 +79,12 @@ let ratings = [
 
 The intended set literal makes its unordered meaning explicit:
 
+<!-- dewy-example: design-only -->
 ```dewy
 let permissions = set["read" "write"]
 "read" in? permissions
 ```
 
-> **Provisional design:** Dictionary, bidictionary, and set literals have a selected overall direction, but their complete type, ordering, collision, and mutation rules remain under design.
+> **Provisional design:** Dictionary insertion order and key/value iteration are settled. Their complete runtime storage, lookup, collision, deletion, equality, and mutation rules—and the corresponding bidictionary and set rules—remain under design.
 
 Objects also use square brackets, but named fields with `=` distinguish them from positional containers. Continue with [Structural Objects](object-types.md), or consult the exact [array and container reference](../../reference/arrays-and-containers.html).

@@ -16,8 +16,9 @@ The compiler does not need to physically copy every byte. It may move storage, b
 
 When mutation should be visible to the caller, pass a place with `@`. The parameter also carries `@`:
 
+<!-- dewy-example: compiler -->
 ```dewy
-let increment = (@value:int64):>void => value += 1
+let increment = (@value:int64):>void => (value += 1)
 
 let count:int64 = 41
 increment(@count)
@@ -28,7 +29,7 @@ Both sides advertise the mutation. `increment(count)` supplies a copy and does n
 
 ## A Place Can Follow a Route
 
-`@` starts at a binding's storage. Fields and indices after it project the place to the final selected location:
+`@` appears only at the beginning of a route and selects the place at the end of that entire route:
 
 ```dewy
 set(@point.x)
@@ -36,7 +37,7 @@ set(@values[i])
 set(@grid.rows[row][column])
 ```
 
-`@point.x` means `(@point).x`. Parenthesizing the complete expression, `@(point.x)`, is equivalent. There is no `point.@x` spelling.
+The parser first groups the prefix as `(@point).x`, but that intermediate grouping is not the semantic boundary: `@point.x` refers to the place occupied by `x`, not first to a standalone reference value for `point`. Parenthesizing the complete expression, `@(point.x)`, selects the same place. There is no `point.@x` spelling.
 
 A computed index evaluates once before the call.
 
@@ -45,8 +46,9 @@ A computed index evaluates once before the call.
 A place can expose the entire selected value, not only its scalar fields:
 
 ```dewy
-let replace_pair = (@pair:Pair):>void =>
+let replace_pair = (@pair:Pair):>void => {
     pair = [left=20 right=22]
+}
 
 replace_pair(@pairs[index])
 ```

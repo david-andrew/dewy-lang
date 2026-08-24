@@ -1,48 +1,58 @@
 # Numbers and Bases
 
-Integer literals may carry a radix prefix. Decimal (base-10) is the default, so `42` and `0d42` are the same value.
+An integer literal may use a radix prefix. Dewy supports integer numerals through base 16:
 
-| Radix | Name             | Prefix | Digits              |
-| ----- | ---------------- | ------ | ------------------- |
-| 2     | Binary           | `0b`   | `[01]`              |
-| 3     | Ternary          | `0t`   | `[012]`             |
-| 4     | Quaternary       | `0q`   | `[0123]`            |
-| 6     | Seximal          | `0s`   | `[0-5]`             |
-| 8     | Octal            | `0o`   | `[0-7]`             |
-| 10    | Decimal          | `0d`   | `[0-9]`             |
-| 12    | Dozenal          | `0z`   | `[0-9xXeE]`         |
-| 16    | Hexadecimal      | `0x`   | `[0-9A-Fa-f]`       |
-| 32    | Duotrigesimal    | `0u`   | `[0-9A-Va-v]`       |
-| 36    | Hexatrigesimal   | `0r`   | `[0-9A-Za-z]`       |
-| 64    | Tetrasexagesimal | `0g`   | `[0-9A-Za-z+/\-_=]` |
+| Base | Prefix | Digits |
+| ---: | :---: | --- |
+| 2 | `0b` | `0`–`1` |
+| 3 | `0t` | `0`–`2` |
+| 4 | `0q` | `0`–`3` |
+| 6 | `0s` | `0`–`5` |
+| 8 | `0o` | `0`–`7` |
+| 10 | `0d` | `0`–`9` |
+| 12 | `0z` | `0`–`9`, `x`, `e` |
+| 16 | `0x` | `0`–`9`, `a`–`f` |
 
-> NOTE: integer literals cannot use bases larger than 16. larger bases need to use the based string or based array notation
-
-> NOTE: base 64 supports `+`/`-` for `62`, and `/`/`_` for `64`. `=` is for explicit padding
+Alphabetic digits are case-insensitive in these integer forms. Decimal is the default, so `42` and `0d42` denote the same value.
 
 ```dewy
-# some examples
 0b10101010      # 170
 0t121010        # 435
 0q123           # 27
 0s1432          # 380
 0o1234567       # 342391
 0xdeadbeef      # 3735928559
-0u'1v2u3t'      # 66156669
-0g'l1z2+3/=='   # 3231913341182
 ```
 
-> Underscores may appear in a numeric literal to group digits, as in `1_000_000`. They have no effect on the actual value.
+Underscores may group integer digits without changing the value:
 
-## Based Strings
+```dewy
+let population = 1_000_000
+let mask = 0b1111_0000
+```
 
-A prefix on a _string_ is a different feature. Power-of-two prefixes pack bits into a byte array instead of parsing an integer:
+## Packed Based Strings
+
+A radix prefix followed by a quoted digit sequence produces exact packed data rather than an integer:
 
 ```dewy
 const program:array<uint8> = 0q"000000010002"
-hex_bytes = 0x"deadbeef"
+const header:array<uint8> = 0x"deadbeef"
 ```
 
-`0b`, `0q`, `0o`, `0x`, `0u`, and `0g` are the packed-string prefixes. They produce exact bytes, not a numeric value. Whitespace and comments may appear among the digits.
+Power-of-two bases have a compositional bit width and can therefore be packed directly:
 
-See [List of numeral systems](https://en.wikipedia.org/wiki/List_of_numeral_systems) and [Senary](https://en.wikipedia.org/wiki/Senary).
+| Base | Prefix | Bits per digit |
+| ---: | :---: | ---: |
+| 2 | `0b` | 1 |
+| 4 | `0q` | 2 |
+| 8 | `0o` | 3 |
+| 16 | `0x` | 4 |
+| 32 | `0u` | 5 |
+| 64 | `0g` | 6 |
+
+Digits contribute bits from left to right, most-significant bit first. A final partial byte is padded with zero bits on the right. Whitespace and comments may separate digits.
+
+Base 64 uses `+` or `-` for digit 62 and `/` or `_` for digit 63. Trailing `=` characters are accepted as explicit padding and do not contribute bits. Unlike numeric underscores, `_` inside a base-64 string is a digit.
+
+Based strings for non-power-of-two bases are reserved until their sequence-width and composition rules are settled. The Reference gives the exact [literal and packing rules](../../reference/literals.html#packed-based-strings).

@@ -4,6 +4,7 @@ Dewy aims to make the straightforward version of a program look straightforward.
 
 ## Small Programs Stay Small
 
+<!-- dewy-example: compiler -->
 ```dewy
 name = "Dewy"
 printl"Hello, {name}!"
@@ -37,8 +38,9 @@ Declarations and assignments produce `void`, so the circumference block expresse
 
 ## Functions Read Like Their Calls
 
+<!-- dewy-example: compiler -->
 ```dewy
-let greet = (name:string greeting="Hello"):>void =>
+let greet = (name:string greeting:string="Hello"):>void =>
     printl"{greeting}, {name}!"
 
 greet("Ada")
@@ -75,6 +77,7 @@ let active_names = [
 
 Strings are immutable sequences of Unicode grapheme clusters. Iteration and indexing therefore treat a family emoji or an accented character as one element:
 
+<!-- dewy-example: compiler -->
 ```dewy
 text = "café 👨‍👩‍👧‍👦 🍀"
 
@@ -87,6 +90,7 @@ Byte and scalar views remain available when a program actually needs those repre
 
 ## Values Do Not Alias by Accident
 
+<!-- dewy-example: compiler -->
 ```dewy
 let original = [1 2 3]
 let edited = original
@@ -95,8 +99,9 @@ edited[0] = 9                 # original is still [1 2 3]
 
 Use a place when a function should deliberately update the caller's value:
 
+<!-- dewy-example: compiler -->
 ```dewy
-let reset = (@value:int64):>void => value = 0
+let reset = (@value:int64):>void => (value = 0)
 
 let count:int64 = 42
 reset(@count)
@@ -108,12 +113,13 @@ The `@` appears in both the function contract and the call, so shared mutation i
 
 An object is a structural value with named fields. A constructor is an ordinary function that returns one:
 
+<!-- dewy-example: compiler -->
 ```dewy
 let Counter:type = [value:int64 increment:<():>void>]
 
 let counter = (start:int64=0):>Counter => [
     value = start
-    increment = () => value += 1
+    increment = () => (value += 1)
 ]
 
 let count = counter(40)
@@ -136,6 +142,7 @@ if answer isnt? undefined
 
 Overloads use the same function syntax and are selected by their contracts:
 
+<!-- dewy-example: compiler -->
 ```dewy
 let format = ((value:int64):>string => "integer {value}")
            & ((value:string):>string => value)

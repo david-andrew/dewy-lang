@@ -6,9 +6,9 @@ This appendix describes implementation coverage. It does not define the language
 
 The hosted compiler parses and statically checks Dewy, lowers supported programs to µDewy, and uses a µDewy backend to produce executable output.
 
-Its implemented core includes bindings, fixed-width integers and Booleans, functions and calls, defaults and keyword arguments, static overloads, structured control flow, ranges and multiiterators, strings and graphemes, homogeneous arrays, structural objects, optional values, nonescaping explicit places, source imports, and initial time quantities.
+Its implemented core includes bindings, fixed-width integers and Booleans, functions and calls, defaults and keyword arguments, static overloads, structured control flow, compile-time-anchored range values and multiiterators, strings, graphemes, streamed and bounded materialized interpolation, homogeneous arrays, structural objects, optional values, initial dictionary literal iteration, nonescaping explicit places, source imports, and initial time quantities.
 
-Several normative areas are only partial. Notable examples include arbitrary-precision runtime integers, escaping and runtime-sized aggregate storage, materialized interpolated strings, function handles and closures, general physical quantities, user-written generics, refinements, and effects.
+Several normative areas are only partial. Notable examples include arbitrary-precision runtime integers, escaping and runtime-sized aggregate storage, user-defined interpolation conversions and unbounded result capacities, runtime range storage, function handles and closures, runtime dictionaries, general physical quantities, user-written generics, refinements, and effects.
 
 The detailed and continuously maintained checklist is [`dewy/status.md`](https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md).
 

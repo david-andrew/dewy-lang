@@ -44,7 +44,7 @@ The following table is ordered from highest to lowest. “Fail” means an ungro
 | right | `^` |
 | left | multiplication juxtaposition |
 | prefix | `*`, `/`, `//` |
-| left | `*`, `/`, `//`, `%`, `\` |
+| left | `*`, `/`, `//`, `%` |
 | prefix | `+`, `-` |
 | left | `+`, `-` |
 | left | `<<`, `>>`, `<<<`, `>>>` |
@@ -67,3 +67,5 @@ The following table is ordered from highest to lowest. “Fail” means an ungro
 | left | attached semicolon suppression |
 
 `else` attaches flow alternatives outside these operator levels. Grouping with `()` or a scoped `{}` is required when the precedence table does not express the intended tree.
+
+This table lists source-language forms whose place in the expression grammar has been selected. Token spellings reserved by the parser for future operations—such as left division, expression-producing assignment, compile-time assignment, and additional shift forms—do not acquire language semantics merely by being tokenizable.

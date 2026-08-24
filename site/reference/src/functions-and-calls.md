@@ -6,7 +6,7 @@ A function literal consists of a parameter contract, an optional return contract
 let add = (left:int64 right:int64=2):>int64 => left + right
 ```
 
-One unannotated parameter may omit parentheses: `x => x + 1`. Zero parameters use `()`.
+One bare parameter name may omit parentheses: `x => x + 1`. Here `x` is always the local parameter name, never an anonymous argument whose type happens to be named `x`. Whether the body can infer a generic contract without other type context depends on the provisional generic-function design. Annotated parameters use `(x:int64)`, and zero parameters use `()`.
 
 ## Argument Binding
 
@@ -77,7 +77,7 @@ A function type records its parameter and return contract:
 let callback:<(value:int64):>int64> = increment
 ```
 
-Structural contracts may omit externally visible names where a position-only interface is required. Function literals still require usable local names for parameters their bodies access.
+Position-only function contracts use `<name:type>`, just like function literals. The name describes the parameter inside the contract but is absent from the keyword-call interface. A bare identifier is always a parameter name, so Dewy does not infer an anonymous type-only parameter from its spelling.
 
 ## Calls and Pipes
 
@@ -105,12 +105,14 @@ The direction for `...rest` is to capture arguments not claimed by earlier param
 A bare function name calls the function whenever a valid call is available. `@fn` selects the function binding as a first-class callable handle instead:
 
 ```dewy
-let sum = (a b) => a + b
+let sum = (a:int64 b:int64) => a + b
 let reference = @sum
 let add5 = @sum(5)
 ```
 
-Selectors use the ordinary place route: `@worker.on_event` reaches the function-valued field at the end of `(@worker).on_event`; it is not `worker.@on_event`.
+Selectors use the ordinary whole-route place rule: `@worker.on_event` selects the function-valued place at the end of the route, and it cannot be written `worker.@on_event`. Although parsing groups the leading prefix first, `@worker` is not the semantic result of that complete expression.
+
+The interaction between automatic calls and member access through a function-valued intermediate route remains open. A future rule must distinguish selecting a member of a function value from calling the function and selecting a member of its result without weakening the leading-`@` rule.
 
 Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.
 

@@ -41,10 +41,11 @@ Default parameters, overloads, and generics apply to constructors exactly as the
 
 Function fields can use sibling fields directly:
 
+<!-- dewy-example: compiler -->
 ```dewy
 let counter = (start:int64=0) => [
     value = start
-    increment = () => value += 1
+    increment = () => (value += 1)
 ]
 
 let count = counter(40)
@@ -71,7 +72,7 @@ copy.saved = true
 To update the caller's object deliberately, accept and pass a place:
 
 ```dewy
-let save = (@document:Document):>void => document.saved = true
+let save = (@document:Document):>void => (document.saved = true)
 save(@original)
 ```
 
@@ -83,8 +84,8 @@ Objects participate in operators and conversions through typed overloads. The pr
 
 ```dewy
 let __add__ = __add__ & (
-    (left:Pair right:Pair):>Pair =>
-        [left=left.left + right.left right=left.right + right.right]
+    (a:Pair b:Pair):>Pair =>
+        [left=a.left + b.left right=a.right + b.right]
 )
 ```
 

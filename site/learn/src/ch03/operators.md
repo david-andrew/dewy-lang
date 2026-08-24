@@ -74,7 +74,7 @@ An attached postfix `;` suppresses an expression's produced value.
 
 ## Place and Function Selection
 
-Prefix `@` selects a place or function binding. Following fields and indices project the route to its final location:
+A leading `@` selects the place at the end of a complete field-and-index route, or selects a function binding as a handle. It appears only at the beginning of that route:
 
 ```dewy
 @value

@@ -39,9 +39,4 @@ This page is a topical index. The main book teaches the same material in a progr
 - [Refinement types](ch03/refinements.md)
 - [Physical dimensions and units](ch03/units.md)
 
-## Domain-Oriented Material
-
-- [Everyday mathematics](ch03/basic-math.md)
-- [Arrays and linear algebra](ch03/linear-algebra.md)
-
 Features with provisional design or incomplete compiler support are catalogued separately in [Language Design and Compiler Support](appendices/language-and-compiler.md), so implementation status does not obscure this index.

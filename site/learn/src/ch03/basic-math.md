@@ -1,45 +1,39 @@
-# Basic Math
+# Everyday Mathematics (Draft)
 
-Arithmetic is ordinary Dewy. There is no separate formula language.
+> **Unpublished design draft:** This page is retained as source material for a future practical mathematics guide. It will return to the Learn navigation after fractional numerics, ordinary juxtaposition multiplication, the core math library, and vectorized operations have settled contracts.
 
-## Operators
+Integer arithmetic uses Dewy's ordinary typed operators. Prefix `/x` is intended to express a reciprocal, and a composite chain such as `n^/2` is intended to express a square root while retaining the first operator's precedence.
 
-The usual operators work on numbers. `+` `-` `*` `/` `//` `%` `^`. Prefix `/x` is `1/x`. Composite chains keep the first operator's precedence, so `n^/2` is a square root.
+The more compact formula notation depends on general numeric juxtaposition multiplication, which is still provisional:
 
+<!-- dewy-example: design-only -->
 ```dewy
-quadratic = (a b c x) => a(x^2) + b(x) + c
-root1 = (-b + (b^2 - (4a)c)^/2) / 2a
-root2 = (-b - (b^2 - (4a)c)^/2) / 2a
+let quadratic = (a:real b:real c:real x:real) => a(x^2) + b(x) + c
+let root1 = (-b + (b^2 - (4a)c)^/2) / 2a
+let root2 = (-b - (b^2 - (4a)c)^/2) / 2a
 ```
 
-Juxtaposition multiplies when both sides are numeric, and calls when the left side is a function:
+## Mathematical Library
 
+Constants such as `pi` and functions such as `sin`, `cos`, and `sqrt` belong in the ordinary library namespace rather than requiring a separate formula language. Their precise types depend on the still-provisional rational, real, and floating-point hierarchy.
+
+<!-- dewy-example: design-only -->
 ```dewy
-identity = sin(x)^2 + cos(x)^2
-2(x + 1)
+let identity = sin(x)^2 + cos(x)^2
+let message = "result: {sqrt(64) + 9 * cos(pi)}"
 ```
 
-See [Operators](operators.md) for the full table, including shifts and elementwise `.`.
+Complex numbers and quaternions are intended numeric domains, but their construction, literal, promotion, and exceptional-value rules have not been selected. This draft therefore does not invent literal syntax for them.
 
-## Constants and Functions
+## Vectorized Operations
 
-`pi` and `inf` are language constants. `sin`, `cos`, `sqrt`, and the rest of the usual real functions are ordinary functions. Complex and quaternion literals are in [Basic Data Types](basic-data-types.md).
+A leading `.` on an operator is intended to apply it elementwise. Broadcasting and Boolean array selection must be specified with the multidimensional shape model before these examples become normative:
 
+<!-- dewy-example: design-only -->
 ```dewy
-my_expression = 'string with the expression {sqrt(64) + 9 * cos(pi)}'
+let primes = [2 3 5 7 11 13 17 19]
+let remainders = 20 .% primes
+let factors = primes[remainders .=? 0]
 ```
 
-## Broadcasting
-
-Prefix `.` on an operator applies it per element:
-
-```dewy
-primes = [2 3 5 7 11 13 17 19]
-mods = 20 .% primes             # [0 2 0 6 9 7 3 1]
-is_factor = mods .=? 0          # [true false true false false false false false]
-p_factors = primes[is_factor]   # [2 5]
-```
-
-## Units
-
-Numbers can carry dimensions. `10kg * (30m/s)^2` is energy. See [Units](units.md).
+Physical quantities compose with the same numeric model; see [Physical Quantities and Units](units.md).

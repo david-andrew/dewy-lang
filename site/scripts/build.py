@@ -207,6 +207,7 @@ def write_sitemap() -> None:
 def main() -> None:
     mdbook = require_tool("mdbook")
     require_tool("wat2wasm")
+    run([sys.executable, "site/scripts/check_dewy_examples.py"])
     copy_static_site()
     build_book(LEARN, DIST / "learn", mdbook)
     build_book(REFERENCE, DIST / "reference", mdbook)

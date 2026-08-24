@@ -62,6 +62,11 @@ Build an operating system from the ground up with security primitives designed i
 - **Parallelism:** work stealing, parallel collection operations, task graphs and futures, later GPU/distributed tiers, and carefully designed low-level synchronization and channel primitives.
 - **Sandboxes and harnesses:** convenient restricted execution and test/program harnesses.
 
+## Language-and-library drafts awaiting settled foundations
+
+- **Everyday mathematics:** turn `learn/src/ch03/basic-math.md` into a practical guide once fractional numerics, ordinary juxtaposition multiplication, the core math library, and vectorized operations have settled contracts. The current draft remains source material but is not in the published navigation.
+- **Arrays and linear algebra:** turn `learn/src/ch03/linear-algebra.md` into a real walkthrough once multidimensional literal syntax, contiguous shapes, axis selection, broadcasting, and matrix overloads are sufficiently settled. Nested arrays remain covered by the ordinary container chapter in the meantime.
+
 ## Promotion criteria
 
 A project should enter the published navigation when it:

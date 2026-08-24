@@ -5,7 +5,7 @@ The complete language website lives under `site/` and builds into the ignored
 
 ## Local prerequisites
 
-- Python 3.12 or newer
+- Python 3.14 or newer
 - [mdBook](https://rust-lang.github.io/mdBook/)
 - [WABT](https://github.com/WebAssembly/wabt), providing `wat2wasm`
 
@@ -35,9 +35,11 @@ python -m http.server --directory site/dist 8000
 - `udewy/reference/` is the µDewy spec book. Its `src/` is generated from `udewy/README.md` at build time.
 - The showcase compiles selected µDewy wasm demos into `dist/udewy/showcase/demos/`.
 - `playground/` documents the generated µDewy browser playground.
-- `scripts/` contains the build, a file watcher, and output checks.
+- `scripts/` contains the build, a file watcher, local-link validation, and published Dewy-example checks.
 - The repo-root `install.sh` is copied to the site root; `udewy/install.sh` is copied to `/udewy/install.sh`.
 - µDewy code blocks are prerendered from the tokenizer highlighter during the site build.
 
 The GitHub Pages workflow runs the same build command. Do not edit `dist/`
 directly.
+
+Published `dewy` code fences are parser-checked by default. Self-contained examples can opt into semantic checking with `<!-- dewy-example: compiler -->`, while syntax that is explicitly part of a provisional design uses `<!-- dewy-example: design-only -->`. See `DOCUMENTATION_GUIDE.md` for the complete policy.

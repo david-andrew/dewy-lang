@@ -18,9 +18,11 @@ Scalar, array, object, string, and container values all follow this rule. A fiel
 
 `@` explicitly selects the place occupied by a mutable value. A parameter that accepts a place also carries `@`, making caller-visible mutation explicit at both boundaries:
 
+<!-- dewy-example: compiler -->
 ```dewy
-let update = (@xs:array<int64 length=3>):>void =>
+let update = (@xs:array<int64 length=3>):>void => {
     xs[0] = 9
+}
 
 let values = [1 2 3]
 update(@values)
@@ -30,7 +32,7 @@ Passing `values` without `@` supplies an ordinary value. Passing `@values` to a 
 
 ## Projected Routes
 
-Selectors after `@` project the root place to the location at the end of the route:
+A leading `@` selects the place at the end of the complete field-and-index route:
 
 ```dewy
 set(@pair.left)
@@ -38,7 +40,7 @@ set(@values[i])
 set(@box.rows[row][column])
 ```
 
-`@pair.left` means `(@pair).left`. `@(pair.left)` is equivalent. There is no `pair.@left` form. A computed index in a place route evaluates once before the call.
+The parser groups `@pair.left` as `(@pair).left`, but the language does not expose `@pair` as a separate reference value before applying `.left`. The whole expression refers to the place occupied by `left`. `@(pair.left)` selects the same place, and there is no `pair.@left` form. A computed index in a place route evaluates once before the call.
 
 ## Type and Aliasing Rules
 

@@ -9,6 +9,7 @@ cd ~/code/greetings
 
 Create `greetings.dewy` with this source:
 
+<!-- dewy-example: compiler -->
 ```dewy
 let greet = (name:string):>void =>
     printl"Hello, {name}!"
@@ -44,6 +45,7 @@ This small program already shows several recurring parts of Dewy:
 
 The one-line traditional greeting is valid too:
 
+<!-- dewy-example: compiler -->
 ```dewy
 printl'Hello, World!'
 ```
@@ -56,6 +58,7 @@ Dewy executes top-level code in source order. A small program therefore needs no
 
 When a module declares `main`, its top level still initializes first and Dewy calls `main` afterward:
 
+<!-- dewy-example: compiler -->
 ```dewy
 const application_name = "notes"
 

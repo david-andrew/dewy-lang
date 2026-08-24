@@ -31,17 +31,29 @@ The exact general multidimensional literal and type syntax remains provisional. 
 
 A dictionary literal uses `->` pairs; a bidictionary uses `<->` pairs and supports lookup in both directions:
 
+<!-- dewy-example: design-only -->
 ```dewy
 let scores = ["Ada" -> 10 "Grace" -> 12]
 let names = [1 <-> "one" 2 <-> "two"]
 ```
 
-The broad literal distinction is settled, while complete type, collision, mutation, ordering, and representation rules remain provisional.
+Dictionaries retain insertion order, and iteration yields key/value pairs in that order:
+
+<!-- dewy-example: compiler -->
+```dewy
+let scores = ["Ada" -> 10 "Grace" -> 12]
+
+loop [name score] in scores
+    printl"{name}: {score}"
+```
+
+The broad literal distinction and insertion-order guarantee are settled, while complete type, lookup, collision, deletion, equality, mutation, and representation rules remain provisional.
 
 ## Sets
 
 The intended set form is `set[...]`:
 
+<!-- dewy-example: design-only -->
 ```dewy
 let permissions = set["read" "write"]
 ```

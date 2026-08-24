@@ -12,7 +12,7 @@ let apply = (
     value:int64
 ):>int64 => transform(value)
 
-let square = value => value^2
+let square = (value:int64) => value^2
 apply(@square 5)
 ```
 
@@ -41,6 +41,7 @@ The array collects what the loop expresses. No separate comprehension or callbac
 
 Reusable library functions can be built from the same pattern once generic function contracts are available:
 
+<!-- dewy-example: design-only -->
 ```dewy
 let map = <T U>(
     transform:<(value:T):>U>
@@ -55,8 +56,9 @@ let map = <T U>(
 
 A function handle can bind some arguments now and leave the rest open:
 
+<!-- dewy-example: design-only -->
 ```dewy
-let add = (left right) => left + right
+let add = (left:int64 right:int64) => left + right
 let add5 = @add(5)
 
 add5(24)       # 29
@@ -71,7 +73,7 @@ A nested function can use names from its lexical environment:
 ```dewy
 let counter = (start:int64=0) => [
     value = start
-    increment = () => value += 1
+    increment = () => (value += 1)
 ]
 ```
 

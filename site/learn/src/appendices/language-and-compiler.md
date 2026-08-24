@@ -13,11 +13,11 @@ Settled design remains part of the normal Learn and Reference prose. Provisional
 
 ## Current Compiler Snapshot
 
-The hosted compiler currently covers a substantial core: bindings and scope, fixed-width integer and Boolean operations, functions and calls, defaults and keyword arguments, static overload selection, conditionals and loops, ranges, strings and grapheme iteration, homogeneous arrays, structural objects, optional values and narrowing, explicit nonescaping places, source modules and imports, and the initial `Time`/`Duration` facilities.
+The hosted compiler currently covers a substantial core: bindings and scope, fixed-width integer and Boolean operations, functions and calls, defaults and keyword arguments, static overload selection, conditionals and loops, compile-time-anchored range values, streamed and materialized string interpolation, grapheme operations, homogeneous arrays, structural objects, optional values and narrowing, initial dictionary literal iteration, explicit nonescaping places, source modules and imports, and the initial `Time`/`Duration` facilities.
 
-Important partial areas include arbitrary-precision `int` representation, arrays whose storage requirements escape their current scope, materialized interpolated-string values, general physical dimensions, function handles and closures, and broader host support.
+Important partial areas include arbitrary-precision `int` representation, arrays whose storage requirements escape their current scope, interpolation through user-defined conversions, ranges with runtime anchors or runtime storage, general physical dimensions, function handles and closures, runtime dictionary operations, and broader host support.
 
-Major design or implementation frontiers include floating-point and exact real arithmetic, general user-written generics, dictionaries and sets, complete refinements and effects, broadcasting and multidimensional array operations, pattern matching, generators as stored values, and general compile-time evaluation.
+Major design or implementation frontiers include floating-point and exact real arithmetic, general user-written generics and unannotated generic inference, growable dictionaries and sets, complete refinements and effects, broadcasting and multidimensional array operations, pattern matching and general unions, generators as stored values, automatic-call behavior inside function-valued member routes, and general compile-time evaluation.
 
 This summary is intentionally broad. The repository's [implementation status](https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md) is the authoritative detailed checklist.
 

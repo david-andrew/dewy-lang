@@ -42,11 +42,6 @@
 - [Modules, Imports, and the Prelude](ch03/imports.md)
 - [The Standard Library](ch04/00-stdlib.md)
 
-## Dewy in Different Domains
-
-- [Everyday Mathematics](ch03/basic-math.md)
-- [Arrays and Linear Algebra](ch03/linear-algebra.md)
-
 ## Appendices
 
 - [Language Feature Index](01-features-list.md)

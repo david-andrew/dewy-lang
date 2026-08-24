@@ -6,9 +6,13 @@ Dewy source is Unicode text. Source-file suffixes are conventional and do not al
 
 ## Identifiers
 
-Identifiers support Latin and Greek letters, selected mathematical symbols, decimal digits after the first character, and language-defined decorations. Identifiers and word operators are case-sensitive unless a particular imported API specifies otherwise.
+An identifier contains at least one base character. Decorations may appear before or after that base character, and decimal digits may follow it.
 
-Reserved operator words such as `and`, `or`, `not`, `in`, `as`, and `transmute` tokenize as operators in their grammatical contexts.
+The current base repertoire contains ASCII Latin letters, the ordinary Greek alphabet, `_`, `‾`, `!`, `°`, and selected mathematical letter symbols such as `ℂ`, `ℕ`, `ℤ`, `ℚ`, and `ℝ`. Decorations include the supported Unicode superscript and subscript letters and digits, prime marks, and `℠`, `™`, `©`, and `®`.
+
+Identifiers are case-sensitive. The exact Unicode repertoire and its normalization/security policy remain provisional; implementations must document the repertoire they accept and must not silently normalize two distinct source spellings into one binding.
+
+Reserved operator words such as `and`, `or`, `not`, `in`, `as`, and `transmute` tokenize as operators in their grammatical contexts. A word operator cannot simultaneously be used as an ordinary identifier in that context.
 
 ## Whitespace and Juxtaposition
 

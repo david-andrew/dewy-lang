@@ -22,17 +22,20 @@ The following principles organize the language and should be treated as normativ
 These areas have a clear direction, but some syntax, edge cases, or runtime contracts remain undecided:
 
 - user-written generic functions and generic structural objects;
+- inference for unannotated function parameters when the body requires overloaded operations;
 - first-class function handles, partial evaluation, captures, and closure identity;
+- automatic-call behavior when a function-valued node occurs before the end of a member route;
 - the exact liquid-refinement language, proof boundary, and `unsafe` obligations;
 - the general effect vocabulary and effect-polymorphic contracts;
 - multidimensional array shape syntax, broadcasting, and contiguous layout selection;
-- dictionary, bidictionary, and set mutation, collision, and ordering rules;
+- dictionary, bidictionary, and set mutation, collision, deletion, and equality rules;
 - the complete numeric hierarchy beyond integers;
-- materialized interpolation and the overloadable string-conversion protocol;
+- the overloadable string-conversion protocol beyond built-in conversions;
 - complete physical-dimension arithmetic, units, and conversion policy;
 - runtime-length aggregate ownership, returns, and escaping places;
 - pattern matching, stored generators, and general unpack/collect behavior;
-- compile-time evaluation and metaprogramming beyond type-valued expressions and imports.
+- compile-time evaluation and metaprogramming beyond type-valued expressions and imports;
+- the final Unicode identifier repertoire and source-normalization policy.
 
 A normative page may describe the decided portion of one of these areas, but must not silently choose an unresolved rule.
 
