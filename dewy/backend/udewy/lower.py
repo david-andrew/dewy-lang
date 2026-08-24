@@ -93,9 +93,9 @@ type ArrayUse = Literal[
     'index_read',
     'index_write',
     'alias',
-    'call_boundary',
     'call_boundary_pending',
     'safe_call_boundary',
+    'copy_call_boundary',
     'representation',
 ]
 
@@ -1107,6 +1107,12 @@ class _Lowerer:
         scope: _Scope,
         current_function: _FunctionDef | None,
     ) -> bool:
+        """Record copy provenance for representation analysis.
+
+        The edge does not represent a Dewy-level alias: lowering must still
+        give the new binding independent mutable contents.
+        """
+
         if (
             current_function is None
             or binding.semantic_id is None
@@ -1352,6 +1358,11 @@ class _Lowerer:
                             iterator.iterable,
                             scope,
                             current_function,
+                            array_use=(
+                                'index_read'
+                                if isinstance(iterator.iterable.type, ty.ArrayType)
+                                else None
+                            ),
                         )
                 else:
                     self._discover_node(arm.condition, scope, current_function)
@@ -1520,6 +1531,8 @@ class _Lowerer:
         self._build_array_parameter_analyses()
 
     def _build_array_alias_groups(self) -> None:
+        # These groups collect copy provenance so representation requirements
+        # propagate between related bindings. They are not observable aliases.
         binding_ids = {
             *self.array_declarations,
             *self.array_parameters,
@@ -1566,23 +1579,28 @@ class _Lowerer:
 
     def _build_array_parameter_analyses(self) -> None:
         self.array_parameter_analyses = {}
-        allowed_uses: set[ArrayUse] = {'length', 'index_read', 'index_write'}
+        # A read-only parameter may borrow the caller's storage because the
+        # sharing is unobservable. A writing parameter receives a value copy.
+        allowed_uses: set[ArrayUse] = {
+            'length',
+            'index_read',
+            'safe_call_boundary',
+            'copy_call_boundary',
+        }
         for binding_id, (function, parameter) in self.array_parameters.items():
             group_id = self.array_alias_group_by_binding[binding_id]
             group = self.array_alias_groups[group_id]
             uses: frozenset[ArrayUse] = frozenset(
-                use for use in self.array_group_uses[group_id] if use != 'alias'
-            )
-            same_function = all(
-                self.binding_by_semantic_id[member].owner_function is function
-                for member in group
+                use
+                for use in self.array_uses.get(binding_id, set())
+                if use != 'alias'
             )
             self.array_parameter_analyses[binding_id] = ArrayParameterAnalysis(
                 function,
                 parameter,
                 group,
                 uses,
-                same_function and uses <= allowed_uses,
+                uses <= allowed_uses,
             )
 
     def _analyze_array_call_boundaries(self) -> dict[int, set[ArrayUse]]:
@@ -1618,17 +1636,14 @@ class _Lowerer:
                     and parameter_analysis is not None
                     and parameter_analysis.adapter_safe
                     and source is not None
-                    and source.kind != 'param'
-                    and raw_kind is not None
-                    and self._raw_array_group_uses_are_safe(group, raw_kind)
-                    and not (
-                        raw_kind == 'static_bytes'
-                        and 'index_write' in parameter_analysis.uses
+                    and (
+                        raw_kind is None
+                        or self._raw_array_group_uses_are_safe(group, raw_kind)
                     )
                 )
                 if source_id is not None:
                     boundary_uses[source_id].add(
-                        'safe_call_boundary' if safe else 'call_boundary'
+                        'safe_call_boundary' if safe else 'copy_call_boundary'
                     )
                 self.array_call_boundary_analyses[(id(call), position)] = (
                     ArrayCallBoundaryAnalysis(
@@ -1766,6 +1781,7 @@ class _Lowerer:
             for use in self.array_uses.get(binding_id, set())
         } - {'alias', 'call_boundary_pending'}
         allowed: set[ArrayUse] = {'length', 'index_read'}
+        allowed.add('copy_call_boundary')
         if raw_kind == 'stack_data':
             allowed.add('index_write')
         return uses <= allowed
@@ -1777,6 +1793,7 @@ class _Lowerer:
             'index_read',
             'index_write',
             'safe_call_boundary',
+            'copy_call_boundary',
         }
         for group_id, group in self.array_alias_groups.items():
             roots = [
@@ -1808,7 +1825,12 @@ class _Lowerer:
             ):
                 continue
             uses = self.array_uses.get(binding_id, set())
-            if not uses <= {'length', 'index_read', 'safe_call_boundary'}:
+            if not uses <= {
+                'length',
+                'index_read',
+                'safe_call_boundary',
+                'copy_call_boundary',
+            }:
                 continue
             array_type = node.annotation or node.expr.type
             assert isinstance(array_type, ty.ArrayType)
@@ -2790,6 +2812,29 @@ class _Lowerer:
                 return self._lower_object_declare(node, declared_type)
             if self._array_representation(node) == 'stack_data':
                 return self._lower_stack_array_declare(node)
+            if (
+                isinstance(declared_type, ty.ArrayType)
+                and self._array_argument_binding(node.expr) is not None
+            ):
+                copy_type = (
+                    node.expr.type
+                    if isinstance(node.expr.type, ty.ArrayType)
+                    and node.expr.type.length is not None
+                    else declared_type
+                )
+                copy_prelude, copied = self._clone_array_value(
+                    node.expr,
+                    copy_type,
+                )
+                return [
+                    *copy_prelude,
+                    replace(
+                        node,
+                        decltype='let',
+                        annotation='int64',
+                        expr=copied,
+                    ),
+                ]
             prelude, expr = self._extract_expression(node.expr)
             annotation = (
                 'int64'
@@ -2884,6 +2929,8 @@ class _Lowerer:
                 return self._lower_object_field_assign(node)
             if isinstance(node.target.type, ty.ObjectType):
                 return self._lower_object_assign(node)
+            if isinstance(node.target.type, ty.ArrayType):
+                return self._lower_array_assign(node)
             payload = (
                 self.optional_payloads.get(node.target.binding_id)
                 if node.target.binding_id is not None
@@ -3201,6 +3248,19 @@ class _Lowerer:
                         arg,
                         boundary,
                     )
+                elif (
+                    boundary is not None
+                    and boundary.parameter is not None
+                    and isinstance(boundary.parameter.type, ty.ArrayType)
+                ):
+                    copy_type = boundary.parameter.type
+                    if self._array_argument_binding(arg) is not None:
+                        arg_prelude, lowered_arg = self._clone_array_value(
+                            arg,
+                            copy_type,
+                        )
+                    else:
+                        arg_prelude, lowered_arg = self._extract_expression(arg)
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
@@ -3219,6 +3279,19 @@ class _Lowerer:
                         arg,
                         boundary,
                     )
+                elif (
+                    boundary is not None
+                    and boundary.parameter is not None
+                    and isinstance(boundary.parameter.type, ty.ArrayType)
+                ):
+                    copy_type = boundary.parameter.type
+                    if self._array_argument_binding(arg) is not None:
+                        arg_prelude, lowered_arg = self._clone_array_value(
+                            arg,
+                            copy_type,
+                        )
+                    else:
+                        arg_prelude, lowered_arg = self._extract_expression(arg)
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType):
@@ -6017,16 +6090,74 @@ class _Lowerer:
         node: hir.Declare,
     ) -> list[hir.AST]:
         if not isinstance(node.expr, hir.ArrayLiteral):
+            array_type = node.annotation or node.expr.type
+            if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
+                raise TypeError(
+                    'INTERNAL ERROR: stack-data array copy requires an exact length'
+                )
+            self._require_array_value_copy_elements(array_type, node)
+            source_is_raw = self._array_use_representation(node.expr) is not None
             prelude, source = self._extract_expression(node.expr)
-            return [
+            element_bytes, _signed = self._array_element_layout(
+                array_type.element,
+                node,
+            )
+            target = hir.ExpressedIdentifier(
+                node.loc,
+                'int64',
+                node.name,
+                binding_id=node.binding_id,
+            )
+            statements: list[hir.AST] = [
                 *prelude,
                 replace(
                     node,
                     decltype='let',
                     annotation='int64',
-                    expr=source,
+                    expr=self._intrinsic_call(
+                        '__alloca__',
+                        [self._int64_literal(
+                            node.loc,
+                            max(1, array_type.length * element_bytes),
+                        )],
+                        'int64',
+                        node.loc,
+                    ),
                 ),
             ]
+            for index in range(array_type.length):
+                source_address = (
+                    self._pointer_element_address(
+                        source,
+                        index,
+                        element_bytes,
+                        node.loc,
+                    )
+                    if source_is_raw
+                    else self._array_element_address(
+                        source,
+                        index,
+                        array_type.element,
+                        node.loc,
+                    )
+                )
+                value = self._array_load(
+                    source_address,
+                    array_type.element,
+                    node.loc,
+                )
+                statements.append(self._array_store(
+                    value,
+                    self._pointer_element_address(
+                        target,
+                        index,
+                        element_bytes,
+                        node.loc,
+                    ),
+                    array_type.element,
+                    node.loc,
+                ))
+            return statements
         array_type = node.expr.type
         if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
             raise TypeError(
@@ -6076,6 +6207,166 @@ class _Lowerer:
                 self._array_store(value, address, array_type.element, item.loc)
             )
         return statements
+
+    def _lower_array_assign(self, node: hir.Assign) -> list[hir.AST]:
+        """Rebind an array without making the target another name for the source."""
+
+        if node.op != '=':
+            self._target_error(node, f'array compound assignment `{node.op}`')
+        array_type = node.target.type
+        if not isinstance(array_type, ty.ArrayType):
+            raise TypeError('INTERNAL ERROR: array assignment target lost its type')
+        if self._array_use_representation(node.target) == 'stack_data':
+            prelude, copied = self._clone_array_to_raw(node.value, array_type)
+        elif self._array_argument_binding(node.value) is not None:
+            prelude, copied = self._clone_array_value(node.value, array_type)
+        else:
+            # Literals and returned temporaries already own fresh storage, so
+            # rebinding may transfer that storage without an observable copy.
+            prelude, copied = self._extract_expression(node.value)
+        return [*prelude, replace(node, value=copied)]
+
+    def _require_array_value_copy_elements(
+        self,
+        array_type: ty.ArrayType,
+        node: hir.AST,
+    ) -> None:
+        """Reject element categories whose recursive value copy is not lowerable yet."""
+
+        if isinstance(array_type.element, (ty.ArrayType, ty.ObjectType)):
+            element_kind = (
+                'nested array'
+                if isinstance(array_type.element, ty.ArrayType)
+                else 'object'
+            )
+            self._target_error(
+                node,
+                f'value-copying arrays with {element_kind} elements',
+            )
+
+    def _clone_array_to_raw(
+        self,
+        node: hir.AST,
+        array_type: ty.ArrayType,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Copy one exact array value into fresh descriptor-free stack data."""
+
+        if array_type.length is None:
+            self._target_error(node, 'value-copying a dynamic-length raw array')
+        self._require_array_value_copy_elements(array_type, node)
+        source_is_raw = self._array_use_representation(node) is not None
+        source_prelude, source = self._extract_expression(node)
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            node,
+        )
+        name = self._new_array_name('copy_data')
+        target = hir.ExpressedIdentifier(node.loc, 'int64', name)
+        statements: list[hir.AST] = [
+            *source_prelude,
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [self._int64_literal(
+                        node.loc,
+                        max(1, array_type.length * element_bytes),
+                    )],
+                    'int64',
+                    node.loc,
+                ),
+            ),
+        ]
+        for index in range(array_type.length):
+            source_address = (
+                self._pointer_element_address(
+                    source,
+                    index,
+                    element_bytes,
+                    node.loc,
+                )
+                if source_is_raw
+                else self._array_element_address(
+                    source,
+                    index,
+                    array_type.element,
+                    node.loc,
+                )
+            )
+            value = self._array_load(
+                source_address,
+                array_type.element,
+                node.loc,
+            )
+            statements.append(self._array_store(
+                value,
+                self._pointer_element_address(
+                    target,
+                    index,
+                    element_bytes,
+                    node.loc,
+                ),
+                array_type.element,
+                node.loc,
+            ))
+        return statements, target
+
+    def _clone_array_value(
+        self,
+        node: hir.AST,
+        array_type: ty.ArrayType,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Materialize a fresh exact array descriptor and element buffer."""
+
+        if array_type.length is None:
+            self._target_error(node, 'value-copying a dynamic-length array')
+        self._require_array_value_copy_elements(array_type, node)
+        source_is_raw = self._array_use_representation(node) is not None
+        source_prelude, source = self._extract_expression(node)
+        allocation, target = self._allocate_array_value(array_type, node.loc)
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            node,
+        )
+        statements = [*source_prelude, *allocation]
+        descriptor = replace(target, type='int64')
+        for index in range(array_type.length):
+            source_address = (
+                self._pointer_element_address(
+                    source,
+                    index,
+                    element_bytes,
+                    node.loc,
+                )
+                if source_is_raw
+                else self._array_element_address(
+                    source,
+                    index,
+                    array_type.element,
+                    node.loc,
+                )
+            )
+            value = self._array_load(
+                source_address,
+                array_type.element,
+                node.loc,
+            )
+            statements.append(self._array_store(
+                value,
+                self._array_element_address(
+                    descriptor,
+                    index,
+                    array_type.element,
+                    node.loc,
+                ),
+                array_type.element,
+                node.loc,
+            ))
+        return statements, target
 
     def _extract_array_literal(
         self,

@@ -1,0 +1,47 @@
+let mutate = (items:array<int64 length=2>):>int64 => {
+    items[0] = 20
+    return items[0] + items[1]
+}
+
+let mutate_copy = (items:array<int64 length=2>):>int64 => {
+    let local = items
+    local[0] = 20
+    return items[0] + local[0]
+}
+
+let main = ():>int64 => {
+    let original = [1 2]
+    let copy = original
+    copy[0] = 9
+
+    let transitive = copy
+    transitive[1] = 8
+
+    const snapshot = copy
+    copy[1] = 7
+
+    let rebound = [0 0]
+    rebound = copy
+    rebound[0] = 6
+
+    let argument = [10 2]
+    let call_result:int64 = mutate(argument)
+    let local_copy_result:int64 = mutate_copy(argument)
+
+    let labels = ["original" "kept"]
+    let labels_copy = labels
+    labels_copy[0] = "changed"
+
+    if original[0] =? 1 and original[1] =? 2
+        and copy[0] =? 9 and copy[1] =? 7
+        and transitive[0] =? 9 and transitive[1] =? 8
+        and snapshot[0] =? 9 and snapshot[1] =? 2
+        and rebound[0] =? 6 and rebound[1] =? 7
+        and argument[0] =? 10 and argument[1] =? 2
+        and call_result =? 22 and local_copy_result =? 30
+        and labels[0] =? "original" and labels_copy[0] =? "changed" {
+        return 42
+    } else {
+        return 1
+    }
+}

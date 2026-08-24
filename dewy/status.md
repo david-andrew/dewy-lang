@@ -134,11 +134,13 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Bounds facts from comparisons, arithmetic, loops, and range iterators.
 - [x] `bool`, string/grapheme, function, nested-array, and object-handle element layouts.
 - [x] Non-escaping function-local `let` and `const` bindings initialized by an exact-length array literal use only a fresh stack element buffer when every use is `.length`, an indexed read, or an indexed write.
+- [x] Ordinary binding, rebinding, and argument passing give exact-length scalar/function/immutable-string-element arrays independent values. Read-only calls may borrow the source invisibly; calls that might mutate receive fresh element storage.
 - [x] Exact-length scalar/function array return values use caller-owned descriptor and element storage, including direct literals, returned locals, forwarding calls, and indirect or method calls with an exact return type.
 - [x] Left-to-right iteration over arrays of settled scalar, function, and immutable string-like elements. Dynamic-length arrays work as single iterators, and exact-length arrays compose with other multiiterator leaves.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
 - [ ] Returning arrays whose storage requirement is not known at the call site, arrays of handles that require nested ownership handling, and other escapes into longer-lived storage.
+- [ ] Recursive value copies for nested-array and mutable-object elements, and general value copies whose array length is known only at runtime.
 
 ## Ranges and range iteration
 
@@ -184,8 +186,9 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Anonymous object literals with named fields in source order.
 - [x] Structural object types and named compile-time `type` aliases used in annotations.
 - [x] Field read and write, nested objects, and exact name/type/order matching.
-- [x] Object parameters, returns, and constructors (functions that return literals), with value-semantics copies.
-  - [ ] The intended rule for arrays, objects, and places is recorded in [`semantic/value_semantics.md`](semantic/value_semantics.md); `@` places are not implemented.
+- [x] Object parameters, returns, and constructors (functions that return literals), with field-by-field copies of directly stored and nested-object fields.
+- [ ] Recursive value copies for mutable handle-valued fields such as arrays.
+- [ ] Explicit `@` places under the intended rule recorded in [`semantic/value_semantics.md`](semantic/value_semantics.md).
 - [x] Function fields, including parenthesis-free zero-argument calls on member access, and object-local reads or compound assignment of sibling fields.
 - [x] Sequential udewy layout for `bool`, fixed-width integers, function pointers, string/array handles, and nested objects of those types.
 - [ ] Dictionary and bidictionary `[]` forms.
@@ -226,11 +229,11 @@ The source-level type of a value describes its semantics, not a mandatory machin
 The current backend still uses a canonical pointer to a 48-byte descriptor containing `data`, `length`, `capacity`, `stride`, `flags`, and `owner` for most arrays. Two proven cases omit it:
 
 - Module-scope `const` arrays whose binding-identity use set contains only `.length`, indexed reads, and proven-safe direct-call boundaries can use raw static storage. Compatible one-word literals and function references use udewy's internal `__static_words__`, while exact based bytes use their static data pointer.
-- A function-local `let` or `const` binding initialized directly by an exact-length `ArrayLiteral` uses a fresh `__alloca__` element buffer when all uses are `.length`, indexed reads or writes, simple same-function aliases, or proven-safe direct-call boundaries. Transitive aliases copy the raw pointer, so reads and writes share the same storage. Length is folded from the exact type, element stride is compiled into address arithmetic, and width-correct loads and stores address the buffer directly. Semantic checking still rejects indexed writes through a `const` binding.
+- A function-local `let` or `const` binding initialized directly by an exact-length `ArrayLiteral` uses a fresh `__alloca__` element buffer when all uses are `.length`, indexed reads or writes, ordinary same-function copies, or analyzed call boundaries. Each downstream binding gets independent element storage when either value could be mutated. Length is folded from the exact type, element stride is compiled into address arithmetic, and width-correct loads and stores address the buffer directly. Semantic checking still rejects indexed writes through a `const` binding.
 
-For a statically resolved direct or selected-overload call, a parameter whose alias closure only observes length or indexed reads/writes is adapter-safe. Lowering wraps raw local/static data in a temporary canonical descriptor in the call prelude without copying elements; the callee ABI and indexing remain descriptor-based. Read-only exact static bytes use borrowed-static flags.
+For a statically resolved direct or selected-overload call, a parameter that only observes length, indexed reads, or other read-only calls is adapter-safe. Lowering wraps raw local/static data in a temporary canonical descriptor in the call prelude without copying elements; the callee ABI and indexing remain descriptor-based. When the callee may write or the call cannot be analyzed, exact arrays are copied into fresh descriptor-backed element storage first. Read-only exact static bytes use borrowed-static flags.
 
-Exact-length scalar/function array returns use a hidden destination supplied by the caller. The caller allocates the descriptor and element buffer in its own frame, and the callee initializes or copies into that storage before returning; a directly returned call forwards the same destination through wrapper functions. No callee-local array storage escapes. Handle elements remain rejected until their nested backing storage can receive the same ownership treatment. Whole-array assignment, object storage, other escapes, casts, parameter forwarding, nonliteral/control-flow initializers, aliases outside one function, and unclassified uses conservatively retain the descriptor. Static-byte mutation retains the descriptor and copy-on-write path. Control-flow representation joins, general or transitive effect analysis, indirect/method adapters, and descriptor-free specialized direct-call ABIs remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
+Exact-length scalar/function array returns use a hidden destination supplied by the caller. The caller allocates the descriptor and element buffer in its own frame, and the callee initializes or copies into that storage before returning; a directly returned call forwards the same destination through wrapper functions. No callee-local array storage escapes. Whole-array binding and assignment now copy exact arrays of scalar, function, and immutable string-like elements. Recursive mutable elements, dynamic-length copies, object storage, other escapes, casts, aliases outside one function, and unclassified uses conservatively retain the descriptor or report that lowering is not implemented. Control-flow representation joins, general or transitive effect analysis, indirect/method read-only adapters, and descriptor-free specialized direct-call ABIs remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
 
 The intended rule is that each value receives the least runtime representation needed by all of its reachable uses. For arrays this includes:
 
@@ -269,7 +272,8 @@ Incremental implementation work:
 - [x] Record an initial representation requirement per semantic binding for module `const` arrays, selecting raw storage only when every reachable use is `.length`, an indexed read, or a proven-safe direct-call boundary.
 - [x] Emit eligible module `const` arrays of stable 64-bit words, compatible non-extern function references, or exact based bytes as raw static data with compile-time length and stride.
 - [x] Scalar-replace eligible non-escaping exact local array literals with a fresh raw stack-data buffer, direct width-aware indexed reads and writes, and compile-time `.length`.
-- [x] Propagate raw stack data through simple same-function alias chains and materialize canonical descriptors without copying for proven-safe direct and selected-overload call boundaries.
+- [x] Give simple same-function exact-array bindings independent raw stack buffers; materialize borrowed canonical descriptors without copying at proven read-only direct and selected-overload call boundaries.
+- [x] Copy exact arrays into fresh element storage for ordinary whole-array rebinding and calls that may mutate or cannot yet be proven read-only.
 - [x] Return exact-length scalar/function arrays through caller-owned result storage, copying direct literals or existing arrays and forwarding destinations through wrapper calls without exposing callee-local allocations.
 - [ ] Generalize representation requirements across control-flow joins, general/transitive effects, cross-function aliases, indirect or method calls, and additional element/storage classes.
 - [ ] Elide array length, capacity, stride, flags, and ownership metadata for additional runtime array representations when each fact is unused or available statically.

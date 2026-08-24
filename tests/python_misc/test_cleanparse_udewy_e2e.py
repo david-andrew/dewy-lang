@@ -56,6 +56,7 @@ LOWERED_CASES = [
     ('array_call_adapters.dewy', 42),
     ('array_returns.dewy', 42),
     ('array_iteration.dewy', 42),
+    ('array_value_semantics.dewy', 42),
     ('range_bound_forms.dewy', 42),
     ('iterator_labeled_exits.dewy', 42),
     ('optional_values.dewy', 42),
@@ -147,16 +148,27 @@ def test_array_call_adapter_fixture_codegen_shape() -> None:
     assert 'const words:int64 = __static_words__(0 2)' in emitted
     assert 'const bytes:int64 = 0x"2802"' in emitted
     assert 'let local:int64 = __alloca__(16)' in emitted
-    assert 'let alias:int64 = local' in emitted
-    assert 'let transitive:int64 = alias' in emitted
+    assert 'let alias:int64 = __alloca__(16)' in emitted
+    assert 'let transitive:int64 = __alloca__(16)' in emitted
+    assert 'let alias:int64 = local' not in emitted
+    assert 'let transitive:int64 = alias' not in emitted
+    assert emitted.count('__alloca__(16)') == 6
     assert emitted.count('__alloca__(48)') == 4
-    assert '__store_i64__(transitive __dewy_array_1)' in emitted
-    assert '__store_i64__(words __dewy_array_2)' in emitted
-    assert '__store_i64__(bytes __dewy_array_3)' in emitted
-    assert '__store_i64__(2 __dewy_array_3 + 32)' in emitted
-    assert '__store_i64__(selected_values __dewy_array_4)' in emitted
-    assert 'let overload_result:int64 = read_array(__dewy_array_4)' in emitted
-    assert '__dewy_array_data_' not in emitted
+    assert '__store_i64__(__load_i64__(transitive) __load_i64__(__dewy_array_1))' in emitted
+    assert '__store_i64__(__load_i64__(words) __load_i64__(__dewy_array_3))' in emitted
+    assert '__store_i64__(bytes __dewy_array_5)' in emitted
+    assert '__store_i64__(2 __dewy_array_5 + 32)' in emitted
+    assert '__store_i64__(selected_values __dewy_array_6)' in emitted
+    assert 'let overload_result:int64 = read_array(__dewy_array_6)' in emitted
+    assert 'local_result =? 42 and __load_i64__(local) =? 0' in emitted
+
+
+def test_array_value_semantics_fixture_copies_mutable_bindings() -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'array_value_semantics.dewy'))
+
+    assert 'let copy:int64 = original' not in emitted
+    assert 'let transitive:int64 = copy' not in emitted
+    assert 'let snapshot:int64 = copy' not in emitted
 
 
 def test_keyword_default_fixture_codegen_shape() -> None:

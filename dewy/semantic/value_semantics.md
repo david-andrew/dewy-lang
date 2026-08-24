@@ -1,12 +1,12 @@
 # Value semantics, copies, and places
 
-BLUF: basically matlab style, assignments copy (with COW under the hood), `@` is used for references (needed on both both sides, call site and in signatures)
+BLUF: Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
 
-Intended language rule. Not implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
+Intended language rule. Implementation is in progress: directly stored and nested-object fields, plus exact-length arrays of directly copyable elements, have value behavior across ordinary bindings, assignments, calls, and returns. Recursive array/object element copies, mutable handle-valued object fields, general dynamic-length arrays, and explicit places with `@` remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
 
 A binding names a value. Assignment, argument passing, and return give you that value, not another name for the same cell. Element and field writes go through the binding you wrote. Sharing is either unobservable or spelled.
 
-This matches the documented object rule: assigning, passing, and returning copy. Arrays follow the same rule. The Python-like experience is cheap literals, in-place writes on _this_ name, and no `clone()` in ordinary code. Copy-on-write and uniqueness proofs are how that stays fast.
+This matches the documented object rule: assigning, passing, and returning copy. Arrays follow the same rule. The Python-like experience is cheap literals, in-place writes on _this_ name, and no `clone()` in ordinary code. Moves, borrowing, ownership transfer, and unobservable sharing are how that can stay fast without making universal copy-on-write part of the language model.
 
 ```dewy
 let a = [1 2 3]
@@ -73,7 +73,7 @@ For now: A place cannot outlive the binding it names. Legal: pass `@myarr`, writ
 
 `@?` (pronounced "is at?") means "is same place?", not residual copy-on-write sharing. Two copies are never the same place, even before anyone writes. If `@?` could see shared buffers, the optimization would leak into the semantics.
 
-Overlapping places in one call are an error: `swap(@x @x)` is two mutable aliases of one cell. A `const` binding cannot be passed to a writing `@`. Read-only sharing does not need `@`; that is what copy-on-write is for.
+Overlapping places in one call are an error: `swap(@x @x)` is two mutable aliases of one cell. A `const` binding cannot be passed to a writing `@`. Read-only storage may be shared invisibly without `@` because that cannot change program behavior.
 
 `__at__` is `@a`. `__is_at__` is `a @? b`. The spelling of an explicit function copy is still tdb.
 
@@ -105,7 +105,7 @@ Ordinary values stay the opposite default: bare argument is a copy, `@` at both 
 
 ## Lowering
 
-Representation stays use-dependent. Two values with the same Dewy type may use different machine layouts. Sharing a pointer for `let b = a` is an elided copy, not the language rule. If both names can be written, the first write unique-ifies.
+Representation stays use-dependent. Two values with the same Dewy type may use different machine layouts. Sharing a pointer for `let b = a` is an elided copy, not the language rule. If both names can be written, lowering must either give them independent storage or otherwise prove that sharing cannot be observed.
 
 Proven cases already point this way: caller-owned exact-length array returns, borrowed read-only parameter adapters, `string as array<uint8>` copy-on-write, and fresh default arrays per call. Local raw-pointer alias chains for non-escaping exact arrays must be justified as unobservable copies, or replaced when both bindings can be written.
 

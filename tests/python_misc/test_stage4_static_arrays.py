@@ -7,7 +7,7 @@ from dewy.backend.udewy import codegen
 from dewy.backend.udewy.lower import ArrayRepresentation, ArrayUse, _Lowerer
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir
-from dewy.semantic.errors import UserError
+from dewy.semantic.errors import NotImplementedYet
 from udewy.frontend import entry_point
 
 
@@ -104,7 +104,7 @@ let read = ():>int64 => {
     } == {'stack_data'}
 
 
-def test_array_parameter_alias_closure_can_be_adapter_safe() -> None:
+def test_array_parameter_local_copy_does_not_make_parameter_writable() -> None:
     lowerer, names = _analyze_arrays('''
 let update = (items:array<int64 length=2>):>int64 => {
     let view = items
@@ -117,7 +117,7 @@ let update = (items:array<int64 length=2>):>int64 => {
     analysis = lowerer.array_parameter_analyses[items]
 
     assert analysis.alias_group == {items, view}
-    assert analysis.uses == {'length', 'index_read', 'index_write'}
+    assert analysis.uses == {'length'}
     assert analysis.adapter_safe
 
 
@@ -149,14 +149,6 @@ let convert = (items:array<grapheme length=2>):>string =>
         ),
         (
             '''
-let first = (items:array<int64 length=2>):>int64 => items[0]
-let forward = (forwarded:array<int64 length=2>):>int64 =>
-    first(forwarded)
-''',
-            'call_boundary',
-        ),
-        (
-            '''
 let replace = (items:array<int64 length=2>):>int64 => {
     let replacement = [40 2]
     items = replacement
@@ -177,6 +169,18 @@ def test_array_parameter_unsafe_uses_require_descriptors(
 
     assert unsafe_use in analysis.uses
     assert not analysis.adapter_safe
+
+
+def test_array_parameter_read_only_forwarding_is_adapter_safe() -> None:
+    lowerer, names = _analyze_arrays('''
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let forward = (forwarded:array<int64 length=2>):>int64 =>
+    first(forwarded)
+''')
+    analysis = lowerer.array_parameter_analyses[names['forwarded']]
+
+    assert analysis.uses == {'safe_call_boundary'}
+    assert analysis.adapter_safe
 
 
 def test_safe_direct_call_boundary_preserves_local_alias_stack_data() -> None:
@@ -245,7 +249,7 @@ let read = ():>int64 => {
     )
 
 
-def test_writable_static_bytes_call_boundary_requires_descriptor() -> None:
+def test_writable_static_bytes_call_boundary_copies_from_static_data() -> None:
     lowerer, names = _analyze_arrays('''
 const bytes:array<uint8> = 0x"2802"
 let mutate = (items:array<uint8 length=2>):>uint8 => {
@@ -257,14 +261,15 @@ let read = ():>uint8 => mutate(bytes)
     boundary = next(iter(lowerer.array_call_boundary_analyses.values()))
 
     assert not boundary.safe
-    assert lowerer.array_representations[names['bytes']] == 'descriptor'
-    assert 'call_boundary' in lowerer.array_uses[names['bytes']]
+    assert lowerer.array_representations[names['bytes']] == 'static_bytes'
+    assert 'copy_call_boundary' in lowerer.array_uses[names['bytes']]
 
 
 @pytest.mark.parametrize(
-    'source',
+    ('source', 'expected_representation', 'expected_safe'),
     [
-        '''
+        (
+            '''
 let first = (items:array<int64 length=2>):>int64 => items[0]
 let read = ():>int64 => {
     let indirect = first
@@ -272,7 +277,11 @@ let read = ():>int64 => {
     return indirect(values)
 }
 ''',
-        '''
+            'stack_data',
+            False,
+        ),
+        (
+            '''
 let first = (items:array<int64 length=2>):>int64 => items[0]
 let forward = (forwarded:array<int64 length=2>):>int64 =>
     first(forwarded)
@@ -281,14 +290,22 @@ let read = ():>int64 => {
     return forward(values)
 }
 ''',
-        '''
+            'stack_data',
+            False,
+        ),
+        (
+            '''
 let first = (items:array<int64 length=2>):>int64 => items[0]
 let read = (choose_left:bool):>int64 => {
     let values = if choose_left { [42 0] } else { [0 42] }
     return first(values)
 }
 ''',
-        '''
+            'descriptor',
+            True,
+        ),
+        (
+            '''
 let store = (items:array<int64 length=2>):>int64 => {
     let box = [value = items]
     return box.value[0]
@@ -298,7 +315,11 @@ let read = ():>int64 => {
     return store(values)
 }
 ''',
-        '''
+            'stack_data',
+            False,
+        ),
+        (
+            '''
 let read = ():>int64 => {
     let reader = [
         apply = (items:array<int64 length=2>):>int64 => items[0]
@@ -307,22 +328,33 @@ let read = ():>int64 => {
     return reader.apply(values)
 }
 ''',
+            'stack_data',
+            False,
+        ),
     ],
 )
-def test_unsafe_call_boundaries_keep_local_literals_descriptors(
+def test_array_call_boundaries_preserve_source_representation(
     source: str,
+    expected_representation: ArrayRepresentation,
+    expected_safe: bool,
 ) -> None:
     lowerer, names = _analyze_arrays(source)
-
-    assert lowerer.array_representations[names['values']] == 'descriptor'
-    assert any(
-        not boundary.safe
+    values = names['values']
+    boundary = next(
+        boundary
         for boundary in lowerer.array_call_boundary_analyses.values()
-        if boundary.source_binding_id == names['values']
+        if boundary.source_binding_id == values
     )
 
+    assert lowerer.array_representations[values] == expected_representation
+    assert boundary.safe is expected_safe
+    expected_use: ArrayUse = (
+        'safe_call_boundary' if expected_safe else 'copy_call_boundary'
+    )
+    assert expected_use in lowerer.array_uses[values]
 
-def test_local_alias_call_materializes_one_descriptor_without_copying() -> None:
+
+def test_local_array_copy_then_read_only_call_uses_independent_storage() -> None:
     emitted = codegen(SrcFile(None, '''
 let first = (items:array<int64 length=2>):>int64 => items[0]
 let read = ():>int64 => {
@@ -333,7 +365,10 @@ let read = ():>int64 => {
 '''))
 
     assert 'let values:int64 = __alloca__(16)' in emitted
-    assert 'let alias:int64 = values' in emitted
+    assert 'let alias:int64 = __alloca__(16)' in emitted
+    assert '__store_i64__(__load_i64__(values) alias)' in emitted
+    assert '__store_i64__(__load_i64__(values + 8) alias + 8)' in emitted
+    assert emitted.count('__alloca__(16)') == 2
     assert emitted.count('__alloca__(48)') == 1
     assert '__store_i64__(alias __dewy_array_1)' in emitted
     assert '__store_i64__(2 __dewy_array_1 + 8)' in emitted
@@ -626,7 +661,7 @@ def test_static_word_array_ambiguous_cases_keep_descriptors(source: str) -> None
     assert '__store_i64__(' in emitted
 
 
-def test_transitive_local_aliases_lower_as_raw_pointer_copies() -> None:
+def test_transitive_local_array_bindings_receive_distinct_storage() -> None:
     emitted = codegen(SrcFile(None, '''
 let read = ():>int64 => {
     let values = [20 22]
@@ -638,11 +673,26 @@ let read = ():>int64 => {
 '''))
 
     assert 'let values:int64 = __alloca__(16)' in emitted
-    assert 'let alias:int64 = values' in emitted
-    assert 'let transitive:int64 = alias' in emitted
+    assert 'let alias:int64 = values' not in emitted
+    assert 'let transitive:int64 = alias' not in emitted
+    assert emitted.count('__alloca__(16)') == 3
     assert '__store_i64__(40 transitive)' in emitted
     assert 'return __load_i64__(alias) + 2' in emitted
     assert '__alloca__(48)' not in emitted
+
+
+def test_nested_array_value_copy_is_rejected_until_recursive_copy_exists() -> None:
+    with pytest.raises(
+        NotImplementedYet,
+        match='value-copying arrays with nested array elements',
+    ):
+        codegen(SrcFile(None, '''
+let read = ():>int64 => {
+    let original = [[1 2] [3 4]]
+    let copy = original
+    return 42
+}
+'''))
 
 
 @pytest.mark.parametrize(
@@ -660,7 +710,7 @@ let read = ():>int64 => {
             (
                 'let values:int64 = __dewy_array_1',
                 'let replacement:int64 = __dewy_array_3',
-                'values = replacement',
+                'values = __dewy_array_5',
             ),
         ),
         (
