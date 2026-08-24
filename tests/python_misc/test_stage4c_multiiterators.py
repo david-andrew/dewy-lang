@@ -260,3 +260,39 @@ let f = (v:int64|string):>int64 => {
     return v.length
 }
 ''')
+
+
+def test_non_diverging_else_still_narrows_the_continuation() -> None:
+    # The continuation is reached only through the else path, where the
+    # condition was false, so the join of continuing paths narrows `v`.
+    _check('''
+let f = (v:int64|string):>int64 => {
+    if v is? int64 { return v }
+    else { let note = 1 }
+    return v.length
+}
+''')
+
+
+def test_continuation_join_unions_per_path_refinements() -> None:
+    # Both arms continue with different narrowings; the join is their union,
+    # which is not enough to call `.length`.
+    with pytest.raises((TypeCheckError, UserError)):
+        _check('''
+let f = (v:int64|string|bool):>int64 => {
+    if v is? int64 { let a = 1 }
+    else if v is? string { let b = 2 }
+    else { return 0 }
+    return v.length
+}
+''')
+
+
+def test_union_member_order_is_canonical_across_spellings() -> None:
+    # Declared, narrowed, and joined unions must number tags identically, so
+    # the canonical member order is independent of how the union was spelled.
+    declared = ty.runtime_union_members(ty.TypeOr(['int64', 'string', 'bool']))
+    joined = ty.runtime_union_members(ty.union('bool', 'string', 'int64'))
+    assert declared == joined
+    with_undefined = ty.runtime_union_members(ty.TypeOr(['string', 'undefined', 'int64']))
+    assert with_undefined is not None and with_undefined[0] == 'undefined'

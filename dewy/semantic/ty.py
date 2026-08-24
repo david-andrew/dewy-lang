@@ -426,9 +426,13 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
         return None
     if optional_payload(type_) is not None:
         return None
-    members = list(type_.items)
-    if 'undefined' in members:
-        members = ['undefined', *[m for m in members if m != 'undefined']]
+    # Canonical order: `undefined` first, then a deterministic sort, so every
+    # spelling of the same member set (declared, narrowed, joined) numbers
+    # its tags identically.
+    members = sorted(
+        type_.items,
+        key=lambda member: (0 if member == 'undefined' else 1, repr(member)),
+    )
     return tuple(members)
 
 

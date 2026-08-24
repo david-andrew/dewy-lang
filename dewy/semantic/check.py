@@ -1851,6 +1851,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             not_implemented(ctx.srcfile, ast.loc, 'multi-value conditional result')
         arms: list[hir.IfArm | hir.LoopArm] = []
         bodies: list[hir.AST] = []
+        # Refinement state at the end of every path that can reach the code
+        # after the flow; the continuation keeps their join.
+        continuing_paths: list[dict[int, ty.Type]] = []
         arm_ctx = ctx
         for arm in ast.arms:
             if len(arm.parts) != 3:
@@ -1873,6 +1876,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 body = check_against(body, branch_expected, ctx=ctx)
             arms.append(hir.IfArm(arm.loc, body.type, condition, body))
             bodies.append(body)
+            if body.type != ty.BOTTOM_TYPE:
+                continuing_paths.append(dict(body_ctx.refinements))
             arm_ctx = _refine_condition_context(
                 arm_ctx,
                 condition,
@@ -1889,14 +1894,29 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if branch_expected is not None:
                 default = check_against(default, branch_expected, ctx=ctx)
             bodies.append(default)
-        elif bodies and all(body.type == ty.BOTTOM_TYPE for body in bodies):
-            # Every arm diverges (return/break/continue) and there is no
-            # else, so control only continues when every condition was
-            # false: the enclosing block keeps the negated refinements.
-            # ``ctx.refinements`` is the dict shared by the block's items.
+            if default.type != ty.BOTTOM_TYPE:
+                continuing_paths.append(dict(arm_ctx.refinements))
+        else:
+            # No else: falling through means every condition was false.
+            continuing_paths.append(dict(arm_ctx.refinements))
+        if continuing_paths:
+            # ``ctx.refinements`` is the dict shared by the enclosing block's
+            # items, so updating it in place narrows the code after the flow.
+            # A binding stays refined only when every continuing path refines
+            # it; the joined type is the union of the per-path types.
+            joined: dict[int, ty.Type] = {}
+            for binding_id in set.intersection(*(set(path) for path in continuing_paths)):
+                joined[binding_id] = ty.union(
+                    *[path[binding_id] for path in continuing_paths]
+                )
+            ctx.refinements.clear()
+            ctx.refinements.update(joined)
+        else:
+            # Everything diverges: the continuation is unreachable, keep the
+            # all-conditions-false state.
             ctx.refinements.clear()
             ctx.refinements.update(arm_ctx.refinements)
-        elif (
+        if ast.default is None and (
             branch_expected is not None
             and any(body.type != ty.BOTTOM_TYPE for body in bodies)
         ):

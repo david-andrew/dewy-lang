@@ -2,6 +2,7 @@
 # the negated refinements: the early-return idiom narrows the union below.
 let describe = (v:int64|string):>int64 => {
     if v is? int64 { return v }
+    else { let note = 0 }    # a non-diverging else still narrows below
     return v.length
 }
 let classify = (v:bool|int64|string):>int64 => {
