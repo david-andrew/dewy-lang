@@ -117,6 +117,7 @@ class _Lowerer(
         self.optional_globals_initialized: set[int] = set()
         self.object_globals_initialized: set[int] = set()
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
+        self.call_union_args: dict[int, list[tuple[ty.TypeExpr, ...] | None]] = {}
         self.call_optional_kwargs: dict[int, dict[str, ty.TypeExpr]] = {}
         self.array_representations: dict[int, ArrayRepresentation] = {}
         self.array_declarations: dict[int, hir.Declare] = {}
@@ -138,6 +139,7 @@ class _Lowerer(
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_array_result: hir.ExpressedIdentifier | None = None
         self.current_string_result: hir.ExpressedIdentifier | None = None
+        self.current_union_result: hir.ExpressedIdentifier | None = None
         self.string_result_bounds: dict[int, StringResultBound | None] = {}
         self.string_result_needs_dest: set[int] = set()
         self.string_result_call_targets: dict[int, _FunctionDef] = {}
@@ -295,12 +297,14 @@ class _Lowerer(
                 'optional array returns require array ownership lowering',
             )
         string_result = id(function) in self.string_result_needs_dest
+        union_result = ty.runtime_union_members(literal.rettype) is not None
         rettype = (
             ty.VOID_TYPE
             if result_payload is not None
             or object_result
             or array_result
             or string_result
+            or union_result
             else self._target_scalar_type(literal.rettype, literal)
         )
         lowered_pos: list[hir.Param | hir.BoundParam] = []
@@ -409,6 +413,43 @@ class _Lowerer(
                 )
                 parameter_prologue.extend(
                     self._object_copy(cell, incoming, param.type, literal.loc)
+                )
+                return replace(
+                    param,
+                    name=incoming_name,
+                    type='int64',
+                    binding_id=None,
+                )
+            members = ty.runtime_union_members(param.type)
+            if members is not None:
+                incoming_name = self._new_optional_name(f'arg_{param.name}')
+                incoming = hir.ExpressedIdentifier(
+                    literal.loc,
+                    param.type,
+                    incoming_name,
+                )
+                cell = hir.ExpressedIdentifier(
+                    literal.loc,
+                    'int64',
+                    param.name,
+                    binding_id=param.binding_id,
+                )
+                parameter_prologue.append(
+                    hir.Declare(
+                        literal.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        param.name,
+                        'int64',
+                        self._union_cell_allocation(members, literal.loc),
+                        binding_id=param.binding_id,
+                    )
+                )
+                parameter_prologue.extend(
+                    self._union_prepare_trees(cell, members, literal.loc)
+                )
+                parameter_prologue.extend(
+                    self._union_write(cell, incoming, members)
                 )
                 return replace(
                     param,
@@ -550,11 +591,13 @@ class _Lowerer(
         object_result_target = None
         array_result_target = None
         string_result_target = None
+        union_result_target = None
         if (
             result_payload is not None
             or object_result
             or array_result
             or string_result
+            or union_result
         ):
             assert function.result_name is not None
             lowered_pos.append(
@@ -571,12 +614,15 @@ class _Lowerer(
                 array_result_target = target
             elif string_result:
                 string_result_target = target
+            elif union_result:
+                union_result_target = target
             else:
                 result_target = target
         previous_result = self.current_optional_result
         previous_object_result = self.current_object_result
         previous_array_result = self.current_array_result
         previous_string_result = self.current_string_result
+        previous_union_result = self.current_union_result
         previous_place_parameter_cells = self.current_place_parameter_cells
         previous_receiver = self.current_object_receiver
         previous_object_type = self.current_object_type
@@ -586,6 +632,7 @@ class _Lowerer(
         self.current_object_result = object_result_target
         self.current_array_result = array_result_target
         self.current_string_result = string_result_target
+        self.current_union_result = union_result_target
         self.current_place_parameter_cells = place_parameter_cells
         self.current_object_receiver = receiver
         self.current_object_type = literal.object_type
@@ -612,6 +659,7 @@ class _Lowerer(
         self.current_object_result = previous_object_result
         self.current_array_result = previous_array_result
         self.current_string_result = previous_string_result
+        self.current_union_result = previous_union_result
         self.current_place_parameter_cells = previous_place_parameter_cells
         self.current_object_receiver = previous_receiver
         self.current_object_type = previous_object_type
@@ -694,6 +742,8 @@ class _Lowerer(
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         if ty.optional_payload(type_) is not None:
+            return 'int64'
+        if ty.runtime_union_members(type_) is not None:
             return 'int64'
         if isinstance(type_, ty.QuantityType):
             return self._lower_runtime_value_type(type_.number)
@@ -1049,6 +1099,7 @@ class _Lowerer(
         )
         if (
             ty.optional_payload(literal.rettype) is not None
+            or ty.runtime_union_members(literal.rettype) is not None
             or isinstance(literal.rettype, ty.ObjectType)
             or (
                 isinstance(literal.rettype, ty.ArrayType)
@@ -1092,8 +1143,9 @@ class _Lowerer(
             payload = ty.optional_payload(param.type)
             if payload is not None and param.binding_id is not None:
                 self.optional_payloads[param.binding_id] = payload
-            if ty.runtime_union_members(param.type) is not None:
-                self._target_error(param, 'a union-typed parameter')
+            members = ty.runtime_union_members(param.type)
+            if members is not None and param.binding_id is not None:
+                self.union_cells[param.binding_id] = members
         for param in literal.kw_only_args:
             self._new_binding(
                 function_scope,
@@ -1108,8 +1160,9 @@ class _Lowerer(
             payload = ty.optional_payload(param.type)
             if payload is not None and param.binding_id is not None:
                 self.optional_payloads[param.binding_id] = payload
-            if ty.runtime_union_members(param.type) is not None:
-                self._target_error(param, 'a union-typed parameter')
+            members = ty.runtime_union_members(param.type)
+            if members is not None and param.binding_id is not None:
+                self.union_cells[param.binding_id] = members
         if literal.rest_args is not None:
             self._new_binding(
                 function_scope,
@@ -1993,6 +2046,12 @@ class _Lowerer(
             if source_function_type is not None:
                 self.call_optional_args[id(transformed)] = optional_payloads
                 self.call_optional_kwargs[id(transformed)] = {}
+                union_slots: list[tuple[ty.TypeExpr, ...] | None] = []
+                for param in source_function_type.pos_or_kw:
+                    union_slots.append(ty.runtime_union_members(param.type))
+                    if not param.required:
+                        union_slots.append(None)
+                self.call_union_args[id(transformed)] = union_slots
             called = self._direct_call_function(node)
             if called is not None and id(called) in self.string_result_needs_dest:
                 # The transformed call loses resolvable identifier identity,
@@ -2218,6 +2277,9 @@ class _Lowerer(
                 if self.current_string_result is not None:
                     items.extend(self._string_result_write(item))
                     continue
+                if self.current_union_result is not None:
+                    items.extend(self._union_result_write(item))
+                    continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
                 items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
@@ -2244,6 +2306,8 @@ class _Lowerer(
             statements = self._array_result_write(node)
         elif self.current_string_result is not None:
             statements = self._string_result_write(node)
+        elif self.current_union_result is not None:
+            statements = self._union_result_write(node)
         else:
             prelude, value = self._extract_expression(node)
             statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
@@ -2342,10 +2406,11 @@ class _Lowerer(
                     node,
                     decltype='let',
                     annotation='int64',
-                    expr=self._optional_allocation(node.loc),
+                    expr=self._union_cell_allocation(members, node.loc),
                 )
                 return [
                     declaration,
+                    *self._union_prepare_trees(cell, members, node.loc),
                     *self._union_write(cell, node.expr, members),
                 ]
             payload = ty.optional_payload(declared_type)
@@ -2588,6 +2653,10 @@ class _Lowerer(
                 if node.item is None:
                     self._target_error(node, 'string return without a value')
                 return self._string_result_write(node.item)
+            if self.current_union_result is not None:
+                if node.item is None:
+                    self._target_error(node, 'union return without a value')
+                return self._union_result_write(node.item)
             if self.current_optional_result is not None:
                 if node.item is None:
                     self._target_error(node, 'optional return without a value')
@@ -2662,13 +2731,11 @@ class _Lowerer(
             members = self.union_cells.get(node.binding_id)
             if members is not None:
                 cell = replace(node, type='int64')
-                if ty.runtime_union_members(node.type) == members:
-                    return [], cell
                 if isinstance(node.type, ty.TypeOr):
-                    self._target_error(
-                        node,
-                        'a partially narrowed union value',
-                    )
+                    # Full or subset union view: tags are physical (the
+                    # storage union's numbering), so the cell passes through
+                    # and consumers consult the storage members.
+                    return [], cell
                 # Fully narrowed: load the payload as the matching member.
                 system = ty.TypeSystem()
                 member = next(
@@ -2685,9 +2752,19 @@ class _Lowerer(
         if isinstance(node, hir.Undefined):
             self._target_error(node, '`undefined` value without an optional context')
         if isinstance(node, hir.TypeTest):
-            # A general-union operand keeps its full static union type at the
-            # test site; fully narrowed operands fold statically below.
+            # Union operands test tags at runtime; fully narrowed operands
+            # fold statically below. A union-typed identifier uses its
+            # storage members, whose indexes stay physical even when the
+            # static type is a narrowed subset union.
             members = ty.runtime_union_members(node.value.type)
+            if (
+                isinstance(node.value.type, ty.TypeOr)
+                and isinstance(node.value, hir.ExpressedIdentifier)
+                and node.value.binding_id is not None
+            ):
+                stored = self.union_cells.get(node.value.binding_id)
+                if stored is not None:
+                    members = stored
             if members is not None:
                 union_prelude, union_value = self._extract_expression(node.value)
                 system = ty.TypeSystem()
@@ -2874,6 +2951,7 @@ class _Lowerer(
                 else None
             )
             optional_arguments = self.call_optional_args.get(id(node), [])
+            union_arguments = self.call_union_args.get(id(node), [])
             pos_args: list[hir.AST] = []
             place_postlude: list[hir.AST] = []
             for index, arg in enumerate(node.pos_args):
@@ -2913,6 +2991,20 @@ class _Lowerer(
                     )
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                elif (
+                    union_arguments[index]
+                    if index < len(union_arguments)
+                    else ty.runtime_union_members(arg.type)
+                ) is not None:
+                    arg_members = (
+                        union_arguments[index]
+                        if index < len(union_arguments)
+                        else ty.runtime_union_members(arg.type)
+                    )
+                    arg_prelude, lowered_arg = self._materialize_union(
+                        arg,
+                        arg_members,
+                    )
                 elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg)
                 else:
@@ -2946,6 +3038,11 @@ class _Lowerer(
                     )
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                elif ty.runtime_union_members(arg.type) is not None:
+                    arg_prelude, lowered_arg = self._materialize_union(
+                        arg,
+                        ty.runtime_union_members(arg.type),
+                    )
                 elif isinstance(arg.type, ty.ObjectType):
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg)
                 else:
@@ -2998,6 +3095,36 @@ class _Lowerer(
                         'int64',
                         self._optional_allocation(node.loc),
                     )
+                )
+                prelude.append(
+                    replace(
+                        node,
+                        type=ty.VOID_TYPE,
+                        func=func,
+                        pos_args=[*pos_args, result],
+                        kw_args=kw_args,
+                    )
+                )
+                return [*prelude, *place_postlude], replace(result, type=node.type)
+            result_members = ty.runtime_union_members(node.type)
+            if result_members is not None:
+                result = hir.ExpressedIdentifier(
+                    node.loc,
+                    'int64',
+                    self._new_optional_name('result_value'),
+                )
+                prelude.append(
+                    hir.Declare(
+                        node.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        result.name,
+                        'int64',
+                        self._union_cell_allocation(result_members, node.loc),
+                    )
+                )
+                prelude.extend(
+                    self._union_prepare_trees(result, result_members, node.loc)
                 )
                 prelude.append(
                     replace(

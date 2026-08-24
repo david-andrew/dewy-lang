@@ -1,0 +1,33 @@
+# Fixed-layout objects and exact arrays as union members: each aggregate
+# member owns a prepared storage tree in the cell, tagging copies the value
+# in, same-union copies deep-copy the active tree, and narrower unions retag
+# into wider ones at call boundaries.
+let Pair:type = [left:int64 right:int64]
+
+let weigh = (v:Pair|int64|string):>int64 => {
+    if v is? Pair { return v.left + v.right }
+    else if v is? int64 { return v }
+    else { return v.length }
+}
+
+let make = (choose:bool):>Pair|string => {
+    if choose { return [left = 20 right = 22] }
+    return "abc"
+}
+
+let main = ():>int64 => {
+    let p:Pair = [left = 1 right = 2]
+    let u:Pair|int64|string = p
+    p.left = 100                       # u holds its own copy
+    let a = weigh(u)                   # 3
+    let copied = u                     # deep copy of the active Pair
+    u = 7                              # retag away; copied keeps the Pair
+    let b = weigh(copied)              # 3
+    let c = weigh(u)                   # 7
+    let d = weigh(make(true))          # 42 via retag Pair|string -> Pair|int64|string
+    let e = weigh(make(false))         # 3
+    let arr:array<int64 length=2>|string = [5 6]
+    let f:int64 = 0
+    if arr is? array<int64 length=2> { f = arr[0] + arr[1] }  # 11
+    return a + b + c + d + e + f - 27  # 42
+}

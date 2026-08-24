@@ -1,0 +1,16 @@
+# Narrowing to a subset union keeps the storage tag numbering physical:
+# tests on the subset view compare against the full storage members.
+let main = ():>int64 => {
+    let z:bool|int64|string = "hello"
+    let total:int64 = 0
+    if z isnt? bool {
+        # z is now int64|string, a subset view of the 3-member storage
+        if z is? string { total = z.length }      # 5
+        if z is? int64 { total = 999 }
+    }
+    z = 37
+    if z isnt? string and z isnt? bool {
+        if z is? int64 { total = total + z }      # +37
+    }
+    return total  # 42
+}

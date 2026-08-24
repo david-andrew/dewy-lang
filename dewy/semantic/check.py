@@ -2490,6 +2490,12 @@ def _tcr_object_literal(
     ctx: Context,
 ) -> hir.ObjectLiteral:
     expected_object = expected if isinstance(expected, ty.ObjectType) else None
+    if expected_object is None and isinstance(expected, ty.TypeOr):
+        # A literal checked against a union targets the union's unique
+        # object member, if there is exactly one.
+        candidates = [item for item in expected.items if isinstance(item, ty.ObjectType)]
+        if len(candidates) == 1:
+            expected_object = candidates[0]
     if expected is not None and expected_object is None:
         type_error(
             ctx.srcfile,
@@ -2784,6 +2790,12 @@ def _tcr_array_literal(
     """Check a one-dimensional homogeneous array with a supported element layout."""
 
     expected_array = expected if isinstance(expected, ty.ArrayType) else None
+    if expected_array is None and isinstance(expected, ty.TypeOr):
+        # A literal checked against a union targets the union's unique
+        # array member, if there is exactly one.
+        candidates = [item for item in expected.items if isinstance(item, ty.ArrayType)]
+        if len(candidates) == 1:
+            expected_array = candidates[0]
     if expected is not None and expected_array is None:
         type_error(
             ctx.srcfile,

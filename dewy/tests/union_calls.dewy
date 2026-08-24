@@ -1,0 +1,24 @@
+# Unions cross call boundaries: parameters copy the incoming cell, member
+# values materialize into fresh cells at the call site, results write into a
+# caller-owned cell, and results feed directly into further union calls.
+
+let describe = (v:int64|string):>int64 => {
+    if v is? int64 { return v } else { return v.length }
+}
+
+let pick = (choose:bool):>int64|string => {
+    if choose { return 30 }
+    return "abcd"
+}
+
+let main = ():>int64 => {
+    let a = describe(37)              # 37
+    let b = describe("ab")            # 2
+    let u:int64|string = "xyz"
+    let c = describe(u)               # 3
+    let r = pick(false)
+    let d:int64 = 0
+    if r is? string { d = r.length }  # 4
+    let e = describe(pick(true))      # 30
+    return a + b + c + d + e - 34     # 42
+}
