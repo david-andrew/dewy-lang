@@ -5,6 +5,12 @@ and several paths were unfinished (`pdb.set_trace()`, `NotImplementedError`).
 Use it when reimplementing the same surface in cleanparse. The example programs
 below are often clearer than the code.
 
+> **Current syntax note:** this interpreter used member-handle spellings such as
+> `obj.@fn`. The current language direction uses one compositional place route:
+> `@obj.fn` is parsed as `(@obj).fn`, selecting the place or callable field at
+> the end of the route. The older spellings below are retained only as a record
+> of that implementation.
+
 Related examples: `examples/closure.dewy`, `examples/partial_functions.dewy`,
 `examples/unpack_array.dewy`, `examples/unpack_dict.dewy`, `examples/objects.dewy`,
 `examples/hello_name.dewy`.

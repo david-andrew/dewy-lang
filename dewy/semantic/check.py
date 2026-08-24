@@ -2434,6 +2434,9 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             )
             return hir.StringLength(binop.loc, result_type, value)
     value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    source_place = value if isinstance(value, hir.Place) else None
+    if source_place is not None:
+        value = source_place.target
     if not isinstance(value.type, ty.ObjectType):
         if name == 'length':
             type_error(
@@ -2460,7 +2463,16 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             Pointer(span=binop.right.loc, message='this field is not present'),
             hint=f'available fields: {", ".join(item.name for item in value.type.fields) or "(none)"}',
         )
-    return hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
+    access = hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
+    if source_place is None:
+        return access
+    if not field.mutable:
+        user_error(
+            ctx.srcfile,
+            f'cannot take the place of const object field `{name}`',
+            Pointer(span=binop.loc, message='this field is const'),
+        )
+    return hir.Place(binop.loc, field.type, access)
 
 
 def _member_root_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
@@ -3080,25 +3092,22 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
                 ),
                 hint='pass `@name` directly to a parameter declared with `@`',
             )
-        if not (
-            isinstance(prefix.item, p0.Atom)
-            and isinstance(prefix.item.item, t1.Identifier)
+        target_ast = prefix.item
+        if (
+            isinstance(target_ast, p0.Block)
+            and target_ast.kind == '()'
+            and len(target_ast.inner) == 1
         ):
-            not_implemented(
-                ctx.srcfile,
-                prefix.item.loc,
-                'places of indexed elements, fields, or temporary values',
-            )
-        target = tcr_identifier(prefix.item.item, ctx=ctx)
-        assert isinstance(target, hir.ExpressedIdentifier)
+            target_ast = target_ast.inner[0]
+        target = tcr_assignment_target(target_ast, ctx=ctx)
         if isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
             not_implemented(
                 ctx.srcfile,
                 prefix.loc,
                 'function handles and partial application with `@`',
             )
-        if target.binding_id is not None:
-            binding = ctx.binding_registry.by_id[target.binding_id]
+        binding = _member_root_binding(target, ctx=ctx)
+        if binding is not None:
             if (
                 binding.declaration is not None
                 and binding.declaration.decltype == 'const'
@@ -3108,7 +3117,7 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
                     'cannot pass a const binding as a mutable place',
                     Pointer(
                         span=prefix.loc,
-                        message=f'`{target.name}` is declared const',
+                        message=f'`{binding.name}` is declared const',
                     ),
                     Pointer(
                         span=binding.declaration.loc,
@@ -3271,6 +3280,9 @@ def _known_string_length(type_: ty.Type) -> int | None:
 
 def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+    source_place = array if isinstance(array, hir.Place) else None
+    if source_place is not None:
+        array = source_place.target
     if isinstance(array.type, ty.BinaryLiteralType):
         array = hir.RepresentationCast(
             array.loc,
@@ -3313,6 +3325,12 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     )
     index = typecheck_and_resolve_inner(index_ast, ctx=index_ctx)
     if isinstance(index, hir.Range):
+        if source_place is not None:
+            user_error(
+                ctx.srcfile,
+                'a slice is a value, not a mutable place',
+                Pointer(span=index.loc, message='select one indexed element instead'),
+            )
         if index.step_pair is not None:
             not_implemented(ctx.srcfile, index.loc, 'stepped sequence slicing')
         slice_length: int | None = None
@@ -3437,6 +3455,12 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             ),
         )
     if _is_string_type(array.type):
+        if source_place is not None:
+            user_error(
+                ctx.srcfile,
+                'cannot take an indexed place in an immutable string',
+                Pointer(span=binop.loc, message='string elements cannot be replaced'),
+            )
         return hir.StringIndex(
             binop.loc,
             ty.StringType(1),
@@ -3445,13 +3469,16 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             constant_index,
         )
     assert isinstance(array.type, ty.ArrayType)
-    return hir.Index(
+    result = hir.Index(
         binop.loc,
         array.type.element,
         array,
         index,
         constant_index,
     )
+    if source_place is None:
+        return result
+    return hir.Place(binop.loc, result.type, result)
 
 
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
@@ -4855,7 +4882,7 @@ def _validate_place_call_arguments(
         if name in parameters_by_name
     )
 
-    seen_places: dict[int, hir.Place] = {}
+    seen_places: list[hir.Place] = []
     for parameter, argument in supplied:
         place = argument if isinstance(argument, hir.Place) else None
         if parameter.place and place is None:
@@ -4892,10 +4919,14 @@ def _validate_place_call_arguments(
                     ),
                 ),
             )
-        binding_id = place.target.binding_id
-        if binding_id is None:
-            raise ValueError('INTERNAL ERROR: place target has no binding identity')
-        previous = seen_places.get(binding_id)
+        previous = next(
+            (
+                candidate
+                for candidate in seen_places
+                if _place_routes_may_overlap(candidate.target, place.target)
+            ),
+            None,
+        )
         if previous is not None:
             user_error(
                 ctx.srcfile,
@@ -4903,7 +4934,49 @@ def _validate_place_call_arguments(
                 Pointer(span=previous.loc, message='first use of this place'),
                 Pointer(span=place.loc, message='same place passed again here'),
             )
-        seen_places[binding_id] = place
+        seen_places.append(place)
+
+
+PlaceRouteComponent = tuple[Literal['field'], str] | tuple[Literal['index'], int | None]
+
+
+def _place_route(
+    target: hir.ExpressedIdentifier | hir.MemberAccess | hir.Index,
+) -> tuple[int, tuple[PlaceRouteComponent, ...]]:
+    if isinstance(target, hir.ExpressedIdentifier):
+        if target.binding_id is None:
+            raise ValueError('INTERNAL ERROR: place target has no binding identity')
+        return target.binding_id, ()
+    if isinstance(target, hir.MemberAccess):
+        binding_id, route = _place_route(target.value)
+        return binding_id, (*route, ('field', target.name))
+    binding_id, route = _place_route(target.array)
+    return binding_id, (*route, ('index', target.constant_index))
+
+
+def _place_routes_may_overlap(
+    left: hir.ExpressedIdentifier | hir.MemberAccess | hir.Index,
+    right: hir.ExpressedIdentifier | hir.MemberAccess | hir.Index,
+) -> bool:
+    left_binding, left_route = _place_route(left)
+    right_binding, right_route = _place_route(right)
+    if left_binding != right_binding:
+        return False
+    for left_part, right_part in zip(left_route, right_route):
+        if left_part[0] != right_part[0]:
+            return False
+        if left_part[0] == 'field' and left_part[1] != right_part[1]:
+            return False
+        if (
+            left_part[0] == 'index'
+            and left_part[1] is not None
+            and right_part[1] is not None
+            and left_part[1] != right_part[1]
+        ):
+            return False
+    # An identical route or a prefix route can select the same storage. Dynamic
+    # indices are conservatively assumed equal unless bounds prove otherwise.
+    return True
 
 
 def _arguments_in_source_order(

@@ -24,3 +24,15 @@ value |> function      # pipe call
 ```
 
 General juxtaposition multiplication and broadcasting remain planned.
+
+## Place projection and precedence
+
+The prefix `@` operator selects a place. Subsequent field and index operations project that place, so ordinary precedence gives these readings:
+
+```dewy
+@pair.left       # (@pair).left: the place occupied by left
+@values[i]       # (@values)[i]: the place occupied by element i
+@box.rows[i][j]  # (((@box).rows)[i])[j]
+```
+
+Parenthesizing the complete route, as in `@(pair.left)`, is equivalent. Dewy does not use a special `pair.@left` member-access form. See [Values, places, and containers](values.md#places-and-projected-routes) for call and aliasing rules.

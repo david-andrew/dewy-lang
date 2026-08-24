@@ -4121,6 +4121,13 @@ values.reduce((+=) @x)
 ```
 Oviously this is a trivial example, but more complex assignments could be done. Noting that this requires `@x` to clearly mean the place `x` lives. This could sort of work (though it gets a bit tricky when thinking about what `@some_fn` means since we use that to get the function without calling it). Perhaps `@` could even refer to locations in an array, e.g. `@arr[2..5 2,4..20]`, though the only problem with this is the precedence order of parsing the array index being lower than `@`
 
+> Resolution: prefix precedence is useful here rather than a problem. `@arr[i]`
+> is `(@arr)[i]`: `@arr` starts at the array binding's place and indexing
+> projects it to the final element place. Fields work the same way, so
+> `@obj.field` is `(@obj).field`; `@(obj.field)` is equivalent. The current
+> compiler implements individual field/index routes, while slice places remain
+> a separate future design.
+
 More thought needed on the semantics of the place of a value, but I think I will allow it
 
 

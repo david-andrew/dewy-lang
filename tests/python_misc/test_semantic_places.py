@@ -132,6 +132,81 @@ let update_pair = (@pair:Pair):>void => { pair.left = 20 }
     assert isinstance(pair.expr.pos_or_kw_args[0].type, ty.ObjectType)
 
 
+def test_field_and_index_selectors_project_a_place_route() -> None:
+    root = _check('''
+let Pair:type = [left:int64 right:int64]
+let set = (@value:int64):>void => { value = 42 }
+let main = ():>void => {
+    let pair:Pair = [left = 1 right = 2]
+    let values:array<int64 length=2> = [3 4]
+    set(@pair.left)
+    set(@values[1])
+    set(@(pair.right))
+}
+''')
+
+    main = root.items[2]
+    assert isinstance(main, hir.Declare)
+    assert isinstance(main.expr, hir.FunctionLiteral)
+    assert isinstance(main.expr.body, hir.Block)
+    field_call, index_call, grouped_call = main.expr.body.items[2:]
+    assert isinstance(field_call, hir.FunctionCall)
+    assert isinstance(field_call.pos_args[0], hir.Place)
+    assert isinstance(field_call.pos_args[0].target, hir.MemberAccess)
+    assert isinstance(index_call, hir.FunctionCall)
+    assert isinstance(index_call.pos_args[0], hir.Place)
+    assert isinstance(index_call.pos_args[0].target, hir.Index)
+    assert isinstance(grouped_call, hir.FunctionCall)
+    assert isinstance(grouped_call.pos_args[0], hir.Place)
+    assert isinstance(grouped_call.pos_args[0].target, hir.MemberAccess)
+
+
+def test_disjoint_projected_places_can_share_one_call() -> None:
+    _check('''
+let Pair:type = [left:int64 right:int64]
+let set_both = (@left:int64 @right:int64):>void => {
+    left = 20
+    right = 22
+}
+let main = ():>void => {
+    let pair:Pair = [left = 1 right = 2]
+    let values:array<int64 length=2> = [3 4]
+    set_both(@pair.left @pair.right)
+    set_both(@values[0] @values[1])
+}
+''')
+
+
+def test_potentially_overlapping_place_routes_are_rejected() -> None:
+    with pytest.raises(UserError, match='overlapping mutable places in one call'):
+        _check('''
+let Pair:type = [left:int64 right:int64]
+let conflict = (@whole:Pair @part:int64):>void => void
+let main = ():>void => {
+    let pair:Pair = [left = 1 right = 2]
+    conflict(@pair @pair.left)
+}
+''')
+
+
+@pytest.mark.parametrize(
+    'argument',
+    ['@pair.left', '@values[0]'],
+)
+def test_projected_place_cannot_descend_from_const_root(argument: str) -> None:
+    source = f'''
+let Pair:type = [left:int64 right:int64]
+let set = (@value:int64):>void => void
+let main = ():>void => {{
+    const pair:Pair = [left = 1 right = 2]
+    const values:array<int64 length=2> = [3 4]
+    set({argument})
+}}
+'''
+    with pytest.raises(UserError, match='const'):
+        _check(source)
+
+
 def test_array_place_lowering_uses_a_non_escaping_pointer_cell() -> None:
     emitted = codegen(SrcFile(None, '''
 let replace = (@items:array<int64 length=2>):>void => { items = [20 22] }
@@ -179,3 +254,22 @@ let main = ():>int64 => {
     assert 'let pair:int64 = __dewy_place_pair_' in emitted
     assert 'replace(pair)' in emitted
     assert 'place_cell_pair' not in emitted
+
+
+def test_projected_place_lowering_passes_the_final_storage_address() -> None:
+    emitted = codegen(SrcFile(None, '''
+let Pair:type = [left:int64 right:int64]
+let set = (@value:int64):>void => { value = 42 }
+let main = ():>int64 => {
+    let pair:Pair = [left = 1 right = 2]
+    let values:array<int64 length=2> = [3 4]
+    set(@pair.right)
+    set(@values[0])
+    return pair.right + values[0] - 42
+}
+'''))
+
+    assert 'set(pair + 8)' in emitted
+    assert 'set(values)' in emitted
+    assert 'place_cell_pair' not in emitted
+    assert 'place_cell_values' not in emitted

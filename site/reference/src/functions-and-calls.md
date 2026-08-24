@@ -113,17 +113,17 @@ let describe = ((value:int64):>string => "integer")
 
 ## Handles
 
-A bare function name calls it when that would be valid. `@fn` is the handle:
-you use it to pass the function, freeze some arguments, and name the original
-binding. Assigning `@fn` does not copy; the new name is the same place.
+Function handles and partial evaluation are a design direction and do not yet lower in the current compiler. The intended syntax uses the same place rule as ordinary data: a bare function name calls it when that would be valid, while `@fn` starts at the function binding's place and exposes it as a callable handle instead.
 
 ```dewy
+# planned
 sum = (a b) => a + b
 add5 = @sum(5)
 reference = @sum
+
+callback = @worker.on_event  # (@worker).on_event, not worker.@on_event
 ```
 
-A parameter whose type is a function already wants that handle, so writing
-`@f` in the signature is optional. The call site still uses `@sum`, because
-`sum` would call. For `@` on arrays and objects, see
-[Arrays, objects, and strings](values.md).
+Selectors project the root place before producing the handle, so `@worker.on_event` reaches the function-valued field at the end of that route. The older interpreter spelling `worker.@on_event` is not the current language direction.
+
+A parameter whose type is a function is intended to request a callable handle directly, making `@f` optional in that signature. The call site still uses `@sum`, because bare `sum` would call. Details of escaping handle identity and explicit function copying remain part of the unfinished function-handle work. For implemented nonescaping data places, see [Values, places, and containers](values.md).

@@ -150,9 +150,9 @@ class ExpressedIdentifier(AST):
 
 @dataclass
 class Place(AST):
-    """A named mutable binding explicitly passed by reference with ``@``."""
+    """A mutable binding or projected field/index passed by reference with ``@``."""
 
-    target: ExpressedIdentifier
+    target: ExpressedIdentifier | MemberAccess | Index
 
 
 @dataclass

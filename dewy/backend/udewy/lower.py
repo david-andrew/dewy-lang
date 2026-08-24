@@ -2408,7 +2408,10 @@ class _Lowerer:
             return node
         if isinstance(node, hir.Place):
             target = self._transform_node(node.target)
-            if not isinstance(target, hir.ExpressedIdentifier):
+            if not isinstance(
+                target,
+                (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index),
+            ):
                 raise TypeError('INTERNAL ERROR: place target was not preserved')
             return replace(node, target=target)
         if isinstance(node, hir.FunctionLiteral):
@@ -8104,10 +8107,13 @@ class _Lowerer:
     def _materialize_place_argument(
         self,
         node: hir.Place,
-    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier, list[hir.AST]]:
+    ) -> tuple[list[hir.AST], hir.AST, list[hir.AST]]:
         """Create one non-escaping pointer cell and a post-call writeback."""
 
         target = node.target
+        if isinstance(target, (hir.MemberAccess, hir.Index)):
+            prelude, storage = self._extract_projected_place_storage(target)
+            return prelude, replace(storage, type='int64'), []
         if isinstance(node.type, ty.ObjectType):
             prelude, storage = self._extract_object_pointer(target)
             return prelude, replace(storage, type='int64'), []
@@ -8171,6 +8177,58 @@ class _Lowerer:
             ),
         ]
         return prelude, cell, postlude
+
+    def _extract_projected_place_storage(
+        self,
+        target: hir.MemberAccess | hir.Index,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Evaluate a place route once and return its final storage address."""
+
+        if isinstance(target, hir.MemberAccess):
+            prelude, obj = self._extract_object_pointer(target.value)
+            if not isinstance(target.value.type, ty.ObjectType):
+                self._target_error(target, 'projected member place requires an object')
+            _size, offsets = self._object_layout(target.value.type, target)
+            return prelude, self._field_address(
+                obj,
+                offsets[target.name],
+                target.loc,
+            )
+
+        raw_representation = self._array_use_representation(target.array)
+        prelude, array = self._extract_expression(target.array)
+        index: int | hir.AST = target.constant_index
+        if index is None:
+            index_prelude, index = self._extract_expression(target.index)
+            prelude.extend(index_prelude)
+        address = (
+            self._pointer_element_address(
+                array,
+                index,
+                self._array_element_layout(target.type, target)[0],
+                target.loc,
+            )
+            if raw_representation is not None
+            else self._array_element_address(
+                array,
+                index,
+                target.type,
+                target.loc,
+            )
+        )
+        if target.type == 'uint8' and raw_representation is None:
+            cow = self._ensure_mutable_byte_array(array, target.loc)
+            if cow:
+                prelude.extend(cow)
+                address = self._array_element_address(
+                    array,
+                    index,
+                    target.type,
+                    target.loc,
+                )
+        if isinstance(target.type, ty.ObjectType):
+            return prelude, self._array_load(address, target.type, target.loc)
+        return prelude, address
 
     def _finish_scalar_call_place_writebacks(
         self,

@@ -23,6 +23,8 @@ triple[end]    # 30
 triple[0..1]   # [10 20]
 ```
 
+Arrays have value semantics: an ordinary binding or call receives an independent value. To let a function update the original array or one element, pass a [place](values-and-places.md), such as `sort(@names)` or `set(@triple[1])`.
+
 A semicolon or newline starts a new dimension. Matrices are still arrays:
 
 ```dewy

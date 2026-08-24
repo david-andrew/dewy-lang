@@ -27,6 +27,7 @@
 - [Language Features](ch03/00-features.md)
   - [Expressions, Statements, and Blocks](ch03/expressions-statements-blocks.md)
   - [Bindings and Scope](ch03/bindings-and-scope.md)
+  - [Values, Copies, and Places](ch03/values-and-places.md)
   - [Basic Data Types](ch03/basic-data-types.md)
   - [Number Bases](ch03/number-bases.md)
   - [Operators](ch03/operators.md)

@@ -524,8 +524,11 @@ class _BoundsValidator:
             return self._constant_binding(node.binding_id, set())
         if isinstance(node, hir.Place):
             self._eval(node.target, state, validate=validate)
-            if node.target.binding_id is not None:
-                state.pop(node.target.binding_id, None)
+            root = node.target
+            while isinstance(root, (hir.MemberAccess, hir.Index)):
+                root = root.value if isinstance(root, hir.MemberAccess) else root.array
+            if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
+                state.pop(root.binding_id, None)
             return None
         if isinstance(node, hir.ValueCast):
             return self._fit_type(

@@ -84,7 +84,7 @@ format('life the universe and everything')
 
 ## Partial Evaluation and Handles
 
-A bare function name _calls_ it if that would be a valid call (or fails to compile). `@` gives you a handle, and you can freeze some arguments:
+Function handles and partial evaluation are planned but do not yet lower in the current compiler. The intended rule builds on places: a bare function name _calls_ it if that would be valid, while `@` starts from the function's place and exposes a callable handle. Arguments may then be frozen into a new function:
 
 ```dewy
 sum = (a b) => a + b
@@ -96,7 +96,9 @@ thirtyseven = @add5(32)
 thirtyseven         # 37
 ```
 
-Leave off the `@`, and `sum` with no arguments is a call, not a the function object. `@fn` is both the handle and the original function's location, so `reference = @sum` does not copy. A parameter whose type is a function already wants that handle; writing `@f` in the signature is optional.
+Leave off the `@`, and `sum` with no arguments is a call, not the function object. Selectors follow the same route rule as data places: `@worker.callback` means `(@worker).callback`, reaching the function-valued field at the end. It is not written `worker.@callback`.
+
+`@fn` is intended to identify the original function's location as a callable handle. A parameter whose type is a function already wants that handle, so writing `@f` in the signature is intended to be optional. The remaining identity, escaping, and explicit-copy details will be settled with function-handle lowering.
 
 ## Scope
 

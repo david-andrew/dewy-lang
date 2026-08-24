@@ -37,6 +37,8 @@ let copy = original
 copy.x = 32         # original.x is still 10
 ```
 
+When a function should deliberately update the original object or one of its fields, pass a [place](values-and-places.md): `update(@original)` or `set(@original.x)`. The leading `@` starts at the object's place and `.x` projects it to the field at the end of the route.
+
 Functions inside can see sibling fields. There is no `self` or `this`; they are in the same scope. You cannot take a method out as a naked function value.
 
 A compact constructor looks like this:

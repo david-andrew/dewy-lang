@@ -1,4 +1,5 @@
 let Pair:type = [left:int64 right:int64]
+let Box:type = [pair:Pair values:array<int64 length=2>]
 
 let bump = (@value:int64):>void => {
     value += 2
@@ -16,6 +17,11 @@ let set_byte = (@value:uint8):>void => {
     value = 42
 }
 
+let set_both = (@left:int64 @right:int64):>void => {
+    left = 20
+    right = 22
+}
+
 let mutate_pair = (@pair:Pair):>void => {
     pair.left = 20
     pair.right = 22
@@ -29,6 +35,10 @@ let forward_replace_pair = (@pair:Pair):>void => {
     replace_pair(@pair)
 }
 
+let replace_row = (@row:array<int64 length=2>):>void => {
+    row = [20 22]
+}
+
 let main = ():>int64 => {
     let value:int64 = 38
     forward_bump(@value)
@@ -37,12 +47,29 @@ let main = ():>int64 => {
     let byte:uint8 = 1
     set_byte(@byte)
 
+    let values:array<int64 length=2> = [1 2]
+    set_both(@values[0] @values[1])
+
     let pair:Pair = [left = 1 right = 2]
-    mutate_pair(@pair)
+    set_both(@pair.left @pair.right)
     let mutated = pair.left + pair.right
     forward_replace_pair(@pair)
 
+    let box:Box = [
+        pair = [left = 1 right = 2]
+        values = [3 4]
+    ]
+    set_both(@box.pair.left @box.values[1])
+
+    let first_row = [1 2]
+    let second_row = [3 4]
+    let matrix = [first_row second_row]
+    replace_row(@matrix[0])
+
     if value =? 40 and enabled and byte =? 42 and mutated =? 42
+        and values[0] =? 20 and values[1] =? 22
+        and box.pair.left =? 20 and box.values[1] =? 22
+        and matrix[0][0] =? 20 and matrix[0][1] =? 22
         and pair.left =? 30 and pair.right =? 12 {
         return 42
     } else {

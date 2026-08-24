@@ -9,7 +9,7 @@
 - [Expressions and operators](expressions-and-operators.md)
 - [Functions and calls](functions-and-calls.md)
 - [Control flow and iteration](control-flow-and-iteration.md)
-- [Arrays, objects, and strings](values.md)
+- [Values, places, and containers](values.md)
 - [Modules and imports](modules-and-imports.md)
 - [µDewy and host interoperability](interoperability.md)
 - [Implementation compatibility](compatibility.md)

@@ -1,18 +1,41 @@
-# Arrays, objects, and strings
+# Values, places, and containers
 
-Assignment, passing, and return copy arrays and objects. `@x` is the place `x` lives. A function writes the caller's value only when both the parameter and the argument are places.
+## Value semantics
+
+Assignment, argument passing, and return give the destination an independent value. The compiler may avoid a physical copy when that cannot be observed, but ordinary source code does not create aliases accidentally.
 
 ```dewy
 let a = [1 2 3]
 let b = a
 b[0] = 9                    # a is still [1 2 3]
+```
 
-update = (@xs:array<int64>) => { xs[0] = 9 }
+## Places and projected routes
+
+`@` explicitly selects storage rather than copying its value. For ordinary data, both the parameter and the call argument use `@`, making mutation visible on both sides of the call:
+
+```dewy
+update = (@xs:array<int64 length=3>) => { xs[0] = 9 }
+
 update(@a)                  # a is now [9 2 3]
 update(a)                   # error: expected a place
 ```
 
-`@?` is true when two names are the same place, not when two copies still share storage. Function handles use the same `@`; see [Functions and calls](functions-and-calls.md).
+Selectors project a place along a route. Prefix precedence means `@pair.left` is `(@pair).left`: start at the place occupied by `pair`, then select the place occupied by `left`. Indexing follows the same rule, and routes can mix selectors:
+
+```dewy
+set(@pair.left)
+set(@values[i])
+set(@box.rows[row][column])
+
+set(@(pair.left))           # equivalent, with explicit grouping
+```
+
+The place is the location at the end of the route, not just its first binding. There is no separate `pair.@left` form. Each computed index is evaluated once before the call.
+
+The current compiler requires an explicitly typed place parameter and an exact type match. The root must be mutable, places cannot yet be stored or returned, and potentially overlapping mutable routes cannot be passed in one call. Sibling fields and distinct constant indices are known to be disjoint; dynamic indices are conservatively treated as possibly overlapping.
+
+The planned `@?` operator asks whether two expressions identify the same place, not whether two independent values happen to share optimized backing storage. Function handles use the same root-and-route interpretation of `@`; see [Functions and calls](functions-and-calls.md).
 
 ## Arrays
 
