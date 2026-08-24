@@ -1,38 +1,45 @@
-# Refinements
+# Refinements and Proven Facts
 
-A type can carry extra facts such as a length, a range, or a field that is never a certain string. Those facts are refinements. The compiler can automatically prove many of them in ordinary code.
-
-## Writing a Refinement
-
-Any type may take a block `T<...>`. Conditions in that block are what the compiler must prove.
+A refinement is a type together with facts its values must satisfy. Length is a familiar example:
 
 ```dewy
-NonEmptyArray = array<length>?0>
-
-MyStruct:type = [a:int b:bool c:string]< a>?10 b=?true c not=? 'apple' >
+let triple:array<int64 length=3> = [10 20 30]
 ```
 
-An assignment in the block is a shorthand for a constant field:
+The type says more than “array of integers”; it also says that the valid shape has exactly three elements.
+
+## Why Refinements Matter
+
+Useful facts let Dewy reject invalid programs and remove unnecessary runtime work:
 
 ```dewy
-SingleValuedArray = array<length=1>    # same as array<length=?1>
+let first = triple[0]
 ```
 
-A top-level `?`-comparison, function, or assignment is a refinement condition. Every other expression is a parameter value, so a literal boolean does not need extra wrapping:
+The index needs no dynamic bounds check because the type already proves it valid.
+
+The same idea can describe nonempty containers, positive values, relationships between parameters and results, and state changes such as an operation reducing a collection's length by one.
+
+## Facts from Ordinary Control Flow
+
+Dewy should infer common refinements from the code programmers already write:
 
 ```dewy
-trues:array<true length=5> = [true true true true true]
+if index >=? 0 and index <? values.length
+    use(values[index])
 ```
 
-Integer types can be ranged the same way. See [Basic Data Types](basic-data-types.md). What happens if a value leaves a custom integer range is not yet determined.
+Inside the body, the condition establishes the indexing precondition. Assignment or a call that may mutate a relevant value invalidates facts that are no longer guaranteed.
 
-> Not all Dewy expressions are supported for refinements. The allowed conditions are booleans, equality and ordering, adding and subtracting integers, tests against literals and tags, lengths, and simple relationships between inputs and results. Function calls are allowed when inlining them would result in a valid refinement.
+## Explicit Boundaries
 
-## How the Compiler Accepts a Refinement
+The intended model distinguishes several outcomes:
 
-- If the compiler can prove it, there is no extra work at run time.
-- An explicit check, including leaving early on the failing case (`if not condition { return }`), lets later code treat the value as refined.
-- You can also supply a checked proof for something the compiler could not prove on its own. (TBD the structure of such proofs)
-- `unsafe` is for when the refinement cannot be proven, but the programmer knows it is true. It tells the compiler to take the claim on trust. That stays a place to audit.
+- a fact the compiler proves automatically has no runtime cost;
+- an explicit runtime check refines the value after it succeeds;
+- a checked proof can discharge an obligation outside automatic inference;
+- `unsafe` can assert an unproved obligation while making that trust boundary visible for review.
 
-The exact set of conditions the compiler can prove on its own is not yet determined. Arbitrary calls, open-ended "for all" claims, code with side effects, and general nonlinear arithmetic are outside what it handles automatically.
+> **Provisional design:** Length and interval reasoning establish the direction, but the complete proposition grammar, trusted pure measures, proof values, solver boundary, and `unsafe` syntax are not fully specified. Unsupported general Dewy expressions must not silently become refinement claims.
+
+The design goal is inference-first: ordinary code should expose enough facts for routine safety without requiring programmers to write proofs throughout application code.

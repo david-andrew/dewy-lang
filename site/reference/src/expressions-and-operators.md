@@ -1,38 +1,54 @@
-# Expressions and operators
+# Expressions and Evaluation
 
-Declarations, assignments, blocks, conditionals, and loops are expressions.
-Declarations and ordinary assignments produce `void`.
+Every executable construct in Dewy is an expression. An expression may produce one value, several values for a surrounding collector, `void`, or `never` when it cannot complete.
 
-Operator meaning is selected by type-directed dispatch. Implemented operators
-cover fixed-width arithmetic, comparisons, shifts, Boolean operations,
-membership/type tests, conversion, and assignment combinations.
-Narrow fixed-width arithmetic and bitwise results roll over at their declared
-width. Shift counts must be unsigned, so a negative count is a compile-time
-error. A fixed-width shift evaluates each operand once. Once a count reaches
-the value's width, a left shift or unsigned right shift is zero; a signed right
-shift continues its sign bit, settling at `0` for nonnegative values and `-1`
-for negative values.
+## Produced Values
 
-Adjacent expressions create a juxtaposition whose meaning can depend on the
-operand types. The parser preserves ambiguity between calls, indexing, and
-future multiplication until semantic analysis can resolve it.
+Literals, value-returning calls, exhaustive conditionals, and value-producing blocks can supply surrounding expressions. Declarations and ordinary assignments produce `void`.
+
+An attached postfix semicolon evaluates an expression and suppresses the values it would otherwise produce:
 
 ```dewy
-function(argument)     # call in a callable context
-values[index]          # indexing in an array context
-value |> function      # pipe call
+operation();
 ```
 
-General juxtaposition multiplication and broadcasting remain planned.
+An unattached semicolon is reserved for array-dimension selection and does not act as generic statement punctuation.
 
-## Place projection and precedence
+## Blocks
 
-The prefix `@` operator selects a place. Subsequent field and index operations project that place, so ordinary precedence gives these readings:
+`{}` is a scoped block. `()` groups expressions without introducing a child lexical scope.
+
+A block evaluates its expressions in source order and expresses each non-`void` result. A context requiring one value rejects a block that can produce an incompatible number of values.
 
 ```dewy
-@pair.left       # (@pair).left: the place occupied by left
-@values[i]       # (@values)[i]: the place occupied by element i
-@box.rows[i][j]  # (((@box).rows)[i])[j]
+let circumference = {
+    let diameter = 2 * radius
+    pi * diameter
+}
 ```
 
-Parenthesizing the complete route, as in `@(pair.left)`, is equivalent. Dewy does not use a special `pair.@left` member-access form. See [Values, places, and containers](values.md#places-and-projected-routes) for call and aliasing rules.
+Only the final calculation produces a value because the declaration is `void`.
+
+## Evaluation Order
+
+Within the expression tree established by grouping and precedence, operands and call arguments evaluate from left to right. A construct documented as evaluating an operand once must preserve that behavior even if lowering expands it into several primitive operations.
+
+Boolean short-circuit expressions evaluate only the operands required by their truth rule. Flow alternatives evaluate conditions in order and execute only the selected body.
+
+## Assignment
+
+Assignment evaluates its destination place and source, updates the binding or selected field/element, and produces `void`. Combined assignment loads the old value, applies the selected typed operator, and stores the result while evaluating the destination route only once.
+
+See [Operators and Precedence](operators-and-precedence.md), [Bindings](bindings-and-scope.md), and [Values, Copies, and Places](values.md).
+
+## Place Projection
+
+The prefix `@` selects a place. Following member and index expressions project the place to the location at the end of the route:
+
+```dewy
+@pair.left
+@values[i]
+@box.rows[row][column]
+```
+
+These parse as projections from the prefixed root. `@(pair.left)` is equivalent to `@pair.left`; Dewy has no `pair.@left` form.

@@ -1,81 +1,93 @@
-# Object Types
+# Structural Objects
 
-Objects are containers of named fields, values and functions, in source order. Field names and order are part of the type. A `type` alias is a name for that structure, not a class object sitting in memory.
+An object is a value with named fields. It does not require a separate class declaration:
+
+```dewy
+let account = [
+    name = "Ada"
+    active = true
+]
+
+account.name
+```
+
+Field names, field types, and their order form the object's structural type.
+
+## Naming an Object Shape
+
+A type alias gives a structural shape a reusable name:
 
 ```dewy
 let Pair:type = [left:int64 right:int64]
-let origin:Pair = [left = 0 right = 0]
+let origin:Pair = [left=0 right=0]
 ```
 
-Objects are distinguished by any `=` assignments at the top level of `[]`. `->` and `<->` make a dictionary instead. And none of those appearing in the top level makes an array.
+The alias does not create a runtime class object or nominal identity. Another value with the same required structure satisfies the same structural contract.
+
+## Constructors Are Functions
+
+A constructor is an ordinary function returning an object:
 
 ```dewy
-let point = [
-    x = 10
-    y = 20
-    sum = ():>int64 => x + y
+let make_pair = (left:int64 right:int64):>Pair =>
+    [left=left right=right]
+
+let pair = make_pair(20 22)
+```
+
+Default parameters, overloads, and generics apply to constructors exactly as they apply to other functions.
+
+## Behavior Inside Objects
+
+Function fields can use sibling fields directly:
+
+```dewy
+let counter = (start:int64=0) => [
+    value = start
+    increment = () => value += 1
 ]
-point.x
-point.sum           # zero-arg field, gets called
-point.sum()         # same thing, spelled out
+
+let count = counter(40)
+count.increment
+count.increment
+printl"count is {count.value}"
 ```
 
-## Constructors
+Accessing a zero-argument function field calls it when that call is valid. Explicit `count.increment()` is equivalent.
 
-There is no `class` keyword. A constructor is just a regular function that returns an object.
+## Objects Are Values
 
-```dewy
-let make = (x:int64 y:int64):>Pair => [left = x right = y]
-let get_left = (pair:Pair):>int64 => pair.left
-```
-
-Assigning, passing, and returning give you a copy, not an alias.
+Ordinary copies are independent:
 
 ```dewy
-let original = [x = 10 y = 20]
+let Document:type = [name:string saved:bool]
+let original:Document = [name="draft" saved=false]
 let copy = original
-copy.x = 32         # original.x is still 10
+copy.saved = true
+
+# original.saved is still false
 ```
 
-When a function should deliberately update the original object or one of its fields, pass a [place](values-and-places.md): `update(@original)` or `set(@original.x)`. The leading `@` starts at the object's place and `.x` projects it to the field at the end of the route.
-
-Functions inside can see sibling fields. There is no `self` or `this`; they are in the same scope. You cannot take a method out as a naked function value.
-
-A compact constructor looks like this:
+To update the caller's object deliberately, accept and pass a place:
 
 ```dewy
-Point = (x:number y:number) => [
-    mag = () => (x^2 + y^2)^/2
-    show = () => printl'({x}, {y})'
-]
-
-p = Point(3 4)
-p.mag               # 5
+let save = (@document:Document):>void => document.saved = true
+save(@original)
 ```
 
-## Dunder Methods
+Fields and array elements can be selected directly, such as `set(@original.saved)`.
 
-Double-underscore methods hook into built-ins, the same idea as Python:
+## Operators and Conversions
+
+Objects participate in operators and conversions through typed overloads. The precise overloadable conversion protocol is preferred over a second class-specific “dunder” model:
 
 ```dewy
-Point = (x:number y:number) => [
-    x = x
-    y = y
-    __add__ = other:Point => Point(x+other.x y+other.y)
-    __repr__ = () => 'Point({x}, {y})'
-    __str__ = () => '({x}, {y})'
-]
-
-p1 = Point(1 2)
-p2 = Point(3 4)
-p3 = p1 + p2
-printl(p3)          # Point(4 6)
+let __add__ = __add__ & (
+    (left:Pair right:Pair):>Pair =>
+        [left=left.left + right.left right=left.right + right.right]
+)
 ```
 
-Or hang the operator on a shared function and let the argument types pick which one runs, instead of putting `__add__` on every instance:
+> **Provisional design:** Extracted methods, escaping captured fields, function-handle identity, and the final convention for attaching overloads to structural types are part of the function-handle and generic-object design.
 
-```dewy
-__add__ = __add__ & ((a:Point b:Point) => Point(a.x+b.x a.y+b.y))
-```
-
-`&` overloads are in [Function Types](function-types.md).
+The Reference defines [structural object behavior](../../reference/objects.html) and [value semantics](../../reference/values.html).

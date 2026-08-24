@@ -1,24 +1,44 @@
-# Control flow and iteration
+# Control Flow
 
-`if`, `else if`, and `else` form an ordered conditional. An exhaustive
-conditional can produce a scalar value; a non-exhaustive conditional produces
-`void`.
+## Conditionals
 
-`loop` covers Boolean repetition and iterator consumption. `break` and
-`continue` can target an enclosing loop through a scope metatag label.
+`if`, `else if`, and `else` form an ordered flow expression. Conditions evaluate from left to right until one succeeds; only the selected body evaluates.
 
 ```dewy
-loop i in 0..10 {
-    if i =? 5 { continue }
-}
+let label = if count =? 0
+    "empty"
+else if count =? 1
+    "one item"
+else
+    "{count} items"
 ```
 
-Static integer ranges support inclusive and explicit open bounds, descending
-steps, and `first,second..last` notation. Multiiterators combine static range
-iterators using `and`, `or`, `xor`, `nand`, `nor`, or `xnor`. Iterator leaves
-advance eagerly from left to right once per condition evaluation.
+An exhaustive conditional may produce a value when its alternatives have a compatible result type. A nonexhaustive conditional produces `void` unless its context collects another well-defined result form.
 
-`in?` supports runtime `int64` candidates and endpoints for unstepped ranges;
-all runtime operands are evaluated once. A runtime candidate can also be tested
-against a statically anchored stepped range, including descending and unbounded
-forms. Runtime-computed step anchors are not yet supported.
+Facts established by a condition narrow values inside the corresponding body and along later paths where earlier alternatives are known false.
+
+## Loops
+
+`loop condition body` reevaluates its condition and executes its body according to the condition's Boolean or iterator behavior.
+
+```dewy
+loop connected
+    receive_message()
+
+loop item in items
+    process(item)
+```
+
+See [Ranges and Iteration](ranges-and-iteration.md) for iterator conditions and multiiterator formulas.
+
+## Exits
+
+`break` exits a loop. `continue` begins its next condition evaluation. `return` exits the current function, optionally supplying its result.
+
+An exit may target an enclosing labeled loop through Dewy's scope metatag mechanism. Exiting more loop levels than exist is an error.
+
+`never` is the type of a path that cannot complete normally. It is distinct from `void`, which represents normal completion without a produced value.
+
+## Pattern Selection and Cleanup
+
+General `match`, cleanup/finally behavior, and effect-aware error propagation are provisional designs. Their eventual forms must compose with expression results and flow-sensitive narrowing rather than creating separate statement-only semantics.

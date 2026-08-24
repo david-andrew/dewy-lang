@@ -1,50 +1,57 @@
-# Values, places, and containers
+# Values, Copies, and Places
 
-## Value semantics
+## Value Semantics
 
-Assignment, argument passing, and return give the destination an independent value. The compiler may avoid a physical copy when that cannot be observed, but ordinary source code does not create aliases accidentally.
-
-```dewy
-let a = [1 2 3]
-let b = a
-b[0] = 9                    # a is still [1 2 3]
-```
-
-## Places and projected routes
-
-`@` explicitly selects storage rather than copying its value. For ordinary data, both the parameter and the call argument use `@`, making mutation visible on both sides of the call:
+Assignment, argument passing, and return supply an independent value. Mutating the destination cannot change the source merely because an implementation reused backing storage.
 
 ```dewy
-update = (@xs:array<int64 length=3>) => { xs[0] = 9 }
-
-update(@a)                  # a is now [9 2 3]
-update(a)                   # error: expected a place
+let original = [1 2 3]
+let copy = original
+copy[0] = 9                  # original remains [1 2 3]
 ```
 
-Selectors project a place along a route. Prefix precedence means `@pair.left` is `(@pair).left`: start at the place occupied by `pair`, then select the place occupied by `left`. Indexing follows the same rule, and routes can mix selectors:
+The compiler may realize that semantic copy through physical copying, a move, ownership transfer, borrowed reading, shared immutable storage, or another representation whose differences are unobservable.
+
+Scalar, array, object, string, and container values all follow this rule. A field whose own type has explicit handle semantics retains those semantics when its containing value is copied.
+
+## Places
+
+`@` explicitly selects the place occupied by a mutable value. A parameter that accepts a place also carries `@`, making caller-visible mutation explicit at both boundaries:
+
+```dewy
+let update = (@xs:array<int64 length=3>):>void =>
+    xs[0] = 9
+
+let values = [1 2 3]
+update(@values)
+```
+
+Passing `values` without `@` supplies an ordinary value. Passing `@values` to a non-place parameter is likewise a type error.
+
+## Projected Routes
+
+Selectors after `@` project the root place to the location at the end of the route:
 
 ```dewy
 set(@pair.left)
 set(@values[i])
 set(@box.rows[row][column])
-
-set(@(pair.left))           # equivalent, with explicit grouping
 ```
 
-The place is the location at the end of the route, not just its first binding. There is no separate `pair.@left` form. Each computed index is evaluated once before the call.
+`@pair.left` means `(@pair).left`. `@(pair.left)` is equivalent. There is no `pair.@left` form. A computed index in a place route evaluates once before the call.
 
-The current compiler requires an explicitly typed place parameter and an exact type match. The root must be mutable, places cannot yet be stored or returned, and potentially overlapping mutable routes cannot be passed in one call. Sibling fields and distinct constant indices are known to be disjoint; dynamic indices are conservatively treated as possibly overlapping.
+## Type and Aliasing Rules
 
-The planned `@?` operator asks whether two expressions identify the same place, not whether two independent values happen to share optimized backing storage. Function handles use the same root-and-route interpretation of `@`; see [Functions and calls](functions-and-calls.md).
+A mutable place is invariant in its value type: a callee must not reinterpret the caller's storage through a broader or narrower place contract.
 
-## Arrays
+Two mutable place arguments in one call must be proven disjoint. Sibling object fields and distinct constant indices are disjoint. Prefix-related routes overlap. Dynamic indices are potentially overlapping unless analysis proves otherwise.
 
-Implemented arrays are homogeneous. Exact-length arrays carry a length refinement, expose `.length`, and support constant or flow-proven indexing. Some non-escaping local literals and module constants lower directly to raw storage. General dynamic-length and escaping arrays remain incomplete.
+A `const` binding does not provide a mutable place.
 
-## Objects
+## Escaping Places and Identity
 
-Object literals contain named fields in source order and have structural types. Fields can be read and mutated when the originating binding permits it. Function fields can read sibling fields, and zero-argument function fields are called by ordinary member access.
+Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.
 
-## Strings
+The intended `@?` operation asks whether two place expressions designate the same semantic place. It does not expose unobservable storage sharing used to optimize independent values.
 
-Strings are immutable sequences of Unicode extended grapheme clusters. Length, indexing, slicing, iteration, exact equality, grapheme ranges, UTF-8 byte views, Unicode scalar views, and grapheme-array conversion are implemented. Equality currently preserves exact scalar spelling rather than normalizing text. Slice endpoints may be computed at runtime when flow-sensitive bounds analysis proves their effective open or closed boundaries stay within the string.
+Function handles build on the same root-and-route interpretation of `@`; see [Functions and Calls](functions-and-calls.md#function-handles).

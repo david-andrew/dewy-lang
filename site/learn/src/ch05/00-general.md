@@ -1,21 +1,38 @@
-<!-- TODO, shouldn't this be way earlier? -->
+# A Few Ideas That Organize Dewy
 
-# General Concepts
+Dewy has a broad feature set, but a small number of ideas explain how those features fit together.
 
-A few ideas show up in every chapter.
+## Expressions Produce Values
 
-## Everything Is an Expression
+Literals, calls, blocks, conditionals, and loops are expressions. An expression may produce one value, several values for a surrounding construct to collect, `void`, or no possible value at all.
 
-Declarations, assignments, blocks, `if`, and `loop` are expressions. Declarations and ordinary assignments produce `void`. A block produces the values it expresses. That is why Dewy does not need a special `?:` form or a separate list-building syntax.
+This is why Dewy does not need a separate ternary operator, list-comprehension grammar, or statement-only form of control flow.
 
-## One Grammar, Many Uses
+## One Grammar, Reused
 
-`[]` is an array, a dictionary, an object, or an index, depending on what is inside. `{ }` is a scoped block and a generator. `=>` is a function. The same pieces combine instead of each feature inventing punctuation.
+The meaning of a construct comes from the expressions inside it and their types:
 
-## Compile Time and Runtime
+- `[]` can collect array elements, object fields, or key/value pairs;
+- juxtaposition can call a function, index a value, or multiply compatible quantities;
+- `{}` creates a scoped block wherever a block is needed;
+- `=>` builds a function from a parameter contract and a body.
 
-Types, units, and import paths are decided when you compile. They are gone from the running program once the compiler has used them. Values that must exist while the program runs keep whatever storage the compiler picks from how they are used.
+These uses are not chosen by textual guesswork alone. Parsing preserves meaningful alternatives and semantic analysis resolves them from context and types.
 
-## Comments and Names
+## Values by Default, Places by Request
 
-`#` starts a line comment. `#{ ... }#` is a block comment. Identifiers are case-sensitive and allow a wider set of letters and decorations than most C-family languages.
+An ordinary assignment or function argument supplies an independent value. The compiler may move or share storage when that cannot be observed, but source code does not accidentally create two mutable names for one value.
+
+`@` requests a place when shared mutation is the point of the operation. Both the function signature and call site show that choice.
+
+## Meaning and Representation Are Separate
+
+A type describes what a value means. Its runtime representation is a compiler decision as long as the program cannot observe a difference.
+
+An integer may have arbitrary-precision semantics while range analysis proves that a machine-width representation is sufficient. A physical unit may participate in type checking and then disappear entirely. An array descriptor may be omitted when its length and layout are already known.
+
+## Compile Time Is Ordinary Language Territory
+
+Types, import paths, dimensions, and other compile-time values use Dewy's expression model instead of separate mini-languages. Not every general compile-time operation is designed or implemented yet, but the organizing rule is that compile-time facilities should compose with the rest of Dewy rather than forming an unrelated macro language.
+
+The next chapter starts with the first of these ideas: [expressions and the values they produce](../ch03/expressions-statements-blocks.md).

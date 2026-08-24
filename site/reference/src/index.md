@@ -1,24 +1,29 @@
-# Dewy language reference
+# Dewy Language Reference
 
-This reference records the behavior of the current Dewy compiler. It is
-intentionally concise and organized by language construct rather than by a
-learning sequence.
+This reference defines the intended syntax and semantics of the Dewy programming language. It is organized by language construct and is meant for answering exact questions rather than teaching the language in sequence.
 
-> **Development reference:** Dewy is version `0.0.0-dev.0`. Syntax and
-> semantics may change. A feature described as **implemented** is expected to
-> pass parsing, semantic analysis, µDewy lowering, and emission. Anything else
-> is explicitly marked **planned**.
+For a guided introduction, read [Learning Dewy](../learn/).
 
-For tutorials and motivation, read [Learning Dewy](../learn/). For the most
-detailed implementation checklist, see
-[`dewy/status.md`](https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md).
+## Normative Language and Current Implementations
+
+The main reference describes Dewy itself. A rule does not become less normative merely because the current compiler has not implemented it yet.
+
+Language-design maturity is recorded in [Design Maturity and Open Questions](design-status.md):
+
+- settled behavior is documented directly;
+- provisional behavior is documented only as far as decisions have been made;
+- unspecified behavior is identified without inventing a default.
+
+Current compiler coverage, target restrictions, and µDewy compatibility belong to [Implementation Compatibility](compatibility.md). Those implementation notes do not redefine the source language.
 
 ## Conventions
 
-- Dewy source normally uses the `.dewy` suffix.
-- µDewy source normally uses `.udewy`, although suffixes do not alter Dewy's
-  semantic analysis.
-- Examples in this reference target current Dewy unless labelled µDewy.
+- Dewy source conventionally uses the `.dewy` suffix.
+- µDewy source conventionally uses `.udewy`; suffixes do not select Dewy semantic rules.
+- Code labelled **provisional** illustrates a design whose stated portions are decided but whose surrounding rules may change.
 - `T | undefined` denotes an optional value.
-- Fixed-width integer examples use `int8` through `int64` and `uint8` through
-  `uint64`.
+- `intN` and `uintN` denote fixed-width signed and unsigned integer families when a rule applies uniformly across widths.
+- “Produces” describes the value or values expressed by a construct. `void` means that no value is produced.
+- “Place” means a mutable storage location selected explicitly with `@`; it is not an accidental alias created by an optimization.
+
+Unless a section explicitly says otherwise, evaluation proceeds from left to right within the order established by grouping and operator precedence.

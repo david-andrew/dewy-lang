@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Arrays, objects, and strings - Dewy Language Reference</title>
+        <title>Values, Copies, and Places - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,34 +207,49 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="arrays-objects-and-strings"><a class="header" href="#arrays-objects-and-strings">Arrays, objects, and strings</a></h1>
-<h2 id="arrays"><a class="header" href="#arrays">Arrays</a></h2>
-<p>Implemented arrays are homogeneous. Exact-length arrays carry a length
-refinement, expose <code>.length</code>, and support constant or flow-proven indexing.
-Some non-escaping local literals and module constants lower directly to raw
-storage. General dynamic-length and escaping arrays remain incomplete.</p>
-<h2 id="objects"><a class="header" href="#objects">Objects</a></h2>
-<p>Object literals contain named fields in source order and have structural types.
-Fields can be read and mutated when the originating binding permits it. Function
-fields can read sibling fields, and zero-argument function fields are called by
-ordinary member access.</p>
-<h2 id="strings"><a class="header" href="#strings">Strings</a></h2>
-<p>Strings are immutable sequences of Unicode extended grapheme clusters. Length,
-indexing, slicing, iteration, exact equality, grapheme ranges, UTF-8 byte views,
-Unicode scalar views, and grapheme-array conversion are implemented. Equality
-currently preserves exact scalar spelling rather than normalizing text. Slice
-endpoints may be computed at runtime when flow-sensitive bounds analysis proves
-their effective open or closed boundaries stay within the string.</p>
+                        <h1 id="values-copies-and-places"><a class="header" href="#values-copies-and-places">Values, Copies, and Places</a></h1>
+<h2 id="value-semantics"><a class="header" href="#value-semantics">Value Semantics</a></h2>
+<p>Assignment, argument passing, and return supply an independent value. Mutating the destination cannot change the source merely because an implementation reused backing storage.</p>
+<pre><code class="language-dewy">let original = [1 2 3]
+let copy = original
+copy[0] = 9                  # original remains [1 2 3]
+</code></pre>
+<p>The compiler may realize that semantic copy through physical copying, a move, ownership transfer, borrowed reading, shared immutable storage, or another representation whose differences are unobservable.</p>
+<p>Scalar, array, object, string, and container values all follow this rule. A field whose own type has explicit handle semantics retains those semantics when its containing value is copied.</p>
+<h2 id="places"><a class="header" href="#places">Places</a></h2>
+<p><code>@</code> explicitly selects the place occupied by a mutable value. A parameter that accepts a place also carries <code>@</code>, making caller-visible mutation explicit at both boundaries:</p>
+<pre><code class="language-dewy">let update = (@xs:array&lt;int64 length=3&gt;):&gt;void =&gt;
+    xs[0] = 9
+
+let values = [1 2 3]
+update(@values)
+</code></pre>
+<p>Passing <code>values</code> without <code>@</code> supplies an ordinary value. Passing <code>@values</code> to a non-place parameter is likewise a type error.</p>
+<h2 id="projected-routes"><a class="header" href="#projected-routes">Projected Routes</a></h2>
+<p>Selectors after <code>@</code> project the root place to the location at the end of the route:</p>
+<pre><code class="language-dewy">set(@pair.left)
+set(@values[i])
+set(@box.rows[row][column])
+</code></pre>
+<p><code>@pair.left</code> means <code>(@pair).left</code>. <code>@(pair.left)</code> is equivalent. There is no <code>pair.@left</code> form. A computed index in a place route evaluates once before the call.</p>
+<h2 id="type-and-aliasing-rules"><a class="header" href="#type-and-aliasing-rules">Type and Aliasing Rules</a></h2>
+<p>A mutable place is invariant in its value type: a callee must not reinterpret the caller's storage through a broader or narrower place contract.</p>
+<p>Two mutable place arguments in one call must be proven disjoint. Sibling object fields and distinct constant indices are disjoint. Prefix-related routes overlap. Dynamic indices are potentially overlapping unless analysis proves otherwise.</p>
+<p>A <code>const</code> binding does not provide a mutable place.</p>
+<h2 id="escaping-places-and-identity"><a class="header" href="#escaping-places-and-identity">Escaping Places and Identity</a></h2>
+<p>Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.</p>
+<p>The intended <code>@?</code> operation asks whether two place expressions designate the same semantic place. It does not expose unobservable storage sharing used to optimize independent values.</p>
+<p>Function handles build on the same root-and-route interpretation of <code>@</code>; see <a href="functions-and-calls.html#function-handles">Functions and Calls</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="control-flow-and-iteration.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="bindings-and-scope.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="modules-and-imports.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="types-and-conversions.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -244,11 +259,11 @@ their effective open or closed boundaries stay within the string.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="control-flow-and-iteration.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="bindings-and-scope.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="modules-and-imports.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="types-and-conversions.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Reference status - Dewy Language Reference</title>
+        <title>About This Reference - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,29 +207,29 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="dewy-language-reference"><a class="header" href="#dewy-language-reference">Dewy language reference</a></h1>
-<p>This reference records the behavior of the current Dewy compiler. It is
-intentionally concise and organized by language construct rather than by a
-learning sequence.</p>
-<blockquote>
-<p><strong>Development reference:</strong> Dewy is version <code>0.0.0-dev.0</code>. Syntax and
-semantics may change. A feature described as <strong>implemented</strong> is expected to
-pass parsing, semantic analysis, µDewy lowering, and emission. Anything else
-is explicitly marked <strong>planned</strong>.</p>
-</blockquote>
-<p>For tutorials and motivation, read <a href="../learn/">Learning Dewy</a>. For the most
-detailed implementation checklist, see
-<a href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md"><code>dewy/status.md</code></a>.</p>
+                        <h1 id="dewy-language-reference"><a class="header" href="#dewy-language-reference">Dewy Language Reference</a></h1>
+<p>This reference defines the intended syntax and semantics of the Dewy programming language. It is organized by language construct and is meant for answering exact questions rather than teaching the language in sequence.</p>
+<p>For a guided introduction, read <a href="../learn/">Learning Dewy</a>.</p>
+<h2 id="normative-language-and-current-implementations"><a class="header" href="#normative-language-and-current-implementations">Normative Language and Current Implementations</a></h2>
+<p>The main reference describes Dewy itself. A rule does not become less normative merely because the current compiler has not implemented it yet.</p>
+<p>Language-design maturity is recorded in <a href="design-status.html">Design Maturity and Open Questions</a>:</p>
+<ul>
+<li>settled behavior is documented directly;</li>
+<li>provisional behavior is documented only as far as decisions have been made;</li>
+<li>unspecified behavior is identified without inventing a default.</li>
+</ul>
+<p>Current compiler coverage, target restrictions, and µDewy compatibility belong to <a href="compatibility.html">Implementation Compatibility</a>. Those implementation notes do not redefine the source language.</p>
 <h2 id="conventions"><a class="header" href="#conventions">Conventions</a></h2>
 <ul>
-<li>Dewy source normally uses the <code>.dewy</code> suffix.</li>
-<li>µDewy source normally uses <code>.udewy</code>, although suffixes do not alter Dewy's
-semantic analysis.</li>
-<li>Examples in this reference target current Dewy unless labelled µDewy.</li>
+<li>Dewy source conventionally uses the <code>.dewy</code> suffix.</li>
+<li>µDewy source conventionally uses <code>.udewy</code>; suffixes do not select Dewy semantic rules.</li>
+<li>Code labelled <strong>provisional</strong> illustrates a design whose stated portions are decided but whose surrounding rules may change.</li>
 <li><code>T | undefined</code> denotes an optional value.</li>
-<li>Fixed-width integer examples use <code>int8</code> through <code>int64</code> and <code>uint8</code> through
-<code>uint64</code>.</li>
+<li><code>intN</code> and <code>uintN</code> denote fixed-width signed and unsigned integer families when a rule applies uniformly across widths.</li>
+<li>“Produces” describes the value or values expressed by a construct. <code>void</code> means that no value is produced.</li>
+<li>“Place” means a mutable storage location selected explicitly with <code>@</code>; it is not an accidental alias created by an optimization.</li>
 </ul>
+<p>Unless a section explicitly says otherwise, evaluation proceeds from left to right within the order established by grouping and operator precedence.</p>
 
                     </main>
 

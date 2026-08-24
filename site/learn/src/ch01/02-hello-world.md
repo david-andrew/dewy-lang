@@ -1,63 +1,70 @@
-# Hello, World!
+# Your First Dewy Program
 
-Most languages start by printing `Hello, World!`. Dewy makes that a
-one-liner.
-
-## Put Your Code in a Directory
+Create a directory for the program:
 
 ```bash
-mkdir -p ~/code/hello_world
-cd ~/code/hello_world
+mkdir -p ~/code/greetings
+cd ~/code/greetings
 ```
 
-## Write the Source
+Create `greetings.dewy` with this source:
 
-Create `hello.dewy` and enter:
+```dewy
+let greet = (name:string):>void =>
+    printl"Hello, {name}!"
+
+let names = ["Ada" "Grace" "Linus"]
+
+loop name in names
+    greet(name)
+```
+
+Run it:
+
+```bash
+dewy greetings.dewy
+```
+
+The output is:
+
+```text
+Hello, Ada!
+Hello, Grace!
+Hello, Linus!
+```
+
+This small program already shows several recurring parts of Dewy:
+
+- `let` introduces a binding;
+- `(name:string):>void => ...` defines a function with one string parameter;
+- whitespace separates array elements, so commas are unnecessary;
+- `loop name in names` consumes the array from left to right;
+- `{name}` interpolates a value into a string;
+- `printl` prints text followed by a newline.
+
+The one-line traditional greeting is valid too:
 
 ```dewy
 printl'Hello, World!'
 ```
 
-`printl` writes a string to the terminal and adds a newline. Juxtaposing
-`printl` with a string is a function call, the same as
-`printl('Hello, World!')`. `print` does the same thing without the
-newline.
+Juxtaposing a callable with its argument can express a call, so this is equivalent to `printl('Hello, World!')`.
 
-## Run It
+## Top-Level Code and `main`
 
-```bash
-dewy hello.dewy
-```
+Dewy executes top-level code in source order. A small program therefore needs no special entry wrapper.
 
-That should print `Hello, World!`.
-
-## Top-Level Execution and `main`
-
-Dewy runs top-level code in source order. A program does not need a
-`main` function.
-
-When a module declares `main`, the top level still runs first, then Dewy
-invokes `main`. `main` takes no arguments and returns an integer exit
-code or `void`.
+When a module declares `main`, its top level still initializes first and Dewy calls `main` afterward:
 
 ```dewy
-let message = 'Hello'
-printl'{message} from the top level'
+const application_name = "notes"
 
-let main = () => {
-    printl'Hello from main'
+let main = ():>int64 => {
+    printl"starting {application_name}"
     return 0
 }
 ```
 
-An explicit call to `main()` at the top level is an ordinary call. Dewy still
-invokes `main` after the top level finishes, so that program would call
-`main` twice.
+An explicit top-level `main()` is an ordinary call; it does not replace automatic entry invocation.
 
-## Compiling and Running Are the Same Step
-
-`dewy` compiles the source and then runs it. You do not need a separate
-compile command for ordinary use.
-
-The hosted compiler lowers Dewy to µDewy, then the µDewy backend
-assembles and runs it. Intermediate files go under `__dewycache__/`.
+For ordinary use, `dewy` compiles and runs the program in one command. The hosted compiler lowers Dewy to µDewy, after which the selected µDewy backend produces the executable form.

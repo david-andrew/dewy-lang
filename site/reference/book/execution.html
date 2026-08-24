@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Source files and execution - Dewy Language Reference</title>
+        <title>Source Files and Execution - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,28 +207,25 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="source-files-and-execution"><a class="header" href="#source-files-and-execution">Source files and execution</a></h1>
-<p>A source file is a compilation unit. Executable top-level items run once in
-source order after imported dependencies have initialized.</p>
-<p>If a zero-argument function named <code>main</code> exists, the generated entry point
-invokes it after top-level execution. <code>main</code> currently returns an integer exit
-code or <code>void</code>. A source file without <code>main</code> receives an empty generated entry
-point.</p>
-<pre><code class="language-dewy">printl("top level")
+                        <h1 id="source-files-and-execution"><a class="header" href="#source-files-and-execution">Source Files and Execution</a></h1>
+<p>A source file is a compilation unit. Its executable top-level expressions run once in source order after imported dependencies have initialized.</p>
+<p>A program does not require <code>main</code>. When a zero-argument function named <code>main</code> exists in the entry module, the program invokes it after top-level initialization.</p>
+<pre><code class="language-dewy">printl"initializing"
 
-let main = () =&gt; {
-    printl("main")
+let main = ():&gt;int64 =&gt; {
+    printl"running"
     return 0
 }
 </code></pre>
-<p>An explicit top-level <code>main()</code> call is an ordinary call and does not suppress
-automatic entry-point invocation.</p>
+<p><code>main</code> may return <code>void</code> or an integer exit status. Additional standardized entry parameters such as command-line arguments and environment access are provisional.</p>
+<p>An explicit top-level call to <code>main()</code> is an ordinary call and does not suppress automatic entry invocation.</p>
+<p>Imported modules initialize once in dependency order. Import cycles and colliding names are errors unless a future construct explicitly defines a valid cycle or disambiguation.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="lexical-structure.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="literals.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -242,7 +239,7 @@ automatic entry-point invocation.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="lexical-structure.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="literals.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 

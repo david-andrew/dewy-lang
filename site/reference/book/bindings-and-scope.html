@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Bindings and scope - Dewy Language Reference</title>
+        <title>Bindings, Initialization, and Scope - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,21 +207,37 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="bindings-and-scope"><a class="header" href="#bindings-and-scope">Bindings and scope</a></h1>
-<p><code>let</code> creates a mutable binding and <code>const</code> creates a binding that cannot be
-assigned after initialization. An assignment to a name with no visible binding
-implicitly creates a <code>let</code> binding; otherwise it reassigns the visible binding.</p>
-<pre><code class="language-dewy">let mutable = 1
-const fixed = 2
-inferred = 3
-mutable += fixed
+                        <h1 id="bindings-initialization-and-scope"><a class="header" href="#bindings-initialization-and-scope">Bindings, Initialization, and Scope</a></h1>
+<h2 id="declarations"><a class="header" href="#declarations">Declarations</a></h2>
+<p><code>let</code> creates a mutable binding. <code>const</code> creates a binding that cannot be reassigned after initialization.</p>
+<pre><code class="language-dewy">let count = 0
+const limit = 10
 </code></pre>
-<p>Bindings have lexical identity. Nested scopes can shadow outer names. Eager
-expressions cannot read a binding before initialization. Function bodies may
-refer to later declarations, but initialization requirements are checked at
-each reachable call site.</p>
-<p>Non-capturing local functions lower by hoisting. Capturing local functions are
-analyzed but closure lowering is not yet implemented.</p>
+<p>An assignment to a name with no visible binding implicitly declares a mutable binding. Otherwise it updates the visible mutable binding:</p>
+<pre><code class="language-dewy">message = "hello"     # implicit let
+message = "welcome"   # reassignment
+</code></pre>
+<p>Type annotations follow <code>:</code>:</p>
+<pre><code class="language-dewy">let count:int64 = 0
+const Name:type = string
+</code></pre>
+<p>Declarations and assignments produce <code>void</code>.</p>
+<h2 id="lexical-identity"><a class="header" href="#lexical-identity">Lexical Identity</a></h2>
+<p>Each declaration creates a distinct lexical binding. A child scope may shadow an outer binding without changing the outer value.</p>
+<p><code>{}</code> creates a child lexical scope. <code>()</code> groups expressions in the surrounding scope.</p>
+<pre><code class="language-dewy">let value = 1
+{
+    let value = 2
+    printl"{value}"    # 2
+}
+printl"{value}"        # 1
+</code></pre>
+<h2 id="initialization"><a class="header" href="#initialization">Initialization</a></h2>
+<p>An eager expression cannot read a binding before that binding is initialized on every reachable path.</p>
+<p>Function bodies may refer to declarations that occur later in the same enclosing scope. The relevant requirement is that each reachable call occurs after every eagerly read captured binding has been initialized. This permits mutually recursive and forward-declared function relationships without permitting an uninitialized runtime read.</p>
+<h2 id="captures"><a class="header" href="#captures">Captures</a></h2>
+<p>A function body may refer to bindings in enclosing lexical scopes. If the function escapes the lifetime of those bindings, its closure must preserve the captured state according to Dewy's value and place semantics.</p>
+<p>The complete representation and identity rules for escaping closures remain provisional. This does not change lexical name resolution.</p>
 
                     </main>
 
@@ -231,7 +247,7 @@ analyzed but closure lowering is not yet implemented.</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="types-and-conversions.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="values.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -245,7 +261,7 @@ analyzed but closure lowering is not yet implemented.</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="types-and-conversions.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="values.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

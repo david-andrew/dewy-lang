@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Lexical structure - Dewy Language Reference</title>
+        <title>Lexical Structure - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,24 +207,33 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="lexical-structure"><a class="header" href="#lexical-structure">Lexical structure</a></h1>
+                        <h1 id="lexical-structure"><a class="header" href="#lexical-structure">Lexical Structure</a></h1>
+<h2 id="source-text"><a class="header" href="#source-text">Source Text</a></h2>
+<p>Dewy source is Unicode text. Source-file suffixes are conventional and do not alter tokenization or semantic rules.</p>
 <h2 id="identifiers"><a class="header" href="#identifiers">Identifiers</a></h2>
-<p>Dewy identifiers support Latin and Greek letters, selected mathematical
-symbols, decimal digits after the first character, and several decorations.
-Identifiers and word operators are case-sensitive except where a construct is
-documented otherwise.</p>
-<h2 id="comments"><a class="header" href="#comments">Comments</a></h2>
-<p><code>#</code> begins a line comment. <code>#{</code> and <code>}#</code> delimit a block comment.</p>
-<pre><code class="language-dewy"># one line
-#{ multiple
-   lines }#
+<p>Identifiers support Latin and Greek letters, selected mathematical symbols, decimal digits after the first character, and language-defined decorations. Identifiers and word operators are case-sensitive unless a particular imported API specifies otherwise.</p>
+<p>Reserved operator words such as <code>and</code>, <code>or</code>, <code>not</code>, <code>in</code>, <code>as</code>, and <code>transmute</code> tokenize as operators in their grammatical contexts.</p>
+<h2 id="whitespace-and-juxtaposition"><a class="header" href="#whitespace-and-juxtaposition">Whitespace and Juxtaposition</a></h2>
+<p>Whitespace separates tokens. Dewy does not generally use commas to separate arguments, parameters, or array elements.</p>
+<p>Spacing can also determine whether expressions are juxtaposed with a punctuation operator. Range endpoints are the clearest example:</p>
+<pre><code class="language-dewy">first..last    # both endpoints
+first ..last   # no left endpoint
+first.. last   # no right endpoint
+first .. last  # no endpoints
 </code></pre>
-<h2 id="literals"><a class="header" href="#literals">Literals</a></h2>
-<p>Implemented literal categories include booleans, integers in bases 2 through
-16, strings, and power-of-two based strings. String semantics are based on
-Unicode extended grapheme clusters; based strings represent exact packed bits.</p>
-<p>Whitespace is generally insignificant but establishes token separation and can
-create juxtaposition between adjacent expressions.</p>
+<p>Newlines normally behave as whitespace. A construct may assign additional structural meaning to line boundaries only where its grammar explicitly says so.</p>
+<h2 id="comments"><a class="header" href="#comments">Comments</a></h2>
+<p><code>#</code> begins a line comment. <code>#{</code> and <code>}#</code> delimit a nestable block comment.</p>
+<pre><code class="language-dewy"># one line
+#{ outer
+   #{ nested }#
+   outer again
+}#
+</code></pre>
+<p>Comment markers inside strings are string contents.</p>
+<h2 id="tokens-and-ambiguity"><a class="header" href="#tokens-and-ambiguity">Tokens and Ambiguity</a></h2>
+<p>Tokenization chooses the longest valid token subject to explicit lexical rules. Parsing may preserve several structurally valid interpretations—most notably call, indexing, and multiplication juxtaposition—until types and context resolve them.</p>
+<p>See <a href="literals.html">Literals</a> for literal tokens and <a href="operators-and-precedence.html">Operators and Precedence</a> for expression grouping.</p>
 
                     </main>
 
@@ -234,7 +243,7 @@ create juxtaposition between adjacent expressions.</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="execution.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="literals.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -248,7 +257,7 @@ create juxtaposition between adjacent expressions.</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="execution.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="literals.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

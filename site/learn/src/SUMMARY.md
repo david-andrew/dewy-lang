@@ -1,67 +1,53 @@
 # Learning Dewy
 
-[Introduction](00-introduction.md) [Dewy at a Glance](pitch.md) [Features](01-features-list.md)
+[Welcome to Dewy](00-introduction.md)
 
-## Getting Started
+## Meet Dewy
 
+- [Dewy at a Glance](pitch.md)
 - [Getting Started](ch01/00-getting-started.md)
   - [Installation](ch01/01-installation.md)
-  - [Hello, World!](ch01/02-hello-world.md)
+  - [Your First Dewy Program](ch01/02-hello-world.md)
 
-- [Hello, Many Worlds!](ch02/00-hello-many-worlds.md)
-  - [GUI](ch02/01-gui.md)
-  - [Graphics](ch02/02-graphics.md)
-  - [Audio](ch02/03-audio.md)
-  - [Networking](ch02/04-networking.md)
-  - [2D Game Development](ch02/05a-game-development.md)
-  - [3D Game Development](ch02/05b-game-development.md)
-  - [Web Development](ch02/06-web-development.md)
-  - [Databases](ch02/07-databases.md)
-  - [Cryptography](ch02/08-cryptography.md)
-  - [Operating Systems](ch02/09-operating-systems.md)
-  - [Compilers](ch02/10-compilers.md)
-  - [Scientific Computing](ch02/11-scientific-computing.md)
-  - [Robotics](ch02/12-robotics.md)
-  - [Machine Learning](ch02/13-machine-learning.md)
+## The Core Language
 
-- [Language Features](ch03/00-features.md)
-  - [Expressions, Statements, and Blocks](ch03/expressions-statements-blocks.md)
-  - [Bindings and Scope](ch03/bindings-and-scope.md)
-  - [Values, Copies, and Places](ch03/values-and-places.md)
-  - [Basic Data Types](ch03/basic-data-types.md)
-  - [Number Bases](ch03/number-bases.md)
-  - [Operators](ch03/operators.md)
-  - [String Types](ch03/string-types.md)
-  - [Range Types](ch03/range-types.md)
-  - [Container Types](ch03/container-types.md)
-  - [Object Types](ch03/object-types.md)
-  - [Optional Types](ch03/optional-types.md)
-  - [Function Types](ch03/function-types.md)
-  - [Effects](ch03/effects.md)
-  - [Flow Control](ch03/flow-control.md)
-  - [One Loop to Rule Them All](ch03/loops.md)
-  - [Units](ch03/units.md)
-  - [Imports](ch03/imports.md)
-  - [Functional Programming](ch03/functional-programming.md)
-  - [Basic Math](ch03/basic-math.md)
-  - [Linear Algebra](ch03/linear-algebra.md)
-  - [Refinements](ch03/refinements.md)
+- [A Few Ideas That Organize Dewy](ch05/00-general.md)
+- [Expressions, Produced Values, and Blocks](ch03/expressions-statements-blocks.md)
+- [Bindings and Scope](ch03/bindings-and-scope.md)
+- [Functions and Calls](ch03/function-types.md)
+- [Branching and Flow Control](ch03/flow-control.md)
+- [Optional Values and Narrowing](ch03/optional-types.md)
+- [Loops and Multiple Iterators](ch03/loops.md)
+- [Ranges](ch03/range-types.md)
 
-- [Standard Library](ch04/00-stdlib.md)
-  - [Data Structures](ch04/xx-data-structures.md)
-  - [Time](ch04/xx-time.md)
-  - [Plotting](ch04/xx-plotting.md)
-  - [Parsing](ch04/xx-parsing.md)
-  - [Parallelism](ch04/xx-parallelism.md)
+## Working with Data
 
-- [General Concepts](ch05/00-general.md)
-  - [Sandboxes and Harnesses](ch05/xx-sandboxes-harnesses.md)
+- [Values, Copies, and Places](ch03/values-and-places.md)
+- [Strings and Graphemes](ch03/string-types.md)
+- [Containers](ch03/container-types.md)
+- [Structural Objects](ch03/object-types.md)
 
-- [Advanced Case Studies](ch06/00-case-studies.md)
-  - [Dewy Compiler](ch06/dewy-compiler.md)
-  - [Asteroid Detection](ch06/neo-mapping.md)
-  - [PDF Editor](ch06/pdf-editing.md)
-  - [dwitter](ch06/dwitter.md)
-  - [Dewy Web](ch06/dewy-web.md)
-  - [DMail](ch06/dmail.md)
-  - [Dewy OS](ch06/dewy-os.md)
+## Types, Operators, and Guarantees
+
+- [Types and Numbers](ch03/basic-data-types.md)
+- [Numbers and Bases](ch03/number-bases.md)
+- [Operators](ch03/operators.md)
+- [Function Values and Composition](ch03/functional-programming.md)
+- [Refinements](ch03/refinements.md)
+- [Physical Quantities and Units](ch03/units.md)
+- [Effects](ch03/effects.md)
+
+## Programs and Libraries
+
+- [Modules, Imports, and the Prelude](ch03/imports.md)
+- [The Standard Library](ch04/00-stdlib.md)
+
+## Dewy in Different Domains
+
+- [Everyday Mathematics](ch03/basic-math.md)
+- [Arrays and Linear Algebra](ch03/linear-algebra.md)
+
+## Appendices
+
+- [Language Feature Index](01-features-list.md)
+- [Language Design and Compiler Support](appendices/language-and-compiler.md)

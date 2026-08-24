@@ -1,60 +1,47 @@
-# Features
+# Language Feature Index
 
-A map of the language, in roughly the order this book teaches it. Items
-marked **not yet determined** belong here, but the syntax or detailed
-rules are still open.
+This page is a topical index. The main book teaches the same material in a progressive order.
 
-## Syntax and Structure
+## Program Structure
 
-- [Expressions, Statements, and Blocks](ch03/expressions-statements-blocks.md)
-- [Bindings and Scope](ch03/bindings-and-scope.md)
-- [Whitespace Lists](ch03/container-types.md) instead of comma separators
-- Blocks, objects, functions, and generators share one grammar
-- [Imports](ch03/imports.md) and the source prelude
+- [Source execution and `main`](ch01/02-hello-world.md#top-level-code-and-main)
+- [Bindings and lexical scope](ch03/bindings-and-scope.md)
+- [Modules, imports, and the source prelude](ch03/imports.md)
+- [The standard library](ch04/00-stdlib.md)
 
-## Types and Values
+## Expressions and Control Flow
 
-- [Basic Data Types](ch03/basic-data-types.md). `int`, fixed widths,
-  `real`, `rational`, `float32` / `float64`, `bool`, `void`,
-  `undefined`, complex, quaternion
-- [Number Bases](ch03/number-bases.md) and packed based strings
-- [Optional Types](ch03/optional-types.md). `T | undefined`, `is?` / `isnt?`
-- [String Types](ch03/string-types.md). Graphemes, interpolation, views
-- [Ranges](ch03/range-types.md) with inclusive or exclusive bounds
-- [Containers](ch03/container-types.md). Arrays, dictionaries, bidicts, sets
-- [Objects](ch03/object-types.md)
-- [Refinements](ch03/refinements.md). `T<conditions>`, `unsafe`
-- Type inference and [type aliases](ch03/basic-data-types.md#type-declarations)
-- Fixed-point literals. Not yet determined
-- Symbolic values. Not yet determined
-- Custom-ranged integer overflow. Not yet determined
-- String collation and normalization. Not yet determined
+- [Expressions, produced values, suppression, and blocks](ch03/expressions-statements-blocks.md)
+- [Conditionals and flow chains](ch03/flow-control.md)
+- [Optional values and type narrowing](ch03/optional-types.md)
+- [Loops, iterator conditions, and multiiterators](ch03/loops.md)
+- [Ranges, bounds, membership, and slicing](ch03/range-types.md)
 
-## Operators and Math
+## Functions
 
-- [Operators](ch03/operators.md). `=?`, English booleans, juxtaposition,
-  pipes, `as` / `transmute`
-- Operator chaining such as `n^/2`
-- [Basic Math](ch03/basic-math.md) and [Linear Algebra](ch03/linear-algebra.md)
-- [Physical Units](ch03/units.md)
+- [Function literals, contracts, calls, defaults, and argument kinds](ch03/function-types.md)
+- [Static overloads](ch03/function-types.md#overloads)
+- [Function values and composition](ch03/functional-programming.md)
+- [Effects](ch03/effects.md)
 
-## Functions and Flow
+## Values and Data
 
-- [Function Types](ch03/function-types.md). Literals, defaults, named and
-  keyword-only arguments, overloads with `&`
-- [Effects](ch03/effects.md), including `noreturn`. Other effects are
-  not yet determined
-- Partial function evaluation with `@`
-- [Functional Programming](ch03/functional-programming.md)
-- [Flow Control](ch03/flow-control.md)
-- [One Loop to Rule Them All](ch03/loops.md). `in`, multi-iterators,
-  labeled exits, generators
-- Rest capture, spreading, and positional-only parameters. Not yet determined
-- `match` and `finally`. Not yet determined
+- [Value semantics and explicit places](ch03/values-and-places.md)
+- [Strings, graphemes, interpolation, and representation views](ch03/string-types.md)
+- [Arrays and other containers](ch03/container-types.md)
+- [Structural objects and constructors](ch03/object-types.md)
 
-## Standard Library and Model
+## Types and Operations
 
-- [Standard Library](ch04/00-stdlib.md), including [Time](ch04/xx-time.md)
-- Timezones and calendars. Not yet determined
-- [Sandboxes and Harnesses](ch05/xx-sandboxes-harnesses.md)
-- More library pages are still missing and will be added
+- [Type inference, numeric types, unions, and aliases](ch03/basic-data-types.md)
+- [Numeric bases and packed based strings](ch03/number-bases.md)
+- [Operators, juxtaposition, conversion, and precedence](ch03/operators.md)
+- [Refinement types](ch03/refinements.md)
+- [Physical dimensions and units](ch03/units.md)
+
+## Domain-Oriented Material
+
+- [Everyday mathematics](ch03/basic-math.md)
+- [Arrays and linear algebra](ch03/linear-algebra.md)
+
+Features with provisional design or incomplete compiler support are catalogued separately in [Language Design and Compiler Support](appendices/language-and-compiler.md), so implementation status does not obscure this index.

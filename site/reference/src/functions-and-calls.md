@@ -1,31 +1,23 @@
-# Functions and calls
+# Functions and Calls
 
-Function literals contain parameter contracts, an optional explicit return contract, and a body.
+A function literal consists of a parameter contract, an optional return contract, `=>`, and a body expression:
 
 ```dewy
 let add = (left:int64 right:int64=2):>int64 => left + right
 ```
 
-## Parameter states
+One unannotated parameter may omit parentheses: `x => x + 1`. Zero parameters use `()`.
 
-Dewy's call model follows one rule: each explicit argument binds one currently unset parameter. A positional argument takes the first parameter still available by position; a named argument takes the parameter with that name. Defaults are fallbacks rather than pre-bound values, so they retain their declared positions.
+## Argument Binding
 
-### Required positional-or-keyword
+Each explicit argument binds one currently unset parameter. Arguments are processed from left to right.
 
-Unbound parameters before `...` may be supplied in their declared position or by name. Named arguments may appear in any order.
+- A positional argument binds the first parameter still available by position.
+- A named argument binds the unset parameter with that name.
+- After explicit arguments are processed, each unset defaulted parameter evaluates its default for that completed call.
+- A required parameter still unset after binding is an error.
 
-```dewy
-let subtract = (left:int64 right:int64):>int64 => left - right
-
-subtract(7 2)
-subtract(right=2 left=7)
-```
-
-Both calls bind `left=7` and `right=2`.
-
-### Positional-or-keyword with a default
-
-A parameter with a default may still be supplied either by position or by name. The default is used only when a completed call leaves that parameter unset.
+Defaults are fallbacks, not values bound when the function is defined. They retain their positions:
 
 ```dewy
 let combine = (
@@ -39,91 +31,87 @@ combine(10 right=16)   # left=10, scale=2, right=16
 combine(scale=3 10 16) # scale=3, then left=10 and right=16
 ```
 
-Named arguments remove their parameters from the remaining positional sequence. Arguments are processed from left to right, which is why the last example is unambiguous. The shorter `combine(10 16)` does _not_ skip `scale`: it supplies `left` and `scale`, then reports that required `right` is missing.
+`combine(10 16)` binds `left` and `scale`; it does not skip `scale`, and therefore reports missing `right`.
 
-The default expression is evaluated separately for every completed call that omits it, and binds a value like any other argument.
+Default expressions evaluate independently for every completed call that omits them. Mutable objects created by a default are not shared accidentally between calls.
 
-### Required keyword-only
+## Parameter Kinds
 
-A bare `...` ends the positional parameter run. Required parameters after it must be supplied by name.
+### Positional or keyword
+
+An ordinary named parameter before the positional divider may be bound by position or name:
+
+```dewy
+let subtract = (left:int64 right:int64):>int64 => left - right
+subtract(7 2)
+subtract(right=2 left=7)
+```
+
+### Keyword-only
+
+A bare `...` ends the positional run. Parameters after it require names:
 
 ```dewy
 let offset = (value:int64 ... amount:int64):>int64 => value + amount
-
 offset(40 amount=2)
 ```
 
-Here `value` remains positional-or-keyword, while `amount` is required and keyword-only.
-
 ### Position-only
 
-Wrapping a parameter in `<>` keeps its name inside the function but removes that name from the call interface. It must be supplied by position.
+Wrapping the name and type in `<>` preserves the local name but removes it from the keyword interface:
 
 ```dewy
 let increment = (<value:int64>):>int64 => value + 1
-
 increment(41)
-# increment(value=41)  # error: `value` is not a keyword parameter
 ```
 
-Annotations and defaults work normally inside the wrapper. A position-only default remains a per-call fallback:
+`increment(value=41)` is an error. A default inside the wrapper remains a per-call fallback.
+
+Types and names share identifier syntax, so a bare identifier in a function literal is a parameter name, not an anonymous argument whose type happens to have that spelling.
+
+## Function Contracts
+
+A function type records its parameter and return contract:
 
 ```dewy
-let increment = (<value:int64=0>):>int64 => value + 1
-
-increment()   # 1
-increment(9)  # 10
-```
-
-### Function type contracts
-
-Types and parameter names use the same identifier syntax. A bare identifier in a function signature is therefore a parameter name, not an unnamed parameter whose type happens to have that spelling. Structural function contracts make the name and type explicit in the same way as function literals.
-
-```dewy
-let increment = (value:int64):>int64 => value + 1
 let callback:<(value:int64):>int64> = increment
-
-callback(41)
-callback(value=41)
 ```
 
-A structural contract may omit a parameter name to require positional access, as in `<int64:>int64>`. Source function literals still give every parameter a local name; `<value:int64>` makes that name private to the function rather than reinterpreting a bare identifier as a type.
+Structural contracts may omit externally visible names where a position-only interface is required. Function literals still require usable local names for parameters their bodies access.
 
-### Rest parameters and spreading
+## Calls and Pipes
 
-The planned `...rest` form captures arguments not claimed by earlier parameters. A captured bundle will be forwardable with the same `...` syntax.
+Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies values to the callable on its right; `<|` supplies right-hand values to the callable on its left according to their associativity.
 
-```dewy
-# planned
-let wrapper = (...rest) => target(...rest)
-```
+Argument expressions evaluate from left to right before the function body begins, except that omitted defaults evaluate as part of completing the call.
 
-Rest capture and argument spreading are recognized design directions but are not yet lowerable by the current compiler. A bare `...` used only as the keyword-only divider is implemented. Partial evaluation will follow the same binding rule. Explicitly supplied values will be evaluated and saved immediately, while defaults remain per-call fallbacks until the resulting function is called.
+## Overloads
 
-## Call behavior
-
-Implemented calls include positional and keyword arguments, per-call default evaluation, pipe calls, direct and indirect calls, recursion, forward references from function bodies, and static overload selection.
-
-Overloads combine with `&`; the argument contract selects the matching function statically.
+`&` combines compatible functions into an overload set. The call contract selects a unique applicable alternative:
 
 ```dewy
 let describe = ((value:int64):>string => "integer")
              & ((value:string):>string => value)
 ```
 
-## Handles
+Ambiguous or unmatched calls are errors. Runtime multifunction values remain part of the provisional dynamic-dispatch design; ordinary overload resolution is static.
 
-Function handles and partial evaluation are a design direction and do not yet lower in the current compiler. The intended syntax uses the same place rule as ordinary data: a bare function name calls it when that would be valid, while `@fn` starts at the function binding's place and exposes it as a callable handle instead.
+## Rest Parameters and Spreading
+
+The direction for `...rest` is to capture arguments not claimed by earlier parameters and allow the resulting bundle to be forwarded with `...`. Exact bundle types and all interactions with named arguments remain provisional.
+
+## Function Handles
+
+A bare function name calls the function whenever a valid call is available. `@fn` selects the function binding as a first-class callable handle instead:
 
 ```dewy
-# planned
-sum = (a b) => a + b
-add5 = @sum(5)
-reference = @sum
-
-callback = @worker.on_event  # (@worker).on_event, not worker.@on_event
+let sum = (a b) => a + b
+let reference = @sum
+let add5 = @sum(5)
 ```
 
-Selectors project the root place before producing the handle, so `@worker.on_event` reaches the function-valued field at the end of that route. The older interpreter spelling `worker.@on_event` is not the current language direction.
+Selectors use the ordinary place route: `@worker.on_event` reaches the function-valued field at the end of `(@worker).on_event`; it is not `worker.@on_event`.
 
-A parameter whose type is a function is intended to request a callable handle directly, making `@f` optional in that signature. The call site still uses `@sum`, because bare `sum` would call. Details of escaping handle identity and explicit function copying remain part of the unfinished function-handle work. For implemented nonescaping data places, see [Values, places, and containers](values.md).
+Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.
+
+Handle identity, explicit function copying, escaping captures, and closure storage remain provisional.

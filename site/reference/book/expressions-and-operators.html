@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Expressions and operators - Dewy Language Reference</title>
+        <title>Expressions and Evaluation - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,36 +207,46 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="expressions-and-operators"><a class="header" href="#expressions-and-operators">Expressions and operators</a></h1>
-<p>Declarations, assignments, blocks, conditionals, and loops are expressions.
-Declarations and ordinary assignments produce <code>void</code>.</p>
-<p>Operator meaning is selected by type-directed dispatch. Implemented operators
-cover fixed-width arithmetic, comparisons, shifts, Boolean operations,
-membership/type tests, conversion, and assignment combinations.
-Narrow fixed-width arithmetic and bitwise results roll over at their declared
-width. Shift counts must be unsigned, so a negative count is a compile-time
-error. A fixed-width shift evaluates each operand once. Once a count reaches
-the value's width, a left shift or unsigned right shift is zero; a signed right
-shift continues its sign bit, settling at <code>0</code> for nonnegative values and <code>-1</code>
-for negative values.</p>
-<p>Adjacent expressions create a juxtaposition whose meaning can depend on the
-operand types. The parser preserves ambiguity between calls, indexing, and
-future multiplication until semantic analysis can resolve it.</p>
-<pre><code class="language-dewy">function(argument)     # call in a callable context
-values[index]          # indexing in an array context
-value |&gt; function      # pipe call
+                        <h1 id="expressions-and-evaluation"><a class="header" href="#expressions-and-evaluation">Expressions and Evaluation</a></h1>
+<p>Every executable construct in Dewy is an expression. An expression may produce one value, several values for a surrounding collector, <code>void</code>, or <code>never</code> when it cannot complete.</p>
+<h2 id="produced-values"><a class="header" href="#produced-values">Produced Values</a></h2>
+<p>Literals, value-returning calls, exhaustive conditionals, and value-producing blocks can supply surrounding expressions. Declarations and ordinary assignments produce <code>void</code>.</p>
+<p>An attached postfix semicolon evaluates an expression and suppresses the values it would otherwise produce:</p>
+<pre><code class="language-dewy">operation();
 </code></pre>
-<p>General juxtaposition multiplication and broadcasting remain planned.</p>
+<p>An unattached semicolon is reserved for array-dimension selection and does not act as generic statement punctuation.</p>
+<h2 id="blocks"><a class="header" href="#blocks">Blocks</a></h2>
+<p><code>{}</code> is a scoped block. <code>()</code> groups expressions without introducing a child lexical scope.</p>
+<p>A block evaluates its expressions in source order and expresses each non-<code>void</code> result. A context requiring one value rejects a block that can produce an incompatible number of values.</p>
+<pre><code class="language-dewy">let circumference = {
+    let diameter = 2 * radius
+    pi * diameter
+}
+</code></pre>
+<p>Only the final calculation produces a value because the declaration is <code>void</code>.</p>
+<h2 id="evaluation-order"><a class="header" href="#evaluation-order">Evaluation Order</a></h2>
+<p>Within the expression tree established by grouping and precedence, operands and call arguments evaluate from left to right. A construct documented as evaluating an operand once must preserve that behavior even if lowering expands it into several primitive operations.</p>
+<p>Boolean short-circuit expressions evaluate only the operands required by their truth rule. Flow alternatives evaluate conditions in order and execute only the selected body.</p>
+<h2 id="assignment"><a class="header" href="#assignment">Assignment</a></h2>
+<p>Assignment evaluates its destination place and source, updates the binding or selected field/element, and produces <code>void</code>. Combined assignment loads the old value, applies the selected typed operator, and stores the result while evaluating the destination route only once.</p>
+<p>See <a href="operators-and-precedence.html">Operators and Precedence</a>, <a href="bindings-and-scope.html">Bindings</a>, and <a href="values.html">Values, Copies, and Places</a>.</p>
+<h2 id="place-projection"><a class="header" href="#place-projection">Place Projection</a></h2>
+<p>The prefix <code>@</code> selects a place. Following member and index expressions project the place to the location at the end of the route:</p>
+<pre><code class="language-dewy">@pair.left
+@values[i]
+@box.rows[row][column]
+</code></pre>
+<p>These parse as projections from the prefixed root. <code>@(pair.left)</code> is equivalent to <code>@pair.left</code>; Dewy has no <code>pair.@left</code> form.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="types-and-conversions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="numeric-types.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="functions-and-calls.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="operators-and-precedence.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -246,11 +256,11 @@ value |&gt; function      # pipe call
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="types-and-conversions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="numeric-types.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="functions-and-calls.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="operators-and-precedence.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

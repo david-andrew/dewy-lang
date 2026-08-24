@@ -1,21 +1,20 @@
-# Source files and execution
+# Source Files and Execution
 
-A source file is a compilation unit. Executable top-level items run once in
-source order after imported dependencies have initialized.
+A source file is a compilation unit. Its executable top-level expressions run once in source order after imported dependencies have initialized.
 
-If a zero-argument function named `main` exists, the generated entry point
-invokes it after top-level execution. `main` currently returns an integer exit
-code or `void`. A source file without `main` receives an empty generated entry
-point.
+A program does not require `main`. When a zero-argument function named `main` exists in the entry module, the program invokes it after top-level initialization.
 
 ```dewy
-printl("top level")
+printl"initializing"
 
-let main = () => {
-    printl("main")
+let main = ():>int64 => {
+    printl"running"
     return 0
 }
 ```
 
-An explicit top-level `main()` call is an ordinary call and does not suppress
-automatic entry-point invocation.
+`main` may return `void` or an integer exit status. Additional standardized entry parameters such as command-line arguments and environment access are provisional.
+
+An explicit top-level call to `main()` is an ordinary call and does not suppress automatic entry invocation.
+
+Imported modules initialize once in dependency order. Import cycles and colliding names are errors unless a future construct explicitly defines a valid cycle or disambiguation.

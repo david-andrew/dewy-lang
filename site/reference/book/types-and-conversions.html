@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Types and conversions - Dewy Language Reference</title>
+        <title>Types and Conversions - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,33 +207,48 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="types-and-conversions"><a class="header" href="#types-and-conversions">Types and conversions</a></h1>
-<p>Dewy performs static type checking and contextual inference. Implemented value
-types include <code>bool</code>, <code>void</code>, <code>never</code>, <code>undefined</code>, fixed-width integers,
-strings, homogeneous arrays, structural objects, functions, ranges, and
-supported optionals.</p>
-<p>Integer literals begin as exact singleton types and may inhabit a compatible
-fixed-width context. An unannotated integer binding widens to abstract <code>int</code>,
-whose semantic contract is arbitrary precision. Bigint lowering is not yet
-implemented.</p>
-<pre><code class="language-dewy">let byte:uint8 = 255
-let count = 10             # int semantics
-let optional:int64 | undefined = undefined
+                        <h1 id="types-and-conversions"><a class="header" href="#types-and-conversions">Types and Conversions</a></h1>
+<p>Dewy statically checks values and expressions. Types describe semantic values; implementations may select any representation that preserves those semantics.</p>
+<h2 id="type-values-and-aliases"><a class="header" href="#type-values-and-aliases">Type Values and Aliases</a></h2>
+<p>A type is a compile-time value of type <code>type</code>. A binding may name it explicitly or infer a type-valued expression:</p>
+<pre><code class="language-dewy">const Name:type = string
+const Index = &lt;int64&gt;
+const MaybeIndex = &lt;int64 | undefined&gt;
 </code></pre>
-<p><code>as</code> performs a checked representation-changing conversion supported by the
-compiler. <code>transmute</code> preserves bits and requires compatible implemented
-representations. Type aliases are currently written with an explicit <code>:type</code>
-annotation.</p>
+<p><code>&lt;&gt;</code> groups a type-valued expression where ordinary expression context would otherwise treat it as a runtime value. Alternatives inside use the normal type operators: <code>&lt;int64 | string&gt;</code>, not whitespace-separated alternatives.</p>
+<p>A type alias does not create nominal identity unless its defining construct explicitly requests generativity.</p>
+<h2 id="inference-and-context"><a class="header" href="#inference-and-context">Inference and Context</a></h2>
+<p>Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to <code>int</code>; a fixed-width annotation accepts the literal only when it fits.</p>
+<p>Function parameters, returns, container elements, object fields, assignments, and operator overloads all provide type context.</p>
+<h2 id="unions-and-narrowing"><a class="header" href="#unions-and-narrowing">Unions and Narrowing</a></h2>
+<p><code>A | B</code> accepts a value belonging to either alternative. <code>T | undefined</code> is an optional value. Type and literal tests such as <code>is?</code> and <code>isnt?</code> narrow the tested value along control-flow paths.</p>
+<p>General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.</p>
+<h2 id="parameterized-and-refined-types"><a class="header" href="#parameterized-and-refined-types">Parameterized and Refined Types</a></h2>
+<p>Parameterized types apply compile-time arguments:</p>
+<pre><code class="language-dewy">array&lt;string&gt;
+array&lt;int64 length=3&gt;
+Duration&lt;uint64&gt;
+</code></pre>
+<p>Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.</p>
+<h2 id="as"><a class="header" href="#as"><code>as</code></a></h2>
+<p><code>as</code> requests a meaning-preserving conversion defined for the source and destination types:</p>
+<pre><code class="language-dewy">value as string
+text as array&lt;uint8&gt;
+</code></pre>
+<p>Conversions may change representation and may invoke overloadable conversion behavior. Lossy or fallible operations require an interface whose type exposes that possibility rather than silently discarding information.</p>
+<h2 id="transmute"><a class="header" href="#transmute"><code>transmute</code></a></h2>
+<p><code>transmute</code> reinterprets a compatible representation without performing a semantic conversion. It is valid only where source and destination layouts satisfy the transmute contract. It must not be used as an implicit substitute for numeric or textual conversion.</p>
+<p>See <a href="numeric-types.html">Numeric Types</a>, <a href="strings.html">Strings</a>, and <a href="design-status.html">Design Maturity</a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="bindings-and-scope.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="values.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="expressions-and-operators.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="numeric-types.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -243,11 +258,11 @@ annotation.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="bindings-and-scope.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="values.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="expressions-and-operators.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="numeric-types.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

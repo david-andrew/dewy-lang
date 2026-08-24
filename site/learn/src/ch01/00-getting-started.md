@@ -1,11 +1,13 @@
 # Getting Started
 
-This chapter installs the toolchain and runs a first program.
+This section gets a Dewy program from a source file to a running process.
 
-On Linux x86-64, the installer puts `dewy` and the µDewy bootstrap
-compiler on your path. From a source checkout you can also run
-`python -m dewy`.
+1. [Install Dewy](01-installation.md), or open the browser playground for µDewy experiments.
+2. [Write and run your first program](02-hello-world.md).
+3. Continue into the core language with [A Few Ideas That Organize Dewy](../ch05/00-general.md).
 
-The [browser playground](../../playground/) runs µDewy, the bootstrap
-subset. It is a good place to try small programs if you do not want to
-install locally.
+Dewy source conventionally uses the `.dewy` suffix. A directory may begin as one source file and grow into several modules without adopting a separate project language.
+
+The compiler accepts top-level executable code, so small programs do not need a `main` wrapper. Applications may define `main` when an explicit entry function is useful.
+
+Current installer, platform, and playground limitations are recorded in [Language Design and Compiler Support](../appendices/language-and-compiler.md#platform-notes).

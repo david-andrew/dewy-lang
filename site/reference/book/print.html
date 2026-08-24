@@ -205,139 +205,324 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="dewy-language-reference"><a class="header" href="#dewy-language-reference">Dewy language reference</a></h1>
-<p>This reference records the behavior of the current Dewy compiler. It is
-intentionally concise and organized by language construct rather than by a
-learning sequence.</p>
-<blockquote>
-<p><strong>Development reference:</strong> Dewy is version <code>0.0.0-dev.0</code>. Syntax and
-semantics may change. A feature described as <strong>implemented</strong> is expected to
-pass parsing, semantic analysis, µDewy lowering, and emission. Anything else
-is explicitly marked <strong>planned</strong>.</p>
-</blockquote>
-<p>For tutorials and motivation, read <a href="../learn/">Learning Dewy</a>. For the most
-detailed implementation checklist, see
-<a href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md"><code>dewy/status.md</code></a>.</p>
+                        <h1 id="dewy-language-reference"><a class="header" href="#dewy-language-reference">Dewy Language Reference</a></h1>
+<p>This reference defines the intended syntax and semantics of the Dewy programming language. It is organized by language construct and is meant for answering exact questions rather than teaching the language in sequence.</p>
+<p>For a guided introduction, read <a href="../learn/">Learning Dewy</a>.</p>
+<h2 id="normative-language-and-current-implementations"><a class="header" href="#normative-language-and-current-implementations">Normative Language and Current Implementations</a></h2>
+<p>The main reference describes Dewy itself. A rule does not become less normative merely because the current compiler has not implemented it yet.</p>
+<p>Language-design maturity is recorded in <a href="design-status.html">Design Maturity and Open Questions</a>:</p>
+<ul>
+<li>settled behavior is documented directly;</li>
+<li>provisional behavior is documented only as far as decisions have been made;</li>
+<li>unspecified behavior is identified without inventing a default.</li>
+</ul>
+<p>Current compiler coverage, target restrictions, and µDewy compatibility belong to <a href="compatibility.html">Implementation Compatibility</a>. Those implementation notes do not redefine the source language.</p>
 <h2 id="conventions"><a class="header" href="#conventions">Conventions</a></h2>
 <ul>
-<li>Dewy source normally uses the <code>.dewy</code> suffix.</li>
-<li>µDewy source normally uses <code>.udewy</code>, although suffixes do not alter Dewy's
-semantic analysis.</li>
-<li>Examples in this reference target current Dewy unless labelled µDewy.</li>
+<li>Dewy source conventionally uses the <code>.dewy</code> suffix.</li>
+<li>µDewy source conventionally uses <code>.udewy</code>; suffixes do not select Dewy semantic rules.</li>
+<li>Code labelled <strong>provisional</strong> illustrates a design whose stated portions are decided but whose surrounding rules may change.</li>
 <li><code>T | undefined</code> denotes an optional value.</li>
-<li>Fixed-width integer examples use <code>int8</code> through <code>int64</code> and <code>uint8</code> through
-<code>uint64</code>.</li>
+<li><code>intN</code> and <code>uintN</code> denote fixed-width signed and unsigned integer families when a rule applies uniformly across widths.</li>
+<li>“Produces” describes the value or values expressed by a construct. <code>void</code> means that no value is produced.</li>
+<li>“Place” means a mutable storage location selected explicitly with <code>@</code>; it is not an accidental alias created by an optimization.</li>
 </ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="lexical-structure"><a class="header" href="#lexical-structure">Lexical structure</a></h1>
+<p>Unless a section explicitly says otherwise, evaluation proceeds from left to right within the order established by grouping and operator precedence.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="lexical-structure"><a class="header" href="#lexical-structure">Lexical Structure</a></h1>
+<h2 id="source-text"><a class="header" href="#source-text">Source Text</a></h2>
+<p>Dewy source is Unicode text. Source-file suffixes are conventional and do not alter tokenization or semantic rules.</p>
 <h2 id="identifiers"><a class="header" href="#identifiers">Identifiers</a></h2>
-<p>Dewy identifiers support Latin and Greek letters, selected mathematical
-symbols, decimal digits after the first character, and several decorations.
-Identifiers and word operators are case-sensitive except where a construct is
-documented otherwise.</p>
-<h2 id="comments"><a class="header" href="#comments">Comments</a></h2>
-<p><code>#</code> begins a line comment. <code>#{</code> and <code>}#</code> delimit a block comment.</p>
-<pre><code class="language-dewy"># one line
-#{ multiple
-   lines }#
+<p>Identifiers support Latin and Greek letters, selected mathematical symbols, decimal digits after the first character, and language-defined decorations. Identifiers and word operators are case-sensitive unless a particular imported API specifies otherwise.</p>
+<p>Reserved operator words such as <code>and</code>, <code>or</code>, <code>not</code>, <code>in</code>, <code>as</code>, and <code>transmute</code> tokenize as operators in their grammatical contexts.</p>
+<h2 id="whitespace-and-juxtaposition"><a class="header" href="#whitespace-and-juxtaposition">Whitespace and Juxtaposition</a></h2>
+<p>Whitespace separates tokens. Dewy does not generally use commas to separate arguments, parameters, or array elements.</p>
+<p>Spacing can also determine whether expressions are juxtaposed with a punctuation operator. Range endpoints are the clearest example:</p>
+<pre><code class="language-dewy">first..last    # both endpoints
+first ..last   # no left endpoint
+first.. last   # no right endpoint
+first .. last  # no endpoints
 </code></pre>
-<h2 id="literals"><a class="header" href="#literals">Literals</a></h2>
-<p>Implemented literal categories include booleans, integers in bases 2 through
-16, strings, and power-of-two based strings. String semantics are based on
-Unicode extended grapheme clusters; based strings represent exact packed bits.</p>
-<p>Whitespace is generally insignificant but establishes token separation and can
-create juxtaposition between adjacent expressions.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="source-files-and-execution"><a class="header" href="#source-files-and-execution">Source files and execution</a></h1>
-<p>A source file is a compilation unit. Executable top-level items run once in
-source order after imported dependencies have initialized.</p>
-<p>If a zero-argument function named <code>main</code> exists, the generated entry point
-invokes it after top-level execution. <code>main</code> currently returns an integer exit
-code or <code>void</code>. A source file without <code>main</code> receives an empty generated entry
-point.</p>
-<pre><code class="language-dewy">printl("top level")
+<p>Newlines normally behave as whitespace. A construct may assign additional structural meaning to line boundaries only where its grammar explicitly says so.</p>
+<h2 id="comments"><a class="header" href="#comments">Comments</a></h2>
+<p><code>#</code> begins a line comment. <code>#{</code> and <code>}#</code> delimit a nestable block comment.</p>
+<pre><code class="language-dewy"># one line
+#{ outer
+   #{ nested }#
+   outer again
+}#
+</code></pre>
+<p>Comment markers inside strings are string contents.</p>
+<h2 id="tokens-and-ambiguity"><a class="header" href="#tokens-and-ambiguity">Tokens and Ambiguity</a></h2>
+<p>Tokenization chooses the longest valid token subject to explicit lexical rules. Parsing may preserve several structurally valid interpretations—most notably call, indexing, and multiplication juxtaposition—until types and context resolve them.</p>
+<p>See <a href="literals.html">Literals</a> for literal tokens and <a href="operators-and-precedence.html">Operators and Precedence</a> for expression grouping.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="literals"><a class="header" href="#literals">Literals</a></h1>
+<p>A literal introduces a value directly in source. Literal syntax may preserve more exact type information than the eventual context requires.</p>
+<h2 id="booleans-and-absence"><a class="header" href="#booleans-and-absence">Booleans and Absence</a></h2>
+<p><code>true</code> and <code>false</code> are the two <code>bool</code> values. <code>undefined</code> is a storable value used in unions such as <code>T | undefined</code>. <code>void</code> describes the absence of a produced value and is not interchangeable with <code>undefined</code>.</p>
+<h2 id="integers"><a class="header" href="#integers">Integers</a></h2>
+<p>Decimal integers require no prefix. Radix prefixes provide bases used by the language's numeral syntax:</p>
+<pre><code class="language-dewy">42
+0b101010
+0o52
+0x2a
+</code></pre>
+<p>An integer literal initially has an exact value type. Context may place it in <code>int</code>, <code>uint</code>, or a compatible fixed-width integer type. A literal outside the destination range is rejected rather than truncated.</p>
+<p>Underscores may group digits without affecting the value: <code>1_000_000</code>.</p>
+<p>Integer numeral prefixes and packed based-string prefixes are related spellings with different results. An unquoted <code>0x2a</code> is an integer; quoted <code>0x"2a"</code> is packed data.</p>
+<h2 id="strings"><a class="header" href="#strings">Strings</a></h2>
+<p>Single and double quotes delimit strings. Both forms have the same string semantics.</p>
+<pre><code class="language-dewy">'short text'
+"text with {interpolation}"
+</code></pre>
+<p>Escape syntax may insert code points. Interpolation braces contain ordinary Dewy expressions. See <a href="strings.html">Strings and Graphemes</a>.</p>
+<h2 id="packed-based-strings"><a class="header" href="#packed-based-strings">Packed Based Strings</a></h2>
+<p>Power-of-two based strings encode digit sequences densely as exact bytes:</p>
+<pre><code class="language-dewy">0b"11110000"
+0x"deadbeef"
+</code></pre>
+<p>Whitespace and comments may separate digits where tokenization remains unambiguous. Non-power-of-two dense packing remains a provisional design because the width of concatenated subsequences is not generally compositional.</p>
+<h2 id="container-and-object-literals"><a class="header" href="#container-and-object-literals">Container and Object Literals</a></h2>
+<p>Square brackets use the top-level contents to determine the constructed form:</p>
+<pre><code class="language-dewy">[1 2 3]                       # array
+[name="Ada" active=true]     # object
+["Ada" -&gt; 1 "Grace" -&gt; 2]   # dictionary
+set[1 2 3]                    # set
+</code></pre>
+<p>Array and object forms are settled. Dictionary, bidictionary, set, and multidimensional literal details are catalogued in <a href="arrays-and-containers.html">Arrays and Containers</a> and the <a href="design-status.html">design appendix</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="source-files-and-execution"><a class="header" href="#source-files-and-execution">Source Files and Execution</a></h1>
+<p>A source file is a compilation unit. Its executable top-level expressions run once in source order after imported dependencies have initialized.</p>
+<p>A program does not require <code>main</code>. When a zero-argument function named <code>main</code> exists in the entry module, the program invokes it after top-level initialization.</p>
+<pre><code class="language-dewy">printl"initializing"
 
-let main = () =&gt; {
-    printl("main")
+let main = ():&gt;int64 =&gt; {
+    printl"running"
     return 0
 }
 </code></pre>
-<p>An explicit top-level <code>main()</code> call is an ordinary call and does not suppress
-automatic entry-point invocation.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="bindings-and-scope"><a class="header" href="#bindings-and-scope">Bindings and scope</a></h1>
-<p><code>let</code> creates a mutable binding and <code>const</code> creates a binding that cannot be
-assigned after initialization. An assignment to a name with no visible binding
-implicitly creates a <code>let</code> binding; otherwise it reassigns the visible binding.</p>
-<pre><code class="language-dewy">let mutable = 1
-const fixed = 2
-inferred = 3
-mutable += fixed
+<p><code>main</code> may return <code>void</code> or an integer exit status. Additional standardized entry parameters such as command-line arguments and environment access are provisional.</p>
+<p>An explicit top-level call to <code>main()</code> is an ordinary call and does not suppress automatic entry invocation.</p>
+<p>Imported modules initialize once in dependency order. Import cycles and colliding names are errors unless a future construct explicitly defines a valid cycle or disambiguation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="bindings-initialization-and-scope"><a class="header" href="#bindings-initialization-and-scope">Bindings, Initialization, and Scope</a></h1>
+<h2 id="declarations"><a class="header" href="#declarations">Declarations</a></h2>
+<p><code>let</code> creates a mutable binding. <code>const</code> creates a binding that cannot be reassigned after initialization.</p>
+<pre><code class="language-dewy">let count = 0
+const limit = 10
 </code></pre>
-<p>Bindings have lexical identity. Nested scopes can shadow outer names. Eager
-expressions cannot read a binding before initialization. Function bodies may
-refer to later declarations, but initialization requirements are checked at
-each reachable call site.</p>
-<p>Non-capturing local functions lower by hoisting. Capturing local functions are
-analyzed but closure lowering is not yet implemented.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="types-and-conversions"><a class="header" href="#types-and-conversions">Types and conversions</a></h1>
-<p>Dewy performs static type checking and contextual inference. Implemented value
-types include <code>bool</code>, <code>void</code>, <code>never</code>, <code>undefined</code>, fixed-width integers,
-strings, homogeneous arrays, structural objects, functions, ranges, and
-supported optionals.</p>
-<p>Integer literals begin as exact singleton types and may inhabit a compatible
-fixed-width context. An unannotated integer binding widens to abstract <code>int</code>,
-whose semantic contract is arbitrary precision. Bigint lowering is not yet
-implemented.</p>
-<pre><code class="language-dewy">let byte:uint8 = 255
-let count = 10             # int semantics
-let optional:int64 | undefined = undefined
+<p>An assignment to a name with no visible binding implicitly declares a mutable binding. Otherwise it updates the visible mutable binding:</p>
+<pre><code class="language-dewy">message = "hello"     # implicit let
+message = "welcome"   # reassignment
 </code></pre>
-<p><code>as</code> performs a checked representation-changing conversion supported by the
-compiler. <code>transmute</code> preserves bits and requires compatible implemented
-representations. Type aliases are currently written with an explicit <code>:type</code>
-annotation.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="expressions-and-operators"><a class="header" href="#expressions-and-operators">Expressions and operators</a></h1>
-<p>Declarations, assignments, blocks, conditionals, and loops are expressions.
-Declarations and ordinary assignments produce <code>void</code>.</p>
-<p>Operator meaning is selected by type-directed dispatch. Implemented operators
-cover fixed-width arithmetic, comparisons, shifts, Boolean operations,
-membership/type tests, conversion, and assignment combinations.
-Narrow fixed-width arithmetic and bitwise results roll over at their declared
-width. Shift counts must be unsigned, so a negative count is a compile-time
-error. A fixed-width shift evaluates each operand once. Once a count reaches
-the value's width, a left shift or unsigned right shift is zero; a signed right
-shift continues its sign bit, settling at <code>0</code> for nonnegative values and <code>-1</code>
-for negative values.</p>
-<p>Adjacent expressions create a juxtaposition whose meaning can depend on the
-operand types. The parser preserves ambiguity between calls, indexing, and
-future multiplication until semantic analysis can resolve it.</p>
-<pre><code class="language-dewy">function(argument)     # call in a callable context
-values[index]          # indexing in an array context
-value |&gt; function      # pipe call
+<p>Type annotations follow <code>:</code>:</p>
+<pre><code class="language-dewy">let count:int64 = 0
+const Name:type = string
 </code></pre>
-<p>General juxtaposition multiplication and broadcasting remain planned.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="functions-and-calls"><a class="header" href="#functions-and-calls">Functions and calls</a></h1>
-<p>Function literals contain parameter contracts, an optional explicit return
-contract, and a body.</p>
+<p>Declarations and assignments produce <code>void</code>.</p>
+<h2 id="lexical-identity"><a class="header" href="#lexical-identity">Lexical Identity</a></h2>
+<p>Each declaration creates a distinct lexical binding. A child scope may shadow an outer binding without changing the outer value.</p>
+<p><code>{}</code> creates a child lexical scope. <code>()</code> groups expressions in the surrounding scope.</p>
+<pre><code class="language-dewy">let value = 1
+{
+    let value = 2
+    printl"{value}"    # 2
+}
+printl"{value}"        # 1
+</code></pre>
+<h2 id="initialization"><a class="header" href="#initialization">Initialization</a></h2>
+<p>An eager expression cannot read a binding before that binding is initialized on every reachable path.</p>
+<p>Function bodies may refer to declarations that occur later in the same enclosing scope. The relevant requirement is that each reachable call occurs after every eagerly read captured binding has been initialized. This permits mutually recursive and forward-declared function relationships without permitting an uninitialized runtime read.</p>
+<h2 id="captures"><a class="header" href="#captures">Captures</a></h2>
+<p>A function body may refer to bindings in enclosing lexical scopes. If the function escapes the lifetime of those bindings, its closure must preserve the captured state according to Dewy's value and place semantics.</p>
+<p>The complete representation and identity rules for escaping closures remain provisional. This does not change lexical name resolution.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="values-copies-and-places"><a class="header" href="#values-copies-and-places">Values, Copies, and Places</a></h1>
+<h2 id="value-semantics"><a class="header" href="#value-semantics">Value Semantics</a></h2>
+<p>Assignment, argument passing, and return supply an independent value. Mutating the destination cannot change the source merely because an implementation reused backing storage.</p>
+<pre><code class="language-dewy">let original = [1 2 3]
+let copy = original
+copy[0] = 9                  # original remains [1 2 3]
+</code></pre>
+<p>The compiler may realize that semantic copy through physical copying, a move, ownership transfer, borrowed reading, shared immutable storage, or another representation whose differences are unobservable.</p>
+<p>Scalar, array, object, string, and container values all follow this rule. A field whose own type has explicit handle semantics retains those semantics when its containing value is copied.</p>
+<h2 id="places"><a class="header" href="#places">Places</a></h2>
+<p><code>@</code> explicitly selects the place occupied by a mutable value. A parameter that accepts a place also carries <code>@</code>, making caller-visible mutation explicit at both boundaries:</p>
+<pre><code class="language-dewy">let update = (@xs:array&lt;int64 length=3&gt;):&gt;void =&gt;
+    xs[0] = 9
+
+let values = [1 2 3]
+update(@values)
+</code></pre>
+<p>Passing <code>values</code> without <code>@</code> supplies an ordinary value. Passing <code>@values</code> to a non-place parameter is likewise a type error.</p>
+<h2 id="projected-routes"><a class="header" href="#projected-routes">Projected Routes</a></h2>
+<p>Selectors after <code>@</code> project the root place to the location at the end of the route:</p>
+<pre><code class="language-dewy">set(@pair.left)
+set(@values[i])
+set(@box.rows[row][column])
+</code></pre>
+<p><code>@pair.left</code> means <code>(@pair).left</code>. <code>@(pair.left)</code> is equivalent. There is no <code>pair.@left</code> form. A computed index in a place route evaluates once before the call.</p>
+<h2 id="type-and-aliasing-rules"><a class="header" href="#type-and-aliasing-rules">Type and Aliasing Rules</a></h2>
+<p>A mutable place is invariant in its value type: a callee must not reinterpret the caller's storage through a broader or narrower place contract.</p>
+<p>Two mutable place arguments in one call must be proven disjoint. Sibling object fields and distinct constant indices are disjoint. Prefix-related routes overlap. Dynamic indices are potentially overlapping unless analysis proves otherwise.</p>
+<p>A <code>const</code> binding does not provide a mutable place.</p>
+<h2 id="escaping-places-and-identity"><a class="header" href="#escaping-places-and-identity">Escaping Places and Identity</a></h2>
+<p>Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.</p>
+<p>The intended <code>@?</code> operation asks whether two place expressions designate the same semantic place. It does not expose unobservable storage sharing used to optimize independent values.</p>
+<p>Function handles build on the same root-and-route interpretation of <code>@</code>; see <a href="functions-and-calls.html#function-handles">Functions and Calls</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="types-and-conversions"><a class="header" href="#types-and-conversions">Types and Conversions</a></h1>
+<p>Dewy statically checks values and expressions. Types describe semantic values; implementations may select any representation that preserves those semantics.</p>
+<h2 id="type-values-and-aliases"><a class="header" href="#type-values-and-aliases">Type Values and Aliases</a></h2>
+<p>A type is a compile-time value of type <code>type</code>. A binding may name it explicitly or infer a type-valued expression:</p>
+<pre><code class="language-dewy">const Name:type = string
+const Index = &lt;int64&gt;
+const MaybeIndex = &lt;int64 | undefined&gt;
+</code></pre>
+<p><code>&lt;&gt;</code> groups a type-valued expression where ordinary expression context would otherwise treat it as a runtime value. Alternatives inside use the normal type operators: <code>&lt;int64 | string&gt;</code>, not whitespace-separated alternatives.</p>
+<p>A type alias does not create nominal identity unless its defining construct explicitly requests generativity.</p>
+<h2 id="inference-and-context"><a class="header" href="#inference-and-context">Inference and Context</a></h2>
+<p>Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to <code>int</code>; a fixed-width annotation accepts the literal only when it fits.</p>
+<p>Function parameters, returns, container elements, object fields, assignments, and operator overloads all provide type context.</p>
+<h2 id="unions-and-narrowing"><a class="header" href="#unions-and-narrowing">Unions and Narrowing</a></h2>
+<p><code>A | B</code> accepts a value belonging to either alternative. <code>T | undefined</code> is an optional value. Type and literal tests such as <code>is?</code> and <code>isnt?</code> narrow the tested value along control-flow paths.</p>
+<p>General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.</p>
+<h2 id="parameterized-and-refined-types"><a class="header" href="#parameterized-and-refined-types">Parameterized and Refined Types</a></h2>
+<p>Parameterized types apply compile-time arguments:</p>
+<pre><code class="language-dewy">array&lt;string&gt;
+array&lt;int64 length=3&gt;
+Duration&lt;uint64&gt;
+</code></pre>
+<p>Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.</p>
+<h2 id="as"><a class="header" href="#as"><code>as</code></a></h2>
+<p><code>as</code> requests a meaning-preserving conversion defined for the source and destination types:</p>
+<pre><code class="language-dewy">value as string
+text as array&lt;uint8&gt;
+</code></pre>
+<p>Conversions may change representation and may invoke overloadable conversion behavior. Lossy or fallible operations require an interface whose type exposes that possibility rather than silently discarding information.</p>
+<h2 id="transmute"><a class="header" href="#transmute"><code>transmute</code></a></h2>
+<p><code>transmute</code> reinterprets a compatible representation without performing a semantic conversion. It is valid only where source and destination layouts satisfy the transmute contract. It must not be used as an implicit substitute for numeric or textual conversion.</p>
+<p>See <a href="numeric-types.html">Numeric Types</a>, <a href="strings.html">Strings</a>, and <a href="design-status.html">Design Maturity</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="numeric-types"><a class="header" href="#numeric-types">Numeric Types</a></h1>
+<h2 id="integer-semantics"><a class="header" href="#integer-semantics">Integer Semantics</a></h2>
+<p><code>int</code> is an arbitrary-precision signed integer type. <code>uint</code> is its nonnegative counterpart. Their semantics do not silently change to machine-width overflow because a compiler chooses a compact representation.</p>
+<p>Fixed-width types use <code>intN</code> and <code>uintN</code> names such as <code>int8</code>, <code>int32</code>, and <code>uint64</code>. Arithmetic and bitwise operations on a fixed-width value remain at that width and roll over according to its bit representation.</p>
+<pre><code class="language-dewy">let count:int = 10
+let byte:uint8 = 255
+let offset:int32 = -12
+</code></pre>
+<p>An integer literal is admitted to a numeric context only when its exact value belongs to that type.</p>
+<h2 id="shifts"><a class="header" href="#shifts">Shifts</a></h2>
+<p>Shift counts are unsigned. A negative literal count is therefore a type error.</p>
+<p>For a fixed-width value, shifting by at least its width reaches the continuation bits of that shift:</p>
+<ul>
+<li>left shift produces <code>0</code>;</li>
+<li>unsigned right shift produces <code>0</code>;</li>
+<li>signed right shift produces <code>0</code> for a nonnegative value and <code>-1</code> for a negative value.</li>
+</ul>
+<p>Operands are evaluated once.</p>
+<h2 id="numeric-hierarchy"><a class="header" href="#numeric-hierarchy">Numeric Hierarchy</a></h2>
+<p>Dewy's intended numeric model includes exact integers and rationals, real numbers, concrete floating-point representations, complex numbers, and quaternions. The relationship among these types is intended to permit information-preserving use of a narrower domain where a broader one is required.</p>
+<p>The complete construction, promotion, literal, rounding, and exceptional-value rules outside integers remain provisional. Until those rules are specified, names such as <code>rational</code>, <code>real</code>, <code>float32</code>, and <code>float64</code> identify the intended domains but do not imply undocumented coercions.</p>
+<h2 id="representation-selection"><a class="header" href="#representation-selection">Representation Selection</a></h2>
+<p>Semantic type and storage representation are separate. A value with <code>int</code> semantics may use a fixed-width machine representation when compile-time range analysis proves that choice equivalent for every reachable value. If the proof is unavailable, an implementation must preserve arbitrary-precision behavior rather than silently choosing overflow.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="expressions-and-evaluation"><a class="header" href="#expressions-and-evaluation">Expressions and Evaluation</a></h1>
+<p>Every executable construct in Dewy is an expression. An expression may produce one value, several values for a surrounding collector, <code>void</code>, or <code>never</code> when it cannot complete.</p>
+<h2 id="produced-values"><a class="header" href="#produced-values">Produced Values</a></h2>
+<p>Literals, value-returning calls, exhaustive conditionals, and value-producing blocks can supply surrounding expressions. Declarations and ordinary assignments produce <code>void</code>.</p>
+<p>An attached postfix semicolon evaluates an expression and suppresses the values it would otherwise produce:</p>
+<pre><code class="language-dewy">operation();
+</code></pre>
+<p>An unattached semicolon is reserved for array-dimension selection and does not act as generic statement punctuation.</p>
+<h2 id="blocks"><a class="header" href="#blocks">Blocks</a></h2>
+<p><code>{}</code> is a scoped block. <code>()</code> groups expressions without introducing a child lexical scope.</p>
+<p>A block evaluates its expressions in source order and expresses each non-<code>void</code> result. A context requiring one value rejects a block that can produce an incompatible number of values.</p>
+<pre><code class="language-dewy">let circumference = {
+    let diameter = 2 * radius
+    pi * diameter
+}
+</code></pre>
+<p>Only the final calculation produces a value because the declaration is <code>void</code>.</p>
+<h2 id="evaluation-order"><a class="header" href="#evaluation-order">Evaluation Order</a></h2>
+<p>Within the expression tree established by grouping and precedence, operands and call arguments evaluate from left to right. A construct documented as evaluating an operand once must preserve that behavior even if lowering expands it into several primitive operations.</p>
+<p>Boolean short-circuit expressions evaluate only the operands required by their truth rule. Flow alternatives evaluate conditions in order and execute only the selected body.</p>
+<h2 id="assignment"><a class="header" href="#assignment">Assignment</a></h2>
+<p>Assignment evaluates its destination place and source, updates the binding or selected field/element, and produces <code>void</code>. Combined assignment loads the old value, applies the selected typed operator, and stores the result while evaluating the destination route only once.</p>
+<p>See <a href="operators-and-precedence.html">Operators and Precedence</a>, <a href="bindings-and-scope.html">Bindings</a>, and <a href="values.html">Values, Copies, and Places</a>.</p>
+<h2 id="place-projection"><a class="header" href="#place-projection">Place Projection</a></h2>
+<p>The prefix <code>@</code> selects a place. Following member and index expressions project the place to the location at the end of the route:</p>
+<pre><code class="language-dewy">@pair.left
+@values[i]
+@box.rows[row][column]
+</code></pre>
+<p>These parse as projections from the prefixed root. <code>@(pair.left)</code> is equivalent to <code>@pair.left</code>; Dewy has no <code>pair.@left</code> form.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="operators-and-precedence"><a class="header" href="#operators-and-precedence">Operators and Precedence</a></h1>
+<p>Operator tokens resolve to typed operations. An operator's spelling determines parsing precedence; operand types and available overloads determine its meaning.</p>
+<h2 id="main-operator-families"><a class="header" href="#main-operator-families">Main Operator Families</a></h2>
+<ul>
+<li>arithmetic: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>//</code>, <code>%</code>, <code>^</code>;</li>
+<li>shifts: <code>&lt;&lt;</code>, <code>&gt;&gt;</code>, <code>&lt;&lt;&lt;</code>, <code>&gt;&gt;&gt;</code>;</li>
+<li>comparisons and tests: <code>=?</code>, <code>not =?</code>, <code>&lt;?</code>, <code>&lt;=?</code>, <code>&gt;?</code>, <code>&gt;=?</code>, <code>is?</code>, <code>isnt?</code>, <code>in?</code>, <code>@?</code>;</li>
+<li>Boolean and bitwise composition: <code>and</code>, <code>or</code>, <code>xor</code>, <code>nand</code>, <code>nor</code>, <code>xnor</code>, <code>&amp;</code>, <code>|</code>, <code>~</code>, <code>not</code>;</li>
+<li>conversion: <code>as</code>, <code>transmute</code>;</li>
+<li>call pipes: <code>|&gt;</code> and <code>&lt;|</code>;</li>
+<li>construction and binding: <code>:</code>, <code>:&gt;</code>, <code>=&gt;</code>, <code>-&gt;</code>, <code>&lt;-&gt;</code>, <code>=</code>;</li>
+<li>suppression: an attached postfix <code>;</code>.</li>
+</ul>
+<p>English Boolean operators short-circuit according to their truth rules. Explicit calls to the corresponding implementation functions are ordinary eager calls.</p>
+<p>Most infix operations have a combined-assignment spelling such as <code>+=</code>. Combined assignment has assignment precedence, not the precedence of its inner operation.</p>
+<h2 id="juxtaposition"><a class="header" href="#juxtaposition">Juxtaposition</a></h2>
+<p>Adjacent expressions can form several operations:</p>
+<pre><code class="language-dewy">function(argument)
+values[index]
+2distance
+</code></pre>
+<p>Parsing retains the meaningful call, index, and multiplication alternatives. Semantic analysis resolves the operation from the operand types and context. General juxtaposition multiplication is still a provisional implementation area, but its place in the expression grammar is settled.</p>
+<h2 id="precedence"><a class="header" href="#precedence">Precedence</a></h2>
+<p>The following table is ordered from highest to lowest. “Fail” means an ungrouped repetition at that level is rejected rather than given an arbitrary associativity. “Flat” produces one n-ary sequence.</p>
+<div class="table-wrapper"><table><thead><tr><th>Associativity</th><th>Operators or forms</th></tr></thead><tbody>
+<tr><td>prefix</td><td><code>@</code></td></tr>
+<tr><td>left</td><td>member <code>.</code>, call juxtaposition, index juxtaposition</td></tr>
+<tr><td>fail</td><td>type-parameter juxtaposition, ellipsis juxtaposition</td></tr>
+<tr><td>postfix / prefix</td><td><code>`</code></td></tr>
+<tr><td>prefix</td><td><code>not</code>, <code>~</code></td></tr>
+<tr><td>postfix</td><td><code>?</code></td></tr>
+<tr><td>right</td><td><code>^</code></td></tr>
+<tr><td>left</td><td>multiplication juxtaposition</td></tr>
+<tr><td>prefix</td><td><code>*</code>, <code>/</code>, <code>//</code></td></tr>
+<tr><td>left</td><td><code>*</code>, <code>/</code>, <code>//</code>, <code>%</code>, <code>\</code></td></tr>
+<tr><td>prefix</td><td><code>+</code>, <code>-</code></td></tr>
+<tr><td>left</td><td><code>+</code>, <code>-</code></td></tr>
+<tr><td>left</td><td><code>&lt;&lt;</code>, <code>&gt;&gt;</code>, <code>&lt;&lt;&lt;</code>, <code>&gt;&gt;&gt;</code></td></tr>
+<tr><td>flat</td><td><code>,</code></td></tr>
+<tr><td>flat</td><td>range juxtaposition (<code>1..2</code>)</td></tr>
+<tr><td>fail</td><td>iterator <code>in</code></td></tr>
+<tr><td>left</td><td>comparisons, membership, type tests, place identity</td></tr>
+<tr><td>left</td><td><code>and</code>, <code>nand</code>, <code>&amp;</code></td></tr>
+<tr><td>left</td><td><code>xor</code>, <code>xnor</code></td></tr>
+<tr><td>left</td><td><code>or</code>, <code>nor</code>, `</td></tr>
+<tr><td>left</td><td><code>as</code>, <code>transmute</code></td></tr>
+<tr><td>fail</td><td><code>of</code>, <code>has</code></td></tr>
+<tr><td>fail</td><td><code>:</code></td></tr>
+<tr><td>left</td><td><code>:&gt;</code></td></tr>
+<tr><td>right</td><td><code>=&gt;</code></td></tr>
+<tr><td>left</td><td>`</td></tr>
+<tr><td>right</td><td>`&lt;</td></tr>
+<tr><td>fail</td><td><code>-&gt;</code>, <code>&lt;-&gt;</code></td></tr>
+<tr><td>fail</td><td>assignment and combined assignment</td></tr>
+<tr><td>left</td><td>attached semicolon suppression</td></tr>
+</tbody></table>
+</div>
+<p><code>else</code> attaches flow alternatives outside these operator levels. Grouping with <code>()</code> or a scoped <code>{}</code> is required when the precedence table does not express the intended tree.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="functions-and-calls"><a class="header" href="#functions-and-calls">Functions and Calls</a></h1>
+<p>A function literal consists of a parameter contract, an optional return contract, <code>=&gt;</code>, and a body expression:</p>
 <pre><code class="language-dewy">let add = (left:int64 right:int64=2):&gt;int64 =&gt; left + right
 </code></pre>
-<h2 id="parameter-states"><a class="header" href="#parameter-states">Parameter states</a></h2>
-<p>Dewy's call model follows one rule: each explicit argument binds one currently
-unset parameter. A positional argument takes the first parameter still
-available by position; a named argument takes the parameter with that name.
-Defaults are fallbacks rather than pre-bound values, so they retain their
-declared positions.</p>
-<h3 id="required-positional-or-keyword"><a class="header" href="#required-positional-or-keyword">Required positional-or-keyword</a></h3>
-<p>Unbound parameters before <code>...</code> may be supplied in their declared position or
-by name. Named arguments may appear in any order.</p>
-<pre><code class="language-dewy">let subtract = (left:int64 right:int64):&gt;int64 =&gt; left - right
-
-subtract(7 2)
-subtract(right=2 left=7)
-</code></pre>
-<p>Both calls bind <code>left=7</code> and <code>right=2</code>.</p>
-<h3 id="positional-or-keyword-with-a-default"><a class="header" href="#positional-or-keyword-with-a-default">Positional-or-keyword with a default</a></h3>
-<p>A parameter with a default may still be supplied either by position or by
-name. The default is used only when a completed call leaves that parameter
-unset.</p>
+<p>One unannotated parameter may omit parentheses: <code>x =&gt; x + 1</code>. Zero parameters use <code>()</code>.</p>
+<h2 id="argument-binding"><a class="header" href="#argument-binding">Argument Binding</a></h2>
+<p>Each explicit argument binds one currently unset parameter. Arguments are processed from left to right.</p>
+<ul>
+<li>A positional argument binds the first parameter still available by position.</li>
+<li>A named argument binds the unset parameter with that name.</li>
+<li>After explicit arguments are processed, each unset defaulted parameter evaluates its default for that completed call.</li>
+<li>A required parameter still unset after binding is an error.</li>
+</ul>
+<p>Defaults are fallbacks, not values bound when the function is defined. They retain their positions:</p>
 <pre><code class="language-dewy">let combine = (
     left:int64
     scale:int64=2
@@ -348,108 +533,255 @@ combine(10 3 16)       # left=10, scale=3, right=16
 combine(10 right=16)   # left=10, scale=2, right=16
 combine(scale=3 10 16) # scale=3, then left=10 and right=16
 </code></pre>
-<p>Named arguments remove their parameters from the remaining positional
-sequence. Arguments are processed from left to right, which is why the last
-example is unambiguous. The shorter <code>combine(10 16)</code> does <em>not</em> skip <code>scale</code>:
-it supplies <code>left</code> and <code>scale</code>, then reports that required <code>right</code> is missing.</p>
-<p>The default expression is evaluated separately for every completed call that
-omits it. Consequently, a mutable default such as an array produces a fresh
-value for each call rather than one shared object.</p>
-<h3 id="required-keyword-only"><a class="header" href="#required-keyword-only">Required keyword-only</a></h3>
-<p>A bare <code>...</code> ends the positional parameter run. Required parameters after it
-must be supplied by name.</p>
+<p><code>combine(10 16)</code> binds <code>left</code> and <code>scale</code>; it does not skip <code>scale</code>, and therefore reports missing <code>right</code>.</p>
+<p>Default expressions evaluate independently for every completed call that omits them. Mutable objects created by a default are not shared accidentally between calls.</p>
+<h2 id="parameter-kinds"><a class="header" href="#parameter-kinds">Parameter Kinds</a></h2>
+<h3 id="positional-or-keyword"><a class="header" href="#positional-or-keyword">Positional or keyword</a></h3>
+<p>An ordinary named parameter before the positional divider may be bound by position or name:</p>
+<pre><code class="language-dewy">let subtract = (left:int64 right:int64):&gt;int64 =&gt; left - right
+subtract(7 2)
+subtract(right=2 left=7)
+</code></pre>
+<h3 id="keyword-only"><a class="header" href="#keyword-only">Keyword-only</a></h3>
+<p>A bare <code>...</code> ends the positional run. Parameters after it require names:</p>
 <pre><code class="language-dewy">let offset = (value:int64 ... amount:int64):&gt;int64 =&gt; value + amount
-
 offset(40 amount=2)
 </code></pre>
-<p>Here <code>value</code> remains positional-or-keyword, while <code>amount</code> is required and
-keyword-only.</p>
-<h3 id="function-type-contracts-remain-named"><a class="header" href="#function-type-contracts-remain-named">Function type contracts remain named</a></h3>
-<p>Types and parameter names use the same identifier syntax. A bare identifier in
-a function signature is therefore a parameter name, not an unnamed parameter
-whose type happens to have that spelling. Structural function contracts make
-the name and type explicit in the same way as function literals.</p>
-<pre><code class="language-dewy">let increment = (value:int64):&gt;int64 =&gt; value + 1
-let callback:&lt;(value:int64):&gt;int64&gt; = increment
-
-callback(41)
-callback(value=41)
+<h3 id="position-only"><a class="header" href="#position-only">Position-only</a></h3>
+<p>Wrapping the name and type in <code>&lt;&gt;</code> preserves the local name but removes it from the keyword interface:</p>
+<pre><code class="language-dewy">let increment = (&lt;value:int64&gt;):&gt;int64 =&gt; value + 1
+increment(41)
 </code></pre>
-<p>Dewy does not currently have source syntax for positional-only or anonymous
-parameters. A future explicit form may add them, but a bare identifier will not
-be reinterpreted as a type.</p>
-<h3 id="rest-parameters-and-spreading"><a class="header" href="#rest-parameters-and-spreading">Rest parameters and spreading</a></h3>
-<p>The planned <code>...rest</code> form captures arguments not claimed by earlier
-parameters. A captured bundle will be forwardable with the same <code>...</code> syntax.</p>
-<pre><code class="language-dewy"># planned
-let wrapper = (...rest) =&gt; target(...rest)
+<p><code>increment(value=41)</code> is an error. A default inside the wrapper remains a per-call fallback.</p>
+<p>Types and names share identifier syntax, so a bare identifier in a function literal is a parameter name, not an anonymous argument whose type happens to have that spelling.</p>
+<h2 id="function-contracts"><a class="header" href="#function-contracts">Function Contracts</a></h2>
+<p>A function type records its parameter and return contract:</p>
+<pre><code class="language-dewy">let callback:&lt;(value:int64):&gt;int64&gt; = increment
 </code></pre>
-<p>Rest capture and argument spreading are recognized design directions but are
-not yet lowerable by the current compiler. A bare <code>...</code> used only as the
-keyword-only divider is implemented. Partial evaluation will follow the same
-binding rule. Explicitly supplied values will be evaluated and saved
-immediately, while defaults remain per-call fallbacks until the resulting
-function is called.</p>
-<h2 id="call-behavior"><a class="header" href="#call-behavior">Call behavior</a></h2>
-<p>Implemented calls include positional and keyword arguments, per-call default
-evaluation, pipe calls, direct and indirect calls, recursion, forward
-references from function bodies, and static overload selection.</p>
-<p>Overloads combine with <code>&amp;</code>; the argument contract selects the matching
-function statically.</p>
+<p>Structural contracts may omit externally visible names where a position-only interface is required. Function literals still require usable local names for parameters their bodies access.</p>
+<h2 id="calls-and-pipes"><a class="header" href="#calls-and-pipes">Calls and Pipes</a></h2>
+<p>Parenthesized or juxtaposed arguments call a callable expression. <code>|&gt;</code> supplies values to the callable on its right; <code>&lt;|</code> supplies right-hand values to the callable on its left according to their associativity.</p>
+<p>Argument expressions evaluate from left to right before the function body begins, except that omitted defaults evaluate as part of completing the call.</p>
+<h2 id="overloads"><a class="header" href="#overloads">Overloads</a></h2>
+<p><code>&amp;</code> combines compatible functions into an overload set. The call contract selects a unique applicable alternative:</p>
 <pre><code class="language-dewy">let describe = ((value:int64):&gt;string =&gt; "integer")
              &amp; ((value:string):&gt;string =&gt; value)
 </code></pre>
-<p>Partial application, capturing closures, and runtime multifunction values are
-not yet lowerable.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="control-flow-and-iteration"><a class="header" href="#control-flow-and-iteration">Control flow and iteration</a></h1>
-<p><code>if</code>, <code>else if</code>, and <code>else</code> form an ordered conditional. An exhaustive
-conditional can produce a scalar value; a non-exhaustive conditional produces
-<code>void</code>.</p>
-<p><code>loop</code> covers Boolean repetition and iterator consumption. <code>break</code> and
-<code>continue</code> can target an enclosing loop through a scope metatag label.</p>
-<pre><code class="language-dewy">loop i in 0..10 {
-    if i =? 5 { continue }
-}
+<p>Ambiguous or unmatched calls are errors. Runtime multifunction values remain part of the provisional dynamic-dispatch design; ordinary overload resolution is static.</p>
+<h2 id="rest-parameters-and-spreading"><a class="header" href="#rest-parameters-and-spreading">Rest Parameters and Spreading</a></h2>
+<p>The direction for <code>...rest</code> is to capture arguments not claimed by earlier parameters and allow the resulting bundle to be forwarded with <code>...</code>. Exact bundle types and all interactions with named arguments remain provisional.</p>
+<h2 id="function-handles"><a class="header" href="#function-handles">Function Handles</a></h2>
+<p>A bare function name calls the function whenever a valid call is available. <code>@fn</code> selects the function binding as a first-class callable handle instead:</p>
+<pre><code class="language-dewy">let sum = (a b) =&gt; a + b
+let reference = @sum
+let add5 = @sum(5)
 </code></pre>
-<p>Static integer ranges support inclusive and explicit open bounds, descending
-steps, and <code>first,second..last</code> notation. Multiiterators combine static range
-iterators using <code>and</code>, <code>or</code>, <code>xor</code>, <code>nand</code>, <code>nor</code>, or <code>xnor</code>. Iterator leaves
-advance eagerly from left to right once per condition evaluation.</p>
-<p><code>in?</code> supports runtime <code>int64</code> candidates and endpoints for unstepped ranges;
-all runtime operands are evaluated once. A runtime candidate can also be tested
-against a statically anchored stepped range, including descending and unbounded
-forms. Runtime-computed step anchors are not yet supported.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="arrays-objects-and-strings"><a class="header" href="#arrays-objects-and-strings">Arrays, objects, and strings</a></h1>
+<p>Selectors use the ordinary place route: <code>@worker.on_event</code> reaches the function-valued field at the end of <code>(@worker).on_event</code>; it is not <code>worker.@on_event</code>.</p>
+<p>Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.</p>
+<p>Handle identity, explicit function copying, escaping captures, and closure storage remain provisional.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="control-flow"><a class="header" href="#control-flow">Control Flow</a></h1>
+<h2 id="conditionals"><a class="header" href="#conditionals">Conditionals</a></h2>
+<p><code>if</code>, <code>else if</code>, and <code>else</code> form an ordered flow expression. Conditions evaluate from left to right until one succeeds; only the selected body evaluates.</p>
+<pre><code class="language-dewy">let label = if count =? 0
+    "empty"
+else if count =? 1
+    "one item"
+else
+    "{count} items"
+</code></pre>
+<p>An exhaustive conditional may produce a value when its alternatives have a compatible result type. A nonexhaustive conditional produces <code>void</code> unless its context collects another well-defined result form.</p>
+<p>Facts established by a condition narrow values inside the corresponding body and along later paths where earlier alternatives are known false.</p>
+<h2 id="loops"><a class="header" href="#loops">Loops</a></h2>
+<p><code>loop condition body</code> reevaluates its condition and executes its body according to the condition's Boolean or iterator behavior.</p>
+<pre><code class="language-dewy">loop connected
+    receive_message()
+
+loop item in items
+    process(item)
+</code></pre>
+<p>See <a href="ranges-and-iteration.html">Ranges and Iteration</a> for iterator conditions and multiiterator formulas.</p>
+<h2 id="exits"><a class="header" href="#exits">Exits</a></h2>
+<p><code>break</code> exits a loop. <code>continue</code> begins its next condition evaluation. <code>return</code> exits the current function, optionally supplying its result.</p>
+<p>An exit may target an enclosing labeled loop through Dewy's scope metatag mechanism. Exiting more loop levels than exist is an error.</p>
+<p><code>never</code> is the type of a path that cannot complete normally. It is distinct from <code>void</code>, which represents normal completion without a produced value.</p>
+<h2 id="pattern-selection-and-cleanup"><a class="header" href="#pattern-selection-and-cleanup">Pattern Selection and Cleanup</a></h2>
+<p>General <code>match</code>, cleanup/finally behavior, and effect-aware error propagation are provisional designs. Their eventual forms must compose with expression results and flow-sensitive narrowing rather than creating separate statement-only semantics.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="ranges-and-iteration"><a class="header" href="#ranges-and-iteration">Ranges and Iteration</a></h1>
+<h2 id="range-forms"><a class="header" href="#range-forms">Range Forms</a></h2>
+<p>A range contains <code>..</code>. Endpoints immediately juxtaposed with <code>..</code> supply its anchors:</p>
+<pre><code class="language-dewy">first..last
+first..
+..last
+..
+</code></pre>
+<p>Square and round boundaries independently include or exclude an endpoint:</p>
+<pre><code class="language-dewy">[first..last]
+[first..last)
+(first..last]
+(first..last)
+</code></pre>
+<p>An unbracketed <code>first..last</code> includes both endpoints.</p>
+<p>A first pair determines a step:</p>
+<pre><code class="language-dewy">1,3..9       # 1 3 5 7 9
+5,4..0       # 5 4 3 2 1 0
+</code></pre>
+<p>The step is <code>second - first</code> and cannot be zero. A descending range requires a negative step; <code>5..0</code> is empty rather than implicitly descending.</p>
+<h2 id="iterability"><a class="header" href="#iterability">Iterability</a></h2>
+<p>A range with a first element may be consumed from that element onward. A left-unbounded range is a valid range value but cannot be iterated because it has no starting value.</p>
+<p>Right-unbounded iteration continues until surrounding control flow or a finite companion iterator stops it.</p>
+<h2 id="membership"><a class="header" href="#membership">Membership</a></h2>
+<p><code>value in? range</code> tests whether the value belongs to the range, respecting open bounds and step alignment. Each runtime operand is evaluated once.</p>
+<h2 id="sequence-slices"><a class="header" href="#sequence-slices">Sequence Slices</a></h2>
+<p>A range used as an index selects a slice. <code>end</code> refers to the last valid index of the selected axis:</p>
+<pre><code class="language-dewy">text[3..12)
+values[..end-1]
+matrix[row][1..end]
+</code></pre>
+<h2 id="iterator-conditions"><a class="header" href="#iterator-conditions">Iterator Conditions</a></h2>
+<p>In a loop condition, <code>name in iterable</code> requests the next value, binds it to <code>name</code>, and reports whether a value was produced:</p>
+<pre><code class="language-dewy">loop item in items
+    process(item)
+</code></pre>
+<p>Iterator clauses may be combined with Boolean operators. Leaves advance from left to right once per condition evaluation:</p>
+<pre><code class="language-dewy">loop index in 0.. and item in items
+    printl"{index}: {item}"
+</code></pre>
+<p>For <code>and</code>, iteration ends when a required leaf is exhausted. Operators such as <code>or</code> may allow one leaf to continue after another is exhausted; an exhausted leaf's bound value is then optional.</p>
+<p>The exact truth and exhaustion formulas for <code>and</code>, <code>or</code>, <code>xor</code>, <code>nand</code>, <code>nor</code>, and <code>xnor</code> follow their Boolean meanings applied to the per-leaf step results.</p>
+<p>Stored generators, arbitrary runtime range arithmetic, and some dynamic iterator sources remain provisional areas; see <a href="design-status.html">Design Maturity and Open Questions</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="strings-and-graphemes"><a class="header" href="#strings-and-graphemes">Strings and Graphemes</a></h1>
+<h2 id="semantic-model"><a class="header" href="#semantic-model">Semantic Model</a></h2>
+<p>A <code>string</code> is an immutable sequence of Unicode extended grapheme clusters. A <code>grapheme</code> is a string whose length is one; <code>char</code> is an alias for the same semantic type.</p>
+<p>Length, indexing, slicing, and default iteration operate in grapheme-cluster units rather than UTF-8 bytes or Unicode scalar values.</p>
+<pre><code class="language-dewy">let text = "café 👨‍👩‍👧‍👦"
+text.length
+text[4]
+</code></pre>
+<p>The exact scalar sequence is preserved. Canonically equivalent spellings are not implicitly normalized, and exact equality compares the preserved spelling. Normalization-aware operations are a separate API design.</p>
+<h2 id="interpolation"><a class="header" href="#interpolation">Interpolation</a></h2>
+<p>Braces inside a string literal evaluate an ordinary Dewy expression and convert its value to string:</p>
+<pre><code class="language-dewy">let message = "item {index}: {value}"
+</code></pre>
+<p>The intended conversion path is the same conversion used by <code>value as string</code>, so user-defined formatting participates in the general conversion protocol rather than a string-only hook.</p>
+<p>An implementation may stream the literal chunks and converted fields directly to a consumer such as <code>printl</code>, or materialize a string value when the surrounding context needs one. That representation choice is not observable.</p>
+<h2 id="representation-views"><a class="header" href="#representation-views">Representation Views</a></h2>
+<p>Explicit array views expose lower-level representations:</p>
+<ul>
+<li><code>array&lt;uint8&gt;</code> contains UTF-8 code units;</li>
+<li><code>array&lt;uint32&gt;</code> contains Unicode scalar values;</li>
+<li><code>array&lt;grapheme&gt;</code> contains grapheme values.</li>
+</ul>
+<p>Converting a grapheme array to string concatenates its contents and segments the result again, so boundaries between adjacent inputs need not remain grapheme boundaries.</p>
+<p>Conversions from arbitrary integers to string representations require proof that the input is valid UTF-8 or valid Unicode scalar data.</p>
+<h2 id="character-ranges"><a class="header" href="#character-ranges">Character Ranges</a></h2>
+<p>A range whose unannotated anchors are one-grapheme strings advances in Unicode scalar order when each anchor contains exactly one scalar. Iteration skips the surrogate interval. Enumerating multi-scalar graphemes or natural-language collation order is unspecified.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="arrays-and-containers"><a class="header" href="#arrays-and-containers">Arrays and Containers</a></h1>
 <h2 id="arrays"><a class="header" href="#arrays">Arrays</a></h2>
-<p>Implemented arrays are homogeneous. Exact-length arrays carry a length
-refinement, expose <code>.length</code>, and support constant or flow-proven indexing.
-Some non-escaping local literals and module constants lower directly to raw
-storage. General dynamic-length and escaping arrays remain incomplete.</p>
-<h2 id="objects"><a class="header" href="#objects">Objects</a></h2>
-<p>Object literals contain named fields in source order and have structural types.
-Fields can be read and mutated when the originating binding permits it. Function
-fields can read sibling fields, and zero-argument function fields are called by
-ordinary member access.</p>
-<h2 id="strings"><a class="header" href="#strings">Strings</a></h2>
-<p>Strings are immutable sequences of Unicode extended grapheme clusters. Length,
-indexing, slicing, iteration, exact equality, grapheme ranges, UTF-8 byte views,
-Unicode scalar views, and grapheme-array conversion are implemented. Equality
-currently preserves exact scalar spelling rather than normalizing text. Slice
-endpoints may be computed at runtime when flow-sensitive bounds analysis proves
-their effective open or closed boundaries stay within the string.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="modules-and-imports"><a class="header" href="#modules-and-imports">Modules and imports</a></h1>
-<p>Imports resolve relative to the importing source file. The current system
-supports selective names, aliases, whole-module namespaces, and splats.</p>
+<p>An array is an ordered homogeneous value. Array indexing is zero-based.</p>
+<pre><code class="language-dewy">let names:array&lt;string&gt; = ["Ada" "Grace"]
+let triple:array&lt;int64 length=3&gt; = [10 20 30]
+</code></pre>
+<p><code>array&lt;T&gt;</code> specifies the element type. <code>array&lt;T length=N&gt;</code> additionally refines the length. Array values follow Dewy's value semantics: binding, assignment, argument passing, and return produce an independent value unless the program explicitly passes a place.</p>
+<pre><code class="language-dewy">let original = [1 2 3]
+let copy = original
+copy[0] = 9                  # original remains [1 2 3]
+</code></pre>
+<p>The compiler may implement an unobservable copy as a move, borrowed read, shared immutable backing storage, or another equivalent representation.</p>
+<p><code>.length</code> reports the length. Integer indexes select elements, and range indexes select slices. The compiler must prove an ordinary index valid; operations that perform explicit runtime validation are separate checked interfaces.</p>
+<h2 id="shapes-and-dimensions"><a class="header" href="#shapes-and-dimensions">Shapes and Dimensions</a></h2>
+<p>Arrays are also the intended foundation for vectors, matrices, and tensors. Shape belongs in array type information rather than requiring unrelated matrix classes.</p>
+<p>The exact general multidimensional literal and type syntax remains provisional. In particular, nested <code>array&lt;array&lt;T&gt;&gt;</code> must remain a valid array-of-arrays construction and must not prevent a contiguous representation such as an array whose <code>length</code> or <code>shape</code> is a sequence of dimensions.</p>
+<h2 id="dictionaries-and-bidictionaries"><a class="header" href="#dictionaries-and-bidictionaries">Dictionaries and Bidictionaries</a></h2>
+<p>A dictionary literal uses <code>-&gt;</code> pairs; a bidictionary uses <code>&lt;-&gt;</code> pairs and supports lookup in both directions:</p>
+<pre><code class="language-dewy">let scores = ["Ada" -&gt; 10 "Grace" -&gt; 12]
+let names = [1 &lt;-&gt; "one" 2 &lt;-&gt; "two"]
+</code></pre>
+<p>The broad literal distinction is settled, while complete type, collision, mutation, ordering, and representation rules remain provisional.</p>
+<h2 id="sets"><a class="header" href="#sets">Sets</a></h2>
+<p>The intended set form is <code>set[...]</code>:</p>
+<pre><code class="language-dewy">let permissions = set["read" "write"]
+</code></pre>
+<p>Membership uses <code>in?</code>. Complete set construction, equality, and ordering rules remain provisional.</p>
+<h2 id="literal-classification"><a class="header" href="#literal-classification">Literal Classification</a></h2>
+<p>At the top level of <code>[]</code>:</p>
+<ul>
+<li>positional values form an array;</li>
+<li>named <code>=</code> fields form an object;</li>
+<li><code>-&gt;</code> pairs form a dictionary;</li>
+<li><code>&lt;-&gt;</code> pairs form a bidictionary.</li>
+</ul>
+<p>Mixed top-level forms must satisfy the rules of the selected container rather than silently switching interpretation element by element.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="structural-objects"><a class="header" href="#structural-objects">Structural Objects</a></h1>
+<p>An object is a structural value containing named fields in source order. Field names, field types, and order participate in its structural type.</p>
+<pre><code class="language-dewy">let Pair:type = [left:int64 right:int64]
+let pair:Pair = [left=20 right=22]
+</code></pre>
+<p>A type alias names the structure; it does not create a runtime class object or give the structure nominal identity.</p>
+<h2 id="fields-and-mutation"><a class="header" href="#fields-and-mutation">Fields and Mutation</a></h2>
+<p>Member access uses <code>.</code>. A mutable object binding permits assignment to its mutable fields. Ordinary object copies remain independent:</p>
+<pre><code class="language-dewy">let original = [name="draft" saved=false]
+let copy = original
+copy.saved = true             # original.saved remains false
+</code></pre>
+<p>Nested array and object fields recursively follow the same value rule.</p>
+<h2 id="constructors"><a class="header" href="#constructors">Constructors</a></h2>
+<p>A constructor is an ordinary function returning an object:</p>
+<pre><code class="language-dewy">let make_pair = (left:int64 right:int64):&gt;Pair =&gt;
+    [left=left right=right]
+</code></pre>
+<p>Dewy does not require a separate class declaration syntax.</p>
+<h2 id="function-fields"><a class="header" href="#function-fields">Function Fields</a></h2>
+<p>A function field may use sibling fields from the object literal's scope:</p>
+<pre><code class="language-dewy">let counter = (start:int64=0) =&gt; [
+    value = start
+    increment = () =&gt; value += 1
+]
+</code></pre>
+<p>Accessing a zero-argument function field calls it when that call is valid. Explicit <code>()</code> remains available.</p>
+<p>Extracting a method as a stored naked function, escaping captures, and full function-handle identity depend on the provisional function-handle and closure design.</p>
+<h2 id="places-through-fields"><a class="header" href="#places-through-fields">Places Through Fields</a></h2>
+<p><code>@object.field</code> starts from the object's place and projects it to the field at the end of the route. <code>@(object.field)</code> is equivalent. There is no separate <code>object.@field</code> syntax.</p>
+<p>See <a href="values.html">Values, Copies, and Places</a> for aliasing and overlap rules.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="physical-quantities"><a class="header" href="#physical-quantities">Physical Quantities</a></h1>
+<p>A physical quantity combines a numeric representation with a dimension. Dimensions participate in static type checking and need not survive as runtime objects.</p>
+<h2 id="type-products"><a class="header" href="#type-products">Type Products</a></h2>
+<p>Applying arithmetic to type values describes the type produced by that operation. A duration may therefore be described as a real-valued representation multiplied by the <code>Time</code> dimension:</p>
+<pre><code class="language-dewy">const Duration:type = &lt;T of real&gt;(T * Time)
+</code></pre>
+<p><code>Duration&lt;int64&gt;</code> preserves <code>int64</code> as its numeric representation while requiring a time dimension.</p>
+<h2 id="unit-values"><a class="header" href="#unit-values">Unit Values</a></h2>
+<p>Juxtaposing a number with a unit multiplies them:</p>
+<pre><code class="language-dewy">let timeout = 300ms
+let distance = 10m
+</code></pre>
+<p>A unit carries an exact scale and dimension. Constant expressions may fold that scale completely; for example, an implementation may lower <code>300ms</code> to an integer count in the canonical time scale while retaining no runtime unit tag.</p>
+<p>Addition and comparison require compatible dimensions. Multiplication and division combine dimensions. Conversion between units preserves the physical value rather than reinterpreting the numeric bits.</p>
+<h2 id="time-and-sleeping"><a class="header" href="#time-and-sleeping">Time and Sleeping</a></h2>
+<p><code>ns</code>, <code>ms</code>, and <code>s</code>, together with their written names, denote exact time scales. <code>sleep</code> accepts a duration, so a dimensionless number is rejected even when its machine representation would be accepted by the host system call.</p>
+<h2 id="provisional-scope"><a class="header" href="#provisional-scope">Provisional Scope</a></h2>
+<p>The general type-product model, representation parameterization, and erasure of compile-time dimensions are settled directions. The complete base-dimension catalog, unit import organization, offset scales such as Celsius, calendar-relative durations, noninteger runtime arithmetic, and canonical conversion policies remain provisional.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="modules-and-imports"><a class="header" href="#modules-and-imports">Modules and Imports</a></h1>
+<p>Each source file defines a module containing its top-level bindings and executable initialization expressions.</p>
+<h2 id="relative-source-imports"><a class="header" href="#relative-source-imports">Relative Source Imports</a></h2>
+<p>An import path resolves relative to the file containing the import:</p>
 <pre><code class="language-dewy">from p"lib.dewy" import (answer add)
 import p"lib.dewy" as library
 </code></pre>
-<p><code>p</code> is an ordinary prelude function producing a structural <code>Path</code> value. An
-exact structural object with a string <code>path</code> field also satisfies the import
-contract.</p>
-<p>Reachable source modules share one type system and binding registry, initialize
-once in dependency order, reject import cycles and collisions, and merge into
-one µDewy executable. <code>$no_prelude = true</code> disables prelude bindings for its
-containing module only.</p>
+<p>Selective imports bind the requested names directly. <code>as</code> renames a selected binding. A namespace import retains qualification. Importing a path without a selection splats its top-level bindings into the current scope.</p>
+<p>The <code>from path import names</code> and <code>import names from path</code> orders are equivalent.</p>
+<h2 id="import-sources"><a class="header" href="#import-sources">Import Sources</a></h2>
+<p><code>p</code> is an ordinary prelude function producing a structural path value. Any exact compile-time object with the required string <code>path</code> field satisfies the source-import contract:</p>
+<pre><code class="language-dewy">from [path="lib.dewy"] import answer
+</code></pre>
+<p>Source imports must be known while constructing the module graph. Runtime strings cannot select source modules.</p>
+<h2 id="binding-kinds"><a class="header" href="#binding-kinds">Binding Kinds</a></h2>
+<p>Values, constants, functions, overload sets, and type aliases are importable. Imported type values remain compile-time values in the receiving module.</p>
+<h2 id="graph-and-initialization"><a class="header" href="#graph-and-initialization">Graph and Initialization</a></h2>
+<p>Reachable source modules share a coherent type environment, initialize once in dependency order, and reject unresolved names, cycles, and collisions. A source suffix is conventional and does not select different Dewy semantics.</p>
+<h2 id="prelude"><a class="header" href="#prelude">Prelude</a></h2>
+<p>Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings. <code>$no_prelude = true</code> disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.</p>
+<h2 id="provisional-package-facilities"><a class="header" href="#provisional-package-facilities">Provisional Package Facilities</a></h2>
+<p>Installed package lookup, directory or glob imports, non-source artifacts, project-wide freestanding policy, and domain-library naming remain provisional. They must extend rather than contradict file-relative module identity and one-time initialization.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="µdewy-and-host-interoperability"><a class="header" href="#µdewy-and-host-interoperability">µDewy and host interoperability</a></h1>
 <p>Dewy currently lowers to µDewy as its primary backend. µDewy is a strict,
 minimal subset designed for bootstrapping; its runtime values occupy 64 bits and
@@ -461,21 +793,59 @@ capability selection remain in development.</p>
 <p>The µDewy compiler supports x86-64 Linux, WebAssembly, RISC-V, AArch64, and C
 backends. Dewy's standard prelude does not yet provide equivalent host behavior
 on every target.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="implementation-compatibility"><a class="header" href="#implementation-compatibility">Implementation compatibility</a></h1>
-<p>The defining compatibility goal for µDewy is:</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="design-maturity-and-open-questions"><a class="header" href="#design-maturity-and-open-questions">Design Maturity and Open Questions</a></h1>
+<p>This appendix records where Dewy's intended semantics are settled, provisional, or open. It is about language design, not compiler progress.</p>
+<h2 id="settled-foundations"><a class="header" href="#settled-foundations">Settled Foundations</a></h2>
+<p>The following principles organize the language and should be treated as normative:</p>
+<ul>
+<li>Dewy is a statically checked, general-purpose language centered on everyday ease of use.</li>
+<li>Expressions may produce values; declarations and ordinary assignments produce <code>void</code>.</li>
+<li>Ordinary rebinding, argument passing, and return have value semantics.</li>
+<li><code>@</code> explicitly selects a place or function binding when reference-like behavior is intended.</li>
+<li>Strings are immutable grapheme-cluster sequences with explicit lower-level views.</li>
+<li>Arrays are homogeneous values and may carry length or shape facts in their types.</li>
+<li>Objects are structural values; constructors are ordinary functions.</li>
+<li>Defaults are per-call fallbacks and do not remove their parameters from positional binding.</li>
+<li>Types are compile-time values and use the ordinary expression grammar where practical.</li>
+<li>Physical dimensions participate in types and may erase from runtime representations.</li>
+</ul>
+<h2 id="provisional-designs"><a class="header" href="#provisional-designs">Provisional Designs</a></h2>
+<p>These areas have a clear direction, but some syntax, edge cases, or runtime contracts remain undecided:</p>
+<ul>
+<li>user-written generic functions and generic structural objects;</li>
+<li>first-class function handles, partial evaluation, captures, and closure identity;</li>
+<li>the exact liquid-refinement language, proof boundary, and <code>unsafe</code> obligations;</li>
+<li>the general effect vocabulary and effect-polymorphic contracts;</li>
+<li>multidimensional array shape syntax, broadcasting, and contiguous layout selection;</li>
+<li>dictionary, bidictionary, and set mutation, collision, and ordering rules;</li>
+<li>the complete numeric hierarchy beyond integers;</li>
+<li>materialized interpolation and the overloadable string-conversion protocol;</li>
+<li>complete physical-dimension arithmetic, units, and conversion policy;</li>
+<li>runtime-length aggregate ownership, returns, and escaping places;</li>
+<li>pattern matching, stored generators, and general unpack/collect behavior;</li>
+<li>compile-time evaluation and metaprogramming beyond type-valued expressions and imports.</li>
+</ul>
+<p>A normative page may describe the decided portion of one of these areas, but must not silently choose an unresolved rule.</p>
+<h2 id="unspecified-behavior"><a class="header" href="#unspecified-behavior">Unspecified Behavior</a></h2>
+<p>When the reference calls behavior unspecified, programs must not depend on one current implementation's result. An implementation should diagnose constructs for which no valid language behavior has been selected rather than treating an accidental lowering result as specification.</p>
+<p>Open design work is tracked in repository discussions and semantic notes. The implementation checklist may also mention a feature before its design is complete; that does not elevate the checklist wording into a language rule.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="implementation-compatibility"><a class="header" href="#implementation-compatibility">Implementation Compatibility</a></h1>
+<p>This appendix describes implementation coverage. It does not define the language.</p>
+<h2 id="hosted-dewy-compiler"><a class="header" href="#hosted-dewy-compiler">Hosted Dewy Compiler</a></h2>
+<p>The hosted compiler parses and statically checks Dewy, lowers supported programs to µDewy, and uses a µDewy backend to produce executable output.</p>
+<p>Its implemented core includes bindings, fixed-width integers and Booleans, functions and calls, defaults and keyword arguments, static overloads, structured control flow, ranges and multiiterators, strings and graphemes, homogeneous arrays, structural objects, optional values, nonescaping explicit places, source imports, and initial time quantities.</p>
+<p>Several normative areas are only partial. Notable examples include arbitrary-precision runtime integers, escaping and runtime-sized aggregate storage, materialized interpolated strings, function handles and closures, general physical quantities, user-written generics, refinements, and effects.</p>
+<p>The detailed and continuously maintained checklist is <a href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md"><code>dewy/status.md</code></a>.</p>
+<h2 id="platform-coverage"><a class="header" href="#platform-coverage">Platform Coverage</a></h2>
+<p>The quick installer and the complete hosted execution path currently focus on x86-64 Linux. µDewy has x86-64 Linux, WebAssembly, RISC-V, AArch64, and C backends, but Dewy's implicit libraries and host facilities are not yet equally available on every target.</p>
+<p>The browser playground executes µDewy rather than the complete Dewy language.</p>
+<h2 id="µdewy-compatibility"><a class="header" href="#µdewy-compatibility">µDewy Compatibility</a></h2>
+<p>The defining compatibility goal is:</p>
 <blockquote>
-<p>Every well-formed µDewy program should compile and exhibit the same visible
-behavior under both the µDewy compiler and the full Dewy compiler.</p>
+<p>Every well-formed µDewy program should compile and exhibit the same visible behavior under both the µDewy compiler and the full Dewy compiler.</p>
 </blockquote>
-<p>That parity is still in progress. The repository contains executable fixtures
-and bootstrap-parity tests for the Python µDewy compiler and the compiler
-implemented in µDewy.</p>
-<p>The source suffix is conventional rather than semantic: Dewy's type checker
-does not choose a weaker mode merely because a file ends in <code>.udewy</code>. µDewy's
-own compiler accepts only the strict subset defined by its specification.</p>
-<p>See the
-<a href="https://github.com/david-andrew/dewy-lang/blob/master/udewy/README.md">µDewy specification</a>
-for the definitive subset language and backend contracts.</p>
+<p>That parity remains in progress and is checked by executable fixtures. Dewy's type checker does not select a weaker semantic mode merely because a file ends in <code>.udewy</code>; the suffix is conventional. µDewy's own compiler accepts only the strict subset defined by its specification.</p>
+<p>See the <a href="/udewy/reference/">µDewy specification</a> for the subset language and backend contracts.</p>
 
                     </main>
 

@@ -1,38 +1,41 @@
 # Welcome to Dewy
 
-This book is an example-led walk through The Dewy Programming Language, covering the syntax, programming model, and overall ideas behind it.
+Dewy is a general-purpose programming language designed to make everyday programs direct to write, clear to read, and safe to grow.
 
-> **Development edition.** Dewy is an early language and the compiler is still catching up. Many examples in this guide may not run yet, nor be performant. For exact current behavior, see the [language reference](../reference/) and [implementation status](../status/).
+The same language should feel comfortable for a short script, a command-line tool, a graphical application, a server, a game, numerical work, or systems software. Dewy starts with convenience rather than ceremony, then uses static types and compile-time reasoning to keep larger programs dependable.
 
-## What Is Dewy
+This book teaches Dewy through examples. It begins with the small set of ideas that organize the language, then develops functions, control flow, data, types, modules, and larger programming patterns in an order that lets each chapter build on the last.
 
-Dewy is a compiled, strongly typed general-purpose language with a focus on ergonomics and safety. Think the ease of Python or MATLAB but with static guarantees and performance.
+## What Dewy Feels Like
 
-Programs are ordinary source files. Top-level code runs in order. Everything is an expression. Common features that require special syntax rules (like functions, ternaries, list/dict comprehensions, zip/enumerate, classes, etc.) all fall out of Dewy's expression syntax.
+Dewy favors ordinary expressions that compose instead of a separate syntax feature for every task:
 
-## Who Dewy Is For
+```dewy
+let label = if unread_count =? 0
+    "Inbox"
+else
+    "Inbox ({unread_count})"
 
-Dewy is for the **everyday programmer**: easy to pick up for small programs, but designed to scale to serious work. It aims to feel at home in scripts, numerical and scientific computing, systems programming, engineering, and general application code—you needn't choose a different language just because the problem got bigger, faster, or more technical.
+let visible = [
+    loop message in messages
+        if not message.archived
+            message
+]
+```
 
-## What's in This Book
+The conditional produces a string. The loop produces the messages that pass its condition, and `[]` collects them into an array. These are not special “conditional expression” and “list comprehension” sublanguages; they are the same `if`, `loop`, and block expressions used everywhere else.
 
-- [Dewy at a Glance](pitch.md) for a quick look at the language
-- [Features index](01-features-list.md) that links into the chapters
-- [Getting Started](ch01/00-getting-started.md). Install and print hello
-- [Hello, Many Worlds!](ch02/00-hello-many-worlds.md). Short sketches across many domains
-- [Language Features Chapter](ch03/00-features.md). The main tutorial
-- Later chapters on the standard library, general concepts, and case studies
+Several principles recur throughout Dewy:
 
-## A Few Ideas Behind Dewy
+- values copy by meaning, while `@` makes intentional shared mutation visible;
+- functions, objects, and control flow use the same expression grammar;
+- strings operate on user-perceived characters rather than exposing UTF-8 bytes by accident;
+- ranges state their bounds directly;
+- types can express useful facts and guide efficient representations without turning routine code into proof notation;
+- domain features such as physical units build on the ordinary type and operator model.
 
-Dewy tries to get more mileage out of fewer concepts. Blocks, conditionals, loops, and functions are expressions, and functions are ordinary values. Features that often need their own special syntax can instead emerge from combining those pieces.
+## How to Read This Book
 
-There is one `loop`. Infinite loops, while-style loops, for-each loops, and walking several iterators together are variations of the same construct.
+Start with [Dewy at a Glance](pitch.md) for a compact tour, then follow [Getting Started](ch01/00-getting-started.md) if you want to run code. The core chapters are intended to be read in order. Later sections can be used independently once you know the basics.
 
-Dewy is statically typed, but you usually don't need to write the types the compiler can infer. Types can also carry additional facts through refinements, giving the compiler more information for both safety and optimization.
-
-Technical computing is ordinary computing. Numbers can carry physical units, and arrays, broadcasting, complex numbers, and quaternions are built into the language's model rather than living in a separate world. `10kg * (30m/s)^2` is energy; `2kg + 3m` is a type error.
-
-Strings are sequences of grapheme clusters. Indexing, slicing, and iteration operate on user-visible characters rather than bytes.
-
-Dewy also avoids a tracing garbage collector. How a value is stored depends on how it is used, with the compiler responsible for keeping those choices safe.
+This book describes the intended Dewy language. When the current compiler has not yet reached a described feature, an unobtrusive note points to [Language Design and Compiler Support](appendices/language-and-compiler.md). Exact syntax and semantic rules live in the [Dewy Language Reference](../reference/).

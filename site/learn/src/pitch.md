@@ -1,170 +1,162 @@
 # Dewy at a Glance
 
-A strongly typed, compiled, general-purpose language with strong STEM support.
+Dewy aims to make the straightforward version of a program look straightforward. This tour shows the language's main ideas without trying to teach every rule at once.
 
-## Everything Is an Expression
+## Small Programs Stay Small
 
 ```dewy
-phase = if temperature <? freezing
-            'solid'
-        else if temperature <? boiling
-            'liquid'
-        else
-            'gas'
+name = "Dewy"
+printl"Hello, {name}!"
+```
 
-squares = [loop n in 1..10 n^2]
+Bindings do not require a declaration keyword when the meaning is clear. `let` and `const` are available when you want to state mutability explicitly.
 
-circumference = {
-    diameter = 2 * radius
+```dewy
+let attempts = 0
+const limit = 3
+attempts += 1
+```
+
+## Expressions Compose
+
+Conditionals and blocks produce values:
+
+```dewy
+let access = if signed_in
+    "account"
+else
+    "sign in"
+
+let circumference = {
+    let diameter = 2 * radius
     pi * diameter
 }
 ```
 
-## One Loop to Rule Them All
+Declarations and assignments produce `void`, so the circumference block expresses only its final calculation.
+
+## Functions Read Like Their Calls
 
 ```dewy
-loop true printl'hello'                     # infinite loop
+let greet = (name:string greeting="Hello"):>void =>
+    printl"{greeting}, {name}!"
 
-loop i <? 10 { i += 1 }                     # while
-
-loop fruit in ['apple' 'banana' 'peach']    # for-each
-    printl'I like to eat {fruit}!'
-
-loop i in 0.. and fruit in fruits           # combine iterators with `and`, `or`, etc.
-    printl'{i}) {fruit}'
+greet("Ada")
+greet("Grace" greeting="Welcome")
 ```
 
-## Whitespace, Not Commas
+Parameters may be supplied by position or name. Defaults are evaluated for each call that needs them.
+
+## One Loop Covers the Common Cases
 
 ```dewy
-my_array = [1 2 3 4 5]
+loop true reconnect()                       # repeat forever
 
-ratings = [
-    'star trek' -> 89
-    'star wars' -> 73
-    'battlestar galactica' -> 92
-    'stargate' -> 98
-]
+loop attempts <? limit attempts += 1       # repeat while true
 
-add = (a b) => a + b
-add(40 2)
+loop task in pending
+    process(task)                           # consume an iterator
+
+loop i in 0.. and task in pending
+    printl"{i}: {task}"                     # combine iterators
 ```
 
-## Physical Units Built In
+A loop may also express values for a surrounding container to collect:
 
 ```dewy
-mass = 10kg
-velocity = 30(m/s)
-energy = 1/2 * mass * velocity^2    # 4500 J
-
-W = 20N * 10m * cos(45°)            # 141.42 J
-8(km/h) + 20(m/s)                   # mixed units convert
-2kg + 3m                            # error: mismatched dimensions
-
-sleep(10s)
-```
-
-## Mathematics Is Ordinary Code
-
-```dewy
-quadratic = (a b c x) => a(x^2) + b(x) + c    # juxtaposition multiplies
-
-(a b c x) = (1 0 -1 3)                        # set some values
-
-root1 = (-b + (b^2 - (4a)c)^/2) / 2a          # ^/2 is square root
-root2 = (-b - (b^2 - (4a)c)^/2) / 2a
-identity = sin(x)^2 + cos(x)^2                # juxtaposition calls
-
-primes = [2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97]
-mods = 20 .% primes                           # .op broadcasts elementwise
-
-A = [
-    1 2
-    3 4
-]
-B = [0 1 ; 1 0]
-C = A * B                                     # matrix multiplication
-```
-
-## Ranges Are Nice
-
-```dewy
-[1..5]      # 1 2 3 4 5     inclusive bounds
-[1..5)      # 1 2 3 4       exclusive right
-(1..5]      # 2 3 4 5       exclusive left
-1..5        # bare range, same as [1..5]
-
-[1,3..9]    # 1 3 5 7 9     step comes from the first pair
-[5,4..0]    # 5 4 3 2 1 0   count down
-0..         # 0 to infinity
-..-10       # -infinity to -10
-'a'..'z'    # any ordered type
-
-5 in? (1..5)                # false
-
-fullstring = 'this is a string'
-substring = fullstring[3..end-3]    # 's is a str'
-```
-
-## Easy Functional Programming
-
-```dewy
-square = x => x^2
-
-sum = (a b) => a + b
-add5 = @sum(5)          # freeze the first argument
-add5(24)                # 29
-```
-
-## Objects Without a Class Sublanguage
-
-```dewy
-Point = (x:number y:number) => [
-    mag = () => (x^2 + y^2)^/2
-    show = () => printl'({x}, {y})'
-]
-
-p = Point(3 4)
-p.mag                   # 5
-p.show                  # (3, 4)
-```
-
-## Types Establish Meaning
-
-```dewy
-count = 42                            # inferred as int
-ratio:rational = 3/4                  # int of rational. rational of real. real of number
-
-scale = (value:number factor:number):>number => value * factor
-names:array<string> = ['Ada' 'Grace']
-items:array<int|string> = [1 'two' 3] # parameterized type containing a union
-
-identity = <T>(value:T):>T => value   # generic function
-
-# overload a function
-format = ((value:int):>string => 'integer')
-       & ((value:string):>string => value)
-
-# the argument types pick which one runs
-format(42)                                    # 'integer'
-format('life the universe and everything')    # 'life the universe and everything'
-```
-
-## Generators Fall Out of Loops
-
-```dewy
-{ 1 2 3 }                       # several values, like an iterable
-loop i in [1..5] i              # a loop expresses one value per iteration
-
-[loop i in [1..5] i]            # [] captures what was expressed: [1 2 3 4 5]
-[loop i in [1..5] i].sum        # or consume it directly: 15
-
-[loop i in [1..3] { i i^2 }]    # multiple values per iteration: [1 1 2 4 3 9]
-[loop i in [1..5] { i -> i^2 }] # -> pairs build a dict instead of an array
-
-[loop i in [1..3]               # nesting builds higher dimensions
-    [loop j in [1..3]
-        [i j]
-    ]
+let active_names = [
+    loop user in users
+        if user.active
+            user.name
 ]
 ```
+
+## Text Means User-Perceived Characters
+
+Strings are immutable sequences of Unicode grapheme clusters. Iteration and indexing therefore treat a family emoji or an accented character as one element:
+
+```dewy
+text = "café 👨‍👩‍👧‍👦 🍀"
+
+loop i in 0.. and character in text
+    if character not =? ' '
+        printl"{i}: {character}"
+```
+
+Byte and scalar views remain available when a program actually needs those representations.
+
+## Values Do Not Alias by Accident
+
+```dewy
+let original = [1 2 3]
+let edited = original
+edited[0] = 9                 # original is still [1 2 3]
+```
+
+Use a place when a function should deliberately update the caller's value:
+
+```dewy
+let reset = (@value:int64):>void => value = 0
+
+let count:int64 = 42
+reset(@count)
+```
+
+The `@` appears in both the function contract and the call, so shared mutation is visible where it matters.
+
+## Objects Need No Class Sublanguage
+
+An object is a structural value with named fields. A constructor is an ordinary function that returns one:
+
+```dewy
+let Counter:type = [value:int64 increment:<():>void>]
+
+let counter = (start:int64=0):>Counter => [
+    value = start
+    increment = () => value += 1
+]
+
+let count = counter(40)
+count.increment
+count.increment
+printl"count is {count.value}"
+```
+
+Functions inside an object can use sibling fields directly.
+
+## Types Add Meaning Where It Helps
+
+```dewy
+let names:array<string> = ["Ada" "Grace"]
+let answer:int64 | undefined = find_answer()
+
+if answer isnt? undefined
+    printl"the answer after this one is {answer + 1}"
+```
+
+Overloads use the same function syntax and are selected by their contracts:
+
+```dewy
+let format = ((value:int64):>string => "integer {value}")
+           & ((value:string):>string => value)
+
+format(42)
+format("already text")
+```
+
+## Specialized Domains Use the Same Language
+
+Physical quantities are one example of Dewy's general type model carrying useful facts:
+
+```dewy
+let timeout = 300ms
+sleep(timeout)
+
+let distance = 120m
+let elapsed = 10s
+let speed = distance / elapsed
+```
+
+The unit portion can be checked and simplified at compile time rather than requiring a large runtime wrapper. The same goal—express meaning clearly, prove what can be proved, and keep runtime representation minimal—guides Dewy's facilities for applications, services, systems work, and numerical programming alike.
+
+Continue with [Getting Started](ch01/00-getting-started.md), or use the [Language Feature Index](01-features-list.md) to jump to a particular subject.

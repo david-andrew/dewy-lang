@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Functions and calls - Dewy Language Reference</title>
+        <title>Functions and Calls - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,30 +207,20 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="functions-and-calls"><a class="header" href="#functions-and-calls">Functions and calls</a></h1>
-<p>Function literals contain parameter contracts, an optional explicit return
-contract, and a body.</p>
+                        <h1 id="functions-and-calls"><a class="header" href="#functions-and-calls">Functions and Calls</a></h1>
+<p>A function literal consists of a parameter contract, an optional return contract, <code>=&gt;</code>, and a body expression:</p>
 <pre><code class="language-dewy">let add = (left:int64 right:int64=2):&gt;int64 =&gt; left + right
 </code></pre>
-<h2 id="parameter-states"><a class="header" href="#parameter-states">Parameter states</a></h2>
-<p>Dewy's call model follows one rule: each explicit argument binds one currently
-unset parameter. A positional argument takes the first parameter still
-available by position; a named argument takes the parameter with that name.
-Defaults are fallbacks rather than pre-bound values, so they retain their
-declared positions.</p>
-<h3 id="required-positional-or-keyword"><a class="header" href="#required-positional-or-keyword">Required positional-or-keyword</a></h3>
-<p>Unbound parameters before <code>...</code> may be supplied in their declared position or
-by name. Named arguments may appear in any order.</p>
-<pre><code class="language-dewy">let subtract = (left:int64 right:int64):&gt;int64 =&gt; left - right
-
-subtract(7 2)
-subtract(right=2 left=7)
-</code></pre>
-<p>Both calls bind <code>left=7</code> and <code>right=2</code>.</p>
-<h3 id="positional-or-keyword-with-a-default"><a class="header" href="#positional-or-keyword-with-a-default">Positional-or-keyword with a default</a></h3>
-<p>A parameter with a default may still be supplied either by position or by
-name. The default is used only when a completed call leaves that parameter
-unset.</p>
+<p>One unannotated parameter may omit parentheses: <code>x =&gt; x + 1</code>. Zero parameters use <code>()</code>.</p>
+<h2 id="argument-binding"><a class="header" href="#argument-binding">Argument Binding</a></h2>
+<p>Each explicit argument binds one currently unset parameter. Arguments are processed from left to right.</p>
+<ul>
+<li>A positional argument binds the first parameter still available by position.</li>
+<li>A named argument binds the unset parameter with that name.</li>
+<li>After explicit arguments are processed, each unset defaulted parameter evaluates its default for that completed call.</li>
+<li>A required parameter still unset after binding is an error.</li>
+</ul>
+<p>Defaults are fallbacks, not values bound when the function is defined. They retain their positions:</p>
 <pre><code class="language-dewy">let combine = (
     left:int64
     scale:int64=2
@@ -241,65 +231,58 @@ combine(10 3 16)       # left=10, scale=3, right=16
 combine(10 right=16)   # left=10, scale=2, right=16
 combine(scale=3 10 16) # scale=3, then left=10 and right=16
 </code></pre>
-<p>Named arguments remove their parameters from the remaining positional
-sequence. Arguments are processed from left to right, which is why the last
-example is unambiguous. The shorter <code>combine(10 16)</code> does <em>not</em> skip <code>scale</code>:
-it supplies <code>left</code> and <code>scale</code>, then reports that required <code>right</code> is missing.</p>
-<p>The default expression is evaluated separately for every completed call that
-omits it. Consequently, a mutable default such as an array produces a fresh
-value for each call rather than one shared object.</p>
-<h3 id="required-keyword-only"><a class="header" href="#required-keyword-only">Required keyword-only</a></h3>
-<p>A bare <code>...</code> ends the positional parameter run. Required parameters after it
-must be supplied by name.</p>
+<p><code>combine(10 16)</code> binds <code>left</code> and <code>scale</code>; it does not skip <code>scale</code>, and therefore reports missing <code>right</code>.</p>
+<p>Default expressions evaluate independently for every completed call that omits them. Mutable objects created by a default are not shared accidentally between calls.</p>
+<h2 id="parameter-kinds"><a class="header" href="#parameter-kinds">Parameter Kinds</a></h2>
+<h3 id="positional-or-keyword"><a class="header" href="#positional-or-keyword">Positional or keyword</a></h3>
+<p>An ordinary named parameter before the positional divider may be bound by position or name:</p>
+<pre><code class="language-dewy">let subtract = (left:int64 right:int64):&gt;int64 =&gt; left - right
+subtract(7 2)
+subtract(right=2 left=7)
+</code></pre>
+<h3 id="keyword-only"><a class="header" href="#keyword-only">Keyword-only</a></h3>
+<p>A bare <code>...</code> ends the positional run. Parameters after it require names:</p>
 <pre><code class="language-dewy">let offset = (value:int64 ... amount:int64):&gt;int64 =&gt; value + amount
-
 offset(40 amount=2)
 </code></pre>
-<p>Here <code>value</code> remains positional-or-keyword, while <code>amount</code> is required and
-keyword-only.</p>
-<h3 id="function-type-contracts-remain-named"><a class="header" href="#function-type-contracts-remain-named">Function type contracts remain named</a></h3>
-<p>Types and parameter names use the same identifier syntax. A bare identifier in
-a function signature is therefore a parameter name, not an unnamed parameter
-whose type happens to have that spelling. Structural function contracts make
-the name and type explicit in the same way as function literals.</p>
-<pre><code class="language-dewy">let increment = (value:int64):&gt;int64 =&gt; value + 1
-let callback:&lt;(value:int64):&gt;int64&gt; = increment
-
-callback(41)
-callback(value=41)
+<h3 id="position-only"><a class="header" href="#position-only">Position-only</a></h3>
+<p>Wrapping the name and type in <code>&lt;&gt;</code> preserves the local name but removes it from the keyword interface:</p>
+<pre><code class="language-dewy">let increment = (&lt;value:int64&gt;):&gt;int64 =&gt; value + 1
+increment(41)
 </code></pre>
-<p>Dewy does not currently have source syntax for positional-only or anonymous
-parameters. A future explicit form may add them, but a bare identifier will not
-be reinterpreted as a type.</p>
-<h3 id="rest-parameters-and-spreading"><a class="header" href="#rest-parameters-and-spreading">Rest parameters and spreading</a></h3>
-<p>The planned <code>...rest</code> form captures arguments not claimed by earlier
-parameters. A captured bundle will be forwardable with the same <code>...</code> syntax.</p>
-<pre><code class="language-dewy"># planned
-let wrapper = (...rest) =&gt; target(...rest)
+<p><code>increment(value=41)</code> is an error. A default inside the wrapper remains a per-call fallback.</p>
+<p>Types and names share identifier syntax, so a bare identifier in a function literal is a parameter name, not an anonymous argument whose type happens to have that spelling.</p>
+<h2 id="function-contracts"><a class="header" href="#function-contracts">Function Contracts</a></h2>
+<p>A function type records its parameter and return contract:</p>
+<pre><code class="language-dewy">let callback:&lt;(value:int64):&gt;int64&gt; = increment
 </code></pre>
-<p>Rest capture and argument spreading are recognized design directions but are
-not yet lowerable by the current compiler. A bare <code>...</code> used only as the
-keyword-only divider is implemented. Partial evaluation will follow the same
-binding rule. Explicitly supplied values will be evaluated and saved
-immediately, while defaults remain per-call fallbacks until the resulting
-function is called.</p>
-<h2 id="call-behavior"><a class="header" href="#call-behavior">Call behavior</a></h2>
-<p>Implemented calls include positional and keyword arguments, per-call default
-evaluation, pipe calls, direct and indirect calls, recursion, forward
-references from function bodies, and static overload selection.</p>
-<p>Overloads combine with <code>&amp;</code>; the argument contract selects the matching
-function statically.</p>
+<p>Structural contracts may omit externally visible names where a position-only interface is required. Function literals still require usable local names for parameters their bodies access.</p>
+<h2 id="calls-and-pipes"><a class="header" href="#calls-and-pipes">Calls and Pipes</a></h2>
+<p>Parenthesized or juxtaposed arguments call a callable expression. <code>|&gt;</code> supplies values to the callable on its right; <code>&lt;|</code> supplies right-hand values to the callable on its left according to their associativity.</p>
+<p>Argument expressions evaluate from left to right before the function body begins, except that omitted defaults evaluate as part of completing the call.</p>
+<h2 id="overloads"><a class="header" href="#overloads">Overloads</a></h2>
+<p><code>&amp;</code> combines compatible functions into an overload set. The call contract selects a unique applicable alternative:</p>
 <pre><code class="language-dewy">let describe = ((value:int64):&gt;string =&gt; "integer")
              &amp; ((value:string):&gt;string =&gt; value)
 </code></pre>
-<p>Partial application, capturing closures, and runtime multifunction values are
-not yet lowerable.</p>
+<p>Ambiguous or unmatched calls are errors. Runtime multifunction values remain part of the provisional dynamic-dispatch design; ordinary overload resolution is static.</p>
+<h2 id="rest-parameters-and-spreading"><a class="header" href="#rest-parameters-and-spreading">Rest Parameters and Spreading</a></h2>
+<p>The direction for <code>...rest</code> is to capture arguments not claimed by earlier parameters and allow the resulting bundle to be forwarded with <code>...</code>. Exact bundle types and all interactions with named arguments remain provisional.</p>
+<h2 id="function-handles"><a class="header" href="#function-handles">Function Handles</a></h2>
+<p>A bare function name calls the function whenever a valid call is available. <code>@fn</code> selects the function binding as a first-class callable handle instead:</p>
+<pre><code class="language-dewy">let sum = (a b) =&gt; a + b
+let reference = @sum
+let add5 = @sum(5)
+</code></pre>
+<p>Selectors use the ordinary place route: <code>@worker.on_event</code> reaches the function-valued field at the end of <code>(@worker).on_event</code>; it is not <code>worker.@on_event</code>.</p>
+<p>Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.</p>
+<p>Handle identity, explicit function copying, escaping captures, and closure storage remain provisional.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="expressions-and-operators.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="operators-and-precedence.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -313,7 +296,7 @@ not yet lowerable.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="expressions-and-operators.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="operators-and-precedence.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 

@@ -1,91 +1,75 @@
-# Container Types
+# Containers
 
-Arrays, dictionaries, sets, and objects all use square brackets `[]`. The contents decide which container you get.
-
-Values in a container are separated by whitespace, not commas.
+Square brackets collect values. Whitespace separates elements, so ordinary Dewy containers do not require commas.
 
 ## Arrays
 
-An array is an ordered list of values:
+An array is an ordered homogeneous value:
 
 ```dewy
-my_array = [0 1 2 3 'apple' 'banana' 'peach' true]
-printl'{my_array[3]}'    # 3
+let names = ["Ada" "Grace" "Linus"]
+printl(names[1])
 ```
 
-Arrays are 0-indexed. Same-type arrays are the common case and the fast one. You can write the type explicitly:
+Arrays are indexed from zero. An annotation can state the element type and a known length:
 
 ```dewy
-names:array<string> = ['Ada' 'Grace']
+let names:array<string> = ["Ada" "Grace"]
 let triple:array<int64 length=3> = [10 20 30]
-triple.length  # 3
-triple[end]    # 30
-triple[0..1]   # [10 20]
+
+triple.length
+triple[end]
+triple[0..1]
 ```
 
-Arrays have value semantics: an ordinary binding or call receives an independent value. To let a function update the original array or one element, pass a [place](values-and-places.md), such as `sort(@names)` or `set(@triple[1])`.
-
-A semicolon or newline starts a new dimension. Matrices are still arrays:
+Array values copy by meaning. If a function should deliberately update an existing array or element, pass its [place](values-and-places.md):
 
 ```dewy
-A = [
-    1 2
-    3 4
-]
-B = [0 1 ; 1 0]
+sort(@names)
+set(@triple[1])
 ```
 
-[Linear Algebra](linear-algebra.md) covers multiply and broadcast.
+## Building Arrays with Loops
 
-## Dictionaries
-
-A dictionary is a list of key-value pairs joined by `->`:
+A loop can express values for `[]` to collect:
 
 ```dewy
-my_dictionary = [
-    'apple' -> 10
-    'banana' -> 15
-    'peach' -> 3
-    'pear' -> 6
+let squares = [
+    loop number in 1..10
+        number^2
 ]
-printl'{my_dictionary['peach']}'    # 3
 ```
 
-`<->` makes it bidirectional. Every pair in that literal has to be `<->`. Lookup works from either side:
+This is the ordinary loop expression, not a separate comprehension grammar.
+
+## Shapes and Multidimensional Data
+
+Arrays are also the foundation for vectors, matrices, and tensors. Dewy's shape and literal syntax must support contiguous multidimensional representations without preventing ordinary arrays of arrays.
+
+> **Provisional design:** Exact multidimensional shape annotations, dimension separators, broadcasting, and axis selection are still being unified. The one-dimensional `array<T length=N>` form and nested array values are settled.
+
+## Dictionaries and Bidictionaries
+
+A dictionary collects key/value pairs written with `->`:
 
 ```dewy
-my_bidictionary = [
-    0 <-> 'zero'
-    1 <-> 'one'
-    'two' <-> 2
-    3 <-> 'three'
+let ratings = [
+    "star trek" -> 89
+    "star wars" -> 73
 ]
-my_bidictionary['three']    # 3
-my_bidictionary[3]          # 'three'
 ```
+
+`<->` describes a bidirectional mapping whose values can be looked up from either side.
 
 ## Sets
 
-A set is an unordered collection:
+The intended set literal makes its unordered meaning explicit:
 
 ```dewy
-my_set = set[0 1 2 3 'apple' 'banana' 'peach' true]
-3 in? my_set        # true
-'pear' in? my_set   # false
+let permissions = set["read" "write"]
+"read" in? permissions
 ```
 
-## Objects
+> **Provisional design:** Dictionary, bidictionary, and set literals have a selected overall direction, but their complete type, ordering, collision, and mutation rules remain under design.
 
-An object is a container of named fields. Field assignments use `=` at the top level of `[]`. Empty `[]` is not an object.
-
-```dewy
-my_obj = [
-    apples = 5
-    bananas = 0.89
-    buy_bananas = q => q * bananas
-]
-my_obj.apples
-my_obj.buy_bananas(10)
-```
-
-See the full page on [Objects](object-types.md)
+Objects also use square brackets, but named fields with `=` distinguish them from positional containers. Continue with [Structural Objects](object-types.md), or consult the exact [array and container reference](../../reference/arrays-and-containers.html).

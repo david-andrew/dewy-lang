@@ -1,27 +1,46 @@
-# Lexical structure
+# Lexical Structure
+
+## Source Text
+
+Dewy source is Unicode text. Source-file suffixes are conventional and do not alter tokenization or semantic rules.
 
 ## Identifiers
 
-Dewy identifiers support Latin and Greek letters, selected mathematical
-symbols, decimal digits after the first character, and several decorations.
-Identifiers and word operators are case-sensitive except where a construct is
-documented otherwise.
+Identifiers support Latin and Greek letters, selected mathematical symbols, decimal digits after the first character, and language-defined decorations. Identifiers and word operators are case-sensitive unless a particular imported API specifies otherwise.
+
+Reserved operator words such as `and`, `or`, `not`, `in`, `as`, and `transmute` tokenize as operators in their grammatical contexts.
+
+## Whitespace and Juxtaposition
+
+Whitespace separates tokens. Dewy does not generally use commas to separate arguments, parameters, or array elements.
+
+Spacing can also determine whether expressions are juxtaposed with a punctuation operator. Range endpoints are the clearest example:
+
+```dewy
+first..last    # both endpoints
+first ..last   # no left endpoint
+first.. last   # no right endpoint
+first .. last  # no endpoints
+```
+
+Newlines normally behave as whitespace. A construct may assign additional structural meaning to line boundaries only where its grammar explicitly says so.
 
 ## Comments
 
-`#` begins a line comment. `#{` and `}#` delimit a block comment.
+`#` begins a line comment. `#{` and `}#` delimit a nestable block comment.
 
 ```dewy
 # one line
-#{ multiple
-   lines }#
+#{ outer
+   #{ nested }#
+   outer again
+}#
 ```
 
-## Literals
+Comment markers inside strings are string contents.
 
-Implemented literal categories include booleans, integers in bases 2 through
-16, strings, and power-of-two based strings. String semantics are based on
-Unicode extended grapheme clusters; based strings represent exact packed bits.
+## Tokens and Ambiguity
 
-Whitespace is generally insignificant but establishes token separation and can
-create juxtaposition between adjacent expressions.
+Tokenization chooses the longest valid token subject to explicit lexical rules. Parsing may preserve several structurally valid interpretations—most notably call, indexing, and multiplication juxtaposition—until types and context resolve them.
+
+See [Literals](literals.md) for literal tokens and [Operators and Precedence](operators-and-precedence.md) for expression grouping.

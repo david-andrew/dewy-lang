@@ -1,116 +1,83 @@
-# Expressions, Statements, and Blocks
+# Expressions, Produced Values, and Blocks
 
-Dewy is expression-based. An expression is a value, or something that evaluates to one. You can bind it, pass it to a function, or build a larger expression from it.
+Dewy is expression-based. A literal, call, conditional, block, or loop can participate in a larger expression when it produces a value.
+
+```dewy
+let answer = 42
+let larger = answer + 1
+let label = if larger >? 40 "large" else "small"
+```
+
+## Values, `void`, and `never`
+
+Most expressions produce a value. Some operations perform useful work without producing one; their type is `void`.
+
+Declarations, ordinary assignments, and `printl` are common `void` expressions:
+
+```dewy
+let count = 0       # void
+count += 1          # void
+printl"ready"       # void
+```
+
+`never` describes a path that cannot complete normally, such as an exit operation. It is not another spelling of `void`.
+
+`undefined` is different again: it is a real value that can be stored in an optional type. [Optional Values and Narrowing](optional-types.md) develops that distinction.
+
+## Suppressing a Value
+
+An attached semicolon evaluates an expression but suppresses what it would otherwise produce:
+
+```dewy
+let selected = [
+    load_primary();
+    load_secondary()
+]
+```
+
+Both calls run, but the array collects only the value from `load_secondary()`.
+
+The semicolon is attached to the expression it suppresses. It is not general statement-ending punctuation. An unattached semicolon is reserved for selecting another array dimension.
+
+## Blocks
+
+`{}` forms a scoped block. Expressions inside run from top to bottom, and the block expresses their non-`void` results:
+
+```dewy
+let circumference = {
+    let diameter = 2 * radius
+    pi * diameter
+}
+```
+
+The declaration is `void`, so the block produces only `pi * diameter`. `diameter` belongs to the child scope and is not visible afterward.
+
+Parentheses also group expressions, but do not create a child lexical scope:
+
+```dewy
+let result = (1 + 2) * 3
+```
+
+A block can express several values when its surrounding context knows how to collect them:
+
+```dewy
+let digits = [{ 1 2 3 }]
+```
+
+Loops use the same rule, which is why an array-producing loop needs no separate comprehension syntax.
 
 ## Comments
 
-`#` starts a line comment. `#{` and `}#` wrap a block comment. Block comments nest, so you can wrap code that already has comments in it.
+`#` begins a line comment. `#{ ... }#` is a nestable block comment:
 
 ```dewy
 # one line
 #{
-    still commented
-    #{ even this }#
+    an outer comment
+    #{ with a nested comment }#
 }#
 ```
 
-comments can be put almost anywhere, with the main exception being inside of [strings](string-types.md) (where `#` and `#{` are just characters).
+Comment markers inside strings are ordinary string contents.
 
-## Expressions
-
-The simplest expression is a literal:
-
-```dewy
-42  # an integer expression
-```
-
-Bind it, or nest it:
-
-```dewy
-my_expression = 42
-my_expression = sqrt(64)  # 8
-my_expression = 'string with the expression {sqrt(64) + 9 * cos(pi)}'
-```
-
-Function calls are expressions when they return a value. In the string above, `+` and `*` combine smaller pieces. `sqrt(64)` and `cos(pi)` are calls. `64` and `9` are literals. `pi` is a constant.
-
-## Statements
-
-A statement is an expression that produces no value. Dewy calls that `void`. Printing is the usual example:
-
-```dewy
-printl'Hello'
-```
-
-`printl` returns `void`. Assigning it is an error:
-
-```dewy
-my_var = printl'Hello'  # error: can't assign void
-```
-
-Declarations and ordinary assignments are `void` too.
-
-A `;` touching an expression discards the value. The expression still runs, its result is just suppressed (so nothing else can capture it). This is useful when a block or array would otherwise capture every result:
-
-```dewy
-my_expression = [
-    sqrt(1);
-    sqrt(4)
-    sqrt(9);
-    sqrt(16)
-    sqrt(25);
-    sqrt(36);
-    sqrt(49);
-    sqrt(64)
-]
-```
-
-The attached semicolons suppress those `sqrt` results, so the array is `[2 4 8]`.
-
-> NOTE: A free-floating `;` does not suppress anything:
->
-> ```dewy
-> myarr = [
->     sqrt(1);      # discarded
->     sqrt(4) ;     # still expressed
->     sqrt(16) ;    # still expressed
-> ]
-> ```
->
-> results in `myarr = [2 4]`
-
-## Blocks
-
-A block is a sequence of expressions wrapped in `{ }` or `( )`. The block itself is an expression.
-
-`{ }` opens a child scope. Names declared inside are not visible outside. `( )` shares the surrounding scope, which is also why you use it for grouping.
-
-```dewy
-{ }  # empty block, type void
-( )  # also empty, also void
-```
-
-A block with one expression has that expression's value:
-
-```dewy
-{ 42 }
-(1 + 2) * 3
-```
-
-A block with several expressions _expresses_ each non-void value. Wrap it in `[]` to capture them, the same idea as a generator.
-
-```dewy
-{ 1 2 3 4 5 6 7 8 9 10 }
-[ { 1 2 3 4 5 } ]           # [1 2 3 4 5]
-```
-
-Assignments are `void`, so they do not add a value. The block below only expresses `pi * diameter`. `circumference` is one number because that is the only value the block produced.
-
-```dewy
-circumference = {
-    diameter = 2 * radius    # void, so not expressed
-    pi * diameter            # this is what the block actually produces
-}
-```
-
-`diameter` is local to the `{ }` block.
+The Reference specifies [evaluation behavior](../../reference/expressions-and-operators.html) and [operator grouping](../../reference/operators-and-precedence.html) precisely.

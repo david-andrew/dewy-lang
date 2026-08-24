@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Modules and imports - Dewy Language Reference</title>
+        <title>Modules and Imports - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,25 +207,34 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="modules-and-imports"><a class="header" href="#modules-and-imports">Modules and imports</a></h1>
-<p>Imports resolve relative to the importing source file. The current system
-supports selective names, aliases, whole-module namespaces, and splats.</p>
+                        <h1 id="modules-and-imports"><a class="header" href="#modules-and-imports">Modules and Imports</a></h1>
+<p>Each source file defines a module containing its top-level bindings and executable initialization expressions.</p>
+<h2 id="relative-source-imports"><a class="header" href="#relative-source-imports">Relative Source Imports</a></h2>
+<p>An import path resolves relative to the file containing the import:</p>
 <pre><code class="language-dewy">from p"lib.dewy" import (answer add)
 import p"lib.dewy" as library
 </code></pre>
-<p><code>p</code> is an ordinary prelude function producing a structural <code>Path</code> value. An
-exact structural object with a string <code>path</code> field also satisfies the import
-contract.</p>
-<p>Reachable source modules share one type system and binding registry, initialize
-once in dependency order, reject import cycles and collisions, and merge into
-one µDewy executable. <code>$no_prelude = true</code> disables prelude bindings for its
-containing module only.</p>
+<p>Selective imports bind the requested names directly. <code>as</code> renames a selected binding. A namespace import retains qualification. Importing a path without a selection splats its top-level bindings into the current scope.</p>
+<p>The <code>from path import names</code> and <code>import names from path</code> orders are equivalent.</p>
+<h2 id="import-sources"><a class="header" href="#import-sources">Import Sources</a></h2>
+<p><code>p</code> is an ordinary prelude function producing a structural path value. Any exact compile-time object with the required string <code>path</code> field satisfies the source-import contract:</p>
+<pre><code class="language-dewy">from [path="lib.dewy"] import answer
+</code></pre>
+<p>Source imports must be known while constructing the module graph. Runtime strings cannot select source modules.</p>
+<h2 id="binding-kinds"><a class="header" href="#binding-kinds">Binding Kinds</a></h2>
+<p>Values, constants, functions, overload sets, and type aliases are importable. Imported type values remain compile-time values in the receiving module.</p>
+<h2 id="graph-and-initialization"><a class="header" href="#graph-and-initialization">Graph and Initialization</a></h2>
+<p>Reachable source modules share a coherent type environment, initialize once in dependency order, and reject unresolved names, cycles, and collisions. A source suffix is conventional and does not select different Dewy semantics.</p>
+<h2 id="prelude"><a class="header" href="#prelude">Prelude</a></h2>
+<p>Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings. <code>$no_prelude = true</code> disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.</p>
+<h2 id="provisional-package-facilities"><a class="header" href="#provisional-package-facilities">Provisional Package Facilities</a></h2>
+<p>Installed package lookup, directory or glob imports, non-source artifacts, project-wide freestanding policy, and domain-library naming remain provisional. They must extend rather than contradict file-relative module identity and one-time initialization.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="values.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="physical-quantities.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -239,7 +248,7 @@ containing module only.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="values.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="physical-quantities.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 

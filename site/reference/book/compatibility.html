@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Implementation compatibility - Dewy Language Reference</title>
+        <title>Implementation Compatibility - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,27 +207,29 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="implementation-compatibility"><a class="header" href="#implementation-compatibility">Implementation compatibility</a></h1>
-<p>The defining compatibility goal for µDewy is:</p>
+                        <h1 id="implementation-compatibility"><a class="header" href="#implementation-compatibility">Implementation Compatibility</a></h1>
+<p>This appendix describes implementation coverage. It does not define the language.</p>
+<h2 id="hosted-dewy-compiler"><a class="header" href="#hosted-dewy-compiler">Hosted Dewy Compiler</a></h2>
+<p>The hosted compiler parses and statically checks Dewy, lowers supported programs to µDewy, and uses a µDewy backend to produce executable output.</p>
+<p>Its implemented core includes bindings, fixed-width integers and Booleans, functions and calls, defaults and keyword arguments, static overloads, structured control flow, ranges and multiiterators, strings and graphemes, homogeneous arrays, structural objects, optional values, nonescaping explicit places, source imports, and initial time quantities.</p>
+<p>Several normative areas are only partial. Notable examples include arbitrary-precision runtime integers, escaping and runtime-sized aggregate storage, materialized interpolated strings, function handles and closures, general physical quantities, user-written generics, refinements, and effects.</p>
+<p>The detailed and continuously maintained checklist is <a href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md"><code>dewy/status.md</code></a>.</p>
+<h2 id="platform-coverage"><a class="header" href="#platform-coverage">Platform Coverage</a></h2>
+<p>The quick installer and the complete hosted execution path currently focus on x86-64 Linux. µDewy has x86-64 Linux, WebAssembly, RISC-V, AArch64, and C backends, but Dewy's implicit libraries and host facilities are not yet equally available on every target.</p>
+<p>The browser playground executes µDewy rather than the complete Dewy language.</p>
+<h2 id="µdewy-compatibility"><a class="header" href="#µdewy-compatibility">µDewy Compatibility</a></h2>
+<p>The defining compatibility goal is:</p>
 <blockquote>
-<p>Every well-formed µDewy program should compile and exhibit the same visible
-behavior under both the µDewy compiler and the full Dewy compiler.</p>
+<p>Every well-formed µDewy program should compile and exhibit the same visible behavior under both the µDewy compiler and the full Dewy compiler.</p>
 </blockquote>
-<p>That parity is still in progress. The repository contains executable fixtures
-and bootstrap-parity tests for the Python µDewy compiler and the compiler
-implemented in µDewy.</p>
-<p>The source suffix is conventional rather than semantic: Dewy's type checker
-does not choose a weaker mode merely because a file ends in <code>.udewy</code>. µDewy's
-own compiler accepts only the strict subset defined by its specification.</p>
-<p>See the
-<a href="https://github.com/david-andrew/dewy-lang/blob/master/udewy/README.md">µDewy specification</a>
-for the definitive subset language and backend contracts.</p>
+<p>That parity remains in progress and is checked by executable fixtures. Dewy's type checker does not select a weaker semantic mode merely because a file ends in <code>.udewy</code>; the suffix is conventional. µDewy's own compiler accepts only the strict subset defined by its specification.</p>
+<p>See the <a href="/udewy/reference/">µDewy specification</a> for the subset language and backend contracts.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="interoperability.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="design-status.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -238,7 +240,7 @@ for the definitive subset language and backend contracts.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="interoperability.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="design-status.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 

@@ -1,153 +1,91 @@
 # Operators
 
-Dewy builds expressions from prefix, infix, and postfix operators. What an operator means depends on the input types (e.g. `and` is logical on booleans and bitwise on integers)
+Dewy operators are typed operations. The same spelling may select different overloads when the operand types give it a coherent meaning.
 
 ## Arithmetic
 
-- `+` `-` `*` `/` `//` `%` `\` add, subtract, multiply, divide, floor divide, modulus, integer divide
-- `^` exponent
-- Prefix `+` `-` `*` `/` `//` unary plus/minus, and `/x` for `1/x`
+```dewy
+left + right
+left - right
+left * right
+left / right
+left // right
+left % right
+base ^ exponent
+```
 
-A chain like `n^/2` keeps the precedence of the first operator, so that is `n^(1/2)`. `5+-1` is `5 + (-1)`.
+Prefix `+` and `-` express sign. Prefix `/value` is reciprocal. Composite operator chains such as `value^/2` retain the first operator's precedence and can express roots compactly.
 
-`+` also concatenates strings.
+## Comparison and Tests
 
-## Comparisons
+Dewy distinguishes tests from assignment:
 
-Comparisons end in `?` and return a boolean. There is no `==`.
+```dewy
+left =? right
+left not =? right
+left <? right
+left <=? right
+value in? range
+value is? Type
+value isnt? undefined
+```
 
-- `=?` equal
-- `not=?` not equal
-- `>?` `<?` `>=?` `<=?` ordered
-- `in?` membership
-- `is?` / `isnt?` what type a value actually is
-- `has?` / `of?` traits and type relations
+## Boolean and Bitwise Operations
 
-`not` in front flips it. `not <?` is `>=?`.
+The English operators `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor` express Boolean composition and short-circuit where their truth rule permits it.
 
-## Boolean and Bitwise
-
-On booleans these are logical, and they short-circuit when that makes sense. On integers they are bitwise, using the wider operand's width.
-
-- `and` `or` `xor` `nand` `nor` `xnor`
-- `not` invert
-- `&` is equivalent to `and`
-- `|` is equivalent to `or`
-- `~` is equivalent to `not`
-
-> NOTE: `&` vs `and`, `|` vs `or`, and `~` vs `not` are all interchangeable. The symbolic version means the exact same thing as the word. The convention is to use `&`/`|`/`~` when describing types (e.g. `(T|~U) & SomeType`) whereas `and`/`or`/`not` should be used for all other situations.
-
-## Shifts
-
-- `<<` `>>` shift
-- `<<<` `>>>` rotate
-
-> NOTE: `>>` is arithmetic for signed inputs, and logical for unsigned inputs.
-
-Once the count hits the width, a left shift or logical right shift is zero. A signed right shift keeps filling in the sign bit.
+`&`, `|`, and `~` participate in type-directed bitwise, type-combination, and overload-set operations.
 
 ## Juxtaposition
 
-Two expressions next to each other are a juxtaposition. What that _means_ depends on the types:
-
-- Call is high precedence, above `^`. `sin(x)`, `printl"Hello"`, `f(arg)` when the left side is callable.
-- Index is `values[i]`, `text[3..7)`.
-- Multiply sits just under `^` and just over `*`. `2(x + 1)`, `10kg`, `a(b)` when both sides are numbers.
-- Range juxtaposition is how `1..10` picks up its ends.
+Adjacent expressions reuse one syntactic relationship:
 
 ```dewy
-sin(x)^2 + cos(x)^2     # (sin(x))^2, sin is callable
-s = 10
-s(x)^2                  # s * (x^2), s is a number
-printl'{n}'             # call
-arr[i]                  # index
+function(argument)    # call
+values[index]         # index
+2distance             # multiplication
 ```
 
-If the parser cannot decide, that is a compile error.
+The parser keeps meaningful alternatives until types and context select the operation. This is why function calls, indexing, and mathematical notation can share a consistent surface form without textual heuristics.
 
-## Pipes, Conversion, and Functions
-
-- `|>` pipe. `value |> f` calls `f` with `value`
-- `<|` the other direction
-- `as` changes representation
-- `transmute` keeps the bits
-- `=>` function literal
-- `:` type annotation
-- `:>` return type
-- `->` / `<->` dictionary pointers
-- `@` select the place a value lives; following fields and indices project it along a route
-- `@?` same place, not two copies that happen to share storage (planned)
+## Pipes and Conversion
 
 ```dewy
-40 |> add
-let bytes:array<uint8> = text as array<uint8>
-let bits:uint64 = duration transmute uint64
+value |> transform
+transform <| value
+value as Destination
+value transmute Representation
 ```
+
+`as` performs a semantic conversion. `transmute` reinterprets a compatible representation and is not a substitute for conversion.
 
 ## Assignment
 
-- `=` bind. Result is `void`
-- `:=` bind and also yield the value
-- `::` compiletime assignment (kicks off compiletime executions)
-- Most infix ops take a trailing `=`
+`=` updates a mutable binding or selected place. Most operations have a combined-assignment form:
 
 ```dewy
-a += 5
-a <?= 5
-a xor= false
+count += 1
+flags xor= mask
 ```
 
-Combined assignment always sits at `=`'s precedence, not the inner op's.
+Combined assignment has assignment precedence. When its right side is itself an assignment-like expression, grouping is required—for example, `() => (value += 1)`.
 
-## Elementwise
+An attached postfix `;` suppresses an expression's produced value.
 
-A `.` in front of an operator broadcasts it over arrays:
+## Place and Function Selection
+
+Prefix `@` selects a place or function binding. Following fields and indices project the route to its final location:
 
 ```dewy
-primes = [2 3 5 7 11 13 17 19]
-mods = 20 .% primes
-is_factor = mods .=? 0
-p_factors = primes[is_factor]
+@value
+@pair.left
+@items[index]
 ```
 
-This works if either side is an array, or both are and they have the same shape. Precedence stays with the inner operator.
+`@?` is intended to test whether two place expressions identify the same place; it does not expose hidden storage sharing between independent values.
 
-## Precedence
+## Elementwise and Vectorized Operations
 
-Highest first. Associativity is left, right, prefix, postfix, flat, or fail. Fail means two of the same operator in a row is an error. Flat means one n-ary node instead of a tree.
+> **Provisional design:** A leading `.` on an operator applies it elementwise, while `f.(values)` vectorizes a function call. Broadcasting and multidimensional shape rules must be specified together before edge cases are normative.
 
-| Associativity | Operators |
-| --- | --- |
-| prefix | `@` |
-| left | `.` call-juxtapose (`fn(x)`), index-juxtapose (`x[42]`) |
-| fail | type-parameter juxtapose (`<T>(...)=>...`) |
-| fail | ellipsis juxtapose (`A...` `...B`) |
-| postfix / prefix | `` ` `` |
-| prefix | `not` `~` |
-| postfix | `?` |
-| right | `^` |
-| left | multiply-juxtapose (`a(b)` `2x`) |
-| prefix | `*` `/` `//` |
-| left | `*` `/` `//` `%` `\` |
-| prefix | `+` `-` |
-| left | `+` `-` |
-| left | `<<` `>>` `<<<` `>>>` |
-| flat | `,` |
-| flat | range juxtapose (`1..2`) |
-| fail | `in` |
-| left | `=?` `>?` `<?` `>=?` `<=?` `is?` `has?` `of?` `isnt?` `in?` `@?` |
-| left | `and` `nand` `&` |
-| left | `xor` `xnor` |
-| left | `or` `nor` `\|` |
-| left | `as` `transmute` |
-| fail | `of` `has` |
-| fail | `:` |
-| left | `:>` |
-| right | `=>` |
-| left | `\|>` |
-| right | `<\|` |
-| fail | `->` `<->` |
-| fail | `=` `::` `:=` and combined assignment (`+=` etc.) |
-| left | semicolon juxtapose (`x;`) |
-
-`else` hangs a flow alternative under all of that. See [Flow Control](flow-control.md).
+The complete and canonical precedence table lives in the [Reference](../../reference/operators-and-precedence.html). Use `()` or `{}` when the intended grouping is not represented directly by that table.

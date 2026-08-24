@@ -79,7 +79,7 @@ loop [show rating] in ratings
 }
 ```
 
-General unpack-and-collect syntax is not yet determined.
+> **Provisional design:** General unpack-and-collect syntax must extend this iterator model without introducing a separate loop grammar. Its complete binding forms are not yet specified.
 
 ## Multiple Conditions
 

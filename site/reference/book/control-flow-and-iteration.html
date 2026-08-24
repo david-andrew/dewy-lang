@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Control flow and iteration - Dewy Language Reference</title>
+        <title>Control Flow - Dewy Language Reference</title>
 
 
         <!-- Custom HTML head -->
@@ -207,24 +207,33 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="control-flow-and-iteration"><a class="header" href="#control-flow-and-iteration">Control flow and iteration</a></h1>
-<p><code>if</code>, <code>else if</code>, and <code>else</code> form an ordered conditional. An exhaustive
-conditional can produce a scalar value; a non-exhaustive conditional produces
-<code>void</code>.</p>
-<p><code>loop</code> covers Boolean repetition and iterator consumption. <code>break</code> and
-<code>continue</code> can target an enclosing loop through a scope metatag label.</p>
-<pre><code class="language-dewy">loop i in 0..10 {
-    if i =? 5 { continue }
-}
+                        <h1 id="control-flow"><a class="header" href="#control-flow">Control Flow</a></h1>
+<h2 id="conditionals"><a class="header" href="#conditionals">Conditionals</a></h2>
+<p><code>if</code>, <code>else if</code>, and <code>else</code> form an ordered flow expression. Conditions evaluate from left to right until one succeeds; only the selected body evaluates.</p>
+<pre><code class="language-dewy">let label = if count =? 0
+    "empty"
+else if count =? 1
+    "one item"
+else
+    "{count} items"
 </code></pre>
-<p>Static integer ranges support inclusive and explicit open bounds, descending
-steps, and <code>first,second..last</code> notation. Multiiterators combine static range
-iterators using <code>and</code>, <code>or</code>, <code>xor</code>, <code>nand</code>, <code>nor</code>, or <code>xnor</code>. Iterator leaves
-advance eagerly from left to right once per condition evaluation.</p>
-<p><code>in?</code> supports runtime <code>int64</code> candidates and endpoints for unstepped ranges;
-all runtime operands are evaluated once. A runtime candidate can also be tested
-against a statically anchored stepped range, including descending and unbounded
-forms. Runtime-computed step anchors are not yet supported.</p>
+<p>An exhaustive conditional may produce a value when its alternatives have a compatible result type. A nonexhaustive conditional produces <code>void</code> unless its context collects another well-defined result form.</p>
+<p>Facts established by a condition narrow values inside the corresponding body and along later paths where earlier alternatives are known false.</p>
+<h2 id="loops"><a class="header" href="#loops">Loops</a></h2>
+<p><code>loop condition body</code> reevaluates its condition and executes its body according to the condition's Boolean or iterator behavior.</p>
+<pre><code class="language-dewy">loop connected
+    receive_message()
+
+loop item in items
+    process(item)
+</code></pre>
+<p>See <a href="ranges-and-iteration.html">Ranges and Iteration</a> for iterator conditions and multiiterator formulas.</p>
+<h2 id="exits"><a class="header" href="#exits">Exits</a></h2>
+<p><code>break</code> exits a loop. <code>continue</code> begins its next condition evaluation. <code>return</code> exits the current function, optionally supplying its result.</p>
+<p>An exit may target an enclosing labeled loop through Dewy's scope metatag mechanism. Exiting more loop levels than exist is an error.</p>
+<p><code>never</code> is the type of a path that cannot complete normally. It is distinct from <code>void</code>, which represents normal completion without a produced value.</p>
+<h2 id="pattern-selection-and-cleanup"><a class="header" href="#pattern-selection-and-cleanup">Pattern Selection and Cleanup</a></h2>
+<p>General <code>match</code>, cleanup/finally behavior, and effect-aware error propagation are provisional designs. Their eventual forms must compose with expression results and flow-sensitive narrowing rather than creating separate statement-only semantics.</p>
 
                     </main>
 
@@ -234,7 +243,7 @@ forms. Runtime-computed step anchors are not yet supported.</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="values.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="ranges-and-iteration.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -248,7 +257,7 @@ forms. Runtime-computed step anchors are not yet supported.</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="values.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="ranges-and-iteration.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

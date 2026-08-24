@@ -1,90 +1,63 @@
-# Linear Algebra
+# Arrays and Linear Algebra
 
-Dewy does not have a separate vector or matrix type. An array is the container; vector, matrix, and tensor are shapes of that array.
+Dewy uses arrays as the foundation for vectors, matrices, and tensors rather than requiring unrelated container classes for each rank.
 
 ```dewy
-v = [1 2 3]
-A = [
+let vector = [1 2 3]
+let matrix = [
     1 2
     3 4
 ]
-B = [0 1 ; 1 0]
 ```
 
-Whitespace separates elements. A semicolon or a newline starts a new dimension.
+## Shape Is Type Information
 
-## Multiplication and Broadcasting
+A matrix is an array whose type carries a two-dimensional shape. Shape facts support bounds checking, operator selection, specialization, and contiguous storage without making those representation choices visible in ordinary code.
 
-Writing arrays next to each other, or using `*`, multiplies them by the usual linear-algebra rules when the shapes allow it.
+Nested arrays remain meaningful values in their own right. A nested `array<array<T>>` must not prevent a separate contiguous representation for an array with multidimensional shape.
+
+## Multiplication and Elementwise Operations
+
+`*` selects the conventional linear-algebra operation when array shapes make that contract applicable. A leading `.` requests elementwise application:
 
 ```dewy
-C = A * B
-scaled = 2A
+let product = left * right
+let pairwise = left .* right
+let shifted = matrix .+ 10
 ```
 
-Elementwise work uses `.`:
+Broadcasting aligns compatible dimensions while preserving explicit shape rules. A scalar can broadcast across every element; singleton dimensions can expand along a corresponding dimension.
 
 ```dewy
-A .+ B
-A .* B
-20 .% primes
-```
-
-A leading `.` on almost any infix operator broadcasts it. Both operands must have broadcastable shapes.
-
-Broadcasting lets you combine arrays of different dimensions by broadcasting singleton dimensions in one over corresponding dimensions in the other
-
-```dewy
-
-A = [
+let values = [
     1 2 3
     4 5 6
 ]
 
-# scalar addition
-A .+ 10
-# result = [
-#    11 12 13
-#    14 15 16
-# ]
-
-
-# broadcast
-A .+ [10 100 1000]
-# result = [
-#     11 102 1003
-#     14 105 1006
-# ]
-
-# broadcast along the other dimension requires an extra dimension
-A .+ [[10 20]]   # or A .+ [10 20][... new]
-# result = [
-#     11 12 13
-#     24 25 26
-# ]
+values .+ [10 100 1000]
 ```
 
-(TODO: describe broadcasting rules better (basically numpy))
+## Indexing and Slicing
 
-## Indexing and Slices
-
-Ranges index any dimension. `end` is the last index of that axis.
+Indexes and ranges select positions or spans along axes. `end` refers to the final index of the selected axis.
 
 ```dewy
-A[0 1]                 # row 0, column 1
-A[1..5]                # rows 1-5
-A[2 [0..4) ... end-3]  # row 2, cols 0-3, all inner dims, 3rd from last of last dim
+matrix[0 1]
+matrix[1..end]
 ```
 
-See [Ranges](range-types.md) and [Container Types](container-types.md).
+## Constructing Results
 
-## Building Arrays
-
-Loops fill higher dimensions without a special list-building syntax.
+Loops naturally express array elements and nested dimensions:
 
 ```dewy
-outer_product = [
-    loop i in [1..3]
-    [loop j in [1..3] i * j]
+let multiplication_table = [
+    loop row in 1..3
+        [loop column in 1..3
+            row * column]
 ]
 ```
+
+> **Provisional design:** The general shape annotation, dimension-separator, axis-selection, broadcasting, and matrix-overload rules are being designed together. Examples on this page describe that direction rather than defining unchosen edge cases.
+
+For ordinary one-dimensional behavior, see [Containers](container-types.md). Physical dimensions such as meters and seconds are independent of array dimensions; see [Physical Quantities and Units](units.md).

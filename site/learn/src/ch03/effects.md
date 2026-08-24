@@ -1,8 +1,10 @@
 # Effects
 
-An effect is something a function does besides produce a value. The full set of effects, is not yet determined.
+An effect describes an observable interaction a function may perform beyond producing its return value. Effects let callers and the compiler reason about mutation, blocking, I/O, allocation, failure, and other behavior relevant to composition.
 
-`noreturn` is one settled effect. It marks a function that does not come back to the caller, such as `exit`. You write it in the return slot.
+## `noreturn`
+
+`noreturn` is a settled effect marking a function that does not return to its caller:
 
 ```dewy
 let die = (message:string):>noreturn => {
@@ -11,30 +13,16 @@ let die = (message:string):>noreturn => {
 }
 ```
 
-`noreturn` is not `never`. `never` is a type for a path that cannot happen. `noreturn` constrains the function. It must not return control.
+It is not the same as `never`. `noreturn` describes what the call does; `never` is the type of a path with no resulting value.
 
-> Note that the above example is technically `never & noreturn`
->
-> ```dewy
-> let die = (message:string):>never & noreturn => {
->     printl(message)
->     exit(1)
-> }
-> ```
->
-> though the type/effects system infers it automatically. in this case, both `never`, and `noreturn`, would be inferred and can be omitted.
+## Why Effects Belong in Contracts
 
-Effects attach to a return type at the top level with `&`. Parenthesize the type expression (or both sides) so the `&` attaches the effect set rather than intersecting into the union. Several effects also combine with `&`: they are all part of the contract, not alternatives. `Effects<IO Random Time noreturn>` is a convenience for the same set.
+Knowing that a function only reads a value allows the compiler to preserve refinements and borrow storage invisibly. Knowing that it may mutate, block, or escape a value changes what remains safe afterward.
 
-```dewy
-impure_function = (x:int y:int):> (int | never) & IO & Random & Time & noreturn => {
-    if time.now =? time.utc'23:59:59' {
-        if random.coinflip exit(1)
-        printl'a special value for a special time'
-        return 42
-    }
-    return x + y
-}
-```
+Effects are therefore not only documentation. They participate in call checking, optimization, lifetime reasoning, and the construction of restricted execution environments.
 
-> NOTE: effects do not participate in structural typing with regular types. An effect may only appear at the top level of a return annotation. `Invoice | IO` and `(T1 | Effect1) & (T2 | Effect2)` are invalid.
+## General Effect Design
+
+> **Provisional design:** The full effect vocabulary and syntax are not yet fixed. It must support inferred ordinary code, explicit public contracts, transitive effects through calls, effect-polymorphic helpers, and deliberate handling or masking at a clear boundary.
+
+The design should keep common programs uncluttered: most local effects should be inferred, while APIs state the effects that matter to their callers.

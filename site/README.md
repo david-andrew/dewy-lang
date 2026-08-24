@@ -30,6 +30,8 @@ python -m http.server --directory site/dist 8000
 - `static/` contains the landing page, the µDewy home and showcase chrome, and top-level information pages.
 - `learn/` is the narrative guide built with mdBook.
 - `reference/` is the concise Dewy language reference built with mdBook.
+- `DOCUMENTATION_GUIDE.md` defines the voice, scope, and design-versus-implementation policy shared by both books.
+- `DOCUMENTATION_PROJECTS.md` preserves future domain quick starts, case studies, and library explorations until they are substantial enough to publish.
 - `udewy/reference/` is the µDewy spec book. Its `src/` is generated from `udewy/README.md` at build time.
 - The showcase compiles selected µDewy wasm demos into `dist/udewy/showcase/demos/`.
 - `playground/` documents the generated µDewy browser playground.

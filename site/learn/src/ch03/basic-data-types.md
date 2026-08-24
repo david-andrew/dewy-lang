@@ -1,154 +1,76 @@
-# Basic Data Types
+# Types and Numbers
 
-Dewy verifies a program's types when you compile. Literals and context usually supply enough information that you can omit annotations. When you write a type, you are naming what the value _is_, not only how it is stored.
+Dewy checks types when it compiles. Literals and surrounding context usually provide enough information that annotations can stay focused on interfaces and important guarantees.
+
+```dewy
+let count = 10
+let enabled = true
+let name:string = "Dewy"
+```
 
 ## Integers
 
-An integer with no type written down has type `int`, a signed integer that can be as big as you need. Fixed-width integers are available when you want a specific size.
+`int` is a signed integer with arbitrary-precision semantics. `uint` is nonnegative. Fixed-width types are available when width is part of an interface or representation:
 
 ```dewy
-my_int = -12                    # inferred as `int`
-my_int32:int32 = 42
-my_uint:uint = 15
-my_uint64:uint64 = 2001
+let offset:int32 = -12
+let byte:uint8 = 255
+let counter:uint64 = 1
 ```
 
-A literal is exactly the number you wrote, then it has to fit wherever you put it. `let byte:uint8 = 255` is fine. `let byte:uint8 = 1234` is an error.
+An integer literal begins as the exact number written. Context can place it in a compatible integer type, but an out-of-range literal is rejected instead of truncated.
 
-| Type | Description | Range |
-| --- | --- | --- |
-| `int` | Arbitrary-precision signed | `(-inf..inf)` |
-| `int8` | 8-bit signed | `[-128..127]` |
-| `int16` | 16-bit signed | `[-32768..32767]` |
-| `int32` | 32-bit signed | `[-2147483648..2147483647]` |
-| `int64` | 64-bit signed | `[-9223372036854775808..9223372036854775807]` |
-| `int128` | 128-bit signed | `[-2^127..2^127-1]` |
-| `uint` | Arbitrary-precision unsigned | `[0..inf)` |
-| `uint8` | 8-bit unsigned | `[0..255]` |
-| `uint16` | 16-bit unsigned | `[0..65535]` |
-| `uint32` | 32-bit unsigned | `[0..4294967295]` |
-| `uint64` | 64-bit unsigned | `[0..18446744073709551615]` |
-| `uint128` | 128-bit unsigned | `[0..2^128-1]` |
-
-[Number Bases](number-bases.md) covers `0b`, `0x`, and friends.
-
-### Custom-Ranged Integers
-
-You can refine an integer type with a range:
-
-```dewy
-my_custom_number:int<range=[42..)> = 42
-```
-
-The compiler will guarantee that the value assigned to `my_custom_number` is always `42` or greater
-
-## Rationals and Reals
-
-A rational is an exact ratio of integers.
-
-`real` is the parent type for most of the numbers you use day to day.
-
-Floating-point work uses the concrete types `float32` and `float64`.
-
-```dewy
-my_rational = rational(22 7)
-approx: float64 = 3.1415
-small: float32 = 54.54
-```
-
-`int is a rational`. `rational is a real`. `real is a number`.
-
-> NOTE: In most cases, the regular division operator `/` will return a rational result. e.g. `my_rational = 22 / 7` would be the same as the above `my_rational = rational(22 7)` . Unless the inputs are not a compatible type with rationals.
-
-### Fixed-Point
-
-Fixed-point numbers store digits and a decimal shift. Fixed-point literal syntax is not yet determined.
-
-### Symbolics
-
-Dewy will support symbolic values, in the same spirit as MATLAB's symbolics. You write an expression in unknowns, then substitute or differentiate later. The syntax and rules are not yet determined, but may look something like this:
-
-```dewy
-let x = sym
-let y:real = sym
-let W:array<real length=[5 2]> = sym
-
-# potental way to declare many at once (needs more work)
-let (a b c d) = loop true sym
-```
+Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program.
 
 ## Booleans
 
+`bool` has the values `true` and `false`:
+
 ```dewy
-my_bool = true
-ready = false
+let ready = true
+let retry = failed and attempts <? limit
 ```
 
-The operators are the English words `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor`. See [Operators](operators.md).
+English Boolean operators include `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor`.
 
 ## `void`, `never`, and `undefined`
 
-`void` means nothing came out. Declarations, assignments, and `printl` are `void`.
+- `void` means an expression completed without producing a value.
+- `never` means the path cannot complete normally.
+- `undefined` is a storable value used for missing alternatives.
 
-`never` means this path cannot happen. There is no value of that type. After you have already handled every case, what is left is `never`.
+`T | undefined` is an optional value, covered in [Optional Values and Narrowing](optional-types.md).
 
-`undefined` is a real value you can store and pass around. It is not `void`, and it is not a name you forgot to set.
+## Type Values and Aliases
 
-Optionals are `T | undefined`. See [Optional Types](optional-types.md).
-
-## Complex Numbers and Quaternions
-
-```dewy
-my_complex0 = 2^/2 + (2^/2)i
-my_complex1 = complex(2^/2 2^/2)
-my_complex2 = complex(1 45°)
-my_complex3 = 1 ∠ 45°
-
-q = 1 + 2i + 3j + 4k
-Q = 1 + 2I + 3J + 4K
-```
-
-`i`, `j`, and `k` are the imaginary units. Uppercase forms work too. TBD if they need to be imported or are included in the prelude imports
-
-## Type Declarations
-
-A type is itself a value of type `type`. Bind one to a name when you want to reuse it in annotations.
-
-The `:type` annotation is what tells the compiler the right-hand side is a type, not a runtime value.
+A type is a compile-time value of type `type`. Bind it to a name for reuse:
 
 ```dewy
-let Count:type = int
+const Count:type = int
+const Pair:type = [left:int64 right:int64]
+
 let total:Count = 3
+let origin:Pair = [left=0 right=0]
 ```
 
-`const` works the same way when the name should not be rebound. A structural type gets a name the same way. That name is an alias for the structure, not a class object sitting in memory.
+`<>` groups a type expression where ordinary expression context would be ambiguous:
 
 ```dewy
-let Pair:type = [left:int64 right:int64]
-let origin:Pair = [left = 0 right = 0]
+const SmallPrime = <2 | 3 | 5 | 7>
+const Result = <string | undefined>
 ```
 
-You can specify something is one of multiple types with `|` (commonly referred to as a union)
+Literal values can therefore participate in types. `|` forms a union of alternatives.
+
+Parameterized aliases accept compile-time type arguments:
 
 ```dewy
-let twotypes:type = string|int
-let mything:twotypes = 42
+const Duration:type = <T of real>(T * Time)
+let pause:Duration<int64> = 300ms
 ```
 
-you can also use literal values to represent a type
+## Broader Numeric Domains
 
-```
-let TheNumberThree:type = 3
-let mythree:TheNumberThree = 3   # cannot be any value other than `3`
-```
+> **Provisional design:** Dewy's numeric hierarchy is intended to include exact rationals, reals, concrete floating-point representations, complex values, and quaternions. Their complete construction, promotion, rounding, exceptional-value, and literal rules are not yet specified, so this book does not invent syntax for them.
 
-> NOTE: depending on the context, you may need to wrap a literal in a type expression in `<>` so the compiler knows its supposed to be a type and not a value. e.g.
->
-> ```dewy
-> let SmallPrimesOrString:type = <2 | 3 | 5 | 7 | string>
-> let mything:SmallPrimesOrString = 'this is a string'
-> ```
-
-A parameterized alias takes type parameters before the body, such as `<T of real>(...)`. See [Time](../ch04/xx-time.md) for `Duration`, and [Objects](object-types.md) for more on structural types.
-
-[Strings](string-types.md), [ranges](range-types.md), [arrays](container-types.md), [objects](object-types.md), [functions](function-types.md), and [units](units.md) each have their own dedicated pages.
+The Reference defines the settled [numeric rules](../../reference/numeric-types.html) and [type/conversion model](../../reference/types-and-conversions.html).

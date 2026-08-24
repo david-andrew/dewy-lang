@@ -1,137 +1,138 @@
-# Function Types
+# Functions and Calls
 
-Functions are values. A function literal is the parameters, `=>`, and a body expression.
-
-```dewy
-my_function = () => { printl'You called my function!' }
-my_function
-# You called my function!
-```
-
-The body can be a block or a single expression. One argument may omit the parentheses. Zero arguments need `()`.
+A function combines a parameter contract with a body expression:
 
 ```dewy
-pythag_length = (a b) => (a^2 + b^2)^/2
-square = x => x^2
-foo = () => printl'bar'
+let greet = (name:string):>void =>
+    printl"Hello, {name}!"
 ```
 
-Return type can be annotated with `:>`:
+`:>void` is the return contract. When context makes the result clear, Dewy can infer it:
 
 ```dewy
-let add = (left:int64 right:int64=2):>int64 => left + right
+let square = value => value^2
+let add = (left right) => left + right
 ```
 
-[Effects](effects.md) such as `noreturn` also go in that slot, alone or attached to a return type with `&`.
+One parameter can omit parentheses. Zero parameters use `()`.
 
-A function type writes the same contract:
+## Positional and Named Arguments
+
+Ordinary parameters may be supplied by position or name:
 
 ```dewy
-let callback:<(value:int64):>int64> = add
+let describe = (name:string count:int64):>string =>
+    "{name}: {count}"
+
+describe("messages" 3)
+describe(count=3 name="messages")
 ```
 
-## Calling Functions
+Dewy processes arguments from left to right. A positional argument fills the first parameter still open by position; a named argument fills that name.
 
-Each argument you write binds one parameter that is not set yet. Positional takes the first one still open. Named takes that name, in any order.
+## Defaults Are Per Call
+
+A default is used only if the completed call leaves its parameter unset:
 
 ```dewy
-let subtract = (x:int64 y:int64):>int64 => x - y
-subtract(5 2)
-subtract(y=2 x=5)
+let greet = (name:string greeting:string="Hello"):>void =>
+    printl"{greeting}, {name}!"
+
+greet("Ada")
+greet("Grace" greeting="Welcome")
+greet("Linus" "Hi")
 ```
 
-If you leave a parameter out of the call, Dewy uses its default. A default does not fill that parameter slot: later positional arguments still fill from left to right.
+The default expression evaluates separately for every call that needs it. A mutable value created by a default is not shared between callers.
+
+A default does not remove its position. This matters when a required parameter follows one:
 
 ```dewy
-let foo = (a:int64 b:int64=5):>int64 => a + b
-foo(3)          # 8
-foo(3 b=2)      # 5
-foo(3 2)        # 5
+let combine = (left:int64 scale:int64=2 right:int64):>int64 =>
+    left + scale * right
 
-let bar = (a:int64 b:int64=5 c:int64):>int64 => a + b + c
-bar(3 5 10)
-bar(3 c=10)
+combine(10 3 16)
+combine(10 right=16)
 ```
 
-`foo(3 2)` fills `a` and `b`. It does not skip a default in the middle. `combine(10 16)` would bind `left` and `scale`, then complain that `right` is missing.
+`combine(10 16)` supplies `left` and `scale`, then reports that `right` is missing.
 
-A bare `...` ends the positional run. After that, arguments are keyword-only:
+## Keyword-Only and Position-Only
+
+A bare `...` ends the positional run:
 
 ```dewy
-let configure = (value:int64 ... scale:int64):>int64 => value * scale
-configure(6 scale=7)
+let connect = (host:string ... timeout:Duration<int64>):>void => {
+    # ...
+}
+
+connect("example.test" timeout=2s)
 ```
 
-Pipes are ordinary calls (including the ability to provide multiple arguments):
-
-```dewy
-3 |> foo
-(3 2) |> foo
-{3 b=2} |> foo  # note the scope so `b` doesn't leak into the surrounding scope
-```
-
-## Overloads
-
-`&` combines functions into a set. Argument types at the call site pick the version used:
-
-```dewy
-format = ((value:int):>string => 'integer')
-       & ((value:string):>string => value)
-
-format(42)
-format('life the universe and everything')
-```
-
-## Partial Evaluation and Handles
-
-Function handles and partial evaluation are planned but do not yet lower in the current compiler. The intended rule builds on places: a bare function name _calls_ it if that would be valid, while `@` starts from the function's place and exposes a callable handle. Arguments may then be frozen into a new function:
-
-```dewy
-sum = (a b) => a + b
-add5 = @sum(5)
-add5(24)            # 29
-
-reference = @sum
-thirtyseven = @add5(32)
-thirtyseven         # 37
-```
-
-Leave off the `@`, and `sum` with no arguments is a call, not the function object. Selectors follow the same route rule as data places: `@worker.callback` means `(@worker).callback`, reaching the function-valued field at the end. It is not written `worker.@callback`.
-
-`@fn` is intended to identify the original function's location as a callable handle. A parameter whose type is a function already wants that handle, so writing `@f` in the signature is intended to be optional. The remaining identity, escaping, and explicit-copy details will be settled with function-handle lowering.
-
-## Scope
-
-The body can see the names around it. Bodies can also mention names declared later. See [Bindings and Scope](bindings-and-scope.md).
-
-## Rest, Spread, and Positional-Only Parameters
-
-A `...rest` parameter that captures leftover arguments, and spreading a bundle into a call with `...`, are not yet determined.
-
-Wrapping a parameter in `<>` makes it position-only while preserving its local name in the function body:
+Wrapping a parameter in `<>` makes its name private to the function's body and requires callers to use its position:
 
 ```dewy
 let increment = (<value:int64>):>int64 => value + 1
 
 increment(41)
-# increment(value=41)  # error
 ```
 
-A bare identifier in a signature is always a parameter name, never an unnamed type annotation.
+`increment(value=41)` is an error. A bare identifier in a function literal is always a parameter name, not an anonymous type annotation.
 
-An anonymous position only argument can be specified with `<>`.
+## Function Contracts
+
+A function type writes the same interface without a body and can be used anywhere another annotation can:
 
 ```dewy
-let A = ():>ProofYouCalledA => { ... }
-let B = <ProofYouCalledA>:>ProofYouCalledB => { ... }
-let C = ():>ProofYouCalledC => { ... }
-let D = (<ProofYouCalledB> <ProofYouCalledC>) => { ... }
-
-
-proof_a = A()
-proof_b = B(proof_a)
-proof_c = C()
-D(proof_b proof_c)
+let apply = (
+    transform:<(value:int64):>int64>
+    value:int64
+):>int64 => transform(value)
 ```
 
-Useful for proving some condition is true but don't actually need the values
+Names in a contract determine which keyword calls it accepts. A position-only structural contract can omit a public name where no body needs to refer to it.
+
+## Overloads
+
+`&` combines functions into an overload set. Argument contracts select the applicable alternative:
+
+```dewy
+let format = ((value:int64):>string => "integer {value}")
+           & ((value:string):>string => value)
+
+format(42)
+format("already text")
+```
+
+An unmatched or ambiguous call is an error.
+
+## Pipes
+
+Pipes are calls written in data-flow order:
+
+```dewy
+3 |> square
+("Grace" greeting="Welcome") |> greet
+```
+
+Grouping several piped arguments keeps any named bindings local to the group.
+
+## Function Handles and Partial Evaluation
+
+> **Provisional design:** The root syntax and argument-binding behavior are settled; escaping identity, captures, and storage remain under design.
+
+A bare function name calls it whenever a valid call exists. `@` selects the function binding as a callable value:
+
+```dewy
+let sum = (a b) => a + b
+let reference = @sum
+let add5 = @sum(5)
+
+add5(24)       # 29
+```
+
+Explicitly supplied partial arguments are saved immediately. Defaults remain per-call fallbacks until the resulting function is called.
+
+The route rule is the same as for data places: `@worker.callback` means `(@worker).callback`, not `worker.@callback`.
+
+Rest capture, spreading, and complete handle semantics are summarized in the [design appendix](../appendices/language-and-compiler.md). Exact argument binding is defined in the [Reference](../../reference/functions-and-calls.html).

@@ -1,36 +1,58 @@
-# Types and conversions
+# Types and Conversions
 
-Dewy performs static type checking and contextual inference. Implemented value
-types include `bool`, `void`, `never`, `undefined`, fixed-width integers,
-strings, homogeneous arrays, structural objects, functions, ranges, and
-supported optionals.
+Dewy statically checks values and expressions. Types describe semantic values; implementations may select any representation that preserves those semantics.
 
-Integer literals begin as exact singleton types and may inhabit a compatible
-fixed-width context. An unannotated integer binding widens to abstract `int`,
-whose semantic contract is arbitrary precision. Bigint lowering is not yet
-implemented.
+## Type Values and Aliases
+
+A type is a compile-time value of type `type`. A binding may name it explicitly or infer a type-valued expression:
 
 ```dewy
-let byte:uint8 = 255
-let count = 10             # int semantics
-let optional:int64 | undefined = undefined
-```
-
-`as` performs a checked representation-changing conversion supported by the
-compiler. `transmute` preserves bits and requires compatible implemented
-representations.
-
-A standalone `<>` block contains one type expression and produces a
-compile-time type value. This lets an ordinary inferred declaration introduce
-an alias; the explicit `:type` spelling remains available too.
-
-```dewy
-const Index = <int64>
-const Result = <int64 | undefined>
 const Name:type = string
-
-let offset:Index = 42
+const Index = <int64>
+const MaybeIndex = <int64 | undefined>
 ```
 
-Separate alternatives inside `<>` use the ordinary type operator rather than
-whitespace: write `<int64 | string>`, not `<int64 string>`.
+`<>` groups a type-valued expression where ordinary expression context would otherwise treat it as a runtime value. Alternatives inside use the normal type operators: `<int64 | string>`, not whitespace-separated alternatives.
+
+A type alias does not create nominal identity unless its defining construct explicitly requests generativity.
+
+## Inference and Context
+
+Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to `int`; a fixed-width annotation accepts the literal only when it fits.
+
+Function parameters, returns, container elements, object fields, assignments, and operator overloads all provide type context.
+
+## Unions and Narrowing
+
+`A | B` accepts a value belonging to either alternative. `T | undefined` is an optional value. Type and literal tests such as `is?` and `isnt?` narrow the tested value along control-flow paths.
+
+General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.
+
+## Parameterized and Refined Types
+
+Parameterized types apply compile-time arguments:
+
+```dewy
+array<string>
+array<int64 length=3>
+Duration<uint64>
+```
+
+Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.
+
+## `as`
+
+`as` requests a meaning-preserving conversion defined for the source and destination types:
+
+```dewy
+value as string
+text as array<uint8>
+```
+
+Conversions may change representation and may invoke overloadable conversion behavior. Lossy or fallible operations require an interface whose type exposes that possibility rather than silently discarding information.
+
+## `transmute`
+
+`transmute` reinterprets a compatible representation without performing a semantic conversion. It is valid only where source and destination layouts satisfy the transmute contract. It must not be used as an implicit substitute for numeric or textual conversion.
+
+See [Numeric Types](numeric-types.md), [Strings](strings.md), and [Design Maturity](design-status.md).

@@ -73,7 +73,7 @@ loop letter in 'z','y'..'a' { ... }
 let ascii_scalars:range<uint32> = 'A'..'Z'
 ```
 
-Enumerating multi-scalar graphemes is not yet determined. See [string types](string-types.md).
+Multi-scalar graphemes have no invented universal successor. Enumerating them requires an explicit alphabet or collation policy. See [Strings and Graphemes](string-types.md).
 
 ## Uses
 
@@ -97,7 +97,7 @@ loop i in [0..4]*0.25 print'{i} '
 # both: 0 0.25 0.5 0.75 1
 ```
 
-Same as writing `[0,0.25..1]`. Dedicated `linspace` / `logspace` helpers are not yet determined.
+This expresses the same intended values as `[0,0.25..1]`. Numerical libraries can provide `linspace` and `logspace` helpers without changing the range grammar.
 
 ### Compound Ranges
 
@@ -148,4 +148,4 @@ arr[5..end-3]
 arr[end-3..]
 ```
 
-Whether non-integer ranges can index a sequence is not yet determined.
+> **Provisional design:** Integer positions and `end` define ordinary sequence slicing. Indexing by noninteger ordered domains requires a collection-specific indexing contract and is not implied by the generic range syntax.

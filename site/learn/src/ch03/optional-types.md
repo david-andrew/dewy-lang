@@ -1,76 +1,58 @@
-# Optional Types
+# Optional Values and Narrowing
 
-`undefined` is a real value you can store and pass around. It is not `void`, and it is not a name you forgot to set.
+`undefined` is a real value representing a missing alternative. It is not `void`, an uninitialized name, or a hidden exception.
 
-An optional is `T | undefined`. Check with `is?` or `isnt?` before you use it as `T`. After the check, Dewy treats it as `T`:
+An optional type is a union with `undefined`:
 
 ```dewy
-let answer:int64|undefined = find_answer()
-
-
-if answer isnt? undefined {
-    printl'{answer + 1}'
-}
-
-if answer is? int64 {
-    printl'{answer + 1}'
-}
+let answer:int64 | undefined = lookup_answer()
 ```
 
-You can also narrow by returning or exiting
+## Checking an Optional
+
+Use `is?` or `isnt?` to establish which alternative is present:
 
 ```dewy
-# narrow to int64 or quit
-if answer is? undefined { exit(1) }
-
-# can use without guard
-printl'answer is {answer}'
+if answer isnt? undefined
+    printl"the next answer is {answer + 1}"
 ```
 
-`value is? T` asks whether the value actually is a `T`. `isnt?` is the other way.
-
-## Where Optionals Come From
-
-Optionals can come from any source that wants to represent a value or nothing. Functions can return them, you can construct them directly, and certain expressions will naturally generate them.
+Inside the body, `answer` is known to be `int64`. An early exit can establish the same fact afterward:
 
 ```dewy
-let myoption:string|undefined = if value =? 42
-    'life, the universe, and everything'
-else
-    undefined
+if answer is? undefined
+    return
+
+printl"answer is {answer}"
 ```
 
-Iterators are a common example that `undefined` might come up. `in` assigns the next iterator value, or `undefined` when it is done, and returns whether it got something. See [Loops](loops.md).
+`value is? Type` tests membership in a type. Literal alternatives can be tested directly as well.
 
-Combine iterators with `or` and one side can run out while the loop keeps going. That side is `T | undefined`:
+## Producing Optional Values
+
+A function can return an optional explicitly:
 
 ```dewy
-short_list = [1 2 3]
-long_list = ['this' 'is' 'a' 'long' 'list' 'of' 'items']
-loop short in short_list or long in long_list
-{
-    if short_item isnt? undefined {
-        process(short_item)
-    }
-    process(long_item)
+let choose = (enabled:bool):>int64 | undefined =>
+    if enabled 42 else undefined
+```
+
+Any expression whose alternatives include a value and `undefined` can produce an optional.
+
+## Optionals in Multiiterators
+
+An `or` multiiterator can continue after one source is exhausted. During those later iterations, the exhausted source's bound value is optional:
+
+```dewy
+loop short in short_items or long in long_items {
+    if short isnt? undefined
+        process_short(short)
+
+    if long isnt? undefined
+        process_long(long)
 }
 ```
 
-The iterations will have the following values
+By contrast, `and` stops before a required source's missing value reaches the body.
 
-```
-0: short=1         long='this'
-1: short=2         long='is'
-2: short=3         long='a'
-3: short=undefined long='long'
-4: short=undefined long='list'
-5: short=undefined long='of'
-6: short=undefined long='items'
-```
-
-Lastly, a function can return an optional directly:
-
-```dewy
-let choose = (flag:bool):>int64|undefined =>
-    if flag 40 else undefined
-```
+General unions with several unrelated runtime layouts use the same type-theoretic model, though their complete representation and narrowing support is still a [design and implementation frontier](../appendices/language-and-compiler.md).

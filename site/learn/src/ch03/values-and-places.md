@@ -1,36 +1,34 @@
 # Values, Copies, and Places
 
-Dewy uses value semantics by default. Giving a value another name, passing it to a function, or returning it does not silently give someone else permission to mutate your original.
+Dewy uses value semantics by default. Assigning, passing, or returning a value gives the destination an independent value:
 
 ```dewy
-let original = [10 20]
+let original = [1 2 3]
 let copy = original
+copy[0] = 9
 
-copy[0] = 99
-printl"{original[0]}"  # 10
+# original is still [1 2 3]
 ```
 
-The compiler does not have to perform a literal copy every time. It can move storage, transfer ownership, or share immutable backing data as long as the program behaves as though the two values are independent.
+The compiler does not need to physically copy every byte. It may move storage, borrow it for reading, or share immutable backing data whenever the program cannot observe a difference.
 
-## Asking a function to write your value
+## Asking a Function to Update Your Value
 
-Use `@` when a function should receive the actual place where a value lives. Mark that intent in both the parameter and the call:
+When mutation should be visible to the caller, pass a place with `@`. The parameter also carries `@`:
 
 ```dewy
-let increment = (@value:int64):>void => {
-    value += 1
-}
+let increment = (@value:int64):>void => value += 1
 
 let count:int64 = 41
 increment(@count)
 printl"{count}"       # 42
 ```
 
-Without `@` on either side, the call is rejected rather than silently changing between copy and mutation behavior.
+Both sides advertise the mutation. `increment(count)` supplies a copy and does not satisfy a place parameter.
 
-## A place can follow a route
+## A Place Can Follow a Route
 
-Think of `@` as starting at a named storage location. Every field or index after it follows the route to a more specific location:
+`@` starts at a binding's storage. Fields and indices after it project the place to the final selected location:
 
 ```dewy
 set(@point.x)
@@ -38,33 +36,38 @@ set(@values[i])
 set(@grid.rows[row][column])
 ```
 
-For example, `@point.x` follows these steps:
+`@point.x` means `(@point).x`. Parenthesizing the complete expression, `@(point.x)`, is equivalent. There is no `point.@x` spelling.
 
-1. `@point` selects the place occupied by `point`.
-2. `.x` projects that place to the storage occupied by its `x` field.
+A computed index evaluates once before the call.
 
-That is why ordinary precedence reads `@point.x` as `(@point).x`. Writing `@(point.x)` is equivalent if the grouping makes the intent easier to see. There is no separate `point.@x` syntax.
+## Whole-Value Replacement
 
-The same rule composes through any supported mixture of fields and individual array indices. An index expression is evaluated once when preparing the call.
-
-## Safety rules
-
-A place parameter has an explicit type, and the argument must have exactly that type. The root must be mutable: neither a `const` value nor a field beneath one can become a writing place.
-
-Dewy also rejects mutable routes that could overlap in one call:
+A place can expose the entire selected value, not only its scalar fields:
 
 ```dewy
-swap(@value @value)          # error: same place twice
-update(@record @record.x)    # error: whole value overlaps its field
+let replace_pair = (@pair:Pair):>void =>
+    pair = [left=20 right=22]
 
-update(@record.x @record.y)  # okay: distinct fields
-update(@items[0] @items[1])  # okay: distinct constant indices
+replace_pair(@pairs[index])
 ```
 
-Runtime-computed indices are currently treated conservatively because two different expressions might select the same element.
+For a recursively fixed aggregate, the caller can provide the complete destination storage. Runtime-sized replacements need the broader ownership and escape design described in the implementation appendix.
 
-## Current boundary
+## Preventing Conflicting Mutation
 
-The compiler supports nonescaping places rooted in named mutable fixed-width scalars, Booleans, arrays, and structural objects. Routes may select mutable object fields or individual array elements, including nested mixed routes. Whole-value replacement through a route works too, such as replacing `@matrix[0]` with another row.
+A call cannot receive two mutable places that may overlap:
 
-Places can currently be passed and forwarded through calls, but cannot be saved in a local, stored in an object, or returned. Function handles share the `@` idea but are still planned; see [Function Types](function-types.md).
+```dewy
+set_both(@pair.left @pair.right)   # distinct fields
+set_both(@values[0] @values[1])   # distinct constant indices
+```
+
+Prefix routes overlap, and dynamic indices are treated as potentially equal unless the compiler can prove otherwise.
+
+`const` bindings do not provide mutable places. Place parameter types are invariant so a callee cannot reinterpret the caller's storage through a broader type.
+
+## Escaping Places
+
+> **Provisional design:** Nonescaping calls and projected routes have settled behavior. Storing or returning a place requires lifetime, ownership, and concurrency rules that are still being designed.
+
+Function handles use the same `@` root-and-route idea; see [Functions and Calls](function-types.md#function-handles-and-partial-evaluation). The Reference contains the exact [value and aliasing rules](../../reference/values.html).
