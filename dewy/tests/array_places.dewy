@@ -1,0 +1,32 @@
+let mutate = (@items:array<int64 length=2>):>void => {
+    items[0] = 20
+}
+
+let replace = (@items:array<int64 length=2>):>void => {
+    items = [30 10]
+}
+
+let forward_replace = (@items:array<int64 length=2>):>void => {
+    replace(items=@items)
+}
+
+let update = (@items:array<int64 length=2>):>int64 => {
+    items[1] = 12
+    return items[0] + items[1]
+}
+
+let main = ():>int64 => {
+    let values = [1 2]
+    mutate(@values)
+    let first = values[0]
+
+    forward_replace(@values)
+    let result = update(@values)
+
+    if first =? 20 and result =? 42
+        and values[0] =? 30 and values[1] =? 12 {
+        return 42
+    } else {
+        return 1
+    }
+}

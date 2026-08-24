@@ -522,6 +522,11 @@ class _BoundsValidator:
             if interval is not None:
                 return interval
             return self._constant_binding(node.binding_id, set())
+        if isinstance(node, hir.Place):
+            self._eval(node.target, state, validate=validate)
+            if node.target.binding_id is not None:
+                state.pop(node.target.binding_id, None)
+            return None
         if isinstance(node, hir.ValueCast):
             return self._fit_type(
                 self._eval(node.expr, state, validate=validate),

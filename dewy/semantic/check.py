@@ -3,7 +3,7 @@ semantic analysis pass 0:
 - type checking
 - ambiguity resolution
 """
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, replace, field, fields, is_dataclass
 from collections import ChainMap
 from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
@@ -54,6 +54,7 @@ class Context:
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
+    allow_place_expression: bool = False
     # TODO: etc stuff
 
 def typecheck_and_resolve(
@@ -3068,6 +3069,59 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
     """Typecheck a prefix operator through its builtin dunder."""
     if not isinstance(prefix.op, t1.Operator):
         not_implemented(ctx.srcfile, prefix.op.loc, 'broadcast prefix operator')
+    if prefix.op.symbol == '@':
+        if not ctx.allow_place_expression:
+            type_error(
+                ctx.srcfile,
+                'a place can only be used as a function argument',
+                Pointer(
+                    span=prefix.loc,
+                    message='this place would escape its immediate call',
+                ),
+                hint='pass `@name` directly to a parameter declared with `@`',
+            )
+        if not (
+            isinstance(prefix.item, p0.Atom)
+            and isinstance(prefix.item.item, t1.Identifier)
+        ):
+            not_implemented(
+                ctx.srcfile,
+                prefix.item.loc,
+                'places of indexed elements, fields, or temporary values',
+            )
+        target = tcr_identifier(prefix.item.item, ctx=ctx)
+        assert isinstance(target, hir.ExpressedIdentifier)
+        if isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
+            not_implemented(
+                ctx.srcfile,
+                prefix.loc,
+                'function handles and partial application with `@`',
+            )
+        if not isinstance(target.type, ty.ArrayType):
+            not_implemented(
+                ctx.srcfile,
+                prefix.loc,
+                '`@` places for values other than arrays',
+            )
+        if target.binding_id is not None:
+            binding = ctx.binding_registry.by_id[target.binding_id]
+            if (
+                binding.declaration is not None
+                and binding.declaration.decltype == 'const'
+            ):
+                user_error(
+                    ctx.srcfile,
+                    'cannot pass a const binding as a mutable place',
+                    Pointer(
+                        span=prefix.loc,
+                        message=f'`{target.name}` is declared const',
+                    ),
+                    Pointer(
+                        span=binding.declaration.loc,
+                        message='const declaration is here',
+                    ),
+                )
+        return hir.Place(prefix.loc, target.type, target)
     if prefix.op.symbol not in builtins.UNARY_PREFIX_DUNDER_MAP:
         not_implemented(ctx.srcfile, prefix.op.loc, f'prefix operator `{prefix.op.symbol}`')
     if (
@@ -3942,6 +3996,7 @@ def typefunc_from_hir_params(
             None if p.position_only else p.name,
             p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE,
             required=not isinstance(p, hir.BoundParam),
+            place=p.place,
         )
         for p in pos_or_kw_args
     ]
@@ -3949,7 +4004,7 @@ def typefunc_from_hir_params(
     for p in kw_only_args:
         ptype = p.type if p.type != ty.INFERRED_TYPE else ty.TOP_TYPE
         required = not isinstance(p, hir.BoundParam)
-        kw.append(ty.KwOnlyArg(p.name, ptype, required))
+        kw.append(ty.KwOnlyArg(p.name, ptype, required, p.place))
     rest_name = rest_args.name if rest_args is not None else None
     ret = rettype if rettype != ty.INFERRED_TYPE else ty.TOP_TYPE
     return ty.FunctionType(pos, kw, rest_name, ret)
@@ -4539,6 +4594,61 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     rest_args: hir.Param|hir.BoundParam|None = None
 
     def collect_param(item: p0.AST, *, position_only: bool = False) -> hir.Param | hir.BoundParam:
+        def mark_place(
+            param: hir.Param | hir.BoundParam,
+            loc: Span,
+        ) -> hir.Param:
+            if isinstance(param, hir.BoundParam):
+                user_error(
+                    ctx.srcfile,
+                    'place parameters cannot have defaults',
+                    Pointer(
+                        span=loc,
+                        message='a place must be supplied explicitly by every call',
+                    ),
+                )
+            if not isinstance(param.type, ty.ArrayType):
+                not_implemented(
+                    ctx.srcfile,
+                    loc,
+                    'place parameters other than explicitly typed arrays',
+                )
+            return replace(param, place=True)
+
+        if isinstance(item, p0.Prefix) and item.op.symbol == '@':
+            return mark_place(
+                collect_param(item.item, position_only=position_only),
+                item.loc,
+            )
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.left, p0.Prefix)
+            and item.left.op.symbol == '@'
+        ):
+            return mark_place(
+                collect_param(
+                    replace(item, left=item.left.item),
+                    position_only=position_only,
+                ),
+                item.left.loc,
+            )
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.left, p0.BinOp)
+            and isinstance(item.left.left, p0.Prefix)
+            and item.left.left.op.symbol == '@'
+        ):
+            normalized_left = replace(
+                item.left,
+                left=item.left.left.item,
+            )
+            return mark_place(
+                collect_param(
+                    replace(item, left=normalized_left),
+                    position_only=position_only,
+                ),
+                item.left.left.loc,
+            )
         match item:
             case p0.Atom(item=t1.Identifier(name=name)):
                 return hir.Param(name, type=ty.INFERRED_TYPE, position_only=position_only)
@@ -4593,7 +4703,11 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case p0.Block(kind='<>'):
                 user_error(ctx.srcfile, 'invalid position-only parameter',
                     Pointer(span=item.loc, message='`<>` must contain exactly one named parameter'))
-            case p0.Atom(item=t1.Identifier()) | p0.BinOp(op=t1.Operator(symbol=':'|'=')):
+            case (
+                p0.Atom(item=t1.Identifier())
+                | p0.Prefix(op=t1.Operator(symbol='@'))
+                | p0.BinOp(op=t1.Operator(symbol=':'|'='))
+            ):
                 (kw_only_args if saw_rest else pos_or_kw_args).append(collect_param(item))
             case p0.BinOp(op=t2.EllipsisJuxtapose(), left=p0.Atom(item=t1.Identifier(name='...')), right=p0.Atom(item=t1.Identifier(name=name))):
                 if saw_rest:
@@ -4628,6 +4742,7 @@ def parse_call_arguments(
     kw_args: dict[str, hir.AST] = {}
     order: list[str | None] = []
     bound_positional_indices: set[int] = set()
+    argument_ctx = replace(ctx, allow_place_expression=True)
     for item in items:
         match item:
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)) as target, right=value):
@@ -4638,8 +4753,25 @@ def parse_call_arguments(
                 if param is None and method is not None:
                     param = next((p for p in method.kw_only if p.name == name), None)
                 expected_arg = param.type if param is not None else None
-                arg = typecheck_and_resolve_inner(value, ctx=ctx, expected=expected_arg)
-                kw_args[name] = check_against(arg, expected_arg, ctx=ctx) if expected_arg is not None else arg
+                arg = typecheck_and_resolve_inner(
+                    value,
+                    ctx=argument_ctx,
+                    expected=expected_arg,
+                )
+                if _contains_place(arg) and not isinstance(arg, hir.Place):
+                    user_error(
+                        ctx.srcfile,
+                        'a place must be a complete call argument',
+                        Pointer(
+                            span=arg.loc,
+                            message='pass `@name` directly without wrapping it in an expression',
+                        ),
+                    )
+                kw_args[name] = (
+                    arg
+                    if isinstance(arg, hir.Place) or expected_arg is None
+                    else check_against(arg, expected_arg, ctx=ctx)
+                )
                 order.append(name)
                 if method is not None:
                     index = next(
@@ -4657,12 +4789,118 @@ def parse_call_arguments(
                     None,
                 ) if method is not None else None
                 expected_arg = method.pos_or_kw[index].type if method is not None and index is not None else None
-                arg = typecheck_and_resolve_inner(item, ctx=ctx, expected=expected_arg)
-                pos_args.append(check_against(arg, expected_arg, ctx=ctx) if expected_arg is not None else arg)
+                arg = typecheck_and_resolve_inner(
+                    item,
+                    ctx=argument_ctx,
+                    expected=expected_arg,
+                )
+                if _contains_place(arg) and not isinstance(arg, hir.Place):
+                    user_error(
+                        ctx.srcfile,
+                        'a place must be a complete call argument',
+                        Pointer(
+                            span=arg.loc,
+                            message='pass `@name` directly without wrapping it in an expression',
+                        ),
+                    )
+                pos_args.append(
+                    arg
+                    if isinstance(arg, hir.Place) or expected_arg is None
+                    else check_against(arg, expected_arg, ctx=ctx)
+                )
                 order.append(None)
                 if index is not None:
                     bound_positional_indices.add(index)
     return pos_args, kw_args, order
+
+
+def _contains_place(value: object) -> bool:
+    if isinstance(value, hir.Place):
+        return True
+    if isinstance(value, (list, tuple)):
+        return any(_contains_place(item) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_place(item) for item in value.values())
+    if is_dataclass(value) and isinstance(value, hir.AST):
+        return any(
+            _contains_place(getattr(value, item.name))
+            for item in fields(value)
+            if item.name not in {'loc', 'type'}
+        )
+    return False
+
+
+def _validate_place_call_arguments(
+    method: ty.FunctionType,
+    pos_args: list[hir.AST],
+    kw_args: dict[str, hir.AST],
+    *,
+    ctx: Context,
+) -> None:
+    """Require `@` on both sides and reject overlapping mutable places."""
+
+    supplied: list[tuple[ty.PosOrKwArg | ty.KwOnlyArg, hir.AST]] = []
+    supplied.extend(zip(method.pos_or_kw, pos_args))
+    parameters_by_name = {
+        parameter.name: parameter
+        for parameter in [*method.pos_or_kw, *method.kw_only]
+        if parameter.name is not None
+    }
+    supplied.extend(
+        (parameters_by_name[name], argument)
+        for name, argument in kw_args.items()
+        if name in parameters_by_name
+    )
+
+    seen_places: dict[int, hir.Place] = {}
+    for parameter, argument in supplied:
+        place = argument if isinstance(argument, hir.Place) else None
+        if parameter.place and place is None:
+            user_error(
+                ctx.srcfile,
+                'place argument requires `@`',
+                Pointer(
+                    span=argument.loc,
+                    message='this parameter can write the caller binding',
+                ),
+                hint='pass a mutable named binding as `@name`',
+            )
+        if not parameter.place and place is not None:
+            user_error(
+                ctx.srcfile,
+                'value parameter does not accept a place',
+                Pointer(
+                    span=place.loc,
+                    message='remove `@` to pass an independent value',
+                ),
+            )
+        if place is None:
+            continue
+        if place.target.type != parameter.type:
+            type_error(
+                ctx.srcfile,
+                'place parameter types are invariant',
+                Pointer(
+                    span=place.loc,
+                    message=(
+                        f'place has type `{type_to_dewy(place.target.type)}`, '
+                        f'but parameter requires exactly '
+                        f'`{type_to_dewy(parameter.type)}`'
+                    ),
+                ),
+            )
+        binding_id = place.target.binding_id
+        if binding_id is None:
+            raise ValueError('INTERNAL ERROR: place target has no binding identity')
+        previous = seen_places.get(binding_id)
+        if previous is not None:
+            user_error(
+                ctx.srcfile,
+                'overlapping mutable places in one call',
+                Pointer(span=previous.loc, message='first use of this place'),
+                Pointer(span=place.loc, message='same place passed again here'),
+            )
+        seen_places[binding_id] = place
 
 
 def _arguments_in_source_order(
@@ -5090,8 +5328,17 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
             raise ValueError('INTERNAL ERROR: selected method no longer accepts ordered call')
         pos_args, kw_args = bound
 
+    _validate_place_call_arguments(
+        result.method,
+        pos_args,
+        kw_args,
+        ctx=ctx,
+    )
+
     contextual_pos_args = [
-        check_against(
+        arg
+        if isinstance(arg, hir.Place)
+        else check_against(
             _contextualize_flow_result(
                 arg,
                 result.method.pos_or_kw[index].type,
@@ -5109,12 +5356,18 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         for param in [*result.method.pos_or_kw, *result.method.kw_only]
     }
     contextual_kw_args = {
-        name: check_against(
-            _contextualize_flow_result(arg, parameter_types[name], ctx=ctx),
+        name: argument
+        if isinstance(argument, hir.Place)
+        else check_against(
+            _contextualize_flow_result(
+                argument,
+                parameter_types[name],
+                ctx=ctx,
+            ),
             parameter_types[name],
             ctx=ctx,
         )
-        for name, arg in kw_args.items()
+        for name, argument in kw_args.items()
     }
     return_type = result.method.ret
     literal_path_type = _literal_path_call_result(

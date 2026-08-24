@@ -149,6 +149,13 @@ class ExpressedIdentifier(AST):
 
 
 @dataclass
+class Place(AST):
+    """A named mutable binding explicitly passed by reference with ``@``."""
+
+    target: ExpressedIdentifier
+
+
+@dataclass
 class Assign(AST):
     """Assignment statement; compound operators remain explicit until MIR lowering."""
     target: ExpressedIdentifier
@@ -350,6 +357,7 @@ class Param:
     type: ty.Type
     binding_id: int | None = field(default=None, kw_only=True)
     position_only: bool = field(default=False, kw_only=True)
+    place: bool = field(default=False, kw_only=True)
 
     def __repr__(self) -> str:
         from .hir_display import hir_to_tree_str

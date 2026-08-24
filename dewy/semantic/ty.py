@@ -120,6 +120,7 @@ class PosOrKwArg:
     name: str | None
     type: TypeExpr
     required: bool = True
+    place: bool = False
 
 @dataclass
 class KwOnlyArg:
@@ -132,6 +133,7 @@ class KwOnlyArg:
     name: str
     type: TypeExpr
     required: bool
+    place: bool = False
 
 @dataclass
 class GenericParam:
@@ -923,6 +925,8 @@ class TypeSystem:
         for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
             if gp.name is not None and fp.name != gp.name:
                 return False
+            if fp.place != gp.place:
+                return False
             if not gp.required and fp.required:
                 return False
             if not self.is_subtype(gp.type, fp.type):
@@ -935,6 +939,8 @@ class TypeSystem:
         for name, gk in g_kw.items():
             fk = f_kw.get(name)
             if fk is not None:
+                if fk.place != gk.place:
+                    return False
                 if not self.is_subtype(gk.type, fk.type):
                     return False
                 if not gk.required and fk.required:
@@ -943,6 +949,8 @@ class TypeSystem:
 
             fp = next((p for p in f.pos_or_kw if p.name == name), None)
             if fp is not None:
+                if fp.place != gk.place:
+                    return False
                 if not gk.required:
                     return False
                 if not self.is_subtype(gk.type, fp.type):
@@ -1554,8 +1562,24 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         nested_shadow = {gp.name for gp in t.type_params}
         inner = {k: v for k, v in bindings.items() if k not in nested_shadow}
         return FunctionType(
-            [PosOrKwArg(p.name, substitute_type(p.type, inner), p.required) for p in t.pos_or_kw],
-            [KwOnlyArg(k.name, substitute_type(k.type, inner), k.required) for k in t.kw_only],
+            [
+                PosOrKwArg(
+                    p.name,
+                    substitute_type(p.type, inner),
+                    p.required,
+                    p.place,
+                )
+                for p in t.pos_or_kw
+            ],
+            [
+                KwOnlyArg(
+                    k.name,
+                    substitute_type(k.type, inner),
+                    k.required,
+                    k.place,
+                )
+                for k in t.kw_only
+            ],
             t.rest,
             substitute_type(t.ret, inner),
             list(t.type_params),
@@ -1575,8 +1599,24 @@ def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> Funct
     if not m.type_params:
         return m
     return FunctionType(
-        [PosOrKwArg(p.name, substitute_type(p.type, type_args), p.required) for p in m.pos_or_kw],
-        [KwOnlyArg(k.name, substitute_type(k.type, type_args), k.required) for k in m.kw_only],
+        [
+            PosOrKwArg(
+                p.name,
+                substitute_type(p.type, type_args),
+                p.required,
+                p.place,
+            )
+            for p in m.pos_or_kw
+        ],
+        [
+            KwOnlyArg(
+                k.name,
+                substitute_type(k.type, type_args),
+                k.required,
+                k.place,
+            )
+            for k in m.kw_only
+        ],
         m.rest,
         substitute_type(m.ret, type_args),
         [],

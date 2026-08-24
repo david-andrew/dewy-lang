@@ -294,6 +294,10 @@ class _Lowerer:
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_array_result: hir.ExpressedIdentifier | None = None
+        self.current_place_parameter_cells: dict[
+            int,
+            hir.ExpressedIdentifier,
+        ] = {}
         self.current_object_receiver: hir.ExpressedIdentifier | None = None
         self.current_object_type: ty.ObjectType | None = None
         self.current_object_field_ids: set[int] = set()
@@ -448,6 +452,7 @@ class _Lowerer:
         lowered_pos: list[hir.Param | hir.BoundParam] = []
         default_prologue: list[hir.AST] = []
         parameter_prologue: list[hir.AST] = []
+        place_parameter_cells: dict[int, hir.ExpressedIdentifier] = {}
 
         def lower_param(param: hir.Param) -> hir.Param:
             if (
@@ -456,6 +461,41 @@ class _Lowerer:
                 and ty.optional_payload(param.type) is None
             ):
                 self._target_error(literal, 'heterogeneous optional parameter type')
+            if param.place:
+                if not isinstance(param.type, ty.ArrayType):
+                    self._target_error(literal, 'non-array place parameters')
+                if param.binding_id is None:
+                    raise TypeError(
+                        'INTERNAL ERROR: place parameter has no binding identity'
+                    )
+                incoming_name = self._new_array_name(f'place_{param.name}')
+                incoming = hir.ExpressedIdentifier(
+                    literal.loc,
+                    'int64',
+                    incoming_name,
+                )
+                place_parameter_cells[param.binding_id] = incoming
+                parameter_prologue.append(hir.Declare(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    param.name,
+                    'int64',
+                    self._intrinsic_call(
+                        '__load_i64__',
+                        [incoming],
+                        'int64',
+                        literal.loc,
+                    ),
+                    binding_id=param.binding_id,
+                ))
+                return replace(
+                    param,
+                    name=incoming_name,
+                    type='int64',
+                    binding_id=None,
+                    place=False,
+                )
             if isinstance(param.type, ty.ObjectType):
                 incoming_name = self._new_object_name(f'arg_{param.name}')
                 incoming = hir.ExpressedIdentifier(
@@ -642,6 +682,7 @@ class _Lowerer:
         previous_result = self.current_optional_result
         previous_object_result = self.current_object_result
         previous_array_result = self.current_array_result
+        previous_place_parameter_cells = self.current_place_parameter_cells
         previous_receiver = self.current_object_receiver
         previous_object_type = self.current_object_type
         previous_field_ids = self.current_object_field_ids
@@ -649,6 +690,7 @@ class _Lowerer:
         self.current_optional_result = result_target
         self.current_object_result = object_result_target
         self.current_array_result = array_result_target
+        self.current_place_parameter_cells = place_parameter_cells
         self.current_object_receiver = receiver
         self.current_object_type = literal.object_type
         self.current_object_field_ids = {binding_id for binding_id, _name in literal.object_fields}
@@ -673,6 +715,7 @@ class _Lowerer:
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
         self.current_array_result = previous_array_result
+        self.current_place_parameter_cells = previous_place_parameter_cells
         self.current_object_receiver = previous_receiver
         self.current_object_type = previous_object_type
         self.current_object_field_ids = previous_field_ids
@@ -1330,6 +1373,14 @@ class _Lowerer:
             ):
                 self.captures[id(current_function.literal)].append((node, binding))
             return
+        if isinstance(node, hir.Place):
+            self._discover_node(
+                node.target,
+                scope,
+                current_function,
+                array_use='representation',
+            )
+            return
         if isinstance(node, hir.FunctionLiteral):
             self._new_function(
                 node,
@@ -1744,6 +1795,8 @@ class _Lowerer:
         )
         arguments: list[tuple[int | str, hir.AST, hir.Param | None]] = []
         for index, argument in enumerate(call.pos_args):
+            if isinstance(argument, hir.Place):
+                continue
             if isinstance(argument.type, ty.ArrayType):
                 parameter = (
                     positional_parameters[index]
@@ -1752,6 +1805,8 @@ class _Lowerer:
                 )
                 arguments.append((index, argument, parameter))
         for name, argument in call.kw_args.items():
+            if isinstance(argument, hir.Place):
+                continue
             if isinstance(argument.type, ty.ArrayType):
                 arguments.append((name, argument, named_parameters.get(name)))
         return arguments
@@ -2305,6 +2360,11 @@ class _Lowerer:
             if binding.emitted_name is not None:
                 return replace(node, name=binding.emitted_name)
             return node
+        if isinstance(node, hir.Place):
+            target = self._transform_node(node.target)
+            if not isinstance(target, hir.ExpressedIdentifier):
+                raise TypeError('INTERNAL ERROR: place target was not preserved')
+            return replace(node, target=target)
         if isinstance(node, hir.FunctionLiteral):
             function = self.function_by_literal[id(node)]
             return hir.ExpressedIdentifier(
@@ -3082,6 +3142,8 @@ class _Lowerer:
                 hir.Break(node.loc, ty.BOTTOM_TYPE),
             ]
         prelude, value = self._extract_expression(node)
+        if prelude and isinstance(value, hir.Void):
+            return prelude
         return [*prelude, value]
 
     def _extract_expression(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
@@ -3270,6 +3332,7 @@ class _Lowerer:
             )
             optional_arguments = self.call_optional_args.get(id(node), [])
             pos_args: list[hir.AST] = []
+            place_postlude: list[hir.AST] = []
             for index, arg in enumerate(node.pos_args):
                 expected_type = (
                     function_type.pos_or_kw[index].type
@@ -3285,7 +3348,12 @@ class _Lowerer:
                     else None
                 )
                 boundary = self.array_call_boundary_analyses.get((id(node), index))
-                if boundary is not None and boundary.safe:
+                if isinstance(arg, hir.Place):
+                    arg_prelude, lowered_arg, arg_postlude = (
+                        self._materialize_place_argument(arg)
+                    )
+                    place_postlude.extend(arg_postlude)
+                elif boundary is not None and boundary.safe:
                     arg_prelude, lowered_arg = self._materialize_array_call_argument(
                         arg,
                         boundary,
@@ -3313,7 +3381,12 @@ class _Lowerer:
             for name, arg in node.kw_args.items():
                 payload = optional_kwargs.get(name)
                 boundary = self.array_call_boundary_analyses.get((id(node), name))
-                if boundary is not None and boundary.safe:
+                if isinstance(arg, hir.Place):
+                    arg_prelude, lowered_arg, arg_postlude = (
+                        self._materialize_place_argument(arg)
+                    )
+                    place_postlude.extend(arg_postlude)
+                elif boundary is not None and boundary.safe:
                     arg_prelude, lowered_arg = self._materialize_array_call_argument(
                         arg,
                         boundary,
@@ -3337,9 +3410,23 @@ class _Lowerer:
                 prelude.extend(arg_prelude)
                 kw_args[name] = lowered_arg
             if isinstance(node.type, ty.ObjectType):
-                return self._finish_object_call(node, func, pos_args, kw_args, prelude)
+                call_prelude, result = self._finish_object_call(
+                    node,
+                    func,
+                    pos_args,
+                    kw_args,
+                    prelude,
+                )
+                return [*call_prelude, *place_postlude], result
             if isinstance(node.type, ty.ArrayType) and node.type.length is not None:
-                return self._finish_array_call(node, func, pos_args, kw_args, prelude)
+                call_prelude, result = self._finish_array_call(
+                    node,
+                    func,
+                    pos_args,
+                    kw_args,
+                    prelude,
+                )
+                return [*call_prelude, *place_postlude], result
             result_payload = ty.optional_payload(node.type)
             if result_payload is not None:
                 result = hir.ExpressedIdentifier(
@@ -3366,7 +3453,7 @@ class _Lowerer:
                         kw_args=kw_args,
                     )
                 )
-                return prelude, replace(result, type=node.type)
+                return [*prelude, *place_postlude], replace(result, type=node.type)
             call = replace(node, func=func, pos_args=pos_args, kw_args=kw_args)
             if self._is_eager_bool_logical_call(call):
                 eager_args: list[hir.AST] = []
@@ -3382,7 +3469,11 @@ class _Lowerer:
                     ))
                     eager_args.append(target)
                 call = replace(call, pos_args=eager_args)
-            return prelude, call
+            return self._finish_scalar_call_place_writebacks(
+                call,
+                prelude,
+                place_postlude,
+            )
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
             prelude, expr = self._extract_expression(node.expr)
             return prelude, replace(node, expr=expr)
@@ -6254,7 +6345,24 @@ class _Lowerer:
                 node.value,
                 array_type,
             )
-        return [*prelude, replace(node, value=copied)]
+        assignment = replace(node, value=copied)
+        place_cell = (
+            self.current_place_parameter_cells.get(node.target.binding_id)
+            if node.target.binding_id is not None
+            else None
+        )
+        if place_cell is None:
+            return [*prelude, assignment]
+        return [
+            *prelude,
+            assignment,
+            self._intrinsic_call(
+                '__store_i64__',
+                [replace(node.target, type='int64'), place_cell],
+                ty.VOID_TYPE,
+                node.loc,
+            ),
+        ]
 
     @staticmethod
     def _copy_source_expression(node: hir.AST) -> hir.AST:
@@ -7925,6 +8033,97 @@ class _Lowerer:
             and isinstance(func.type, ty.FunctionType)
         )
 
+    def _materialize_place_argument(
+        self,
+        node: hir.Place,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier, list[hir.AST]]:
+        """Create one non-escaping pointer cell and a post-call writeback."""
+
+        if not isinstance(node.type, ty.ArrayType):
+            self._target_error(node, 'non-array place arguments')
+        target = node.target
+        if self._array_use_representation(target) is not None:
+            raise TypeError(
+                'INTERNAL ERROR: place argument retained a descriptor-free array'
+            )
+        cell_name = self._new_array_name(f'place_cell_{target.name}')
+        cell = hir.ExpressedIdentifier(node.loc, 'int64', cell_name)
+        loaded = self._intrinsic_call(
+            '__load_i64__',
+            [cell],
+            'int64',
+            node.loc,
+        )
+        writeback_target = replace(target, type='int64')
+        postlude: list[hir.AST] = [hir.Assign(
+            node.loc,
+            ty.VOID_TYPE,
+            writeback_target,
+            '=',
+            loaded,
+        )]
+        outer_cell = (
+            self.current_place_parameter_cells.get(target.binding_id)
+            if target.binding_id is not None
+            else None
+        )
+        if outer_cell is not None:
+            postlude.append(self._intrinsic_call(
+                '__store_i64__',
+                [writeback_target, outer_cell],
+                ty.VOID_TYPE,
+                node.loc,
+            ))
+        prelude: list[hir.AST] = [
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                cell_name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [self._int64_literal(node.loc, 8)],
+                    'int64',
+                    node.loc,
+                ),
+            ),
+            self._intrinsic_call(
+                '__store_i64__',
+                [writeback_target, cell],
+                ty.VOID_TYPE,
+                node.loc,
+            ),
+        ]
+        return prelude, cell, postlude
+
+    def _finish_scalar_call_place_writebacks(
+        self,
+        call: hir.FunctionCall,
+        prelude: list[hir.AST],
+        postlude: list[hir.AST],
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Keep a scalar call result live while place cells are written back."""
+
+        if not postlude:
+            return prelude, call
+        if call.type == ty.VOID_TYPE:
+            return [*prelude, call, *postlude], hir.Void(call.loc, ty.VOID_TYPE)
+        runtime_type = self._lower_runtime_value_type(call.type)
+        target = replace(self._new_flow_temp(call), type=runtime_type)
+        return [
+            *prelude,
+            hir.Declare(
+                call.loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                runtime_type,
+                replace(call, type=runtime_type),
+            ),
+            *postlude,
+        ], target
+
     def _method_runtime_type(self, type_: ty.FunctionType) -> ty.FunctionType:
         lowered = self._lower_callable_type(type_)
         assert isinstance(lowered, ty.FunctionType)
@@ -7968,6 +8167,7 @@ class _Lowerer:
         )
         prelude = [*obj_prelude]
         pos_args: list[hir.AST] = [replace(obj, type='int64')]
+        place_postlude: list[hir.AST] = []
         optional_arguments = self.call_optional_args.get(id(node), [])
         for index, arg in enumerate(node.pos_args):
             expected_type = (
@@ -7982,7 +8182,12 @@ class _Lowerer:
                 if expected_type is not None
                 else None
             )
-            if payload is not None:
+            if isinstance(arg, hir.Place):
+                arg_prelude, lowered_arg, arg_postlude = (
+                    self._materialize_place_argument(arg)
+                )
+                place_postlude.extend(arg_postlude)
+            elif payload is not None:
                 arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
             elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
                 arg_prelude, lowered_arg = self._extract_object_pointer(arg)
@@ -7994,7 +8199,12 @@ class _Lowerer:
         optional_kwargs = self.call_optional_kwargs.get(id(node), {})
         for name, arg in node.kw_args.items():
             payload = optional_kwargs.get(name)
-            if payload is not None:
+            if isinstance(arg, hir.Place):
+                arg_prelude, lowered_arg, arg_postlude = (
+                    self._materialize_place_argument(arg)
+                )
+                place_postlude.extend(arg_postlude)
+            elif payload is not None:
                 arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
             elif isinstance(arg.type, ty.ObjectType):
                 arg_prelude, lowered_arg = self._extract_object_pointer(arg)
@@ -8003,21 +8213,23 @@ class _Lowerer:
             prelude.extend(arg_prelude)
             kw_args[name] = lowered_arg
         if isinstance(node.type, ty.ObjectType):
-            return self._finish_object_call(
+            call_prelude, result = self._finish_object_call(
                 node,
                 loaded,
                 pos_args,
                 kw_args,
                 prelude,
             )
+            return [*call_prelude, *place_postlude], result
         if isinstance(node.type, ty.ArrayType) and node.type.length is not None:
-            return self._finish_array_call(
+            call_prelude, result = self._finish_array_call(
                 node,
                 loaded,
                 pos_args,
                 kw_args,
                 prelude,
             )
+            return [*call_prelude, *place_postlude], result
         result_payload = ty.optional_payload(node.type)
         if result_payload is not None:
             result = hir.ExpressedIdentifier(
@@ -8044,9 +8256,13 @@ class _Lowerer:
                     kw_args=kw_args,
                 )
             )
-            return prelude, replace(result, type=node.type)
+            return [*prelude, *place_postlude], replace(result, type=node.type)
         call = replace(node, func=loaded, pos_args=pos_args, kw_args=kw_args)
-        return prelude, call
+        return self._finish_scalar_call_place_writebacks(
+            call,
+            prelude,
+            place_postlude,
+        )
 
     def _finish_object_call(
         self,

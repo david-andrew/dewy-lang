@@ -206,6 +206,13 @@ class _InitializationChecker:
         if isinstance(node, hir.ExpressedIdentifier):
             self._require_initialized(node, initialized)
             return initialized
+        if isinstance(node, hir.Place):
+            return self._check_eager(
+                node.target,
+                initialized,
+                parameters,
+                call_stack,
+            )
         if isinstance(node, hir.Suppress):
             return self._check_eager(
                 node.item,

@@ -103,15 +103,17 @@ def _function_type_to_dewy(t: ty.FunctionType) -> str:
         parts.append(f'<{gens}>')
     args: list[str] = []
     for a in t.pos_or_kw:
-        args.append(
+        argument = (
             type_to_dewy(a.type)
             if a.name is None
             else f'{a.name}:{type_to_dewy(a.type)}'
         )
+        args.append(f'@{argument}' if a.place else argument)
     if t.rest is not None or t.kw_only:
         args.append(f'...{t.rest}' if t.rest else '...')
     for a in t.kw_only:
-        args.append(f'{a.name}:{type_to_dewy(a.type)}')
+        argument = f'{a.name}:{type_to_dewy(a.type)}'
+        args.append(f'@{argument}' if a.place else argument)
     if (
         len(t.pos_or_kw) == 1
         and t.pos_or_kw[0].name is None
@@ -193,6 +195,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
     if isinstance(node, hir.ExpressedIdentifier):
         binding = f' #{node.binding_id}' if node.binding_id is not None else ''
         return f'ExpressedIdentifier({node.name}){binding}'
+    if isinstance(node, hir.Place):
+        return 'Place(@)'
     if isinstance(node, hir.Bool):
         return f'Bool({node.value})'
     if isinstance(node, hir.Integer):
@@ -312,6 +316,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('expr', node.expr)]
     if isinstance(node, hir.Assign):
         return [('target', node.target), ('value', node.value)]
+    if isinstance(node, hir.Place):
+        return [('target', node.target)]
     if isinstance(node, hir.ArrayLiteral):
         return [(f'items[{i}]', item) for i, item in enumerate(node.items)]
     if isinstance(node, hir.ObjectLiteral):
@@ -768,6 +774,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         )
     if isinstance(node, hir.ExpressedIdentifier):
         return _text(node.name)
+    if isinstance(node, hir.Place):
+        return _seq(_text('@'), _to_doc(node.target, 0, indent))
     if isinstance(node, hir.Return):
         if node.item is None:
             return _text('return')
@@ -872,6 +880,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
 def _param_doc(p: hir.Param, indent: int) -> Doc:
     """Render a parameter as `name:type` or `name:type=default`."""
     base = _text(f'{p.name}:{type_to_dewy(p.type)}')
+    if p.place:
+        base = _seq(_text('@'), base)
     if isinstance(p, hir.BoundParam):
         return _seq(base, _text('='), _to_doc(p.value, 0, indent))
     return base
