@@ -6,7 +6,7 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import NotImplementedYet, TypeCheckError, UserError
+from dewy.semantic.errors import TypeCheckError, UserError
 from udewy.frontend import entry_point
 
 
@@ -150,11 +150,12 @@ let rendered = "{index}: {value}"
     assert rendered.parts[1].content == ': '
     assert isinstance(rendered.parts[2], hir.ExpressedIdentifier)
 
-    with pytest.raises(
-        NotImplementedYet,
-        match='materializing an interpolated string outside print or printl',
-    ):
-        codegen(SrcFile(None, source))
+    # Interpolated strings now materialize into complete runtime string
+    # descriptors: bytes are gathered per part and UAX #29 segmentation
+    # rebuilds boundaries over the joined buffer.
+    emitted = codegen(SrcFile(None, source))
+    assert '__store_u8__' in emitted
+    assert 'boundaries' in emitted
 
 
 def test_character_ranges_default_to_graphemes_and_skip_surrogates() -> None:

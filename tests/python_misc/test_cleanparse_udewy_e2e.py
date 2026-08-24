@@ -218,6 +218,60 @@ def test_bare_metal_dewy_hello_world(
 
 
 @pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_interpolated_string_values_materialize(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'interpolated_string_values.dewy'))
+    udewy_path = tmp_path / 'interpolated_string_values.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 0
+    assert capfd.readouterr().out == (
+        'value: 42!\n'
+        'length is 10\n'
+        'flag=true neg=-7\n'
+        'hello wörld \U0001f44b\n'
+        '13\n'
+        'éclair has 6 graphemes\n'
+    )
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_interpolated_string_returns_survive_later_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'interpolated_string_returns.dewy'))
+    udewy_path = tmp_path / 'interpolated_string_returns.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 0
+    assert capfd.readouterr().out == (
+        'integer: 42\n'
+        'text: Dewy\n'
+        'béziér x3 has 9 graphemes\n'
+        'run 2026\n'
+    )
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_bool_printing_and_interpolation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'bool_printing.dewy'))
+    udewy_path = tmp_path / 'bool_printing.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 0
+    assert capfd.readouterr().out == 'false\ntrue\ntrue and done\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
 def test_prelude_printl_writes_to_console(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -5,6 +5,7 @@ Split from ``lower.py``; methods run as part of ``_Lowerer``.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from typing import Literal
 
@@ -22,12 +23,14 @@ from .lowering_shared import (
     ARRAY_MUTABLE,
     ARRAY_OWNER_OFFSET,
     ARRAY_STRIDE_OFFSET,
+    FIXED_INTEGER_WIDTHS,
     STRING_BOUNDARIES_OFFSET,
     STRING_BYTE_LENGTH_OFFSET,
     STRING_DATA_OFFSET,
     STRING_DESCRIPTOR_SIZE,
     STRING_GRAPHEME_LENGTH_OFFSET,
     STRING_START_OFFSET,
+    StringResultBound,
 )
 from .runtime_unicode import (
     EXTENDED_PICTOGRAPHIC_RECORDS,
@@ -840,6 +843,689 @@ class _StringLowering:
             None,
         )
 
+        segmentation, grapheme_count = self._utf8_segmentation(
+            loc,
+            data,
+            byte_length,
+            boundaries,
+        )
+        descriptor_word = replace(descriptor, type='int64')
+        declarations = [
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                element_index_name,
+                'int64',
+                self._int64_literal(loc, 0),
+            ),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                byte_index_name,
+                'int64',
+                self._int64_literal(loc, 0),
+            ),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                byte_length_name,
+                'int64',
+                self._int64_literal(loc, 0),
+            ),
+            sum_loop,
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                data_name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [
+                        self._int64_binary(
+                            '__add__',
+                            byte_length,
+                            self._int64_literal(loc, 1),
+                            loc,
+                        )
+                    ],
+                    'int64',
+                    loc,
+                ),
+            ),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                boundaries_name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [
+                        self._int64_binary(
+                            '__mul__',
+                            self._int64_binary(
+                                '__add__',
+                                byte_length,
+                                self._int64_literal(loc, 1),
+                                loc,
+                            ),
+                            self._int64_literal(loc, 4),
+                            loc,
+                        )
+                    ],
+                    'int64',
+                    loc,
+                ),
+            ),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                descriptor.name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)],
+                    'int64',
+                    loc,
+                ),
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                STRING_BYTE_LENGTH_OFFSET,
+                self._int64_literal(loc, 0),
+                loc,
+            ),
+            hir.Assign(
+                loc,
+                ty.VOID_TYPE,
+                element_index,
+                '=',
+                self._int64_literal(loc, 0),
+            ),
+            copy_loop,
+        ]
+        return [
+            *prelude,
+            *declarations,
+            *segmentation,
+            self._store_i64_field(
+                descriptor_word,
+                STRING_DATA_OFFSET,
+                data,
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                STRING_BYTE_LENGTH_OFFSET,
+                byte_length,
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                STRING_BOUNDARIES_OFFSET,
+                boundaries,
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                STRING_GRAPHEME_LENGTH_OFFSET,
+                grapheme_count,
+                loc,
+            ),
+            self._store_i64_field(
+                descriptor_word,
+                STRING_START_OFFSET,
+                self._int64_literal(loc, 0),
+                loc,
+            ),
+        ], descriptor
+
+    @staticmethod
+    def _is_string_valued(type_: object) -> bool:
+        return isinstance(type_, (ty.StringType, ty.StringLiteralType)) or type_ in (
+            'string',
+            'grapheme',
+            'char',
+        )
+
+    @staticmethod
+    def _unwrap_transparent(node: hir.AST) -> hir.AST:
+        while (
+            isinstance(node, hir.Block)
+            and not node.scoped
+            and len(node.items) == 1
+        ):
+            node = node.items[0]
+        return node
+
+    def _analyze_string_results(self) -> None:
+        """Bound string results and select caller-owned destination functions.
+
+        Every string-returning function gets a capacity bound: a constant
+        byte count plus per-parameter multiples of string argument lengths.
+        Functions that may return frame-backed materialized strings switch to
+        the destination ABI, where the caller allocates a result block sized
+        by the bound and the callee writes the result through it.
+        """
+        self.string_result_bounds = {}
+        self.string_result_needs_dest = set()
+        self._string_bound_in_progress: set[int] = set()
+        for function in self.functions:
+            if self._is_string_valued(function.literal.rettype):
+                self._function_string_bound(function)
+        for function in self.functions:
+            if id(function) not in self.string_result_needs_dest:
+                continue
+            if function.literal.object_receiver:
+                self._target_error(
+                    function.literal,
+                    'an object method returning a materialized string',
+                )
+            if function.result_name is None:
+                function.result_name = self._new_result_name()
+        self._check_string_function_value_uses()
+
+    def _function_string_bound(self, function) -> StringResultBound | None:
+        key = id(function)
+        if key in self.string_result_bounds:
+            return self.string_result_bounds[key]
+        if key in self._string_bound_in_progress:
+            return None
+        self._string_bound_in_progress.add(key)
+        literal = function.literal
+        returned = self._returned_string_expressions(literal)
+        local_cache: dict[int, StringResultBound | None] = {}
+        bound: StringResultBound | None = StringResultBound(0, (), False)
+        materialized = False
+        for expr in returned:
+            expr_bound = self._string_value_bound(expr, literal, local_cache)
+            if expr_bound is not None and expr_bound.materialized:
+                materialized = True
+            if bound is None or expr_bound is None:
+                bound = None
+            else:
+                bound = bound.combined_max(expr_bound)
+        self._string_bound_in_progress.discard(key)
+        if materialized or any(
+            isinstance(self._unwrap_transparent(expr), hir.InterpolatedString)
+            for expr in returned
+        ):
+            self.string_result_needs_dest.add(key)
+            if bound is None:
+                self._target_error(
+                    literal,
+                    'a returned string whose size cannot be bounded at compile time',
+                )
+        self.string_result_bounds[key] = bound
+        return bound
+
+    def _returned_string_expressions(self, literal: hir.FunctionLiteral) -> list[hir.AST]:
+        results: list[hir.AST] = []
+
+        def note(expr: hir.AST) -> None:
+            if self._is_string_valued(expr.type):
+                results.append(expr)
+
+        def trailing(expr: hir.AST) -> None:
+            expr = self._unwrap_transparent(expr)
+            if isinstance(expr, hir.Block):
+                if expr.items:
+                    trailing(expr.items[-1])
+                return
+            if isinstance(expr, hir.Flow):
+                for arm in expr.arms:
+                    trailing(arm.body)
+                if expr.default is not None:
+                    trailing(expr.default)
+                return
+            if isinstance(expr, hir.Return):
+                return
+            note(expr)
+
+        def walk(node: object) -> None:
+            if isinstance(node, hir.FunctionLiteral) and node is not literal:
+                return
+            if isinstance(node, hir.Return) and node.item is not None:
+                note(node.item)
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (
+                        value if isinstance(value, (list, tuple)) else [value]
+                    ):
+                        if isinstance(child, hir.AST):
+                            walk(child)
+                        elif isinstance(child, hir.ObjectField):
+                            walk(child.value)
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                walk(item)
+
+        walk(literal.body)
+        trailing(literal.body)
+        return results
+
+    def _string_local_candidates(
+        self,
+        literal: hir.FunctionLiteral,
+    ) -> dict[int, list[hir.AST]]:
+        candidates: dict[int, list[hir.AST]] = {}
+
+        def walk(node: object) -> None:
+            if isinstance(node, hir.FunctionLiteral) and node is not literal:
+                return
+            if (
+                isinstance(node, hir.Declare)
+                and node.binding_id is not None
+                and self._is_string_valued(node.annotation or node.expr.type)
+            ):
+                candidates.setdefault(node.binding_id, []).append(node.expr)
+            if (
+                isinstance(node, hir.Assign)
+                and node.target.binding_id is not None
+                and self._is_string_valued(node.target.type)
+            ):
+                candidates.setdefault(node.target.binding_id, []).append(node.value)
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (
+                        value if isinstance(value, (list, tuple)) else [value]
+                    ):
+                        if isinstance(child, hir.AST):
+                            walk(child)
+                        elif isinstance(child, hir.ObjectField):
+                            walk(child.value)
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                walk(item)
+
+        walk(literal.body)
+        return candidates
+
+    def _string_value_bound(
+        self,
+        expr: hir.AST,
+        literal: hir.FunctionLiteral,
+        local_cache: dict[int, StringResultBound | None],
+        _local_in_progress: set[int] | None = None,
+    ) -> StringResultBound | None:
+        in_progress = set() if _local_in_progress is None else _local_in_progress
+        expr = self._unwrap_transparent(expr)
+        if isinstance(expr, hir.String):
+            return StringResultBound(len(expr.content.encode('utf-8')), (), False)
+        if isinstance(expr.type, ty.StringLiteralType):
+            return StringResultBound(
+                len(expr.type.value.encode('utf-8')), (), False
+            )
+        if isinstance(expr, hir.InterpolatedString):
+            bound = StringResultBound(0, (), True)
+            for part in expr.parts:
+                part_bound = self._string_part_bound(
+                    part, literal, local_cache, in_progress
+                )
+                if part_bound is None:
+                    return None
+                bound = bound.combined_sum(part_bound)
+            return bound
+        if isinstance(expr, hir.ExpressedIdentifier):
+            if expr.binding_id is not None:
+                for index, param in enumerate(literal.pos_or_kw_args):
+                    if param.binding_id == expr.binding_id:
+                        return StringResultBound(0, ((index, 1),), False)
+                if expr.binding_id in local_cache:
+                    return local_cache[expr.binding_id]
+                if expr.binding_id in in_progress:
+                    return None
+                candidates = self._string_local_candidates(literal).get(
+                    expr.binding_id
+                )
+                if candidates:
+                    in_progress.add(expr.binding_id)
+                    bound: StringResultBound | None = StringResultBound(0, (), False)
+                    for candidate in candidates:
+                        candidate_bound = self._string_value_bound(
+                            candidate, literal, local_cache, in_progress
+                        )
+                        if bound is None or candidate_bound is None:
+                            bound = None
+                        else:
+                            bound = bound.combined_max(candidate_bound)
+                    in_progress.discard(expr.binding_id)
+                    local_cache[expr.binding_id] = bound
+                    return bound
+            return None
+        if isinstance(expr, (hir.StringIndex, hir.StringSlice)):
+            return self._string_value_bound(
+                expr.string, literal, local_cache, in_progress
+            )
+        if isinstance(expr, hir.Flow):
+            bound = StringResultBound(0, (), False)
+            bodies = [arm.body for arm in expr.arms]
+            if expr.default is not None:
+                bodies.append(expr.default)
+            for body in bodies:
+                body_bound = self._string_value_bound(
+                    body, literal, local_cache, in_progress
+                )
+                if body_bound is None:
+                    return None
+                bound = bound.combined_max(body_bound)
+            return bound
+        if isinstance(expr, hir.FunctionCall):
+            callee = self._direct_call_function(expr)
+            if callee is None:
+                return None
+            callee_bound = self._function_string_bound(callee)
+            if callee_bound is None:
+                return None
+            # The call's result is copied into this frame, so it counts as
+            # materialized storage; its size composes the callee bound with
+            # bounds for this call's string arguments.
+            composed = StringResultBound(callee_bound.const_bytes, (), True)
+            for index, count in callee_bound.counts:
+                params = callee.literal.pos_or_kw_args
+                if index >= len(params):
+                    return None
+                argument = (
+                    expr.pos_args[index]
+                    if index < len(expr.pos_args)
+                    else expr.kw_args.get(params[index].name)
+                )
+                if argument is None:
+                    return None
+                argument_bound = self._string_value_bound(
+                    argument, literal, local_cache, in_progress
+                )
+                if argument_bound is None:
+                    return None
+                for _ in range(count):
+                    composed = composed.combined_sum(argument_bound)
+            return composed
+        return None
+
+    def _string_part_bound(
+        self,
+        part: hir.AST,
+        literal: hir.FunctionLiteral,
+        local_cache: dict[int, StringResultBound | None],
+        in_progress: set[int],
+    ) -> StringResultBound | None:
+        part_type = part.type
+        if isinstance(part_type, ty.IntegerLiteralType):
+            return StringResultBound(len(str(part_type.value)), (), False)
+        if part_type == 'bool':
+            return StringResultBound(5, (), False)
+        if isinstance(part_type, str) and (
+            part_type == 'int' or part_type in FIXED_INTEGER_WIDTHS
+        ):
+            return StringResultBound(20, (), False)
+        if self._is_string_valued(part_type):
+            return self._string_value_bound(
+                part, literal, local_cache, in_progress
+            )
+        return None
+
+    def _check_string_function_value_uses(self) -> None:
+        """Reject destination-ABI functions escaping as first-class values.
+
+        Their lowered signature carries a hidden result parameter, so an
+        indirect call through a plain function type would corrupt memory.
+        """
+        call_positions: set[int] = set()
+
+        def mark(node: object) -> None:
+            if (
+                isinstance(node, hir.FunctionCall)
+                and self._direct_call_function(node) is not None
+            ):
+                func = self._unwrap_transparent(node.func)
+                call_positions.add(id(func))
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (
+                        value if isinstance(value, (list, tuple)) else [value]
+                    ):
+                        if isinstance(child, hir.AST):
+                            mark(child)
+                        elif isinstance(child, hir.ObjectField):
+                            mark(child.value)
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                mark(item)
+
+        def check(node: object) -> None:
+            if isinstance(node, hir.ExpressedIdentifier) and id(node) not in call_positions:
+                binding = self.identifier_bindings.get(id(node))
+                if (
+                    binding is not None
+                    and binding.kind == 'function'
+                    and binding.function is not None
+                    and id(binding.function) in self.string_result_needs_dest
+                ):
+                    self._target_error(
+                        node,
+                        'a function returning a materialized string used as a value',
+                    )
+            if (
+                isinstance(node, hir.FunctionLiteral)
+                and id(node) not in call_positions
+            ):
+                function = self.function_by_literal.get(id(node))
+                if (
+                    function is not None
+                    and id(function) in self.string_result_needs_dest
+                    and function.logical_name == 'anon'
+                ):
+                    self._target_error(
+                        node,
+                        'a function literal returning a materialized string used as a value',
+                    )
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (
+                        value if isinstance(value, (list, tuple)) else [value]
+                    ):
+                        if isinstance(child, hir.AST):
+                            check(child)
+                        elif isinstance(child, hir.ObjectField):
+                            check(child.value)
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                check(item)
+
+        mark(self.root)
+        check(self.root)
+
+    def _string_result_write(self, item: hir.AST) -> list[hir.AST]:
+        """Write one returned string into the caller-owned result block."""
+        if self.current_string_result is None:
+            raise TypeError('INTERNAL ERROR: missing string result cell')
+        node = self._unwrap_transparent(item)
+        if not isinstance(node, hir.InterpolatedString):
+            # A single-field interpolation is exactly "copy this string value
+            # with re-segmentation", which keeps one unified write path.
+            node = hir.InterpolatedString(item.loc, ty.StringType(), [item])
+        statements, _result = self._materialize_interpolated_string(
+            node,
+            dest=self.current_string_result,
+        )
+        return [
+            *statements,
+            hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
+        ]
+
+    def _finish_string_call(
+        self,
+        node: hir.FunctionCall,
+        func: hir.AST,
+        pos_args: list[hir.AST],
+        kw_args: dict[str, hir.AST],
+        prelude: list[hir.AST],
+        function,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Allocate and pre-point a caller-owned string result block.
+
+        Layout: 40-byte descriptor, then ``(capacity + 1) * 4`` boundary
+        bytes, then ``capacity + 1`` data bytes. The descriptor's data and
+        boundaries fields are initialized to point into the block so the
+        callee can materialize through them.
+        """
+        loc = node.loc
+        bound = self.string_result_bounds.get(id(function))
+        if bound is None:
+            self._target_error(
+                node,
+                'a string result whose size cannot be bounded at compile time',
+            )
+        capacity: hir.AST = self._int64_literal(loc, bound.const_bytes)
+        params = function.literal.pos_or_kw_args
+        for index, count in bound.counts:
+            if count == 0:
+                continue
+            parameter = params[index] if index < len(params) else None
+            if parameter is None or isinstance(parameter, hir.BoundParam):
+                self._target_error(
+                    node,
+                    'a string result sized by a defaulted string parameter',
+                )
+            # Normalized calls give every optional parameter a value slot and
+            # a presence-flag slot, so map the parameter index to its slot.
+            slot = index + sum(
+                1
+                for previous in params[:index]
+                if isinstance(previous, hir.BoundParam)
+            )
+            argument = pos_args[slot] if slot < len(pos_args) else None
+            if argument is None:
+                self._target_error(
+                    node,
+                    'a string result capacity argument that cannot be located',
+                )
+            if not isinstance(argument, hir.ExpressedIdentifier):
+                bound_name = self._new_string_temp(loc, 'int64', 'capacity_arg').name
+                prelude.append(
+                    hir.Declare(loc, ty.VOID_TYPE, 'let', bound_name, 'int64', argument)
+                )
+                argument = hir.ExpressedIdentifier(loc, 'int64', bound_name)
+                pos_args[slot] = argument
+            term: hir.AST = self._load_i64_field(
+                replace(argument, type='int64'),
+                STRING_BYTE_LENGTH_OFFSET,
+                loc,
+            )
+            if count != 1:
+                term = self._int64_binary(
+                    '__mul__', term, self._int64_literal(loc, count), loc
+                )
+            capacity = self._int64_binary('__add__', capacity, term, loc)
+        capacity_name = self._new_string_temp(loc, 'int64', 'result_capacity').name
+        capacity_ident = hir.ExpressedIdentifier(loc, 'int64', capacity_name)
+        result = self._new_string_temp(loc, node.type, 'result_block')
+        result_word = replace(result, type='int64')
+        boundaries_pointer = self._int64_binary(
+            '__add__',
+            result_word,
+            self._int64_literal(loc, STRING_DESCRIPTOR_SIZE),
+            loc,
+        )
+        data_pointer = self._int64_binary(
+            '__add__',
+            boundaries_pointer,
+            self._int64_binary(
+                '__mul__',
+                self._int64_binary(
+                    '__add__', capacity_ident, self._int64_literal(loc, 1), loc
+                ),
+                self._int64_literal(loc, 4),
+                loc,
+            ),
+            loc,
+        )
+        prelude.extend([
+            hir.Declare(loc, ty.VOID_TYPE, 'let', capacity_name, 'int64', capacity),
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                result.name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [
+                        self._int64_binary(
+                            '__add__',
+                            self._int64_binary(
+                                '__mul__',
+                                capacity_ident,
+                                self._int64_literal(loc, 5),
+                                loc,
+                            ),
+                            self._int64_literal(loc, STRING_DESCRIPTOR_SIZE + 5),
+                            loc,
+                        )
+                    ],
+                    'int64',
+                    loc,
+                ),
+            ),
+            self._store_i64_field(
+                result_word,
+                STRING_BOUNDARIES_OFFSET,
+                boundaries_pointer,
+                loc,
+            ),
+            self._store_i64_field(result_word, STRING_DATA_OFFSET, data_pointer, loc),
+            self._store_i64_field(
+                result_word,
+                STRING_BYTE_LENGTH_OFFSET,
+                self._int64_literal(loc, 0),
+                loc,
+            ),
+            self._store_i64_field(
+                result_word,
+                STRING_GRAPHEME_LENGTH_OFFSET,
+                self._int64_literal(loc, 0),
+                loc,
+            ),
+            self._store_i64_field(
+                result_word,
+                STRING_START_OFFSET,
+                self._int64_literal(loc, 0),
+                loc,
+            ),
+            replace(
+                node,
+                type=ty.VOID_TYPE,
+                func=func,
+                pos_args=[*pos_args, result_word],
+                kw_args=kw_args,
+            ),
+        ])
+        return prelude, result
+
+    def _utf8_segmentation(
+        self,
+        loc: Span,
+        data: hir.ExpressedIdentifier,
+        byte_length: hir.ExpressedIdentifier,
+        boundaries: hir.ExpressedIdentifier,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Emit UAX #29 grapheme segmentation over a UTF-8 byte buffer.
+
+        Stores ``uint32`` boundary byte offsets into ``boundaries`` (a
+        leading 0, one entry per grapheme start, and a final
+        ``byte_length`` entry) and returns the statements together with
+        the identifier holding the grapheme count. ``boundaries`` must
+        provide ``(byte_length + 1) * 4`` bytes of storage.
+        """
         utf8_index_name = self._new_string_temp(loc, 'int64', 'utf8_index').name
         scalar_start_name = self._new_string_temp(loc, 'int64', 'scalar_start').name
         scalar_name = self._new_string_temp(loc, 'int64', 'scalar').name
@@ -1514,112 +2200,6 @@ class _StringLowering:
             ],
             None,
         )
-        descriptor_word = replace(descriptor, type='int64')
-        declarations = [
-            hir.Declare(
-                loc,
-                ty.VOID_TYPE,
-                'let',
-                element_index_name,
-                'int64',
-                self._int64_literal(loc, 0),
-            ),
-            hir.Declare(
-                loc,
-                ty.VOID_TYPE,
-                'let',
-                byte_index_name,
-                'int64',
-                self._int64_literal(loc, 0),
-            ),
-            hir.Declare(
-                loc,
-                ty.VOID_TYPE,
-                'let',
-                byte_length_name,
-                'int64',
-                self._int64_literal(loc, 0),
-            ),
-            sum_loop,
-            hir.Declare(
-                loc,
-                ty.VOID_TYPE,
-                'let',
-                data_name,
-                'int64',
-                self._intrinsic_call(
-                    '__alloca__',
-                    [
-                        self._int64_binary(
-                            '__add__',
-                            byte_length,
-                            self._int64_literal(loc, 1),
-                            loc,
-                        )
-                    ],
-                    'int64',
-                    loc,
-                ),
-            ),
-            hir.Declare(
-                loc,
-                ty.VOID_TYPE,
-                'let',
-                boundaries_name,
-                'int64',
-                self._intrinsic_call(
-                    '__alloca__',
-                    [
-                        self._int64_binary(
-                            '__mul__',
-                            self._int64_binary(
-                                '__add__',
-                                byte_length,
-                                self._int64_literal(loc, 1),
-                                loc,
-                            ),
-                            self._int64_literal(loc, 4),
-                            loc,
-                        )
-                    ],
-                    'int64',
-                    loc,
-                ),
-            ),
-            hir.Declare(
-                loc,
-                ty.VOID_TYPE,
-                'let',
-                descriptor.name,
-                'int64',
-                self._intrinsic_call(
-                    '__alloca__',
-                    [self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)],
-                    'int64',
-                    loc,
-                ),
-            ),
-            self._store_i64_field(
-                descriptor_word,
-                STRING_BYTE_LENGTH_OFFSET,
-                self._int64_literal(loc, 0),
-                loc,
-            ),
-            hir.Assign(
-                loc,
-                ty.VOID_TYPE,
-                element_index,
-                '=',
-                self._int64_literal(loc, 0),
-            ),
-            copy_loop,
-            self._intrinsic_call(
-                '__store_u32__',
-                [hir.Integer(loc, 'uint32', t0.base10, 0), boundaries],
-                ty.VOID_TYPE,
-                loc,
-            ),
-        ]
         state_declarations = [
             (utf8_index_name, 'int64', self._int64_literal(loc, 0)),
             (scalar_start_name, 'int64', self._int64_literal(loc, 0)),
@@ -1633,37 +2213,504 @@ class _StringLowering:
             (has_break_name, 'bool', hir.Bool(loc, 'bool', True)),
         ]
         return [
-            *prelude,
-            *declarations,
+            self._intrinsic_call(
+                '__store_u32__',
+                [hir.Integer(loc, 'uint32', t0.base10, 0), boundaries],
+                ty.VOID_TYPE,
+                loc,
+            ),
             *[
                 hir.Declare(loc, ty.VOID_TYPE, 'let', name, type_, value)
                 for name, type_, value in state_declarations
             ],
             scan_loop,
             final_boundary,
-            self._store_i64_field(
-                descriptor_word,
-                STRING_DATA_OFFSET,
-                data,
+        ], grapheme_count
+
+    def _materialize_interpolated_string(
+        self,
+        node: hir.InterpolatedString,
+        dest: hir.ExpressedIdentifier | None = None,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Build one contiguous runtime string from interpolated parts.
+
+        Writes every part's UTF-8 bytes into a byte buffer, then runs UAX #29
+        segmentation so the result is a complete string descriptor with
+        correct grapheme boundaries even when clusters span part joins.
+
+        Without ``dest`` the storage lives in the current frame. With ``dest``
+        — a caller-owned result block whose descriptor already points its
+        ``data`` and ``boundaries`` fields at caller storage sized by the
+        function's string-result capacity formula — the bytes, boundaries,
+        and descriptor fields are written through ``dest`` instead, so the
+        result survives the return.
+        """
+        loc = node.loc
+        statements: list[hir.AST] = []
+        # Module-startup values outlive the startup frame, so their storage
+        # must be static — which needs a compile-time capacity computed from
+        # the parts. Everything else lives in the current frame with runtime
+        # sizing.
+        allocator = (
+            '__static_alloca__' if self.lowering_module_startup else '__alloca__'
+        )
+        static_capacity: int | None = None
+        if self.lowering_module_startup and dest is None:
+            static_capacity = 0
+            for part in node.parts:
+                part_type = part.type
+                if isinstance(part_type, ty.IntegerLiteralType):
+                    static_capacity += len(str(part_type.value))
+                elif part_type == 'bool':
+                    static_capacity += 5
+                elif isinstance(part_type, str) and (
+                    part_type == 'int' or part_type in FIXED_INTEGER_WIDTHS
+                ):
+                    static_capacity += 20
+                elif isinstance(part_type, ty.StringLiteralType):
+                    static_capacity += len(part_type.value.encode('utf-8'))
+                elif isinstance(part, hir.String):
+                    static_capacity += len(part.content.encode('utf-8'))
+                else:
+                    self._target_error(
+                        part,
+                        'a module-level interpolated string field without a '
+                        'compile-time size bound',
+                    )
+        # Each piece normalizes to a (length, source byte pointer) pair of
+        # frame-local int64 bindings.
+        pieces: list[tuple[hir.ExpressedIdentifier, hir.ExpressedIdentifier]] = []
+
+        def declare(suffix: str, type_: str, value: hir.AST) -> hir.ExpressedIdentifier:
+            name = self._new_string_temp(loc, type_, suffix).name
+            statements.append(
+                hir.Declare(loc, ty.VOID_TYPE, 'let', name, type_, value)
+            )
+            return hir.ExpressedIdentifier(loc, type_, name)
+
+        def assign(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.AST:
+            return hir.Assign(loc, ty.VOID_TYPE, target, '=', value)
+
+        def add_piece(length: hir.AST, source: hir.AST) -> None:
+            pieces.append((
+                declare('piece_length', 'int64', length),
+                declare('piece_source', 'int64', source),
+            ))
+
+        def string_piece(part: hir.AST) -> None:
+            prelude, descriptor = self._extract_expression(part)
+            statements.extend(prelude)
+            word = (
+                replace(descriptor, type='int64')
+                if isinstance(descriptor, hir.ExpressedIdentifier)
+                else descriptor
+            )
+            add_piece(
+                self._load_i64_field(word, STRING_BYTE_LENGTH_OFFSET, loc),
+                self._string_data_start(word, loc),
+            )
+
+        def static_text(content: str) -> hir.ExpressedIdentifier:
+            prelude, descriptor = self._extract_string_literal(
+                hir.String(loc, ty.StringLiteralType(content), content)
+            )
+            statements.extend(prelude)
+            return replace(descriptor, type='int64')
+
+        def bool_piece(part: hir.AST) -> None:
+            prelude, value = self._extract_expression(part)
+            statements.extend(prelude)
+            true_text = static_text('true')
+            false_text = static_text('false')
+            selected = declare('bool_text', 'int64', false_text)
+            statements.append(
+                hir.Flow(
+                    loc,
+                    ty.VOID_TYPE,
+                    [hir.IfArm(loc, ty.VOID_TYPE, value, assign(selected, true_text))],
+                    None,
+                )
+            )
+            add_piece(
+                self._load_i64_field(selected, STRING_BYTE_LENGTH_OFFSET, loc),
+                self._string_data_start(selected, loc),
+            )
+
+        def store_digit(value: hir.AST, address: hir.AST) -> hir.AST:
+            return self._intrinsic_call(
+                '__store_u8__',
+                [replace(value, type='uint8'), address],
+                ty.VOID_TYPE,
+                loc,
+            )
+
+        def integer_piece(part: hir.AST) -> None:
+            prelude, raw = self._extract_expression(part)
+            statements.extend(prelude)
+            digits = declare(
+                'digits',
+                'int64',
+                self._intrinsic_call(
+                    allocator,
+                    [self._int64_literal(loc, 20)],
+                    'int64',
+                    loc,
+                ),
+            )
+            position = declare('digit_position', 'int64', self._int64_literal(loc, 20))
+            value = declare(
+                'digit_value',
+                'int64',
+                raw if raw.type == 'int64' else replace(raw, type='int64'),
+            )
+            negative = declare(
+                'digit_negative',
+                'bool',
+                self._int64_comparison('__lt__', value, self._int64_literal(loc, 0), loc),
+            )
+            source = declare('piece_source', 'int64', self._int64_literal(loc, 0))
+            length = declare('piece_length', 'int64', self._int64_literal(loc, 0))
+            minimum_text = static_text('-9223372036854775808')
+
+            def emit_digit() -> list[hir.AST]:
+                return [
+                    assign(
+                        position,
+                        self._int64_binary(
+                            '__sub__', position, self._int64_literal(loc, 1), loc
+                        ),
+                    ),
+                    store_digit(
+                        self._int64_binary(
+                            '__add__',
+                            self._int64_literal(loc, 48),
+                            self._int64_binary(
+                                '__mod__', value, self._int64_literal(loc, 10), loc
+                            ),
+                            loc,
+                        ),
+                        self._int64_binary('__add__', digits, position, loc),
+                    ),
+                    assign(
+                        value,
+                        self._int64_binary(
+                            '__floordiv__', value, self._int64_literal(loc, 10), loc
+                        ),
+                    ),
+                ]
+
+            render = hir.Block(
+                loc,
+                ty.VOID_TYPE,
+                [
+                    hir.Flow(
+                        loc,
+                        ty.VOID_TYPE,
+                        [
+                            hir.IfArm(
+                                loc,
+                                ty.VOID_TYPE,
+                                negative,
+                                assign(
+                                    value,
+                                    self._int64_binary(
+                                        '__sub__',
+                                        self._int64_literal(loc, 0),
+                                        value,
+                                        loc,
+                                    ),
+                                ),
+                            )
+                        ],
+                        None,
+                    ),
+                    *emit_digit(),
+                    hir.Flow(
+                        loc,
+                        ty.VOID_TYPE,
+                        [
+                            hir.LoopArm(
+                                loc,
+                                ty.VOID_TYPE,
+                                self._int64_comparison(
+                                    '__lt__',
+                                    self._int64_literal(loc, 0),
+                                    value,
+                                    loc,
+                                ),
+                                hir.Block(loc, ty.VOID_TYPE, emit_digit(), True),
+                            )
+                        ],
+                        None,
+                    ),
+                    hir.Flow(
+                        loc,
+                        ty.VOID_TYPE,
+                        [
+                            hir.IfArm(
+                                loc,
+                                ty.VOID_TYPE,
+                                negative,
+                                hir.Block(
+                                    loc,
+                                    ty.VOID_TYPE,
+                                    [
+                                        assign(
+                                            position,
+                                            self._int64_binary(
+                                                '__sub__',
+                                                position,
+                                                self._int64_literal(loc, 1),
+                                                loc,
+                                            ),
+                                        ),
+                                        store_digit(
+                                            self._int64_literal(loc, 45),
+                                            self._int64_binary(
+                                                '__add__', digits, position, loc
+                                            ),
+                                        ),
+                                    ],
+                                    True,
+                                ),
+                            )
+                        ],
+                        None,
+                    ),
+                    assign(
+                        source,
+                        self._int64_binary('__add__', digits, position, loc),
+                    ),
+                    assign(
+                        length,
+                        self._int64_binary(
+                            '__sub__',
+                            self._int64_literal(loc, 20),
+                            position,
+                            loc,
+                        ),
+                    ),
+                ],
+                True,
+            )
+            # Negating the minimum value would overflow; use its literal text.
+            statements.append(
+                hir.Flow(
+                    loc,
+                    ty.VOID_TYPE,
+                    [
+                        hir.IfArm(
+                            loc,
+                            ty.VOID_TYPE,
+                            self._int64_comparison(
+                                '__eq__',
+                                value,
+                                self._int64_literal(loc, -9223372036854775808),
+                                loc,
+                            ),
+                            hir.Block(
+                                loc,
+                                ty.VOID_TYPE,
+                                [
+                                    assign(
+                                        source,
+                                        self._string_data_start(minimum_text, loc),
+                                    ),
+                                    assign(length, self._int64_literal(loc, 20)),
+                                ],
+                                True,
+                            ),
+                        )
+                    ],
+                    render,
+                )
+            )
+            pieces.append((length, source))
+
+        for part in node.parts:
+            part_type = part.type
+            if isinstance(part_type, ty.IntegerLiteralType):
+                string_piece(
+                    hir.String(
+                        part.loc,
+                        ty.StringLiteralType(str(part_type.value)),
+                        str(part_type.value),
+                    )
+                )
+            elif isinstance(part_type, (ty.StringLiteralType, ty.StringType)) or (
+                isinstance(part_type, str)
+                and part_type in {'string', 'grapheme', 'char'}
+            ):
+                string_piece(part)
+            elif part_type == 'bool':
+                bool_piece(part)
+            elif isinstance(part_type, str) and (
+                part_type == 'int' or part_type in FIXED_INTEGER_WIDTHS
+            ):
+                integer_piece(part)
+            else:
+                self._target_error(
+                    part,
+                    'materializing an interpolation field of type '
+                    f'`{type_to_dewy(part_type)}`',
+                )
+
+        total = declare('byte_length', 'int64', self._int64_literal(loc, 0))
+        for length, _source in pieces:
+            statements.append(
+                assign(total, self._int64_binary('__add__', total, length, loc))
+            )
+        dest_word = replace(dest, type='int64') if dest is not None else None
+        data = declare(
+            'data',
+            'int64',
+            self._load_i64_field(dest_word, STRING_DATA_OFFSET, loc)
+            if dest_word is not None
+            else self._intrinsic_call(
+                allocator,
+                [
+                    self._int64_literal(loc, static_capacity + 1)
+                    if static_capacity is not None
+                    else self._int64_binary(
+                        '__add__', total, self._int64_literal(loc, 1), loc
+                    )
+                ],
+                'int64',
                 loc,
             ),
-            self._store_i64_field(
-                descriptor_word,
-                STRING_BYTE_LENGTH_OFFSET,
-                byte_length,
+        )
+        cursor = declare('cursor', 'int64', self._int64_literal(loc, 0))
+        for length, source in pieces:
+            index = declare('copy_index', 'int64', self._int64_literal(loc, 0))
+            statements.append(
+                hir.Flow(
+                    loc,
+                    ty.VOID_TYPE,
+                    [
+                        hir.LoopArm(
+                            loc,
+                            ty.VOID_TYPE,
+                            self._int64_comparison('__lt__', index, length, loc),
+                            hir.Block(
+                                loc,
+                                ty.VOID_TYPE,
+                                [
+                                    self._intrinsic_call(
+                                        '__store_u8__',
+                                        [
+                                            self._intrinsic_call(
+                                                '__load_u8__',
+                                                [
+                                                    self._int64_binary(
+                                                        '__add__', source, index, loc
+                                                    )
+                                                ],
+                                                'uint8',
+                                                loc,
+                                            ),
+                                            self._int64_binary(
+                                                '__add__',
+                                                self._int64_binary(
+                                                    '__add__', data, cursor, loc
+                                                ),
+                                                index,
+                                                loc,
+                                            ),
+                                        ],
+                                        ty.VOID_TYPE,
+                                        loc,
+                                    ),
+                                    assign(
+                                        index,
+                                        self._int64_binary(
+                                            '__add__',
+                                            index,
+                                            self._int64_literal(loc, 1),
+                                            loc,
+                                        ),
+                                    ),
+                                ],
+                                True,
+                            ),
+                        )
+                    ],
+                    None,
+                )
+            )
+            statements.append(
+                assign(cursor, self._int64_binary('__add__', cursor, length, loc))
+            )
+        boundaries = declare(
+            'boundaries',
+            'int64',
+            self._load_i64_field(dest_word, STRING_BOUNDARIES_OFFSET, loc)
+            if dest_word is not None
+            else self._intrinsic_call(
+                allocator,
+                [
+                    self._int64_literal(loc, (static_capacity + 1) * 4)
+                    if static_capacity is not None
+                    else self._int64_binary(
+                        '__mul__',
+                        self._int64_binary(
+                            '__add__', total, self._int64_literal(loc, 1), loc
+                        ),
+                        self._int64_literal(loc, 4),
+                        loc,
+                    )
+                ],
+                'int64',
                 loc,
             ),
-            self._store_i64_field(
-                descriptor_word,
-                STRING_BOUNDARIES_OFFSET,
-                boundaries,
+        )
+        segmentation, grapheme_count = self._utf8_segmentation(
+            loc,
+            data,
+            total,
+            boundaries,
+        )
+        statements.extend(segmentation)
+        if dest is not None and dest_word is not None:
+            statements.extend([
+                self._store_i64_field(
+                    dest_word, STRING_BYTE_LENGTH_OFFSET, total, loc
+                ),
+                self._store_i64_field(
+                    dest_word, STRING_GRAPHEME_LENGTH_OFFSET, grapheme_count, loc
+                ),
+                self._store_i64_field(
+                    dest_word,
+                    STRING_START_OFFSET,
+                    self._int64_literal(loc, 0),
+                    loc,
+                ),
+            ])
+            return statements, dest
+        descriptor = self._new_string_temp(loc, node.type)
+        descriptor_word = replace(descriptor, type='int64')
+        statements.extend([
+            hir.Declare(
                 loc,
+                ty.VOID_TYPE,
+                'let',
+                descriptor.name,
+                'int64',
+                self._intrinsic_call(
+                    allocator,
+                    [self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)],
+                    'int64',
+                    loc,
+                ),
+            ),
+            self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, data, loc),
+            self._store_i64_field(
+                descriptor_word, STRING_BYTE_LENGTH_OFFSET, total, loc
             ),
             self._store_i64_field(
-                descriptor_word,
-                STRING_GRAPHEME_LENGTH_OFFSET,
-                grapheme_count,
-                loc,
+                descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc
+            ),
+            self._store_i64_field(
+                descriptor_word, STRING_GRAPHEME_LENGTH_OFFSET, grapheme_count, loc
             ),
             self._store_i64_field(
                 descriptor_word,
@@ -1671,7 +2718,9 @@ class _StringLowering:
                 self._int64_literal(loc, 0),
                 loc,
             ),
-        ], descriptor
+        ])
+        return statements, descriptor
+
 
     def _string_to_uint32_array(
         self,

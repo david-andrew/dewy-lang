@@ -42,6 +42,12 @@ from ...semantic import builtins, hir, ty
 from ...semantic.analyze.effects import ProgramEffects, analyze_effects
 from ...semantic.errors import NotImplementedYet
 from ...semantic.hir_display import type_to_dewy
+from .lowering_arrays import _ArrayLowering
+from .lowering_flow import _FlowLowering
+from .lowering_iterators import _IteratorLowering
+from .lowering_objects import _ObjectLowering
+from .lowering_optionals import _OptionalLowering
+from .lowering_places import _PlaceLowering
 from .lowering_shared import (
     ARRAY_LENGTH_OFFSET,
     STRING_GRAPHEME_LENGTH_OFFSET,
@@ -51,17 +57,12 @@ from .lowering_shared import (
     ArrayUse,
     LoweredFunction,
     LoweredProgram,
+    StringResultBound,
     _Binding,
     _FunctionDef,
     _Scope,
 )
 from .lowering_strings import _StringLowering
-from .lowering_arrays import _ArrayLowering
-from .lowering_objects import _ObjectLowering
-from .lowering_places import _PlaceLowering
-from .lowering_optionals import _OptionalLowering
-from .lowering_iterators import _IteratorLowering
-from .lowering_flow import _FlowLowering
 
 
 class _Lowerer(
@@ -135,6 +136,10 @@ class _Lowerer(
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_array_result: hir.ExpressedIdentifier | None = None
+        self.current_string_result: hir.ExpressedIdentifier | None = None
+        self.string_result_bounds: dict[int, StringResultBound | None] = {}
+        self.string_result_needs_dest: set[int] = set()
+        self.string_result_call_targets: dict[int, _FunctionDef] = {}
         self.current_place_parameter_cells: dict[
             int,
             hir.ExpressedIdentifier,
@@ -161,6 +166,7 @@ class _Lowerer(
             function_body=False,
         )
         self._classify_array_representations()
+        self._analyze_string_results()
         self._check_captures()
         self.needs_startup = any(
             not (
@@ -286,9 +292,13 @@ class _Lowerer(
                 literal,
                 'optional array returns require array ownership lowering',
             )
+        string_result = id(function) in self.string_result_needs_dest
         rettype = (
             ty.VOID_TYPE
-            if result_payload is not None or object_result or array_result
+            if result_payload is not None
+            or object_result
+            or array_result
+            or string_result
             else self._target_scalar_type(literal.rettype, literal)
         )
         lowered_pos: list[hir.Param | hir.BoundParam] = []
@@ -537,7 +547,13 @@ class _Lowerer(
         result_target = None
         object_result_target = None
         array_result_target = None
-        if result_payload is not None or object_result or array_result:
+        string_result_target = None
+        if (
+            result_payload is not None
+            or object_result
+            or array_result
+            or string_result
+        ):
             assert function.result_name is not None
             lowered_pos.append(
                 hir.Param(function.result_name, 'int64')
@@ -551,11 +567,14 @@ class _Lowerer(
                 object_result_target = target
             elif array_result:
                 array_result_target = target
+            elif string_result:
+                string_result_target = target
             else:
                 result_target = target
         previous_result = self.current_optional_result
         previous_object_result = self.current_object_result
         previous_array_result = self.current_array_result
+        previous_string_result = self.current_string_result
         previous_place_parameter_cells = self.current_place_parameter_cells
         previous_receiver = self.current_object_receiver
         previous_object_type = self.current_object_type
@@ -564,6 +583,7 @@ class _Lowerer(
         self.current_optional_result = result_target
         self.current_object_result = object_result_target
         self.current_array_result = array_result_target
+        self.current_string_result = string_result_target
         self.current_place_parameter_cells = place_parameter_cells
         self.current_object_receiver = receiver
         self.current_object_type = literal.object_type
@@ -589,6 +609,7 @@ class _Lowerer(
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
         self.current_array_result = previous_array_result
+        self.current_string_result = previous_string_result
         self.current_place_parameter_cells = previous_place_parameter_cells
         self.current_object_receiver = previous_receiver
         self.current_object_type = previous_object_type
@@ -1955,6 +1976,11 @@ class _Lowerer(
             if source_function_type is not None:
                 self.call_optional_args[id(transformed)] = optional_payloads
                 self.call_optional_kwargs[id(transformed)] = {}
+            called = self._direct_call_function(node)
+            if called is not None and id(called) in self.string_result_needs_dest:
+                # The transformed call loses resolvable identifier identity,
+                # so record the destination-ABI target for the extract phase.
+                self.string_result_call_targets[id(transformed)] = called
             return transformed
         if isinstance(node, hir.Block):
             items: list[hir.AST] = []
@@ -2167,6 +2193,9 @@ class _Lowerer(
                 if self.current_array_result is not None:
                     items.extend(self._array_result_write(item))
                     continue
+                if self.current_string_result is not None:
+                    items.extend(self._string_result_write(item))
+                    continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
                 items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
@@ -2191,6 +2220,8 @@ class _Lowerer(
             statements = self._object_result_write(node)
         elif self.current_array_result is not None:
             statements = self._array_result_write(node)
+        elif self.current_string_result is not None:
+            statements = self._string_result_write(node)
         else:
             prelude, value = self._extract_expression(node)
             statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
@@ -2496,6 +2527,10 @@ class _Lowerer(
                 if node.item is None:
                     self._target_error(node, 'array return without a value')
                 return self._array_result_write(node.item)
+            if self.current_string_result is not None:
+                if node.item is None:
+                    self._target_error(node, 'string return without a value')
+                return self._string_result_write(node.item)
             if self.current_optional_result is not None:
                 if node.item is None:
                     self._target_error(node, 'optional return without a value')
@@ -2656,10 +2691,7 @@ class _Lowerer(
                 )
             self._target_error(node, 'runtime string concatenation and re-segmentation')
         if isinstance(node, hir.InterpolatedString):
-            self._target_error(
-                node,
-                'materializing an interpolated string outside print or printl',
-            )
+            return self._materialize_interpolated_string(node)
         if isinstance(node, hir.ArrayLiteral):
             return self._extract_array_literal(node)
         if isinstance(node, hir.ArrayLength):
@@ -2824,6 +2856,18 @@ class _Lowerer(
                     prelude,
                 )
                 return [*call_prelude, *place_postlude], result
+            if self._is_string_valued(node.type):
+                called = self.string_result_call_targets.get(id(node))
+                if called is not None:
+                    call_prelude, result = self._finish_string_call(
+                        node,
+                        func,
+                        pos_args,
+                        kw_args,
+                        prelude,
+                        called,
+                    )
+                    return [*call_prelude, *place_postlude], result
             result_payload = ty.optional_payload(node.type)
             if result_payload is not None:
                 result = hir.ExpressedIdentifier(
@@ -2999,6 +3043,8 @@ class _Lowerer(
             '__add__',
             '__sub__',
             '__mul__',
+            '__floordiv__',
+            '__mod__',
             '__and__',
             '__lshift__',
             '__rshift__',

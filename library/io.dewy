@@ -26,7 +26,16 @@ let _print_int64 = (value:int64):>void => {
     return void
 }
 
-let print = _print_string & _print_int64
+let _print_bool = (value:bool):>void => {
+    if value {
+        _print_string("true")
+    } else {
+        _print_string("false")
+    }
+    return void
+}
+
+let print = _print_string & _print_int64 & _print_bool
 
 let printl = (s:string):>void => {
     print(s)

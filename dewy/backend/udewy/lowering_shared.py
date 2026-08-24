@@ -176,3 +176,39 @@ class ArrayCallBoundaryAnalysis:
     source_binding_id: int | None
     source_alias_group: frozenset[int]
     safe: bool
+
+
+@dataclass(frozen=True)
+class StringResultBound:
+    """Compile-time capacity bound for one string value.
+
+    ``const_bytes`` plus, for each positional parameter index, ``counts[i]``
+    times the runtime byte length of that string argument bounds the UTF-8
+    byte size of the value. ``materialized`` records whether the value may be
+    backed by frame-local materialized storage, in which case returning it
+    requires caller-owned result storage.
+    """
+
+    const_bytes: int
+    counts: tuple[tuple[int, int], ...]
+    materialized: bool
+
+    def combined_max(self, other: StringResultBound) -> StringResultBound:
+        counts: dict[int, int] = dict(self.counts)
+        for index, count in other.counts:
+            counts[index] = max(counts.get(index, 0), count)
+        return StringResultBound(
+            max(self.const_bytes, other.const_bytes),
+            tuple(sorted(counts.items())),
+            self.materialized or other.materialized,
+        )
+
+    def combined_sum(self, other: StringResultBound) -> StringResultBound:
+        counts: dict[int, int] = dict(self.counts)
+        for index, count in other.counts:
+            counts[index] = counts.get(index, 0) + count
+        return StringResultBound(
+            self.const_bytes + other.const_bytes,
+            tuple(sorted(counts.items())),
+            self.materialized or other.materialized,
+        )

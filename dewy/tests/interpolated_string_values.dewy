@@ -1,0 +1,16 @@
+# Interpolated strings materialize into complete first-class string values:
+# int, bool, and string fields; correct grapheme boundaries even when a
+# cluster spans a part join; and reuse as fields of further interpolations.
+let x = 42
+let s = "value: {x}!"
+printl(s)
+printl"length is {s.length}"
+let flag = true
+printl"flag={flag} neg={-7}"
+let name = "wörld"
+let u = "hello {name} 👋"
+printl(u)
+printl"{u.length}"
+let e = "e"
+let combined = "{e}́clair"
+printl"{combined} has {combined.length} graphemes"

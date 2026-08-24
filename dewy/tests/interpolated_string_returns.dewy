@@ -1,0 +1,30 @@
+# Functions returning interpolated strings write into caller-owned result
+# blocks sized by a compile-time capacity bound, so results survive later
+# calls. This is the front-page functions.dewy example plus hardening.
+
+let format = ((value:int64):>string => "integer: {value}")
+           & ((value:string):>string => "text: {value}")
+
+let clobber = (n:int64):>int64 => {
+    let junk = "XXXXXXXXXXXXXXXXXXXXX{n}XXXXXXXXXXXXXXXXX"
+    return junk.length
+}
+
+let describe = (count:int64 name:string):>string => {
+    let rendered = "{name} x{count}"
+    return rendered
+}
+
+# A module-level materialized string uses static storage, so it outlives the
+# startup frame.
+let banner = "run {2026}"
+
+let main = ():>void => {
+    let a = format(42)
+    let unused = clobber(9)
+    printl(a)
+    printl(format("Dewy"))
+    let d = describe(3 "béziér")
+    printl"{d} has {d.length} graphemes"
+    printl(banner)
+}
