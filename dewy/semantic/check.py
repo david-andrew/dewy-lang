@@ -629,6 +629,10 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
                 object_type=target.value.type,
             )
         return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, value)
+    if _is_range_type(target.type):
+        # Range bindings resolve to their initializer at compile time, so a
+        # reassignment would silently be ignored by earlier resolutions.
+        not_implemented(ctx.srcfile, ast.loc, 'reassigning a range value')
     if target.binding_id is not None:
         ctx.refinements.pop(target.binding_id, None)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
@@ -1204,6 +1208,57 @@ def _normalize_integer_range(
     return _NormalizedIntegerRange(first, step, last, count, target_type)
 
 
+def _is_range_type(type_: ty.TypeExpr | None) -> bool:
+    return type_ == 'range' or (
+        isinstance(type_, ty.TypeParameterize) and type_.t == 'range'
+    )
+
+
+def _resolve_range_value(
+    node: hir.AST,
+    *,
+    ctx: Context,
+    _seen: frozenset[int] = frozenset(),
+) -> hir.Range | None:
+    """Resolve a range-typed expression to its compile-time range literal.
+
+    Range bindings are compile-time values: iterating or testing membership
+    against a stored range inlines the literal it was initialized with. Only
+    ranges whose anchors are compile-time constants resolve, because inlining
+    runtime anchor expressions at the use site could observe mutations made
+    after the binding was initialized. Range bindings cannot be reassigned.
+    """
+    while (
+        isinstance(node, hir.Block)
+        and not node.scoped
+        and len(node.items) == 1
+    ):
+        node = node.items[0]
+    if isinstance(node, hir.Range):
+        for anchor in [node.left, node.right, *(node.step_pair or ())]:
+            if anchor is None:
+                continue
+            if _is_string_type(anchor.type):
+                if _constant_scalar_grapheme(anchor) is None:
+                    return None
+            elif _constant_integer(anchor, ctx=ctx) is None:
+                return None
+        return node
+    if (
+        isinstance(node, hir.ExpressedIdentifier)
+        and node.binding_id is not None
+        and node.binding_id not in _seen
+    ):
+        binding = ctx.binding_registry.by_id.get(node.binding_id)
+        if binding is not None and binding.declaration is not None:
+            return _resolve_range_value(
+                binding.declaration.expr,
+                ctx=ctx,
+                _seen=_seen | {node.binding_id},
+            )
+    return None
+
+
 def _tcr_range_membership(
     value: hir.AST,
     range_: hir.Range,
@@ -1328,6 +1383,10 @@ def _tcr_range_iterator(
 
     identifier = condition_ast.left.item
     iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=ctx)
+    if not isinstance(iterable, hir.Range):
+        resolved_range = _resolve_range_value(iterable, ctx=ctx)
+        if resolved_range is not None:
+            iterable = resolved_range
     if not isinstance(iterable, hir.Range):
         target_type: ty.TypeExpr | None = None
         count: int | None = None
@@ -3617,8 +3676,14 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         type_block=type_block,
     )
 
-    if symbol == 'in?' and isinstance(right, hir.Range):
-        return _tcr_range_membership(left, right, ctx=ctx)
+    if symbol == 'in?':
+        range_operand = (
+            right
+            if isinstance(right, hir.Range)
+            else _resolve_range_value(right, ctx=ctx)
+        )
+        if range_operand is not None:
+            return _tcr_range_membership(left, range_operand, ctx=ctx)
     
     match binop.op:
         case t2.QJuxtapose():

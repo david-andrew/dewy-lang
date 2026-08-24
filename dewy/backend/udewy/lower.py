@@ -177,6 +177,7 @@ class _Lowerer(
                         and binding.kind in {'function', 'overload'}
                     )
                     or isinstance(item.expr, hir.TypeValue)
+                    or self._is_range_valued(item.annotation or item.expr.type)
                     or self._array_representation(item) in {
                         'static_words',
                         'static_bytes',
@@ -637,6 +638,12 @@ class _Lowerer(
                 rettype=rettype,
                 body=body,
             ),
+        )
+
+    @staticmethod
+    def _is_range_valued(type_: object) -> bool:
+        return type_ == 'range' or (
+            isinstance(type_, ty.TypeParameterize) and type_.t == 'range'
         )
 
     def _lower_callable_type(self, type_: ty.Type) -> ty.Type:
@@ -1745,6 +1752,10 @@ class _Lowerer(
                 item=self._require_node(self._transform_node(node.item)),
             )
         if isinstance(node, hir.ExpressedIdentifier):
+            if self._is_range_valued(node.type):
+                # Supported range uses were inlined during checking; anything
+                # left needs a runtime range representation.
+                self._target_error(node, 'a runtime range value')
             binding = self.identifier_bindings.get(id(node))
             if binding is None:
                 return node
@@ -1994,6 +2005,11 @@ class _Lowerer(
             if binding.kind in {'function', 'overload'}:
                 return None
             if isinstance(node.expr, hir.TypeValue):
+                return None
+            if self._is_range_valued(node.annotation or node.expr.type):
+                # Range bindings are compile-time values: every supported use
+                # was resolved to the literal during checking, so the binding
+                # needs no runtime storage.
                 return None
             return replace(
                 node,

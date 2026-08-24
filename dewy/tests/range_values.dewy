@@ -1,0 +1,23 @@
+# Stored range bindings are compile-time values: iterating and membership
+# resolve the binding back to its literal with zero runtime representation.
+window = [0..10)
+evens = 0,2..100
+
+let sum_window = ():>int64 => {
+    let total:int64 = 0
+    loop i in window total += i
+    return total
+}
+
+let main = ():>int64 => {
+    let a = sum_window()           # 0 + 1 + ... + 9 = 45
+    let count:int64 = 0
+    loop e in evens count += 1     # 51 values: 0, 2, ..., 100
+    let local = [3..6]
+    let b:int64 = 0
+    loop j in local b += j         # 3 + 4 + 5 + 6 = 18
+    if 16 in? evens and not (15 in? evens) and not (16 in? (5..15]) {
+        return a + count + b - 72  # 45 + 51 + 18 - 72 = 42
+    }
+    return 1
+}

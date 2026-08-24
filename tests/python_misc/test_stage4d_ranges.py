@@ -347,3 +347,51 @@ def test_finite_bigint_range_is_semantic_but_not_udewy_lowerable() -> None:
         match='range iteration requires bigint lowering',
     ):
         codegen(SrcFile(None, source))
+
+
+def test_stored_range_binding_resolves_to_its_literal() -> None:
+    root = _check('''
+let window = [0..10)
+loop i in window {}
+''')
+    flow = root.items[1]
+    assert isinstance(flow, hir.Flow)
+    iterator = flow.arms[0].condition
+    assert isinstance(iterator, hir.IteratorExpression)
+    # The binding was resolved back to its range literal at check time.
+    assert isinstance(iterator.iterable, hir.Range)
+    assert iterator.first == 0
+    assert iterator.step == 1
+    assert iterator.last == 9
+    assert iterator.count == 10
+
+
+def test_stored_stepped_range_membership_resolves() -> None:
+    root = _check('''
+let evens = 0,2..100
+let hit = 16 in? evens
+''')
+    declaration = root.items[1]
+    assert isinstance(declaration, hir.Declare)
+    # Constant candidate and anchors fold the membership at compile time.
+    assert isinstance(declaration.expr, hir.Bool)
+    assert declaration.expr.value is True
+
+
+def test_range_bindings_cannot_be_reassigned() -> None:
+    with pytest.raises(NotImplementedYet, match='reassigning a range value'):
+        _check('let r = [1..5] r = [2..6]')
+
+
+def test_runtime_anchored_range_bindings_do_not_resolve() -> None:
+    # Inlining a runtime anchor at the use site could observe later mutation,
+    # so resolution declines and iteration reports the existing limitation.
+    with pytest.raises(NotImplementedYet):
+        _check('''
+let f = (n:int64):>int64 => {
+    let r = [0..n)
+    let total:int64 = 0
+    loop i in r total += i
+    return total
+}
+''')
