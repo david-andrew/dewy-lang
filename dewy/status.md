@@ -44,9 +44,15 @@ In dependency order; A4 and A5 are long-running and interleave with Milestone B 
 
 Ordered by how much each item builds on the previous ones.
 
-- [ ] **B1. General tagged unions and `match`.** A compiler is one large AST of sum types; single-payload `T | undefined` is not enough. Highest-value language feature for bootstrap ergonomics.
-- [ ] **B2. Growable arrays.** Push, pop, truncate, runtime-length returns, and escapes into longer-lived storage. Depends directly on phase 1; forces the first real memory-management decision, where the descriptor's `capacity` and `owner` fields either earn their keep or get redesigned.
-- [ ] **B3. Mutable, growable dictionaries and sets.** Symbol tables, scopes, and string interning.
+- [ ] **B1. General tagged unions and `match`.** A compiler is one large AST of sum types; single-payload `T | undefined` is not enough. Highest-value language feature for bootstrap ergonomics. Done so far: local union bindings with word-sized members (fixed ints, bool, strings/graphemes, `undefined`) lower as tag-and-payload cells sharing the optional layout (`undefined` is always tag 0, so the numberings coincide); initialization and reassignment tag by member, `is?`/`isnt?` compare tags (folding statically when the answer is known), flow-sensitive narrowing now splits any union — including else-branches — and fully narrowed reads load the payload. Still to do: union parameters, results, and call boundaries; array/object members (needs the ownership story); partially narrowed subset unions (retagging); module-level union bindings; exhaustiveness checking as the `match` story over `is?` chains.
+- [ ] **B2. Growable arrays.** Push, pop, truncate, runtime-length returns, and escapes into longer-lived storage. Depends directly on phase 1; forces the first real memory-management decision, where the descriptor's `capacity` and `owner` fields either earn their keep or get redesigned. Reference design: the circular-deque `vector.c` from the old C implementation (`head` offset + doubling capacity, O(1) push/pop at both ends) — see the representation notes below.
+- [ ] **B3. Mutable, growable dictionaries and sets.** Symbol tables, scopes, and string interning. Reference design: the compact-dict `dictionary.c` from the old C implementation — see the representation notes below.
+
+**Runtime representation notes for dictionaries, sets, and deque arrays.** The intended full representations are based on the old C implementations on the `C_Clustered_Nonterminal_Parser` branch (`src/dictionary.c`, `src/vector.c`):
+
+- Dictionaries (and sets) use the compact two-structure layout: a sparse `indices` probe table mapping hash slots to entry positions, plus a dense `entries` array of `(hash, key, value)` in insertion order. Lookup probes the indices table (linear probing advanced by an LFSR step, with a nonzero-hash sentinel); iteration walks the dense entries array. The two structures resize independently (indices rehash at ~2/3 load; entries double).
+- **Semantic guarantee to preserve from day one: dictionaries and sets iterate in insertion order.** The current compile-time dictionaries (hidden parallel arrays in literal order) already satisfy this; nothing may regress it when the runtime representation lands. Deletion semantics in the C code were unfinished (a `DELETED` sentinel existed but was unused), so deletion behavior is an open design point, not something to copy.
+- Vectors are circular deques: `head` offset + `size` + `capacity` with modular indexing, capacity doubling (power-of-2), giving O(1) push/pop at both ends. This is a candidate representation for growable arrays where front-insertion matters; the known middle-insertion off-by-one in the C code is a bug, not a spec.
 - [ ] **B4. Closure lowering.** Capture analysis exists; lowering does not.
 - [ ] **B5. Error handling.** Effects and error values per the design, or at minimum a workable result-type idiom.
 - [ ] **B6. File I/O and `main(argv)`.** `open`/`read` in `library/system-linux.dewy` plus the already-tracked argv support.
@@ -225,7 +231,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Flow-sensitive narrowing with `is?`, `isnt?`, and supported short-circuit conditions; assignment invalidates affected refinements.
 - [x] Optional locals, globals, assignment, parameters, returns, and direct, indirect, or overloaded calls.
 - [x] A correct tag-and-payload udewy ABI with value semantics.
-- [ ] General heterogeneous runtime unions such as `int64 | string | undefined`.
+- [x] General heterogeneous runtime unions such as `int64 | string | undefined` for local bindings with word-sized members: tag-and-payload cells, member-indexed tags (`undefined` always tag 0), tag-comparing `is?`/`isnt?`, and payload loads after full narrowing. Union parameters, results, module-level bindings, aggregate members, and partially narrowed subset unions remain pending (see roadmap item B1).
 - [ ] Compact niche layouts and scalar-replaced optional calling conventions.
 
 ## Multiiterators

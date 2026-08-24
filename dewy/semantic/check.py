@@ -1043,10 +1043,9 @@ def _refine_type_test(
     matches: bool,
     ctx: Context,
 ) -> ty.Type:
-    payload = ty.optional_payload(current)
     variants: list[ty.TypeExpr] = (
-        [payload, 'undefined']
-        if payload is not None
+        list(current.items)
+        if isinstance(current, ty.TypeOr)
         else [cast(ty.TypeExpr, current)]
     )
     selected = [

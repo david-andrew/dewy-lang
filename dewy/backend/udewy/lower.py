@@ -113,6 +113,7 @@ class _Lowerer(
         self.lower_loop_depth = 0
         self.lowering_module_startup = False
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
+        self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
         self.optional_globals_initialized: set[int] = set()
         self.object_globals_initialized: set[int] = set()
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
@@ -721,14 +722,10 @@ class _Lowerer(
 
 
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
-        if (
-            isinstance(type_, ty.TypeOr)
-            and 'undefined' in type_.items
-            and ty.optional_payload(type_) is None
-        ):
+        if ty.runtime_union_members(type_) is not None:
             self._target_error(
                 node,
-                'heterogeneous runtime union containing `undefined`',
+                'a union-typed result',
             )
         if isinstance(type_, ty.ArrayType):
             self._target_error(
@@ -950,6 +947,11 @@ class _Lowerer(
                 payload = ty.optional_payload(item.annotation or item.expr.type)
                 if payload is not None and item.binding_id is not None:
                     self.optional_payloads[item.binding_id] = payload
+                members = ty.runtime_union_members(
+                    item.annotation or item.expr.type
+                )
+                if members is not None and item.binding_id is not None:
+                    self.union_cells[item.binding_id] = members
 
         for item in block.items:
             if isinstance(item, hir.Declare):
@@ -1090,6 +1092,8 @@ class _Lowerer(
             payload = ty.optional_payload(param.type)
             if payload is not None and param.binding_id is not None:
                 self.optional_payloads[param.binding_id] = payload
+            if ty.runtime_union_members(param.type) is not None:
+                self._target_error(param, 'a union-typed parameter')
         for param in literal.kw_only_args:
             self._new_binding(
                 function_scope,
@@ -1104,6 +1108,8 @@ class _Lowerer(
             payload = ty.optional_payload(param.type)
             if payload is not None and param.binding_id is not None:
                 self.optional_payloads[param.binding_id] = payload
+            if ty.runtime_union_members(param.type) is not None:
+                self._target_error(param, 'a union-typed parameter')
         if literal.rest_args is not None:
             self._new_binding(
                 function_scope,
@@ -2313,15 +2319,35 @@ class _Lowerer(
             return statements
         if isinstance(node, hir.Declare):
             declared_type = node.annotation or node.expr.type
-            if (
-                isinstance(declared_type, ty.TypeOr)
-                and 'undefined' in declared_type.items
-                and ty.optional_payload(declared_type) is None
-            ):
-                self._target_error(
-                    node,
-                    'heterogeneous runtime union containing `undefined`',
+            members = ty.runtime_union_members(declared_type)
+            if members is not None:
+                if self.lowering_module_startup:
+                    self._target_error(
+                        node, 'a module-level union binding'
+                    )
+                for member in members:
+                    if not self._union_member_supported(member):
+                        self._target_error(
+                            node,
+                            'a union member without a word-sized representation'
+                            f' (`{type_to_dewy(member)}`)',
+                        )
+                cell = hir.ExpressedIdentifier(
+                    node.loc,
+                    'int64',
+                    node.name,
+                    binding_id=node.binding_id,
                 )
+                declaration = replace(
+                    node,
+                    decltype='let',
+                    annotation='int64',
+                    expr=self._optional_allocation(node.loc),
+                )
+                return [
+                    declaration,
+                    *self._union_write(cell, node.expr, members),
+                ]
             payload = ty.optional_payload(declared_type)
             if payload is not None:
                 cell = hir.ExpressedIdentifier(
@@ -2463,6 +2489,21 @@ class _Lowerer(
                 return self._lower_object_assign(node)
             if isinstance(node.target.type, ty.ArrayType):
                 return self._lower_array_assign(node)
+            members = (
+                self.union_cells.get(node.target.binding_id)
+                if node.target.binding_id is not None
+                else None
+            )
+            if members is not None:
+                if node.op != '=':
+                    self._target_error(
+                        node, f'union compound assignment `{node.op}`'
+                    )
+                return self._union_write(
+                    replace(node.target, type='int64'),
+                    node.value,
+                    members,
+                )
             payload = (
                 self.optional_payloads.get(node.target.binding_id)
                 if node.target.binding_id is not None
@@ -2618,6 +2659,25 @@ class _Lowerer(
                 if ty.optional_payload(node.type) is not None:
                     return [], cell
                 return [], self._optional_load_payload(cell, payload, node.loc)
+            members = self.union_cells.get(node.binding_id)
+            if members is not None:
+                cell = replace(node, type='int64')
+                if ty.runtime_union_members(node.type) == members:
+                    return [], cell
+                if isinstance(node.type, ty.TypeOr):
+                    self._target_error(
+                        node,
+                        'a partially narrowed union value',
+                    )
+                # Fully narrowed: load the payload as the matching member.
+                system = ty.TypeSystem()
+                member = next(
+                    (m for m in members if system.is_subtype(node.type, m)),
+                    None,
+                )
+                if member is None or member == 'undefined':
+                    self._target_error(node, 'a union payload read of this type')
+                return [], self._optional_load_payload(cell, member, node.loc)
         if isinstance(node, hir.ObjectLiteral):
             return self._extract_object_literal(node)
         if isinstance(node, hir.MemberAccess):
@@ -2625,6 +2685,44 @@ class _Lowerer(
         if isinstance(node, hir.Undefined):
             self._target_error(node, '`undefined` value without an optional context')
         if isinstance(node, hir.TypeTest):
+            # A general-union operand keeps its full static union type at the
+            # test site; fully narrowed operands fold statically below.
+            members = ty.runtime_union_members(node.value.type)
+            if members is not None:
+                union_prelude, union_value = self._extract_expression(node.value)
+                system = ty.TypeSystem()
+                matching = [
+                    index
+                    for index, member in enumerate(members)
+                    if system.is_subtype(member, node.test_type) != node.negated
+                ]
+                if len(matching) == len(members):
+                    return union_prelude, hir.Bool(node.loc, 'bool', True)
+                if not matching:
+                    return union_prelude, hir.Bool(node.loc, 'bool', False)
+                cell = (
+                    replace(union_value, type='int64')
+                    if isinstance(union_value, hir.ExpressedIdentifier)
+                    else union_value
+                )
+                tag = self._optional_tag(cell, node.loc)
+                test: hir.AST | None = None
+                for index in matching:
+                    comparison = self._typed_equality(
+                        tag,
+                        self._uint8_literal(node.loc, index),
+                        'uint8',
+                        node.loc,
+                    )
+                    test = (
+                        comparison
+                        if test is None
+                        else hir.ShortCircuit(
+                            node.loc, 'bool', 'or', test, comparison
+                        )
+                    )
+                assert test is not None
+                return union_prelude, test
             prelude, value = self._extract_expression(node.value)
             payload = ty.optional_payload(node.value.type)
             if payload is None and isinstance(node.value, hir.ExpressedIdentifier):

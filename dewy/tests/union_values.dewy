@@ -1,0 +1,37 @@
+# General tagged unions lower as tag-and-payload cells: initialization tags
+# by member, `is?`/`isnt?` compare tags, narrowed reads load the payload,
+# reassignment retags, and same-union copies move both cell words.
+
+let main = ():>int64 => {
+    let x:int64|string = 42
+    let a:int64 = 0
+    if x is? int64 { a = x }             # 42
+    if x is? string { a = 999 }
+
+    let y:int64|string = "hello"
+    let b:int64 = 0
+    if y is? string { b = y.length }     # 5
+    if y isnt? string { b = 888 }
+
+    let copied = x
+    let c:int64 = 0
+    if copied is? int64 { c = copied }   # 42
+
+    let z:bool|string|undefined = true
+    let d:int64 = 0
+    if z is? bool { d = 7 }
+    z = "text"
+    if z is? string { d = d + 2 }        # 9
+    if z is? undefined { d = 500 }
+
+    let choose = b =? 5
+    let v:int64|string = if choose 30 else "abc"
+    let e:int64 = 0
+    if v is? int64 {
+        e = v                            # 30
+    } else {
+        e = v.length
+    }
+
+    return a - 42 + b - 5 + c - 42 + d - 9 + e + 12  # 30 + 12 = 42
+}

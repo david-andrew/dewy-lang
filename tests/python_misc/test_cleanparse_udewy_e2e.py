@@ -69,6 +69,7 @@ LOWERED_CASES = [
     ('range_values.dewy', 42),
     ('iterator_labeled_exits.dewy', 42),
     ('optional_values.dewy', 42),
+    ('union_values.dewy', 42),
     ('optional_layouts.dewy', 42),
     ('optional_calls.dewy', 42),
     ('multi_iterator_and.dewy', 42),

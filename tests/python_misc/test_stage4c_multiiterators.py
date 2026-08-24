@@ -83,10 +83,12 @@ let get = (value:int64|undefined):>int64 =>
 """)
 
 
-def test_heterogeneous_optional_runtime_union_is_deferred() -> None:
+def test_heterogeneous_runtime_union_bindings_lower() -> None:
+    # General tagged unions now lower as tag-and-payload cells, including a
+    # heterogeneous union containing `undefined`.
     source = 'let main = ():>int64 => { let x:int64|string|undefined = 1 return 0 }'
-    with pytest.raises(NotImplementedYet, match='heterogeneous runtime union'):
-        codegen(SrcFile(None, source))
+    emitted = codegen(SrcFile(None, source))
+    assert '__store_u8__' in emitted
 
 
 def test_multiiterator_uses_flat_postfix_formula_and_precise_optionals() -> None:

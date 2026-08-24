@@ -415,6 +415,23 @@ def optional(type_: TypeExpr) -> TypeExpr:
     return union(type_, 'undefined')
 
 
+def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
+    """Canonical member order for a general runtime tagged union.
+
+    Returns None for non-unions and for single-payload optionals, which keep
+    their dedicated two-state cells. ``undefined`` is always member 0 when
+    present, so the general tag numbering coincides with optional tags.
+    """
+    if not isinstance(type_, TypeOr):
+        return None
+    if optional_payload(type_) is not None:
+        return None
+    members = list(type_.items)
+    if 'undefined' in members:
+        members = ['undefined', *[m for m in members if m != 'undefined']]
+    return tuple(members)
+
+
 def is_zero_arg_function(type_: Type) -> bool:
     """Whether a type is a function that takes no arguments."""
 
