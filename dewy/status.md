@@ -2,6 +2,12 @@
 
 This document tracks language features in the cleanparse compiler. Checked items are supported through parsing, semantic analysis, udewy lowering, and emission.
 
+## Current focus
+
+The current compiler-development focus is recursive, transitive effect analysis for aggregate parameters. The analysis should distinguish reads, mutation, whole-value rebinding, and escapes; follow field and index routes; propagate effects through direct calls; and remain conservative at unresolved or indirect calls. Its first use is to make value-semantic borrowing and copying correct for nested arrays and structural objects, replacing the current array-specific boundary checks.
+
+The intended follow-on slices are iteration over arrays of structural objects and caller-owned materialization of interpolated string results. Runtime-length array returns and whole-array place rebinding remain deferred until effect, escape, and ownership analysis can support their storage requirements safely.
+
 ## Core declarations and expressions
 
 - [x] `let` and `const` declarations, assignment, and combined assignment. Plain `name = value` implicitly declares a `let` binding when no visible binding exists; otherwise it remains reassignment.
