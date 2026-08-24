@@ -14,6 +14,7 @@ This page is a topical index. The main book teaches the same material in a progr
 - [Expressions, produced values, suppression, and blocks](ch03/expressions-statements-blocks.md)
 - [Conditionals and flow chains](ch03/flow-control.md)
 - [Optional values and type narrowing](ch03/optional-types.md)
+- [Errors and exception values, safe navigation, and propagation](ch03/errors-as-values.md)
 - [Loops, iterator conditions, and multiiterators](ch03/loops.md)
 - [Ranges, bounds, membership, and slicing](ch03/range-types.md)
 

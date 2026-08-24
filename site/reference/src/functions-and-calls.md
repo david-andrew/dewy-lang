@@ -79,6 +79,8 @@ let callback:<(value:int64):>int64> = increment
 
 Position-only function contracts use `<name:type>`, just like function literals. The name describes the parameter inside the contract but is absent from the keyword-call interface. A bare identifier is always a parameter name, so Dewy does not infer an anonymous type-only parameter from its spelling.
 
+Expected failures appear as direct [error alternatives](errors-and-forwarding.md) in the return contract. Public functions should normally declare a stable set of returned errors even where an unexposed helper could infer them.
+
 ## Calls and Pipes
 
 Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies values to the callable on its right; `<|` supplies right-hand values to the callable on its left according to their associativity.

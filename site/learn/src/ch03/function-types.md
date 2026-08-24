@@ -92,6 +92,8 @@ let apply = (
 
 Names in a contract determine which keyword calls it accepts. Position-only parameters use the same `<name:type>` form in a function type as in a function literal. Dewy does not reinterpret a bare identifier as an unnamed type annotation.
 
+A function that can fail lists its [error values](errors-as-values.md) directly among its return alternatives, such as `:>Customer | NotFoundError`. There is no additional result wrapper around a successful return.
+
 ## Overloads
 
 `&` combines functions into an overload set. Argument contracts select the applicable alternative:

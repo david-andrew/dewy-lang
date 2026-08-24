@@ -1,6 +1,6 @@
 # Optional Values and Narrowing
 
-`undefined` is a real value representing a missing alternative. It is not `void`, an uninitialized name, or a hidden exception.
+`undefined` is a real value representing a missing alternative. It is not `void` or an uninitialized name. It belongs to Dewy's `exception` type family, which means navigation forwards it without trying to access a member on it. This is ordinary typed value flow, not a hidden throw or stack unwind.
 
 An optional type is a union with `undefined`:
 
@@ -38,6 +38,31 @@ let choose = (enabled:bool):>int64 | undefined =>
 ```
 
 Any expression whose alternatives include a value and `undefined` can produce an optional.
+
+## Absence Is an Exception, Not an Error
+
+`undefined` says that a value is absent. An error says that an operation failed and carries its own error type. Both descend from `exception`, so both forward through navigation, but they remain distinct contracts:
+
+```dewy
+User | undefined       # a user may simply be absent
+```
+
+<!-- dewy-example: design-only -->
+```dewy
+User | NotFoundError   # looking up the user may fail
+```
+
+[Exception values](errors-as-values.md#exception-values-forward) automatically forward when they are encountered as the receiver of a navigation route:
+
+<!-- dewy-example: design-only -->
+```dewy
+let user:User | undefined = findUser(id)
+let city = user.profile.address.city
+
+# city has type string | undefined
+```
+
+If users want a non-forwarding sentinel, they can define an ordinary type that does not descend from `exception`. Every ordinary alternative must support a requested member or be narrowed away first.
 
 ## Optionals in Multiiterators
 

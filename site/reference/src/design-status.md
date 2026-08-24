@@ -16,6 +16,9 @@ The following principles organize the language and should be treated as normativ
 - Defaults are per-call fallbacks and do not remove their parameters from positional binding.
 - Types are compile-time values and use the ordinary expression grammar where practical.
 - Physical dimensions participate in types and may erase from runtime representations.
+- Expected failures are direct union alternatives belonging to a nominal `error` family rather than values wrapped in a `Result` container.
+- Any alternative descended from nominal `exception` forwards through receiver navigation. Both `error` and `undefined` descend from it, while all ordinary alternatives remain subject to member checking; call arguments never forward implicitly.
+- Returned errors and evaluation effects occupy separate parts of a function contract.
 
 ## Provisional Designs
 
@@ -31,6 +34,7 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - dictionary, bidictionary, and set mutation, collision, deletion, and equality rules;
 - the complete numeric hierarchy beyond integers;
 - the overloadable string-conversion protocol beyond built-in conversions;
+- exception- and error-type declaration syntax, transformed propagation, recovery helpers, and whether pipes join automatic exception forwarding;
 - complete physical-dimension arithmetic, units, and conversion policy;
 - runtime-length aggregate ownership, returns, and escaping places;
 - pattern matching, stored generators, and general unpack/collect behavior;

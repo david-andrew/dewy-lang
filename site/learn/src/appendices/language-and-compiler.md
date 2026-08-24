@@ -17,7 +17,7 @@ The hosted compiler currently covers a substantial core: bindings and scope, fix
 
 Important partial areas include arbitrary-precision `int` representation, arrays whose storage requirements escape their current scope, interpolation through user-defined conversions, ranges with runtime anchors or runtime storage, general physical dimensions, function handles and closures, runtime dictionary operations, and broader host support.
 
-Major design or implementation frontiers include floating-point and exact real arithmetic, general user-written generics and unannotated generic inference, growable dictionaries and sets, complete refinements and effects, broadcasting and multidimensional array operations, pattern matching and general unions, generators as stored values, automatic-call behavior inside function-valued member routes, and general compile-time evaluation.
+Major design or implementation frontiers include floating-point and exact real arithmetic, general user-written generics and unannotated generic inference, growable dictionaries and sets, complete refinements and effects, exception-value forwarding and recovery, broadcasting and multidimensional array operations, pattern matching and general unions, generators as stored values, automatic-call behavior inside function-valued member routes, and general compile-time evaluation.
 
 This summary is intentionally broad. The repository's [implementation status](https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md) is the authoritative detailed checklist.
 

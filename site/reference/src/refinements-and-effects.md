@@ -35,10 +35,12 @@ Effects propagate through calls. A caller may preserve a refinement or borrow st
 
 `noreturn` is a settled effect used by a function that cannot return to its caller. It is distinct from the `never` result type.
 
+Expected failures remain [error alternatives in the return type](errors-and-forwarding.md), not members of the effect set. A contract may contain both a returned error union and effects, but `|` combines the returned alternatives while the effect syntax describes evaluation behavior separately.
+
 ## `unsafe`
 
 `unsafe` identifies a proof or memory-safety obligation the compiler has not established. It is an auditable trust boundary, not a request to turn off unrelated checking.
 
 ## Provisional Boundary
 
-The complete proposition grammar, qualifier inference, proof-value form, effect vocabulary, effect polymorphism, checked-failure model, and surface syntax for `unsafe` remain provisional. See [Design Maturity](design-status.md).
+The complete proposition grammar, qualifier inference, proof-value form, effect vocabulary, effect polymorphism, and surface syntax for `unsafe` remain provisional. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).

@@ -18,6 +18,7 @@
 - [Operators and Precedence](operators-and-precedence.md)
 - [Functions and Calls](functions-and-calls.md)
 - [Control Flow](control-flow-and-iteration.md)
+- [Errors, Exceptions, and Forwarding](errors-and-forwarding.md)
 - [Ranges and Iteration](ranges-and-iteration.md)
 - [Refinements, Effects, and Safety](refinements-and-effects.md)
 

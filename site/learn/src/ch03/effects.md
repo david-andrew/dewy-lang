@@ -26,3 +26,15 @@ Effects are therefore not only documentation. They participate in call checking,
 > **Provisional design:** The full effect vocabulary and syntax are not yet fixed. It must support inferred ordinary code, explicit public contracts, transitive effects through calls, effect-polymorphic helpers, and deliberate handling or masking at a clear boundary.
 
 The design should keep common programs uncluttered: most local effects should be inferred, while APIs state the effects that matter to their callers.
+
+## Errors Are Return Values
+
+An expected failure is not represented by putting an error name in the effect set. It is an ordinary alternative in the return type:
+
+<!-- dewy-example: design-only -->
+```dewy
+let load = (id:RecordId)
+    :> (Record | NotFoundError | DatabaseError) & reads<database>
+```
+
+The union says which value the caller receives. `reads<database>` says what evaluating the function may do. Keeping those two ideas separate lets callers recover from a returned error without pretending that the database access itself did not happen. See [Errors as Values](errors-as-values.md).

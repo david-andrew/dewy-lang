@@ -80,6 +80,6 @@ let find = (items:array<int64> wanted:int64):>int64 | undefined => {
 }
 ```
 
-Labeled exits can target an enclosing loop; [Loops and Multiple Iterators](loops.md) develops those forms.
+Labeled exits can target an enclosing loop; [Loops and Multiple Iterators](loops.md) develops those forms. Postfix `or_return` is the corresponding concise exit for passing an [exception value](errors-as-values.md#propagating-an-exception) back to the caller.
 
-> **Provisional design:** Pattern matching, unconditional cleanup/finally behavior, and typed error propagation must compose with these expression and narrowing rules. Their complete surface syntax is not yet specified.
+> **Provisional design:** General pattern matching, unconditional cleanup/finally behavior, and transformed error propagation must compose with these expression and narrowing rules. Their complete surface syntax is not yet specified.

@@ -28,6 +28,8 @@ Function parameters, returns, container elements, object fields, assignments, an
 
 General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.
 
+An alternative belonging to the nominal `exception` family receives special receiver-navigation behavior. Member access operates on every ordinary alternative that supports the member and forwards every exception alternative. Both `error` and `undefined` descend from `exception`; arbitrary union alternatives do not become skippable. See [Errors, Exceptions, and Forwarding](errors-and-forwarding.md).
+
 ## Parameterized and Refined Types
 
 Parameterized types apply compile-time arguments:

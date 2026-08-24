@@ -22,6 +22,7 @@ Current compiler coverage, target restrictions, and µDewy compatibility belong 
 - µDewy source conventionally uses `.udewy`; suffixes do not select Dewy semantic rules.
 - Code labelled **provisional** illustrates a design whose stated portions are decided but whose surrounding rules may change.
 - `T | undefined` denotes an optional value.
+- `exception` is the nominal parent of values forwarded by safe navigation; both `error` and `undefined` descend from it.
 - `intN` and `uintN` denote fixed-width signed and unsigned integer families when a rule applies uniformly across widths.
 - “Produces” describes the value or values expressed by a construct. `void` means that no value is produced.
 - “Place” means a mutable storage location selected explicitly with `@`; it is not an accidental alias created by an optimization.

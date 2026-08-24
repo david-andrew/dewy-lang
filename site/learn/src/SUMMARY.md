@@ -17,6 +17,7 @@
 - [Functions and Calls](ch03/function-types.md)
 - [Branching and Flow Control](ch03/flow-control.md)
 - [Optional Values and Narrowing](ch03/optional-types.md)
+- [Errors as Values](ch03/errors-as-values.md)
 - [Loops and Multiple Iterators](ch03/loops.md)
 - [Ranges](ch03/range-types.md)
 

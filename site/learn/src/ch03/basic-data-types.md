@@ -62,6 +62,8 @@ const Result = <string | undefined>
 
 Literal values can therefore participate in types. `|` forms a union of alternatives.
 
+When an alternative belongs to the nominal `exception` family, navigation can [forward that exception value](errors-as-values.md#exception-values-forward) while applying the requested member operation to the ordinary alternatives. Both `error` and `undefined` descend from `exception`. This is a rule for exception-classified union members, not for arbitrary unions.
+
 Parameterized aliases accept compile-time type arguments:
 
 ```dewy
