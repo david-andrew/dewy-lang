@@ -5,6 +5,7 @@ semantic analysis pass 0:
 """
 from dataclasses import dataclass, replace, field, fields, is_dataclass
 from collections import ChainMap
+from itertools import count
 from typing import Literal, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
@@ -476,6 +477,9 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 op=t1.Operator(symbol='='|'::'|':='),
                 right=p0.AST() as right)
             ]:
+            dict_block = _dict_literal_block(right)
+            if dict_block is not None:
+                return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
             require_valued(expr.type, ctx.srcfile, expr.loc, 'declaration initializer')
             if keyword == 'let':
@@ -592,6 +596,9 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         and ast.left.item.name not in ctx.declarations
     ):
         name = ast.left.item.name
+        dict_block = _dict_literal_block(ast.right)
+        if dict_block is not None:
+            return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)
         value = typecheck_and_resolve_inner(ast.right, ctx=ctx)
         require_valued(value.type, ctx.srcfile, value.loc, 'declaration initializer')
         value = _widen_inferred_let_value(value)
@@ -1365,6 +1372,124 @@ def _tcr_range_membership(
     return hir.Bool(value.loc, 'bool', included)
 
 
+def _array_binding_iterator(
+    target_name: str,
+    target_loc: Span,
+    array_binding_id: int,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> tuple[hir.IteratorExpression, Context]:
+    """Build an iterator over a hidden fixed-length array binding."""
+    array_binding = ctx.binding_registry.by_id[array_binding_id]
+    array_type = array_binding.type
+    assert isinstance(array_type, ty.ArrayType) and array_type.length is not None
+    element_type = array_type.element
+    binding = ctx.binding_registry.allocate_param(
+        target_name,
+        element_type,
+        target_loc,
+    )
+    iterator_ctx = replace(
+        ctx,
+        declarations=ctx.declarations.new_child({target_name: element_type}),
+        binding_scopes=ctx.binding_scopes.new_child({target_name: binding}),
+    )
+    target = hir.ExpressedIdentifier(
+        target_loc,
+        element_type,
+        target_name,
+        binding_id=binding.id,
+    )
+    iterable = hir.ExpressedIdentifier(
+        loc,
+        array_type,
+        array_binding.name,
+        binding_id=array_binding_id,
+    )
+    return (
+        hir.IteratorExpression(
+            loc,
+            ty.TypeParameterize('iterator', [element_type]),
+            target,
+            iterable,
+            0,
+            1,
+            array_type.length - 1,
+            array_type.length,
+        ),
+        iterator_ctx,
+    )
+
+
+def _tcr_dict_unpack_iterators(
+    condition_ast: p0.AST,
+    *,
+    ctx: Context,
+) -> tuple[tuple[hir.IteratorExpression, hir.IteratorExpression], Context] | None:
+    """Check a `loop [key value] in dictionary` unpacking condition.
+
+    Dictionaries are hidden parallel arrays, so the unpacking desugars to a
+    lockstep pair of array iterators combined with `and`.
+    """
+    if not (
+        isinstance(condition_ast, p0.BinOp)
+        and isinstance(condition_ast.op, t1.Operator)
+        and condition_ast.op.symbol == 'in'
+        and isinstance(condition_ast.left, p0.Block)
+        and condition_ast.left.kind == '[]'
+    ):
+        return None
+    targets = condition_ast.left.inner
+    if not all(
+        isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier)
+        for item in targets
+    ):
+        return None
+    iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=ctx)
+    binding = (
+        ctx.binding_registry.by_id.get(iterable.binding_id)
+        if isinstance(iterable, hir.ExpressedIdentifier)
+        and iterable.binding_id is not None
+        else None
+    )
+    if binding is None or binding.dict_arrays is None:
+        not_implemented(
+            ctx.srcfile,
+            condition_ast.loc,
+            'iterator target unpacking over non-dictionary values',
+        )
+    if len(targets) != 2:
+        user_error(
+            ctx.srcfile,
+            'dictionary unpacking takes exactly two targets',
+            Pointer(
+                span=condition_ast.left.loc,
+                message='use `[key value]` to unpack dictionary entries',
+            ),
+        )
+    names = [
+        item.item.name
+        for item in targets
+        if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier)
+    ]
+    key_iterator, ctx_after_key = _array_binding_iterator(
+        names[0],
+        targets[0].loc,
+        binding.dict_arrays[0],
+        condition_ast.loc,
+        ctx=ctx,
+    )
+    value_iterator, ctx_after_value = _array_binding_iterator(
+        names[1],
+        targets[1].loc,
+        binding.dict_arrays[1],
+        condition_ast.loc,
+        ctx=ctx_after_key,
+    )
+    return (key_iterator, value_iterator), ctx_after_value
+
+
 def _tcr_range_iterator(
     condition_ast: p0.AST,
     *,
@@ -1558,6 +1683,26 @@ def _tcr_loop_iterator(
                 *right_formula,
                 _ITERATOR_LOGICAL_OPS[ast.op.symbol],
             ], result_ctx
+
+        unpack = _tcr_dict_unpack_iterators(ast, ctx=current_ctx)
+        if unpack is not None:
+            pair, iterator_ctx = unpack
+            formula: list[hir.IteratorFormulaToken] = []
+            for iterator in pair:
+                if iterator.target.name in names:
+                    user_error(
+                        ctx.srcfile,
+                        f'duplicate iterator target `{iterator.target.name}`',
+                        Pointer(
+                            span=iterator.target.loc,
+                            message='each target may occur only once in a multiiterator condition',
+                        ),
+                    )
+                names.add(iterator.target.name)
+                formula.append(len(iterators))
+                iterators.append(iterator)
+            formula.append('and')
+            return formula, iterator_ctx
 
         result = _tcr_range_iterator(ast, ctx=current_ctx)
         if result is None:
@@ -2034,6 +2179,81 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
     finally:
         ctx.resolving_type_aliases.remove(binding.id)
     return binding.type_value
+
+
+_dict_literal_counter = count(1)
+
+
+def _dict_literal_block(ast: p0.AST) -> p0.Block | None:
+    """Match a `[]` block whose items are all `->` dictionary entries."""
+    if (
+        isinstance(ast, p0.Block)
+        and ast.kind == '[]'
+        and ast.inner
+        and all(
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == '->'
+            for item in ast.inner
+        )
+    ):
+        return ast
+    return None
+
+
+def _tcr_dict_declare(
+    name: str,
+    loc: Span,
+    block: p0.Block,
+    *,
+    ctx: Context,
+) -> hir.AST:
+    """Declare a dictionary as two hidden parallel arrays.
+
+    Dictionaries are compile-time values for now: the visible binding has no
+    runtime storage. Iteration desugars to a lockstep multiiterator over the
+    hidden key and value arrays; every other use reports the pending runtime
+    dictionary representation.
+    """
+    entries = [item for item in block.inner if isinstance(item, p0.BinOp)]
+    keys_block = p0.Block(block.loc, [item.left for item in entries], '[]', None)
+    values_block = p0.Block(block.loc, [item.right for item in entries], '[]', None)
+    keys = typecheck_and_resolve_inner(keys_block, ctx=ctx)
+    values = typecheck_and_resolve_inner(values_block, ctx=ctx)
+    if not isinstance(keys.type, ty.ArrayType) or not isinstance(
+        values.type, ty.ArrayType
+    ):
+        not_implemented(
+            ctx.srcfile,
+            block.loc,
+            'dictionary entries without homogeneous key and value types',
+        )
+    suffix = next(_dict_literal_counter)
+    parts: list[hir.Declare] = []
+    part_ids: list[int] = []
+    for side, value in (('keys', keys), ('values', values)):
+        hidden_name = f'__dewy_dict_{name}_{side}_{suffix}'
+        binding = ctx.binding_registry.allocate(value, hidden_name, 'value', loc)
+        binding.type = value.type
+        declaration = hir.Declare(
+            loc,
+            ty.VOID_TYPE,
+            'let',
+            hidden_name,
+            None,
+            value,
+            binding_id=binding.id,
+        )
+        binding.declaration = declaration
+        parts.append(declaration)
+        part_ids.append(binding.id)
+    dict_type = ty.TypeParameterize('dict', [keys.type.element, values.type.element])
+    visible = ctx.binding_registry.allocate(block, name, 'value', loc)
+    visible.type = dict_type
+    visible.dict_arrays = (part_ids[0], part_ids[1])
+    ctx.declarations[name] = dict_type
+    ctx.binding_scopes[name] = visible
+    return hir.Block(loc, ty.VOID_TYPE, list(parts), False)
 
 
 def _is_top_level_arrow(item: p0.AST) -> bool:

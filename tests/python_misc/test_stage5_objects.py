@@ -351,9 +351,15 @@ def test_object_types_require_exact_field_types() -> None:
     assert not types.is_subtype(unnamed, named)
 
 
-def test_dictionary_literals_are_not_implemented() -> None:
+def test_dictionary_declarations_desugar_to_parallel_arrays() -> None:
+    # Declaring a dictionary now works: the binding becomes hidden parallel
+    # key/value arrays with no runtime dictionary representation.
+    _check('let f = ():>int64 => { let d = [1 -> 2] return 0 }')
+
+
+def test_dictionary_literals_outside_declarations_are_not_implemented() -> None:
     with pytest.raises(NotImplementedYet, match='dictionary'):
-        _check('let f = ():>int64 => { let d = [1 -> 2] return 0 }')
+        _check('let d = ([1 -> 2])')
 
 
 def test_runtime_type_values_are_not_implemented() -> None:

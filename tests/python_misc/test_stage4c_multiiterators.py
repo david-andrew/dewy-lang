@@ -209,3 +209,31 @@ let f = ():>int64 => {
     assert emitted.count('__dewy_iterator_2 += 1') == 1
     assert 'undefined' not in emitted
     assert ' in [' not in emitted
+
+
+def test_dict_unpacking_builds_lockstep_array_iterators() -> None:
+    root = _check('''
+let pairs = ['a' -> 1 'b' -> 2]
+loop [k v] in pairs {}
+''')
+    flow = next(item for item in root.items if isinstance(item, hir.Flow))
+    condition = flow.arms[0].condition
+    assert isinstance(condition, hir.MultiIteratorExpression)
+    assert len(condition.iterators) == 2
+    assert condition.formula == [0, 1, 'and']
+    keys, values = condition.iterators
+    assert keys.target.name == 'k'
+    assert values.target.name == 'v'
+    assert isinstance(keys.iterable.type, ty.ArrayType)
+    assert keys.count == 2
+    assert values.count == 2
+
+
+def test_dict_unpacking_over_arrays_is_not_implemented() -> None:
+    with pytest.raises(NotImplementedYet, match='non-dictionary'):
+        _check('let pairs = [[1 2] [3 4]] loop [a b] in pairs {}')
+
+
+def test_dict_unpacking_requires_two_targets() -> None:
+    with pytest.raises(UserError, match='exactly two targets'):
+        _check("let d = ['a' -> 1] loop [a b c] in d {}")

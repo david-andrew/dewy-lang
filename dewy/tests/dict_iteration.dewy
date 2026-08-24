@@ -1,0 +1,18 @@
+# Dictionary declarations desugar to hidden parallel key/value arrays, and
+# `loop [key value] in dict` iterates them in lockstep.
+ratings = [
+    'star wars' -> 73
+    'star trek' -> 89
+    'legend of the galactic heroes' -> 100
+]
+
+loop [show rating] in ratings
+    printl'I give {show} a {rating} out of 100'
+
+let sum_values = ():>int64 => {
+    let local = ['a' -> 1 'b' -> 2]
+    let total:int64 = 0
+    loop [k v] in local total += v
+    return total
+}
+printl"{sum_values()}"

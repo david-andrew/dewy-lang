@@ -41,7 +41,7 @@ The current compiler supports places rooted in named mutable scalar, array, or s
 
 `@` on a parameter is a binding convention, not a type constructor. Inside the function body, the name still has type `T`. You write `a[10] = 42`, not `(@a)[10]`. That keeps `@T` from becoming a first-class identity type on day one.
 
-Field and index selection project a place along a route. `@pair.left` is parsed as `(@pair).left`: `@pair` starts at the place occupied by `pair`, then `.left` selects the place occupied by its field. The same rule composes through `@matrix[row][column]` and mixed routes such as `@box.items[i]`. Parenthesized `@(pair.left)` is equivalent. Every selector expression is evaluated once before the call.
+Field and index selection form one place route. `@` occurs only at the beginning, and `@pair.left` selects the place occupied by `left` at the end of the complete route. The parser groups it as `(@pair).left`, but `@pair` is not an independently observable intermediate reference value. The same rule composes through `@matrix[row][column]` and mixed routes such as `@box.items[i]`. Parenthesized `@(pair.left)` selects the same final place. Every selector expression is evaluated once before the call.
 
 Mark a place on both sides for ordinary values:
 
@@ -86,7 +86,7 @@ Overlapping places in one call are an error: `swap(@x @x)` is two mutable aliase
 
 ## Functions
 
-A bare function name calls it if that would be a valid call. There is therefore no `g = f` copy the way there is for arrays and objects. In the planned function-handle model, `@fn` starts from the original function binding's place and exposes it as the handle used for passing and partial evaluation. The same route rule makes `@obj.fn` mean `(@obj).fn`: project the object's place to its function-valued field. The old interpreter spelling `obj.@fn` is not the current direction.
+A bare function name calls it if that would be a valid call. There is therefore no `g = f` copy the way there is for arrays and objects. In the planned function-handle model, `@fn` selects the function binding's place as the handle used for passing and partial evaluation. The same whole-route rule makes `@obj.fn` select the function-valued place `fn` at the end of the route; the old interpreter spelling `obj.@fn` is not the current direction. The exact interaction between automatic calls and member access through a function-valued intermediate route remains to be designed: the language must distinguish selecting a member of the function value from calling it and selecting a member of its result.
 
 ```dewy
 sum = (a b) => a + b

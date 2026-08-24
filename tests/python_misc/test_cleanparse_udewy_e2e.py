@@ -259,6 +259,25 @@ def test_interpolated_string_returns_survive_later_calls(
 
 
 @pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_dict_iteration_unpacks_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'dict_iteration.dewy'))
+    udewy_path = tmp_path / 'dict_iteration.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 0
+    assert capfd.readouterr().out == (
+        'I give star wars a 73 out of 100\n'
+        'I give star trek a 89 out of 100\n'
+        'I give legend of the galactic heroes a 100 out of 100\n'
+        '3\n'
+    )
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
 def test_bool_printing_and_interpolation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
