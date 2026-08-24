@@ -3097,12 +3097,6 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
                 prefix.loc,
                 'function handles and partial application with `@`',
             )
-        if not isinstance(target.type, ty.ArrayType):
-            not_implemented(
-                ctx.srcfile,
-                prefix.loc,
-                '`@` places for values other than arrays',
-            )
         if target.binding_id is not None:
             binding = ctx.binding_registry.by_id[target.binding_id]
             if (
@@ -4607,11 +4601,20 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
                         message='a place must be supplied explicitly by every call',
                     ),
                 )
-            if not isinstance(param.type, ty.ArrayType):
+            if param.type == ty.INFERRED_TYPE:
+                user_error(
+                    ctx.srcfile,
+                    'place parameters require an explicit type',
+                    Pointer(
+                        span=loc,
+                        message='write `@name:Type` so calls can match exactly',
+                    ),
+                )
+            if isinstance(param.type, (ty.FunctionType, ty.OverloadType)):
                 not_implemented(
                     ctx.srcfile,
                     loc,
-                    'place parameters other than explicitly typed arrays',
+                    'function-handle place parameters',
                 )
             return replace(param, place=True)
 

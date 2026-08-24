@@ -90,6 +90,7 @@ The type system instantiates generic function types for built-in operator overlo
 - [x] Explicit position-only parameters written as `<name:type>`. The name remains available inside the body but is absent from the keyword-call interface; required and defaulted forms use the ordinary positional/default rules.
 - [x] Positional-or-named parameters may have per-call defaults; explicit post-`...` parameters are keyword-only and participate in semantic checking and initialization analysis.
 - [x] Positional or named arguments and per-call defaults lower through a positional udewy ABI for direct, piped, overload-selected, indirect, and method calls.
+- [x] Explicit non-escaping place parameters and arguments use `@` on both sides. Named mutable fixed-width scalar, Boolean, array, and structural-object bindings can be updated or replaced through direct and nested calls; place types are invariant.
 - [ ] Rest parameters, argument spreading, and partial application do not yet lower to udewy calls.
 - [ ] Vectorized function calls. `.` with a non-identifier right-hand side (`f.(xs)`, `putchar."text"`, `f.[1 2 3]`) applies the left-hand callable to each element of the right-hand side, equivalent to `[loop xi in rhs f(xi)]`. A bare identifier on the right remains member access (`obj.field`), so a sequence in a variable is written `f.(xs)`, not `f.xs`. The parser already produces `BinOp(.)` for these forms; only `.` glued to a following operator becomes `BroadcastOp` (`.*`, `.|>`). Semantic analysis currently rejects non-identifier RHS as unimplemented computed member access. No parser change.
 
@@ -137,7 +138,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Ordinary binding, rebinding, element storage, object-field storage, and argument passing recursively copy exact nested arrays. Read-only calls may borrow the source invisibly; calls that might mutate receive fresh element storage.
 - [x] Non-escaping runtime-length array copies allocate from the source length and use a counted, width-correct element loop.
 - [x] Recursively fixed array and structural-object return values use caller-owned storage, including exact nested arrays and exact array-valued object fields. Direct literals, returned locals, forwarding calls, and indirect or method calls all fill storage prepared by the caller.
-- [x] Initial non-escaping `@` places for named mutable array bindings. Both the parameter and call site must use `@`; element writes and whole-array rebinding propagate to the caller through nested calls. Place types are invariant, `const` places and overlapping arguments are rejected.
+- [x] Non-escaping `@` places for named mutable array bindings. Both the parameter and call site must use `@`; element writes and whole-array rebinding propagate to the caller through nested calls. Place types are invariant, `const` places and overlapping arguments are rejected.
 - [x] Left-to-right iteration over arrays of settled scalar, function, and immutable string-like elements. Dynamic-length arrays work as single iterators, and exact-length arrays compose with other multiiterator leaves.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
@@ -189,7 +190,8 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Field read and write, nested objects, and exact name/type/order matching.
 - [x] Object bindings, assignments, parameters, and constructors recursively copy exact array-valued fields as well as directly stored and nested-object fields.
 - [x] Caller-owned object returns recursively prepare exact array-valued fields and nested structural fields in the caller before the callee fills them.
-- [ ] Extend explicit `@` places from named arrays to objects, fields, indexed elements, and the other forms recorded in [`semantic/value_semantics.md`](semantic/value_semantics.md).
+- [x] Non-escaping `@` places for named mutable structural-object bindings. Field mutation and whole-object replacement operate directly on the caller's recursively fixed storage and can be forwarded through nested calls.
+- [ ] Extend explicit `@` places to fields, indexed elements, and the other forms recorded in [`semantic/value_semantics.md`](semantic/value_semantics.md).
 - [x] Function fields, including parenthesis-free zero-argument calls on member access, and object-local reads or compound assignment of sibling fields.
 - [x] Sequential udewy layout for `bool`, fixed-width integers, function pointers, string/array handles, and nested objects of those types.
 - [ ] Dictionary and bidictionary `[]` forms.
@@ -236,7 +238,7 @@ For a statically resolved direct or selected-overload call, a parameter that onl
 
 Recursively fixed array and structural-object returns use a hidden destination supplied by the caller. The caller allocates the complete mutable storage tree in its own frame, including exact nested array descriptors and buffers or exact array-valued object fields. The callee initializes or recursively copies into that storage before returning, and a directly returned call forwards the same destination through wrapper functions. No callee-local mutable result storage escapes. Local binding, assignment, element storage, object-field storage, and argument passing use the same recursive value-copy rule. Runtime-length arrays can be copied while the destination remains in the current frame. Results with runtime-dependent storage, unresolved backing-storage lifetimes, and other escapes remain pending. Control-flow representation joins, general or transitive effect analysis, indirect/method read-only adapters, and descriptor-free specialized direct-call ABIs also remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
 
-A named array passed as `@name` uses a non-escaping pointer cell for the duration of the call. The cell initially contains the caller's descriptor; direct element writes therefore reach the selected storage, while whole-array rebinding replaces the cell value. The caller reloads its binding after the call, including when one place parameter forwards the place to another. This initial ABI deliberately requires exact source/parameter type equality and does not allow a place to be stored or returned.
+A named scalar or array passed as `@name` uses non-escaping addressable storage for the duration of the call. Scalar cells use width-correct loads and stores; an array cell contains the caller's descriptor, so direct element writes reach the selected storage while whole-array rebinding replaces the descriptor. The caller reloads its binding after the call, including when one place parameter forwards the place to another. Structural objects already have stable recursively fixed storage, so an object place passes that address directly without another cell; field writes and whole-object copying both update the caller's storage. This ABI deliberately requires exact source/parameter type equality and does not allow a place to be stored or returned.
 
 The intended rule is that each value receives the least runtime representation needed by all of its reachable uses. For arrays this includes:
 
@@ -280,7 +282,8 @@ Incremental implementation work:
 - [x] Recursively copy nested exact arrays and array-valued object fields for local binding, assignment, element storage, and parameter passing.
 - [x] Copy descriptor-backed runtime-length arrays in non-escaping contexts with a counted element loop.
 - [x] Return recursively fixed arrays and structural objects through caller-owned result storage, copying direct literals or existing values and forwarding destinations through wrapper calls without exposing callee-local mutable allocations.
-- [x] Pass named mutable arrays to explicitly marked non-escaping `@` parameters through a temporary pointer cell, writing descriptor rebinding back after the call while direct element mutation intentionally shares the selected storage.
+- [x] Pass named mutable scalars and arrays to explicitly marked non-escaping `@` parameters through width-aware temporary storage, writing rebinding back after the call while direct array-element mutation intentionally shares the selected storage.
+- [x] Pass named mutable structural objects as `@` places using their existing caller-owned storage, avoiding an extra pointer cell while preserving both field mutation and whole-object replacement.
 - [ ] Generalize representation requirements across control-flow joins, general/transitive effects, cross-function aliases, indirect or method calls, and additional element/storage classes.
 - [ ] Elide array length, capacity, stride, flags, and ownership metadata for additional runtime array representations when each fact is unused or available statically.
 - [ ] Add indirect/method boundary adapters and descriptor-free direct-call ABI specialization where profitable.
@@ -307,7 +310,7 @@ In no particular order
 - [ ] Floating-point, rational, and real numbers
 - [ ] Dictionaries, bidirectional maps, and sets
 - [ ] Pattern matching (`match`)
-- [ ] Partial application (`@`), function handles, and `@` places beyond the implemented named-array parameter slice. See [`semantic/value_semantics.md`](semantic/value_semantics.md).
+- [ ] Partial application (`@`), function handles, and `@` places beyond implemented named scalar, array, and structural-object parameter forms. See [`semantic/value_semantics.md`](semantic/value_semantics.md).
 - [ ] expression returning assignment (`:=`) (i.e. python walrus operator) and compile-time assignment (`::`)
 - [ ] General juxtaposition multiplication and broadcasting beyond the implemented number/physical-quantity case. Vectorized calls (`f.(xs)`) are a `BinOp(.)` interpretation, not operator broadcasting; see Function signatures and calls.
 - [ ] Math

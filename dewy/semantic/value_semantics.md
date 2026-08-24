@@ -2,7 +2,7 @@
 
 BLUF: Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
 
-Intended language rule. Implementation is in progress: objects and arrays now recursively copy nested exact arrays and array-valued object fields across ordinary local bindings, assignments, calls, and returns. For recursively fixed return layouts, the caller prepares the complete mutable storage tree before the call. Runtime-length array copies use a counted element loop in non-escaping contexts. Named mutable array bindings can also be passed to explicitly marked array-place parameters with `@`; element writes and whole-array rebinding are visible to the caller. Other place forms and escaping storage remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
+Intended language rule. Implementation is in progress: objects and arrays now recursively copy nested exact arrays and array-valued object fields across ordinary local bindings, assignments, calls, and returns. For recursively fixed return layouts, the caller prepares the complete mutable storage tree before the call. Runtime-length array copies use a counted element loop in non-escaping contexts. Named mutable scalar, array, and structural-object bindings can also be passed to explicitly marked place parameters with `@`; mutation and whole-value rebinding are visible to the caller. Other place forms and escaping storage remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
 
 A binding names a value. Assignment, argument passing, and return give you that value, not another name for the same cell. Element and field writes go through the binding you wrote. Sharing is either unobservable or spelled.
 
@@ -35,7 +35,7 @@ Default argument expressions run on every call that omits them, so `(a:array = [
 
 ## Places
 
-The initial compiler slice supports a place only when it is a named mutable array binding passed directly to an explicitly typed array-place parameter. The caller and parameter types must match exactly, a `const` binding cannot be passed, and the same binding cannot occupy two place arguments in one call. The place cannot be returned, stored, or bound to another local. Places of scalars, objects, fields, and indexed elements remain planned.
+The current compiler slice supports a place when a named mutable scalar, array, or structural-object binding is passed directly to an explicitly typed place parameter. The caller and parameter types must match exactly, a `const` binding cannot be passed, and the same binding cannot occupy two place arguments in one call. Nested calls may forward a place. The place cannot be returned, stored, or bound to another local. Places of fields and indexed elements remain planned.
 
 `@x` is the place `x` lives. A bare name is the value (or, for a function, the call). That is already how `@` works on functions: `sum` calls, `@sum` is the handle. Arrays and objects use the same word as the opt-in hole in value semantics.
 

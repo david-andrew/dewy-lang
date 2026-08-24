@@ -1,0 +1,51 @@
+let Pair:type = [left:int64 right:int64]
+
+let bump = (@value:int64):>void => {
+    value += 2
+}
+
+let forward_bump = (@value:int64):>void => {
+    bump(@value)
+}
+
+let enable = (@flag:bool):>void => {
+    flag = true
+}
+
+let set_byte = (@value:uint8):>void => {
+    value = 42
+}
+
+let mutate_pair = (@pair:Pair):>void => {
+    pair.left = 20
+    pair.right = 22
+}
+
+let replace_pair = (@pair:Pair):>void => {
+    pair = [left = 30 right = 12]
+}
+
+let forward_replace_pair = (@pair:Pair):>void => {
+    replace_pair(@pair)
+}
+
+let main = ():>int64 => {
+    let value:int64 = 38
+    forward_bump(@value)
+    let enabled:bool = false
+    enable(@enabled)
+    let byte:uint8 = 1
+    set_byte(@byte)
+
+    let pair:Pair = [left = 1 right = 2]
+    mutate_pair(@pair)
+    let mutated = pair.left + pair.right
+    forward_replace_pair(@pair)
+
+    if value =? 40 and enabled and byte =? 42 and mutated =? 42
+        and pair.left =? 30 and pair.right =? 12 {
+        return 42
+    } else {
+        return 1
+    }
+}

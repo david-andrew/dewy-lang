@@ -265,6 +265,7 @@ class _Lowerer:
         self.next_optional_temp = 1
         self.next_result_temp = 1
         self.next_default_temp = 1
+        self.next_place_temp = 1
         self.next_loop_signal = 1
         self.loop_signal_levels: hir.ExpressedIdentifier | None = None
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
@@ -462,31 +463,39 @@ class _Lowerer:
             ):
                 self._target_error(literal, 'heterogeneous optional parameter type')
             if param.place:
-                if not isinstance(param.type, ty.ArrayType):
-                    self._target_error(literal, 'non-array place parameters')
                 if param.binding_id is None:
                     raise TypeError(
                         'INTERNAL ERROR: place parameter has no binding identity'
                     )
-                incoming_name = self._new_array_name(f'place_{param.name}')
+                incoming_name = self._new_place_name(param.name)
                 incoming = hir.ExpressedIdentifier(
                     literal.loc,
                     'int64',
                     incoming_name,
                 )
-                place_parameter_cells[param.binding_id] = incoming
+                direct_storage = (
+                    isinstance(param.type, ty.ObjectType)
+                    or ty.optional_payload(param.type) is not None
+                )
+                if not direct_storage:
+                    place_parameter_cells[param.binding_id] = incoming
+                runtime_type = (
+                    'int64'
+                    if direct_storage
+                    else self._place_runtime_type(param.type, literal)
+                )
+                initial_value = (
+                    incoming
+                    if direct_storage
+                    else self._value_load(incoming, runtime_type, literal.loc)
+                )
                 parameter_prologue.append(hir.Declare(
                     literal.loc,
                     ty.VOID_TYPE,
                     'let',
                     param.name,
-                    'int64',
-                    self._intrinsic_call(
-                        '__load_i64__',
-                        [incoming],
-                        'int64',
-                        literal.loc,
-                    ),
+                    runtime_type,
+                    initial_value,
                     binding_id=param.binding_id,
                 ))
                 return replace(
@@ -751,14 +760,22 @@ class _Lowerer:
         for param in type_.pos_or_kw:
             pos.append(ty.PosOrKwArg(
                 param.name,
-                self._lower_runtime_value_type(param.type),
+                (
+                    'int64'
+                    if param.place
+                    else self._lower_runtime_value_type(param.type)
+                ),
             ))
             if not param.required:
                 pos.append(ty.PosOrKwArg(None, 'bool'))
         for param in type_.kw_only:
             pos.append(ty.PosOrKwArg(
                 param.name,
-                self._lower_runtime_value_type(param.type),
+                (
+                    'int64'
+                    if param.place
+                    else self._lower_runtime_value_type(param.type)
+                ),
             ))
             if not param.required:
                 pos.append(ty.PosOrKwArg(None, 'bool'))
@@ -807,6 +824,35 @@ class _Lowerer:
             assert isinstance(lowered, ty.FunctionType)
             return lowered
         return type_
+
+    def _place_runtime_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
+        """Return the directly loadable representation held by a place cell."""
+
+        runtime_type = self._lower_runtime_value_type(type_)
+        if not isinstance(runtime_type, (str, ty.FunctionType)):
+            self._target_error(
+                node,
+                f'place storage for `{type_to_dewy(type_)}`',
+            )
+        if isinstance(runtime_type, ty.FunctionType):
+            self._target_error(node, 'function-handle place storage')
+        return runtime_type
+
+    def _place_storage_bytes(self, type_: ty.Type, node: hir.AST) -> int:
+        """Size of one non-escaping cell containing a lowered place value."""
+
+        if type_ == 'bool':
+            return 1
+        layout = ty.fixed_integer_layout(type_)
+        if layout is not None:
+            width, _signed = layout
+            return max(1, width // 8)
+        if self._is_handle_type(type_):
+            return 8
+        self._target_error(
+            node,
+            f'place storage for `{type_to_dewy(type_)}`',
+        )
 
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
         if (
@@ -3089,7 +3135,21 @@ class _Lowerer:
                 statements.extend(self._optional_write(cell, value, payload))
                 return statements
             prelude, value = self._extract_expression(node.value)
-            return [*prelude, replace(node, value=value)]
+            assignment = replace(node, value=value)
+            place_cell = (
+                self.current_place_parameter_cells.get(node.target.binding_id)
+                if node.target.binding_id is not None
+                else None
+            )
+            if place_cell is None:
+                return [*prelude, assignment]
+            runtime_type = self._place_runtime_type(node.target.type, node)
+            target = replace(node.target, type=runtime_type)
+            return [
+                *prelude,
+                assignment,
+                *self._value_store(target, place_cell, runtime_type, node.loc),
+            ]
         if isinstance(node, hir.Return):
             if self.current_object_result is not None:
                 if node.item is None:
@@ -7263,6 +7323,14 @@ class _Lowerer:
                 self.source_names.add(name)
                 return name
 
+    def _new_place_name(self, role: str) -> str:
+        while True:
+            name = f'__dewy_place_{role}_{self.next_place_temp}'
+            self.next_place_temp += 1
+            if name not in self.source_names:
+                self.source_names.add(name)
+                return name
+
     def _new_result_name(self) -> str:
         while True:
             name = f'__dewy_result_{self.next_result_temp}'
@@ -8039,22 +8107,24 @@ class _Lowerer:
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier, list[hir.AST]]:
         """Create one non-escaping pointer cell and a post-call writeback."""
 
-        if not isinstance(node.type, ty.ArrayType):
-            self._target_error(node, 'non-array place arguments')
         target = node.target
-        if self._array_use_representation(target) is not None:
+        if isinstance(node.type, ty.ObjectType):
+            prelude, storage = self._extract_object_pointer(target)
+            return prelude, replace(storage, type='int64'), []
+        if ty.optional_payload(node.type) is not None:
+            return [], replace(target, type='int64'), []
+        if (
+            isinstance(node.type, ty.ArrayType)
+            and self._array_use_representation(target) is not None
+        ):
             raise TypeError(
                 'INTERNAL ERROR: place argument retained a descriptor-free array'
             )
-        cell_name = self._new_array_name(f'place_cell_{target.name}')
+        runtime_type = self._place_runtime_type(node.type, node)
+        cell_name = self._new_place_name(f'cell_{target.name}')
         cell = hir.ExpressedIdentifier(node.loc, 'int64', cell_name)
-        loaded = self._intrinsic_call(
-            '__load_i64__',
-            [cell],
-            'int64',
-            node.loc,
-        )
-        writeback_target = replace(target, type='int64')
+        loaded = self._value_load(cell, runtime_type, node.loc)
+        writeback_target = replace(target, type=runtime_type)
         postlude: list[hir.AST] = [hir.Assign(
             node.loc,
             ty.VOID_TYPE,
@@ -8068,12 +8138,14 @@ class _Lowerer:
             else None
         )
         if outer_cell is not None:
-            postlude.append(self._intrinsic_call(
-                '__store_i64__',
-                [writeback_target, outer_cell],
-                ty.VOID_TYPE,
-                node.loc,
-            ))
+            postlude.extend(
+                self._value_store(
+                    writeback_target,
+                    outer_cell,
+                    runtime_type,
+                    node.loc,
+                )
+            )
         prelude: list[hir.AST] = [
             hir.Declare(
                 node.loc,
@@ -8083,15 +8155,18 @@ class _Lowerer:
                 'int64',
                 self._intrinsic_call(
                     '__alloca__',
-                    [self._int64_literal(node.loc, 8)],
+                    [self._int64_literal(
+                        node.loc,
+                        self._place_storage_bytes(runtime_type, node),
+                    )],
                     'int64',
                     node.loc,
                 ),
             ),
-            self._intrinsic_call(
-                '__store_i64__',
-                [writeback_target, cell],
-                ty.VOID_TYPE,
+            *self._value_store(
+                writeback_target,
+                cell,
+                runtime_type,
                 node.loc,
             ),
         ]

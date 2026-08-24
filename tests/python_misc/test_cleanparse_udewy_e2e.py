@@ -59,6 +59,7 @@ LOWERED_CASES = [
     ('array_iteration.dewy', 42),
     ('array_value_semantics.dewy', 42),
     ('array_places.dewy', 42),
+    ('value_places.dewy', 42),
     ('range_bound_forms.dewy', 42),
     ('iterator_labeled_exits.dewy', 42),
     ('optional_values.dewy', 42),

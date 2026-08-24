@@ -3,7 +3,7 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import NotImplementedYet, TypeCheckError, UserError
+from dewy.semantic.errors import TypeCheckError, UserError
 
 
 def _check(source: str) -> hir.Block:
@@ -108,12 +108,28 @@ let mutate = (
 ''')
 
 
-def test_initial_place_slice_is_limited_to_array_bindings() -> None:
-    with pytest.raises(
-        NotImplementedYet,
-        match='place parameters other than explicitly typed arrays',
-    ):
-        _check('let mutate = (@value:int64):>void => void')
+def test_place_parameter_requires_an_explicit_type() -> None:
+    with pytest.raises(UserError, match='place parameters require an explicit type'):
+        _check('let mutate = (@value):>void => void')
+
+
+def test_scalar_and_object_places_are_preserved_in_hir() -> None:
+    root = _check('''
+let Pair:type = [left:int64 right:int64]
+let update_number = (@value:int64):>void => { value += 1 }
+let update_pair = (@pair:Pair):>void => { pair.left = 20 }
+''')
+
+    number = root.items[1]
+    pair = root.items[2]
+    assert isinstance(number, hir.Declare)
+    assert isinstance(number.expr, hir.FunctionLiteral)
+    assert number.expr.pos_or_kw_args[0].place
+    assert number.expr.pos_or_kw_args[0].type == 'int64'
+    assert isinstance(pair, hir.Declare)
+    assert isinstance(pair.expr, hir.FunctionLiteral)
+    assert pair.expr.pos_or_kw_args[0].place
+    assert isinstance(pair.expr.pos_or_kw_args[0].type, ty.ObjectType)
 
 
 def test_array_place_lowering_uses_a_non_escaping_pointer_cell() -> None:
@@ -126,8 +142,40 @@ let main = ():>int64 => {
 }
 '''))
 
-    assert 'let items:int64 = __load_i64__(__dewy_array_place_items_' in emitted
-    assert '__store_i64__(items __dewy_array_place_items_' in emitted
-    assert 'place_cell_values_' in emitted
-    assert 'replace(__dewy_array_place_cell_values_' in emitted
-    assert 'values = __load_i64__(__dewy_array_place_cell_values_' in emitted
+    assert 'let items:int64 = __load_i64__(__dewy_place_items_' in emitted
+    assert '__store_i64__(items __dewy_place_items_' in emitted
+    assert '__dewy_place_cell_values_' in emitted
+    assert 'replace(__dewy_place_cell_values_' in emitted
+    assert 'values = __load_i64__(__dewy_place_cell_values_' in emitted
+
+
+def test_scalar_place_lowering_uses_typed_cell_loads_and_stores() -> None:
+    emitted = codegen(SrcFile(None, '''
+let bump = (@value:int64):>void => { value += 2 }
+let main = ():>int64 => {
+    let value:int64 = 40
+    bump(@value)
+    return value
+}
+'''))
+
+    assert 'let value:int64 = __load_i64__(__dewy_place_value_' in emitted
+    assert '__store_i64__(value __dewy_place_value_' in emitted
+    assert 'bump(__dewy_place_cell_value_' in emitted
+    assert 'value = __load_i64__(__dewy_place_cell_value_' in emitted
+
+
+def test_object_place_lowering_passes_structural_storage_directly() -> None:
+    emitted = codegen(SrcFile(None, '''
+let Pair:type = [left:int64 right:int64]
+let replace = (@pair:Pair):>void => { pair = [left = 20 right = 22] }
+let main = ():>int64 => {
+    let pair:Pair = [left = 1 right = 2]
+    replace(@pair)
+    return pair.left + pair.right
+}
+'''))
+
+    assert 'let pair:int64 = __dewy_place_pair_' in emitted
+    assert 'replace(pair)' in emitted
+    assert 'place_cell_pair' not in emitted
