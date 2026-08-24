@@ -55,6 +55,7 @@ LOWERED_CASES = [
     ('array_dynamic_narrow.dewy', 42),
     ('array_call_adapters.dewy', 42),
     ('array_returns.dewy', 42),
+    ('array_borrowed_returns.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
     ('array_value_semantics.dewy', 42),

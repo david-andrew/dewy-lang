@@ -18,14 +18,14 @@ The current focus above is phase 1 of this roadmap. Two named milestones anchor 
 - [x] Add a CI workflow that runs the pytest suite; only site-deploy and udewy-release workflows exist today.
 - [x] Replace the stale README example table, which predates cleanparse and points at files now in `examples/old`.
 - [x] Archive `dewy/todo.py` (parser-era notes superseded by this document) and remove the disabled `todo-to-gh-issue` workflow file.
-- [ ] Consider golden-stdout checks for the printing fixtures in `dewy/tests` so backend refactoring cannot silently change output.
+- [x] Golden-stdout checks for the printing fixtures in `dewy/tests` so backend refactoring cannot silently change output. Already covered: the e2e and stage tests capture and compare program stdout with `capfd` for every fixture that prints.
 
 ### Phase 1 — effect analysis and the lowering refactor
 
 The effect analysis described under Current focus, treated as one campaign with paying down the accumulated backend debt:
 
-- [ ] Build the recursive, transitive effect analysis as its own module.
-- [ ] Replace the array-specific call-boundary checks in `dewy/backend/udewy/lower.py` with it, unifying the near-duplicate array and object code paths.
+- [x] Build the recursive, transitive effect analysis as its own module. `semantic/analyze/effects.py` summarizes per-parameter reads, mutation, rebinding, and escapes by field/index route over checked HIR, propagates place-argument effects through direct calls to a fixed point, and stays conservative at indirect or unresolved calls. Value arguments propagate only a read: under value semantics each boundary decides copy-versus-borrow locally from the callee's own summary.
+- [ ] Replace the array-specific call-boundary checks in `dewy/backend/udewy/lower.py` with it, unifying the near-duplicate array and object code paths. Done so far: array parameter adapter-safety is now driven by the semantic summary, which reaches the true transitive fixed point the old two-pass use-set check stopped short of — read-only parameters that return, object-store, or forward their array now borrow instead of copying (`array_borrowed_returns.dewy` proves the behavior). Still to do: route-aware borrowing for arrays with object elements, the object-parameter path, boundary-analysis internals, and removing the superseded use-set machinery.
 - [ ] Use the campaign to split `lower.py` (currently ~11k lines) into coherent modules: representation analysis, place lowering, copy machinery, string lowering, call ABI. `dewy/semantic/check.py` (~5.7k lines) gets the same treatment opportunistically.
 
 This phase is load-bearing: effect, escape, and ownership analysis is the prerequisite for runtime-length array returns, whole-array place rebinding, growable arrays, and representation elision.

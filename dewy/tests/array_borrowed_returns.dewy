@@ -1,0 +1,23 @@
+# Read-only parameters that return, store, or forward their array may borrow
+# the caller's storage. The returned value must still be an independent copy.
+
+let echo = (items:array<int64 length=2>):>array<int64 length=2> => items
+
+let store = (items:array<int64 length=2>):>int64 => {
+    let box = [value = items]
+    return box.value[0]
+}
+
+let first = (items:array<int64 length=2>):>int64 => items[0]
+let forward = (forwarded:array<int64 length=2>):>int64 => first(forwarded)
+
+let main = ():>int64 => {
+    let values = [12 1]
+    let copied = echo(values)
+    copied[0] = 5
+    let a = values[0]        # still 12: copied must not alias values
+    let b = copied[0]        # 5
+    let c = store(values)    # 12
+    let d = forward(values)  # 12
+    return a + b + c + d + values[1]  # 12 + 5 + 12 + 12 + 1 = 42
+}

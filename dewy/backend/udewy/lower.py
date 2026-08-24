@@ -40,6 +40,7 @@ from typing import Literal, NoReturn
 from ...parser import t0
 from ...reporting import Error, Pointer, Span, SrcFile
 from ...semantic import builtins, hir, ty
+from ...semantic.analyze.effects import ProgramEffects, analyze_effects
 from ...semantic.errors import NotImplementedYet
 from ...semantic.hir_display import type_to_dewy
 from .runtime_unicode import (
@@ -309,6 +310,7 @@ class _Lowerer:
         self.needs_startup = False
         self.startup_symbol = '__dewy_top_level'
         self.user_main_base = '__dewy_user_main'
+        self.program_effects: ProgramEffects = analyze_effects(root)
 
     def lower(self) -> LoweredProgram:
         """Run discovery, validation, symbol allocation, and HIR rewriting."""
@@ -1734,12 +1736,22 @@ class _Lowerer:
                 for use in self.array_uses.get(binding_id, set())
                 if use != 'alias'
             )
+            # The semantic effect summary proves whether the function body can
+            # write to or retain the parameter, including transitively through
+            # place-forwarded calls. The local use-set check remains as a
+            # fallback for parameters without a semantic summary.
+            summary = self.program_effects.for_param_binding(binding_id)
+            borrow_safe = (
+                summary.read_only
+                if summary is not None
+                else uses <= allowed_uses
+            )
             self.array_parameter_analyses[binding_id] = ArrayParameterAnalysis(
                 function,
                 parameter,
                 group,
                 uses,
-                uses <= allowed_uses
+                borrow_safe
                 and not self._array_type_contains_object(parameter.type),
             )
 

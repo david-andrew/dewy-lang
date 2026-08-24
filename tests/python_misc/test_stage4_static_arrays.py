@@ -125,22 +125,6 @@ let update = (items:array<int64 length=2>):>int64 => {
     [
         (
             '''
-let escape = (items:array<int64 length=2>):>array<int64 length=2> =>
-    items
-''',
-            'representation',
-        ),
-        (
-            '''
-let store = (items:array<int64 length=2>):>int64 => {
-    let box = [value = items]
-    return box.value[0]
-}
-''',
-            'representation',
-        ),
-        (
-            '''
 let convert = (items:array<grapheme length=2>):>string =>
     items as string
 ''',
@@ -168,6 +152,32 @@ def test_array_parameter_unsafe_uses_require_descriptors(
 
     assert unsafe_use in analysis.uses
     assert not analysis.adapter_safe
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        '''
+let escape = (items:array<int64 length=2>):>array<int64 length=2> =>
+    items
+''',
+        '''
+let store = (items:array<int64 length=2>):>int64 => {
+    let box = [value = items]
+    return box.value[0]
+}
+''',
+    ],
+)
+def test_read_only_returns_and_stores_are_adapter_safe(source: str) -> None:
+    # Returning the parameter or storing it into an object field copies the
+    # value at that site, so the effect analysis proves the parameter itself
+    # is only read and its storage may be borrowed across the call.
+    lowerer, names = _analyze_arrays(source)
+    analysis = lowerer.array_parameter_analyses[names['items']]
+
+    assert 'representation' in analysis.uses
+    assert analysis.adapter_safe
 
 
 def test_array_parameter_read_only_forwarding_is_adapter_safe() -> None:
@@ -305,7 +315,7 @@ let read = ():>int64 => {
 }
 ''',
             'stack_data',
-            False,
+            True,
         ),
         (
             '''
@@ -330,7 +340,7 @@ let read = ():>int64 => {
 }
 ''',
             'stack_data',
-            False,
+            True,
         ),
         (
             '''
