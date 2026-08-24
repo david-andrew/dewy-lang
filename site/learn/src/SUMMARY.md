@@ -60,3 +60,7 @@
   - [Dewy Compiler](ch06/dewy-compiler.md)
   - [Asteroid Detection](ch06/neo-mapping.md)
   - [PDF Editor](ch06/pdf-editing.md)
+  - [dwitter](ch06/dwitter.md)
+  - [Dewy Web](ch06/dewy-web.md)
+  - [DMail](ch06/dmail.md)
+  - [Dewy OS](ch06/dewy-os.md)

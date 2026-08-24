@@ -1,0 +1,5 @@
+# dwitter
+
+BLUF: basically remake dwitter using dewy from end to end. see [Twitter, but you have 140 Characters of JavaScript](https://www.youtube.com/watch?v=WiX135GIdL8).
+
+user's can write dewy code in the browser that gets compiled and run on and generates some output perhaps convenient functions available for drawing (perhaps register or array-based or shader-esque interface), emitting sound, etc. I think it should be 1kb allowed rather than 140 characters. Perhaps even base the size directly on the AST rather than raw number of characters so that user's don't have to squish things down to fit (ideally whitespace and variable name lengths are free)
