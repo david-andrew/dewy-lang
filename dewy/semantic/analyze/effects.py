@@ -24,7 +24,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 
-from .. import hir
+from .. import hir, ty
 
 INDEX_STEP = '[]'
 """Route step standing for any element of an array; field steps use the name."""
@@ -425,6 +425,21 @@ class _EffectAnalyzer:
             if node.target.binding_id in params:
                 params[node.target.binding_id].add_rebind(ROOT)
             self._visit(node.iterable, params)
+            return
+        if isinstance(node, hir.MemberAccess) and isinstance(
+            node.type, (ty.FunctionType, ty.OverloadType)
+        ):
+            # A function-valued member captures its receiver, so reading it
+            # (or calling it, directly or later) may mutate sibling fields.
+            # The member value is runtime data, so this stays conservative.
+            resolved = self._resolve_route(node.value, params)
+            if resolved is not None:
+                binding_id, route, inner = resolved
+                params[binding_id].add_opaque(route)
+                for expr in inner:
+                    self._visit(expr, params)
+                return
+            self._visit(node.value, params)
             return
         if isinstance(node, (hir.Index, hir.MemberAccess)):
             resolved = self._resolve_route(node, params)

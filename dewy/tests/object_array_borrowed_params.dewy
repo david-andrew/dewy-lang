@@ -1,0 +1,40 @@
+# A read-only parameter whose array holds object elements may borrow the
+# caller's storage. Object elements are stored as handles, so this stresses
+# the paths the borrow must not corrupt: field reads through the handle,
+# element extraction into a locally mutated copy, forwarding, and storing
+# the parameter into an object field.
+
+let Pair:type = [left:int64 right:int64]
+
+let read_fields = (items:array<Pair length=2>):>int64 => {
+    return items[0].left + items[1].right
+}
+
+let extract_and_scribble = (items:array<Pair length=2>):>int64 => {
+    let local = items[0]
+    local.left = 999
+    return local.left - items[0].left  # 999 - 1 = 998 when items is intact
+}
+
+let forward = (items:array<Pair length=2>):>int64 => read_fields(items)
+
+let box_it = (items:array<Pair length=2>):>int64 => {
+    let box = [inner = items]
+    return box.inner[1].left
+}
+
+let main = ():>int64 => {
+    let pairs:array<Pair length=2> = [[left = 1 right = 2] [left = 3 right = 4]]
+
+    let a = read_fields(pairs)           # 1 + 4 = 5
+    let b = extract_and_scribble(pairs)  # 998
+    if b not =? 998
+        return 1
+    if pairs[0].left not =? 1            # caller storage must be untouched
+        return 2
+    let c = forward(pairs)               # 5
+    let d = box_it(pairs)                # 3
+    if pairs[1].left not =? 3
+        return 3
+    return a + c + d + pairs[0].right + pairs[1].right + 23  # 5+5+3+2+4+23 = 42
+}

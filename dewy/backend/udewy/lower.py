@@ -514,6 +514,30 @@ class _Lowerer:
                     'int64',
                     incoming_name,
                 )
+                summary = (
+                    self.program_effects.for_param_binding(param.binding_id)
+                    if param.binding_id is not None
+                    else None
+                )
+                if summary is not None and summary.read_only:
+                    # The body provably never writes to or retains the object,
+                    # so the parameter borrows the caller's storage instead of
+                    # copying it into a fresh allocation.
+                    parameter_prologue.append(hir.Declare(
+                        literal.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        param.name,
+                        'int64',
+                        incoming,
+                        binding_id=param.binding_id,
+                    ))
+                    return replace(
+                        param,
+                        name=incoming_name,
+                        type='int64',
+                        binding_id=None,
+                    )
                 cell = hir.ExpressedIdentifier(
                     literal.loc,
                     'int64',
@@ -1738,21 +1762,25 @@ class _Lowerer:
             )
             # The semantic effect summary proves whether the function body can
             # write to or retain the parameter, including transitively through
-            # place-forwarded calls. The local use-set check remains as a
-            # fallback for parameters without a semantic summary.
+            # place-forwarded calls and through object-element handles, so it
+            # alone decides borrow safety. The local use-set check remains as
+            # a fallback for parameters without a semantic summary; it cannot
+            # see handle-hidden mutation, so it keeps the object-element ban.
             summary = self.program_effects.for_param_binding(binding_id)
-            borrow_safe = (
+            adapter_safe = (
                 summary.read_only
                 if summary is not None
-                else uses <= allowed_uses
+                else (
+                    uses <= allowed_uses
+                    and not self._array_type_contains_object(parameter.type)
+                )
             )
             self.array_parameter_analyses[binding_id] = ArrayParameterAnalysis(
                 function,
                 parameter,
                 group,
                 uses,
-                borrow_safe
-                and not self._array_type_contains_object(parameter.type),
+                adapter_safe,
             )
 
     @classmethod
@@ -1765,11 +1793,33 @@ class _Lowerer:
             and cls._array_type_contains_object(element)
         )
 
+    @staticmethod
+    def _call_place_argument_roots(call: hir.FunctionCall) -> set[int]:
+        """Semantic binding ids whose storage a call's place arguments expose."""
+        roots: set[int] = set()
+        for argument in [*call.pos_args, *call.kw_args.values()]:
+            if not isinstance(argument, hir.Place):
+                continue
+            target: hir.AST = argument.target
+            while isinstance(target, (hir.MemberAccess, hir.Index)):
+                target = (
+                    target.value
+                    if isinstance(target, hir.MemberAccess)
+                    else target.array
+                )
+            if (
+                isinstance(target, hir.ExpressedIdentifier)
+                and target.binding_id is not None
+            ):
+                roots.add(target.binding_id)
+        return roots
+
     def _analyze_array_call_boundaries(self) -> dict[int, set[ArrayUse]]:
         boundary_uses: dict[int, set[ArrayUse]] = defaultdict(set)
         self.array_call_boundary_analyses = {}
         for call in self.array_calls:
             function = self._direct_call_function(call)
+            place_roots = self._call_place_argument_roots(call)
             for position, argument, parameter in self._call_array_arguments(
                 call,
                 function,
@@ -1798,6 +1848,10 @@ class _Lowerer:
                     and parameter_analysis is not None
                     and parameter_analysis.adapter_safe
                     and source is not None
+                    # A place argument in the same call exposing the same
+                    # binding could write mid-call; a borrowed value argument
+                    # would observe those writes, so the boundary must copy.
+                    and source_id not in place_roots
                     and (
                         raw_kind is None
                         or self._raw_array_group_uses_are_safe(group, raw_kind)
@@ -3457,7 +3511,7 @@ class _Lowerer:
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
-                    arg_prelude, lowered_arg = self._extract_object_pointer(arg)
+                    arg_prelude, lowered_arg = self._lower_object_argument(node, arg)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 prelude.extend(arg_prelude)
@@ -3490,7 +3544,7 @@ class _Lowerer:
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType):
-                    arg_prelude, lowered_arg = self._extract_object_pointer(arg)
+                    arg_prelude, lowered_arg = self._lower_object_argument(node, arg)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 prelude.extend(arg_prelude)
@@ -6488,6 +6542,43 @@ class _Lowerer:
         if self._array_expression_owns_fresh_storage(node):
             return self._extract_expression(node)
         return self._clone_array_value(node, array_type)
+
+    def _lower_object_argument(
+        self,
+        call: hir.FunctionCall,
+        arg: hir.AST,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Lower one object-typed value argument of ``call``.
+
+        The bare handle is passed, because the callee prologue either clones
+        it or, for a proven read-only parameter, borrows it. When a place
+        argument in the same call exposes the same binding's storage, a
+        borrowing callee could observe mid-call writes, so the caller clones
+        the argument first.
+        """
+        if isinstance(arg.type, ty.ObjectType):
+            place_roots = self._call_place_argument_roots(call)
+            if place_roots:
+                base: hir.AST = arg
+                while True:
+                    if (
+                        isinstance(base, hir.Block)
+                        and not base.scoped
+                        and len(base.items) == 1
+                    ):
+                        base = base.items[0]
+                    elif isinstance(base, hir.MemberAccess):
+                        base = base.value
+                    elif isinstance(base, hir.Index):
+                        base = base.array
+                    else:
+                        break
+                if (
+                    isinstance(base, hir.ExpressedIdentifier)
+                    and base.binding_id in place_roots
+                ):
+                    return self._clone_object_value(arg, arg.type)
+        return self._extract_object_pointer(arg)
 
     def _clone_object_value(
         self,

@@ -1,0 +1,33 @@
+# Passing one binding as both a value argument and a place argument in the
+# same call: the value argument is a snapshot and must not observe the
+# callee's place writes, while the place writes must still reach the caller.
+
+let Pair:type = [left:int64 right:int64]
+
+let f = (items:array<int64 length=2> @sink:array<int64 length=2>):>int64 => {
+    sink[0] = 99
+    return items[0]
+}
+
+let g = (p:Pair @sink:Pair):>int64 => {
+    sink.left = 99
+    return p.left
+}
+
+let descriptor_case = (choose:bool):>int64 => {
+    let values = if choose { [1 2] } else { [3 4] }
+    return f(values @values)
+}
+
+let main = ():>int64 => {
+    let values = [1 2]
+    let a = f(values @values)      # 1: snapshot, not the place write
+    if values[0] not =? 99         # the place write must land in the caller
+        return 1
+    let b = descriptor_case(true)  # 1: same, with descriptor representation
+    let pair:Pair = [left = 1 right = 2]
+    let c = g(pair @pair)          # 1: object snapshot
+    if pair.left not =? 99
+        return 2
+    return a + b + c + 39  # 1 + 1 + 1 + 39 = 42
+}

@@ -176,6 +176,20 @@ let main = ():>void => {
     assert not outer.mutates
 
 
+def test_method_access_on_parameter_is_conservative() -> None:
+    # A function-valued member captures its receiver, so touching it may
+    # mutate sibling fields; the parameter must not look read-only.
+    root, effects = _analyze('''
+let call_method = (o:[a:int64 bump:<():>void>]):>int64 => {
+    o.bump
+    return o.a
+}
+''')
+    summary = _param_effects(effects, _function(root, 'call_method'))
+    assert not summary.read_only
+    assert summary.mutates
+
+
 def test_read_prefix_dominates_deeper_routes() -> None:
     root, effects = _analyze('''
 let mixed = (items:array<int64 length=2>):>int64 => {

@@ -1,0 +1,44 @@
+# Read-only object parameters borrow the caller's storage instead of the
+# callee cloning the object in its prologue. Local copies made from the
+# borrowed parameter must still be independent.
+
+let Pair:type = [left:int64 right:int64]
+
+let read_pair = (p:Pair):>int64 => {
+    return p.left + p.right
+}
+
+let copy_and_scribble = (p:Pair):>int64 => {
+    let local = p
+    local.left = 999
+    return local.left - p.left  # 999 - 1 = 998 when p is intact
+}
+
+let echo = (p:Pair):>Pair => p
+
+let forward = (p:Pair):>int64 => read_pair(p)
+
+let writer = (p:Pair):>int64 => {
+    p.left = 77          # writes its own copy; caller must be unaffected
+    return p.left
+}
+
+let main = ():>int64 => {
+    let pair:Pair = [left = 1 right = 2]
+
+    let a = read_pair(pair)          # 3
+    let b = copy_and_scribble(pair)  # 998
+    if b not =? 998
+        return 1
+    if pair.left not =? 1
+        return 2
+    let c = forward(pair)            # 3
+    let returned = echo(pair)
+    returned.right = 50
+    if pair.right not =? 2           # returned must not alias pair
+        return 3
+    let d = writer(pair)             # 77
+    if pair.left not =? 1            # writer got a copy
+        return 4
+    return a + c + d - returned.right + pair.right + 7  # 3+3+77-50+2+7 = 42
+}
