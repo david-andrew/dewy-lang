@@ -295,15 +295,22 @@ def test_array_length_counts_as_object_receiver_use() -> None:
     )
 
 
-def test_object_return_with_array_field_waits_for_recursive_result_storage() -> None:
-    with pytest.raises(
-        NotImplementedYet,
-        match='recursive caller-owned result storage',
-    ):
-        codegen(SrcFile(None, '''
+def test_object_return_with_array_field_uses_recursive_result_storage() -> None:
+    emitted = codegen(SrcFile(None, '''
 let Box:type = [items:array<int64 length=2>]
 let make = ():>Box => [items = [40 2]]
+let main = ():>int64 => {
+    let box = make()
+    return box.items[0] + box.items[1]
+}
 '''))
+
+    make_body, main_body = emitted.split('let main =', 1)
+    assert '__alloca__(' not in make_body
+    assert main_body.count('__alloca__(8)') == 1
+    assert main_body.count('__alloca__(16)') == 1
+    assert main_body.count('__alloca__(48)') == 1
+    assert 'make(__dewy_object_' in main_body
 
 
 def test_field_order_is_part_of_the_type() -> None:

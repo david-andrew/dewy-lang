@@ -1,0 +1,24 @@
+let Matrix:type = array<array<int64 length=2> length=2>
+let Box:type = [items:array<int64 length=2>]
+let Envelope:type = [box:Box]
+
+let make_matrix = ():>Matrix => [[10 1] [20 2]]
+let forward_matrix = ():>Matrix => make_matrix()
+
+let make_envelope = ():>Envelope => {
+    let local:Envelope = [box = [items = [7 1]]]
+    return local
+}
+let forward_envelope = ():>Envelope => make_envelope()
+
+let main = ():>int64 => {
+    let matrix = forward_matrix()
+    let other = forward_matrix()
+    other[0][0] = 0
+    matrix[0][0] = 11
+
+    let envelope = forward_envelope()
+    return matrix[0][0] + matrix[0][1]
+         + matrix[1][0] + matrix[1][1]
+         + envelope.box.items[0] + envelope.box.items[1]
+}

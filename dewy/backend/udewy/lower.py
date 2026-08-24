@@ -290,6 +290,7 @@ class _Lowerer:
             ArrayCallBoundaryAnalysis,
         ] = {}
         self.array_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
+        self.object_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_array_result: hir.ExpressedIdentifier | None = None
@@ -423,7 +424,7 @@ class _Lowerer:
         ):
             self._target_error(
                 literal,
-                'exact array returns of handle elements require ownership lowering',
+                'exact array returns require a recursively fixed result layout',
             )
         if (
             object_result
@@ -432,8 +433,7 @@ class _Lowerer:
         ):
             self._target_error(
                 literal,
-                'object returns with mutable handle-valued fields require '
-                'recursive caller-owned result storage',
+                'object returns require a recursively fixed result layout',
             )
         if isinstance(result_payload, ty.ArrayType):
             self._target_error(
@@ -6719,6 +6719,103 @@ class _Lowerer:
         ]
         return statements, target
 
+    def _allocate_array_result_value(
+        self,
+        array_type: ty.ArrayType,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Allocate the complete exact array storage tree in the caller."""
+
+        statements, target = self._allocate_array_value(array_type, loc)
+        descriptor = replace(target, type='int64')
+        for index in range(array_type.length or 0):
+            address = self._array_element_address(
+                descriptor,
+                index,
+                array_type.element,
+                loc,
+            )
+            if isinstance(array_type.element, ty.ArrayType):
+                nested_statements, nested = self._allocate_array_result_value(
+                    array_type.element,
+                    loc,
+                )
+                statements.extend(nested_statements)
+                statements.append(
+                    self._array_store(nested, address, array_type.element, loc)
+                )
+            elif isinstance(array_type.element, ty.ObjectType):
+                nested_statements, nested = self._allocate_object_result_value(
+                    array_type.element,
+                    loc,
+                )
+                statements.extend(nested_statements)
+                statements.append(
+                    self._array_store(nested, address, array_type.element, loc)
+                )
+        return statements, target
+
+    def _allocate_object_result_value(
+        self,
+        object_type: ty.ObjectType,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Allocate an object and its exact mutable result fields in the caller."""
+
+        size, _offsets = self._object_layout(
+            object_type,
+            hir.Void(loc, ty.VOID_TYPE),
+        )
+        target = self._new_object_temp(loc)
+        statements: list[hir.AST] = [
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                'int64',
+                self._object_allocation(loc, size),
+            )
+        ]
+        statements.extend(
+            self._initialize_object_result_storage(target, object_type, loc)
+        )
+        return statements, target
+
+    def _initialize_object_result_storage(
+        self,
+        dest: hir.AST,
+        object_type: ty.ObjectType,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """Prepare array fields recursively within existing object storage."""
+
+        _size, offsets = self._object_layout(
+            object_type,
+            hir.Void(loc, ty.VOID_TYPE),
+        )
+        statements: list[hir.AST] = []
+        for field in object_type.fields:
+            address = self._field_address(dest, offsets[field.name], loc)
+            if isinstance(field.type, ty.ArrayType):
+                nested_statements, nested = self._allocate_array_result_value(
+                    field.type,
+                    loc,
+                )
+                statements.extend(nested_statements)
+                statements.extend(
+                    self._value_store(nested, address, field.type, loc)
+                )
+            elif isinstance(field.type, ty.ObjectType):
+                statements.extend(
+                    self._initialize_object_result_storage(
+                        address,
+                        field.type,
+                        loc,
+                    )
+                )
+        return statements
+
     def _array_storage_value(
         self,
         node: hir.AST,
@@ -7249,15 +7346,29 @@ class _Lowerer:
             f'array element layout `{type_to_dewy(element_type)}`',
         )
 
-    @staticmethod
-    def _array_result_elements_are_returnable(array_type: ty.ArrayType) -> bool:
-        """Whether copying elements cannot retain pointers into a callee frame."""
+    @classmethod
+    def _array_result_elements_are_returnable(
+        cls,
+        array_type: ty.ArrayType,
+    ) -> bool:
+        """Whether callers can prepare the complete mutable result layout."""
 
+        if array_type.length is None:
+            return False
+        element_type = array_type.element
         return (
             array_type.length == 0
-            or array_type.element == 'bool'
-            or ty.fixed_integer_layout(array_type.element) is not None
-            or isinstance(array_type.element, ty.FunctionType)
+            or element_type == 'bool'
+            or ty.fixed_integer_layout(element_type) is not None
+            or isinstance(element_type, ty.FunctionType)
+            or (
+                isinstance(element_type, ty.ArrayType)
+                and cls._array_result_elements_are_returnable(element_type)
+            )
+            or (
+                isinstance(element_type, ty.ObjectType)
+                and cls._object_result_fields_are_returnable(element_type)
+            )
         )
 
     @classmethod
@@ -7268,7 +7379,10 @@ class _Lowerer:
         """Whether field copying needs no callee-owned mutable storage."""
 
         for field in object_type.fields:
-            if isinstance(field.type, ty.ArrayType):
+            if (
+                isinstance(field.type, ty.ArrayType)
+                and not cls._array_result_elements_are_returnable(field.type)
+            ):
                 return False
             if (
                 isinstance(field.type, ty.ObjectType)
@@ -7944,24 +8058,19 @@ class _Lowerer:
     ) -> tuple[list[hir.AST], hir.AST]:
         if not isinstance(node.type, ty.ObjectType):
             self._target_error(node, 'object call result is not an object')
-        size, _offsets = self._object_layout(node.type, node)
-        result = self._new_object_temp(node.loc)
-        prelude.append(
-            hir.Declare(
+        result = self.object_result_destinations.pop(id(node), None)
+        if result is None:
+            allocation, result = self._allocate_object_result_value(
+                node.type,
                 node.loc,
-                ty.VOID_TYPE,
-                'let',
-                result.name,
-                'int64',
-                self._object_allocation(node.loc, size),
             )
-        )
+            prelude.extend(allocation)
         prelude.append(
             replace(
                 node,
                 type=ty.VOID_TYPE,
                 func=func,
-                pos_args=[*pos_args, result],
+                pos_args=[*pos_args, replace(result, type='int64')],
                 kw_args=kw_args,
             )
         )
@@ -7982,7 +8091,10 @@ class _Lowerer:
             )
         result = self.array_result_destinations.pop(id(node), None)
         if result is None:
-            allocation, result = self._allocate_array_value(node.type, node.loc)
+            allocation, result = self._allocate_array_result_value(
+                node.type,
+                node.loc,
+            )
             prelude.extend(allocation)
         prelude.append(
             replace(
@@ -8149,18 +8261,150 @@ class _Lowerer:
         if not isinstance(object_type, ty.ObjectType):
             raise TypeError('INTERNAL ERROR: object result is not an object type')
         dest = replace(self.current_object_result, type='int64')
-        if isinstance(item, hir.ObjectLiteral):
-            prelude, _ptr = self._init_object_literal_at(item, dest)
-            return [
-                *prelude,
-                hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
-            ]
-        prelude, src = self._extract_object_pointer(item)
         return [
-            *prelude,
-            *self._object_copy(dest, src, object_type, item.loc),
+            *self._write_object_result_value(dest, item, object_type),
             hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
         ]
+
+    def _write_object_result_value(
+        self,
+        dest: hir.AST,
+        item: hir.AST,
+        object_type: ty.ObjectType,
+    ) -> list[hir.AST]:
+        """Write an object into a complete storage tree owned by the caller."""
+
+        if isinstance(item, hir.FunctionCall):
+            destination_prelude, destination = self._result_destination_identifier(
+                dest,
+                object_type,
+                item.loc,
+                object_result=True,
+            )
+            self.object_result_destinations[id(item)] = destination
+            prelude, result = self._extract_expression(item)
+            if id(item) in self.object_result_destinations:
+                del self.object_result_destinations[id(item)]
+                raise TypeError(
+                    'INTERNAL ERROR: object result destination was not consumed'
+                )
+            if (
+                not isinstance(result, hir.ExpressedIdentifier)
+                or result.name != destination.name
+            ):
+                raise TypeError(
+                    'INTERNAL ERROR: forwarded object result changed destination'
+                )
+            return [*destination_prelude, *prelude]
+        if isinstance(item, hir.ObjectLiteral):
+            return self._write_object_literal_result(dest, item, object_type)
+        prelude, source = self._extract_object_pointer(item)
+        return [
+            *prelude,
+            *self._copy_object_into_result_storage(
+                dest,
+                source,
+                object_type,
+                item.loc,
+            ),
+        ]
+
+    def _write_object_literal_result(
+        self,
+        dest: hir.AST,
+        node: hir.ObjectLiteral,
+        object_type: ty.ObjectType,
+    ) -> list[hir.AST]:
+        """Initialize an object literal without replacing prepared child storage."""
+
+        _size, offsets = self._object_layout(object_type, node)
+        field_names = {
+            field.binding_id: field.name
+            for field in node.fields
+            if field.binding_id is not None
+        }
+        self.object_literal_contexts.append((dest, object_type, field_names))
+        statements: list[hir.AST] = []
+        try:
+            for field in node.fields:
+                expected = object_type.field(field.name)
+                field_type = expected.type if expected is not None else field.value.type
+                address = self._field_address(dest, offsets[field.name], field.loc)
+                if isinstance(field_type, ty.ArrayType):
+                    nested_dest = self._value_load(
+                        address,
+                        field_type,
+                        field.loc,
+                    )
+                    statements.extend(
+                        self._write_array_result_value(
+                            nested_dest,
+                            field.value,
+                            field_type,
+                        )
+                    )
+                elif isinstance(field_type, ty.ObjectType):
+                    statements.extend(
+                        self._write_object_result_value(
+                            address,
+                            field.value,
+                            field_type,
+                        )
+                    )
+                else:
+                    prelude, value = self._extract_expression(field.value)
+                    statements.extend(prelude)
+                    statements.extend(
+                        self._value_store(value, address, field_type, field.loc)
+                    )
+        finally:
+            self.object_literal_contexts.pop()
+        return statements
+
+    def _copy_object_into_result_storage(
+        self,
+        dest: hir.AST,
+        src: hir.AST,
+        object_type: ty.ObjectType,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """Recursively copy an object into already-prepared mutable storage."""
+
+        _size, offsets = self._object_layout(
+            object_type,
+            hir.Void(loc, ty.VOID_TYPE),
+        )
+        statements: list[hir.AST] = []
+        for field in object_type.fields:
+            dest_address = self._field_address(dest, offsets[field.name], loc)
+            source_address = self._field_address(src, offsets[field.name], loc)
+            if isinstance(field.type, ty.ArrayType):
+                target_array = self._value_load(dest_address, field.type, loc)
+                source_array = self._value_load(source_address, field.type, loc)
+                statements.extend(
+                    self._copy_array_into_result_storage(
+                        target_array,
+                        source_array,
+                        field.type,
+                        loc,
+                        source_is_pointer=True,
+                    )
+                )
+            elif isinstance(field.type, ty.ObjectType):
+                statements.extend(
+                    self._copy_object_into_result_storage(
+                        dest_address,
+                        source_address,
+                        field.type,
+                        loc,
+                    )
+                )
+            else:
+                value = self._value_load(source_address, field.type, loc)
+                statements.extend(
+                    self._value_store(value, dest_address, field.type, loc)
+                )
+        return statements
 
     def _array_result_write(self, item: hir.AST) -> list[hir.AST]:
         """Copy one exact-length array result into storage owned by the caller."""
@@ -8169,91 +8413,225 @@ class _Lowerer:
             raise TypeError('INTERNAL ERROR: missing array result cell')
         array_type = self.current_array_result.type
         if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
-            raise TypeError('INTERNAL ERROR: array result does not have an exact layout')
-        dest = replace(self.current_array_result, type='int64')
-        statements: list[hir.AST] = []
-        if isinstance(item, hir.FunctionCall):
-            self.array_result_destinations[id(item)] = replace(
-                self.current_array_result,
-                type=item.type,
+            raise TypeError(
+                'INTERNAL ERROR: array result does not have an exact layout'
             )
+        dest = replace(self.current_array_result, type='int64')
+        return [
+            *self._write_array_result_value(dest, item, array_type),
+            hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
+        ]
+
+    def _write_array_result_value(
+        self,
+        dest: hir.AST,
+        item: hir.AST,
+        array_type: ty.ArrayType,
+    ) -> list[hir.AST]:
+        """Write an exact array into a complete storage tree owned by the caller."""
+
+        if isinstance(item, hir.FunctionCall):
+            destination_prelude, destination = self._result_destination_identifier(
+                dest,
+                array_type,
+                item.loc,
+                object_result=False,
+            )
+            self.array_result_destinations[id(item)] = destination
             prelude, result = self._extract_expression(item)
             if id(item) in self.array_result_destinations:
                 del self.array_result_destinations[id(item)]
-                raise TypeError('INTERNAL ERROR: array result destination was not consumed')
+                raise TypeError(
+                    'INTERNAL ERROR: array result destination was not consumed'
+                )
             if (
                 not isinstance(result, hir.ExpressedIdentifier)
-                or result.name != self.current_array_result.name
+                or result.name != destination.name
             ):
-                raise TypeError('INTERNAL ERROR: forwarded array result changed destination')
-            return [
-                *prelude,
-                hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
-            ]
+                raise TypeError(
+                    'INTERNAL ERROR: forwarded array result changed destination'
+                )
+            return [*destination_prelude, *prelude]
+        statements: list[hir.AST] = []
         if isinstance(item, hir.ArrayLiteral):
             if len(item.items) != array_type.length:
                 raise TypeError('INTERNAL ERROR: checked array result length changed')
             for index, element in enumerate(item.items):
-                prelude, value = self._array_storage_value(
-                    element,
-                    array_type.element,
-                )
-                statements.extend(prelude)
-                statements.append(self._array_store(
-                    value,
-                    self._array_element_address(
-                        dest,
-                        index,
-                        array_type.element,
-                        element.loc,
-                    ),
+                target_address = self._array_element_address(
+                    dest,
+                    index,
                     array_type.element,
                     element.loc,
-                ))
+                )
+                if isinstance(array_type.element, ty.ArrayType):
+                    nested_dest = self._array_load(
+                        target_address,
+                        array_type.element,
+                        element.loc,
+                    )
+                    statements.extend(
+                        self._write_array_result_value(
+                            nested_dest,
+                            element,
+                            array_type.element,
+                        )
+                    )
+                elif isinstance(array_type.element, ty.ObjectType):
+                    nested_dest = self._array_load(
+                        target_address,
+                        array_type.element,
+                        element.loc,
+                    )
+                    statements.extend(
+                        self._write_object_result_value(
+                            nested_dest,
+                            element,
+                            array_type.element,
+                        )
+                    )
+                else:
+                    prelude, value = self._array_storage_value(
+                        element,
+                        array_type.element,
+                    )
+                    statements.extend(prelude)
+                    statements.append(
+                        self._array_store(
+                            value,
+                            target_address,
+                            array_type.element,
+                            element.loc,
+                        )
+                    )
         else:
-            raw_representation = self._array_use_representation(item)
-            prelude, source = self._extract_expression(item)
-            statements.extend(prelude)
-            element_bytes, _signed = self._array_element_layout(
-                array_type.element,
-                item,
+            statements.extend(
+                self._copy_array_into_result_storage(
+                    dest,
+                    item,
+                    array_type,
+                    item.loc,
+                )
             )
-            for index in range(array_type.length):
-                source_address = (
-                    self._pointer_element_address(
-                        source,
-                        index,
-                        element_bytes,
-                        item.loc,
-                    )
-                    if raw_representation is not None
-                    else self._array_element_address(
-                        source,
-                        index,
-                        array_type.element,
-                        item.loc,
-                    )
-                )
-                value = self._array_load(
-                    source_address,
-                    array_type.element,
-                    item.loc,
-                )
-                statements.append(self._array_store(
-                    value,
-                    self._array_element_address(
-                        dest,
-                        index,
-                        array_type.element,
-                        item.loc,
-                    ),
-                    array_type.element,
-                    item.loc,
-                ))
-        statements.append(
-            hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE))
-        )
         return statements
+
+    def _copy_array_into_result_storage(
+        self,
+        dest: hir.AST,
+        source_node: hir.AST,
+        array_type: ty.ArrayType,
+        loc: Span,
+        *,
+        source_is_pointer: bool = False,
+    ) -> list[hir.AST]:
+        """Recursively copy an array into already-prepared mutable storage."""
+
+        if array_type.length is None:
+            self._target_error(source_node, 'runtime-length escaping array results')
+        if source_is_pointer:
+            raw_representation = None
+            prelude, source = [], replace(source_node, type='int64')
+        else:
+            raw_representation = self._array_use_representation(source_node)
+            prelude, source = self._extract_expression(source_node)
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            source_node,
+        )
+        statements = [*prelude]
+        for index in range(array_type.length):
+            source_address = (
+                self._pointer_element_address(
+                    source,
+                    index,
+                    element_bytes,
+                    loc,
+                )
+                if raw_representation is not None
+                else self._array_element_address(
+                    source,
+                    index,
+                    array_type.element,
+                    loc,
+                )
+            )
+            target_address = self._array_element_address(
+                dest,
+                index,
+                array_type.element,
+                loc,
+            )
+            source_value = self._array_load(
+                source_address,
+                array_type.element,
+                loc,
+            )
+            if isinstance(array_type.element, ty.ArrayType):
+                target_value = self._array_load(
+                    target_address,
+                    array_type.element,
+                    loc,
+                )
+                statements.extend(
+                    self._copy_array_into_result_storage(
+                        target_value,
+                        source_value,
+                        array_type.element,
+                        loc,
+                        source_is_pointer=True,
+                    )
+                )
+            elif isinstance(array_type.element, ty.ObjectType):
+                target_value = self._array_load(
+                    target_address,
+                    array_type.element,
+                    loc,
+                )
+                statements.extend(
+                    self._copy_object_into_result_storage(
+                        target_value,
+                        source_value,
+                        array_type.element,
+                        loc,
+                    )
+                )
+            else:
+                statements.append(
+                    self._array_store(
+                        source_value,
+                        target_address,
+                        array_type.element,
+                        loc,
+                    )
+                )
+        return statements
+
+    def _result_destination_identifier(
+        self,
+        dest: hir.AST,
+        result_type: ty.ArrayType | ty.ObjectType,
+        loc: Span,
+        *,
+        object_result: bool,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Give a nested prepared destination a stable name for call forwarding."""
+
+        if isinstance(dest, hir.ExpressedIdentifier):
+            return [], replace(dest, type=result_type)
+        target = (
+            self._new_object_temp(loc)
+            if object_result
+            else self._new_array_temp(hir.Void(loc, result_type))
+        )
+        return [
+            hir.Declare(
+                loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                'int64',
+                replace(dest, type='int64'),
+            )
+        ], replace(target, type=result_type)
 
     def _lower_iterator_flow(
         self,

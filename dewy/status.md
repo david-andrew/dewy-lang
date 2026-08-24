@@ -136,11 +136,11 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Non-escaping function-local `let` and `const` bindings initialized by an exact-length array literal use only a fresh stack element buffer when every use is `.length`, an indexed read, or an indexed write.
 - [x] Ordinary binding, rebinding, element storage, object-field storage, and argument passing recursively copy exact nested arrays. Read-only calls may borrow the source invisibly; calls that might mutate receive fresh element storage.
 - [x] Non-escaping runtime-length array copies allocate from the source length and use a counted, width-correct element loop.
-- [x] Exact-length scalar/function array return values use caller-owned descriptor and element storage, including direct literals, returned locals, forwarding calls, and indirect or method calls with an exact return type.
+- [x] Recursively fixed array and structural-object return values use caller-owned storage, including exact nested arrays and exact array-valued object fields. Direct literals, returned locals, forwarding calls, and indirect or method calls all fill storage prepared by the caller.
 - [x] Left-to-right iteration over arrays of settled scalar, function, and immutable string-like elements. Dynamic-length arrays work as single iterators, and exact-length arrays compose with other multiiterator leaves.
 - [ ] Empty-array inference.
 - [ ] Arrays whose exact runtime length is not known where indexing requires it.
-- [ ] Returning arrays whose storage requirement is not known at the call site, recursive caller-owned results for nested mutable elements, and other escapes into longer-lived storage.
+- [ ] Returning arrays whose storage requirement is not known at the call site, return elements with unresolved backing-storage lifetimes, and other escapes into longer-lived storage.
 
 ## Ranges and range iteration
 
@@ -187,7 +187,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Structural object types and named compile-time `type` aliases used in annotations.
 - [x] Field read and write, nested objects, and exact name/type/order matching.
 - [x] Object bindings, assignments, parameters, and constructors recursively copy exact array-valued fields as well as directly stored and nested-object fields.
-- [ ] Caller-owned object returns containing array-valued fields; these are rejected until their nested storage can be allocated in the caller.
+- [x] Caller-owned object returns recursively prepare exact array-valued fields and nested structural fields in the caller before the callee fills them.
 - [ ] Explicit `@` places under the intended rule recorded in [`semantic/value_semantics.md`](semantic/value_semantics.md).
 - [x] Function fields, including parenthesis-free zero-argument calls on member access, and object-local reads or compound assignment of sibling fields.
 - [x] Sequential udewy layout for `bool`, fixed-width integers, function pointers, string/array handles, and nested objects of those types.
@@ -233,7 +233,7 @@ The current backend still uses a canonical pointer to a 48-byte descriptor conta
 
 For a statically resolved direct or selected-overload call, a parameter that only observes length, indexed reads, or other read-only calls is adapter-safe. Lowering wraps raw local/static data in a temporary canonical descriptor in the call prelude without copying elements; the callee ABI and indexing remain descriptor-based. When the callee may write or the call cannot be analyzed, arrays are copied into fresh descriptor-backed element storage first. Exact copies are unrolled; runtime-length copies use a counted loop over the descriptor length. Read-only exact static bytes use borrowed-static flags.
 
-Exact-length scalar/function array returns use a hidden destination supplied by the caller. The caller allocates the descriptor and element buffer in its own frame, and the callee initializes or copies into that storage before returning; a directly returned call forwards the same destination through wrapper functions. No callee-local array storage escapes. Local binding, assignment, element storage, object-field storage, and argument passing recursively copy nested exact arrays. Runtime-length arrays can be copied while the destination remains in the current frame. Recursive mutable returns and other escapes report that caller-owned ownership lowering is not implemented. Control-flow representation joins, general or transitive effect analysis, indirect/method read-only adapters, and descriptor-free specialized direct-call ABIs remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
+Recursively fixed array and structural-object returns use a hidden destination supplied by the caller. The caller allocates the complete mutable storage tree in its own frame, including exact nested array descriptors and buffers or exact array-valued object fields. The callee initializes or recursively copies into that storage before returning, and a directly returned call forwards the same destination through wrapper functions. No callee-local mutable result storage escapes. Local binding, assignment, element storage, object-field storage, and argument passing use the same recursive value-copy rule. Runtime-length arrays can be copied while the destination remains in the current frame. Results with runtime-dependent storage, unresolved backing-storage lifetimes, and other escapes remain pending. Control-flow representation joins, general or transitive effect analysis, indirect/method read-only adapters, and descriptor-free specialized direct-call ABIs also remain pending. At present arrays cannot change length; `capacity`, `stride`, and `owner` are not read by generated programs.
 
 The intended rule is that each value receives the least runtime representation needed by all of its reachable uses. For arrays this includes:
 
@@ -276,7 +276,7 @@ Incremental implementation work:
 - [x] Copy exact arrays into fresh element storage for ordinary whole-array rebinding and calls that may mutate or cannot yet be proven read-only.
 - [x] Recursively copy nested exact arrays and array-valued object fields for local binding, assignment, element storage, and parameter passing.
 - [x] Copy descriptor-backed runtime-length arrays in non-escaping contexts with a counted element loop.
-- [x] Return exact-length scalar/function arrays through caller-owned result storage, copying direct literals or existing arrays and forwarding destinations through wrapper calls without exposing callee-local allocations.
+- [x] Return recursively fixed arrays and structural objects through caller-owned result storage, copying direct literals or existing values and forwarding destinations through wrapper calls without exposing callee-local mutable allocations.
 - [ ] Generalize representation requirements across control-flow joins, general/transitive effects, cross-function aliases, indirect or method calls, and additional element/storage classes.
 - [ ] Elide array length, capacity, stride, flags, and ownership metadata for additional runtime array representations when each fact is unused or available statically.
 - [ ] Add indirect/method boundary adapters and descriptor-free direct-call ABI specialization where profitable.

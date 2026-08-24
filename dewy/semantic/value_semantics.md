@@ -2,7 +2,7 @@
 
 BLUF: Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
 
-Intended language rule. Implementation is in progress: objects and arrays now recursively copy nested exact arrays and array-valued object fields across ordinary local bindings, assignments, and calls. Runtime-length array copies use a counted element loop in non-escaping contexts. Recursive caller-owned returns, other escaping mutable storage, and explicit places with `@` remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
+Intended language rule. Implementation is in progress: objects and arrays now recursively copy nested exact arrays and array-valued object fields across ordinary local bindings, assignments, calls, and returns. For recursively fixed return layouts, the caller prepares the complete mutable storage tree before the call. Runtime-length array copies use a counted element loop in non-escaping contexts. Other escaping storage and explicit places with `@` remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
 
 A binding names a value. Assignment, argument passing, and return give you that value, not another name for the same cell. Element and field writes go through the binding you wrote. Sharing is either unobservable or spelled.
 
@@ -107,7 +107,7 @@ Ordinary values stay the opposite default: bare argument is a copy, `@` at both 
 
 Representation stays use-dependent. Two values with the same Dewy type may use different machine layouts. Sharing a pointer for `let b = a` is an elided copy, not the language rule. If both names can be written, lowering must either give them independent storage or otherwise prove that sharing cannot be observed.
 
-Proven cases already point this way: caller-owned exact-length array returns, borrowed read-only parameter adapters, `string as array<uint8>` copy-on-write, and fresh default arrays per call. Local raw-pointer alias chains for non-escaping exact arrays must be justified as unobservable copies, or replaced when both bindings can be written.
+Proven cases already point this way: caller-owned recursively fixed array and object returns, borrowed read-only parameter adapters, `string as array<uint8>` copy-on-write, and fresh default arrays per call. Local raw-pointer alias chains for non-escaping exact arrays must be justified as unobservable copies, or replaced when both bindings can be written.
 
 A descriptor, capacity, owner, or runtime stride appears only when some reachable use needs it. Places compile as a borrow of the named binding's storage, with writeback of any rebinding.
 

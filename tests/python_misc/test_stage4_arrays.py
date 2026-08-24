@@ -301,11 +301,32 @@ let replace_saved = ():>void => {
 """))
 
 
-def test_exact_array_returns_defer_handle_element_ownership() -> None:
-    with pytest.raises(NotImplementedYet, match='handle elements require ownership'):
+def test_exact_array_returns_reject_unresolved_handle_storage() -> None:
+    with pytest.raises(NotImplementedYet, match='recursively fixed result layout'):
         codegen(SrcFile(None, '''
 let make = ():>array<string length=1> => ["local"]
 '''))
+
+
+def test_nested_exact_array_returns_prepare_storage_in_the_caller() -> None:
+    emitted = codegen(SrcFile(None, '''
+let Matrix:type = array<array<int64 length=2> length=2>
+let make = ():>Matrix => [[10 11] [20 1]]
+let forward = ():>Matrix => make()
+let main = ():>int64 => {
+    let result = forward()
+    return result[0][0]
+}
+'''))
+
+    make_body, remainder = emitted.split('let forward =', 1)
+    forward_body, main_body = remainder.split('let main =', 1)
+    assert '__alloca__(' not in make_body
+    assert '__alloca__(' not in forward_body
+    assert 'make(__dewy_result_' in forward_body
+    assert main_body.count('__alloca__(48)') == 3
+    assert main_body.count('__alloca__(16)') == 3
+    assert 'forward(__dewy_array_' in main_body
 
 
 def test_dynamic_index_uses_precise_source_position_facts() -> None:
