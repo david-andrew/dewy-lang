@@ -75,7 +75,7 @@ esac
         [
             compatible_python,
             "-c",
-            "import sys; raise SystemExit(sys.version_info < (3, 12))",
+            "import sys; raise SystemExit(sys.version_info < (3, 14))",
         ]
     )
     assert version_check.returncode == 0
@@ -128,7 +128,7 @@ exec "$REAL_PYTHON" "$@"
     )
     assert first.stdout.strip().startswith("dewy ")
     assert python_log.read_text().splitlines() == ["called", "called"]
-    python_marker = install_dir / ".python-3.12-ok"
+    python_marker = install_dir / ".python-3.14-ok"
     assert python_marker.read_text().strip() == str(
         tools / "python3"
     )
@@ -170,7 +170,7 @@ let main = ():>int64 => answer
         capture_output=True,
     )
     assert rejected.returncode == 1
-    assert "requires Python 3.12 or newer" in rejected.stderr
+    assert "requires Python 3.14 or newer" in rejected.stderr
 
 
 def test_udewy_install_script_installs_only_the_binary(tmp_path: Path) -> None:

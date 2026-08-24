@@ -8,6 +8,56 @@ The current compiler-development focus is recursive, transitive effect analysis 
 
 The intended follow-on slices are iteration over arrays of structural objects and caller-owned materialization of interpolated string results. Runtime-length array returns and whole-array place rebinding remain deferred until effect, escape, and ownership analysis can support their storage requirements safely.
 
+## Roadmap
+
+The current focus above is phase 1 of this roadmap. Two named milestones anchor the sequencing: **Milestone A** — every example on the site front page compiles and runs as shown; **Milestone B** — the language is comfortable enough to write a compiler in, without the bootstrap itself being part of this roadmap. A good acceptance test for Milestone B is writing the udewy tokenizer in Dewy: it exercises files, growable arrays, dictionaries, unions with matching, strings, and error handling without committing to the full bootstrap.
+
+### Phase 0 — hygiene
+
+- [x] Declare `requires-python = ">=3.14"` in `pyproject.toml` and align the installer check and README, which currently claim Python 3.12. The compiler relies on 3.14 deferred annotation evaluation, so 3.12 and 3.13 fail at import.
+- [x] Add a CI workflow that runs the pytest suite; only site-deploy and udewy-release workflows exist today.
+- [x] Replace the stale README example table, which predates cleanparse and points at files now in `examples/old`.
+- [x] Archive `dewy/todo.py` (parser-era notes superseded by this document) and remove the disabled `todo-to-gh-issue` workflow file.
+- [ ] Consider golden-stdout checks for the printing fixtures in `dewy/tests` so backend refactoring cannot silently change output.
+
+### Phase 1 — effect analysis and the lowering refactor
+
+The effect analysis described under Current focus, treated as one campaign with paying down the accumulated backend debt:
+
+- [ ] Build the recursive, transitive effect analysis as its own module.
+- [ ] Replace the array-specific call-boundary checks in `dewy/backend/udewy/lower.py` with it, unifying the near-duplicate array and object code paths.
+- [ ] Use the campaign to split `lower.py` (currently ~11k lines) into coherent modules: representation analysis, place lowering, copy machinery, string lowering, call ABI. `dewy/semantic/check.py` (~5.7k lines) gets the same treatment opportunistically.
+
+This phase is load-bearing: effect, escape, and ownership analysis is the prerequisite for runtime-length array returns, whole-array place rebinding, growable arrays, and representation elision.
+
+### Milestone A — front-page examples
+
+In dependency order; A4 and A5 are long-running and interleave with Milestone B work.
+
+- [ ] **A1. First-class interpolated strings** (fixes `functions.dewy`). Caller-owned materialization of interpolated results plus a minimal `__string__`/`__as__` conversion protocol. Also unblocks `bool` and other non-string interpolation fields, which is the last gap in `ranges.dewy` today.
+- [ ] **A2. Ranges as storable values** (fixes `ranges.dewy`). Store, pass, and iterate range values such as `window = [0..10)` and `evens = 0,2..100` beyond the current iterator normalization. Membership and slicing already work.
+- [ ] **A3. Iterator-target unpacking and first dictionaries** (fixes `loops.dewy`). Split: (a) unpack `[a b]` targets from iterator elements; (b) dictionaries with `->` entries, starting from a fixed-size literal-plus-iteration slice and deferring growth and mutation until phase 1's ownership story lands.
+- [ ] **A4. Fractional numerics and the unit catalog** (fixes `units.dewy`). Rationals and fixed-point are the primary fraction types — `let a = 1/3` should infer a rational — and both lower naturally onto udewy's integer-only core (integer pairs and scaled integers). Floats remain available when explicitly requested but are deliberately deprioritized; no serious float implementation in this roadmap. Then: base dimensions beyond `Time`, dimension products, powers, and division, the unit catalog, `^`, and enough math library for `cos` and `°` over the chosen representations.
+- [ ] **A5. Liquid refinements MVP** (fixes `refinements.dewy`). Scoped to the example: parameterize-block syntax, propositions like `length>?0` and single-argument lambdas, proofs from literal initializers, and proven/refuted/unknown diagnostics. The full solver comes later per the design section below.
+
+### Milestone B — comfortable-to-bootstrap feature set
+
+Ordered by how much each item builds on the previous ones.
+
+- [ ] **B1. General tagged unions and `match`.** A compiler is one large AST of sum types; single-payload `T | undefined` is not enough. Highest-value language feature for bootstrap ergonomics.
+- [ ] **B2. Growable arrays.** Push, pop, truncate, runtime-length returns, and escapes into longer-lived storage. Depends directly on phase 1; forces the first real memory-management decision, where the descriptor's `capacity` and `owner` fields either earn their keep or get redesigned.
+- [ ] **B3. Mutable, growable dictionaries and sets.** Symbol tables, scopes, and string interning.
+- [ ] **B4. Closure lowering.** Capture analysis exists; lowering does not.
+- [ ] **B5. Error handling.** Effects and error values per the design, or at minimum a workable result-type idiom.
+- [ ] **B6. File I/O and `main(argv)`.** `open`/`read` in `library/system-linux.dewy` plus the already-tracked argv support.
+- [ ] **B7. User-written generic functions and parameterized types.** The internal machinery exists for builtins; exposing it makes containers writable in the standard library instead of as compiler magic.
+- [ ] **B8. String building.** Concatenation, join, and a builder on top of A1's materialized interpolation.
+- [ ] **B9. Self-hosted test harness**, written in Dewy, as the dogfooding proof.
+
+### Sequencing
+
+Phase 0 → phase 1 → A1 → A2 → A3 → B1 → B2 → B3 → B4, with A4 and A5 interleaved as parallel long-poles (they touch different compiler layers than the ownership work) → B5–B8 → B9 → the tokenizer-in-Dewy checkpoint.
+
 ## Core declarations and expressions
 
 - [x] `let` and `const` declarations, assignment, and combined assignment. Plain `name = value` implicitly declares a `let` binding when no visible binding exists; otherwise it remains reassignment.
@@ -317,7 +367,7 @@ Incremental implementation work:
 
 In no particular order
 
-- [ ] Floating-point, rational, and real numbers
+- [ ] Fractional numbers. Rationals and fixed-point are the primary fraction types (`1/3` infers a rational); floats exist only when explicitly requested and are deprioritized for now. Real numbers remain further out.
 - [ ] Dictionaries, bidirectional maps, and sets
 - [ ] Pattern matching (`match`)
 - [ ] Partial application and function handles with `@`, escaping places, and place targets beyond mutable named roots with field/index projection. See [`semantic/value_semantics.md`](semantic/value_semantics.md).

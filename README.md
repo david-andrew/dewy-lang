@@ -28,7 +28,7 @@ Linux x86_64. This installs the `udewy` bootstrap compiler and the current Pytho
 curl -fsSL https://dewy-lang.org/install.sh | bash
 ```
 
-The first `dewy` invocation checks for Python 3.12 or newer and caches the compatible interpreter path for later runs. You can then run a program with:
+The first `dewy` invocation checks for Python 3.14 or newer and caches the compatible interpreter path for later runs. You can then run a program with:
 
 ```
 dewy path/to/my_script.dewy
@@ -44,54 +44,15 @@ python -m dewy path/to/my_script.dewy
 
 ## Examples
 
-Several example programs are available in [examples/](examples/). Here is a breakdown of which ones work with the current progress:
+The hero program on the [dewy-lang.org](https://dewy-lang.org) front page lives at [examples/hero.dewy](examples/hero.dewy) and runs today:
 
-| Filename                                                        | status |
-| --------------------------------------------------------------- | ------ |
-| [hello.dewy](examples/hello.dewy)                               | [✓]    |
-| [hello_func.dewy](examples/hello_func.dewy)                     | [✓]    |
-| [hello_name.dewy](examples/hello_name.dewy)                     | [✓]    |
-| [hello_loop.dewy](examples/hello_loop.dewy)                     | [✓]    |
-| [anonymous_func.dewy](examples/anonymous_func.dewy)             | [✓]    |
-| [if_else.dewy](examples/if_else.dewy)                           | [✓]    |
-| [if_else_if.dewy](examples/if_else_if.dewy)                     | [✓]    |
-| [dangling_else.dewy](examples/dangling_else.dewy)               | [✓]    |
-| [if_tree.dewy](examples/if_tree.dewy)                           | [✓]    |
-| [loop_in_iter.dewy](examples/loop_in_iter.dewy)                 | [✓]    |
-| [loop_and_iters.dewy](examples/loop_and_iters.dewy)             | [✓]    |
-| [enumerate_list.dewy](examples/enumerate_list.dewy)             | [✓]    |
-| [loop_or_iters.dewy](examples/loop_or_iters.dewy)               | [✓]    |
-| [nested_loop.dewy](examples/nested_loop.dewy)                   | [✓]    |
-| [block_printing.dewy](examples/block_printing.dewy)             | [✓]    |
-| [row_vs_col.dewy](examples/row_vs_col.dewy)                     | [✗]    |
-| [tensors.dewy](examples/tensors.dewy)                           | [✗]    |
-| [arrays.dewy](examples/arrays.dewy)                             | [✗]    |
-| [objects.dewy](examples/objects.dewy)                           | [✓]    |
-| [unpack_array.dewy](examples/unpack_array.dewy)                 | [✓]    |
-| [unpack_dict.dewy](examples/unpack_dict.dewy)                   | [✓]    |
-| [unpack_object.dewy](examples/unpack_object.dewy)               | [✗]    |
-| [declare.dewy](examples/declare.dewy)                           | [✗]    |
-| [loop_iter_manual.dewy](examples/loop_iter_manual.dewy)         | [✗]    |
-| [range_iter_test.dewy](examples/range_iter_test.dewy)           | [✗]    |
-| [functions.dewy](examples/functions.dewy)                       | [✓]    |
-| [partial_functions.dewy](examples/partial_functions.dewy)       | [✓]    |
-| [closure.dewy](examples/closure.dewy)                           | [✓]    |
-| [function_signatures.dewy](examples/function_signatures.dewy)   | [✓]    |
-| [opchains.dewy](examples/opchains.dewy)                         | [✓]    |
-| [ops.dewy](examples/ops.dewy)                                   | [✗]    |
-| [shebang.dewy](examples/shebang.dewy)                           | [✗]    |
-| [fizzbuzz-1.dewy](examples/fizzbuzz-1.dewy)                     | [✓]    |
-| [fizzbuzz0.dewy](examples/fizzbuzz0.dewy)                       | [✓]    |
-| [fizzbuzz1.dewy](examples/fizzbuzz1.dewy)                       | [✗]    |
-| [random.dewy](examples/random.dewy)                             | [✓]    |
-| [primes.dewy](examples/primes.dewy)                             | [✓]    |
-| [primes2.dewy](examples/primes2.dewy)                           | [✗]    |
-| [mdbook_preprocessor.dewy](docs/plugins/src_to_iframe.dewy)     | [✗]    |
-| [fast_inverse_sqrt.dewy](examples/fast_inverse_sqrt.dewy)       | [✗]    |
-| [rule110.dewy](examples/rule110.dewy)                           | [✗]    |
-| [dewy_syntax_examples.dewy](examples/dewy_syntax_examples.dewy) | [✗]    |
-| [syntax.dewy](examples/syntax.dewy)                             | [✗]    |
-| [tokenizer.dewy](examples/tokenizer.dewy)                       | [✗]    |
+```
+python -m dewy examples/hero.dewy
+```
+
+For more working programs, see the executable fixtures in [dewy/tests/](dewy/tests/) (each one compiles and runs in CI) and the curated, status-labeled examples on the [site examples page](https://dewy-lang.org/examples/). Implementation status for every language feature is tracked in [dewy/status.md](dewy/status.md).
+
+Programs written for the previous interpreter implementation are archived in [examples/old/](examples/old/); most have not yet been ported to the current compiler.
 
 ## Buzzwords
 

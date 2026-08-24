@@ -98,7 +98,7 @@ set -eu
 
 dewy_home=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 dewy_runtime="${dewy_home}/runtime"
-python_marker="${dewy_home}/.python-3.12-ok"
+python_marker="${dewy_home}/.python-3.14-ok"
 
 if [ ! -f "${dewy_runtime}/dewy/__main__.py" ]; then
     echo "Dewy runtime not found at ${dewy_runtime}. Re-run the Dewy installer." >&2
@@ -128,7 +128,7 @@ for python_command in python3 python; do
         continue
     fi
     found_python=true
-    if "$python_path" -c 'import sys; raise SystemExit(sys.version_info < (3, 12))'; then
+    if "$python_path" -c 'import sys; raise SystemExit(sys.version_info < (3, 14))'; then
         marker_temp="${python_marker}.tmp.$$"
         if printf '%s\n' "$python_path" > "$marker_temp"; then
             mv "$marker_temp" "$python_marker"
@@ -140,9 +140,9 @@ for python_command in python3 python; do
 done
 
 if [ "$found_python" = true ]; then
-    echo "Dewy requires Python 3.12 or newer; no compatible Python interpreter was found." >&2
+    echo "Dewy requires Python 3.14 or newer; no compatible Python interpreter was found." >&2
 else
-    echo "Dewy requires Python 3.12 or newer, but Python was not found." >&2
+    echo "Dewy requires Python 3.14 or newer, but Python was not found." >&2
 fi
 exit 1
 LAUNCHER
