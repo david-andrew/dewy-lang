@@ -169,6 +169,9 @@ def test_array_value_semantics_fixture_copies_mutable_bindings() -> None:
     assert 'let copy:int64 = original' not in emitted
     assert 'let transitive:int64 = copy' not in emitted
     assert 'let snapshot:int64 = copy' not in emitted
+    assert '__dewy_array_copy_length_' in emitted
+    assert '__alloca__(__dewy_array_copy_length_' in emitted
+    assert 'loop __dewy_array_copy_index_' in emitted
 
 
 def test_keyword_default_fixture_codegen_shape() -> None:

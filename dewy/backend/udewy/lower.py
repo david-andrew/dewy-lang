@@ -425,6 +425,16 @@ class _Lowerer:
                 literal,
                 'exact array returns of handle elements require ownership lowering',
             )
+        if (
+            object_result
+            and isinstance(literal.rettype, ty.ObjectType)
+            and not self._object_result_fields_are_returnable(literal.rettype)
+        ):
+            self._target_error(
+                literal,
+                'object returns with mutable handle-valued fields require '
+                'recursive caller-owned result storage',
+            )
         if isinstance(result_payload, ty.ArrayType):
             self._target_error(
                 literal,
@@ -543,6 +553,34 @@ class _Lowerer:
                 binding_id=param.binding_id,
             )
             default = self._require_node(self._transform_node(param.value))
+            if isinstance(param.type, ty.ArrayType):
+                selected = hir.Flow(
+                    literal.loc,
+                    param.type,
+                    [
+                        hir.IfArm(
+                            literal.loc,
+                            param.type,
+                            hir.ExpressedIdentifier(
+                                literal.loc,
+                                'bool',
+                                present_name,
+                            ),
+                            incoming,
+                        )
+                    ],
+                    default,
+                )
+                default_prologue.append(hir.Declare(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    param.name,
+                    param.type,
+                    selected,
+                    binding_id=param.binding_id,
+                ))
+                continue
             default_prologue.extend([
                 hir.Declare(
                     literal.loc,
@@ -1421,7 +1459,11 @@ class _Lowerer:
                 node.array,
                 scope,
                 current_function,
-                array_use='index_read',
+                array_use=(
+                    'index_write'
+                    if array_use == 'index_write'
+                    else 'index_read'
+                ),
             )
             self._discover_node(node.index, scope, current_function)
             return
@@ -2814,7 +2856,7 @@ class _Lowerer:
                 return self._lower_stack_array_declare(node)
             if (
                 isinstance(declared_type, ty.ArrayType)
-                and self._array_argument_binding(node.expr) is not None
+                and not self._array_expression_owns_fresh_storage(node.expr)
             ):
                 copy_type = (
                     node.expr.type
@@ -3254,13 +3296,10 @@ class _Lowerer:
                     and isinstance(boundary.parameter.type, ty.ArrayType)
                 ):
                     copy_type = boundary.parameter.type
-                    if self._array_argument_binding(arg) is not None:
-                        arg_prelude, lowered_arg = self._clone_array_value(
-                            arg,
-                            copy_type,
-                        )
-                    else:
-                        arg_prelude, lowered_arg = self._extract_expression(arg)
+                    arg_prelude, lowered_arg = self._independent_array_value(
+                        arg,
+                        copy_type,
+                    )
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
@@ -3285,13 +3324,10 @@ class _Lowerer:
                     and isinstance(boundary.parameter.type, ty.ArrayType)
                 ):
                     copy_type = boundary.parameter.type
-                    if self._array_argument_binding(arg) is not None:
-                        arg_prelude, lowered_arg = self._clone_array_value(
-                            arg,
-                            copy_type,
-                        )
-                    else:
-                        arg_prelude, lowered_arg = self._extract_expression(arg)
+                    arg_prelude, lowered_arg = self._independent_array_value(
+                        arg,
+                        copy_type,
+                    )
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
                 elif isinstance(arg.type, ty.ObjectType):
@@ -6095,7 +6131,6 @@ class _Lowerer:
                 raise TypeError(
                     'INTERNAL ERROR: stack-data array copy requires an exact length'
                 )
-            self._require_array_value_copy_elements(array_type, node)
             source_is_raw = self._array_use_representation(node.expr) is not None
             prelude, source = self._extract_expression(node.expr)
             element_bytes, _signed = self._array_element_layout(
@@ -6141,19 +6176,15 @@ class _Lowerer:
                         node.loc,
                     )
                 )
-                value = self._array_load(
-                    source_address,
-                    array_type.element,
+                target_address = self._pointer_element_address(
+                    target,
+                    index,
+                    element_bytes,
                     node.loc,
                 )
-                statements.append(self._array_store(
-                    value,
-                    self._pointer_element_address(
-                        target,
-                        index,
-                        element_bytes,
-                        node.loc,
-                    ),
+                statements.extend(self._copy_array_element_between_addresses(
+                    source_address,
+                    target_address,
                     array_type.element,
                     node.loc,
                 ))
@@ -6218,31 +6249,82 @@ class _Lowerer:
             raise TypeError('INTERNAL ERROR: array assignment target lost its type')
         if self._array_use_representation(node.target) == 'stack_data':
             prelude, copied = self._clone_array_to_raw(node.value, array_type)
-        elif self._array_argument_binding(node.value) is not None:
-            prelude, copied = self._clone_array_value(node.value, array_type)
         else:
-            # Literals and returned temporaries already own fresh storage, so
-            # rebinding may transfer that storage without an observable copy.
-            prelude, copied = self._extract_expression(node.value)
+            prelude, copied = self._independent_array_value(
+                node.value,
+                array_type,
+            )
         return [*prelude, replace(node, value=copied)]
 
-    def _require_array_value_copy_elements(
-        self,
-        array_type: ty.ArrayType,
-        node: hir.AST,
-    ) -> None:
-        """Reject element categories whose recursive value copy is not lowerable yet."""
+    @staticmethod
+    def _copy_source_expression(node: hir.AST) -> hir.AST:
+        """Discard wrappers that do not themselves create runtime storage."""
 
-        if isinstance(array_type.element, (ty.ArrayType, ty.ObjectType)):
-            element_kind = (
-                'nested array'
-                if isinstance(array_type.element, ty.ArrayType)
-                else 'object'
-            )
-            self._target_error(
-                node,
-                f'value-copying arrays with {element_kind} elements',
-            )
+        while True:
+            if isinstance(node, hir.ValueCast):
+                node = node.expr
+                continue
+            if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+                node = node.items[0]
+                continue
+            return node
+
+    def _array_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
+        node = self._copy_source_expression(node)
+        return isinstance(node, (hir.ArrayLiteral, hir.FunctionCall)) or (
+            isinstance(node, hir.RepresentationCast)
+            and isinstance(node.type, ty.ArrayType)
+        )
+
+    def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
+        node = self._copy_source_expression(node)
+        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall))
+
+    def _independent_array_value(
+        self,
+        node: hir.AST,
+        array_type: ty.ArrayType,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Produce an independently mutable array value from one expression."""
+
+        if self._array_expression_owns_fresh_storage(node):
+            return self._extract_expression(node)
+        return self._clone_array_value(node, array_type)
+
+    def _clone_object_value(
+        self,
+        node: hir.AST,
+        object_type: ty.ObjectType,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Materialize an independent structural object value."""
+
+        source_prelude, source = self._extract_object_pointer(node)
+        size, _offsets = self._object_layout(object_type, node)
+        target = self._new_object_temp(node.loc)
+        statements: list[hir.AST] = [
+            *source_prelude,
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                'int64',
+                self._object_allocation(node.loc, size),
+            ),
+            *self._object_copy(target, source, object_type, node.loc),
+        ]
+        return statements, target
+
+    def _independent_object_value(
+        self,
+        node: hir.AST,
+        object_type: ty.ObjectType,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Produce an independently mutable object value from one expression."""
+
+        if self._object_expression_owns_fresh_storage(node):
+            return self._extract_object_pointer(node)
+        return self._clone_object_value(node, object_type)
 
     def _clone_array_to_raw(
         self,
@@ -6253,7 +6335,6 @@ class _Lowerer:
 
         if array_type.length is None:
             self._target_error(node, 'value-copying a dynamic-length raw array')
-        self._require_array_value_copy_elements(array_type, node)
         source_is_raw = self._array_use_representation(node) is not None
         source_prelude, source = self._extract_expression(node)
         element_bytes, _signed = self._array_element_layout(
@@ -6297,19 +6378,15 @@ class _Lowerer:
                     node.loc,
                 )
             )
-            value = self._array_load(
-                source_address,
-                array_type.element,
+            target_address = self._pointer_element_address(
+                target,
+                index,
+                element_bytes,
                 node.loc,
             )
-            statements.append(self._array_store(
-                value,
-                self._pointer_element_address(
-                    target,
-                    index,
-                    element_bytes,
-                    node.loc,
-                ),
+            statements.extend(self._copy_array_element_between_addresses(
+                source_address,
+                target_address,
                 array_type.element,
                 node.loc,
             ))
@@ -6320,11 +6397,10 @@ class _Lowerer:
         node: hir.AST,
         array_type: ty.ArrayType,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Materialize a fresh exact array descriptor and element buffer."""
+        """Materialize a fresh array descriptor and recursively copied buffer."""
 
         if array_type.length is None:
-            self._target_error(node, 'value-copying a dynamic-length array')
-        self._require_array_value_copy_elements(array_type, node)
+            return self._clone_dynamic_array_value(node, array_type)
         source_is_raw = self._array_use_representation(node) is not None
         source_prelude, source = self._extract_expression(node)
         allocation, target = self._allocate_array_value(array_type, node.loc)
@@ -6350,22 +6426,178 @@ class _Lowerer:
                     node.loc,
                 )
             )
-            value = self._array_load(
-                source_address,
+            target_address = self._array_element_address(
+                descriptor,
+                index,
                 array_type.element,
                 node.loc,
             )
-            statements.append(self._array_store(
-                value,
-                self._array_element_address(
-                    descriptor,
-                    index,
-                    array_type.element,
-                    node.loc,
-                ),
+            statements.extend(self._copy_array_element_between_addresses(
+                source_address,
+                target_address,
                 array_type.element,
                 node.loc,
             ))
+        return statements, target
+
+    def _clone_dynamic_array_value(
+        self,
+        node: hir.AST,
+        array_type: ty.ArrayType,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Copy a descriptor-backed runtime-length array in the current frame."""
+
+        if self.lowering_module_startup:
+            self._target_error(
+                node,
+                'runtime-length array copies at module scope',
+            )
+        source_prelude, source = self._extract_expression(node)
+        element_bytes, _signed = self._array_element_layout(
+            array_type.element,
+            node,
+        )
+        length_name = self._new_array_name('copy_length')
+        length = hir.ExpressedIdentifier(node.loc, 'int64', length_name)
+        data_name = self._new_array_name('copy_data')
+        data = hir.ExpressedIdentifier(node.loc, 'int64', data_name)
+        target = self._new_array_temp(node)
+        descriptor = replace(target, type='int64')
+        index_name = self._new_array_name('copy_index')
+        index = hir.ExpressedIdentifier(node.loc, 'int64', index_name)
+        allocation_bytes: hir.AST = length
+        if element_bytes != 1:
+            allocation_bytes = self._int64_binary(
+                '__mul__',
+                length,
+                self._int64_literal(node.loc, element_bytes),
+                node.loc,
+            )
+        source_address = self._array_element_address(
+            source,
+            index,
+            array_type.element,
+            node.loc,
+        )
+        target_address = self._pointer_element_address(
+            data,
+            index,
+            element_bytes,
+            node.loc,
+        )
+        copy_body = self._copy_array_element_between_addresses(
+            source_address,
+            target_address,
+            array_type.element,
+            node.loc,
+        )
+        copy_body.append(hir.Assign(
+            node.loc,
+            ty.VOID_TYPE,
+            index,
+            '=',
+            self._int64_binary(
+                '__add__',
+                index,
+                self._int64_literal(node.loc, 1),
+                node.loc,
+            ),
+        ))
+        copy_loop = hir.Flow(
+            node.loc,
+            ty.VOID_TYPE,
+            [
+                hir.LoopArm(
+                    node.loc,
+                    ty.VOID_TYPE,
+                    self._int64_comparison(
+                        '__lt__',
+                        index,
+                        length,
+                        node.loc,
+                    ),
+                    hir.Block(node.loc, ty.VOID_TYPE, copy_body, True),
+                )
+            ],
+            None,
+        )
+        statements: list[hir.AST] = [
+            *source_prelude,
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                length_name,
+                'int64',
+                self._load_i64_field(source, ARRAY_LENGTH_OFFSET, node.loc),
+            ),
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                data_name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [allocation_bytes],
+                    'int64',
+                    node.loc,
+                ),
+            ),
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                target.name,
+                'int64',
+                self._intrinsic_call(
+                    '__alloca__',
+                    [self._int64_literal(node.loc, ARRAY_DESCRIPTOR_SIZE)],
+                    'int64',
+                    node.loc,
+                ),
+            ),
+            self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, data, node.loc),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_LENGTH_OFFSET,
+                length,
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_CAPACITY_OFFSET,
+                length,
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_STRIDE_OFFSET,
+                self._int64_literal(node.loc, element_bytes),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_FLAGS_OFFSET,
+                self._int64_literal(node.loc, ARRAY_MUTABLE),
+                node.loc,
+            ),
+            self._store_i64_field(
+                descriptor,
+                ARRAY_OWNER_OFFSET,
+                self._int64_literal(node.loc, 0),
+                node.loc,
+            ),
+            hir.Declare(
+                node.loc,
+                ty.VOID_TYPE,
+                'let',
+                index_name,
+                'int64',
+                self._int64_literal(node.loc, 0),
+            ),
+            copy_loop,
+        ]
         return statements, target
 
     def _extract_array_literal(
@@ -6499,7 +6731,38 @@ class _Lowerer:
                 t0.base10,
                 node.type.value,
             )
+        if isinstance(element_type, ty.ArrayType):
+            return self._independent_array_value(node, element_type)
+        if isinstance(element_type, ty.ObjectType):
+            return self._independent_object_value(node, element_type)
         return self._extract_expression(node)
+
+    def _copy_array_element_between_addresses(
+        self,
+        source_address: hir.AST,
+        target_address: hir.AST,
+        element_type: ty.Type,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """Copy one stored element, recursively materializing mutable values."""
+
+        source_value = self._array_load(source_address, element_type, loc)
+        if isinstance(element_type, ty.ArrayType):
+            prelude, copied = self._clone_array_value(
+                replace(source_value, type='int64'),
+                element_type,
+            )
+        elif isinstance(element_type, ty.ObjectType):
+            prelude, copied = self._clone_object_value(
+                replace(source_value, type='int64'),
+                element_type,
+            )
+        else:
+            prelude, copied = [], source_value
+        return [
+            *prelude,
+            self._array_store(copied, target_address, element_type, loc),
+        ]
 
     def _optional_allocation(self, loc: Span) -> hir.FunctionCall:
         allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
@@ -6997,6 +7260,23 @@ class _Lowerer:
             or isinstance(array_type.element, ty.FunctionType)
         )
 
+    @classmethod
+    def _object_result_fields_are_returnable(
+        cls,
+        object_type: ty.ObjectType,
+    ) -> bool:
+        """Whether field copying needs no callee-owned mutable storage."""
+
+        for field in object_type.fields:
+            if isinstance(field.type, ty.ArrayType):
+                return False
+            if (
+                isinstance(field.type, ty.ObjectType)
+                and not cls._object_result_fields_are_returnable(field.type)
+            ):
+                return False
+        return True
+
     def _array_element_address(
         self,
         array: hir.AST,
@@ -7355,6 +7635,16 @@ class _Lowerer:
             src_addr = self._field_address(src, offsets[field.name], loc)
             if isinstance(field.type, ty.ObjectType):
                 statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc))
+            elif isinstance(field.type, ty.ArrayType):
+                source = self._value_load(src_addr, field.type, loc)
+                prelude, copied = self._clone_array_value(
+                    replace(source, type='int64'),
+                    field.type,
+                )
+                statements.extend(prelude)
+                statements.extend(
+                    self._value_store(copied, dest_addr, field.type, loc)
+                )
             elif isinstance(field.type, ty.FunctionType):
                 loaded = self._intrinsic_call(
                     '__load_i64__',
@@ -7438,7 +7728,13 @@ class _Lowerer:
                     )
                     statements.extend(nested_prelude)
                     continue
-                prelude, value = self._extract_expression(field.value)
+                if isinstance(field_type, ty.ArrayType):
+                    prelude, value = self._independent_array_value(
+                        field.value,
+                        field_type,
+                    )
+                else:
+                    prelude, value = self._extract_expression(field.value)
                 statements.extend(prelude)
                 statements.extend(
                     self._value_store(value, address, field_type, field.loc)
@@ -7784,6 +8080,15 @@ class _Lowerer:
                 self._target_error(node, f'object field compound assignment `{node.op}`')
             prelude, src = self._extract_object_pointer(node.value)
             return [*prelude, *self._object_copy(address, src, field_type, node.loc)]
+        if isinstance(field_type, ty.ArrayType) and node.op == '=':
+            prelude, value = self._independent_array_value(
+                node.value,
+                field_type,
+            )
+            return [
+                *prelude,
+                *self._value_store(value, address, field_type, node.loc),
+            ]
         assigned_value = node.value
         if node.op != '=':
             symbol = node.op[:-1]
@@ -7823,8 +8128,18 @@ class _Lowerer:
         field_type = field.type if field is not None else node.target.type
         if isinstance(field_type, ty.ObjectType):
             value_prelude, src = self._extract_object_pointer(node.value)
-            return [*prelude, *value_prelude, *self._object_copy(address, src, field_type, node.loc)]
-        value_prelude, value = self._extract_expression(node.value)
+            return [
+                *prelude,
+                *value_prelude,
+                *self._object_copy(address, src, field_type, node.loc),
+            ]
+        if isinstance(field_type, ty.ArrayType):
+            value_prelude, value = self._independent_array_value(
+                node.value,
+                field_type,
+            )
+        else:
+            value_prelude, value = self._extract_expression(node.value)
         return [*prelude, *value_prelude, *self._value_store(value, address, field_type, node.loc)]
 
     def _object_result_write(self, item: hir.AST) -> list[hir.AST]:

@@ -9,6 +9,28 @@ let mutate_copy = (items:array<int64 length=2>):>int64 => {
     return items[0] + local[0]
 }
 
+let Box:type = [items:array<int64 length=2>]
+
+let mutate_box = (box:Box):>int64 => {
+    box.items[0] = 40
+    return box.items[0] + box.items[1]
+}
+
+let mutate_nested = (
+    items:array<array<int64 length=2> length=2>
+):>int64 => {
+    items[0][0] = 40
+    return items[0][0] + items[1][1]
+}
+
+let copy_dynamic_sum = (items:array<int64>):>int64 => {
+    let local:array<int64> = items
+    let total:int64 = 0
+    loop value in local
+        total += value
+    return total
+}
+
 let main = ():>int64 => {
     let original = [1 2]
     let copy = original
@@ -32,6 +54,31 @@ let main = ():>int64 => {
     let labels_copy = labels
     labels_copy[0] = "changed"
 
+    let first_row = [1 2]
+    let second_row = [3 4]
+    let nested = [first_row second_row]
+    let nested_copy = nested
+    nested_copy[0][0] = 9
+    let detached_row = nested_copy[1]
+    detached_row[0] = 8
+    let replacement_row = [5 6]
+    nested_copy[1] = replacement_row
+    replacement_row[0] = 7
+    let nested_call_result:int64 = mutate_nested(nested)
+
+    let field_source = [10 20]
+    let box:Box = [items = field_source]
+    field_source[0] = 99
+    let box_copy = box
+    box_copy.items[1] = 32
+    let field_replacement = [40 2]
+    box_copy.items = field_replacement
+    field_replacement[0] = 0
+    let box_call_result:int64 = mutate_box(box)
+
+    let dynamic_source:array<int64> = [2 7]
+    let dynamic_copy_result:int64 = copy_dynamic_sum(dynamic_source)
+
     if original[0] =? 1 and original[1] =? 2
         and copy[0] =? 9 and copy[1] =? 7
         and transitive[0] =? 9 and transitive[1] =? 8
@@ -39,7 +86,16 @@ let main = ():>int64 => {
         and rebound[0] =? 6 and rebound[1] =? 7
         and argument[0] =? 10 and argument[1] =? 2
         and call_result =? 22 and local_copy_result =? 30
-        and labels[0] =? "original" and labels_copy[0] =? "changed" {
+        and labels[0] =? "original" and labels_copy[0] =? "changed"
+        and first_row[0] =? 1 and nested[0][0] =? 1
+        and nested_copy[0][0] =? 9 and nested_copy[1][0] =? 5
+        and detached_row[0] =? 8 and replacement_row[0] =? 7
+        and nested_call_result =? 44
+        and field_source[0] =? 99 and box.items[0] =? 10
+        and box.items[1] =? 20 and box_copy.items[0] =? 40
+        and box_copy.items[1] =? 2 and field_replacement[0] =? 0
+        and box_call_result =? 60 and box.items[0] =? 10
+        and dynamic_source[0] =? 2 and dynamic_copy_result =? 9 {
         return 42
     } else {
         return 1

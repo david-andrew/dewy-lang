@@ -7,7 +7,6 @@ from dewy.backend.udewy import codegen
 from dewy.backend.udewy.lower import ArrayRepresentation, ArrayUse, _Lowerer
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir
-from dewy.semantic.errors import NotImplementedYet
 from udewy.frontend import entry_point
 
 
@@ -181,6 +180,21 @@ let forward = (forwarded:array<int64 length=2>):>int64 =>
 
     assert analysis.uses == {'safe_call_boundary'}
     assert analysis.adapter_safe
+
+
+def test_nested_array_write_marks_outer_parameter_writable() -> None:
+    lowerer, names = _analyze_arrays('''
+let update = (
+    items:array<array<int64 length=2> length=2>
+):>int64 => {
+    items[0][0] = 40
+    return items[0][0]
+}
+''')
+    analysis = lowerer.array_parameter_analyses[names['items']]
+
+    assert 'index_write' in analysis.uses
+    assert not analysis.adapter_safe
 
 
 def test_safe_direct_call_boundary_preserves_local_alias_stack_data() -> None:
@@ -681,18 +695,20 @@ let read = ():>int64 => {
     assert '__alloca__(48)' not in emitted
 
 
-def test_nested_array_value_copy_is_rejected_until_recursive_copy_exists() -> None:
-    with pytest.raises(
-        NotImplementedYet,
-        match='value-copying arrays with nested array elements',
-    ):
-        codegen(SrcFile(None, '''
+def test_nested_array_value_copy_materializes_recursive_storage() -> None:
+    emitted = codegen(SrcFile(None, '''
 let read = ():>int64 => {
     let original = [[1 2] [3 4]]
     let copy = original
-    return 42
+    copy[0][0] = 9
+    return original[0][0] + copy[0][0]
 }
 '''))
+
+    assert 'let original:int64 = __alloca__(16)' in emitted
+    assert 'let copy:int64 = __alloca__(16)' in emitted
+    assert emitted.count('__alloca__(48)') == 4
+    assert '__store_i64__(9 __load_i64__(__load_i64__(copy)))' in emitted
 
 
 @pytest.mark.parametrize(
@@ -723,7 +739,7 @@ let read = ():>int64 => {
 ''',
             (
                 'let values:int64 = __dewy_array_1',
-                '__store_i64__(values __dewy_object_1)',
+                '__store_i64__(__dewy_array_3 __dewy_object_1)',
                 '__load_i64__(__load_i64__(__load_i64__(box)))',
             ),
         ),

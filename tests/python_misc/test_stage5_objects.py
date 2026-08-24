@@ -295,6 +295,17 @@ def test_array_length_counts_as_object_receiver_use() -> None:
     )
 
 
+def test_object_return_with_array_field_waits_for_recursive_result_storage() -> None:
+    with pytest.raises(
+        NotImplementedYet,
+        match='recursive caller-owned result storage',
+    ):
+        codegen(SrcFile(None, '''
+let Box:type = [items:array<int64 length=2>]
+let make = ():>Box => [items = [40 2]]
+'''))
+
+
 def test_field_order_is_part_of_the_type() -> None:
     with pytest.raises(TypeCheckError, match='object fields'):
         _check(

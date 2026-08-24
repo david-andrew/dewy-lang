@@ -2,7 +2,7 @@
 
 BLUF: Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
 
-Intended language rule. Implementation is in progress: directly stored and nested-object fields, plus exact-length arrays of directly copyable elements, have value behavior across ordinary bindings, assignments, calls, and returns. Recursive array/object element copies, mutable handle-valued object fields, general dynamic-length arrays, and explicit places with `@` remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
+Intended language rule. Implementation is in progress: objects and arrays now recursively copy nested exact arrays and array-valued object fields across ordinary local bindings, assignments, and calls. Runtime-length array copies use a counted element loop in non-escaping contexts. Recursive caller-owned returns, other escaping mutable storage, and explicit places with `@` remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
 
 A binding names a value. Assignment, argument passing, and return give you that value, not another name for the same cell. Element and field writes go through the binding you wrote. Sharing is either unobservable or spelled.
 
