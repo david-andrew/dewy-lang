@@ -1889,6 +1889,13 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if branch_expected is not None:
                 default = check_against(default, branch_expected, ctx=ctx)
             bodies.append(default)
+        elif bodies and all(body.type == ty.BOTTOM_TYPE for body in bodies):
+            # Every arm diverges (return/break/continue) and there is no
+            # else, so control only continues when every condition was
+            # false: the enclosing block keeps the negated refinements.
+            # ``ctx.refinements`` is the dict shared by the block's items.
+            ctx.refinements.clear()
+            ctx.refinements.update(arm_ctx.refinements)
         elif (
             branch_expected is not None
             and any(body.type != ty.BOTTOM_TYPE for body in bodies)

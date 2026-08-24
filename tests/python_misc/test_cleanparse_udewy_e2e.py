@@ -73,6 +73,7 @@ LOWERED_CASES = [
     ('union_calls.dewy', 42),
     ('union_subset_narrowing.dewy', 42),
     ('union_aggregate_members.dewy', 42),
+    ('union_early_return_narrowing.dewy', 42),
     ('optional_layouts.dewy', 42),
     ('optional_calls.dewy', 42),
     ('multi_iterator_and.dewy', 42),

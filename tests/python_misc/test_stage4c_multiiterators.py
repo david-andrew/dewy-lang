@@ -239,3 +239,24 @@ def test_dict_unpacking_over_arrays_is_not_implemented() -> None:
 def test_dict_unpacking_requires_two_targets() -> None:
     with pytest.raises(UserError, match='exactly two targets'):
         _check("let d = ['a' -> 1] loop [a b c] in d {}")
+
+
+def test_diverging_if_arms_narrow_the_continuation() -> None:
+    root = _check('''
+let f = (v:int64|string):>int64 => {
+    if v is? int64 { return v }
+    return v.length
+}
+''')
+    # Typechecks at all only because `v` is `string` after the early return.
+    assert isinstance(root.items[0], hir.Declare)
+
+
+def test_non_diverging_if_arms_do_not_narrow() -> None:
+    with pytest.raises((TypeCheckError, UserError)):
+        _check('''
+let f = (v:int64|string):>int64 => {
+    if v is? int64 { let x = v }
+    return v.length
+}
+''')
