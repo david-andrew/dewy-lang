@@ -1,0 +1,22 @@
+# Runtime-length array results are arena-backed: the callee copies the
+# returned value into the process arena and returns its descriptor, so the
+# result survives later calls; forwarded call results pass straight through.
+let copy_of = (items:array<int64>):>array<int64> => {
+    let out:array<int64> = items
+    return out
+}
+let forward = (items:array<int64>):>array<int64> => copy_of(items)
+let clobber = (n:int64):>int64 => {
+    let junk:array<int64> = [n n n n n n n n]
+    return junk.length
+}
+let main = ():>int64 => {
+    let source:array<int64> = [1 2 3 4]
+    let d = copy_of(source)
+    let unused = clobber(9)
+    let f = forward(source)
+    let total:int64 = 0
+    loop v in d total += v
+    loop w in f total += w
+    return total + d.length + f.length + source[0] + 13   # 10 + 10 + 4 + 4 + 1 + 13 = 42
+}

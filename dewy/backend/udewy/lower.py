@@ -140,6 +140,7 @@ class _Lowerer(
         self.current_array_result: hir.ExpressedIdentifier | None = None
         self.current_string_result: hir.ExpressedIdentifier | None = None
         self.current_union_result: hir.ExpressedIdentifier | None = None
+        self.current_dynamic_array_result: ty.ArrayType | None = None
         self.string_result_bounds: dict[int, StringResultBound | None] = {}
         self.string_result_needs_dest: set[int] = set()
         self.string_result_call_targets: dict[int, _FunctionDef] = {}
@@ -298,6 +299,12 @@ class _Lowerer(
             )
         string_result = id(function) in self.string_result_needs_dest
         union_result = ty.runtime_union_members(literal.rettype) is not None
+        dynamic_array_result = (
+            literal.rettype
+            if isinstance(literal.rettype, ty.ArrayType)
+            and literal.rettype.length is None
+            else None
+        )
         rettype = (
             ty.VOID_TYPE
             if result_payload is not None
@@ -623,6 +630,7 @@ class _Lowerer(
         previous_array_result = self.current_array_result
         previous_string_result = self.current_string_result
         previous_union_result = self.current_union_result
+        previous_dynamic_array_result = self.current_dynamic_array_result
         previous_place_parameter_cells = self.current_place_parameter_cells
         previous_receiver = self.current_object_receiver
         previous_object_type = self.current_object_type
@@ -633,6 +641,7 @@ class _Lowerer(
         self.current_array_result = array_result_target
         self.current_string_result = string_result_target
         self.current_union_result = union_result_target
+        self.current_dynamic_array_result = dynamic_array_result
         self.current_place_parameter_cells = place_parameter_cells
         self.current_object_receiver = receiver
         self.current_object_type = literal.object_type
@@ -660,6 +669,7 @@ class _Lowerer(
         self.current_array_result = previous_array_result
         self.current_string_result = previous_string_result
         self.current_union_result = previous_union_result
+        self.current_dynamic_array_result = previous_dynamic_array_result
         self.current_place_parameter_cells = previous_place_parameter_cells
         self.current_object_receiver = previous_receiver
         self.current_object_type = previous_object_type
@@ -778,6 +788,9 @@ class _Lowerer(
                 'a union-typed result',
             )
         if isinstance(type_, ty.ArrayType):
+            if type_.length is None:
+                # Runtime-length results are arena-backed descriptors.
+                return 'int64'
             self._target_error(
                 node,
                 'array return values require an exact compile-time length',
@@ -2280,6 +2293,9 @@ class _Lowerer(
                 if self.current_union_result is not None:
                     items.extend(self._union_result_write(item))
                     continue
+                if self.current_dynamic_array_result is not None:
+                    items.extend(self._dynamic_array_result_write(item))
+                    continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
                 items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
@@ -2308,6 +2324,8 @@ class _Lowerer(
             statements = self._string_result_write(node)
         elif self.current_union_result is not None:
             statements = self._union_result_write(node)
+        elif self.current_dynamic_array_result is not None:
+            statements = self._dynamic_array_result_write(node)
         else:
             prelude, value = self._extract_expression(node)
             statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
@@ -2657,6 +2675,10 @@ class _Lowerer(
                 if node.item is None:
                     self._target_error(node, 'union return without a value')
                 return self._union_result_write(node.item)
+            if self.current_dynamic_array_result is not None:
+                if node.item is None:
+                    self._target_error(node, 'array return without a value')
+                return self._dynamic_array_result_write(node.item)
             if self.current_optional_result is not None:
                 if node.item is None:
                     self._target_error(node, 'optional return without a value')

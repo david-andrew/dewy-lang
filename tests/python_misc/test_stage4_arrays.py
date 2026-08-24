@@ -270,8 +270,11 @@ let f = ():>{type_name} => {{
 
 
 def test_udewy_exact_array_returns_use_caller_owned_storage() -> None:
-    with pytest.raises(NotImplementedYet, match='exact compile-time length'):
-        codegen(SrcFile(None, 'let make = ():>array<int64> => [1]'))
+    # Runtime-length results are arena-backed descriptors: no hidden result
+    # parameter, and the prelude arena is pulled into the program.
+    dynamic = codegen(SrcFile(None, 'let make = ():>array<int64> => [1]'))
+    assert 'let make = ():>int64' in dynamic
+    assert '_arena_alloc' in dynamic
 
     emitted = codegen(SrcFile(None, '''
 let make = ():>array<int64 length=1> => {

@@ -234,6 +234,39 @@ class ModuleCompiler:
                     continue
                 self._collect_referenced_binding_ids(getattr(value, field.name), found)
 
+    # Prelude declarations the backend may call without a source reference.
+    BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc'})
+
+    def _program_needs_arena(self) -> bool:
+        """Whether lowering will call the arena: any runtime-length array result."""
+        found = False
+
+        def walk(value: Any) -> None:
+            nonlocal found
+            if found:
+                return
+            if isinstance(value, hir.FunctionLiteral):
+                rettype = value.rettype
+                if isinstance(rettype, ty.ArrayType) and rettype.length is None:
+                    found = True
+                    return
+            if isinstance(value, hir.AST):
+                for field in fields(value):
+                    walk(getattr(value, field.name))
+            elif isinstance(value, hir.ObjectField):
+                walk(value.value)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    walk(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    walk(item)
+
+        for record in self.order:
+            if not record.prelude:
+                walk(record.root)
+        return found
+
     def _needed_prelude_binding_ids(self) -> set[int]:
         needed: set[int] = set()
         for record in self.order:
@@ -247,6 +280,10 @@ class ModuleCompiler:
             for item in record.root.items
             if isinstance(item, hir.Declare) and item.binding_id is not None
         ]
+        if self._program_needs_arena():
+            for item in prelude_items:
+                if item.name in self.BACKEND_RUNTIME_HELPERS and item.binding_id is not None:
+                    needed.add(item.binding_id)
         changed = True
         while changed:
             changed = False

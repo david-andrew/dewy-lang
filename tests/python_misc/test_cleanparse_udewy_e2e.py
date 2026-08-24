@@ -56,6 +56,7 @@ LOWERED_CASES = [
     ('array_call_adapters.dewy', 42),
     ('array_returns.dewy', 42),
     ('array_borrowed_returns.dewy', 42),
+    ('dynamic_array_returns.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
     ('array_value_semantics.dewy', 42),
@@ -131,6 +132,12 @@ def test_udewy_fixture_compiles_and_runs(
     monkeypatch.chdir(tmp_path)
     exit_code = entry_point(udewy_path, [])
     assert exit_code == expected_exit
+
+
+def test_dynamic_array_returns_use_the_prelude_arena() -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'dynamic_array_returns.dewy'))
+    assert '_arena_alloc' in emitted
+    assert '__syscall6__(9' in emitted
 
 
 def test_fixed_local_array_fixtures_use_stack_data() -> None:

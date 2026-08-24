@@ -1012,18 +1012,87 @@ class _ArrayLowering:
             ))
         return statements, target
 
+    def _arena_allocation(self, size: hir.AST, loc) -> hir.FunctionCall:
+        """Allocate ``size`` bytes from the prelude's process arena."""
+        function = next(
+            (
+                candidate
+                for candidate in self.functions
+                if candidate.logical_name.endswith('_arena_alloc')
+            ),
+            None,
+        )
+        if function is None:
+            self._target_error(
+                hir.Void(loc, ty.VOID_TYPE),
+                'arena allocation without the prelude arena',
+            )
+        function_type = ty.FunctionType(
+            [ty.PosOrKwArg(None, 'int64')],
+            [],
+            None,
+            'int64',
+        )
+        return hir.FunctionCall(
+            loc,
+            'int64',
+            hir.ExpressedIdentifier(loc, function_type, function.symbol),
+            [size],
+            {},
+        )
+
+    def _dynamic_array_result_write(self, item: hir.AST) -> list[hir.AST]:
+        """Return a runtime-length array as an arena-backed descriptor."""
+        array_type = self.current_dynamic_array_result
+        if array_type is None:
+            raise TypeError('INTERNAL ERROR: missing dynamic array result type')
+        source = item
+        while (
+            isinstance(source, hir.Block)
+            and not source.scoped
+            and len(source.items) == 1
+        ):
+            source = source.items[0]
+        if (
+            isinstance(source, hir.FunctionCall)
+            and isinstance(source.type, ty.ArrayType)
+            and source.type.length is None
+        ):
+            # Runtime-length call results are already arena-backed.
+            prelude, value = self._extract_expression(source)
+            return [*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, replace(value, type='int64'))]
+        prelude, copied = self._clone_dynamic_array_value(
+            item,
+            array_type,
+            arena=True,
+        )
+        return [*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, replace(copied, type='int64'))]
+
     def _clone_dynamic_array_value(
         self,
         node: hir.AST,
         array_type: ty.ArrayType,
+        *,
+        arena: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Copy a descriptor-backed runtime-length array in the current frame."""
+        """Copy a descriptor-backed runtime-length array.
 
-        if self.lowering_module_startup:
+        Storage comes from the current frame, or from the process arena when
+        ``arena`` is set so the copy may outlive the frame.
+        """
+
+        if self.lowering_module_startup and not arena:
             self._target_error(
                 node,
                 'runtime-length array copies at module scope',
             )
+        if arena:
+            element = array_type.element
+            if not (element == 'bool' or ty.fixed_integer_layout(element) is not None):
+                self._target_error(
+                    node,
+                    'an arena-backed array whose elements are not word scalars',
+                )
         source_prelude, source = self._extract_expression(node)
         element_bytes, _signed = self._array_element_layout(
             array_type.element,
@@ -1109,7 +1178,9 @@ class _ArrayLowering:
                 'let',
                 data_name,
                 'int64',
-                self._intrinsic_call(
+                self._arena_allocation(allocation_bytes, node.loc)
+                if arena
+                else self._intrinsic_call(
                     '__alloca__',
                     [allocation_bytes],
                     'int64',
@@ -1122,7 +1193,11 @@ class _ArrayLowering:
                 'let',
                 target.name,
                 'int64',
-                self._intrinsic_call(
+                self._arena_allocation(
+                    self._int64_literal(node.loc, ARRAY_DESCRIPTOR_SIZE), node.loc
+                )
+                if arena
+                else self._intrinsic_call(
                     '__alloca__',
                     [self._int64_literal(node.loc, ARRAY_DESCRIPTOR_SIZE)],
                     'int64',
