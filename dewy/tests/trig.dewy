@@ -1,0 +1,22 @@
+# Angles are quantities whose canonical unit is the turn, so degrees are
+# exact; trig yields fixed-point (Q32.32) values.
+let work = 20N * 10m * cos(45°)          # ≈ 141.42 J
+
+let main = ():>int64 => {
+    let joules:fixed = work / J
+    let quarter:fixed = cos(90°)
+    let half:fixed = cos(60°)
+    let unit:fixed = sin(90°)
+    let diag:fixed = tan(45°)
+    let third:fixed = 1/3
+    let sum:fixed = third + 2/3 + 1.25
+    printl"{joules} {quarter} {half} {unit} {diag} {sum} {2 * third}"
+    let checks:int64 = 0
+    if quarter.raw <? 8 and quarter.raw >? (-8) { checks += 1 }
+    if half.raw >=? 2147483647 and half.raw <=? 2147483649 { checks += 2 }
+    if unit.raw =? 4294967296 { checks += 4 }
+    if diag.raw >? 4294967290 and diag.raw <? 4294967300 { checks += 8 }
+    if sum =? 9/4 { checks += 16 }
+    if 1/2 <? joules / 200 { checks += 32 }
+    return checks + (joules.raw >> 32)
+}

@@ -163,6 +163,10 @@ def _typecheck_module(
         for name, binding in prelude_bindings.items()
         if binding.type is not None
     }
+    for type_name, attribute in ((RATIONAL_TYPE_NAME, 'rational_object'), (FIXED_TYPE_NAME, 'fixed_object')):
+        prelude_type = prelude_bindings.get(type_name)
+        if prelude_type is not None and prelude_type.type_value is not None:
+            setattr(type_system, attribute, prelude_type.type_value)
     declarations = ChainMap(prelude_declarations, builtins.builtin_types)
 
     if block is None:
@@ -3813,6 +3817,43 @@ def _rational_type(ctx: Context, loc: Span) -> ty.Type:
     return binding.type_value
 
 
+FIXED_TYPE_NAME = 'Fixed'
+FIXED_SCALE = 1 << 32
+_FIXED_BINARY_FUNCTIONS = {
+    '__add__': '_fixed_add',
+    '__sub__': '_fixed_sub',
+    '__mul__': '_fixed_mul',
+    '__truediv__': '_fixed_div',
+    '__eq__': '_fixed_eq',
+    '__ne__': '_fixed_ne',
+    '__lt__': '_fixed_lt',
+    '__le__': '_fixed_le',
+    '__gt__': '_fixed_gt',
+    '__ge__': '_fixed_ge',
+}
+
+
+def _fixed_type(ctx: Context, loc: Span) -> ty.Type:
+    """The prelude's `Fixed` object type, which `fixed` names."""
+    binding = ctx.binding_scopes.get(FIXED_TYPE_NAME)
+    if binding is None or binding.type_value is None:
+        user_error(
+            ctx.srcfile,
+            'fixed-point numbers need the prelude',
+            Pointer(span=loc, message='`Fixed` from `library/fixed.dewy` is not in scope'),
+        )
+    return binding.type_value
+
+
+def _is_fixed(type_: ty.Type, *, ctx: Context) -> bool:
+    binding = ctx.binding_scopes.get(FIXED_TYPE_NAME)
+    return (
+        binding is not None
+        and binding.type_value is not None
+        and type_ == binding.type_value
+    )
+
+
 def _is_rational(type_: ty.Type, *, ctx: Context) -> bool:
     binding = ctx.binding_scopes.get(RATIONAL_TYPE_NAME)
     return (
@@ -3937,6 +3978,43 @@ def _to_rational(arg: hir.AST, *, ctx: Context) -> hir.AST:
     return _prelude_call('_rational_from_int', [_as_int64(_strip_dimension(arg), ctx=ctx)], loc=arg.loc, ctx=ctx)
 
 
+def _fixed_constant(value: Fraction, *, loc: Span, ctx: Context) -> hir.AST:
+    """A compile-time number as a fixed value (raw Q32.32, rounded to nearest)."""
+    magnitude = (2 * abs(value.numerator) * FIXED_SCALE + value.denominator) // (2 * value.denominator)
+    raw = -magnitude if value < 0 else magnitude
+    if not -(1 << 63) <= raw < (1 << 63):
+        type_error(
+            ctx.srcfile,
+            'value is outside the fixed-point range',
+            Pointer(span=loc, message=f'`{value}` does not fit Q32.32'),
+        )
+    return _prelude_call(
+        '_fixed_from_raw',
+        [hir.Integer(loc, ty.IntegerLiteralType(raw), '0d', raw)],
+        loc=loc,
+        ctx=ctx,
+    )
+
+
+def _to_fixed(arg: hir.AST, *, ctx: Context) -> hir.AST:
+    """An operand as a runtime `Fixed` (dimension stripped); constants and rationals convert."""
+    number, _ = _number_and_dimension(arg.type)
+    if _is_fixed(number, ctx=ctx):
+        return _strip_dimension(arg)
+    constant = _constant_rational(arg, ctx=ctx)
+    if constant is not None:
+        return _fixed_constant(constant, loc=arg.loc, ctx=ctx)
+    if _is_rational(number, ctx=ctx):
+        return _prelude_call('_fixed_from_rational', [_strip_dimension(arg)], loc=arg.loc, ctx=ctx)
+    if not ctx.type_system.is_subtype(number, 'int'):
+        type_error(
+            ctx.srcfile,
+            'no fixed-point conversion for this operand',
+            Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
+        )
+    return _prelude_call('_fixed_from_int', [_as_int64(_strip_dimension(arg), ctx=ctx)], loc=arg.loc, ctx=ctx)
+
+
 _COMPARISON_DUNDERS = {'__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__'}
 _SAME_DIMENSION_DUNDERS = {'__add__', '__sub__', *_COMPARISON_DUNDERS}
 
@@ -4005,10 +4083,13 @@ def _dispatch_rational(
         _is_rational(number, ctx=ctx) or isinstance(number, ty.RationalLiteralType)
         for number in numbers
     )
+    involves_fixed = any(_is_fixed(number, ctx=ctx) for number in numbers)
     involves_quantity = any(isinstance(arg.type, ty.QuantityType) for arg in args)
     is_division = fname == '__truediv__' and len(args) == 2
-    if not (involves_rational or involves_quantity or is_division):
+    if not (involves_rational or involves_fixed or involves_quantity or is_division):
         return None
+    if involves_fixed:
+        return _dispatch_fixed(fname, args, loc=loc, source_name=source_name, ctx=ctx)
     if fname == '__unary_sub__':
         if len(args) != 1:
             return None
@@ -4020,7 +4101,7 @@ def _dispatch_rational(
                 Pointer(span=loc, message='rationals support `+ - * / ^`, negation, and comparisons'),
             )
         return None
-    if not all(ctx.type_system.is_subtype(number, 'number') or _is_rational(number, ctx=ctx) for number in numbers):
+    if not all(ctx.type_system.is_subtype(number, 'number') or _is_rational(number, ctx=ctx) or _is_fixed(number, ctx=ctx) for number in numbers):
         type_error(
             ctx.srcfile,
             f'no matching overload for operator `{source_name}`',
@@ -4085,6 +4166,42 @@ def _dispatch_rational(
     return replace(call, type=_with_dimension(rational_type, result_dimension))
 
 
+def _dispatch_fixed(
+    fname: str,
+    args: list[hir.AST],
+    *,
+    loc: Span,
+    source_name: str,
+    ctx: Context,
+) -> hir.AST:
+    """Operations with a fixed operand: fixed absorbs integers and rationals."""
+    dimensions = [_number_and_dimension(arg.type)[1] for arg in args]
+    if fname == '__unary_sub__':
+        if len(args) != 1:
+            raise ValueError('INTERNAL ERROR: unary minus takes one operand')
+        call = _prelude_call('_fixed_neg', [_to_fixed(args[0], ctx=ctx)], loc=loc, ctx=ctx)
+        return replace(call, type=_with_dimension(_fixed_type(ctx, loc), dimensions[0]))
+    helper = _FIXED_BINARY_FUNCTIONS.get(fname)
+    if helper is None or len(args) != 2:
+        type_error(
+            ctx.srcfile,
+            f'operator `{source_name}` is not defined for fixed-point values',
+            Pointer(span=loc, message='fixed supports `+ - * /`, negation, and comparisons'),
+        )
+    result_dimension = _result_dimension(fname, dimensions, loc=loc, ctx=ctx)
+    if fname == '__truediv__' and _constant_rational(args[1], ctx=ctx) == 0:
+        type_error(
+            ctx.srcfile,
+            'division by zero',
+            Pointer(span=args[1].loc, message='the divisor is the constant `0`'),
+        )
+    operands = [_to_fixed(arg, ctx=ctx) for arg in args]
+    call = _prelude_call(helper, operands, loc=loc, ctx=ctx)
+    if fname in _COMPARISON_DUNDERS:
+        return call
+    return replace(call, type=_with_dimension(_fixed_type(ctx, loc), result_dimension))
+
+
 def _as_int64(arg: hir.AST, *, ctx: Context) -> hir.AST:
     """An integer operand as `int64`, widening narrower fixed widths."""
     if isinstance(arg.type, str) and arg.type in ty.FIXED_INTEGER_TYPES and arg.type != 'int64':
@@ -4125,6 +4242,8 @@ def _dispatch_pow(
             'a dimensioned quantity needs a constant exponent',
             Pointer(span=exponent.loc, message='the result dimension must be known at compile time'),
         )
+    if _is_fixed(number, ctx=ctx):
+        not_implemented(ctx.srcfile, loc, '`^` on fixed-point bases')
     base_rational = _is_rational(number, ctx=ctx) or isinstance(number, ty.RationalLiteralType)
     if not base_rational and not ctx.type_system.is_subtype(number, 'int'):
         type_error(
@@ -4301,6 +4420,12 @@ def _dispatch_builtin(
     methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
     try:
         expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
+        if expected_return is not None:
+            expected_number, _ = _number_and_dimension(expected_return)
+            if _is_rational(expected_number, ctx=ctx) or _is_fixed(expected_number, ctx=ctx):
+                # Integer results convert to rational/fixed targets afterwards
+                # (`let c:fixed = -7`), so they must not constrain dispatch.
+                expected_return = None
         result = ctx.type_system.match_best_function(methods, arg_types, expected_return=expected_return)
     except ty.DispatchError as e:
         pointers = [Pointer(span=op_loc, message=str(e))]
@@ -5804,6 +5929,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return builtins.builtin_type_aliases[name]
             if name == 'rational' and RATIONAL_TYPE_NAME in ctx.binding_scopes:
                 return _rational_type(ctx, ast.loc)
+            if name == 'fixed' and FIXED_TYPE_NAME in ctx.binding_scopes:
+                return _fixed_type(ctx, ast.loc)
             return name
 
         case p0.Atom(item=t1.Integer(value=value)):
@@ -5940,13 +6067,19 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 ty.DimensionType,
             ):
                 return ty.multiply_dimensions(left, right)
+            def numeric(type_: ty.Type) -> bool:
+                return (
+                    ctx.type_system.is_subtype(type_, 'number')
+                    or _is_rational(type_, ctx=ctx)
+                    or _is_fixed(type_, ctx=ctx)
+                )
             if isinstance(left, ty.DimensionType):
                 if isinstance(right, ty.QuantityType):
                     return ty.QuantityType(
                         right.number,
                         ty.multiply_dimensions(left, right.dimension),
                     )
-                if ctx.type_system.is_subtype(right, 'number'):
+                if numeric(right):
                     return ty.QuantityType(right, left)
             if isinstance(right, ty.DimensionType):
                 if isinstance(left, ty.QuantityType):
@@ -5954,7 +6087,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                         left.number,
                         ty.multiply_dimensions(left.dimension, right),
                     )
-                if ctx.type_system.is_subtype(left, 'number'):
+                if numeric(left):
                     return ty.QuantityType(left, right)
             quantity = _quantity_product_type(left, right, ctx=ctx)
             if quantity is not None:
@@ -7055,11 +7188,18 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
-    if _is_compile_time_rational(node.type):
+    node_number, node_dimension = _number_and_dimension(node.type)
+    if isinstance(node_number, (ty.RationalLiteralType, ty.IntegerLiteralType)):
+        # Compile-time numbers materialize into runtime rational or fixed
+        # targets of the same dimension.
         expected_number, expected_dimension = _number_and_dimension(expected)
-        _, node_dimension = _number_and_dimension(node.type)
-        if node_dimension == expected_dimension and _is_rational(expected_number, ctx=ctx):
-            return _materialize_rational(node, ctx=ctx)
+        if node_dimension == expected_dimension:
+            if _is_rational(expected_number, ctx=ctx):
+                return _materialize_rational(node, ctx=ctx)
+            if _is_fixed(expected_number, ctx=ctx):
+                value = _constant_rational(node, ctx=ctx)
+                if value is not None:
+                    return replace(_fixed_constant(value, loc=node.loc, ctx=ctx), type=expected)
     if isinstance(node.type, ty.BinaryLiteralType):
         target = _refine_binary_materialization_target(node.type, expected)
         if ctx.type_system.is_subtype(node.type, target):

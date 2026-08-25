@@ -2264,8 +2264,9 @@ class _Lowerer(
             )
             if (
                 isinstance(node, (hir.ValueCast, hir.Transmute))
-                and isinstance(node.type, ty.QuantityType)
+                and isinstance(node.type, (ty.QuantityType, ty.ObjectType))
             ):
+                # Objects are one-word handles; quantities are their numbers.
                 return replace(
                     transformed,
                     type=self._lower_runtime_value_type(node.type),

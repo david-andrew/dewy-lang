@@ -50,7 +50,34 @@ let _print_rational = (value:Rational):>void => {
     return void
 }
 
-let print = _print_string & _print_int64 & _print_bool & _print_rational
+# Fixed-point values print in decimal with trailing zeros trimmed (up to
+# nine fractional digits; the representation holds about 9.6).
+let _print_fixed = (value:Fixed):>void => {
+    let raw:int64 = value.raw
+    if raw <? 0 {
+        _print_string("-")
+        raw = -raw
+    }
+    _print_int64(raw >> 32)
+    let fraction:int64 = raw and 4294967295
+    if fraction =? 0 { return void }
+    let digits:array<int64 length=9> = [0 0 0 0 0 0 0 0 0]
+    let last:int64 = -1
+    loop i in [0..9) {
+        fraction = fraction * 10
+        digits[i] = fraction >> 32
+        fraction = fraction and 4294967295
+        if digits[i] not =? 0 { last = i }
+    }
+    if last <? 0 { return void }
+    _print_string(".")
+    loop i in [0..9) {
+        if i <=? last { _print_int64(digits[i]) }
+    }
+    return void
+}
+
+let print = _print_string & _print_int64 & _print_bool & _print_rational & _print_fixed
 
 let printl = (s:string):>void => {
     print(s)

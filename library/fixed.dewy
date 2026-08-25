@@ -1,0 +1,122 @@
+# Fixed-point numbers: Q32.32 in an int64 (32 integer bits, 32 fraction
+# bits, resolution 2^-32 ≈ 2.3e-10). `fixed` is this object type. Trig
+# functions produce fixed values; integers and rationals convert into fixed
+# through the routing in the checker (`_fixed_from_int`/`_fixed_from_rational`
+# at runtime, exact raw constants at compile time). Division truncates toward
+# zero; multiplication truncates toward zero as well.
+let Fixed:type = [raw:int64]
+
+let _FIXED_ONE:int64 = 4294967296
+let _FIXED_MASK:int64 = 4294967295
+let _FIXED_HALF:int64 = 2147483648
+let _FIXED_QUARTER:int64 = 1073741824
+let _FIXED_TWO_PI:int64 = 26986075409   # 2π · 2^32
+
+let _fixed_from_raw = (raw:int64):>Fixed => [raw = raw]
+
+let _fixed_from_int = (value:int64):>Fixed => [raw = value * 4294967296]
+
+let _int_abs = (value:int64):>int64 => {
+    if value <? 0 { return -value }
+    return value
+}
+
+# round(|n| · 2^32 / d) with the sign of n, for d >? 0 and |n| // d <? 2^31.
+# The fraction is produced by 32 shift-subtract steps so `n << 32` never has
+# to fit in 64 bits.
+let _muldiv_shift32 = (n:int64 d:int64):>int64 => {
+    let negative:bool = n <? 0
+    let magnitude:int64 = _int_abs(n)
+    let quotient:int64 = magnitude // d
+    let remainder:int64 = magnitude % d
+    let fraction:int64 = 0
+    let step:int64 = 0
+    loop step <? 32 {
+        remainder = remainder * 2
+        fraction = fraction * 2
+        if remainder >=? d {
+            remainder = remainder - d
+            fraction = fraction + 1
+        }
+        step = step + 1
+    }
+    let raw:int64 = quotient * 4294967296 + fraction
+    # round to nearest (half away from zero)
+    if remainder * 2 >=? d { raw = raw + 1 }
+    if negative { return -raw }
+    return raw
+}
+
+let _fixed_from_rational = (value:Rational):>Fixed =>
+    [raw = _muldiv_shift32(value.numerator value.denominator)]
+
+let _fixed_add = (a:Fixed b:Fixed):>Fixed => [raw = a.raw + b.raw]
+let _fixed_sub = (a:Fixed b:Fixed):>Fixed => [raw = a.raw - b.raw]
+let _fixed_neg = (a:Fixed):>Fixed => [raw = -a.raw]
+
+# (a · b) >> 32 without a 128-bit intermediate: split both magnitudes into
+# 32-bit halves and add the partial products at their scales.
+let _fixed_mul = (a:Fixed b:Fixed):>Fixed => {
+    let negative:bool = (a.raw <? 0) xor (b.raw <? 0)
+    let x:uint64 = _int_abs(a.raw) transmute uint64
+    let y:uint64 = _int_abs(b.raw) transmute uint64
+    let xh:uint64 = x >> 32
+    let xl:uint64 = x and 4294967295
+    let yh:uint64 = y >> 32
+    let yl:uint64 = y and 4294967295
+    let high:uint64 = (xh * yh) << 32
+    let middle:uint64 = xh * yl + xl * yh
+    let low:uint64 = (xl * yl) >> 32
+    let raw:int64 = (high + middle + low) transmute int64
+    if negative { return [raw = -raw] }
+    return [raw = raw]
+}
+
+let _fixed_div = (a:Fixed b:Fixed):>Fixed => {
+    let negative:bool = b.raw <? 0
+    let divisor:int64 = _int_abs(b.raw)
+    let raw:int64 = _muldiv_shift32(a.raw divisor)
+    if negative { return [raw = -raw] }
+    return [raw = raw]
+}
+
+# Division by a small positive integer, exact in the raw scale.
+let _fixed_div_int = (a:Fixed d:int64):>Fixed => [raw = a.raw // d]
+
+let _fixed_eq = (a:Fixed b:Fixed):>bool => a.raw =? b.raw
+let _fixed_ne = (a:Fixed b:Fixed):>bool => a.raw not =? b.raw
+let _fixed_lt = (a:Fixed b:Fixed):>bool => a.raw <? b.raw
+let _fixed_le = (a:Fixed b:Fixed):>bool => a.raw <=? b.raw
+let _fixed_gt = (a:Fixed b:Fixed):>bool => a.raw >? b.raw
+let _fixed_ge = (a:Fixed b:Fixed):>bool => a.raw >=? b.raw
+
+# Trigonometry over angles measured in turns (1 turn = 360° = 2π rad).
+# The fractional turn is exact in Q32.32, so range reduction is exact; the
+# quarter-turn is then folded by symmetry and evaluated as a Taylor series
+# in θ = 2πx over [0, π/2] (nine terms: error below 2^-32).
+let _cos_turns = (turns:Fixed):>Fixed => {
+    let x:int64 = turns.raw and 4294967295
+    if x >? 2147483648 { x = 4294967296 - x }
+    let negative:bool = false
+    if x >? 1073741824 {
+        x = 2147483648 - x
+        negative = true
+    }
+    let theta:Fixed = _fixed_mul([raw = 26986075409] [raw = x])
+    let theta_squared:Fixed = _fixed_mul(theta theta)
+    let term:Fixed = [raw = 4294967296]
+    let sum:Fixed = [raw = 4294967296]
+    let k:int64 = 1
+    loop k <=? 9 {
+        term = _fixed_div_int(_fixed_mul(term theta_squared) ((2 * k - 1) * (2 * k)))
+        term = [raw = -term.raw]
+        sum = [raw = sum.raw + term.raw]
+        k = k + 1
+    }
+    if negative { return [raw = -sum.raw] }
+    return sum
+}
+
+let _sin_turns = (turns:Fixed):>Fixed => _cos_turns([raw = turns.raw - 1073741824])
+
+let _tan_turns = (turns:Fixed):>Fixed => _fixed_div(_sin_turns(turns) _cos_turns(turns))

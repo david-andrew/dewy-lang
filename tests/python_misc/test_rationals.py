@@ -92,12 +92,15 @@ def test_unit_scales_fold_into_dimensioned_constants() -> None:
     speed = declared['speed'].expr
     assert isinstance(speed.type, ty.QuantityType)
     assert speed.type.dimension == ty.dimension(('Length', 1), ('Time', -1))
-    assert speed.type.number == ty.RationalLiteralType(3, 100000000)  # metres per nanosecond
+    assert speed.type.number == ty.IntegerLiteralType(30)  # metres per second
     assert declared['accel'].expr.type.dimension == ty.dimension(('Length', 1), ('Time', -2))
+    assert declared['accel'].expr.type.number == ty.RationalLiteralType(49, 5)
     energy = declared['energy'].expr
     assert isinstance(energy.type, ty.QuantityType)
     assert energy.type.dimension == ty.dimension(('Mass', 1), ('Length', 2), ('Time', -2))
-    assert [arg.value for arg in energy.pos_args] == [9, 2000000000000000]
+    # whole-valued results stay integer quantities (a runtime `int` after `let` widening)
+    assert isinstance(energy, hir.Integer) and energy.value == 4500
+    assert energy.type.number == 'int'
 
 
 def test_mismatched_dimensions_are_rejected() -> None:
@@ -110,7 +113,8 @@ def test_mismatched_dimensions_are_rejected() -> None:
 def test_derived_units_are_exact_compile_time_scales() -> None:
     declared = _declared('const newton = N\nconst joule = J')
     assert declared['newton'].expr.type.dimension == ty.dimension(('Mass', 1), ('Length', 1), ('Time', -2))
-    assert declared['newton'].expr.type.number == ty.RationalLiteralType(1, 10**18)
+    assert declared['newton'].expr.type.number == ty.IntegerLiteralType(1)  # SI-canonical scales
+    assert declared['joule'].expr.type.number == ty.IntegerLiteralType(1)
     assert declared['joule'].expr.type.dimension == ty.dimension(('Mass', 1), ('Length', 2), ('Time', -2))
 
 
@@ -131,3 +135,40 @@ def test_power_base_must_be_numeric() -> None:
         _declared('let a = "x"^2')
     with pytest.raises(TypeCheckError, match='exponent must be an integer'):
         _declared('let a = 2^(1/2)')
+
+
+def _fixed_type() -> ty.Type:
+    return _declared('let f:fixed = 1/2')['f'].expr.type
+
+
+def test_fixed_constants_round_to_nearest_raw() -> None:
+    declared = _declared('let a:fixed = 1/3\nlet b:fixed = 1.25\nlet c:fixed = -7')
+    assert [arg.value for arg in declared['a'].expr.pos_args] == [1431655765]
+    assert [arg.value for arg in declared['b'].expr.pos_args] == [5368709120]
+    assert [arg.value for arg in declared['c'].expr.pos_args] == [-30064771072]
+
+
+def test_fixed_absorbs_integers_and_rationals() -> None:
+    declared = _declared('let f:fixed = 1/2\nlet a = f + 1\nlet b = 2/3 * f\nlet c = f <? 1/3\nlet d = -f')
+    fixed = _fixed_type()
+    assert declared['a'].expr.type == fixed and declared['a'].expr.func.name.endswith('_fixed_add')
+    assert declared['b'].expr.type == fixed and declared['b'].expr.func.name.endswith('_fixed_mul')
+    assert declared['c'].expr.type == 'bool'
+    assert declared['d'].expr.type == fixed
+
+
+def test_trig_takes_exact_degree_constants_and_fixed_angles() -> None:
+    declared = _declared('let a = cos(45°)\nlet r:fixed = 1/2\nlet b = sin(r * rad)\nlet w = 20N * 10m * cos(45°)')
+    fixed = _fixed_type()
+    assert declared['a'].expr.type == fixed
+    assert declared['b'].expr.type == fixed
+    work = declared['w'].expr.type
+    assert isinstance(work, ty.QuantityType) and work.number == fixed
+    assert work.dimension == ty.dimension(('Mass', 1), ('Length', 2), ('Time', -2))
+
+
+def test_time_is_canonical_in_seconds() -> None:
+    declared = _declared('const a = 300ms\nconst b = 2minute\nconst c = 1ns')
+    assert declared['a'].expr.type.number == ty.RationalLiteralType(3, 10)
+    assert declared['b'].expr.type.number == ty.IntegerLiteralType(120)
+    assert declared['c'].expr.type.number == ty.RationalLiteralType(1, 10**9)

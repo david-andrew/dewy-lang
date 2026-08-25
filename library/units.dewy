@@ -1,26 +1,26 @@
 # Physical dimensions are compile-time type factors. Duration preserves the
-# chosen numeric representation; unit constants carry an exact scale which is
-# folded into that representation when a quantity is constructed.
+# chosen numeric representation. Canonical scales are the SI base units
+# (second, metre, kilogram, ...), so derived SI units are exact scale 1 and
+# prefixes are exact rationals folded at compile time.
 
 const Duration:type = <T of real>(T * Time)
 
-const ns:Duration<1> = 1 transmute Duration<1>
-const nanosecond:Duration<1> = 1 transmute Duration<1>
-const nanoseconds:Duration<1> = 1 transmute Duration<1>
+const s:(1 * Time) = 1 transmute (1 * Time)
+const second:(1 * Time) = s
+const seconds:(1 * Time) = s
+const ms = s / 1000
+const millisecond = ms
+const milliseconds = ms
+const us = s / 1000000
+const microsecond = us
+const microseconds = us
+const ns = s / 1000000000
+const nanosecond = ns
+const nanoseconds = ns
 
-const ms:Duration<1000000> = 1000000 transmute Duration<1000000>
-const millisecond:Duration<1000000> = 1000000 transmute Duration<1000000>
-const milliseconds:Duration<1000000> = 1000000 transmute Duration<1000000>
-
-const s:Duration<1000000000> = 1000000000 transmute Duration<1000000000>
-const second:Duration<1000000000> = 1000000000 transmute Duration<1000000000>
-const seconds:Duration<1000000000> = 1000000000 transmute Duration<1000000000>
-
-# SI base units. Canonical scales: nanosecond (so integer durations stay
-# exact for `sleep`), metre, kilogram, ampere, kelvin, mole, candela, radian.
-# Derived units and prefixes are exact compile-time rationals of these, so
-# unit arithmetic folds away entirely; only runtime quantities carry a
-# number (a `Rational` when the scale is fractional).
+# SI base units: metre, kilogram, ampere, kelvin, mole, candela. Derived
+# units and prefixes are exact compile-time rationals of these, so unit
+# arithmetic folds away entirely; only runtime quantities carry a number.
 const m:(1 * Length) = 1 transmute (1 * Length)
 const metre:(1 * Length) = m
 const meter:(1 * Length) = m
@@ -37,7 +37,17 @@ const A:(1 * Current) = 1 transmute (1 * Current)
 const K:(1 * Temperature) = 1 transmute (1 * Temperature)
 const mol:(1 * Amount) = 1 transmute (1 * Amount)
 const cd:(1 * Luminosity) = 1 transmute (1 * Luminosity)
-const rad:(1 * Angle) = 1 transmute (1 * Angle)
+# Angles: the canonical unit is the whole turn, so degrees are exact
+# rationals (45° is 1/8 turn) and range reduction for trig is exact. The
+# radian's scale (1/2π turn) is irrational, so `rad` is a fixed-point unit.
+const turn:(1 * Angle) = 1 transmute (1 * Angle)
+const ° = turn / 360
+const deg = °
+const degree = °
+const degrees = °
+const rad:(fixed * Angle) = _fixed_from_raw(683565276) transmute (fixed * Angle)   # 2^32 / 2π
+const radian:(fixed * Angle) = rad
+const radians:(fixed * Angle) = rad
 
 const minute = 60 * s
 const hour = 60 * minute
@@ -48,3 +58,14 @@ const N = kg * m / s^2
 const Pa = N / m^2
 const J = N * m
 const W = J / s
+
+# Trigonometry takes an angle quantity and yields a dimensionless fixed value.
+let _cos_rational = (angle:(rational * Angle)):>fixed => _cos_turns(_fixed_from_rational(angle transmute rational))
+let _cos_fixed = (angle:(fixed * Angle)):>fixed => _cos_turns(angle transmute fixed)
+let cos = _cos_rational & _cos_fixed
+let _sin_rational = (angle:(rational * Angle)):>fixed => _sin_turns(_fixed_from_rational(angle transmute rational))
+let _sin_fixed = (angle:(fixed * Angle)):>fixed => _sin_turns(angle transmute fixed)
+let sin = _sin_rational & _sin_fixed
+let _tan_rational = (angle:(rational * Angle)):>fixed => _tan_turns(_fixed_from_rational(angle transmute rational))
+let _tan_fixed = (angle:(fixed * Angle)):>fixed => _tan_turns(angle transmute fixed)
+let tan = _tan_rational & _tan_fixed

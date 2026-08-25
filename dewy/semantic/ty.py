@@ -517,6 +517,10 @@ class TypeSystem:
         self._type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE}})
         # order-independent keys via sorted (a, b); separate from the subtype graph
         self._promote_rules: dict[tuple[str, str], str] = {}
+        # Runtime representations of `rational`/`fixed`, registered from the
+        # prelude's object types so compile-time numbers dispatch onto them.
+        self.rational_object: TypeExpr | None = None
+        self.fixed_object: TypeExpr | None = None
 
         for t in system_types:
             if isinstance(t, tuple): self.add_type(*t) 
@@ -620,6 +624,13 @@ class TypeSystem:
             if a == b or self.is_subtype(b.bound, a):
                 return b
             return None
+        for literal, other in ((a, b), (b, a)):
+            if (
+                isinstance(literal, (IntegerLiteralType, RationalLiteralType))
+                and isinstance(other, ObjectType)
+                and other in (self.rational_object, self.fixed_object)
+            ):
+                return literal  # the compile-time number materializes into that representation
         if isinstance(a, IntegerLiteralType) and isinstance(b, IntegerLiteralType):
             return a if a == b else None
         if isinstance(a, RationalLiteralType) and isinstance(b, RationalLiteralType):
@@ -745,6 +756,14 @@ class TypeSystem:
             return a == b or self.is_subtype(a.bound, b)
         if isinstance(b, TypeVariable):
             return a == b
+        if isinstance(a, (IntegerLiteralType, RationalLiteralType)) and isinstance(b, ObjectType):
+            # Compile-time numbers materialize into the runtime rational or
+            # fixed representation at the checking boundary.
+            if b == self.fixed_object:
+                return True
+            if b == self.rational_object:
+                return True
+            return False
         if isinstance(a, IntegerLiteralType):
             if isinstance(b, IntegerLiteralType):
                 return a == b
@@ -1276,10 +1295,40 @@ class TypeSystem:
                 if other_index != index
             )
         ]
+        if len(winners) > 1:
+            winners = self._prefer_exact_number_methods(winners, pos_types)
         if len(winners) != 1:
             raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
         method_index, method = winners[0]
         return DispatchResult(method, method_index, promote_pos)
+
+    def _prefer_exact_number_methods(
+        self,
+        winners: list[tuple[int, FunctionType]],
+        pos_types: list[TypeExpr],
+    ) -> list[tuple[int, FunctionType]]:
+        """Compile-time numbers pick exact (rational) parameters over fixed ones.
+
+        A literal such as `45°` materializes into whichever representation the
+        parameter wants, so it is applicable to both a `rational` and a `fixed`
+        overload; the exact one wins.
+        """
+        def number_of(type_: TypeExpr) -> TypeExpr:
+            return type_.number if isinstance(type_, QuantityType) else type_
+
+        def preference(method: FunctionType) -> tuple[int, ...]:
+            scores: list[int] = []
+            for position, arg_type in enumerate(pos_types):
+                if not isinstance(number_of(arg_type), (IntegerLiteralType, RationalLiteralType)):
+                    continue
+                if position >= len(method.pos_or_kw):
+                    continue
+                param = number_of(method.pos_or_kw[position].type)
+                scores.append(2 if param == self.rational_object else 1 if param == self.fixed_object else 0)
+            return tuple(scores)
+
+        best = max(preference(method) for _, method in winners)
+        return [(index, method) for index, method in winners if preference(method) == best]
 
 
 

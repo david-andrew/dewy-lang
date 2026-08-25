@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from shutil import which
 
@@ -110,11 +111,25 @@ def test_unit_multiplication_preserves_variable_representation(
 ) -> None:
     root = _check(f'''
 let value:{representation} = 2 transmute {representation}
-let delay = value * ms
+let delay = value * s
 ''')
 
     assert _declarations(root)['delay'].expr.type == ty.QuantityType(
         representation,
+        ty.dimension(('Time', 1)),
+    )
+
+
+def test_fractional_unit_scales_make_rational_quantities() -> None:
+    # `ms` is the exact rational 1/1000 s, so a runtime integer times it is a
+    # runtime rational quantity; a literal folds to an exact constant.
+    root = _check('let value:int64 = 2 transmute int64\nlet delay = value * ms\nconst pause = 300ms')
+    delay = _declarations(root)['delay'].expr.type
+    assert isinstance(delay, ty.QuantityType)
+    assert isinstance(delay.number, ty.ObjectType)
+    assert delay.dimension == ty.dimension(('Time', 1))
+    assert _declarations(root)['pause'].expr.type == ty.QuantityType(
+        ty.RationalLiteralType(3, 10),
         ty.dimension(('Time', 1)),
     )
 
@@ -127,9 +142,9 @@ def test_sleep_requires_a_time_quantity() -> None:
 def test_unit_dimensions_are_erased_from_udewy() -> None:
     emitted = codegen(SrcFile(None, 'sleep(300ms)'))
 
-    assert 'sleep = (duration:uint64):>void' in emitted
+    assert re.search(r'sleep = \(\w+:int64\):>void', emitted)  # a rational-seconds object
     assert 'ms:int64' not in emitted
-    assert '300000000' in emitted
+    assert '_rational_make(3 10' in emitted  # 300ms is 3/10 s
     assert '__syscall2__(35 request 0)' in emitted
     assert 'Time' not in emitted
     assert 'Duration' not in emitted
@@ -163,4 +178,4 @@ loop i in 0.. and c in text
     emitted = codegen(SrcFile(None, source))
 
     assert '__syscall2__(35 request 0)' in emitted
-    assert '300000000' in emitted
+    assert '_rational_make(3 10' in emitted

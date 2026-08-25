@@ -17,6 +17,7 @@ PORTABLE_LIBRARIES = (
     library / 'path.dewy',
     library / 'math.dewy',
     library / 'rational.dewy',
+    library / 'fixed.dewy',
     library / 'io.dewy',
     library / 'units.dewy',
 )

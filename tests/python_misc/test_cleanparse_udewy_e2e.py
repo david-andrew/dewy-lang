@@ -63,6 +63,7 @@ LOWERED_CASES = [
     ('rationals.dewy', 51),
     ('powers.dewy', 66),
     ('units_algebra.dewy', 44),
+    ('trig.dewy', 204),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
