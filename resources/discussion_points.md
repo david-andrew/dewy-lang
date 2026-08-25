@@ -4609,7 +4609,7 @@ x: Type1 & Trait1
 
 
 
-## Splicing structural types into the nominal type tree [settled: `A = B & [...]` + `__as__` overload per nominal parent. coercion happens at canonical-representation boundaries; explicit `__as__` beats composed paths; diamond ambiguity is a lazy use-site error. see "Structural splicing into the nominal type tree" in dewy/status.md]
+## Splicing structural types into the nominal type tree [superseded direction: only `type of Parent` mints identity; `&` is non-generative intersection. A fresh hybrid is `(type of Parent) & [...]`, while `ExistingHybrid & [...]` only strengthens its structure. See "Structural splicing into the nominal type tree" in dewy/status.md]
 I think in general structural types will typically inherit directly from `any`, or perhaps some prior defined structural type that you want to expand.
 
 However I think it could plenty of times be the case that you build something structurally but allow that structural type to also be used any time a nominal type is expected. I think this should be handled by intersecting the structural type with the nominal type (or potentially using the `of` syntax), and then explicitly define an overload for converting the struct type to the nominal type
@@ -4617,7 +4617,7 @@ However I think it could plenty of times be the case that you build something st
 
 ```dewy
 
-SomeStructThatIsAlsoInt:type = int & [
+SomeStructThatIsAlsoInt:type = (type of int) & [
     a:int
     b:bool
     c:string
@@ -4631,7 +4631,7 @@ SomeStructThatIsAlsoInt:type = int & [
 __as__ &= (x:SomeStructThatIsAlsoInt):>int => if x.b x.a+5 else x.a-5  # any time this struct needs to be interpreted as an integer, use the convert function
 ```
 
-the `int & ...` is what splices the structural type into the nominal tree, and the overload of `__as__` is what let's anything expecting a regular `int` know how to actually deal with it
+`type of int` mints the nominal child, `& ...` adds the structural requirements without minting again, and the overload of `__as__` lets anything requiring the canonical `int` representation know how to deal with it
 - I think it probably is a type error if you combine a structural and nominal type and don't define the `__as__` for the structural into the nominal
 
 So with this setup, a structural type can be used anywhere some nominal type is expected
@@ -4666,7 +4666,7 @@ Generics so far are a special way of making something into a function that takes
 array:type = <T>(T[])   # hypothetical: a generic *expression*, not a function
 ```
 Undecided whether this is worth supporting at all. Points from discussion:
-- if generics are sugar for type-parameter functions, then `Tagged<int>()` re-evaluates the body per instantiation like any call. Generic instantiation should NOT be memoized — that would introduce a second evaluation rule for what is definitionally just a function call (and would smuggle back site+args type identity, which was rejected in favor of pure per-evaluation generativity)
-- this only matters when the body mints a nominal type (`type of T`, `T & [...]` with nominal T). Purely structural results are duck-typed, so a structural generic factory is stable across instantiations for free
+- if generics are sugar for type-parameter functions, then `Tagged<int>()` re-evaluates the body per instantiation like any call. Generic instantiation should not be implicitly memoized
+- this only creates distinct results when the body contains `type of T`. `T & [...]` is non-generative even when `T` carries nominal ancestry, so a structural generic factory is stable across evaluations
 - the workaround for stable nominal-minting factories is the closure/bind-once idiom: `TaggedInt = Tagged(int)` and reuse the binding
 - so a generic-expression form would mostly be convenience sugar; possibly a fool's errand given the existing mechanisms compose to cover both behaviors

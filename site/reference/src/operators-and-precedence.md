@@ -9,6 +9,7 @@ Operator tokens resolve to typed operations. An operator's spelling determines p
 - comparisons and tests: `=?`, `not =?`, `<?`, `<=?`, `>?`, `>=?`, `is?`, `isnt?`, `in?`, `@?`;
 - Boolean and bitwise composition: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `&`, `|`, `~`, `not`;
 - conversion: `as`, `transmute`;
+- type relationships and construction: `of`, `has`, `type of Parent`;
 - call pipes: `|>` and `<|`;
 - construction and binding: `:`, `:>`, `=>`, `->`, `<->`, `=`;
 - suppression: an attached postfix `;`.
@@ -67,5 +68,7 @@ The following table is ordered from highest to lowest. “Fail” means an ungro
 | left | attached semicolon suppression |
 
 `else` attaches flow alternatives outside these operator levels. Grouping with `()` or a scoped `{}` is required when the precedence table does not express the intended tree.
+
+In particular, `&` binds more tightly than `of`. A fresh nominal type with structural requirements is therefore written `(type of Parent) & Structure`. Without those parentheses, `type of Parent & Structure` groups as `type of (Parent & Structure)`.
 
 This table lists source-language forms whose place in the expression grammar has been selected. Token spellings reserved by the parser for future operations—such as left division, expression-producing assignment, compile-time assignment, and additional shift forms—do not acquire language semantics merely by being tokenizable.

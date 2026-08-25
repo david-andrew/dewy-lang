@@ -62,6 +62,29 @@ const Result = <string | undefined>
 
 Literal values can therefore participate in types. `|` forms a union of alternatives.
 
+## Creating Nominal Types
+
+`type of Parent` creates a fresh nominal child of an existing type:
+
+<!-- dewy-example: design-only -->
+```dewy
+const UserId:type = type of int
+const MyCustomError:type = type of error
+```
+
+Each evaluation of `type of` creates identity. Ordinary type intersection does not:
+
+<!-- dewy-example: design-only -->
+```dewy
+const ContextError:type =
+    (type of error) & [context:string]
+
+const DetailedContextError:type =
+    ContextError & [source:string]
+```
+
+`DetailedContextError` adds a structural requirement while retaining `ContextError`'s nominal ancestry. It is not another nominal error variant. Generic parameter syntax such as `<T of real>` only places a bound on `T`; it does not create a type.
+
 When an alternative belongs to the nominal `exception` family, navigation can [forward that exception value](errors-as-values.md#exception-values-forward) while applying the requested member operation to the ordinary alternatives. Both `error` and `undefined` descend from `exception`. This is a rule for exception-classified union members, not for arbitrary unions.
 
 Parameterized aliases accept compile-time type arguments:

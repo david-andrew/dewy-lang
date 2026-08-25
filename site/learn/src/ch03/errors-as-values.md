@@ -21,6 +21,38 @@ Safe navigation is governed by a broader `exception` type family. Both `error` a
 
 Here, “exception” describes an ordinary value's type. It does not imply throwing, catching, or stack unwinding.
 
+## Defining Exceptions
+
+`type of Parent` creates a fresh nominal child. A unit-like error has one canonical inhabitant written with the type's own name:
+
+<!-- dewy-example: design-only -->
+```dewy
+const MyCustomError:type = type of error
+
+let maybeNumber = ():>int64 | MyCustomError => {
+    if random.coinflip
+        return MyCustomError
+    return 42
+}
+```
+
+There is currently no separate `MyCustomError()` spelling. Whether the canonical inhabitant and its type value are literally the same semantic object is left open.
+
+An error that carries context combines its fresh nominal identity with a structural type:
+
+<!-- dewy-example: design-only -->
+```dewy
+const MyComplexError:type =
+    (type of error) & [extra:string fields:int64]
+
+let problem = MyComplexError[
+    extra='some extra context'
+    fields=42
+]
+```
+
+Only `type of error` creates identity. A later alias such as `MyComplexError & [metadata:string]` adds a structural requirement while remaining the same nominal error kind.
+
 ## Safe Navigation
 
 When a receiver might be an exception, Dewy applies a member operation to every ordinary alternative and forwards the exception unchanged:
@@ -101,6 +133,6 @@ Not every alternative that describes an unsuccessful search should be an excepti
 
 Errors are also separate from [effects](effects.md). An error appears in the returned union because it is a value the caller receives. Effects describe behavior such as I/O, blocking, or mutation even when a call succeeds.
 
-> **Design boundary:** Direct error unions, the `exception` forwarding family, safe receiver navigation, explicit argument handling, and the separation of errors from effects are the intended model. The exact syntax for declaring new exception and error types, transforming an exception during `or_return`, pattern matching, recovery helpers, and extending automatic forwarding to pipelines remains provisional.
+> **Design boundary:** Direct error unions, nominal exception creation, the `exception` forwarding family, safe receiver navigation, explicit argument handling, and the separation of errors from effects are the intended model. Transforming an exception during `or_return`, pattern matching, recovery helpers, and extending automatic forwarding to pipelines remain provisional.
 
 The [Errors and Forwarding reference](../../reference/errors-and-forwarding.html) gives the exact type rules and collects the remaining open points.

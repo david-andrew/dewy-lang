@@ -1,11 +1,6 @@
 > NOTE: some of this might not be valid dewy syntax. It's mainly to illustrate the design of the types and effects system
 
-> NOTE: omitted from this discussion:
-> - intersection types/errors, e.g. `A & B` or `SomeStruct & Error` to make a structural type into an error
-> - what happens when you intersect nominal vs structural types
->    - `T = nominalT & structT` just makes `T is nominalT` true
->    - `T = nominalT1 & nominalT2` makes `T is nominalT1` true, and `T is nominalT2` true
->    - `T = structT1 & structT2` makes `T` contain all of the structural properties of `structT1` and `structT2` in a single type. TBD how to handle name conflicts, perhaps allow if they are compatible, taking the more specific one, and error if they are not compatible types
+> NOTE: nominal creation and structural intersection are now separate operations. `type of Parent` is the sole generative expression; `A & B` is non-generative intersection. Object intersections retain unique fields and intersect the types of matching fields. A mutability disagreement is invalid, and a required field reduced to `never` makes the object intersection uninhabited.
 
 ## Direct Union Errors and Forwarding Semantics
 
@@ -20,14 +15,15 @@ let createInvoice =
 }
 ```
 
-`Invoice` and `CreateInvoiceError` are ordinary runtime values. The distinction is provided by the type system, with error types descending from a nominal base `Error` type.
+`Invoice` and `CreateInvoiceError` are ordinary runtime values. The distinction is provided by the type system, with error types descending from the nominal base `error` type, which itself descends from `exception`.
 
 ```dewy
-# TBD if this is a valid way to make a new error type
-CreateInvoiceError: type<Error> = ...
+CreateInvoiceError:type = type of error
 
-# This should definitely be possible, but TBD if it will be the main approach
-CreateInvoiceError: type = [#{some relevant type content}#] & Error
+DetailedInvoiceError:type = (type of error) & [
+    message:string
+    invoiceId:InvoiceId
+]
 ```
 
 ### Errors as Union Members
@@ -90,22 +86,24 @@ The replacement must be compatible with the enclosing function’s return type.
 
 ### Forwarding Types
 
-Some types belong to a special forwarding category:
+Types descended from `exception` belong to the forwarding category:
 
 ```dewy
-Forward
-├── Error
-└── Absent
+exception
+├── error
+└── undefined
 ```
 
-Possible `Absent` members include:
+Libraries and users may create other exception descendants. A sentinel that should not forward is an ordinary type outside this family.
+
+Possible absence exceptions include:
 
 ```dewy
 undefined
 null
 ```
 
-`Error` and `Absent` share navigation behavior, but they remain distinct categories so operators may handle them differently.
+Errors and absence exceptions share navigation behavior, but remain distinct types so operators may handle them differently.
 
 ### Universal Safe Navigation
 
@@ -301,7 +299,7 @@ Convenience methods such as `map`, `map_error`, `and_then`, or `or_else` may be 
 
 ### Error Identity
 
-`Error` is a nominal type, though the language itself supports hybrid nominal and structural.
+`error` is a nominal type, though the language itself supports hybrid nominal and structural types.
 
 This prevents an error type from accidentally collapsing into or overlapping with a successful alternative during union normalization.
 
@@ -311,19 +309,21 @@ User | ValidationError
 
 must preserve both alternatives even when the types contain structurally similar fields.
 
-A value intended to treat an error as ordinary data should use an explicit intersection between `Error` and the data/content to include with it:
+A new error carrying structural data mints one nominal descendant and intersects it with that content:
 
 ```dewy
-ValidationError = Error & [
+ValidationError = (type of error) & [
     reason:str
     authLevel:Authority
     timestamp:Time
 ]
 ```
 
+Further structural strengthening is non-generative: `DetailedValidationError = ValidationError & [source:string]` remains the same nominal error kind with an additional required field.
+
 ### Domain Alternatives Versus Errors
 
-Not every unsuccessful-looking outcome needs to descend from `Error`.
+Not every unsuccessful-looking outcome needs to descend from `error` or `exception`.
 
 ```dewy
 User | Missing
@@ -337,9 +337,7 @@ User | NotFoundError
 
 represents a successful value or a propagatable failure.
 
-> NOTE: TBD if this is actually true. may or may not let `or_return` and related syntax deal over any Forward type or may restrict to Error or Absent depending on what makes sense. I think most likely it will deal in both to provider a simpler language to users.
-
-Only members classified as forwarding types participate in automatic navigation forwarding and `or_return`.
+Only members descended from `exception` participate in automatic navigation forwarding and `or_return`.
 
 ### Effects Remain Separate
 
@@ -461,7 +459,7 @@ The central rules are:
 
 ```text
 Navigation:
-    Automatically forwards Error and Absent receiver alternatives.
+    Automatically forwards receiver alternatives descended from exception.
 
 Arguments:
     Never forward implicitly.

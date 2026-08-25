@@ -489,40 +489,56 @@ Mainly useful for e.g. letting you return a type and some consumer can further r
 
 ### Structural splicing into the nominal type tree
 
-Structural types may be spliced into the nominal type tree by intersecting with a nominal type. The intended idiom: the spliced type _semantically is_ the nominal type, but with a different runtime representation (and/or extra metadata):
+Structural requirements may be combined with a fresh nominal descendant. `type of Parent` is the operation that mints the nominal identity; `&` only intersects the resulting type with the structural requirements:
 
 ```dewy
-Posit64:type = float64 & [sign:bit regime:array<bits> exponent:array<bits> fraction:array<bits>]< regime.length + exponent.length + fraction.length =? 63 >
+Posit64:type = (type of float64) & [sign:bit regime:array<bits> exponent:array<bits> fraction:array<bits>]< regime.length + exponent.length + fraction.length =? 63 >
 __as__ &= (x:Posit64):>float64 => { some algorithm to convert posits to floats }
 ```
 
 Rules and semantics:
 
-- intersecting a structural type with a nominal type requires a corresponding `__as__` overload converting to the nominal type. The absence is checked lazily at use sites (definitions may appear after the type, in any order at module level), and it is a type error to actually need the conversion when none is defined
+- `type of Parent` creates one fresh nominal child of `Parent`. Intersecting that child with a structure does not mint a second type or add another edge to the nominal tree
+- `A & B` is always non-generative type intersection. A hybrid retains any nominal ancestry already present in its operands, and otherwise follows structural/duck-typed equality
+- a structural type with a representation different from a representation-bearing nominal ancestor requires a corresponding `__as__` overload when a use reaches that ancestor's canonical representation. The absence is checked lazily at use sites (definitions may appear after the type, in any order at module level), and it is a type error to actually need the conversion when none is defined. Marker ancestry with no canonical representation, such as `exception` and `error`, introduces no conversion by itself
 - `x is? float64` is true for a `Posit64` instance; the spliced type genuinely is a descendant of the nominal type
-- the nominal type tree itself is single inheritance, but structural (including spliced) types may have multiple parents, including multiple nominal parents (`MyType = int & float64 & [...]`), with one `__as__` overload per nominal parent
+- the nominal type tree itself is single inheritance, but structural intersections may require membership in multiple nominal families (`MyType = int & float64 & [...]`), with one `__as__` overload per representation-bearing nominal parent
 - nominal types are immutable / have no internal fields to mutate, so coercion never creates mutation-aliasing concerns; `__as__` produces a fresh value with ordinary value semantics
 - `as`/`__as__` in general must be invoked explicitly; the sole implicit case is a spliced type flowing to a context requiring one of its nominal ancestors
 - coercion happens at _canonical-representation boundaries_, not call boundaries. A generic bound like `<T of float64>(left:T right:T)` binds `T = Posit64` directly with no conversion; `__as__` is inserted only where the canonical machine representation is actually required (e.g. inside a builtin body), per the representation-selection rules described earlier in this document. Consequently, overload resolution prefers a representation-preserving match over one requiring `__as__`, so defining posit-native operations opts out of coercion per-operation
 - conversion path resolution: an explicitly defined direct `__as__` always takes precedence over a composed path. Composed paths (chaining `__as__` up the ancestry, e.g. `Tracked -> Posit64 -> float64` for `Tracked = Posit64 & [...]`) are allowed when unambiguous. With multiple nominal parents, diamonds are possible (`X = int & float64 & [...]` at a boundary expecting a common ancestor); if multiple composed paths exist at a use site, that is a type error, resolved by defining a direct conversion. The error surfaces only at ambiguous _use_ sites — the mere existence of multiple paths is fine (opt-in lint at most) — and the diagnostic must name the competing paths and the definition sites of the `__as__` overloads involved
 - a pure nominal descendant with no structural body is spelled as an ordinary expression: `UserId = type of int`
+- extending an existing hybrid structurally does not need or create another nominal type: `DetailedPosit = Posit64 & [source:string]`. It remains nominally a `Posit64` while requiring the added field
+
+Structural object intersections merge requirements by field name. A field present on only one side is retained. For a field on both sides, the required type is the intersection of the two field types. The mutability declarations must agree; mutable and const requirements for the same field are incompatible rather than silently selecting one. If a required field type normalizes to `never`, the entire object intersection is uninhabited and a declaration that presents it as a constructible type is rejected.
 
 ### Generativity of type expressions
 
-- `type of T` and `T & [...]` (where `T` is nominal) are generative: each _evaluation_ mints a distinct nominal type. Type expressions are ordinary expressions and function bodies re-evaluate on every call, so a factory function containing a generative type expression returns a fresh type per call
-- intersections of purely structural types are _not_ generative: structural type equality is duck typing, so two evaluations of the same structural intersection produce equal types. Generativity only enters when a nominal type is being minted. If you want a combined structural type with unique (generative) identity, splice in an anonymous nominal type: `MyUniqueStructType = type of any & [...]`
-- applicative behavior (one stable type reused everywhere) is achieved with existing mechanisms: bind the result once and refer to the binding (possibly closing over it), or explicitly cache results (note: a userland memoizing type factory requires mutable state that persists across compile-time evaluations)
+- `type of T` is the sole generative type expression. Each evaluation mints a distinct nominal child. Type expressions are ordinary expressions and function bodies re-evaluate on every call, so a factory containing `type of` returns a fresh type per call
+- `A & B` never mints identity. Purely structural intersections use duck-typed equality; intersections carrying a nominal component retain that existing nominal identity. If a combined structural type needs unique identity, write `(type of any) & [...]`
+- binding a generative result once gives it stable identity; aliasing or structurally strengthening that binding does not mint again
 
 ```dewy
 Tagged = (T:type) => T & [tag:string]
-TaggedInt = Tagged(int)   # bind once; every use of TaggedInt is the same type
-a: TaggedInt = [...]
-b: TaggedInt = [...]      # compatible with a. Writing `a: Tagged(int)` and `b: Tagged(int)` would mint two distinct types
+TaggedInt1 = Tagged(int)
+TaggedInt2 = Tagged(int)  # equal to TaggedInt1: the body contains no generative expression
+
+FreshTagged = (T:type) => (type of T) & [tag:string]
+Fresh1 = FreshTagged(int)
+Fresh2 = FreshTagged(int) # distinct nominal types
 ```
 
-- generics do not change this: genericizing an expression is sugar for making it a function taking a type parameter, so `Tagged = <T>() => T & [tag:string]` invoked as `Tagged<int>()` re-evaluates the body and mints a fresh type per instantiation, same as any other call. Generic instantiation is deliberately _not_ memoized — that would introduce a second evaluation rule for what is definitionally just a function call. (Note this only matters when the body mints a nominal type; a generic producing a purely structural result is stable across instantiations for free, per duck typing)
+- generics do not change this: genericizing an expression is sugar for making it a function taking a type parameter. Re-evaluating a body containing only intersections produces an equal structural type; re-evaluating a body containing `type of` mints a fresh type. Generic instantiation is not implicitly memoized
 - type annotations (on parameters, returns, bindings) are conceptually evaluated once, at typechecking time — checking happens once even if the function is called many times. Default values, by contrast, are re-evaluated on every call (so `(a:array = []) => ...` gets a fresh array per call, avoiding the shared mutable-default trap). A generative type expression in default-value position therefore mints a fresh type per call, consistent with both rules
-- builtin parameterization like `array<int>` falls on the non-generative side: `array` is a builtin structural type, and parameterizing an existing type is partial application on the type object (narrowing), not minting a descendant. The dividing line: parameterization narrows, `type of` / nominal-splicing mints
+- builtin parameterization like `array<int>` is non-generative: parameterizing an existing type is partial application on the type object (narrowing), not minting a descendant. The dividing line is simple: only `type of` mints
+
+### Constructing nominal and hybrid values
+
+- a unit-like nominal type has one canonical inhabitant, written with the type's own name. `MyCustomError = type of error` can therefore be returned as `return MyCustomError`; an explicit `MyCustomError()` spelling is not currently part of the design
+- it remains open whether the type value and this canonical inhabitant are literally the same semantic object or share only the spelling selected by type/value context
+- a hybrid nominal/structural value is constructed by applying the type to its object portion: `MyComplexError[extra='context' fields=42]`. The object literal must provide every required field with a compatible type, and the result carries the hybrid's nominal ancestry
+- structurally strengthened aliases use the same construction form and require the combined fields. They are not separate nominal variants: `Base | (Base & Extra)` normalizes to `Base`
+- a pure nominal descendant is not automatically unit-like merely because it declares no object fields. A representation-bearing parent may require a payload; for example, `UserId = type of int` describes an integer-like nominal descendant rather than a singleton
 
 ### Array type literal syntax (`T[]`)
 

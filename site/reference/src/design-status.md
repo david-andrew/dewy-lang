@@ -12,13 +12,16 @@ The following principles organize the language and should be treated as normativ
 - `@` explicitly selects a place or function binding when reference-like behavior is intended.
 - Strings are immutable grapheme-cluster sequences with explicit lower-level views.
 - Arrays are homogeneous values and may carry length or shape facts in their types.
-- Objects are structural values; constructors are ordinary functions.
+- Objects are structural values. User-defined constructors are ordinary functions, while a structural or hybrid type may directly contextualize an object literal.
 - Defaults are per-call fallbacks and do not remove their parameters from positional binding.
 - Types are compile-time values and use the ordinary expression grammar where practical.
 - Physical dimensions participate in types and may erase from runtime representations.
 - Expected failures are direct union alternatives belonging to a nominal `error` family rather than values wrapped in a `Result` container.
 - Any alternative descended from nominal `exception` forwards through receiver navigation. Both `error` and `undefined` descend from it, while all ordinary alternatives remain subject to member checking; call arguments never forward implicitly.
 - Returned errors and evaluation effects occupy separate parts of a function contract.
+- `type of Parent` is the sole generative type operation. It creates a fresh nominal child; `&` is non-generative intersection and preserves nominal ancestry already present in its operands.
+- A unit-like nominal type has one canonical inhabitant written with the type's name. Hybrid nominal/structural values use `Type[field=value ...]` construction.
+- Structural object intersections merge matching fields by intersecting their types. A mutability disagreement is invalid rather than selecting one declaration.
 
 ## Provisional Designs
 
@@ -34,12 +37,14 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - dictionary, bidictionary, and set mutation, collision, deletion, and equality rules;
 - the complete numeric hierarchy beyond integers;
 - the overloadable string-conversion protocol beyond built-in conversions;
-- exception- and error-type declaration syntax, transformed propagation, recovery helpers, and whether pipes join automatic exception forwarding;
+- transformed exception propagation, recovery helpers, and whether pipes join automatic exception forwarding;
 - complete physical-dimension arithmetic, units, and conversion policy;
 - runtime-length aggregate ownership, returns, and escaping places;
 - pattern matching, stored generators, and general unpack/collect behavior;
 - compile-time evaluation and metaprogramming beyond type-valued expressions and imports;
 - the final Unicode identifier repertoire and source-normalization policy.
+
+Whether a unit-like nominal type value and its canonical inhabitant are literally the same semantic object remains open; the shared spelling is settled independently of that representation question.
 
 A normative page may describe the decided portion of one of these areas, but must not silently choose an unresolved rule.
 

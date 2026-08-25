@@ -24,6 +24,19 @@ let origin:Pair = [left=0 right=0]
 
 The alias does not create a runtime class object or nominal identity. Another value with the same required structure satisfies the same structural contract.
 
+## Combining Object Requirements
+
+`&` combines structural types without creating nominal identity:
+
+<!-- dewy-example: design-only -->
+```dewy
+const Located:type = [line:int64 column:int64]
+const Labeled:type = [label:string]
+const LabeledLocation:type = Located & Labeled
+```
+
+Fields present on only one side are retained. When both sides contain the same field, its required type is the intersection of the two field types. If that becomes `never`, the complete object type is impossible. The two declarations must also agree about whether the field is mutable; silently choosing one would break the other contract.
+
 ## Constructors Are Functions
 
 A constructor is an ordinary function returning an object:
@@ -36,6 +49,21 @@ let pair = make_pair(20 22)
 ```
 
 Default parameters, overloads, and generics apply to constructors exactly as they apply to other functions.
+
+A type with a structural body can construct that body directly:
+
+<!-- dewy-example: design-only -->
+```dewy
+const ContextError:type =
+    (type of error) & [context:string code:int64]
+
+let problem = ContextError[
+    context='request body'
+    code=400
+]
+```
+
+The object literal is checked against the named type and receives its nominal ancestry. Intersecting another structure onto `ContextError` adds required fields but does not mint a new nominal type.
 
 ## Behavior Inside Objects
 

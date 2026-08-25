@@ -20,7 +20,50 @@ Any value whose type descends from `exception` is a forwarding value. Programs m
 
 ## Error Types and Return Unions
 
-An error type descends from the nominal base type `error`, which itself descends from `exception`. The exact declaration syntax for introducing such a type is provisional; this page uses names such as `NotFoundError` without prescribing their definitions.
+An error type descends from the nominal base type `error`, which itself descends from `exception`. `type of error` creates a fresh nominal error type:
+
+<!-- dewy-example: design-only -->
+```dewy
+const MyCustomError:type = type of error
+```
+
+A unit-like nominal error has one canonical inhabitant, written with the type's name. The question of whether that inhabitant is literally the type value itself remains open, but there is no separate `MyCustomError()` spelling:
+
+<!-- dewy-example: design-only -->
+```dewy
+let maybeNumber = ():>int64 | MyCustomError => {
+    if random.coinflip
+        return MyCustomError
+    return 42
+}
+```
+
+Intersect the fresh nominal type with an object type when an error carries fields:
+
+<!-- dewy-example: design-only -->
+```dewy
+const MyComplexError:type =
+    (type of error) & [extra:string fields:int64]
+
+let maybeNumber = ():>int64 | MyComplexError => {
+    if random.coinflip
+        return MyComplexError[
+            extra='some extra context'
+            fields=42
+        ]
+    return 42
+}
+```
+
+`type of error` mints the identity; `&` only adds the structural requirement. Further structural extension therefore reuses the existing nominal ancestry:
+
+<!-- dewy-example: design-only -->
+```dewy
+const MyMoreComplexError:type =
+    MyComplexError & [metadata:string]
+```
+
+`MyMoreComplexError` is structurally stronger but is not a separate nominal error variant. See [Nominal Identity](types-and-conversions.md#nominal-identity).
 
 <!-- dewy-example: design-only -->
 ```dewy
@@ -160,7 +203,6 @@ Here the union describes what the caller receives. `reads<database>` describes w
 
 The following details remain open:
 
-- the preferred declaration syntax for new nominal exception and error types and structural error payloads;
 - pattern-selection and concise recovery syntax;
 - transformed `or_return` forms;
 - whether pipes automatically forward exceptions, and the exact rule for broadcast pipes whose elements may be exceptions;

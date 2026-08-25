@@ -12,6 +12,8 @@ Several normative areas are only partial. Notable examples include arbitrary-pre
 
 The hosted type system records `exception` as the parent of `error` and `undefined`. Automatic exception forwarding and `or_return` are not yet implemented, so those rules describe the intended language rather than current compiler behavior.
 
+Generative `type of Parent`, hybrid `Type[field=value ...]` construction, and general structural-object intersection merging are also not yet implemented.
+
 The detailed and continuously maintained checklist is [`dewy/status.md`](https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md).
 
 ## Platform Coverage

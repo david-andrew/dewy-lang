@@ -16,6 +16,51 @@ const MaybeIndex = <int64 | undefined>
 
 A type alias does not create nominal identity unless its defining construct explicitly requests generativity.
 
+## Nominal Identity
+
+`type of Parent` evaluates to a fresh nominal child of `Parent`:
+
+<!-- dewy-example: design-only -->
+```dewy
+const UserId:type = type of int
+const NotFoundError:type = type of error
+```
+
+Each evaluation of `type of` creates a distinct identity. Referring to or aliasing the resulting binding preserves that identity. `<T of Bound>` in a generic parameter is a bound declaration and is not this generative expression.
+
+`type of` is the only generative type operation. Intersection does not mint nominal identity:
+
+<!-- dewy-example: design-only -->
+```dewy
+const ContextError:type =
+    (type of error) & [context:string code:int64]
+
+const DetailedContextError:type =
+    ContextError & [source:string]
+```
+
+`ContextError` has one fresh identity beneath `error`. `DetailedContextError` is the same nominal kind with a stronger structural requirement; it does not add another node to the nominal tree. Consequently, `ContextError | DetailedContextError` simplifies to `ContextError`.
+
+## Intersections
+
+`A & B` requires both operand types and is non-generative, including when an operand carries nominal ancestry. Re-evaluating equal intersections produces equal types.
+
+Structural-object intersections merge requirements by field name. A field found on only one side is retained. Matching fields intersect their required types:
+
+<!-- dewy-example: design-only -->
+```dewy
+const T1:type = [a:int | bool b:string c:bool | undefined]
+const T2:type = [a:bool b:int]
+
+# a requires (int | bool) & bool, which simplifies to bool
+# b requires string & int, which simplifies to never
+const Impossible:type = T1 & T2  # compile-time error
+```
+
+A required `never` field makes the complete object intersection uninhabited; presenting that result as a constructible declared type is a compile-time error. Matching fields must also agree on mutability. A mutable requirement and a const requirement are incompatible because neither contract can safely stand in for the other.
+
+These rules keep `&` associative, commutative, idempotent, and independent of declaration identity. Because object field order otherwise participates in structural types, normalization of a merged intersection must choose the same semantic field order independently of operand order; the exact canonical ordering and layout remain representation-design work.
+
 ## Inference and Context
 
 Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to `int`; a fixed-width annotation accepts the literal only when it fits.

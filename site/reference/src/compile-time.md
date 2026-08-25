@@ -6,6 +6,8 @@ Dewy uses ordinary language values and expressions at compile time where possibl
 
 Types are compile-time values of type `type`. Aliases, parameterized type constructors, physical dimensions, and refinements use this model. See [Types and Conversions](types-and-conversions.md).
 
+`type of Parent` is generative: every evaluation creates a fresh nominal child. All other type algebra, including `&`, is non-generative. Binding a generated type once gives it stable identity; aliases and structural intersections retain that identity rather than minting another one.
+
 ## Import Values
 
 Source imports accept exact compile-time structural path values. Runtime-computed values cannot alter the source module graph. See [Modules and Imports](modules-and-imports.md).
