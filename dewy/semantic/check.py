@@ -50,6 +50,7 @@ class Context:
     loop_boundaries: tuple[LoopBoundary, ...] = ()
     function_boundary_labels: dict[str, Span] = field(default_factory=dict)
     refinements: dict[int, ty.Type] = field(default_factory=dict)
+    length_bounds: dict[int, int] = field(default_factory=dict)  # proven minimum lengths of runtime-length arrays
     type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
     resolving_type_aliases: set[int] = field(default_factory=set)
     module_loader: object | None = None
@@ -163,6 +164,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     binding_scopes=ctx.binding_scopes.new_child(),
                     module_namespaces=ctx.module_namespaces.new_child(),
                     refinements=dict(ctx.refinements),
+                    length_bounds=dict(ctx.length_bounds),
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
                     passes.append((typecheck_and_resolve_inner(candidate, ctx=fork, type_block=type_block, expected=expected), fork))
@@ -193,6 +195,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             ctx.module_namespaces.maps[0].update(fork.module_namespaces.maps[0])
             ctx.refinements.clear()
             ctx.refinements.update(fork.refinements)
+            ctx.length_bounds.clear()
+            ctx.length_bounds.update(fork.length_bounds)
             if ctx.catcher is not None:
                 assert fork.catcher is not None
                 ctx.catcher.returns[:] = fork.catcher.returns
@@ -495,13 +499,17 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                     f'INTERNAL ERROR: checked function type {expr.type} does not match the pre-bound signature {prebound} for `{name}`'
 
             # use the type directly from the expression since no type annotation was provided
-            ctx.declarations[name] = expr.type
+            grown_annotation = _grown_array_annotation(name, keyword, expr.type, ctx=ctx)
+            ctx.declarations[name] = grown_annotation or expr.type
 
-            return _complete_binding(
+            declaration = _complete_binding(
                 ast,
-                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr),
+                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, grown_annotation, expr),
                 ctx=ctx,
             )
+            if grown_annotation is not None and declaration.binding_id is not None:
+                ctx.refinements[declaration.binding_id] = expr.type
+            return declaration
         
         case [
             t1.Keyword(name='let'|'const' as keyword),
@@ -621,19 +629,23 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         value = typecheck_and_resolve_inner(ast.right, ctx=ctx)
         require_valued(value.type, ctx.srcfile, value.loc, 'declaration initializer')
         value = _widen_inferred_let_value(value)
-        ctx.declarations[name] = value.type
-        return _complete_binding(
+        grown_annotation = _grown_array_annotation(name, 'let', value.type, ctx=ctx)
+        ctx.declarations[name] = grown_annotation or value.type
+        declaration = _complete_binding(
             ast,
             hir.Declare(
                 ast.loc,
                 ty.VOID_TYPE,
                 'let',
                 name,
-                None,
+                grown_annotation,
                 value,
             ),
             ctx=ctx,
         )
+        if grown_annotation is not None and declaration.binding_id is not None:
+            ctx.refinements[declaration.binding_id] = value.type
+        return declaration
 
     target = tcr_assignment_target(ast.left, ctx=ctx)
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
@@ -661,6 +673,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         not_implemented(ctx.srcfile, ast.loc, 'reassigning a range value')
     if target.binding_id is not None:
         ctx.refinements.pop(target.binding_id, None)
+        ctx.length_bounds.pop(target.binding_id, None)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
 
 
@@ -1075,6 +1088,67 @@ def _refine_type_test(
     return ty.union(*selected)
 
 
+def _length_bound_fact(
+    condition: hir.AST,
+    truth: bool,
+    *,
+    ctx: Context,
+) -> tuple[int, int] | None:
+    """A proven minimum length from `xs.length <op> k` (or `k <op> xs.length`)."""
+    if not (
+        isinstance(condition, hir.FunctionCall)
+        and isinstance(condition.func, hir.ExpressedIdentifier)
+        and condition.func.name in {'__gt__', '__ge__', '__lt__', '__le__', '__eq__', '__ne__'}
+        and len(condition.pos_args) == 2
+    ):
+        return None
+    left, right = condition.pos_args
+    name = condition.func.name
+
+    def length_binding(node: hir.AST) -> int | None:
+        if (
+            isinstance(node, hir.ArrayLength)
+            and isinstance(node.array, hir.ExpressedIdentifier)
+            and node.array.binding_id is not None
+        ):
+            return node.array.binding_id
+        return None
+
+    binding_id = length_binding(left)
+    if binding_id is not None:
+        constant = _constant_integer(right, ctx=ctx)
+        if constant is None:
+            return None
+        relation = name
+    else:
+        binding_id = length_binding(right)
+        if binding_id is None:
+            return None
+        constant = _constant_integer(left, ctx=ctx)
+        if constant is None:
+            return None
+        # `k op len` mirrors to `len op' k`.
+        relation = {
+            '__gt__': '__lt__', '__lt__': '__gt__',
+            '__ge__': '__le__', '__le__': '__ge__',
+            '__eq__': '__eq__', '__ne__': '__ne__',
+        }[name]
+    if not truth:
+        relation = {
+            '__gt__': '__le__', '__le__': '__gt__',
+            '__ge__': '__lt__', '__lt__': '__ge__',
+            '__eq__': '__ne__', '__ne__': '__eq__',
+        }[relation]
+    # relation now holds `len <relation> constant` as a true fact.
+    if relation == '__gt__':
+        return binding_id, max(constant + 1, 0)
+    if relation in {'__ge__', '__eq__'}:
+        return binding_id, max(constant, 0)
+    if relation == '__ne__' and constant == 0:
+        return binding_id, 1
+    return None
+
+
 def _refine_condition_context(
     ctx: Context,
     condition: hir.AST,
@@ -1093,6 +1167,12 @@ def _refine_condition_context(
                 ctx=ctx,
             )
         return replace(ctx, refinements=refinements)
+    length_fact = _length_bound_fact(condition, truth, ctx=ctx)
+    if length_fact is not None:
+        binding_id, minimum = length_fact
+        length_bounds = dict(ctx.length_bounds)
+        length_bounds[binding_id] = max(length_bounds.get(binding_id, 0), minimum)
+        return replace(ctx, refinements=refinements, length_bounds=length_bounds)
     if isinstance(condition, hir.ShortCircuit):
         if condition.op == 'and' and truth:
             left_ctx = _refine_condition_context(ctx, condition.left, truth=True)
@@ -1873,6 +1953,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # Refinement state at the end of every path that can reach the code
         # after the flow; the continuation keeps their join.
         continuing_paths: list[dict[int, ty.Type]] = []
+        continuing_bounds: list[dict[int, int]] = []
         arm_ctx = ctx
         for arm in ast.arms:
             if len(arm.parts) != 3:
@@ -1897,6 +1978,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             bodies.append(body)
             if body.type != ty.BOTTOM_TYPE:
                 continuing_paths.append(dict(body_ctx.refinements))
+                continuing_bounds.append(dict(body_ctx.length_bounds))
             arm_ctx = _refine_condition_context(
                 arm_ctx,
                 condition,
@@ -1915,9 +1997,11 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             bodies.append(default)
             if default.type != ty.BOTTOM_TYPE:
                 continuing_paths.append(dict(arm_ctx.refinements))
+                continuing_bounds.append(dict(arm_ctx.length_bounds))
         else:
             # No else: falling through means every condition was false.
             continuing_paths.append(dict(arm_ctx.refinements))
+            continuing_bounds.append(dict(arm_ctx.length_bounds))
         if continuing_paths:
             # ``ctx.refinements`` is the dict shared by the enclosing block's
             # items, so updating it in place narrows the code after the flow.
@@ -1930,11 +2014,18 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 )
             ctx.refinements.clear()
             ctx.refinements.update(joined)
+            joined_bounds: dict[int, int] = {}
+            for binding_id in set.intersection(*(set(path) for path in continuing_bounds)):
+                joined_bounds[binding_id] = min(path[binding_id] for path in continuing_bounds)
+            ctx.length_bounds.clear()
+            ctx.length_bounds.update(joined_bounds)
         else:
             # Everything diverges: the continuation is unreachable, keep the
             # all-conditions-false state.
             ctx.refinements.clear()
             ctx.refinements.update(arm_ctx.refinements)
+            ctx.length_bounds.clear()
+            ctx.length_bounds.update(arm_ctx.length_bounds)
         if ast.default is None and (
             branch_expected is not None
             and any(body.type != ty.BOTTOM_TYPE for body in bodies)
@@ -1980,6 +2071,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if mutated_binding is not None:
                 ctx.refinements.pop(mutated_binding.id, None)
                 body_ctx.refinements.pop(mutated_binding.id, None)
+                ctx.length_bounds.pop(mutated_binding.id, None)
+                body_ctx.length_bounds.pop(mutated_binding.id, None)
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
@@ -2527,7 +2620,10 @@ def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
         return node
     if ty.is_zero_arg_function(node.type):
         assert isinstance(node.type, ty.FunctionType)
-        return hir.FunctionCall(node.loc, node.type.ret, node, [], {})
+        call = hir.FunctionCall(node.loc, node.type.ret, node, [], {})
+        if isinstance(node, hir.ArrayMethod):
+            _apply_array_method_transition(node, node.loc, ctx=ctx)
+        return call
     if isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
         not_implemented(
             ctx.srcfile,
@@ -2721,6 +2817,78 @@ def _tcr_object_literal(
 _ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve'})
 
 
+def _apply_array_method_transition(
+    method: hir.ArrayMethod,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> None:
+    """Update length facts after a growth method call, proving `pop` first.
+
+    An exact-length refinement steps by one on `push`/`pop` and resets on
+    `clear`; otherwise a proven minimum length (from guards such as
+    `xs.length >? 0`) steps the same way. `pop` requires one of them to
+    prove the array is non-empty.
+    """
+    receiver = method.array
+    if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id is None:
+        return
+    binding_id = receiver.binding_id
+    assert isinstance(receiver.type, ty.ArrayType)
+    element = receiver.type.element
+    current = ctx.refinements.get(binding_id)
+    exact = current.length if isinstance(current, ty.ArrayType) else None
+    minimum = ctx.length_bounds.get(binding_id, 0) if exact is None else exact
+    if method.name == 'pop':
+        if exact == 0:
+            user_error(
+                ctx.srcfile,
+                'pop on an empty array',
+                Pointer(span=loc, message='this array has length 0 here'),
+            )
+        if exact is None and minimum < 1:
+            user_error(
+                ctx.srcfile,
+                'cannot prove the array is non-empty',
+                Pointer(span=loc, message='`pop` needs a proven positive length'),
+                hint='guard the call with `if xs.length >? 0 { ... }`, or pop while the length is known',
+            )
+        new_exact = None if exact is None else exact - 1
+        new_minimum = minimum - 1
+    elif method.name == 'push':
+        new_exact = None if exact is None else exact + 1
+        new_minimum = minimum + 1
+    elif method.name == 'clear':
+        new_exact = 0
+        new_minimum = 0
+    else:  # reserve
+        new_exact = exact
+        new_minimum = minimum
+    if new_exact is not None:
+        ctx.refinements[binding_id] = ty.ArrayType(element, new_exact)
+    else:
+        ctx.refinements.pop(binding_id, None)
+    ctx.length_bounds[binding_id] = max(new_minimum, 0)
+
+
+def _grown_array_annotation(
+    name: str,
+    keyword: str,
+    value_type: ty.Type,
+    *,
+    ctx: Context,
+) -> ty.ArrayType | None:
+    """The runtime-length type for an unannotated `let` array that gets grown."""
+    if (
+        keyword == 'let'
+        and name in ctx.grown_array_names
+        and isinstance(value_type, ty.ArrayType)
+        and value_type.length is not None
+    ):
+        return ty.ArrayType(value_type.element, None)
+    return None
+
+
 def _grown_array_names(ast: p0.AST) -> frozenset[str]:
     """Names that are receivers of a growth method anywhere in ``ast``.
 
@@ -2823,8 +2991,6 @@ def _tcr_array_method(
             ),
             hint='declare the binding as `array<T>` to allow growth',
         )
-    # The length is about to change: drop any exact-length refinement.
-    ctx.refinements.pop(value.binding_id, None)
     value = replace(value, type=declared)
     element = declared.element
     signatures: dict[str, ty.FunctionType] = {
@@ -4595,6 +4761,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         loop_boundaries=(),
         function_boundary_labels=function_boundary_labels,
         refinements={},
+        length_bounds={},
     )
     body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
 
@@ -5935,6 +6102,8 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         contextual_kw_args,
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
+    if isinstance(left, hir.ArrayMethod):
+        _apply_array_method_transition(left, call.loc, ctx=ctx)
     return _specialize_interpolated_output(call, ctx=ctx)
 
 

@@ -7,7 +7,8 @@ let main = ():>int64 => {
     xs.push(5)
     let i:int64 = 0
     loop i <? 20 { xs.push(i) i += 1 }      # forces several growths
-    let last = xs.pop                        # 19
+    let last:int64 = 0
+    if xs.length >? 0 { last = xs.pop }     # 19; the guard proves the pop
     let total:int64 = 0
     loop v in xs total += v                  # 1+2+3+4+5 + 0..18 = 15 + 171 = 186
     let ys:array<int64> = xs                 # independent copy

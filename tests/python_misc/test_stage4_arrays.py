@@ -574,16 +574,19 @@ let f = ():>int64 => {
 def test_exact_length_arrays_cannot_grow() -> None:
     with pytest.raises(UserError, match='cannot change length'):
         _check('let xs:array<int64 length=2> = [1 2] xs.push(3)')
-    with pytest.raises(UserError, match='cannot change length'):
-        _check('let xs = [1 2] xs.push(3)')
+    # An unannotated `let` that is grown somewhere is a runtime-length array
+    # whose initializer length is only a refinement.
+    _check('let xs = [1 2] xs.push(3)')
 
 
-def test_exact_length_refinement_is_invalidated_by_growth() -> None:
-    # Before the push the initializer's exact length still proves the index;
-    # after it the binding is a runtime-length array again.
-    _check('let xs:array<int64> = [1 2] let a = xs[1] xs.push(3)')
-    with pytest.raises(UserError, match='not proven in bounds'):
-        _check('let xs:array<int64> = [1 2] xs.push(3) let a = xs[1]')
+def test_exact_length_refinement_steps_with_growth() -> None:
+    # The exact length follows push/pop/clear, so indexes stay provable while
+    # the length is statically known.
+    _check('let xs:array<int64> = [1 2] xs.push(3) let a = xs[2]')
+    with pytest.raises(UserError, match='out of bounds'):
+        _check('let xs:array<int64> = [1 2] xs.push(3) let a = xs[3]')
+    with pytest.raises(UserError, match='out of bounds'):
+        _check('let xs:array<int64> = [1 2 3] let p = xs.pop let a = xs[2]')
 
 
 def test_loop_bodies_invalidate_refinements_they_mutate() -> None:
@@ -600,3 +603,40 @@ let f = ():>int64 => {
     return 0
 }
 ''')
+
+
+def test_pop_requires_a_proven_positive_length() -> None:
+    with pytest.raises(UserError, match='pop on an empty array'):
+        _check('let f = ():>int64 => { let xs:array<int64> = [] xs.push(1) xs.clear return xs.pop }')
+    with pytest.raises(UserError, match='cannot prove the array is non-empty'):
+        _check('let f = (xs:array<int64>):>int64 => xs.pop')
+    # Exact lengths step through push and pop: three pops of a two-element
+    # array plus one push are fine, a fourth is not.
+    _check('let f = ():>int64 => { let xs:array<int64> = [1 2] xs.push(3) let a = xs.pop let b = xs.pop return xs.pop }')
+    with pytest.raises(UserError, match='pop on an empty array'):
+        _check('let f = ():>int64 => { let xs:array<int64> = [1] let a = xs.pop return xs.pop }')
+
+
+def test_length_guards_prove_pop() -> None:
+    _check("""
+let f = (xs:array<int64>):>int64 => {
+    if xs.length >? 0 { return xs.pop }
+    return 0
+}
+""")
+    _check("""
+let f = (xs:array<int64>):>int64 => {
+    if 2 <=? xs.length {
+        let a = xs.pop
+        return xs.pop
+    }
+    return 0
+}
+""")
+    with pytest.raises(UserError, match='cannot prove'):
+        _check("""
+let f = (xs:array<int64>):>int64 => {
+    if xs.length >? 0 { let a = xs.pop return xs.pop }
+    return 0
+}
+""")
