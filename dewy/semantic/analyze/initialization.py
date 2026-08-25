@@ -355,7 +355,7 @@ class _InitializationChecker:
                     call_stack,
                 )
             return current
-        if isinstance(node, hir.ArrayLength):
+        if isinstance(node, (hir.ArrayLength, hir.ArrayMethod)):
             return self._check_eager(
                 node.array,
                 initialized,
@@ -667,6 +667,8 @@ class _InitializationChecker:
     ) -> list[hir.FunctionLiteral] | None:
         while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
             node = node.items[0]
+        if isinstance(node, hir.ArrayMethod):
+            return []  # compiler-provided; no callable effects
         if isinstance(node, hir.FunctionLiteral):
             return [node]
         if isinstance(node, hir.OverloadedFunction):

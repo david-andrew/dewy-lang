@@ -237,6 +237,19 @@ class ArrayLength(AST):
 
 
 @dataclass
+class ArrayMethod(AST):
+    """A compiler-provided method bound to a named array binding.
+
+    ``type`` is the method's FunctionType; calling it mutates the receiver in
+    place (``push``, ``pop``, ``clear``, ``reserve``), as if ``array`` were a
+    Dewy object type defining these methods.
+    """
+
+    array: AST
+    name: str
+
+
+@dataclass
 class IteratorExpression(AST):
     """A scoped `name in iterable` expression advanced by an enclosing loop."""
 

@@ -215,6 +215,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'ModuleNamespace({node.name})'
     if isinstance(node, hir.ArrayLength):
         return 'ArrayLength'
+    if isinstance(node, hir.ArrayMethod):
+        return f'ArrayMethod({node.name})'
     if isinstance(node, hir.IteratorExpression):
         return (
             f'IteratorExpression({node.target.name}, '
@@ -331,6 +333,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.ModuleNamespace):
         return []
     if isinstance(node, hir.ArrayLength):
+        return [('array', node.array)]
+    if isinstance(node, hir.ArrayMethod):
         return [('array', node.array)]
     if isinstance(node, hir.IteratorExpression):
         return [('target', node.target), ('iterable', node.iterable)]
@@ -747,6 +751,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _text(node.name)
     if isinstance(node, hir.ArrayLength):
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
+    if isinstance(node, hir.ArrayMethod):
+        return _seq(_to_doc(node.array, _CALL_PREC, indent), _text(f'.{node.name}'))
     if isinstance(node, hir.IteratorExpression):
         return _seq(
             _to_doc(node.target, 0, indent),

@@ -55,6 +55,7 @@ class Context:
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
+    grown_array_names: frozenset[str] = frozenset()  # names some `.push`/`.pop`/... targets
     allow_place_expression: bool = False
     # TODO: etc stuff
 
@@ -142,6 +143,7 @@ def _typecheck_module(
         binding_registry=registry or sb.BindingRegistry(),
         module_loader=module_loader,
         module_declared_names=declared_names,
+        grown_array_names=_grown_array_names(block),
     )
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
@@ -546,8 +548,18 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             )
             expr = check_against(expr, annotation, ctx=ctx)
             optional_annotation_payload = ty.optional_payload(annotation)
+            growable = (
+                keyword == 'let'
+                and name in ctx.grown_array_names
+                and isinstance(annotation, ty.ArrayType)
+                and annotation.length is None
+                and isinstance(expr.type, ty.ArrayType)
+                and expr.type.length is not None
+            )
             ctx.declarations[name] = (
-                expr.type
+                annotation
+                if growable
+                else expr.type
                 if isinstance(annotation, (ty.ArrayType, ty.ObjectType))
                 and isinstance(expr.type, type(annotation))
                 else ty.optional(expr.type)
@@ -555,11 +567,18 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 and isinstance(expr.type, type(optional_annotation_payload))
                 else annotation
             )
-            return _complete_binding(
+            declaration = _complete_binding(
                 ast,
                 hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
                 ctx=ctx,
             )
+            if growable and declaration.binding_id is not None:
+                # A runtime-length binding initialized from an exact-length
+                # value keeps that exact length as a refinement until a
+                # length-changing operation invalidates it, so index proofs
+                # still work while the length is known.
+                ctx.refinements[declaration.binding_id] = expr.type
+            return declaration
         
         case [
             t1.Keyword(name='let'|'const'),
@@ -1953,6 +1972,14 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             body_ctx = _refine_condition_context(ctx, condition, truth=True)
         else:
             condition, body_ctx = iterator_result
+        # A refinement established before the loop is only sound inside the
+        # body if nothing in the body can invalidate it on a later iteration,
+        # so drop refinements of every binding the body assigns or grows.
+        for mutated_name in _mutated_binding_names(body_ast):
+            mutated_binding = ctx.binding_scopes.get(mutated_name)
+            if mutated_binding is not None:
+                ctx.refinements.pop(mutated_binding.id, None)
+                body_ctx.refinements.pop(mutated_binding.id, None)
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
@@ -2496,7 +2523,7 @@ def _mark_object_receiver(
 
 
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
-    if not isinstance(node, hir.MemberAccess):
+    if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod)):
         return node
     if ty.is_zero_arg_function(node.type):
         assert isinstance(node.type, ty.FunctionType)
@@ -2691,6 +2718,124 @@ def _tcr_object_literal(
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
 
+_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve'})
+
+
+def _grown_array_names(ast: p0.AST) -> frozenset[str]:
+    """Names that are receivers of a growth method anywhere in ``ast``.
+
+    A `let` array whose name is never grown keeps its initializer's exact
+    type everywhere (including inside functions); one that is grown somewhere
+    is checked as a runtime-length array with a local exact-length refinement.
+    Name-based matching over-approximates under shadowing, which only costs
+    precision.
+    """
+    names: set[str] = set()
+
+    def walk(node: object) -> None:
+        if (
+            isinstance(node, p0.BinOp)
+            and isinstance(node.op, t1.Operator)
+            and node.op.symbol == '.'
+            and isinstance(node.left, p0.Atom)
+            and isinstance(node.left.item, t1.Identifier)
+            and isinstance(node.right, p0.Atom)
+            and isinstance(node.right.item, t1.Identifier)
+            and node.right.item.name in _ARRAY_METHOD_NAMES
+        ):
+            names.add(node.left.item.name)
+        if is_dataclass(node) and not isinstance(node, type):
+            for field_ in fields(node):
+                walk(getattr(node, field_.name))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+
+    walk(ast)
+    return frozenset(names)
+
+
+def _mutated_binding_names(ast: p0.AST) -> set[str]:
+    """Names a syntax tree may assign or grow (a conservative pre-scan)."""
+    names: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, p0.BinOp):
+            left_name = (
+                node.left.item.name
+                if isinstance(node.left, p0.Atom) and isinstance(node.left.item, t1.Identifier)
+                else None
+            )
+            if left_name is not None and (
+                (isinstance(node.op, t1.Operator) and node.op.symbol in {'=', ':=', '::'})
+                or isinstance(node.op, t2.CombinedAssignmentOp)
+            ):
+                names.add(left_name)
+            if (
+                left_name is not None
+                and isinstance(node.op, t1.Operator)
+                and node.op.symbol == '.'
+                and isinstance(node.right, p0.Atom)
+                and isinstance(node.right.item, t1.Identifier)
+                and node.right.item.name in _ARRAY_METHOD_NAMES
+            ):
+                names.add(left_name)
+        if is_dataclass(node) and not isinstance(node, type):
+            for field_ in fields(node):
+                walk(getattr(node, field_.name))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+
+    walk(ast)
+    return names
+
+
+def _tcr_array_method(
+    value: hir.AST,
+    name: str,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> hir.ArrayMethod:
+    """Bind a compiler-provided growth method to a named array binding.
+
+    Conceptually ``array`` is an ordinary Dewy object type whose methods are
+    ``push``, ``pop``, ``clear``, and ``reserve``; container mutation is only
+    ever reached through the container value.
+    """
+    assert isinstance(value.type, ty.ArrayType)
+    if not isinstance(value, hir.ExpressedIdentifier) or value.binding_id is None:
+        not_implemented(ctx.srcfile, loc, 'array methods on an unnamed array value')
+    binding = ctx.binding_registry.by_id[value.binding_id]
+    declared = (
+        binding.declaration.annotation
+        if binding.declaration is not None and binding.declaration.annotation is not None
+        else binding.type
+    )
+    if not isinstance(declared, ty.ArrayType) or declared.length is not None:
+        user_error(
+            ctx.srcfile,
+            'exact-length arrays cannot change length',
+            Pointer(
+                span=value.loc,
+                message=f'this is declared as `{type_to_dewy(declared)}`',
+            ),
+            hint='declare the binding as `array<T>` to allow growth',
+        )
+    # The length is about to change: drop any exact-length refinement.
+    ctx.refinements.pop(value.binding_id, None)
+    value = replace(value, type=declared)
+    element = declared.element
+    signatures: dict[str, ty.FunctionType] = {
+        'push': ty.FunctionType([ty.PosOrKwArg('value', element)], [], None, ty.VOID_TYPE),
+        'pop': ty.FunctionType([], [], None, element),
+        'clear': ty.FunctionType([], [], None, ty.VOID_TYPE),
+        'reserve': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
+    }
+    return hir.ArrayMethod(loc, signatures[name], value, name)
+
+
 def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     if not (
         isinstance(binop.right, p0.Atom)
@@ -2721,6 +2866,10 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             binding.name,
             binding_id=binding.id,
         )
+    if name in _ARRAY_METHOD_NAMES:
+        value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        if isinstance(value.type, ty.ArrayType):
+            return _tcr_array_method(value, name, binop.loc, ctx=ctx)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.BinaryLiteralType):

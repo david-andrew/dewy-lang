@@ -37,6 +37,7 @@ type ArrayRepresentation = Literal[
 
 type ArrayUse = Literal[
     'length',
+    'grow',
     'index_read',
     'index_write',
     'alias',

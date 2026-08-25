@@ -555,3 +555,48 @@ let f = ():>int64 => {
     assert 'loop __dewy_iterator_1 <? 2' in emitted
     assert '__dewy_iterator_value_1 = 1 + __dewy_iterator_1' in emitted
     assert '__dewy_iterator_1 += 1' in emitted
+
+
+def test_array_growth_methods_are_bound_to_the_value() -> None:
+    root = _check('''
+let f = ():>int64 => {
+    let xs:array<int64> = [1 2]
+    xs.push(3)
+    let last = xs.pop
+    xs.clear
+    xs.reserve(16)
+    return last
+}
+''')
+    assert isinstance(root.items[0], hir.Declare)
+
+
+def test_exact_length_arrays_cannot_grow() -> None:
+    with pytest.raises(UserError, match='cannot change length'):
+        _check('let xs:array<int64 length=2> = [1 2] xs.push(3)')
+    with pytest.raises(UserError, match='cannot change length'):
+        _check('let xs = [1 2] xs.push(3)')
+
+
+def test_exact_length_refinement_is_invalidated_by_growth() -> None:
+    # Before the push the initializer's exact length still proves the index;
+    # after it the binding is a runtime-length array again.
+    _check('let xs:array<int64> = [1 2] let a = xs[1] xs.push(3)')
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check('let xs:array<int64> = [1 2] xs.push(3) let a = xs[1]')
+
+
+def test_loop_bodies_invalidate_refinements_they_mutate() -> None:
+    # A length-changing call anywhere in the loop body drops the exact-length
+    # refinement for the whole body, not just the code after the call.
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check('''
+let f = ():>int64 => {
+    let xs:array<int64> = [1 2 3]
+    loop true {
+        let a = xs[2]
+        xs.clear
+    }
+    return 0
+}
+''')

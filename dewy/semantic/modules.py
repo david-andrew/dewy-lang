@@ -250,6 +250,10 @@ class ModuleCompiler:
                 if isinstance(rettype, ty.ArrayType) and rettype.length is None:
                     found = True
                     return
+            if isinstance(value, hir.ArrayMethod):
+                # Growth methods relocate array data into the arena.
+                found = True
+                return
             if isinstance(value, hir.AST):
                 for field in fields(value):
                     walk(getattr(value, field.name))

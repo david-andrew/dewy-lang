@@ -1041,6 +1041,158 @@ class _ArrayLowering:
             {},
         )
 
+    def _array_grow_statements(
+        self,
+        descriptor: hir.AST,
+        needed: hir.AST,
+        element_type: ty.Type,
+        element_bytes: int,
+        loc,
+    ) -> list[hir.AST]:
+        """Ensure ``capacity >= needed``, moving the data into the arena.
+
+        Growth doubles the capacity (minimum 8, at least ``needed``), copies
+        the current elements into a fresh arena buffer, and repoints the
+        descriptor, so raw stack, static, or borrowed data is never written
+        through: the first growth always relocates.
+        """
+        capacity = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('capacity'))
+        new_capacity = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('new_capacity'))
+        old_data = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('old_data'))
+        new_data = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('new_data'))
+        index = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('grow_index'))
+        length = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('grow_length'))
+
+        def declare(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.Declare:
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', target.name, 'int64', value)
+
+        def assign(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.Assign:
+            return hir.Assign(loc, ty.VOID_TYPE, target, '=', value)
+
+        def lt(left: hir.AST, right: hir.AST) -> hir.AST:
+            return self._int64_comparison('__lt__', left, right, loc)
+
+        copy_body = self._copy_array_element_between_addresses(
+            self._pointer_element_address(old_data, index, element_bytes, loc),
+            self._pointer_element_address(new_data, index, element_bytes, loc),
+            element_type,
+            loc,
+        )
+        copy_body.append(
+            assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc))
+        )
+        grow = hir.Block(
+            loc,
+            ty.VOID_TYPE,
+            [
+                declare(new_capacity, self._int64_binary('__mul__', capacity, self._int64_literal(loc, 2), loc)),
+                hir.Flow(
+                    loc,
+                    ty.VOID_TYPE,
+                    [hir.IfArm(loc, ty.VOID_TYPE, lt(new_capacity, needed), assign(new_capacity, needed))],
+                    None,
+                ),
+                hir.Flow(
+                    loc,
+                    ty.VOID_TYPE,
+                    [hir.IfArm(loc, ty.VOID_TYPE, lt(new_capacity, self._int64_literal(loc, 8)), assign(new_capacity, self._int64_literal(loc, 8)))],
+                    None,
+                ),
+                declare(old_data, self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)),
+                declare(length, self._load_i64_field(descriptor, ARRAY_LENGTH_OFFSET, loc)),
+                declare(
+                    new_data,
+                    self._arena_allocation(
+                        self._int64_binary('__mul__', new_capacity, self._int64_literal(loc, element_bytes), loc),
+                        loc,
+                    ),
+                ),
+                declare(index, self._int64_literal(loc, 0)),
+                hir.Flow(
+                    loc,
+                    ty.VOID_TYPE,
+                    [hir.LoopArm(loc, ty.VOID_TYPE, lt(index, length), hir.Block(loc, ty.VOID_TYPE, copy_body, True))],
+                    None,
+                ),
+                self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, new_data, loc),
+                self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, new_capacity, loc),
+                self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE), loc),
+            ],
+            True,
+        )
+        return [
+            declare(capacity, self._load_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, loc)),
+            hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, lt(capacity, needed), grow)], None),
+        ]
+
+    def _extract_array_method_call(
+        self,
+        node: hir.FunctionCall,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Lower ``xs.push(v)``, ``xs.pop``, ``xs.clear``, ``xs.reserve(n)``."""
+        method = node.func
+        assert isinstance(method, hir.ArrayMethod)
+        array_type = method.array.type
+        if not isinstance(array_type, ty.ArrayType):
+            raise TypeError('INTERNAL ERROR: array method receiver is not an array')
+        element_type = array_type.element
+        if not (element_type == 'bool' or ty.fixed_integer_layout(element_type) is not None):
+            self._target_error(node, 'growing an array whose elements are not word scalars')
+        loc = node.loc
+        prelude, descriptor = self._extract_expression(method.array)
+        if isinstance(descriptor, hir.ExpressedIdentifier):
+            descriptor = replace(descriptor, type='int64')
+        element_bytes, _signed = self._array_element_layout(element_type, node)
+        length = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('method_length'))
+        length_declare = hir.Declare(
+            loc, ty.VOID_TYPE, 'let', length.name, 'int64',
+            self._load_i64_field(descriptor, ARRAY_LENGTH_OFFSET, loc),
+        )
+        data = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
+        if method.name == 'push':
+            value_prelude, value = self._extract_expression(node.pos_args[0])
+            next_length = self._int64_binary('__add__', length, self._int64_literal(loc, 1), loc)
+            return [
+                *prelude,
+                *value_prelude,
+                length_declare,
+                *self._array_grow_statements(descriptor, next_length, element_type, element_bytes, loc),
+                self._array_store(
+                    value,
+                    self._pointer_element_address(data, length, element_bytes, loc),
+                    element_type,
+                    loc,
+                ),
+            ], self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, next_length, loc)
+        if method.name == 'pop':
+            last = self._int64_binary('__sub__', length, self._int64_literal(loc, 1), loc)
+            result = hir.ExpressedIdentifier(loc, element_type, self._new_array_name('popped'))
+            return [
+                *prelude,
+                length_declare,
+                hir.Declare(
+                    loc, ty.VOID_TYPE, 'let', result.name, element_type,
+                    self._array_load(
+                        self._pointer_element_address(data, last, element_bytes, loc),
+                        element_type,
+                        loc,
+                    ),
+                ),
+                self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last, loc),
+            ], result
+        if method.name == 'clear':
+            return [*prelude], self._store_i64_field(
+                descriptor, ARRAY_LENGTH_OFFSET, self._int64_literal(loc, 0), loc
+            )
+        if method.name == 'reserve':
+            count_prelude, count = self._extract_expression(node.pos_args[0])
+            return [
+                *prelude,
+                *count_prelude,
+                *self._array_grow_statements(descriptor, count, element_type, element_bytes, loc),
+            ], hir.Void(loc, ty.VOID_TYPE)
+        self._target_error(node, f'array method `{method.name}`')
+
     def _dynamic_array_result_write(self, item: hir.AST) -> list[hir.AST]:
         """Return a runtime-length array as an arena-backed descriptor."""
         array_type = self.current_dynamic_array_result

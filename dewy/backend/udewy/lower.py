@@ -144,6 +144,12 @@ class _Lowerer(
         self.string_result_bounds: dict[int, StringResultBound | None] = {}
         self.string_result_needs_dest: set[int] = set()
         self.string_result_call_targets: dict[int, _FunctionDef] = {}
+        # Side tables above are keyed by ``id(node)``. CPython reuses the id
+        # of a freed object, so every node registered as a key must stay
+        # alive for the whole lowering or a later node could inherit stale
+        # analyses (this manifested as a boolean argument being cloned as an
+        # array, depending on allocator state).
+        self._keyed_nodes_keepalive: list[object] = []
         self.current_place_parameter_cells: dict[
             int,
             hir.ExpressedIdentifier,
@@ -1354,6 +1360,14 @@ class _Lowerer(
                 array_use='length',
             )
             return
+        if isinstance(node, hir.ArrayMethod):
+            self._discover_node(
+                node.array,
+                scope,
+                current_function,
+                array_use='grow',
+            )
+            return
         if isinstance(node, hir.StringLength):
             self._discover_node(node.string, scope, current_function)
             return
@@ -1898,7 +1912,7 @@ class _Lowerer(
             return node
         if isinstance(node, hir.ModuleNamespace):
             self._target_error(node, 'using a module namespace as a runtime value')
-        if isinstance(node, hir.ArrayLength):
+        if isinstance(node, (hir.ArrayLength, hir.ArrayMethod)):
             return replace(
                 node,
                 array=self._require_node(self._transform_node(node.array)),
@@ -2042,6 +2056,7 @@ class _Lowerer(
                 kw_args={},
                 selected_method_index=None,
             )
+            self._keyed_nodes_keepalive.append(transformed)
             for index, (argument, source_position) in enumerate(zip(
                 transformed.pos_args,
                 source_positions,
@@ -2960,6 +2975,8 @@ class _Lowerer(
             )
             return prelude, self._array_load(address, node.type, node.loc)
         if isinstance(node, hir.FunctionCall):
+            if isinstance(node.func, hir.ArrayMethod):
+                return self._extract_array_method_call(node)
             if self._is_object_method_func(node.func):
                 return self._extract_method_call(node)
             if self._is_fixed_width_shift(node):

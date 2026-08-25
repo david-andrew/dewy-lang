@@ -499,6 +499,19 @@ class _EffectAnalyzer:
         call: hir.FunctionCall,
         params: dict[int, ParameterEffects],
     ) -> None:
+        if isinstance(call.func, hir.ArrayMethod):
+            # Growth methods mutate the receiver array in place.
+            resolved = self._resolve_route(call.func.array, params)
+            if resolved is not None:
+                binding_id, route, inner = resolved
+                params[binding_id].add_mutate(route)
+                for expr in inner:
+                    self._visit(expr, params)
+            else:
+                self._visit(call.func.array, params)
+            for argument in [*call.pos_args, *call.kw_args.values()]:
+                self._visit(argument, params)
+            return
         self._visit(call.func, params)
         targets = self._direct_targets(call)
         pairings: list[list[tuple[hir.AST, hir.Param | None]]] | None = None

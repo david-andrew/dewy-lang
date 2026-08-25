@@ -1,0 +1,16 @@
+# Growable arrays: push/pop/clear are methods on the array value; growth
+# doubles capacity and relocates the data into the arena, so raw stack data
+# is never written through, and copies stay independent.
+let main = ():>int64 => {
+    let xs:array<int64> = [1 2 3]
+    xs.push(4)
+    xs.push(5)
+    let i:int64 = 0
+    loop i <? 20 { xs.push(i) i += 1 }      # forces several growths
+    let last = xs.pop                        # 19
+    let total:int64 = 0
+    loop v in xs total += v                  # 1+2+3+4+5 + 0..18 = 15 + 171 = 186
+    let ys:array<int64> = xs                 # independent copy
+    ys.clear
+    return total + xs.length + ys.length + last - 24 - 163  # 186 + 24 + 0 + 19 - 24 - 163 = 42
+}
