@@ -65,6 +65,7 @@ LOWERED_CASES = [
     ('units_algebra.dewy', 44),
     ('trig.dewy', 204),
     ('refinements.dewy', 45),
+    ('abstract_int.dewy', 133),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
@@ -476,7 +477,7 @@ def test_explicit_signed_shift_intrinsic_roundtrips(tmp_path: Path) -> None:
     assert codegen(SrcFile(path, f'$no_prelude = true\n{source}')) == source
 
 
-def test_abstract_integer_right_shift_fails_udewy_lowering(tmp_path: Path) -> None:
+def test_abstract_integer_right_shift_lowers_as_a_signed_word(tmp_path: Path) -> None:
     source = """let main = ():>int => {
     let value:int = 8
     return value >> 2
@@ -485,8 +486,8 @@ def test_abstract_integer_right_shift_fails_udewy_lowering(tmp_path: Path) -> No
     path = tmp_path / 'abstract.dewy'
     path.write_text(source)
 
-    with pytest.raises(NotImplementedError, match='abstract `int` operation'):
-        codegen(SrcFile.from_path(path))
+    # the bounds analysis proves `value` fits, so the shift is a signed int64 shift
+    assert '__signed_shr__(value 2)' in codegen(SrcFile.from_path(path))
 
 
 @pytest.mark.parametrize(

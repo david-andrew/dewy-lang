@@ -192,7 +192,8 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 
 - [x] Flow-sensitive integer intervals for bindings, used to prove array-index bounds from comparisons, arithmetic, loops, and range iterators.
 - [x] A right-unbounded integer iterator can use a concrete `int64` counter when a finite companion and the multiiterator formula prove the loop stops, and the complete observed range fits.
-- [ ] Selecting a hidden `intN` representation for values annotated or inferred as `int` when every reachable value fits that width.
+- [x] Abstract `int`/`uint` values lower to 64-bit words when the bounds analysis proves they fit: every abstract-integer arithmetic result and every narrowing cast (`int` meeting `int64`, printing, passing to a fixed-width parameter) is validated against the 64-bit range, with a proven/unknown diagnostic (`cannot prove this integer fits int64`) otherwise. `int` meeting a fixed width promotes to that width (`a:int + b:int64` is an `int64` operation). Truncating division by a positive divisor now has an interval rule.
+- [ ] Selecting narrower hidden `intN` representations (below 64 bits) and proving loop accumulators fit (today an unbounded accumulator is rejected — annotate `int64`).
 - [ ] General proofs that a right-unbounded iterator such as `0..` never overflows a chosen fixed-width counter when termination is not established by a finite multiiterator companion.
 - [ ] Using the same proofs to specialize other layouts, such as optional niches for narrow integers.
 

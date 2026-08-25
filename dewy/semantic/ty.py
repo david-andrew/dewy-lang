@@ -615,6 +615,11 @@ class TypeSystem:
             return None
         if a == b:
             return a
+        for abstract, other in ((a, b), (b, a)):
+            if abstract in {'int', 'uint'} and other in FIXED_INTEGER_TYPES:
+                # An arbitrary-precision integer meeting a fixed width takes that
+                # representation; the bounds analysis proves the value fits.
+                return other
         if self._is_nom_subtype(a, b):
             return b
         if self._is_nom_subtype(b, a):

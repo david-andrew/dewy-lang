@@ -4517,6 +4517,14 @@ def _dispatch_builtin(
                 # Integer results convert to rational/fixed targets afterwards
                 # (`let c:fixed = -7`), so they must not constrain dispatch.
                 expected_return = None
+            elif (
+                isinstance(expected_number, str)
+                and expected_number in ty.FIXED_INTEGER_TYPES
+                and any(arg_type in ('int', 'uint') for arg_type in arg_types)
+            ):
+                # Abstract-integer arithmetic stays abstract and narrows to the
+                # fixed width afterwards (validated by the bounds analysis).
+                expected_return = None
         result = ctx.type_system.match_best_function(methods, arg_types, expected_return=expected_return)
     except ty.DispatchError as e:
         pointers = [Pointer(span=op_loc, message=str(e))]
@@ -6952,6 +6960,10 @@ def _checked_single_argument_call(
 
     if _is_compile_time_rational(argument.type):
         argument = _materialize_rational(argument, ctx=ctx)
+    if argument.type in ('int', 'uint'):
+        # arbitrary-precision integers print as 64-bit words; the bounds
+        # analysis proves the value fits
+        argument = hir.ValueCast(argument.loc, 'int64' if argument.type == 'int' else 'uint64', argument)
     if isinstance(argument.type, ty.QuantityType):
         # Dimensions are erased at runtime; the number prints in its canonical scale.
         argument = _strip_dimension(argument)

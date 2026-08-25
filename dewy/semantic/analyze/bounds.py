@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ...reporting import Pointer, SrcFile
@@ -160,6 +161,49 @@ def _subtract(left: int | None, right: int | None) -> int | None:
     return None if left is None or right is None else left - right
 
 
+_WORD_ARITHMETIC = {'__add__', '__sub__', '__mul__', '__floordiv__', '__mod__', '__lshift__', '__rshift__'}
+
+
+def _assigned_binding_ids(root: hir.AST) -> set[int]:
+    """Binding ids that some assignment or mutable place targets anywhere."""
+    found: set[int] = set()
+
+    def root_binding(node: hir.AST) -> int | None:
+        while isinstance(node, (hir.MemberAccess, hir.Index)):
+            node = node.value if isinstance(node, hir.MemberAccess) else node.array
+        return node.binding_id if isinstance(node, hir.ExpressedIdentifier) else None
+
+    def walk(value: object) -> None:
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+            return
+        if not isinstance(value, hir.AST):
+            return
+        if isinstance(value, hir.Assign):
+            binding_id = root_binding(value.target)
+            if binding_id is not None:
+                found.add(binding_id)
+        elif isinstance(value, (hir.IndexAssign, hir.Place)):
+            binding_id = root_binding(value.target)
+            if binding_id is not None:
+                found.add(binding_id)
+        elif isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ArrayMethod):
+            binding_id = root_binding(value.func.array)
+            if binding_id is not None:
+                found.add(binding_id)
+        for field_name in getattr(value, '__dataclass_fields__', {}):
+            walk(getattr(value, field_name))
+
+    walk(root)
+    return found
+
+
+def _truncate_divide(numerator: int, divisor: int) -> int:
+    quotient = abs(numerator) // abs(divisor)
+    return -quotient if (numerator < 0) != (divisor < 0) else quotient
+
+
 def _multiply(interval: Interval, other: Interval) -> Interval:
     if (
         interval.lower is None
@@ -187,12 +231,17 @@ class _BoundsValidator:
         self.registry = registry
         self.srcfile = srcfile
         self.checked_functions: set[int] = set()
+        assigned = _assigned_binding_ids(root)
+        # Module-level `let` bindings that are never reassigned keep their
+        # proven intervals inside function bodies; assigned ones are unknown
+        # there because any call may change them.
         self.mutable_globals = {
             item.binding_id
             for item in root.items
             if isinstance(item, hir.Declare)
             and item.decltype == 'let'
             and item.binding_id is not None
+            and item.binding_id in assigned
         }
 
     def validate(self, root: hir.Block) -> None:
@@ -223,11 +272,11 @@ class _BoundsValidator:
             if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
                 interval = self._seed_refinements(node, current, interval)
             if isinstance(node.expr, hir.FunctionLiteral):
-                self._analyze_function(node.expr, validate=validate)
+                self._analyze_function(node.expr, validate=validate, enclosing=current)
             elif isinstance(node.expr, hir.OverloadedFunction):
                 for alternate in node.expr.alternates:
                     if isinstance(alternate, hir.FunctionLiteral):
-                        self._analyze_function(alternate, validate=validate)
+                        self._analyze_function(alternate, validate=validate, enclosing=current)
             if node.binding_id is not None:
                 self._set_interval(current, node.binding_id, interval)
             return current
@@ -277,12 +326,17 @@ class _BoundsValidator:
         function: hir.FunctionLiteral,
         *,
         validate: bool,
+        enclosing: State | None = None,
     ) -> None:
         function_id = id(function)
         if function_id in self.checked_functions:
             return
         self.checked_functions.add(function_id)
-        state: State = {}
+        state: State = {
+            key: interval
+            for key, interval in (enclosing or {}).items()
+            if key not in self.mutable_globals
+        }
         for param in [
             *function.pos_or_kw_args,
             *function.kw_only_args,
@@ -389,19 +443,54 @@ class _BoundsValidator:
         self._eval(iterator.iterable, state, validate=validate)
         if iterator.count == 0:
             return dict(state)
-        body_state = dict(state)
-        if iterator.target.binding_id is not None:
-            body_state[iterator.target.binding_id] = self._iterator_interval(
-                iterator
-            )
-        transfer = self._loop_transfer(body, body_state, validate=validate)
+        target_ids = {iterator.target.binding_id} - {None}
+
+        def enter(head: State) -> State:
+            body_state = dict(head)
+            if iterator.target.binding_id is not None:
+                body_state[iterator.target.binding_id] = self._iterator_interval(iterator)
+            return body_state
+
+        return self._iterate_loop(body, state, enter, target_ids, validate=validate)
+
+    def _iterate_loop(
+        self,
+        body: hir.AST,
+        state: State,
+        enter: 'Callable[[State], State]',
+        target_ids: set[int],
+        *,
+        validate: bool,
+    ) -> State:
+        """Widen loop-carried state to a fixed point, then validate the body once.
+
+        Without this, an accumulator such as `total = total + step` would be
+        analyzed from the entry state only and its growth across iterations
+        would be invisible.
+        """
+        head = dict(state)
+        for _ in range(8):
+            transfer = self._loop_transfer(body, enter(head), validate=False)
+            backedges = [
+                *([transfer.normal] if transfer.normal is not None else []),
+                *transfer.continues.get(0, []),
+            ]
+            for backedge in backedges:
+                for binding_id in target_ids:
+                    backedge.pop(binding_id, None)
+            candidate = self._join_states([state, *backedges])
+            widened = self._widen_states(head, candidate)
+            if widened == head:
+                break
+            head = widened
+        transfer = self._loop_transfer(body, enter(head), validate=validate)
         exits = [
             *([transfer.normal] if transfer.normal is not None else []),
             *transfer.breaks.get(0, []),
         ]
         for exit_state in exits:
-            if iterator.target.binding_id is not None:
-                exit_state.pop(iterator.target.binding_id, None)
+            for binding_id in target_ids:
+                exit_state.pop(binding_id, None)
         return self._join_states([state, *exits])
 
     def _analyze_multi_iterator_loop(
@@ -412,30 +501,22 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> State:
-        body_state = dict(state)
         for iterator in condition.iterators:
-            self._eval(iterator.iterable, body_state, validate=validate)
-            if (
-                iterator.count != 0
-                and iterator.target.binding_id is not None
-            ):
-                body_state[iterator.target.binding_id] = self._iterator_interval(
-                    iterator
-                )
-        transfer = self._loop_transfer(body, body_state, validate=validate)
-        exits = [
-            *([transfer.normal] if transfer.normal is not None else []),
-            *transfer.breaks.get(0, []),
-        ]
+            self._eval(iterator.iterable, state, validate=validate)
         target_ids = {
             iterator.target.binding_id
             for iterator in condition.iterators
             if iterator.target.binding_id is not None
         }
-        for exit_state in exits:
-            for binding_id in target_ids:
-                exit_state.pop(binding_id, None)
-        return self._join_states([state, *exits])
+
+        def enter(head: State) -> State:
+            body_state = dict(head)
+            for iterator in condition.iterators:
+                if iterator.count != 0 and iterator.target.binding_id is not None:
+                    body_state[iterator.target.binding_id] = self._iterator_interval(iterator)
+            return body_state
+
+        return self._iterate_loop(body, state, enter, target_ids, validate=validate)
 
     @staticmethod
     def _iterator_interval(iterator: hir.IteratorExpression) -> Interval:
@@ -597,10 +678,18 @@ class _BoundsValidator:
                 state.pop(root.binding_id, None)
             return None
         if isinstance(node, hir.ValueCast):
-            return self._fit_type(
-                self._eval(node.expr, state, validate=validate),
-                node.type,
-            )
+            inner = self._eval(node.expr, state, validate=validate)
+            fitted = self._fit_type(inner, node.type)
+            if (
+                validate
+                and fitted is None
+                and node.expr.type in ('int', 'uint')
+                and ty.fixed_integer_layout(node.type) is not None
+            ):
+                # Narrowing an arbitrary-precision integer to a fixed width is
+                # only allowed when the analysis proves the value fits.
+                self._report_unfit(node, inner, node.type)
+            return fitted
         if isinstance(node, hir.RepresentationCast):
             self._eval(node.expr, state, validate=validate)
             return None
@@ -729,25 +818,34 @@ class _BoundsValidator:
             ):
                 for binding_id in self.mutable_globals:
                     state.pop(binding_id, None)
+            result: Interval | None = None
+            arithmetic = False
             if name == '__unary_sub__' and len(arguments) == 1:
+                arithmetic = True
                 value = arguments[0]
-                if value is None:
-                    return None
-                return self._fit_type(
-                    Interval(
-                        None if value.upper is None else -value.upper,
-                        None if value.lower is None else -value.lower,
-                    ),
-                    node.type,
-                )
-            if len(arguments) == 2 and name is not None:
-                return self._binary_interval(
+                if value is not None:
+                    result = self._fit_type(
+                        Interval(
+                            None if value.upper is None else -value.upper,
+                            None if value.lower is None else -value.lower,
+                        ),
+                        node.type,
+                    )
+            elif len(arguments) == 2 and name in _WORD_ARITHMETIC:
+                arithmetic = True
+                result = self._binary_interval(
                     name,
                     arguments[0],
                     arguments[1],
                     node.type,
                 )
-            return None
+            if validate and arithmetic and node.type in ('int', 'uint'):
+                # Abstract integer arithmetic lowers to 64-bit words, so its
+                # result must be proven to fit one.
+                word = 'int64' if node.type == 'int' else 'uint64'
+                if self._fit_type(result, word) is None:
+                    self._report_unfit(node, result, word)
+            return result
         if isinstance(node, hir.ShortCircuit):
             self._eval(node.left, state, validate=validate)
             self._eval(node.right, state, validate=validate)
@@ -789,7 +887,7 @@ class _BoundsValidator:
                     self._analyze_function(alternate, validate=validate)
             return None
         if isinstance(node, hir.FunctionLiteral):
-            self._analyze_function(node, validate=validate)
+            self._analyze_function(node, validate=validate, enclosing=state)
             return None
         if isinstance(node, hir.ObjectLiteral):
             for field in node.fields:
@@ -877,6 +975,30 @@ class _BoundsValidator:
             )
         elif name == '__mul__':
             result = _multiply(left, right)
+        elif name == '__rshift__':
+            # an arithmetic right shift never grows the magnitude
+            result = Interval(
+                None if left.lower is None else min(left.lower, 0),
+                None if left.upper is None else max(left.upper, 0),
+            )
+        elif name == '__lshift__' and right.lower is not None and right.lower == right.upper:
+            result = _multiply(left, Interval.exact(1 << right.lower))
+        elif (
+            name == '__floordiv__'
+            and right.lower is not None
+            and right.lower > 0
+            and left.lower is not None
+            and left.upper is not None
+        ):
+            # Truncating division by a positive divisor is monotone in the
+            # numerator and largest in magnitude at the smallest divisor.
+            divisors = [right.lower] if right.upper is None else [right.lower, right.upper]
+            candidates = [
+                _truncate_divide(numerator, divisor)
+                for numerator in (left.lower, left.upper)
+                for divisor in divisors
+            ]
+            result = Interval(min(candidates), max(candidates))
         elif (
             name == '__mod__'
             and right.lower is not None
@@ -887,6 +1009,24 @@ class _BoundsValidator:
         else:
             return None
         return self._fit_type(result, result_type)
+
+    def _report_unfit(self, node: hir.AST, interval: Interval | None, word: str) -> None:
+        if interval is None or (interval.lower is None and interval.upper is None):
+            known = 'no bound on this value is known'
+        else:
+            lower = '-∞' if interval.lower is None else str(interval.lower)
+            upper = '∞' if interval.upper is None else str(interval.upper)
+            known = f'the value is only known to lie in [{lower}, {upper}]'
+        user_error(
+            self.srcfile,
+            f'cannot prove this integer fits `{word}`',
+            Pointer(span=node.loc, message=f'{known}, so it may not fit 64 bits (neither proven nor refuted)'),
+            hint=(
+                'unannotated integers are arbitrary precision and only lower to 64-bit words when '
+                'the bounds analysis proves they fit: annotate a fixed width such as `int64`, or '
+                'establish the range with a comparison'
+            ),
+        )
 
     @staticmethod
     def _fit_type(

@@ -1,0 +1,13 @@
+# Unannotated integers are arbitrary precision; they lower to 64-bit words
+# when the bounds analysis proves every value fits.
+let base = 5
+let scaled = base * 3 + 1              # 16
+let shifted = scaled - 20              # -4
+let main = ():>int64 => {
+    let total:int64 = scaled + 100     # int -> int64 (proven)
+    let mixed = total + base           # int64 + int -> int64
+    printl"{scaled} {shifted} {mixed}"
+    let small:uint8 = 7
+    let widened = base + small         # int + uint8 -> uint8 (proven to fit)
+    return mixed + (widened transmute int64)
+}

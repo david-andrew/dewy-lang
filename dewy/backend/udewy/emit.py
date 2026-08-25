@@ -415,7 +415,10 @@ def _selected_first_parameter(call: hir.FunctionCall) -> ty.TypeExpr | None:
         return None
     if not isinstance(call.func.type, ty.FunctionType) or not call.func.type.pos_or_kw:
         return None
-    return call.func.type.pos_or_kw[0].type
+    operand_type = call.func.type.pos_or_kw[0].type
+    # Abstract integers are 64-bit words by the time they reach emission (the
+    # bounds analysis proved they fit), so they take the word's signedness.
+    return {'int': 'int64', 'uint': 'uint64'}.get(operand_type, operand_type) if isinstance(operand_type, str) else operand_type
 
 
 def _check_supported_integer_operation(call: hir.FunctionCall) -> None:
@@ -424,11 +427,9 @@ def _check_supported_integer_operation(call: hir.FunctionCall) -> None:
     name = call.func.name
     if name not in UDEWY_BINOP_DUNDERS and name not in UDEWY_PREFIX_DUNDERS:
         return
-    operand_type = _selected_first_parameter(call)
-    if operand_type == 'int':
-        raise NotImplementedError(
-            f'udewy codegen for abstract `int` operation `{name}` requires range-based lowering'
-        )
+    # Abstract `int`/`uint` operations reach here only after the bounds
+    # analysis proved their values fit a 64-bit word, so they emit as int64.
+    return
 
 
 def _wrap_fixed_integer(expression: str, operand_type: ty.TypeExpr | None) -> str:
