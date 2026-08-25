@@ -4026,6 +4026,8 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
         ctx=ctx,
         expected=expected,
     )
+    if isinstance(target_bool := _unwrap_parens(item), hir.TargetBool) and prefix.op.symbol == 'not':
+        return hir.TargetBool(prefix.loc, 'bool', not target_bool.value)
     if isinstance(item, hir.Integer) and isinstance(result, hir.FunctionCall):
         if prefix.op.symbol == '-':
             return replace(result, type=ty.IntegerLiteralType(-item.value))
@@ -4374,6 +4376,39 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     return hir.Place(binop.loc, result.type, result)
 
 
+def _unwrap_parens(node: hir.AST) -> hir.AST:
+    """Look through `( ... )` around a single expression."""
+    while (
+        isinstance(node, hir.Block)
+        and not node.scoped
+        and len(node.items) == 1
+    ):
+        node = node.items[0]
+    return node
+
+
+def _target_membership(left: hir.AST, right: hir.AST, loc: Span) -> hir.TargetBool | None:
+    """`$target in? ["x86_64" "riscv" ...]` folds at compile time.
+
+    Returns None when this is not a target-list membership test.
+    """
+    left = _unwrap_parens(left)
+    right = _unwrap_parens(right)
+    if not isinstance(left, hir.TargetString):
+        return None
+    if not isinstance(right, hir.ArrayLiteral):
+        return None
+    names: set[str] = set()
+    for item in right.items:
+        # Literal elements are cast to the array's element representation.
+        while isinstance(item, hir.RepresentationCast):
+            item = item.expr
+        if not isinstance(item, hir.String):
+            return None
+        names.add(item.content)
+    return hir.TargetBool(loc, 'bool', left.content in names)
+
+
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
@@ -4475,11 +4510,15 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
                 test_type,
                 binop.op.op == 'is?',
             )
+        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
+        right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
+        if binop.op.op == 'in?':
+            membership = _target_membership(left, right, binop.loc)
+            if membership is not None:
+                return replace(membership, value=not membership.value)
         fname = builtins.INVERTED_COMPARISON_DUNDER_MAP.get(binop.op.op)
         if fname is None:
             not_implemented(ctx.srcfile, binop.op.loc, f'inverted comparison `not{binop.op.op}`')
-        left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
-        right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
         return _dispatch_builtin(
             fname,
             [left, right],
@@ -4509,7 +4548,29 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         type_block=type_block,
     )
 
+    left_target = _unwrap_parens(left)
+    right_target = _unwrap_parens(right)
+    if isinstance(left_target, hir.TargetBool) and isinstance(right_target, hir.TargetBool):
+        # Compile-time target conditions combine at compile time so gated
+        # `if` arms can be selected during checking.
+        a, b = left_target.value, right_target.value
+        folded = {
+            'and': a and b,
+            '&': a and b,
+            'or': a or b,
+            '|': a or b,
+            'nand': not (a and b),
+            'nor': not (a or b),
+            'xor': a != b,
+            'xnor': a == b,
+        }.get(symbol)
+        if folded is not None:
+            return hir.TargetBool(binop.loc, 'bool', folded)
+
     if symbol == 'in?':
+        membership = _target_membership(left, right, binop.loc)
+        if membership is not None:
+            return membership
         range_operand = (
             right
             if isinstance(right, hir.Range)

@@ -24,11 +24,30 @@ def test_target_metatag_folds_to_a_string() -> None:
     assert isinstance(declared['other'].expr, hir.TargetBool) and declared['other'].expr.value is False
 
 
+@pytest.mark.parametrize(
+    ('source', 'value'),
+    [
+        ('$target in? ["x86_64" "riscv" "arm" "c"]', True),
+        ('$target in? ["wasm32"]', False),
+        ('$target not in? ["wasm32"]', True),
+        ('$target not =? "wasm32"', True),
+        ('not ($target =? "x86_64")', False),
+        ('$target =? "x86_64" or $target =? "wasm32"', True),
+        ('$target =? "x86_64" and $target =? "wasm32"', False),
+    ],
+)
+def test_target_conditions_fold_at_compile_time(source: str, value: bool) -> None:
+    root = check.typecheck_and_resolve(SrcFile(None, f'let v = {source}'), target='x86_64')
+    declared = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    assert isinstance(declared['v'].expr, hir.TargetBool)
+    assert declared['v'].expr.value is value
+
+
 def test_gated_import_binds_only_for_the_matching_target(tmp_path: Path) -> None:
     (tmp_path / 'native_layer.dewy').write_text('let layer_name = "native"\n')
     (tmp_path / 'main.dewy').write_text(
-        'if $target =? "x86_64" { from p"native_layer.dewy" import layer_name }\n'
-        'if $target =? "wasm32" { from p"does_not_exist.dewy" import nothing }\n'
+        'if $target in? ["x86_64" "riscv"] { from p"native_layer.dewy" import layer_name }\n'
+        'if $target not =? "x86_64" { from p"does_not_exist.dewy" import nothing }\n'
         'let chosen = layer_name\n'
     )
     root = _check_file(tmp_path / 'main.dewy')
