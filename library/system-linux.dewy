@@ -25,8 +25,7 @@ let _arena_alloc = (size:int64):>int64 => {
         let chunk:int64 = 1048576
         if aligned >? chunk { chunk = aligned }
         # mmap(NULL chunk PROT_READ|PROT_WRITE MAP_PRIVATE|MAP_ANONYMOUS fd=-1 0)
-        let no_fd:int64 = 0 - 1
-        let base:int64 = __syscall6__(9 0 chunk 3 34 no_fd 0)
+        let base:int64 = __syscall6__(9 0 chunk 3 34 (-1) 0)
         _arena_cursor = base
         _arena_end = base + chunk
     }
