@@ -15,3 +15,36 @@ const milliseconds:Duration<1000000> = 1000000 transmute Duration<1000000>
 const s:Duration<1000000000> = 1000000000 transmute Duration<1000000000>
 const second:Duration<1000000000> = 1000000000 transmute Duration<1000000000>
 const seconds:Duration<1000000000> = 1000000000 transmute Duration<1000000000>
+
+# SI base units. Canonical scales: nanosecond (so integer durations stay
+# exact for `sleep`), metre, kilogram, ampere, kelvin, mole, candela, radian.
+# Derived units and prefixes are exact compile-time rationals of these, so
+# unit arithmetic folds away entirely; only runtime quantities carry a
+# number (a `Rational` when the scale is fractional).
+const m:(1 * Length) = 1 transmute (1 * Length)
+const metre:(1 * Length) = m
+const meter:(1 * Length) = m
+const km = 1000 * m
+const cm = m / 100
+const mm = m / 1000
+
+const kg:(1 * Mass) = 1 transmute (1 * Mass)
+const kilogram:(1 * Mass) = kg
+const g = kg / 1000
+const mg = g / 1000
+
+const A:(1 * Current) = 1 transmute (1 * Current)
+const K:(1 * Temperature) = 1 transmute (1 * Temperature)
+const mol:(1 * Amount) = 1 transmute (1 * Amount)
+const cd:(1 * Luminosity) = 1 transmute (1 * Luminosity)
+const rad:(1 * Angle) = 1 transmute (1 * Angle)
+
+const minute = 60 * s
+const hour = 60 * minute
+
+# Derived units.
+const Hz = 1 / s
+const N = kg * m / s^2
+const Pa = N / m^2
+const J = N * m
+const W = J / s

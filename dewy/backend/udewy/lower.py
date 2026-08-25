@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from typing import Literal, NoReturn
 
 from ...parser import t0
@@ -66,6 +66,45 @@ from .lowering_shared import (
 from .lowering_strings import _StringLowering
 
 
+def _erase_dimensions(root: object) -> None:
+    """Physical dimensions have no runtime representation.
+
+    Every node and annotation typed as a quantity is retyped in place by its
+    numeric representation, so the rest of the lowering never sees a
+    ``QuantityType``. Nodes are mutated (not replaced) because the checker's
+    side tables are keyed by node identity.
+    """
+    seen: set[int] = set()
+
+    def erase(type_: object) -> object:
+        return type_.number if isinstance(type_, ty.QuantityType) else type_
+
+    def walk(value: object) -> None:
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+            return
+        if not is_dataclass(value) or isinstance(value, type) or id(value) in seen:
+            return
+        if type(value).__module__ == ty.__name__:
+            return  # types are immutable; only node fields get rewritten
+        seen.add(id(value))
+        for field_info in fields(value):
+            current = getattr(value, field_info.name)
+            if field_info.name in {'type', 'annotation'}:
+                erased = erase(current)
+                if erased is not current:
+                    setattr(value, field_info.name, erased)
+                continue
+            walk(current)
+
+    walk(root)
+
+
 class _Lowerer(
     _DictLowering,
     _StringLowering,
@@ -80,6 +119,7 @@ class _Lowerer(
 
     def __init__(self, root: hir.Block, srcfile: SrcFile):
         """Initialize per-program identity maps and deterministic counters."""
+        _erase_dimensions(root)
         self.root = root
         self.srcfile = srcfile
         self.preserve_raw_udewy_shifts = bool(re.search(
@@ -197,6 +237,7 @@ class _Lowerer(
                     )
                     or isinstance(item.expr, hir.TypeValue)
                     or self._is_range_valued(item.annotation or item.expr.type)
+                    or self._is_compile_time_rational(item.annotation or item.expr.type)
                     or self._array_representation(item) in {
                         'static_words',
                         'static_bytes',
@@ -719,6 +760,11 @@ class _Lowerer(
                 body=body,
             ),
         )
+
+    @staticmethod
+    def _is_compile_time_rational(type_: object) -> bool:
+        number = type_.number if isinstance(type_, ty.QuantityType) else type_
+        return isinstance(number, ty.RationalLiteralType)
 
     @staticmethod
     def _is_range_valued(type_: object) -> bool:
@@ -1864,7 +1910,11 @@ class _Lowerer(
                 node,
                 item=self._require_node(self._transform_node(node.item)),
             )
+        if isinstance(node, hir.RationalConstant):
+            self._target_error(node, 'a compile-time rational in this position')
         if isinstance(node, hir.ExpressedIdentifier):
+            if self._is_compile_time_rational(node.type):
+                self._target_error(node, 'a compile-time rational in this position')
             if self._is_range_valued(node.type):
                 # Supported range uses were inlined during checking; anything
                 # left needs a runtime range representation.
@@ -2152,8 +2202,16 @@ class _Lowerer(
                 # was resolved to the literal during checking, so the binding
                 # needs no runtime storage.
                 return None
+            if self._is_compile_time_rational(node.annotation or node.expr.type):
+                # Exact rational constants (unit scales) fold during checking.
+                return None
+            annotation = node.annotation
+            if isinstance(node.annotation or node.expr.type, ty.QuantityType):
+                # Dimensions are erased: the binding holds the number's word.
+                annotation = self._lower_runtime_value_type(node.annotation or node.expr.type)
             return replace(
                 node,
+                annotation=annotation,
                 expr=self._require_node(self._transform_node(node.expr)),
             )
         if isinstance(node, hir.Return):

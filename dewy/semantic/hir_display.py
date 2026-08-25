@@ -18,6 +18,8 @@ def type_to_dewy(t: ty.Type) -> str:
         return t
     if isinstance(t, ty.TypeVariable):
         return t.name
+    if isinstance(t, ty.RationalLiteralType):
+        return f'{t.numerator}/{t.denominator}'
     if isinstance(t, ty.IntegerLiteralType):
         return str(t.value)
     if isinstance(t, ty.StringLiteralType):
@@ -199,6 +201,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'Place(@)'
     if isinstance(node, hir.Bool):
         return f'Bool({node.value})'
+    if isinstance(node, hir.RationalConstant):
+        return f'Rational({node.numerator}/{node.denominator})'
     if isinstance(node, hir.Integer):
         return f'Integer({_format_integer(node)})'
     if isinstance(node, hir.ArrayLiteral):
@@ -677,6 +681,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(item, _text(';'))
     if isinstance(node, hir.Undefined):
         return _text('undefined')
+    if isinstance(node, hir.RationalConstant):
+        return _text(f'{node.numerator}/{node.denominator}')
     if isinstance(node, hir.Integer):
         return _text(_format_integer(node))
     if isinstance(node, hir.Bool):

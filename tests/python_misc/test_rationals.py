@@ -71,8 +71,47 @@ def test_constant_integer_powers_fold() -> None:
 def test_negative_constant_exponent_makes_a_rational() -> None:
     declared = _declared('let a = 2^(-3)\nlet b = (2/3)^(-2)')
     assert [arg.value for arg in declared['a'].expr.pos_args] == [1, 8]
-    assert declared['b'].expr.func.name.endswith('_rational_pow')
+    # constant rational bases fold too; the `let` materializes the result
+    assert [arg.value for arg in declared['b'].expr.pos_args] == [9, 4]
     assert declared['b'].expr.type == _rational_type()
+
+
+def test_constant_rational_expressions_fold_at_compile_time() -> None:
+    declared = _declared('const a = 1/3 + 1/6\nconst b = a * 4\nlet c = b')
+    assert isinstance(declared['a'].expr, hir.RationalConstant)
+    assert (declared['a'].expr.numerator, declared['a'].expr.denominator) == (1, 2)
+    assert isinstance(declared['b'].expr, hir.RationalConstant)
+    assert (declared['b'].expr.numerator, declared['b'].expr.denominator) == (2, 1)
+    assert declared['b'].expr.type == ty.RationalLiteralType(2, 1)
+    # a `let` of a constant materializes the folded value, not a chain of calls
+    assert [arg.value for arg in declared['c'].expr.pos_args] == [2, 1]
+
+
+def test_unit_scales_fold_into_dimensioned_constants() -> None:
+    declared = _declared('const speed = 30m/s\nconst accel = 9.8(m/s^2)\nlet energy = 1/2 * 10kg * speed^2')
+    speed = declared['speed'].expr
+    assert isinstance(speed.type, ty.QuantityType)
+    assert speed.type.dimension == ty.dimension(('Length', 1), ('Time', -1))
+    assert speed.type.number == ty.RationalLiteralType(3, 100000000)  # metres per nanosecond
+    assert declared['accel'].expr.type.dimension == ty.dimension(('Length', 1), ('Time', -2))
+    energy = declared['energy'].expr
+    assert isinstance(energy.type, ty.QuantityType)
+    assert energy.type.dimension == ty.dimension(('Mass', 1), ('Length', 2), ('Time', -2))
+    assert [arg.value for arg in energy.pos_args] == [9, 2000000000000000]
+
+
+def test_mismatched_dimensions_are_rejected() -> None:
+    with pytest.raises(TypeCheckError, match='incompatible physical dimensions'):
+        _declared('let x = 2kg + 3m')
+    with pytest.raises(TypeCheckError, match='incompatible physical dimensions'):
+        _declared('let x = 2kg <? 3m')
+
+
+def test_derived_units_are_exact_compile_time_scales() -> None:
+    declared = _declared('const newton = N\nconst joule = J')
+    assert declared['newton'].expr.type.dimension == ty.dimension(('Mass', 1), ('Length', 1), ('Time', -2))
+    assert declared['newton'].expr.type.number == ty.RationalLiteralType(1, 10**18)
+    assert declared['joule'].expr.type.dimension == ty.dimension(('Mass', 1), ('Length', 2), ('Time', -2))
 
 
 def test_runtime_integer_power_routes_to_the_prelude() -> None:

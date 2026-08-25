@@ -287,7 +287,7 @@ class ModuleType:
         return next((field for field in self.fields if field.name == name), None)
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 type TypeAliasValue = TypeExpr | GenericTypeAlias
 
@@ -363,12 +363,21 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
 ]
 
+@dataclass(frozen=True)
+class RationalLiteralType:
+    """The singleton type of one exact compile-time rational (normalized)."""
+
+    numerator: int
+    denominator: int
+
+
 # map from structural python types to their nominal position in the type graph 
 STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     FunctionType: 'function',
     OverloadType: 'multifunction',
     SequenceType: 'generator',  # a group of expressed values is consumable like a generator; only the bare umbrella, `<int int> of? generator<int>` is TBD
     IntegerLiteralType: 'int',
+    RationalLiteralType: 'rational',
     StringLiteralType: 'string',
     StringType: 'string',
     ArrayType: 'array',
@@ -493,6 +502,14 @@ def multiply_dimensions(left: DimensionType, right: DimensionType) -> DimensionT
     return dimension(*left.powers, *right.powers)
 
 
+def divide_dimensions(left: DimensionType, right: DimensionType) -> DimensionType:
+    return dimension(*left.powers, *((name, -exponent) for name, exponent in right.powers))
+
+
+def power_dimension(base: DimensionType, exponent: int) -> DimensionType:
+    return dimension(*((name, power * exponent) for name, power in base.powers))
+
+
 class TypeSystem:
     def __init__(self, system_types: list[Primitive|tuple[Primitive, Primitive]] = _default_system_types):
         self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE} # void and inferred don't participate in type expressions
@@ -605,6 +622,12 @@ class TypeSystem:
             return None
         if isinstance(a, IntegerLiteralType) and isinstance(b, IntegerLiteralType):
             return a if a == b else None
+        if isinstance(a, RationalLiteralType) and isinstance(b, RationalLiteralType):
+            return a if a == b else None
+        if isinstance(a, RationalLiteralType) and isinstance(b, str):
+            return a if self._is_nom_subtype('rational', b) else None
+        if isinstance(b, RationalLiteralType) and isinstance(a, str):
+            return b if self._is_nom_subtype('rational', a) else None
         if isinstance(a, IntegerLiteralType) and isinstance(b, str):
             return a if self._integer_literal_implies(a, b) else None
         if isinstance(b, IntegerLiteralType) and isinstance(a, str):
@@ -727,6 +750,11 @@ class TypeSystem:
                 return a == b
             if isinstance(b, str):
                 return self._integer_literal_implies(a, b)
+        if isinstance(a, RationalLiteralType):
+            if isinstance(b, RationalLiteralType):
+                return a == b
+            if isinstance(b, str):
+                return self._is_nom_subtype('rational', b)
         if isinstance(a, StringLiteralType):
             return self._string_literal_implies(a, b)
         if isinstance(a, BinaryLiteralType):
@@ -1293,7 +1321,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
+type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1451,7 +1479,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
+    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1551,6 +1579,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
     if isinstance(t, TypeVariable):
         return bindings.get(t.name, t)
     if isinstance(t, IntegerLiteralType):
+        return t
+    if isinstance(t, RationalLiteralType):
         return t
     if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType)):
         return t

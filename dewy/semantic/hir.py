@@ -183,6 +183,18 @@ class Integer(AST):
 
 
 @dataclass
+class RationalConstant(AST):
+    """An exact compile-time rational (optionally dimensioned).
+
+    Never lowered: runtime uses materialize it through the prelude's
+    `_rational_make` during checking; `const` bindings holding one are elided.
+    """
+
+    numerator: int
+    denominator: int
+
+
+@dataclass
 class ArrayLiteral(AST):
     """A one-dimensional homogeneous array value."""
 

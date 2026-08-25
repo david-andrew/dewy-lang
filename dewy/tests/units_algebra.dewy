@@ -1,0 +1,22 @@
+# Units are values; juxtaposition multiplies; dimensions live in the type
+# and unit scales fold at compile time.
+let mass = 10kg
+let velocity = 30m/s
+let energy = 1/2 * mass * velocity^2       # 4500 J, folded during checking
+let force = 1000kg * 9.8(m/s^2)            # 9800 N
+
+let main = ():>int64 => {
+    let joules:rational = energy / J
+    let newtons:rational = force / N
+    printl"{joules} {newtons}"
+    let distance = 120m
+    let elapsed = 10s
+    let speed = distance / elapsed           # 12 m/s, a runtime rational in m/ns
+    let checks:int64 = 0
+    if speed =? 12m/s { checks += 1 }
+    if 2km + 300m =? 2300m { checks += 2 }
+    if 1km >? 999m { checks += 4 }
+    if speed * 5s =? 60m { checks += 8 }
+    if 1/2 * hour =? 30minute { checks += 16 }
+    return checks + joules.numerator // 1000 + newtons.numerator // 1000
+}

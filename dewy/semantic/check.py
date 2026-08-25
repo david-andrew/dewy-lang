@@ -4,6 +4,7 @@ semantic analysis pass 0:
 - ambiguity resolution
 """
 from dataclasses import dataclass, replace, field, fields, is_dataclass
+from fractions import Fraction
 from collections import ChainMap
 from itertools import count
 from typing import Literal, cast
@@ -486,9 +487,19 @@ def _complete_binding(
     return declaration
 
 
-def _widen_inferred_let_value(expr: hir.AST) -> hir.AST:
+def _widen_inferred_let_value(expr: hir.AST, *, ctx: Context) -> hir.AST:
     if isinstance(expr, hir.Integer) and isinstance(expr.type, ty.IntegerLiteralType):
         return replace(expr, type='int')
+    if (
+        isinstance(expr, hir.Integer)
+        and isinstance(expr.type, ty.QuantityType)
+        and isinstance(expr.type.number, ty.IntegerLiteralType)
+    ):
+        # `let distance = 120m` is a runtime integer quantity, like `let x = 5`.
+        return replace(expr, type=ty.QuantityType('int', expr.type.dimension))
+    if _is_compile_time_rational(expr.type):
+        # `let` bindings are runtime values; exact rationals materialize here.
+        return _materialize_rational(expr, ctx=ctx)
     return expr
 
 
@@ -531,7 +542,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
             require_valued(expr.type, ctx.srcfile, expr.loc, 'declaration initializer')
             if keyword == 'let':
-                expr = _widen_inferred_let_value(expr)
+                expr = _widen_inferred_let_value(expr, ctx=ctx)
 
             # if this declaration was pre-bound by the two-phase pass, verify the checked
             # type matches the pre-bound signature rather than silently overwriting it
@@ -679,7 +690,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
             return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)
         value = typecheck_and_resolve_inner(ast.right, ctx=ctx)
         require_valued(value.type, ctx.srcfile, value.loc, 'declaration initializer')
-        value = _widen_inferred_let_value(value)
+        value = _widen_inferred_let_value(value, ctx=ctx)
         grown_annotation = _grown_array_annotation(name, 'let', value.type, ctx=ctx)
         ctx.declarations[name] = grown_annotation or value.type
         declaration = _complete_binding(
@@ -3842,19 +3853,134 @@ def _to_rational(arg: hir.AST, *, ctx: Context) -> hir.AST:
     return _prelude_call('_rational_from_int', [arg], loc=arg.loc, ctx=ctx)
 
 
+def _number_and_dimension(type_: ty.Type) -> tuple[ty.Type, ty.DimensionType]:
+    if isinstance(type_, ty.QuantityType):
+        return type_.number, type_.dimension
+    return type_, ty.dimension()
+
+
+def _with_dimension(number: ty.Type, dimension: ty.DimensionType) -> ty.Type:
+    return number if not dimension.powers else ty.QuantityType(number, dimension)
+
+
+def _is_compile_time_rational(type_: ty.Type) -> bool:
+    number, _ = _number_and_dimension(type_)
+    return isinstance(number, ty.RationalLiteralType)
+
+
+def _constant_rational(node: hir.AST, *, ctx: Context) -> Fraction | None:
+    """The exact value of a compile-time number (integer or rational, possibly dimensioned)."""
+    node = _unwrap_parens(node)
+    number, _ = _number_and_dimension(node.type)
+    if isinstance(number, ty.RationalLiteralType):
+        return Fraction(number.numerator, number.denominator)
+    if isinstance(number, ty.IntegerLiteralType):
+        return Fraction(number.value)
+    if isinstance(node, hir.RationalConstant):
+        return Fraction(node.numerator, node.denominator)
+    value = _constant_integer(node, ctx=ctx)
+    return None if value is None else Fraction(value)
+
+
+def _rational_constant(value: Fraction, dimension: ty.DimensionType, *, loc: Span) -> hir.AST:
+    """A compile-time number: integer-scaled quantities keep the integer singleton form."""
+    if value.denominator == 1 and dimension.powers:
+        return hir.Integer(
+            loc,
+            ty.QuantityType(ty.IntegerLiteralType(value.numerator), dimension),
+            '0d',
+            value.numerator,
+        )
+    literal = ty.RationalLiteralType(value.numerator, value.denominator)
+    return hir.RationalConstant(loc, _with_dimension(literal, dimension), value.numerator, value.denominator)
+
+
 def _rational_literal(numerator: int, denominator: int, *, loc: Span, ctx: Context) -> hir.AST:
-    """A normalized rational value from compile-time integer parts."""
-    from math import gcd
-    if denominator < 0:
-        numerator, denominator = -numerator, -denominator
-    common = gcd(numerator, denominator) or 1
-    numerator //= common
-    denominator //= common
+    """A normalized compile-time rational from integer parts."""
+    return _rational_constant(Fraction(numerator, denominator), ty.dimension(), loc=loc)
+
+
+def _materialize_rational(node: hir.AST, *, ctx: Context) -> hir.AST:
+    """A compile-time rational (possibly dimensioned) as a runtime `Rational` value."""
+    value = _constant_rational(node, ctx=ctx)
+    if value is None:
+        raise ValueError('INTERNAL ERROR: compile-time rational without a value')
+    _, dimension = _number_and_dimension(node.type)
     parts = [
-        hir.Integer(loc, ty.IntegerLiteralType(numerator), '0d', numerator),
-        hir.Integer(loc, ty.IntegerLiteralType(denominator), '0d', denominator),
+        hir.Integer(node.loc, ty.IntegerLiteralType(part), '0d', part)
+        for part in (value.numerator, value.denominator)
     ]
-    return _prelude_call('_rational_make', parts, loc=loc, ctx=ctx)
+    call = _prelude_call('_rational_make', parts, loc=node.loc, ctx=ctx)
+    return replace(call, type=_with_dimension(call.type, dimension))
+
+
+def _strip_dimension(node: hir.AST) -> hir.AST:
+    """The same value typed by its numeric representation alone."""
+    if isinstance(node.type, ty.QuantityType):
+        return replace(node, type=node.type.number)
+    return node
+
+
+def _to_rational(arg: hir.AST, *, ctx: Context) -> hir.AST:
+    """An operand as a runtime `Rational` (dimension stripped); integers promote."""
+    if _is_compile_time_rational(arg.type):
+        return _strip_dimension(_materialize_rational(arg, ctx=ctx))
+    number, _ = _number_and_dimension(arg.type)
+    if _is_rational(number, ctx=ctx):
+        return _strip_dimension(arg)
+    if not ctx.type_system.is_subtype(number, 'int'):
+        type_error(
+            ctx.srcfile,
+            'no rational conversion for this operand',
+            Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
+        )
+    return _prelude_call('_rational_from_int', [_as_int64(_strip_dimension(arg), ctx=ctx)], loc=arg.loc, ctx=ctx)
+
+
+_COMPARISON_DUNDERS = {'__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__'}
+_SAME_DIMENSION_DUNDERS = {'__add__', '__sub__', *_COMPARISON_DUNDERS}
+
+
+def _fold_constant_operation(fname: str, values: list[Fraction]) -> Fraction | bool | None:
+    a = values[0]
+    if fname == '__unary_sub__':
+        return -a
+    b = values[1]
+    match fname:
+        case '__add__': return a + b
+        case '__sub__': return a - b
+        case '__mul__': return a * b
+        case '__truediv__': return a / b
+        case '__eq__': return a == b
+        case '__ne__': return a != b
+        case '__lt__': return a < b
+        case '__le__': return a <= b
+        case '__gt__': return a > b
+        case '__ge__': return a >= b
+    return None
+
+
+def _result_dimension(fname: str, dimensions: list[ty.DimensionType], *, loc: Span, ctx: Context) -> ty.DimensionType:
+    if fname == '__unary_sub__':
+        return dimensions[0]
+    left, right = dimensions
+    if fname == '__mul__':
+        return ty.multiply_dimensions(left, right)
+    if fname == '__truediv__':
+        return ty.divide_dimensions(left, right)
+    if fname in _SAME_DIMENSION_DUNDERS:
+        if left != right:
+            type_error(
+                ctx.srcfile,
+                'incompatible physical dimensions',
+                Pointer(
+                    span=loc,
+                    message=f'`{type_to_dewy(left)}` and `{type_to_dewy(right)}` cannot be combined',
+                ),
+                hint='only quantities of the same dimension add, subtract, or compare',
+            )
+        return ty.dimension() if fname in _COMPARISON_DUNDERS else left
+    return ty.dimension()
 
 
 def _dispatch_rational(
@@ -3865,61 +3991,106 @@ def _dispatch_rational(
     source_name: str,
     ctx: Context,
 ) -> hir.AST | None:
-    """Route `/` and any operation on a rational operand to the prelude.
+    """Route `/`, rational operands, and dimensioned operands.
 
-    Returns None when the operation is not a rational one.
+    Compile-time operands (integer and rational singletons, including unit
+    scales) fold exactly; runtime rationals call the prelude; dimensions
+    combine in the result type. Returns None when the ordinary builtin
+    dispatch should handle the operation.
     """
-    involves_rational = any(_is_rational(arg.type, ctx=ctx) for arg in args)
-    if fname == '__truediv__':
-        if len(args) != 2:
-            return None
-        if not involves_rational and not all(
-            ctx.type_system.is_subtype(arg.type, 'int') for arg in args
-        ):
-            type_error(
-                ctx.srcfile,
-                f'no matching overload for operator `{source_name}`',
-                *[
-                    Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`')
-                    for arg in args
-                ],
-                hint='`/` divides integers and rationals exactly; use `//` for floor division',
-            )
-        constants = [_constant_integer(_unwrap_parens(arg), ctx=ctx) for arg in args]
-        if constants[1] == 0:
-            type_error(
-                ctx.srcfile,
-                'division by zero',
-                Pointer(span=args[1].loc, message='the divisor is the constant `0`'),
-            )
-        if not involves_rational and None not in constants:
-            numerator, denominator = cast(list[int], constants)
-            return _rational_literal(numerator, denominator, loc=loc, ctx=ctx)
-        if not involves_rational:
-            return _prelude_call(
-                '_rational_make',
-                [check_against(arg, 'int64', ctx=ctx) for arg in args],
-                loc=loc,
-                ctx=ctx,
-            )
-    if not involves_rational:
+    parts = [_number_and_dimension(arg.type) for arg in args]
+    numbers = [number for number, _ in parts]
+    dimensions = [dimension for _, dimension in parts]
+    involves_rational = any(
+        _is_rational(number, ctx=ctx) or isinstance(number, ty.RationalLiteralType)
+        for number in numbers
+    )
+    involves_quantity = any(isinstance(arg.type, ty.QuantityType) for arg in args)
+    is_division = fname == '__truediv__' and len(args) == 2
+    if not (involves_rational or involves_quantity or is_division):
         return None
-    if fname == '__unary_sub__' and len(args) == 1:
-        return _prelude_call('_rational_neg', args, loc=loc, ctx=ctx)
-    helper = _RATIONAL_BINARY_FUNCTIONS.get(fname)
-    if helper is None or len(args) != 2:
+    if fname == '__unary_sub__':
+        if len(args) != 1:
+            return None
+    elif len(args) != 2 or fname not in {*_SAME_DIMENSION_DUNDERS, '__mul__', '__truediv__'}:
+        if involves_rational:
+            type_error(
+                ctx.srcfile,
+                f'operator `{source_name}` is not defined for rationals',
+                Pointer(span=loc, message='rationals support `+ - * / ^`, negation, and comparisons'),
+            )
+        return None
+    if not all(ctx.type_system.is_subtype(number, 'number') or _is_rational(number, ctx=ctx) for number in numbers):
         type_error(
             ctx.srcfile,
-            f'operator `{source_name}` is not defined for rationals',
-            Pointer(span=loc, message='rationals support `+ - * /`, negation, and comparisons'),
+            f'no matching overload for operator `{source_name}`',
+            *[
+                Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`')
+                for arg in args
+            ],
+            hint='`/` divides numbers exactly; use `//` for floor division' if is_division else None,
         )
+    result_dimension = _result_dimension(fname, dimensions, loc=loc, ctx=ctx)
+    constants = [_constant_rational(arg, ctx=ctx) for arg in args]
+    if is_division and constants[1] == 0:
+        type_error(
+            ctx.srcfile,
+            'division by zero',
+            Pointer(span=args[1].loc, message='the divisor is the constant `0`'),
+        )
+    if all(value is not None for value in constants):
+        folded = _fold_constant_operation(fname, cast(list[Fraction], constants))
+        if isinstance(folded, bool):
+            return hir.Bool(loc, 'bool', folded)
+        if isinstance(folded, Fraction):
+            all_integers = all(isinstance(number, ty.IntegerLiteralType) for number in numbers)
+            if all_integers and not is_division and folded.denominator == 1:
+                return hir.Integer(
+                    loc,
+                    _with_dimension(ty.IntegerLiteralType(folded.numerator), result_dimension),
+                    '0d',
+                    folded.numerator,
+                )
+            return _rational_constant(folded, result_dimension, loc=loc)
+    if not involves_rational and not is_division:
+        # Dimensioned integers: operate on the numbers, keep the dimension.
+        if fname == '__mul__':
+            return None  # the quantity product path handles representations
+        stripped = [_strip_dimension(arg) for arg in args]
+        result = _dispatch_builtin(
+            fname,
+            stripped,
+            loc=loc,
+            op_loc=loc,
+            source_name=source_name,
+            ctx=ctx,
+        )
+        if fname in _COMPARISON_DUNDERS:
+            return result
+        return replace(result, type=_with_dimension(result.type, result_dimension))
+    rational_type = _rational_type(ctx, loc)
+    if is_division and not involves_rational:
+        # integer / integer: build the fraction directly
+        operands = [_as_int64(_strip_dimension(arg), ctx=ctx) for arg in args]
+        call = _prelude_call('_rational_make', operands, loc=loc, ctx=ctx)
+        return replace(call, type=_with_dimension(rational_type, result_dimension))
+    if fname == '__unary_sub__':
+        call = _prelude_call('_rational_neg', [_to_rational(args[0], ctx=ctx)], loc=loc, ctx=ctx)
+        return replace(call, type=_with_dimension(rational_type, result_dimension))
+    helper = _RATIONAL_BINARY_FUNCTIONS[fname]
     operands = [_to_rational(arg, ctx=ctx) for arg in args]
-    return _prelude_call(helper, operands, loc=loc, ctx=ctx)
+    call = _prelude_call(helper, operands, loc=loc, ctx=ctx)
+    if fname in _COMPARISON_DUNDERS:
+        return call
+    return replace(call, type=_with_dimension(rational_type, result_dimension))
 
 
 def _as_int64(arg: hir.AST, *, ctx: Context) -> hir.AST:
     """An integer operand as `int64`, widening narrower fixed widths."""
     if isinstance(arg.type, str) and arg.type in ty.FIXED_INTEGER_TYPES and arg.type != 'int64':
+        return hir.ValueCast(arg.loc, 'int64', arg)
+    if arg.type == 'int':
+        # Abstract integers currently lower as int64 words.
         return hir.ValueCast(arg.loc, 'int64', arg)
     return check_against(arg, 'int64', ctx=ctx)
 
@@ -3930,56 +4101,61 @@ def _dispatch_pow(
     loc: Span,
     ctx: Context,
 ) -> hir.AST:
-    """`base ^ exponent` over integers and rationals.
+    """`base ^ exponent` over integers, rationals, and dimensioned quantities.
 
-    Integer bases with a non-negative exponent stay integers (folded when both
-    are constants, `_int_pow` otherwise); a negative constant exponent makes
-    the result a rational; rational bases accept any integer exponent.
+    Compile-time bases fold exactly (a negative exponent makes an integer base
+    rational); runtime integer bases with a non-negative exponent call
+    `_int_pow`; runtime rational bases take any integer exponent through
+    `_rational_pow`. The dimension is raised to the same power.
     """
     if len(args) != 2:
         raise ValueError('INTERNAL ERROR: `^` takes two operands')
     base, exponent = args
-    exponent_value = _constant_integer(_unwrap_parens(exponent), ctx=ctx)
     if not ctx.type_system.is_subtype(exponent.type, 'int'):
         type_error(
             ctx.srcfile,
             'exponent must be an integer',
             Pointer(span=exponent.loc, message=f'this has type `{type_to_dewy(exponent.type)}`'),
         )
-    if _is_rational(base.type, ctx=ctx):
-        return _prelude_call(
-            '_rational_pow',
-            [base, _as_int64(exponent, ctx=ctx)],
-            loc=loc,
-            ctx=ctx,
+    exponent_value = _constant_integer(_unwrap_parens(exponent), ctx=ctx)
+    number, dimension = _number_and_dimension(base.type)
+    if dimension.powers and exponent_value is None:
+        type_error(
+            ctx.srcfile,
+            'a dimensioned quantity needs a constant exponent',
+            Pointer(span=exponent.loc, message='the result dimension must be known at compile time'),
         )
-    if not ctx.type_system.is_subtype(base.type, 'int'):
+    base_rational = _is_rational(number, ctx=ctx) or isinstance(number, ty.RationalLiteralType)
+    if not base_rational and not ctx.type_system.is_subtype(number, 'int'):
         type_error(
             ctx.srcfile,
             'no matching overload for operator `^`',
             Pointer(span=base.loc, message=f'this has type `{type_to_dewy(base.type)}`'),
             hint='`^` raises integers and rationals to integer powers',
         )
-    base_value = _constant_integer(_unwrap_parens(base), ctx=ctx)
-    if exponent_value is not None and exponent_value < 0:
-        # Negative powers of integers are rationals: 2^(-3) is 1/8.
-        if base_value is not None:
-            if base_value == 0:
-                type_error(
-                    ctx.srcfile,
-                    'division by zero',
-                    Pointer(span=loc, message='zero raised to a negative power'),
-                )
-            return _rational_literal(1, base_value ** -exponent_value, loc=loc, ctx=ctx)
-        return _prelude_call(
-            '_rational_pow',
-            [
-                _to_rational(_as_int64(base, ctx=ctx), ctx=ctx),
-                _as_int64(exponent, ctx=ctx),
-            ],
-            loc=loc,
-            ctx=ctx,
-        )
+    base_value = _constant_rational(base, ctx=ctx)
+    if base_value is not None and exponent_value is not None:
+        if base_value == 0 and exponent_value < 0:
+            type_error(
+                ctx.srcfile,
+                'division by zero',
+                Pointer(span=loc, message='zero raised to a negative power'),
+            )
+        result_dimension = ty.power_dimension(dimension, exponent_value)
+        folded = base_value ** exponent_value
+        if not base_rational and exponent_value >= 0:
+            return hir.Integer(
+                loc,
+                _with_dimension(ty.IntegerLiteralType(folded.numerator), result_dimension),
+                '0d',
+                folded.numerator,
+            )
+        return _rational_constant(folded, result_dimension, loc=loc)
+    result_dimension = ty.power_dimension(dimension, exponent_value) if exponent_value is not None else dimension
+    exponent64 = _as_int64(exponent, ctx=ctx)
+    if base_rational or (exponent_value is not None and exponent_value < 0):
+        call = _prelude_call('_rational_pow', [_to_rational(base, ctx=ctx), exponent64], loc=loc, ctx=ctx)
+        return replace(call, type=_with_dimension(_rational_type(ctx, loc), result_dimension))
     if exponent_value is None and not ctx.type_system.is_subtype(exponent.type, 'uint'):
         type_error(
             ctx.srcfile,
@@ -3987,17 +4163,10 @@ def _dispatch_pow(
             Pointer(span=exponent.loc, message='a negative exponent would make the result a rational'),
             hint='use an unsigned exponent, or make the base a rational (`(1/1 * base) ^ n`)',
         )
-    if base_value is not None and exponent_value is not None:
-        value = base_value ** exponent_value
-        return hir.Integer(loc, ty.IntegerLiteralType(value), '0d', value)
-    if base.type not in ('int', 'int64') and not isinstance(base.type, ty.IntegerLiteralType):
+    if number not in ('int', 'int64') and not isinstance(number, ty.IntegerLiteralType):
         not_implemented(ctx.srcfile, loc, f'`^` on `{type_to_dewy(base.type)}` bases')
-    return _prelude_call(
-        '_int_pow',
-        [_as_int64(base, ctx=ctx), _as_int64(exponent, ctx=ctx)],
-        loc=loc,
-        ctx=ctx,
-    )
+    call = _prelude_call('_int_pow', [_as_int64(_strip_dimension(base), ctx=ctx), exponent64], loc=loc, ctx=ctx)
+    return replace(call, type=_with_dimension('int64', result_dimension))
 
 
 def _real_literal(real: t1.Real, *, loc: Span, ctx: Context) -> hir.AST:
@@ -6376,6 +6545,11 @@ def _checked_single_argument_call(
 ) -> hir.FunctionCall:
     """Build one ordinary checked call from an already-checked argument."""
 
+    if _is_compile_time_rational(argument.type):
+        argument = _materialize_rational(argument, ctx=ctx)
+    if isinstance(argument.type, ty.QuantityType):
+        # Dimensions are erased at runtime; the number prints in its canonical scale.
+        argument = _strip_dimension(argument)
     methods: list[ty.FunctionType]
     if isinstance(func.type, ty.FunctionType):
         methods = [func.type]
@@ -6881,6 +7055,11 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
+    if _is_compile_time_rational(node.type):
+        expected_number, expected_dimension = _number_and_dimension(expected)
+        _, node_dimension = _number_and_dimension(node.type)
+        if node_dimension == expected_dimension and _is_rational(expected_number, ctx=ctx):
+            return _materialize_rational(node, ctx=ctx)
     if isinstance(node.type, ty.BinaryLiteralType):
         target = _refine_binary_materialization_target(node.type, expected)
         if ctx.type_system.is_subtype(node.type, target):

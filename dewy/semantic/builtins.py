@@ -352,6 +352,13 @@ builtin_type_aliases: dict[str, ty.TypeExpr] = {
     # Base physical dimensions are compile-time-only type factors.  The
     # prelude builds representation-parameterized quantities from them.
     'Time': ty.dimension(('Time', 1)),
+    'Length': ty.dimension(('Length', 1)),
+    'Mass': ty.dimension(('Mass', 1)),
+    'Current': ty.dimension(('Current', 1)),
+    'Temperature': ty.dimension(('Temperature', 1)),
+    'Amount': ty.dimension(('Amount', 1)),
+    'Luminosity': ty.dimension(('Luminosity', 1)),
+    'Angle': ty.dimension(('Angle', 1)),
 }
 
 # Explicit cross-branch promote rules (a, b, result). Along-edge cases use the subtype graph.

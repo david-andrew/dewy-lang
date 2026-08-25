@@ -39,11 +39,16 @@ let _rational_add = (a:Rational b:Rational):>Rational =>
 let _rational_sub = (a:Rational b:Rational):>Rational =>
     _rational_make(a.numerator * b.denominator - b.numerator * a.denominator  a.denominator * b.denominator)
 
-let _rational_mul = (a:Rational b:Rational):>Rational =>
-    _rational_make(a.numerator * b.numerator  a.denominator * b.denominator)
+# Cross-reduction before multiplying keeps intermediate products small, so
+# unit scales such as 1/10^18 divide out without overflowing int64.
+let _rational_mul = (a:Rational b:Rational):>Rational => {
+    let g1:int64 = _gcd(a.numerator b.denominator)
+    let g2:int64 = _gcd(b.numerator a.denominator)
+    return _rational_make((a.numerator // g1) * (b.numerator // g2)  (a.denominator // g2) * (b.denominator // g1))
+}
 
 let _rational_div = (a:Rational b:Rational):>Rational =>
-    _rational_make(a.numerator * b.denominator  a.denominator * b.numerator)
+    _rational_mul(a [numerator = b.denominator denominator = b.numerator])
 
 let _rational_neg = (a:Rational):>Rational => [numerator = -a.numerator denominator = a.denominator]
 
