@@ -83,11 +83,13 @@ const DetailedContextError:type =
     ContextError & [source:string]
 ```
 
-`DetailedContextError` adds a structural requirement while retaining `ContextError`'s nominal ancestry. It is not another nominal error variant. Generic parameter syntax such as `<T of real>` only places a bound on `T`; it does not create a type.
+`DetailedContextError` adds a structural requirement while retaining `ContextError`'s nominal ancestry. It is not another nominal error variant.
 
 When an alternative belongs to the nominal `exception` family, navigation can [forward that exception value](errors-as-values.md#exception-values-forward) while applying the requested member operation to the ordinary alternatives. Both `error` and `undefined` descend from `exception`. This is a rule for exception-classified union members, not for arbitrary unions.
 
-Parameterized aliases accept compile-time type arguments:
+## Parameterized Type Aliases
+
+A parameterized alias accepts compile-time type arguments. A bound such as `<T of real>` constrains the accepted argument; unlike the expression `type of Parent`, it does not create nominal identity:
 
 ```dewy
 const Duration:type = <T of real>(T * Time)

@@ -1,6 +1,6 @@
 # Optional Values and Narrowing
 
-`undefined` is a real value representing a missing alternative. It is not `void` or an uninitialized name. It belongs to Dewy's `exception` type family, which means navigation forwards it without trying to access a member on it. This is ordinary typed value flow, not a hidden throw or stack unwind.
+`undefined` is a real value representing a missing alternative. It is not `void` or an uninitialized name.
 
 An optional type is a union with `undefined`:
 
@@ -41,7 +41,7 @@ Any expression whose alternatives include a value and `undefined` can produce an
 
 ## Absence Is an Exception, Not an Error
 
-`undefined` says that a value is absent. An error says that an operation failed and carries its own error type. Both descend from `exception`, so both forward through navigation, but they remain distinct contracts:
+`undefined` says that a value is absent. An error says that an operation failed and carries its own error type. Both descend from Dewy's `exception` type family, so navigation forwards either one without trying to access a member on it. They nevertheless remain distinct contracts:
 
 ```dewy
 User | undefined       # a user may simply be absent
@@ -64,20 +64,6 @@ let city = user.profile.address.city
 
 If users want a non-forwarding sentinel, they can define an ordinary type that does not descend from `exception`. Every ordinary alternative must support a requested member or be narrowed away first.
 
-## Optionals in Multiiterators
-
-An `or` multiiterator can continue after one source is exhausted. During those later iterations, the exhausted source's bound value is optional:
-
-```dewy
-loop short in short_items or long in long_items {
-    if short isnt? undefined
-        process_short(short)
-
-    if long isnt? undefined
-        process_long(long)
-}
-```
-
-By contrast, `and` stops before a required source's missing value reaches the body.
+This is ordinary typed value flow, not a hidden throw or stack unwind. The next chapter develops the exception family and propagation in full.
 
 General unions with several unrelated runtime layouts use the same type-theoretic model, though their complete representation and narrowing support is still a [design and implementation frontier](../appendices/language-and-compiler.md).

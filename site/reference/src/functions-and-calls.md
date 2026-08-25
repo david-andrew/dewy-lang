@@ -69,6 +69,10 @@ increment(41)
 
 Types and names share identifier syntax, so a bare identifier in a function literal is a parameter name, not an anonymous argument whose type happens to have that spelling.
 
+## Rest Parameters and Spreading
+
+The direction for `...rest` is to capture arguments not claimed by earlier parameters and allow the resulting bundle to be forwarded with `...`. Exact bundle types and all interactions with named arguments remain provisional.
+
 ## Function Contracts
 
 A function type records its parameter and return contract:
@@ -97,10 +101,6 @@ let describe = ((value:int64):>string => "integer")
 ```
 
 Ambiguous or unmatched calls are errors. Runtime multifunction values remain part of the provisional dynamic-dispatch design; ordinary overload resolution is static.
-
-## Rest Parameters and Spreading
-
-The direction for `...rest` is to capture arguments not claimed by earlier parameters and allow the resulting bundle to be forwarded with `...`. Exact bundle types and all interactions with named arguments remain provisional.
 
 ## Function Handles
 

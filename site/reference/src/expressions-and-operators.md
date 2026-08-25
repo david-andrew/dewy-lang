@@ -52,3 +52,5 @@ The prefix `@` must begin a place route and selects the location at the end of t
 ```
 
 The parser groups the prefix before the selectors, but that grouping does not make the root place an independently observable intermediate value. `@(pair.left)` selects the same final place as `@pair.left`; Dewy has no `pair.@left` form.
+
+Function handles extend the same whole-route rule with a grouping boundary between selection or partial evaluation and an ordinary call. See [Function Handles](functions-and-calls.md#function-handles).

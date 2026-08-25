@@ -40,7 +40,7 @@ set(@values[i])
 set(@box.rows[row][column])
 ```
 
-The parser groups `@pair.left` as `(@pair).left`, but the language does not expose `@pair` as a separate reference value before applying `.left`. The whole expression refers to the place occupied by `left`. `@(pair.left)` selects the same place, and there is no `pair.@left` form. A computed index in a place route evaluates once before the call.
+The parser groups `@pair.left` as `(@pair).left`, but the language does not expose `@pair` as a separate reference value before applying `.left`. The whole expression refers to the place occupied by `left`. Putting the route inside the prefix, `@(pair.left)`, selects the same place. Grouping the completed selection, `(@pair.left)`, ends the `@` chain; this distinction matters when a following argument group calls a selected function. There is no `pair.@left` form. A computed index in a place route evaluates once before the call.
 
 ## Type and Aliasing Rules
 
@@ -58,9 +58,9 @@ The intended `@?` operation asks whether two place expressions designate the sam
 
 Function handles build on the same root-and-route interpretation of `@`; see [Functions and Calls](functions-and-calls.md#function-handles).
 
-## Explicit Managed Handles
+## Provisional User-Managed Handles
 
-A library-defined shared-ownership type such as `Rc<T>` is intended to remain an ordinary Dewy value. Copying the handle retains its explicitly shared payload; copying an object containing such a handle does the same recursively. This does not make ordinary arrays or objects reference-semantic values.
+The future systems escape hatch builds on, but does not change, the rules above. A library-defined shared-ownership type such as `Rc<T>` is intended to remain an ordinary Dewy value. Copying the handle retains its explicitly shared payload; copying an object containing such a handle does the same recursively. This does not make ordinary arrays or objects reference-semantic values.
 
 `@rc` selects the place occupied by the handle, allowing a callee to replace that handle in the caller's binding. It does not select the allocation behind the handle. Payload access will instead use lifetime-bounded places supplied by the handle type: read-only while shared, and mutable only after unique ownership is established or through a separate checked-mutation abstraction.
 

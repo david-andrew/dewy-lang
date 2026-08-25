@@ -84,6 +84,8 @@ A leading `@` selects the place at the end of a complete field-and-index route, 
 
 `@?` is intended to test whether two place expressions identify the same place; it does not expose hidden storage sharing between independent values.
 
+For functions, an ungrouped `@` chain selects and partially evaluates without calling. Grouping ends that chain, so `(@worker.callback)(5)` calls the selected function. [Function Values and Composition](functional-programming.md) develops the complete rule after introducing places and objects.
+
 ## Elementwise and Vectorized Operations
 
 > **Provisional design:** A leading `.` on an operator applies it elementwise, while `f.(values)` vectorizes a function call. Broadcasting and multidimensional shape rules must be specified together before edge cases are normative.

@@ -14,6 +14,7 @@
 - [A Few Ideas That Organize Dewy](ch05/00-general.md)
 - [Expressions, Produced Values, and Blocks](ch03/expressions-statements-blocks.md)
 - [Bindings and Scope](ch03/bindings-and-scope.md)
+- [Types and Numbers](ch03/basic-data-types.md)
 - [Functions and Calls](ch03/function-types.md)
 - [Branching and Flow Control](ch03/flow-control.md)
 - [Optional Values and Narrowing](ch03/optional-types.md)
@@ -28,9 +29,8 @@
 - [Containers](ch03/container-types.md)
 - [Structural Objects](ch03/object-types.md)
 
-## Types, Operators, and Guarantees
+## Operators and Guarantees
 
-- [Types and Numbers](ch03/basic-data-types.md)
 - [Numbers and Bases](ch03/number-bases.md)
 - [Operators](ch03/operators.md)
 - [Function Values and Composition](ch03/functional-programming.md)

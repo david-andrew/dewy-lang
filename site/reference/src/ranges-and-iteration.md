@@ -71,4 +71,12 @@ For `and`, iteration ends when a required leaf is exhausted. Operators such as `
 
 The exact truth and exhaustion formulas for `and`, `or`, `xor`, `nand`, `nor`, and `xnor` follow their Boolean meanings applied to the per-leaf step results.
 
-Stored generators, arbitrary runtime range arithmetic, and some dynamic iterator sources remain provisional areas; see [Design Maturity and Open Questions](design-status.md).
+## Provisional Boundaries
+
+The following remain under design:
+
+- advancement and short-circuit behavior when iterator clauses mix with ordinary Boolean predicates;
+- stored generators and some dynamic iterator sources; and
+- result types, normalization, empty-span behavior, and representation for arbitrary runtime range arithmetic.
+
+See [Design Maturity and Open Questions](design-status.md).

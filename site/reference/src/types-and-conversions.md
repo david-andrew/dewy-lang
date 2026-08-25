@@ -75,7 +75,7 @@ General heterogeneous runtime-union layout remains provisional. Optional values 
 
 An alternative belonging to the nominal `exception` family receives special receiver-navigation behavior. Member access operates on every ordinary alternative that supports the member and forwards every exception alternative. Both `error` and `undefined` descend from `exception`; arbitrary union alternatives do not become skippable. See [Errors, Exceptions, and Forwarding](errors-and-forwarding.md).
 
-## Parameterized and Refined Types
+## Parameterized Types
 
 Parameterized types apply compile-time arguments:
 
@@ -84,6 +84,8 @@ array<string>
 array<int64 length=3>
 Duration<uint64>
 ```
+
+## Refined Types
 
 Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.
 

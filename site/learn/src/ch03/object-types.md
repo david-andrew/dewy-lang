@@ -52,18 +52,11 @@ Default parameters, overloads, and generics apply to constructors exactly as the
 
 A type with a structural body can construct that body directly:
 
-<!-- dewy-example: design-only -->
 ```dewy
-const ContextError:type =
-    (type of error) & [context:string code:int64]
-
-let problem = ContextError[
-    context='request body'
-    code=400
-]
+let unit_x = Pair[left=1 right=0]
 ```
 
-The object literal is checked against the named type and receives its nominal ancestry. Intersecting another structure onto `ContextError` adds required fields but does not mint a new nominal type.
+The object literal is checked against the named structure. When a type also carries nominal ancestry, the constructed value retains that identity; [Defining Exceptions](errors-as-values.md#defining-exceptions) shows such a hybrid type.
 
 ## Behavior Inside Objects
 

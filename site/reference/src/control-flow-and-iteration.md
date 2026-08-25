@@ -41,6 +41,6 @@ An exit may target an enclosing labeled loop through Dewy's scope metatag mechan
 
 Postfix `or_return` propagates an [exception value](errors-and-forwarding.md) from an expression through the current function. Its ordinary alternatives continue locally; its exception alternatives must be accepted by the enclosing return contract.
 
-## Pattern Selection and Cleanup
+## Related Provisional Control Flow
 
 General `match`, cleanup/finally behavior, and transformed error-propagation forms are provisional designs. Their eventual forms must compose with expression results and flow-sensitive narrowing rather than creating separate statement-only semantics.

@@ -37,7 +37,7 @@ set(@values[i])
 set(@grid.rows[row][column])
 ```
 
-The parser first groups the prefix as `(@point).x`, but that intermediate grouping is not the semantic boundary: `@point.x` refers to the place occupied by `x`, not first to a standalone reference value for `point`. Parenthesizing the complete expression, `@(point.x)`, selects the same place. There is no `point.@x` spelling.
+The parser first groups the prefix as `(@point).x`, but that intermediate grouping is not the semantic boundary: `@point.x` refers to the place occupied by `x`, not first to a standalone reference value for `point`. Putting the route inside the prefix, `@(point.x)`, selects the same place. Grouping the completed selection as `(@point.x)` also preserves that place while ending the `@` chain, which matters when a following argument group calls a selected function. There is no `point.@x` spelling.
 
 A computed index evaluates once before the call.
 
@@ -72,4 +72,4 @@ Prefix routes overlap, and dynamic indices are treated as potentially equal unle
 
 > **Provisional design:** Nonescaping calls and projected routes have settled behavior. Storing or returning a place requires lifetime, ownership, and concurrency rules that are still being designed.
 
-Function handles use the same `@` root-and-route idea; see [Functions and Calls](function-types.md#function-handles-and-partial-evaluation). The Reference contains the exact [value and aliasing rules](../../reference/values.html).
+Function handles use the same `@` root-and-route idea; see [Function Values and Composition](functional-programming.md). The Reference contains the exact [value and aliasing rules](../../reference/values.html).

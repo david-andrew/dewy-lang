@@ -83,6 +83,8 @@ loop left in left_items or right in right_items {
 }
 ```
 
+This applies the same narrowing rules introduced in [Optional Values and Narrowing](optional-types.md). By contrast, `and` stops before a required source's missing value reaches the body.
+
 The same rule extends to `xor`, `nand`, `nor`, and `xnor`: each iterator contributes the Boolean result of its current advance, and the operator's truth rule decides whether the body runs. Some formulas remain true after every input is exhausted. For example, `xnor` of two exhausted iterators is true, so such a loop needs another exit if it can reach that state.
 
 > **Provisional design:** Combining iterator clauses with ordinary Boolean predicates is a separate case from a formula containing only iterator leaves. Its advancement and short-circuit rules have not been selected, so this book does not infer behavior for expressions such as `item in items and clock.now <? deadline`.

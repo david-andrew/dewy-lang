@@ -89,32 +89,6 @@ loop i in 5,4..0 print'{i} '
 
 A reversed range **requires** an explicit step. `5..0` results in an empty range.
 
-### Range Arithmetic
-
-> **Provisional design:** Applying arithmetic to a complete range and combining several ranges are selected directions, but their result types, normalization, empty-span behavior, and runtime representation are not yet fully specified. The following examples illustrate that direction rather than defining the remaining edge cases.
-
-<!-- dewy-example: design-only -->
-```dewy
-loop i in [0..4]/4 print'{i} '
-loop i in [0..4]*0.25 print'{i} '
-# both: 0 0.25 0.5 0.75 1
-```
-
-This expresses the same intended values as `[0,0.25..1]`. Numerical libraries can provide `linspace` and `logspace` helpers without changing the range grammar.
-
-### Compound Ranges
-
-<!-- dewy-example: design-only -->
-```dewy
-complex_range = [1..5] + (15..20)
-loop i in complex_range
-    printl(i)           # 1 2 3 4 5 16 17 18 19
-7 in? complex_range     # false
-16 in? complex_range    # true
-
-complex_range = [1..20) - (5..15]
-```
-
 ### Membership
 
 ```dewy
@@ -153,3 +127,29 @@ arr[end-3..]
 ```
 
 > **Provisional design:** Integer positions and `end` define ordinary sequence slicing. Indexing by noninteger ordered domains requires a collection-specific indexing contract and is not implied by the generic range syntax.
+
+### Range Arithmetic
+
+> **Provisional design:** Applying arithmetic to a complete range and combining several ranges are selected directions, but their result types, normalization, empty-span behavior, and runtime representation are not yet fully specified. The following examples illustrate that direction rather than defining the remaining edge cases.
+
+<!-- dewy-example: design-only -->
+```dewy
+loop i in [0..4]/4 print'{i} '
+loop i in [0..4]*0.25 print'{i} '
+# both: 0 0.25 0.5 0.75 1
+```
+
+This expresses the same intended values as `[0,0.25..1]`. Numerical libraries can provide `linspace` and `logspace` helpers without changing the range grammar.
+
+### Compound Ranges
+
+<!-- dewy-example: design-only -->
+```dewy
+complex_range = [1..5] + (15..20)
+loop i in complex_range
+    printl(i)           # 1 2 3 4 5 16 17 18 19
+7 in? complex_range     # false
+16 in? complex_range    # true
+
+complex_range = [1..20) - (5..15]
+```

@@ -62,11 +62,11 @@ combine(10 right=16)
 A bare `...` ends the positional run:
 
 ```dewy
-let connect = (host:string ... timeout:Duration<int64>):>void => {
+let connect = (host:string ... timeout_ms:int64):>void => {
     # ...
 }
 
-connect("example.test" timeout=2s)
+connect("example.test" timeout_ms=2_000)
 ```
 
 Wrapping a parameter in `<>` makes its name private to the function's body and requires callers to use its position:
@@ -119,56 +119,8 @@ Pipes are calls written in data-flow order:
 
 Grouping several piped arguments keeps any named bindings local to the group.
 
-## Function Handles and Partial Evaluation
+## Functions as Values
 
-> **Provisional design:** The root syntax and argument-binding behavior are settled; escaping identity, captures, and storage remain under design.
+Functions can also be passed, stored, and configured for a later call. Because a bare function name normally calls it whenever a valid call is available, Dewy uses `@` to select the function itself.
 
-A bare function name calls it whenever a valid call exists. `@` selects the function binding as a callable value:
-
-```dewy
-let sum = (a:int64 b:int64) => a + b
-let reference = @sum
-let add5 = @sum(5)
-
-add5(24)       # 29
-```
-
-Explicitly supplied partial arguments are saved immediately. Defaults remain per-call fallbacks until the resulting function is called.
-
-The route rule is the same as for data places: `@worker.callback` selects the function-valued place at the end of the entire route, and `@` cannot appear as `worker.@callback`. The parser's intermediate `(@worker).callback` grouping does not make `@worker` the semantic result.
-
-A leading `@` disables calls throughout its complete ungrouped selector-and-application chain. This lets a route continue through the function value itself. Argument groups within the chain save arguments; grouping ends the chain, allowing a following argument group to call the selected function.
-
-```dewy
-@worker.callback.metadata     # select metadata on the callback value
-worker.callback().metadata    # call callback, then read result.metadata
-(@worker.callback)(5).metadata # select callback, call it, then read result.metadata
-```
-
-The ordinary call resolves `callback` as its callee without first automatically calling it. The partial-evaluation and call boundaries are visible in the grouping:
-
-```dewy
-@sum(1)(2)       # save 1, then save 2
-(@sum(1))(2)     # save 1, then call with 2
-@sum(1)()        # an empty second partial evaluation
-(@sum(1))()      # call the partially evaluated function
-```
-
-An empty partial evaluation neither invokes the function nor evaluates defaults. Consequently, `@worker.callback(5)()` remains a function; `(@worker.callback(5))()` calls it.
-
-The function can be an inner member of a stable object route:
-
-```dewy
-let on_item = @worker.callback(5)
-```
-
-This selects `worker.callback`, preserves its receiver, and saves `5` without calling it. If a call produces the object, bind its result before selecting the inner function:
-
-```dewy
-let worker = make_worker()
-let on_item = @worker.callback(5)
-```
-
-The binding is required because a temporary call result is not a place-route root. `@make_worker()` would instead mean an empty partial evaluation of `make_worker`.
-
-Rest capture, spreading, and complete handle semantics are summarized in the [design appendix](../appendices/language-and-compiler.md). Exact argument binding is defined in the [Reference](../../reference/functions-and-calls.html).
+That topic builds on places, object members, and grouping, so it is developed later in [Function Values and Composition](functional-programming.md). The Reference defines exact [argument binding](../../reference/functions-and-calls.html#argument-binding) independently of those function-handle details.

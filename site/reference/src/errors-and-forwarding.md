@@ -18,7 +18,7 @@ Any value whose type descends from `exception` is a forwarding value. Programs m
 
 “Exception” names a type category here. Exception values remain ordinary values; forwarding does not imply throwing, catching, or stack unwinding.
 
-## Error Types and Return Unions
+## Declaring Error Types
 
 An error type descends from the nominal base type `error`, which itself descends from `exception`. `type of error` creates a fresh nominal error type:
 
@@ -64,6 +64,8 @@ const MyMoreComplexError:type =
 ```
 
 `MyMoreComplexError` is structurally stronger but is not a separate nominal error variant. See [Nominal Identity](types-and-conversions.md#nominal-identity).
+
+## Error Return Unions
 
 <!-- dewy-example: design-only -->
 ```dewy
