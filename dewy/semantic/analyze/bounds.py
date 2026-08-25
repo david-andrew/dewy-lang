@@ -69,6 +69,65 @@ UNKNOWN_INTERVAL = Interval(None, None)
 EMPTY_INTERVAL = Interval(1, 0)
 State = dict[int, Interval]
 
+# Runtime-length arrays contribute two kinds of synthetic state entries, keyed
+# by negative ids so they never collide with bindings: the array's *length
+# interval* (refined by `xs.length >? k` and stepped by growth methods) and
+# *index facts* recording that an index binding is proven below an array's
+# length (from `i <? xs.length`). Joins and widening only keep keys common to
+# both sides, which is exactly the sound treatment for facts.
+_FACT_BASE = 1 << 40
+_FACT_SHIFT = 20
+
+# A runtime-length array's length is a nonnegative int64, which keeps
+# `i <? xs.length` bounded above so `i + 1` cannot roll over.
+_MAX_LENGTH = (1 << 63) - 1
+
+
+def _length_key(array_id: int) -> int:
+    return -array_id - 1
+
+
+def _index_fact_key(index_id: int, array_id: int) -> int:
+    return -(_FACT_BASE + (index_id << _FACT_SHIFT) + array_id)
+
+
+def _decode_index_fact(key: int) -> tuple[int, int] | None:
+    if key > -_FACT_BASE:
+        return None
+    raw = -key - _FACT_BASE
+    return raw >> _FACT_SHIFT, raw & ((1 << _FACT_SHIFT) - 1)
+
+
+def _runtime_array_id(node: hir.AST) -> int | None:
+    """The binding id of a named runtime-length array, else None."""
+    while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+        node = node.expr
+    if (
+        isinstance(node, hir.ExpressedIdentifier)
+        and node.binding_id is not None
+        and isinstance(node.type, ty.ArrayType)
+        and node.type.length is None
+    ):
+        return node.binding_id
+    return None
+
+
+def _drop_index_facts(
+    state: State,
+    *,
+    index_id: int | None = None,
+    array_id: int | None = None,
+) -> None:
+    for key in [key for key in state if key <= -_FACT_BASE]:
+        decoded = _decode_index_fact(key)
+        if decoded is None:
+            continue
+        fact_index, fact_array = decoded
+        if (index_id is not None and fact_index == index_id) or (
+            array_id is not None and fact_array == array_id
+        ):
+            del state[key]
+
 
 @dataclass
 class _LoopTransfer:
@@ -192,6 +251,11 @@ class _BoundsValidator:
             elif node.op != '=':
                 value = None
             self._set_interval(current, binding_id, value)
+            _drop_index_facts(current, index_id=binding_id)
+            if isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None:
+                # Whole-array replacement: nothing is known about the new length.
+                current.pop(_length_key(binding_id), None)
+                _drop_index_facts(current, array_id=binding_id)
             return current
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
@@ -545,7 +609,15 @@ class _BoundsValidator:
             self._eval(node.array, state, validate=validate)
             if isinstance(node.array.type, ty.ArrayType):
                 length = node.array.type.length
-                return None if length is None else Interval.exact(length)
+                if length is not None:
+                    return Interval.exact(length)
+                array_id = _runtime_array_id(node.array)
+                if array_id is not None:
+                    return state.get(_length_key(array_id), Interval(0, _MAX_LENGTH))
+                return Interval(0, _MAX_LENGTH)
+            return None
+        if isinstance(node, hir.ArrayMethod):
+            self._eval(node.array, state, validate=validate)
             return None
         if isinstance(node, hir.StringLength):
             self._eval(node.string, state, validate=validate)
@@ -555,7 +627,7 @@ class _BoundsValidator:
             self._eval(node.array, state, validate=validate)
             interval = self._eval(node.index, state, validate=validate)
             if validate:
-                self._validate_index(node, interval)
+                self._validate_index(node, interval, state)
             return None
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, state, validate=validate)
@@ -565,7 +637,7 @@ class _BoundsValidator:
             self._eval(node.string, state, validate=validate)
             interval = self._eval(node.index, state, validate=validate)
             if validate:
-                self._validate_index(node, interval)
+                self._validate_index(node, interval, state)
             return None
         if isinstance(node, hir.StringSlice):
             self._eval(node.string, state, validate=validate)
@@ -597,6 +669,28 @@ class _BoundsValidator:
         if isinstance(node, hir.ArrayLiteral):
             for item in node.items:
                 self._eval(item, state, validate=validate)
+            return None
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod):
+            for arg in node.pos_args:
+                self._eval(arg, state, validate=validate)
+            array_id = _runtime_array_id(node.func.array)
+            if array_id is not None:
+                key = _length_key(array_id)
+                current = state.get(key, Interval(0, _MAX_LENGTH))
+                if node.func.name == 'push':
+                    state[key] = Interval(
+                        _add(current.lower, 1),
+                        _minimum_upper(_add(current.upper, 1), _MAX_LENGTH),
+                    )
+                elif node.func.name == 'pop':
+                    state[key] = Interval(
+                        max(0, (current.lower or 0) - 1),
+                        _subtract(current.upper, 1),
+                    )
+                    _drop_index_facts(state, array_id=array_id)
+                elif node.func.name == 'clear':
+                    state[key] = Interval.exact(0)
+                    _drop_index_facts(state, array_id=array_id)
             return None
         if isinstance(node, hir.FunctionCall):
             self._eval(node.func, state, validate=validate)
@@ -814,6 +908,7 @@ class _BoundsValidator:
         self,
         node: hir.Index | hir.StringIndex,
         interval: Interval | None,
+        state: State,
     ) -> None:
         if isinstance(node, hir.Index):
             length = (
@@ -838,6 +933,21 @@ class _BoundsValidator:
             if interval.lower == interval.upper:
                 node.constant_index = interval.lower
             return
+        if isinstance(node, hir.Index) and length is None:
+            # Runtime-length array: prove `0 <= index` from the interval and
+            # `index < length` from either a proven minimum length or an
+            # `index <? xs.length` fact about this index binding.
+            array_id = _runtime_array_id(node.array)
+            nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
+            if array_id is not None and nonnegative:
+                minimum_length = state.get(_length_key(array_id), Interval(0, _MAX_LENGTH)).lower or 0
+                if interval.upper is not None and interval.upper < minimum_length:
+                    if interval.lower == interval.upper:
+                        node.constant_index = interval.lower
+                    return
+                index_id = self._binding_id(index)
+                if index_id is not None and _index_fact_key(index_id, array_id) in state:
+                    return
         known = (
             'unknown'
             if interval is None
@@ -944,6 +1054,28 @@ class _BoundsValidator:
             return refined
         name = condition.func.name
         left, right = condition.pos_args
+        if truth:
+            fact: tuple[int, int] | None = None
+            if name == '__lt__':
+                index_id = self._binding_id(left)
+                array_id = (
+                    _runtime_array_id(right.array)
+                    if isinstance(right, hir.ArrayLength)
+                    else None
+                )
+                if index_id is not None and array_id is not None:
+                    fact = (index_id, array_id)
+            elif name == '__gt__':
+                index_id = self._binding_id(right)
+                array_id = (
+                    _runtime_array_id(left.array)
+                    if isinstance(left, hir.ArrayLength)
+                    else None
+                )
+                if index_id is not None and array_id is not None:
+                    fact = (index_id, array_id)
+            if fact is not None:
+                refined[_index_fact_key(*fact)] = Interval.exact(1)
         left_binding = self._binding_id(left)
         right_interval = self._eval(right, refined, validate=False)
         if left_binding is not None and right_interval is not None:
@@ -982,6 +1114,9 @@ class _BoundsValidator:
     def _binding_id(node: hir.AST) -> int | None:
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
+        if isinstance(node, hir.ArrayLength):
+            array_id = _runtime_array_id(node.array)
+            return None if array_id is None else _length_key(array_id)
         return (
             node.binding_id
             if isinstance(node, hir.ExpressedIdentifier)

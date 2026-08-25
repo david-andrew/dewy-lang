@@ -200,7 +200,7 @@ def test_array_diagnostics_cover_shape_elements_and_indices() -> None:
             'let values = [1 2] '
             'return values[index] }'
         )
-    with pytest.raises(UserError, match='exact compile-time length'):
+    with pytest.raises(UserError, match='not proven in bounds'):
         _check('let f = (values:array<int64>):>int64 => values[0]')
     with pytest.raises(TypeCheckError, match='length mismatch'):
         _check('let values:array<int64 length=2> = [1]')
@@ -637,6 +637,54 @@ let f = (xs:array<int64>):>int64 => {
         _check("""
 let f = (xs:array<int64>):>int64 => {
     if xs.length >? 0 { let a = xs.pop return xs.pop }
+    return 0
+}
+""")
+
+
+def test_runtime_length_indexes_need_facts() -> None:
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check('let f = (xs:array<int64> i:int64):>int64 => xs[i]')
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check('let f = (xs:array<int64>):>int64 => xs[2]')
+
+
+def test_length_guards_prove_runtime_length_indexes() -> None:
+    _check("""
+let f = (xs:array<int64>):>int64 => {
+    let total:int64 = 0
+    let i:int64 = 0
+    loop i <? xs.length {
+        total += xs[i]
+        i += 1
+    }
+    return total
+}
+""")
+    _check('let f = (xs:array<int64>):>int64 => if xs.length >? 2 xs[2] else 0')
+    # The fact is about the index binding: incrementing it discards the fact.
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check("""
+let f = (xs:array<int64>):>int64 => {
+    let i:int64 = 0
+    loop i <? xs.length {
+        i += 1
+        let a = xs[i]
+    }
+    return 0
+}
+""")
+    # Shrinking the array inside the loop discards facts about it.
+    with pytest.raises(UserError, match='not proven in bounds'):
+        _check("""
+let f = ():>int64 => {
+    let xs:array<int64> = [1 2 3]
+    let i:int64 = 0
+    loop i <? xs.length {
+        if xs.length >? 0 { let p = xs.pop }
+        let a = xs[i]
+        i += 1
+    }
     return 0
 }
 """)

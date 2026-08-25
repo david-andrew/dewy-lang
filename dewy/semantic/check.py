@@ -4063,7 +4063,11 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             ),
         )
     constant_index = _constant_integer(index, ctx=index_ctx)
-    if length is None:
+    if length is None and not (
+        isinstance(array.type, ty.ArrayType)
+        and isinstance(array, hir.ExpressedIdentifier)
+        and array.binding_id is not None
+    ):
         user_error(
             ctx.srcfile,
             'sequence index is not proven in bounds',
@@ -4072,8 +4076,11 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 message='this sequence does not have an exact compile-time length',
             ),
         )
+    # A named runtime-length array defers to the bounds analysis, which
+    # proves indexes from length facts and `i <? xs.length` guards.
     if (
-        constant_index is not None
+        length is not None
+        and constant_index is not None
         and not 0 <= constant_index < length
     ):
         user_error(

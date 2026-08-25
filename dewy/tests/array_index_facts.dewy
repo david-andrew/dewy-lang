@@ -1,0 +1,24 @@
+# Indexing a runtime-length array is proven from facts rather than an exact
+# length: `i <? xs.length` loop guards prove `xs[i]`, and a proven minimum
+# length (`xs.length >? 2`) proves constant indexes.
+let build = (n:int64):>array<int64> => {
+    let xs:array<int64> = []
+    let k:int64 = 0
+    loop k <? n { xs.push(k) k += 1 }
+    return xs
+}
+let sum = (xs:array<int64>):>int64 => {
+    let total:int64 = 0
+    let i:int64 = 0
+    loop i <? xs.length {
+        total += xs[i]
+        i += 1
+    }
+    return total
+}
+let main = ():>int64 => {
+    let xs = build(9)          # 0..8, sum 36
+    let third:int64 = 0
+    if xs.length >? 2 { third = xs[2] }   # 2
+    return sum(xs) + third + xs.length - 5   # 36 + 2 + 9 - 5 = 42
+}
