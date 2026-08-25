@@ -1,0 +1,19 @@
+# `a / b` on integers is an exact rational; decimal literals are exact too.
+let third = 1/3
+let main = ():>int64 => {
+    let half:rational = 2/4
+    let sum = third + half             # 5/6
+    let scaled = sum * 12              # 10
+    let diff = half - 9.8              # -93/10
+    let quotient = third / half        # 2/3
+    let neg = -quotient                # -2/3
+    printl"{sum} {scaled} {diff} {quotient} {neg}"
+    let checks:int64 = 0
+    if third <? half { checks += 1 }
+    if half =? 1/2 { checks += 2 }
+    if sum not =? 1 { checks += 4 }
+    if scaled =? 10 { checks += 8 }
+    if 1/3 >=? third { checks += 16 }
+    # -93/10 → numerator -93 denominator 10
+    return checks + diff.denominator + scaled.numerator
+}

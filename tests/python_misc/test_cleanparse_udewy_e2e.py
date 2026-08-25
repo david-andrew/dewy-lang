@@ -60,6 +60,7 @@ LOWERED_CASES = [
     ('array_growth.dewy', 42),
     ('array_index_facts.dewy', 42),
     ('dict_runtime.dewy', 42),
+    ('rationals.dewy', 51),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

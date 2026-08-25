@@ -40,7 +40,17 @@ let _print_bool = (value:bool):>void => {
     return void
 }
 
-let print = _print_string & _print_int64 & _print_bool
+# Rationals print as reduced fractions; whole values print as integers.
+let _print_rational = (value:Rational):>void => {
+    _print_int64(value.numerator)
+    if value.denominator not =? 1 {
+        _print_string("/")
+        _print_int64(value.denominator)
+    }
+    return void
+}
+
+let print = _print_string & _print_int64 & _print_bool & _print_rational
 
 let printl = (s:string):>void => {
     print(s)

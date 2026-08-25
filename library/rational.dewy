@@ -1,0 +1,63 @@
+# Exact rationals. `rational` is this object type: a normalized fraction
+# (denominator positive, numerator and denominator coprime) over int64 parts.
+# `a / b` on integers, decimal literals such as `9.8`, and arithmetic or
+# comparisons involving a rational all route to these functions; integers
+# promote through `_rational_from_int`. Values overflow int64 silently for
+# now (no bigint tier yet), and a zero denominator is only rejected for
+# literal operands (runtime error values are pending).
+let Rational:type = [numerator:int64 denominator:int64]
+
+let _gcd = (a:int64 b:int64):>int64 => {
+    if a <? 0 { a = -a }
+    if b <? 0 { b = -b }
+    loop b not =? 0 {
+        let t:int64 = a % b
+        a = b
+        b = t
+    }
+    return a
+}
+
+let _rational_make = (numerator:int64 denominator:int64):>Rational => {
+    if denominator <? 0 {
+        numerator = -numerator
+        denominator = -denominator
+    }
+    let g:int64 = _gcd(numerator denominator)
+    if g >? 1 {
+        numerator = numerator // g
+        denominator = denominator // g
+    }
+    return [numerator = numerator denominator = denominator]
+}
+
+let _rational_from_int = (value:int64):>Rational => [numerator = value denominator = 1]
+
+let _rational_add = (a:Rational b:Rational):>Rational =>
+    _rational_make(a.numerator * b.denominator + b.numerator * a.denominator  a.denominator * b.denominator)
+
+let _rational_sub = (a:Rational b:Rational):>Rational =>
+    _rational_make(a.numerator * b.denominator - b.numerator * a.denominator  a.denominator * b.denominator)
+
+let _rational_mul = (a:Rational b:Rational):>Rational =>
+    _rational_make(a.numerator * b.numerator  a.denominator * b.denominator)
+
+let _rational_div = (a:Rational b:Rational):>Rational =>
+    _rational_make(a.numerator * b.denominator  a.denominator * b.numerator)
+
+let _rational_neg = (a:Rational):>Rational => [numerator = -a.numerator denominator = a.denominator]
+
+# Normalized fractions compare componentwise for equality; ordering
+# cross-multiplies (denominators are positive, so the direction holds).
+let _rational_eq = (a:Rational b:Rational):>bool =>
+    a.numerator =? b.numerator and a.denominator =? b.denominator
+let _rational_ne = (a:Rational b:Rational):>bool =>
+    a.numerator not =? b.numerator or a.denominator not =? b.denominator
+let _rational_lt = (a:Rational b:Rational):>bool =>
+    a.numerator * b.denominator <? b.numerator * a.denominator
+let _rational_le = (a:Rational b:Rational):>bool =>
+    a.numerator * b.denominator <=? b.numerator * a.denominator
+let _rational_gt = (a:Rational b:Rational):>bool =>
+    a.numerator * b.denominator >? b.numerator * a.denominator
+let _rational_ge = (a:Rational b:Rational):>bool =>
+    a.numerator * b.denominator >=? b.numerator * a.denominator

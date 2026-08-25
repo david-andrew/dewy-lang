@@ -306,7 +306,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return hir.TargetString(ast.loc, ty.StringLiteralType(ctx.target), ctx.target)
         case p0.Atom(item=t1.Metatag(name=name)):
             return tcr_scope_metatag(ast, name=name, ctx=ctx)
-        # case p0.Atom(item=t1.Real()): ...
+        case p0.Atom(item=t1.Real() as real):
+            return _real_literal(real, loc=ast.loc, ctx=ctx)
         case p0.Atom(item=t1.Semicolon()):
             not_implemented(
                 ctx.srcfile,
@@ -3774,6 +3775,174 @@ def _quantity_product_type(
     return number if not dimension.powers else ty.QuantityType(number, dimension)
 
 
+RATIONAL_TYPE_NAME = 'Rational'
+_RATIONAL_BINARY_FUNCTIONS = {
+    '__add__': '_rational_add',
+    '__sub__': '_rational_sub',
+    '__mul__': '_rational_mul',
+    '__truediv__': '_rational_div',
+    '__eq__': '_rational_eq',
+    '__ne__': '_rational_ne',
+    '__lt__': '_rational_lt',
+    '__le__': '_rational_le',
+    '__gt__': '_rational_gt',
+    '__ge__': '_rational_ge',
+}
+
+
+def _rational_type(ctx: Context, loc: Span) -> ty.Type:
+    """The prelude's `Rational` object type, which `rational` names."""
+    binding = ctx.binding_scopes.get(RATIONAL_TYPE_NAME)
+    if binding is None or binding.type_value is None:
+        user_error(
+            ctx.srcfile,
+            'rationals need the prelude',
+            Pointer(span=loc, message='`Rational` from `library/rational.dewy` is not in scope'),
+        )
+    return binding.type_value
+
+
+def _is_rational(type_: ty.Type, *, ctx: Context) -> bool:
+    binding = ctx.binding_scopes.get(RATIONAL_TYPE_NAME)
+    return (
+        binding is not None
+        and binding.type_value is not None
+        and type_ == binding.type_value
+    )
+
+
+def _prelude_call(name: str, args: list[hir.AST], *, loc: Span, ctx: Context) -> hir.FunctionCall:
+    """Call a prelude function by name with already-checked arguments."""
+    if name not in ctx.declarations:
+        user_error(
+            ctx.srcfile,
+            'rationals need the prelude',
+            Pointer(span=loc, message=f'`{name}` from `library/rational.dewy` is not in scope'),
+        )
+    func = tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
+    if not isinstance(func.type, ty.FunctionType):
+        raise ValueError(f'INTERNAL ERROR: prelude helper `{name}` is not a plain function')
+    checked = [
+        check_against(arg, param.type, ctx=ctx)
+        for arg, param in zip(args, func.type.pos_or_kw, strict=True)
+    ]
+    return hir.FunctionCall(loc, func.type.ret, func, checked, {})
+
+
+def _to_rational(arg: hir.AST, *, ctx: Context) -> hir.AST:
+    """Promote an integer operand to a rational; rationals pass through."""
+    if _is_rational(arg.type, ctx=ctx):
+        return arg
+    if not ctx.type_system.is_subtype(arg.type, 'int'):
+        type_error(
+            ctx.srcfile,
+            'no rational conversion for this operand',
+            Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
+        )
+    return _prelude_call('_rational_from_int', [arg], loc=arg.loc, ctx=ctx)
+
+
+def _rational_literal(numerator: int, denominator: int, *, loc: Span, ctx: Context) -> hir.AST:
+    """A normalized rational value from compile-time integer parts."""
+    from math import gcd
+    if denominator < 0:
+        numerator, denominator = -numerator, -denominator
+    common = gcd(numerator, denominator) or 1
+    numerator //= common
+    denominator //= common
+    parts = [
+        hir.Integer(loc, ty.IntegerLiteralType(numerator), '0d', numerator),
+        hir.Integer(loc, ty.IntegerLiteralType(denominator), '0d', denominator),
+    ]
+    return _prelude_call('_rational_make', parts, loc=loc, ctx=ctx)
+
+
+def _dispatch_rational(
+    fname: str,
+    args: list[hir.AST],
+    *,
+    loc: Span,
+    source_name: str,
+    ctx: Context,
+) -> hir.AST | None:
+    """Route `/` and any operation on a rational operand to the prelude.
+
+    Returns None when the operation is not a rational one.
+    """
+    involves_rational = any(_is_rational(arg.type, ctx=ctx) for arg in args)
+    if fname == '__truediv__':
+        if len(args) != 2:
+            return None
+        if not involves_rational and not all(
+            ctx.type_system.is_subtype(arg.type, 'int') for arg in args
+        ):
+            type_error(
+                ctx.srcfile,
+                f'no matching overload for operator `{source_name}`',
+                *[
+                    Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`')
+                    for arg in args
+                ],
+                hint='`/` divides integers and rationals exactly; use `//` for floor division',
+            )
+        constants = [_constant_integer(_unwrap_parens(arg), ctx=ctx) for arg in args]
+        if constants[1] == 0:
+            type_error(
+                ctx.srcfile,
+                'division by zero',
+                Pointer(span=args[1].loc, message='the divisor is the constant `0`'),
+            )
+        if not involves_rational and None not in constants:
+            numerator, denominator = cast(list[int], constants)
+            return _rational_literal(numerator, denominator, loc=loc, ctx=ctx)
+        if not involves_rational:
+            return _prelude_call(
+                '_rational_make',
+                [check_against(arg, 'int64', ctx=ctx) for arg in args],
+                loc=loc,
+                ctx=ctx,
+            )
+    if not involves_rational:
+        return None
+    if fname == '__unary_sub__' and len(args) == 1:
+        return _prelude_call('_rational_neg', args, loc=loc, ctx=ctx)
+    helper = _RATIONAL_BINARY_FUNCTIONS.get(fname)
+    if helper is None or len(args) != 2:
+        type_error(
+            ctx.srcfile,
+            f'operator `{source_name}` is not defined for rationals',
+            Pointer(span=loc, message='rationals support `+ - * /`, negation, and comparisons'),
+        )
+    operands = [_to_rational(arg, ctx=ctx) for arg in args]
+    return _prelude_call(helper, operands, loc=loc, ctx=ctx)
+
+
+def _real_literal(real: t1.Real, *, loc: Span, ctx: Context) -> hir.AST:
+    """A decimal literal such as `9.8` is the exact rational 49/5."""
+    def digits(number: t0.Number) -> tuple[int, int]:
+        if number.prefix != '0d':
+            not_implemented(ctx.srcfile, loc, 'non-decimal real literals')
+        text = number.src[2:] if number.src[:2].casefold() == '0d' else number.src
+        text = text.replace('_', '')
+        return int(text, 10), len(text)
+
+    numerator, _ = digits(real.whole)
+    denominator = 1
+    if real.fraction is not None:
+        fraction, count = digits(real.fraction)
+        denominator = 10 ** count
+        numerator = numerator * denominator + fraction
+    if real.exponent is not None:
+        if real.exponent.binary:
+            not_implemented(ctx.srcfile, loc, 'binary exponents in real literals')
+        power, _ = digits(real.exponent.value)
+        if real.exponent.positive:
+            numerator *= 10 ** power
+        else:
+            denominator *= 10 ** power
+    return _rational_literal(numerator, denominator, loc=loc, ctx=ctx)
+
+
 def _dispatch_builtin(
     fname: str,
     args: list[hir.AST],
@@ -3794,6 +3963,9 @@ def _dispatch_builtin(
         )
         for arg in args
     ]
+    rational = _dispatch_rational(fname, args, loc=loc, source_name=source_name, ctx=ctx)
+    if rational is not None:
+        return rational
     if (
         fname in {'__lshift__', '__rshift__'}
         and len(args) == 2
@@ -5376,6 +5548,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return name
             if name in builtins.builtin_type_aliases:
                 return builtins.builtin_type_aliases[name]
+            if name == 'rational' and RATIONAL_TYPE_NAME in ctx.binding_scopes:
+                return _rational_type(ctx, ast.loc)
             return name
 
         case p0.Atom(item=t1.Integer(value=value)):

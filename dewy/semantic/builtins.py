@@ -11,7 +11,7 @@ BINOP_DUNDER_MAP = {
     '+': '__add__',
     '-': '__sub__',
     '*': '__mul__',
-    # '/': '__truediv__',
+    '/': '__truediv__',
     '//': '__floordiv__',
     # '\\': '__solve__',
     '%': '__mod__',
