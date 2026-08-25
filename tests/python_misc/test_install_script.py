@@ -14,6 +14,7 @@ def _make_source_archive(path: Path) -> None:
     included = [
         REPO_ROOT / "VERSION",
         REPO_ROOT / "library" / "path.dewy",
+        REPO_ROOT / "library" / "math.dewy",
         REPO_ROOT / "library" / "rational.dewy",
         REPO_ROOT / "library" / "io.dewy",
         REPO_ROOT / "library" / "units.dewy",

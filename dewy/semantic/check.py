@@ -3917,6 +3917,89 @@ def _dispatch_rational(
     return _prelude_call(helper, operands, loc=loc, ctx=ctx)
 
 
+def _as_int64(arg: hir.AST, *, ctx: Context) -> hir.AST:
+    """An integer operand as `int64`, widening narrower fixed widths."""
+    if isinstance(arg.type, str) and arg.type in ty.FIXED_INTEGER_TYPES and arg.type != 'int64':
+        return hir.ValueCast(arg.loc, 'int64', arg)
+    return check_against(arg, 'int64', ctx=ctx)
+
+
+def _dispatch_pow(
+    args: list[hir.AST],
+    *,
+    loc: Span,
+    ctx: Context,
+) -> hir.AST:
+    """`base ^ exponent` over integers and rationals.
+
+    Integer bases with a non-negative exponent stay integers (folded when both
+    are constants, `_int_pow` otherwise); a negative constant exponent makes
+    the result a rational; rational bases accept any integer exponent.
+    """
+    if len(args) != 2:
+        raise ValueError('INTERNAL ERROR: `^` takes two operands')
+    base, exponent = args
+    exponent_value = _constant_integer(_unwrap_parens(exponent), ctx=ctx)
+    if not ctx.type_system.is_subtype(exponent.type, 'int'):
+        type_error(
+            ctx.srcfile,
+            'exponent must be an integer',
+            Pointer(span=exponent.loc, message=f'this has type `{type_to_dewy(exponent.type)}`'),
+        )
+    if _is_rational(base.type, ctx=ctx):
+        return _prelude_call(
+            '_rational_pow',
+            [base, _as_int64(exponent, ctx=ctx)],
+            loc=loc,
+            ctx=ctx,
+        )
+    if not ctx.type_system.is_subtype(base.type, 'int'):
+        type_error(
+            ctx.srcfile,
+            'no matching overload for operator `^`',
+            Pointer(span=base.loc, message=f'this has type `{type_to_dewy(base.type)}`'),
+            hint='`^` raises integers and rationals to integer powers',
+        )
+    base_value = _constant_integer(_unwrap_parens(base), ctx=ctx)
+    if exponent_value is not None and exponent_value < 0:
+        # Negative powers of integers are rationals: 2^(-3) is 1/8.
+        if base_value is not None:
+            if base_value == 0:
+                type_error(
+                    ctx.srcfile,
+                    'division by zero',
+                    Pointer(span=loc, message='zero raised to a negative power'),
+                )
+            return _rational_literal(1, base_value ** -exponent_value, loc=loc, ctx=ctx)
+        return _prelude_call(
+            '_rational_pow',
+            [
+                _to_rational(_as_int64(base, ctx=ctx), ctx=ctx),
+                _as_int64(exponent, ctx=ctx),
+            ],
+            loc=loc,
+            ctx=ctx,
+        )
+    if exponent_value is None and not ctx.type_system.is_subtype(exponent.type, 'uint'):
+        type_error(
+            ctx.srcfile,
+            'integer exponent must be known to be non-negative',
+            Pointer(span=exponent.loc, message='a negative exponent would make the result a rational'),
+            hint='use an unsigned exponent, or make the base a rational (`(1/1 * base) ^ n`)',
+        )
+    if base_value is not None and exponent_value is not None:
+        value = base_value ** exponent_value
+        return hir.Integer(loc, ty.IntegerLiteralType(value), '0d', value)
+    if base.type not in ('int', 'int64') and not isinstance(base.type, ty.IntegerLiteralType):
+        not_implemented(ctx.srcfile, loc, f'`^` on `{type_to_dewy(base.type)}` bases')
+    return _prelude_call(
+        '_int_pow',
+        [_as_int64(base, ctx=ctx), _as_int64(exponent, ctx=ctx)],
+        loc=loc,
+        ctx=ctx,
+    )
+
+
 def _real_literal(real: t1.Real, *, loc: Span, ctx: Context) -> hir.AST:
     """A decimal literal such as `9.8` is the exact rational 49/5."""
     def digits(number: t0.Number) -> tuple[int, int]:
@@ -3963,6 +4046,8 @@ def _dispatch_builtin(
         )
         for arg in args
     ]
+    if fname == '__pow__':
+        return _dispatch_pow(args, loc=loc, ctx=ctx)
     rational = _dispatch_rational(fname, args, loc=loc, source_name=source_name, ctx=ctx)
     if rational is not None:
         return rational

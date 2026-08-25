@@ -60,3 +60,35 @@ def test_true_division_needs_numbers() -> None:
 def test_rationals_need_the_prelude() -> None:
     with pytest.raises(UserError, match='rationals need the prelude'):
         check.typecheck_and_resolve(SrcFile(None, '$no_prelude = true\nlet a = 1/3'))
+
+
+def test_constant_integer_powers_fold() -> None:
+    declared = _declared('let a = 2^10\nlet b = (-3)^3')
+    assert isinstance(declared['a'].expr, hir.Integer) and declared['a'].expr.value == 1024
+    assert isinstance(declared['b'].expr, hir.Integer) and declared['b'].expr.value == -27
+
+
+def test_negative_constant_exponent_makes_a_rational() -> None:
+    declared = _declared('let a = 2^(-3)\nlet b = (2/3)^(-2)')
+    assert [arg.value for arg in declared['a'].expr.pos_args] == [1, 8]
+    assert declared['b'].expr.func.name.endswith('_rational_pow')
+    assert declared['b'].expr.type == _rational_type()
+
+
+def test_runtime_integer_power_routes_to_the_prelude() -> None:
+    declared = _declared('let n:int64 = 3\nlet e:uint8 = 2\nlet a = n^2\nlet b = n^e')
+    assert declared['a'].expr.func.name.endswith('_int_pow')
+    assert declared['b'].expr.func.name.endswith('_int_pow')
+    assert declared['a'].expr.type == 'int64'
+
+
+def test_runtime_signed_exponent_is_rejected() -> None:
+    with pytest.raises(TypeCheckError, match='known to be non-negative'):
+        _declared('let n:int64 = 3\nlet e:int64 = 2\nlet a = n^e')
+
+
+def test_power_base_must_be_numeric() -> None:
+    with pytest.raises(TypeCheckError, match='no matching overload for operator `\\^`'):
+        _declared('let a = "x"^2')
+    with pytest.raises(TypeCheckError, match='exponent must be an integer'):
+        _declared('let a = 2^(1/2)')

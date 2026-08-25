@@ -1,0 +1,13 @@
+# `^` raises integers and rationals to integer powers.
+let main = ():>int64 => {
+    let n:int64 = 3
+    let cube = n^3                    # 27 at runtime
+    let folded:int64 = 2^10           # 1024 at compile time
+    let eighth = 2^(-3)               # 1/8
+    let ratio = (2/3)^2               # 4/9
+    let inverted = (2/3)^(-2)         # 9/4
+    let e:uint8 = 4
+    let dynamic = n^e                 # 81
+    printl"{cube} {folded} {eighth} {ratio} {inverted} {dynamic}"
+    return cube + folded // 100 + eighth.denominator + ratio.numerator + inverted.numerator + dynamic // 10
+}

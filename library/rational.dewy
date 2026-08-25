@@ -61,3 +61,11 @@ let _rational_gt = (a:Rational b:Rational):>bool =>
     a.numerator * b.denominator >? b.numerator * a.denominator
 let _rational_ge = (a:Rational b:Rational):>bool =>
     a.numerator * b.denominator >=? b.numerator * a.denominator
+
+# `r ^ n` for any integer `n`: negative exponents invert the fraction.
+let _rational_pow = (a:Rational exponent:int64):>Rational => {
+    if exponent <? 0 {
+        return _rational_make(_int_pow(a.denominator (-exponent)) _int_pow(a.numerator (-exponent)))
+    }
+    return [numerator = _int_pow(a.numerator exponent) denominator = _int_pow(a.denominator exponent)]
+}
