@@ -217,6 +217,12 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'ArrayLength'
     if isinstance(node, hir.ArrayMethod):
         return f'ArrayMethod({node.name})'
+    if isinstance(node, hir.DictLookup):
+        return 'DictLookup'
+    if isinstance(node, hir.DictStore):
+        return 'DictStore'
+    if isinstance(node, hir.DictContains):
+        return 'DictContains'
     if isinstance(node, hir.IteratorExpression):
         return (
             f'IteratorExpression({node.target.name}, '
@@ -336,6 +342,12 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('array', node.array)]
     if isinstance(node, hir.ArrayMethod):
         return [('array', node.array)]
+    if isinstance(node, hir.DictLookup):
+        return [('keys', node.keys), ('values', node.values), ('key', node.key)]
+    if isinstance(node, hir.DictStore):
+        return [('keys', node.keys), ('values', node.values), ('key', node.key), ('value', node.value)]
+    if isinstance(node, hir.DictContains):
+        return [('keys', node.keys), ('key', node.key)]
     if isinstance(node, hir.IteratorExpression):
         return [('target', node.target), ('iterable', node.iterable)]
     if isinstance(node, hir.MultiIteratorExpression):
@@ -753,6 +765,15 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
     if isinstance(node, hir.ArrayMethod):
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text(f'.{node.name}'))
+    if isinstance(node, hir.DictLookup):
+        return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent), _text(']'))
+    if isinstance(node, hir.DictStore):
+        return _seq(
+            _to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent),
+            _text('] = '), _to_doc(node.value, 0, indent),
+        )
+    if isinstance(node, hir.DictContains):
+        return _seq(_to_doc(node.key, _CALL_PREC, indent), _text(' in? '), _to_doc(node.keys, _CALL_PREC, indent))
     if isinstance(node, hir.IteratorExpression):
         return _seq(
             _to_doc(node.target, 0, indent),

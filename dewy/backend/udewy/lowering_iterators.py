@@ -11,6 +11,7 @@ from ...reporting import Error, Pointer
 from ...semantic import hir, ty
 from ...semantic.errors import NotImplementedYet
 from .lowering_shared import (
+    ARRAY_LENGTH_OFFSET,
     STRING_DESCRIPTOR_SIZE,
     STRING_GRAPHEME_LENGTH_OFFSET,
     ArrayRepresentation,
@@ -161,7 +162,11 @@ class _IteratorLowering:
                     iterator.iterable
                 )
                 declarations.extend(array_prelude)
-                assert iterator.count is not None
+                if iterator.count is None and array_representation is not None:
+                    self._target_error(
+                        iterator.iterable,
+                        'a raw-represented array iterated with a runtime length',
+                    )
             else:
                 assert iterator.count is not None
             offset = self._new_iterator_temp(iterator)
@@ -294,6 +299,14 @@ class _IteratorLowering:
                 )
                 if string_value is not None
                 else self._int64_literal(iterator.loc, iterator.count)
+                if array_value is not None and iterator.count is not None
+                else self._load_i64_field(
+                    replace(array_value, type='int64')
+                    if isinstance(array_value, hir.ExpressedIdentifier)
+                    else array_value,
+                    ARRAY_LENGTH_OFFSET,
+                    iterator.loc,
+                )
                 if array_value is not None
                 else self._int64_literal(iterator.loc, iterator.count)
             )

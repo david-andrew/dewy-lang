@@ -541,6 +541,15 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 binding.type = ty.TYPE_TYPE
                 binding.type_value = type_value
                 return declaration
+            if (
+                isinstance(annotation, ty.TypeParameterize)
+                and annotation.t == 'dict'
+                and len(annotation.args) == 2
+                and isinstance(right, p0.Block)
+                and right.kind == '[]'
+                and (not right.inner or _dict_literal_block(right) is not None)
+            ):
+                return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=annotation)
             optional_payload = ty.optional_payload(annotation)
             expression_expected = (
                 optional_payload
@@ -647,6 +656,9 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
             ctx.refinements[declaration.binding_id] = value.type
         return declaration
 
+    dict_store = _tcr_dict_store(ast, ctx=ctx)
+    if dict_store is not None:
+        return dict_store
     target = tcr_assignment_target(ast.left, ctx=ctx)
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
     value = check_against(value, target.type, ctx=ctx)
@@ -675,6 +687,43 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         ctx.refinements.pop(target.binding_id, None)
         ctx.length_bounds.pop(target.binding_id, None)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
+
+
+def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
+    """Check `d[key] = value` when `d` names a dictionary."""
+    left = ast.left
+    if not isinstance(left, p0.BinOp):
+        return None
+    op = left.op
+    if isinstance(op, t2.QJuxtapose):
+        op = next((option for option in op.options if isinstance(option, t2.IndexJuxtapose)), op)
+    if not isinstance(op, t2.IndexJuxtapose):
+        return None
+    if not (isinstance(left.left, p0.Atom) and isinstance(left.left.item, t1.Identifier)):
+        return None
+    binding = ctx.binding_scopes.get(left.left.item.name)
+    if binding is None or binding.dict_arrays is None:
+        return None
+    if not isinstance(left.right, p0.Block) or len(left.right.inner) != 1:
+        user_error(
+            ctx.srcfile,
+            'dictionary store takes one key',
+            Pointer(span=left.right.loc, message='expected exactly one key expression'),
+        )
+    key_type, value_type = _dict_key_value_types(binding)
+    key = check_against(
+        typecheck_and_resolve_inner(left.right.inner[0], ctx=ctx, expected=key_type),
+        key_type,
+        ctx=ctx,
+    )
+    value = check_against(
+        typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=value_type),
+        value_type,
+        ctx=ctx,
+    )
+    keys, values = _dict_array_identifiers(binding, ast.loc, ctx=ctx)
+    _invalidate_dict_lengths(binding, ctx=ctx)
+    return hir.DictStore(ast.loc, ty.VOID_TYPE, keys, values, key, value)
 
 
 def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
@@ -1480,8 +1529,8 @@ def _array_binding_iterator(
 ) -> tuple[hir.IteratorExpression, Context]:
     """Build an iterator over a hidden fixed-length array binding."""
     array_binding = ctx.binding_registry.by_id[array_binding_id]
-    array_type = array_binding.type
-    assert isinstance(array_type, ty.ArrayType) and array_type.length is not None
+    array_type = ctx.refinements.get(array_binding_id, array_binding.type)
+    assert isinstance(array_type, ty.ArrayType)
     element_type = array_type.element
     binding = ctx.binding_registry.allocate_param(
         target_name,
@@ -1513,7 +1562,7 @@ def _array_binding_iterator(
             iterable,
             0,
             1,
-            array_type.length - 1,
+            None if array_type.length is None else array_type.length - 1,
             array_type.length,
         ),
         iterator_ctx,
@@ -1842,11 +1891,17 @@ def _tcr_loop_iterator(
         ),
         None,
     )
-    if dynamic_array is not None:
+    # Runtime-length arrays advance at runtime against their length. That is
+    # supported for pure `and` (zip-shortest) formulas, whose all-exhausted
+    # truth is false, so the loop cannot repeat forever.
+    lockstep_dynamic = dynamic_array is not None and all(
+        isinstance(token, int) or token == 'and' for token in formula
+    )
+    if dynamic_array is not None and not lockstep_dynamic:
         not_implemented(
             ctx.srcfile,
             dynamic_array.iterable.loc,
-            'dynamic-length arrays in multiiterator formulas',
+            'dynamic-length arrays in multiiterator formulas other than `and`',
         )
 
     counts = [iterator.count for iterator in iterators]
@@ -1864,7 +1919,7 @@ def _tcr_loop_iterator(
         if not _eval_iterator_formula(formula, active):
             stop = iteration
             break
-    repeats = stop is None
+    repeats = stop is None and not lockstep_dynamic
     typed_iterators: list[hir.IteratorExpression] = []
     for iterator in iterators:
         if (
@@ -2069,10 +2124,12 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         for mutated_name in _mutated_binding_names(body_ast):
             mutated_binding = ctx.binding_scopes.get(mutated_name)
             if mutated_binding is not None:
-                ctx.refinements.pop(mutated_binding.id, None)
-                body_ctx.refinements.pop(mutated_binding.id, None)
-                ctx.length_bounds.pop(mutated_binding.id, None)
-                body_ctx.length_bounds.pop(mutated_binding.id, None)
+                invalidated = [mutated_binding.id, *(mutated_binding.dict_arrays or ())]
+                for invalidated_id in invalidated:
+                    ctx.refinements.pop(invalidated_id, None)
+                    body_ctx.refinements.pop(invalidated_id, None)
+                    ctx.length_bounds.pop(invalidated_id, None)
+                    body_ctx.length_bounds.pop(invalidated_id, None)
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
@@ -2347,12 +2404,56 @@ def _dict_literal_block(ast: p0.AST) -> p0.Block | None:
     return None
 
 
+def _dict_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
+    """The dictionary binding a checked expression names, if any."""
+    while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+        node = node.items[0]
+    if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+        binding = ctx.binding_registry.by_id.get(node.binding_id)
+        if binding is not None and binding.dict_arrays is not None:
+            return binding
+    return None
+
+
+def _dict_array_identifiers(
+    binding: sb.Binding,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> tuple[hir.ExpressedIdentifier, hir.ExpressedIdentifier]:
+    """Identifiers for a dictionary's hidden key and value arrays."""
+    assert binding.dict_arrays is not None
+    result: list[hir.ExpressedIdentifier] = []
+    for array_id in binding.dict_arrays:
+        array_binding = ctx.binding_registry.by_id[array_id]
+        array_type = ctx.refinements.get(array_id, array_binding.type)
+        assert isinstance(array_type, ty.ArrayType)
+        result.append(
+            hir.ExpressedIdentifier(loc, array_type, array_binding.name, binding_id=array_id)
+        )
+    return result[0], result[1]
+
+
+def _dict_key_value_types(binding: sb.Binding) -> tuple[ty.TypeExpr, ty.TypeExpr]:
+    assert isinstance(binding.type, ty.TypeParameterize) and len(binding.type.args) == 2
+    return binding.type.args[0], binding.type.args[1]
+
+
+def _invalidate_dict_lengths(binding: sb.Binding, *, ctx: Context) -> None:
+    """A store may append: the hidden arrays' exact lengths are no longer known."""
+    assert binding.dict_arrays is not None
+    for array_id in binding.dict_arrays:
+        ctx.refinements.pop(array_id, None)
+        ctx.length_bounds.pop(array_id, None)
+
+
 def _tcr_dict_declare(
     name: str,
     loc: Span,
     block: p0.Block,
     *,
     ctx: Context,
+    annotation: ty.TypeParameterize | None = None,
 ) -> hir.AST:
     """Declare a dictionary as two hidden parallel arrays.
 
@@ -2364,8 +2465,13 @@ def _tcr_dict_declare(
     entries = [item for item in block.inner if isinstance(item, p0.BinOp)]
     keys_block = p0.Block(block.loc, [item.left for item in entries], '[]', None)
     values_block = p0.Block(block.loc, [item.right for item in entries], '[]', None)
-    keys = typecheck_and_resolve_inner(keys_block, ctx=ctx)
-    values = typecheck_and_resolve_inner(values_block, ctx=ctx)
+    expected_keys = expected_values = None
+    if annotation is not None:
+        key_type, value_type = annotation.args
+        expected_keys = ty.ArrayType(key_type, len(entries))
+        expected_values = ty.ArrayType(value_type, len(entries))
+    keys = typecheck_and_resolve_inner(keys_block, ctx=ctx, expected=expected_keys)
+    values = typecheck_and_resolve_inner(values_block, ctx=ctx, expected=expected_values)
     if not isinstance(keys.type, ty.ArrayType) or not isinstance(
         values.type, ty.ArrayType
     ):
@@ -2380,17 +2486,22 @@ def _tcr_dict_declare(
     for side, value in (('keys', keys), ('values', values)):
         hidden_name = f'__dewy_dict_{name}_{side}_{suffix}'
         binding = ctx.binding_registry.allocate(value, hidden_name, 'value', loc)
-        binding.type = value.type
+        assert isinstance(value.type, ty.ArrayType)
+        # The hidden arrays are growable (runtime-length) with the literal's
+        # exact length kept as a refinement until a store may append.
+        runtime_type = ty.ArrayType(value.type.element, None)
+        binding.type = runtime_type
         declaration = hir.Declare(
             loc,
             ty.VOID_TYPE,
             'let',
             hidden_name,
-            None,
+            runtime_type,
             value,
             binding_id=binding.id,
         )
         binding.declaration = declaration
+        ctx.refinements[binding.id] = value.type
         parts.append(declaration)
         part_ids.append(binding.id)
     dict_type = ty.TypeParameterize('dict', [keys.type.element, values.type.element])
@@ -2940,6 +3051,16 @@ def _mutated_binding_names(ast: p0.AST) -> set[str]:
             ):
                 names.add(left_name)
             if (
+                left_name is None
+                and isinstance(node.op, t1.Operator)
+                and node.op.symbol == '='
+                and isinstance(node.left, p0.BinOp)
+                and isinstance(node.left.left, p0.Atom)
+                and isinstance(node.left.left.item, t1.Identifier)
+            ):
+                # `d[k] = v` mutates the indexed binding (a dictionary or array).
+                names.add(node.left.left.item.name)
+            if (
                 left_name is not None
                 and isinstance(node.op, t1.Operator)
                 and node.op.symbol == '.'
@@ -3038,6 +3159,15 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             return _tcr_array_method(value, name, binop.loc, ctx=ctx)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        dictionary = _dict_binding(value, ctx=ctx)
+        if dictionary is not None:
+            keys, _values = _dict_array_identifiers(dictionary, binop.loc, ctx=ctx)
+            assert isinstance(keys.type, ty.ArrayType)
+            return hir.ArrayLength(
+                binop.loc,
+                ty.IntegerLiteralType(keys.type.length) if keys.type.length is not None else 'int64',
+                keys,
+            )
         if isinstance(value.type, ty.BinaryLiteralType):
             value = hir.RepresentationCast(
                 value.loc,
@@ -3916,6 +4046,22 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     source_place = array if isinstance(array, hir.Place) else None
     if source_place is not None:
         array = source_place.target
+    dictionary = _dict_binding(array, ctx=ctx)
+    if dictionary is not None:
+        if not isinstance(binop.right, p0.Block) or len(binop.right.inner) != 1:
+            user_error(
+                ctx.srcfile,
+                'dictionary lookup takes one key',
+                Pointer(span=binop.right.loc, message='expected exactly one key expression'),
+            )
+        key_type, value_type = _dict_key_value_types(dictionary)
+        key = check_against(
+            typecheck_and_resolve_inner(binop.right.inner[0], ctx=ctx, expected=key_type),
+            key_type,
+            ctx=ctx,
+        )
+        keys, values = _dict_array_identifiers(dictionary, binop.loc, ctx=ctx)
+        return hir.DictLookup(binop.loc, ty.optional(value_type), keys, values, key)
     if isinstance(array.type, ty.BinaryLiteralType):
         array = hir.RepresentationCast(
             array.loc,
@@ -4264,6 +4410,16 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         )
         if range_operand is not None:
             return _tcr_range_membership(left, range_operand, ctx=ctx)
+        dictionary = _dict_binding(right, ctx=ctx)
+        if dictionary is not None:
+            key_type, _value_type = _dict_key_value_types(dictionary)
+            keys, _values = _dict_array_identifiers(dictionary, binop.loc, ctx=ctx)
+            return hir.DictContains(
+                binop.loc,
+                'bool',
+                keys,
+                check_against(left, key_type, ctx=ctx),
+            )
     
     match binop.op:
         case t2.QJuxtapose():
@@ -5157,6 +5313,16 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             return ty.TypeParameterize(
                 'range',
                 [ast_to_type(element_ast, ctx=ctx)],
+            )
+
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
+            left=p0.Atom(item=t1.Identifier(name='dict')),
+            right=p0.Block(kind='<>', inner=[key_ast, value_ast]),
+        ):
+            return ty.TypeParameterize(
+                'dict',
+                [ast_to_type(key_ast, ctx=ctx), ast_to_type(value_ast, ctx=ctx)],
             )
 
         case p0.Block(kind='<>'|'()', inner=[inner]):

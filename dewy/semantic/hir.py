@@ -237,6 +237,35 @@ class ArrayLength(AST):
 
 
 @dataclass
+class DictLookup(AST):
+    """``d[key]`` on a dictionary: ``V | undefined`` by linear search over the
+    hidden key array, reading the matching value."""
+
+    keys: AST
+    values: AST
+    key: AST
+
+
+@dataclass
+class DictStore(AST):
+    """``d[key] = value``: replace the value of an existing key, else append
+    the entry (insertion order is the entry order)."""
+
+    keys: AST
+    values: AST
+    key: AST
+    value: AST
+
+
+@dataclass
+class DictContains(AST):
+    """``key in? d`` on a dictionary."""
+
+    keys: AST
+    key: AST
+
+
+@dataclass
 class ArrayMethod(AST):
     """A compiler-provided method bound to a named array binding.
 

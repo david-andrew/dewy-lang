@@ -1,0 +1,27 @@
+# Runtime dictionaries: stores append or replace, lookups yield `V|undefined`,
+# `in?` tests membership, `.length` counts entries, and iteration follows
+# insertion order even after growth.
+let main = ():>int64 => {
+    let counts:dict<string int64> = []
+    counts['apple'] = 3
+    counts['pear'] = 5
+    counts['apple'] = 4              # replaces, keeps position
+    let names = ['x' -> 1]
+    names['y'] = 2
+
+    let total:int64 = 0
+    let apple = counts['apple']
+    if apple is? int64 { total += apple }          # 4
+    let missing = counts['plum']
+    if missing is? undefined { total += 10 }        # 14
+    if 'pear' in? counts { total += 20 }            # 34
+    if 'plum' in? counts { total += 100 }
+    total += counts.length                          # 36
+
+    let order:int64 = 0
+    loop [k v] in counts {
+        order = order * 10 + v                      # 4 then 5 -> 45
+    }
+    loop [k v] in names { total += v }              # 36 + 1 + 2 = 39
+    return total + order - 42                       # 39 + 45 - 42 = 42
+}

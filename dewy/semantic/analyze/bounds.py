@@ -619,6 +619,22 @@ class _BoundsValidator:
         if isinstance(node, hir.ArrayMethod):
             self._eval(node.array, state, validate=validate)
             return None
+        if isinstance(node, hir.DictLookup):
+            self._eval(node.key, state, validate=validate)
+            return None
+        if isinstance(node, hir.DictContains):
+            self._eval(node.key, state, validate=validate)
+            return None
+        if isinstance(node, hir.DictStore):
+            self._eval(node.key, state, validate=validate)
+            self._eval(node.value, state, validate=validate)
+            # A store may append to both hidden arrays.
+            for array in (node.keys, node.values):
+                array_id = _runtime_array_id(array)
+                if array_id is not None:
+                    state.pop(_length_key(array_id), None)
+                    _drop_index_facts(state, array_id=array_id)
+            return None
         if isinstance(node, hir.StringLength):
             self._eval(node.string, state, validate=validate)
             length = self._string_length(node.string.type)

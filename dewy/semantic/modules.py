@@ -250,8 +250,8 @@ class ModuleCompiler:
                 if isinstance(rettype, ty.ArrayType) and rettype.length is None:
                     found = True
                     return
-            if isinstance(value, hir.ArrayMethod):
-                # Growth methods relocate array data into the arena.
+            if isinstance(value, (hir.ArrayMethod, hir.DictStore)):
+                # Growth methods and dictionary stores relocate data into the arena.
                 found = True
                 return
             if isinstance(value, hir.AST):

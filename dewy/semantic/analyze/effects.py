@@ -462,6 +462,19 @@ class _EffectAnalyzer:
                 return
             self._visit(node.array, params)
             return
+        if isinstance(node, hir.DictStore):
+            for array in (node.keys, node.values):
+                resolved = self._resolve_route(array, params)
+                if resolved is not None:
+                    binding_id, route, inner = resolved
+                    params[binding_id].add_mutate(route)
+                    for expr in inner:
+                        self._visit(expr, params)
+                else:
+                    self._visit(array, params)
+            self._visit(node.key, params)
+            self._visit(node.value, params)
+            return
         if isinstance(node, hir.RepresentationCast):
             # Representation casts may produce views that borrow the source
             # storage (`string as array<uint8>` is copy-on-write over the

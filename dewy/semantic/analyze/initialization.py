@@ -362,6 +362,17 @@ class _InitializationChecker:
                 parameters,
                 call_stack,
             )
+        if isinstance(node, (hir.DictLookup, hir.DictStore, hir.DictContains)):
+            current = initialized
+            for child in (
+                node.keys,
+                getattr(node, 'values', None),
+                node.key,
+                getattr(node, 'value', None),
+            ):
+                if child is not None:
+                    current = self._check_eager(child, current, parameters, call_stack)
+            return current
         if isinstance(node, hir.IteratorExpression):
             return self._check_eager(
                 node.iterable,

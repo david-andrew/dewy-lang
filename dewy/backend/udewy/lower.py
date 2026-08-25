@@ -43,6 +43,7 @@ from ...semantic.analyze.effects import ProgramEffects, analyze_effects
 from ...semantic.errors import NotImplementedYet
 from ...semantic.hir_display import type_to_dewy
 from .lowering_arrays import _ArrayLowering
+from .lowering_dicts import _DictLowering
 from .lowering_flow import _FlowLowering
 from .lowering_iterators import _IteratorLowering
 from .lowering_objects import _ObjectLowering
@@ -66,6 +67,7 @@ from .lowering_strings import _StringLowering
 
 
 class _Lowerer(
+    _DictLowering,
     _StringLowering,
     _ArrayLowering,
     _ObjectLowering,
@@ -1368,6 +1370,18 @@ class _Lowerer(
                 array_use='grow',
             )
             return
+        if isinstance(node, (hir.DictLookup, hir.DictContains)):
+            self._discover_node(node.keys, scope, current_function, array_use='index_read')
+            if isinstance(node, hir.DictLookup):
+                self._discover_node(node.values, scope, current_function, array_use='index_read')
+            self._discover_node(node.key, scope, current_function)
+            return
+        if isinstance(node, hir.DictStore):
+            self._discover_node(node.keys, scope, current_function, array_use='grow')
+            self._discover_node(node.values, scope, current_function, array_use='grow')
+            self._discover_node(node.key, scope, current_function)
+            self._discover_node(node.value, scope, current_function)
+            return
         if isinstance(node, hir.StringLength):
             self._discover_node(node.string, scope, current_function)
             return
@@ -1916,6 +1930,27 @@ class _Lowerer(
             return replace(
                 node,
                 array=self._require_node(self._transform_node(node.array)),
+            )
+        if isinstance(node, hir.DictLookup):
+            return replace(
+                node,
+                keys=self._require_node(self._transform_node(node.keys)),
+                values=self._require_node(self._transform_node(node.values)),
+                key=self._require_node(self._transform_node(node.key)),
+            )
+        if isinstance(node, hir.DictContains):
+            return replace(
+                node,
+                keys=self._require_node(self._transform_node(node.keys)),
+                key=self._require_node(self._transform_node(node.key)),
+            )
+        if isinstance(node, hir.DictStore):
+            return replace(
+                node,
+                keys=self._require_node(self._transform_node(node.keys)),
+                values=self._require_node(self._transform_node(node.values)),
+                key=self._require_node(self._transform_node(node.key)),
+                value=self._require_node(self._transform_node(node.value)),
             )
         if isinstance(node, hir.StringLength):
             return replace(
@@ -2974,6 +3009,12 @@ class _Lowerer(
                 )
             )
             return prelude, self._array_load(address, node.type, node.loc)
+        if isinstance(node, hir.DictLookup):
+            return self._extract_dict_lookup(node)
+        if isinstance(node, hir.DictContains):
+            return self._extract_dict_contains(node)
+        if isinstance(node, hir.DictStore):
+            return self._extract_dict_store(node)
         if isinstance(node, hir.FunctionCall):
             if isinstance(node.func, hir.ArrayMethod):
                 return self._extract_array_method_call(node)

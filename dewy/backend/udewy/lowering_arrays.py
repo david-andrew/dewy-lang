@@ -1041,6 +1041,14 @@ class _ArrayLowering:
             {},
         )
 
+    def _is_word_element(self, element: ty.Type) -> bool:
+        """Elements copied as one word: scalars and immutable string handles."""
+        return (
+            element == 'bool'
+            or ty.fixed_integer_layout(element) is not None
+            or self._is_string_valued(element)
+        )
+
     def _array_grow_statements(
         self,
         descriptor: hir.AST,
@@ -1136,8 +1144,8 @@ class _ArrayLowering:
         if not isinstance(array_type, ty.ArrayType):
             raise TypeError('INTERNAL ERROR: array method receiver is not an array')
         element_type = array_type.element
-        if not (element_type == 'bool' or ty.fixed_integer_layout(element_type) is not None):
-            self._target_error(node, 'growing an array whose elements are not word scalars')
+        if not self._is_word_element(element_type):
+            self._target_error(node, 'growing an array whose elements are not word scalars or string handles')
         loc = node.loc
         prelude, descriptor = self._extract_expression(method.array)
         if isinstance(descriptor, hir.ExpressedIdentifier):
@@ -1240,10 +1248,10 @@ class _ArrayLowering:
             )
         if arena:
             element = array_type.element
-            if not (element == 'bool' or ty.fixed_integer_layout(element) is not None):
+            if not self._is_word_element(element):
                 self._target_error(
                     node,
-                    'an arena-backed array whose elements are not word scalars',
+                    'an arena-backed array whose elements are not word scalars or string handles',
                 )
         source_prelude, source = self._extract_expression(node)
         element_bytes, _signed = self._array_element_layout(

@@ -296,3 +296,49 @@ def test_union_member_order_is_canonical_across_spellings() -> None:
     assert declared == joined
     with_undefined = ty.runtime_union_members(ty.TypeOr(['string', 'undefined', 'int64']))
     assert with_undefined is not None and with_undefined[0] == 'undefined'
+
+
+def test_dict_store_lookup_and_membership_check() -> None:
+    root = _check("""
+let f = ():>int64 => {
+    let d:dict<string int64> = []
+    d['a'] = 1
+    let v = d['a']
+    let present = 'a' in? d
+    let n = d.length
+    return 0
+}
+""")
+    body = root.items[0].expr.body
+    kinds = [type(item).__name__ for item in body.items]
+    assert 'DictStore' in kinds
+    declared = {item.name: item for item in body.items if isinstance(item, hir.Declare)}
+    assert isinstance(declared['v'].expr, hir.DictLookup)
+    assert declared['v'].expr.type == ty.optional('int64')
+    assert isinstance(declared['present'].expr, hir.DictContains)
+    assert isinstance(declared['n'].expr, hir.ArrayLength)
+
+
+def test_dict_key_and_value_types_are_checked() -> None:
+    with pytest.raises((TypeCheckError, UserError)):
+        _check("let f = ():>int64 => { let d:dict<string int64> = [] d[1] = 2 return 0 }")
+    with pytest.raises((TypeCheckError, UserError)):
+        _check("let f = ():>int64 => { let d:dict<string int64> = [] d['a'] = 'b' return 0 }")
+
+
+def test_grown_dict_iterates_in_lockstep_at_runtime() -> None:
+    root = _check("""
+let f = ():>int64 => {
+    let d = ['a' -> 1]
+    d['b'] = 2
+    let total:int64 = 0
+    loop [k v] in d { total += v }
+    return total
+}
+""")
+    body = root.items[0].expr.body
+    flow = next(item for item in body.items if isinstance(item, hir.Flow))
+    condition = flow.arms[0].condition
+    assert isinstance(condition, hir.MultiIteratorExpression)
+    assert all(iterator.count is None for iterator in condition.iterators)
+    assert not condition.repeats_when_exhausted
