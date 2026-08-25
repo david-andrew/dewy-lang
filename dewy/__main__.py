@@ -35,12 +35,13 @@ if args.file is None:
 # compile the program and output udewy source code
 path = Path(args.file)
 srcfile = SrcFile.from_path(path)
-udewy_src = codegen(srcfile)
+target = cast(BackendName, args.target or identify_host_target())
+udewy_src = codegen(srcfile, target=target)
 
 # set up udewy options, and save the udewy source code to a cache file
 options = EntryPointOptions(
     compile_only=args.compile,
-    target=cast(BackendName, args.target or identify_host_target()),
+    target=target,
     #TODO: for now wasm extra args are ignored
 )
 udewy_path = cache_artifact(path, ".udewy")

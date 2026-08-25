@@ -60,6 +60,7 @@ LOWERED_CASES = [
     ('array_growth.dewy', 42),
     ('array_index_facts.dewy', 42),
     ('dict_runtime.dewy', 42),
+    ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
     ('array_value_semantics.dewy', 42),
@@ -289,6 +290,25 @@ def test_dict_iteration_unpacks_entries(
         'I give star trek a 89 out of 100\n'
         'I give legend of the galactic heroes a 100 out of 100\n'
         '3\n'
+    )
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_main_receives_argv_as_strings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    emitted = codegen(SrcFile.from_path(fixtures / 'argv_echo.dewy'))
+    udewy_path = tmp_path / 'argv_echo.udewy'
+    udewy_path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, ['alpha', 'béta', '👨‍👩‍👧‍👦 z']) == 0
+    assert capfd.readouterr().out == (
+        '4\n'
+        '1: alpha (5)\n'
+        '2: béta (4)\n'
+        '3: 👨‍👩‍👧‍👦 z (3)\n'
     )
 
 

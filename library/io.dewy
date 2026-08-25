@@ -1,10 +1,15 @@
-# Linux x86_64 only. `write` is syscall 1; stdout is fd 1.
-# Other targets need a host write capability Dewy does not have yet.
-
+# Portable printing. The target layer provides `_write_stdout`/`_write_stderr`;
+# everything here is target-independent policy. `$target` is resolved at
+# compile time (the same gating udewy uses), so only the matching layer is
+# imported. The native backends and the C backend all run on the Linux
+# syscall layer for now.
+if $target =? "x86_64" { from p"linux/io.dewy" import (_write_stdout _write_stderr) }
+if $target =? "riscv"  { from p"linux/io.dewy" import (_write_stdout _write_stderr) }
+if $target =? "arm"    { from p"linux/io.dewy" import (_write_stdout _write_stderr) }
+if $target =? "c"      { from p"linux/io.dewy" import (_write_stdout _write_stderr) }
 let _print_string = (s:string):>void => {
     let bytes:array<uint8> = s as array<uint8>
-    let data:int64 = __load_i64__(bytes)
-    let written:int64 = __syscall3__(1 1 data bytes.length)
+    let written:int64 = _write_stdout(bytes)
     return void
 }
 

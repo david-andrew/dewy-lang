@@ -7,6 +7,7 @@ from ...reporting import SrcFile
 from ...semantic import builtins, check, hir, ty
 from ...semantic.hir_display import type_to_dewy
 from . import lower
+from .lowering_shared import ARGC_NAME, ARGV_NAME
 
 TAB = '    '
 
@@ -97,9 +98,9 @@ class EmitContext:
 
 
 
-def codegen(srcfile:SrcFile) -> str:
+def codegen(srcfile:SrcFile, *, target: str = 'x86_64') -> str:
     """Type-check Dewy source and emit equivalent udewy source."""
-    ast = check.typecheck_and_resolve(srcfile, include_prelude=True)
+    ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target)
     return codegen_inner(ast, srcfile)
 
 def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
@@ -138,6 +139,8 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
             program.startup_symbol,
             program.user_main_symbol,
             functions,
+            argv_prologue=program.argv_prologue,
+            argv_value=program.argv_value,
         )
     elif 'main' not in functions:
         functions['main'] = hir.FunctionLiteral(
@@ -174,8 +177,16 @@ def _entrypoint_wrapper(
     startup_symbol: str,
     user_main_symbol: str | None,
     functions: dict[str, hir.FunctionLiteral],
+    *,
+    argv_prologue: list[hir.AST] | None = None,
+    argv_value: hir.AST | None = None,
 ) -> hir.FunctionLiteral:
-    """Call module startup before the optional source-defined entrypoint."""
+    """Call module startup before the optional source-defined entrypoint.
+
+    When the user's ``main`` takes the command line, the wrapper receives the
+    C ``argc``/``argv`` words from ``_start`` and runs the lowered prologue
+    that turns them into an ``array<string>`` before the call.
+    """
     startup_call = hir.FunctionCall(
         root.loc,
         ty.VOID_TYPE,
@@ -194,21 +205,30 @@ def _entrypoint_wrapper(
     else:
         user_main = functions[user_main_symbol]
         rettype = user_main.rettype
+        call_args: list[hir.AST] = []
+        if argv_prologue is not None and argv_value is not None:
+            items.extend(argv_prologue)
+            call_args = [argv_value]
         call = hir.FunctionCall(
             root.loc,
             rettype,
             hir.ExpressedIdentifier(root.loc, user_main.type, user_main_symbol),
-            [],
+            call_args,
             {},
         )
         if rettype == ty.VOID_TYPE:
             items.extend([call, hir.Return(root.loc, ty.BOTTOM_TYPE, None)])
         else:
             items.append(hir.Return(root.loc, ty.BOTTOM_TYPE, call))
+    params: list[hir.Param | hir.BoundParam] = []
+    param_types: list[ty.PosOrKwArg] = []
+    if argv_prologue is not None:
+        params = [hir.Param(ARGC_NAME, 'int64'), hir.Param(ARGV_NAME, 'int64')]
+        param_types = [ty.PosOrKwArg(ARGC_NAME, 'int64'), ty.PosOrKwArg(ARGV_NAME, 'int64')]
     return hir.FunctionLiteral(
         root.loc,
-        ty.FunctionType([], [], None, rettype),
-        [],
+        ty.FunctionType(param_types, [], None, rettype),
+        params,
         [],
         None,
         rettype,

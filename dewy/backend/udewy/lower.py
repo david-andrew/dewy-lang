@@ -180,7 +180,14 @@ class _Lowerer(
         self._classify_array_representations()
         self._analyze_string_results()
         self._check_captures()
-        self.needs_startup = any(
+        self.user_main_takes_argv = any(
+            isinstance(item, hir.Declare)
+            and item.name == 'main'
+            and isinstance(item.expr, hir.FunctionLiteral)
+            and bool(item.expr.pos_or_kw_args)
+            for item in self.root.items
+        )
+        self.needs_startup = self.user_main_takes_argv or any(
             not (
                 isinstance(item, hir.Declare)
                 and (
@@ -258,6 +265,10 @@ class _Lowerer(
                 raise TypeError('INTERNAL ERROR: top-level startup did not lower to a block')
             startup_items = startup.items
         main = self.module_scope.bindings.get('main')
+        argv_prologue: list[hir.AST] | None = None
+        argv_value: hir.AST | None = None
+        if self.user_main_takes_argv:
+            argv_prologue, argv_value = self._build_argv_prologue(self.root.loc)
         user_main_symbol = (
             main.function.symbol
             if main is not None and main.function is not None
@@ -270,6 +281,8 @@ class _Lowerer(
             user_main_symbol,
             self.startup_symbol,
             self.needs_startup,
+            argv_prologue,
+            argv_value,
         )
 
     def _lower_function(self, function: _FunctionDef) -> LoweredFunction:

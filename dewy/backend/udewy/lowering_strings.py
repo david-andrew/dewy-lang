@@ -14,6 +14,8 @@ from ...reporting import Span
 from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
+    ARGC_NAME,
+    ARGV_NAME,
     ARRAY_BORROWED_STATIC,
     ARRAY_CAPACITY_OFFSET,
     ARRAY_DATA_OFFSET,
@@ -2226,6 +2228,185 @@ class _StringLowering:
             scan_loop,
             final_boundary,
         ], grapheme_count
+
+    def _string_from_bytes(
+        self,
+        data_pointer: hir.AST,
+        byte_length: hir.ExpressedIdentifier,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Copy ``byte_length`` bytes into the arena and build a segmented string."""
+        statements: list[hir.AST] = []
+
+        def declare(suffix: str, value: hir.AST) -> hir.ExpressedIdentifier:
+            name = self._new_string_temp(loc, 'int64', suffix).name
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value))
+            return hir.ExpressedIdentifier(loc, 'int64', name)
+
+        data = declare(
+            'data',
+            self._arena_allocation(
+                self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc), loc
+            ),
+        )
+        index = declare('copy_index', self._int64_literal(loc, 0))
+        statements.append(
+            hir.Flow(
+                loc,
+                ty.VOID_TYPE,
+                [
+                    hir.LoopArm(
+                        loc,
+                        ty.VOID_TYPE,
+                        self._int64_comparison('__lt__', index, byte_length, loc),
+                        hir.Block(
+                            loc,
+                            ty.VOID_TYPE,
+                            [
+                                self._intrinsic_call(
+                                    '__store_u8__',
+                                    [
+                                        self._intrinsic_call(
+                                            '__load_u8__',
+                                            [self._int64_binary('__add__', data_pointer, index, loc)],
+                                            'uint8',
+                                            loc,
+                                        ),
+                                        self._int64_binary('__add__', data, index, loc),
+                                    ],
+                                    ty.VOID_TYPE,
+                                    loc,
+                                ),
+                                hir.Assign(
+                                    loc,
+                                    ty.VOID_TYPE,
+                                    index,
+                                    '=',
+                                    self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc),
+                                ),
+                            ],
+                            True,
+                        ),
+                    )
+                ],
+                None,
+            )
+        )
+        boundaries = declare(
+            'boundaries',
+            self._arena_allocation(
+                self._int64_binary(
+                    '__mul__',
+                    self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc),
+                    self._int64_literal(loc, 4),
+                    loc,
+                ),
+                loc,
+            ),
+        )
+        segmentation, grapheme_count = self._utf8_segmentation(loc, data, byte_length, boundaries)
+        statements.extend(segmentation)
+        descriptor = self._new_string_temp(loc, ty.StringType())
+        descriptor_word = replace(descriptor, type='int64')
+        statements.extend([
+            hir.Declare(
+                loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64',
+                self._arena_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+            ),
+            self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, data, loc),
+            self._store_i64_field(descriptor_word, STRING_BYTE_LENGTH_OFFSET, byte_length, loc),
+            self._store_i64_field(descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
+            self._store_i64_field(descriptor_word, STRING_GRAPHEME_LENGTH_OFFSET, grapheme_count, loc),
+            self._store_i64_field(descriptor_word, STRING_START_OFFSET, self._int64_literal(loc, 0), loc),
+        ])
+        return statements, descriptor
+
+    def _build_argv_prologue(self, loc: Span) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Turn the C ``argc``/``argv`` into a growable ``array<string>``."""
+        argc = hir.ExpressedIdentifier(loc, 'int64', ARGC_NAME)
+        argv = hir.ExpressedIdentifier(loc, 'int64', ARGV_NAME)
+        element = ty.StringType()
+        array_type = ty.ArrayType(element, None)
+        statements, args = self._allocate_array_value(ty.ArrayType(element, 0), loc)
+        args_array = replace(args, type=array_type)
+        index = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('argv_index'))
+        pointer = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('argv_pointer'))
+        length = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'argv_length').name)
+        strlen_loop = hir.Flow(
+            loc,
+            ty.VOID_TYPE,
+            [
+                hir.LoopArm(
+                    loc,
+                    ty.VOID_TYPE,
+                    self._bool_not(
+                        self._typed_equality(
+                            replace(
+                                self._intrinsic_call(
+                                    '__load_u8__',
+                                    [self._int64_binary('__add__', pointer, length, loc)],
+                                    'uint8',
+                                    loc,
+                                ),
+                                type='int64',
+                            ),
+                            self._int64_literal(loc, 0),
+                            'int64',
+                            loc,
+                        )
+                    ),
+                    hir.Block(
+                        loc,
+                        ty.VOID_TYPE,
+                        [hir.Assign(loc, ty.VOID_TYPE, length, '=', self._int64_binary('__add__', length, self._int64_literal(loc, 1), loc))],
+                        True,
+                    ),
+                )
+            ],
+            None,
+        )
+        string_statements, string = self._string_from_bytes(pointer, length, loc)
+        push_method = hir.ArrayMethod(
+            loc,
+            ty.FunctionType([ty.PosOrKwArg('value', element)], [], None, ty.VOID_TYPE),
+            args_array,
+            'push',
+        )
+        push_prelude, push = self._extract_array_method_call(
+            hir.FunctionCall(loc, ty.VOID_TYPE, push_method, [string], {})
+        )
+        body = hir.Block(
+            loc,
+            ty.VOID_TYPE,
+            [
+                hir.Declare(
+                    loc, ty.VOID_TYPE, 'let', pointer.name, 'int64',
+                    self._intrinsic_call(
+                        '__load_i64__',
+                        [self._int64_binary('__add__', argv, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)],
+                        'int64',
+                        loc,
+                    ),
+                ),
+                hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._int64_literal(loc, 0)),
+                strlen_loop,
+                *string_statements,
+                *push_prelude,
+                push,
+                hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc)),
+            ],
+            True,
+        )
+        statements.extend([
+            hir.Declare(loc, ty.VOID_TYPE, 'let', index.name, 'int64', self._int64_literal(loc, 0)),
+            hir.Flow(
+                loc,
+                ty.VOID_TYPE,
+                [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, argc, loc), body)],
+                None,
+            ),
+        ])
+        return statements, args_array
 
     def _materialize_interpolated_string(
         self,

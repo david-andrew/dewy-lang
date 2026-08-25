@@ -13,7 +13,7 @@ from . import bindings as sb
 from . import builtins, hir, ty
 from .analyze import bounds, initialization
 from .errors import user_error
-from .prelude import PRELUDE_FILES
+from .prelude import prelude_files
 
 
 @dataclass
@@ -32,8 +32,9 @@ class ModuleRecord:
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
-    def __init__(self, entry: SrcFile):
+    def __init__(self, entry: SrcFile, target: str = 'x86_64'):
         self.entry = entry
+        self.target = target
         self.type_system = ty.TypeSystem()
         builtins.apply_builtin_promote_rules(self.type_system)
         self.registry = sb.BindingRegistry()
@@ -42,13 +43,14 @@ class ModuleCompiler:
         self.stack: list[Path] = []
         self.prelude_bindings: dict[str, sb.Binding] = {}
         self.prelude_loaded = False
+        self.prelude_paths: set[Path] = set()
         self.finished_roots: dict[int, hir.Block] = {}
 
     def _ensure_prelude(self) -> None:
         if self.prelude_loaded:
             return
         self.prelude_loaded = True
-        for path in PRELUDE_FILES:
+        for path in prelude_files(self.target):
             resolved = path.resolve()
             if resolved in self.stack:
                 continue
@@ -73,6 +75,8 @@ class ModuleCompiler:
         cached = self.records.get(path)
         if cached is not None:
             return cached
+        if prelude:
+            self.prelude_paths.add(path)
         if path in self.stack:
             cycle = [*self.stack[self.stack.index(path):], path]
             source = importer or self.entry
@@ -99,7 +103,7 @@ class ModuleCompiler:
         srcfile = self.entry if entry else SrcFile.from_path(path)
         from . import check
 
-        block, no_prelude = check._parse_module(srcfile)
+        block, no_prelude = check._parse_module(srcfile, target=self.target)
         if not prelude and not no_prelude:
             self._ensure_prelude()
         root, ctx = check._typecheck_module(
@@ -108,6 +112,7 @@ class ModuleCompiler:
             type_system=self.type_system,
             registry=self.registry,
             module_loader=self,
+            target=self.target,
             prelude_bindings=(
                 self.prelude_bindings
                 if prelude or not no_prelude
@@ -148,19 +153,29 @@ class ModuleCompiler:
                 'imports require a file-backed source',
                 Pointer(span=loc, message='this source has no containing directory'),
             )
+        importer_path = ctx.srcfile.path.resolve()
         return self.load(
             ctx.srcfile.path.parent / path_text,
             importer=ctx.srcfile,
             loc=loc,
+            # A module imported by a prelude file is prelude too: pruned when
+            # unused and named as part of the prelude.
+            prelude=importer_path in self.prelude_paths,
         )
 
     @staticmethod
     def _module_slug(record: ModuleRecord) -> str:
-        stem = re.sub(
-            r'[^A-Za-z0-9_]+',
-            '_',
-            record.path.stem if record.path is not None else 'memory',
-        ).strip('_')
+        from .prelude import library
+
+        raw = 'memory'
+        if record.path is not None:
+            raw = record.path.stem
+            try:
+                relative = record.path.resolve().relative_to(library.resolve())
+                raw = '_'.join([*relative.parts[:-1], relative.stem])
+            except ValueError:
+                pass
+        stem = re.sub(r'[^A-Za-z0-9_]+', '_', raw).strip('_')
         if record.prelude:
             return f'prelude_{stem or "module"}'
         return f'{record.index + 1}_{stem or "module"}'
@@ -237,8 +252,10 @@ class ModuleCompiler:
     # Prelude declarations the backend may call without a source reference.
     BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc'})
 
-    def _program_needs_arena(self) -> bool:
-        """Whether lowering will call the arena: any runtime-length array result."""
+    def _program_needs_arena(self, extra_roots: list[Any] = ()) -> bool:
+        """Whether lowering will call the arena: a runtime-length array result,
+        growth method, dictionary store, or `main(args)` in the program or in
+        the prelude declarations it uses."""
         found = False
 
         def walk(value: Any) -> None:
@@ -252,6 +269,15 @@ class ModuleCompiler:
                     return
             if isinstance(value, (hir.ArrayMethod, hir.DictStore)):
                 # Growth methods and dictionary stores relocate data into the arena.
+                found = True
+                return
+            if (
+                isinstance(value, hir.Declare)
+                and value.name == 'main'
+                and isinstance(value.expr, hir.FunctionLiteral)
+                and value.expr.pos_or_kw_args
+            ):
+                # `main(args)` builds the argument strings in the arena.
                 found = True
                 return
             if isinstance(value, hir.AST):
@@ -269,6 +295,8 @@ class ModuleCompiler:
         for record in self.order:
             if not record.prelude:
                 walk(record.root)
+        for root in extra_roots:
+            walk(root)
         return found
 
     def _needed_prelude_binding_ids(self) -> set[int]:
@@ -284,19 +312,27 @@ class ModuleCompiler:
             for item in record.root.items
             if isinstance(item, hir.Declare) and item.binding_id is not None
         ]
-        if self._program_needs_arena():
+        def close_over_references() -> None:
+            changed = True
+            while changed:
+                changed = False
+                for item in prelude_items:
+                    if item.binding_id not in needed:
+                        continue
+                    before = len(needed)
+                    self._collect_referenced_binding_ids(item.expr, needed)
+                    changed = changed or len(needed) > before
+
+        close_over_references()
+        # Arena consumers may live in prelude code the program pulled in
+        # (for example `read_bytes` growing its result), so include the
+        # needed prelude declarations when deciding whether to keep the arena.
+        needed_prelude = [item for item in prelude_items if item.binding_id in needed]
+        if self._program_needs_arena(extra_roots=needed_prelude):
             for item in prelude_items:
                 if item.name in self.BACKEND_RUNTIME_HELPERS and item.binding_id is not None:
                     needed.add(item.binding_id)
-        changed = True
-        while changed:
-            changed = False
-            for item in prelude_items:
-                if item.binding_id not in needed:
-                    continue
-                before = len(needed)
-                self._collect_referenced_binding_ids(item.expr, needed)
-                changed = changed or len(needed) > before
+            close_over_references()
         return needed
 
     def finish(self, entry: ModuleRecord) -> hir.Block:
@@ -338,8 +374,9 @@ def typecheck_program(
     srcfile: SrcFile,
     *,
     include_prelude: bool = True,
+    target: str = 'x86_64',
 ) -> hir.Block:
-    compiler = ModuleCompiler(srcfile)
+    compiler = ModuleCompiler(srcfile, target)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)
         merged = compiler.finish(entry)
@@ -347,7 +384,7 @@ def typecheck_program(
 
     from . import check
 
-    block, no_prelude = check._parse_module(srcfile)
+    block, no_prelude = check._parse_module(srcfile, target=target)
     if not no_prelude:
         compiler._ensure_prelude()
     root, ctx = check._typecheck_module(
@@ -356,6 +393,7 @@ def typecheck_program(
         type_system=compiler.type_system,
         registry=compiler.registry,
         module_loader=compiler,
+        target=target,
         prelude_bindings=compiler.prelude_bindings if not no_prelude else None,
     )
     exports = {

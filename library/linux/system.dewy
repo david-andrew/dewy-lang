@@ -1,0 +1,89 @@
+# Linux x86_64 system facilities.  Future targets can provide the same public
+# bindings with platform-appropriate implementations.
+
+# The Time dimension has already done its job by this boundary, so the
+# transmute exposes Duration's canonical nanosecond representation.
+let sleep = (duration:Duration<uint64>):>void => {
+    let total_nanoseconds:uint64 = duration transmute uint64
+    let request:int64 = __alloca__(16)
+    let request_nanoseconds:int64 = request + 8
+    __store_u64__(__unsigned_idiv__(total_nanoseconds 1000000000) request)
+    __store_u64__(__unsigned_mod__(total_nanoseconds 1000000000) request_nanoseconds)
+    let status:int64 = __syscall2__(35 request 0)
+    return void
+}
+
+# Arena allocation: bump allocation over anonymous mmap chunks. This is the
+# first dynamic storage tier of the ownership model; storage lives for the
+# whole process until scoped arenas land. Sizes round up to 8 bytes.
+let _arena_cursor:int64 = 0
+let _arena_end:int64 = 0
+
+let _arena_alloc = (size:int64):>int64 => {
+    let aligned:int64 = ((size + 7) // 8) * 8
+    if _arena_cursor + aligned >? _arena_end {
+        let chunk:int64 = 1048576
+        if aligned >? chunk { chunk = aligned }
+        # mmap(NULL chunk PROT_READ|PROT_WRITE MAP_PRIVATE|MAP_ANONYMOUS fd=-1 0)
+        let base:int64 = __syscall6__(9 0 chunk 3 34 (-1) 0)
+        _arena_cursor = base
+        _arena_end = base + chunk
+    }
+    let result:int64 = _arena_cursor
+    _arena_cursor = _arena_cursor + aligned
+    return result
+}
+
+# File access over Linux syscalls: open(2)=2, read=0, write=1, close=3,
+# access=21. Paths are copied into a NUL-terminated buffer for the kernel.
+# Failures report through empty results and `false` until errors as values
+# land.
+let _c_path = (path:string):>array<uint8> => {
+    let bytes:array<uint8> = path as array<uint8>
+    let buffer:array<uint8> = []
+    loop b in bytes buffer.push(b)
+    buffer.push(0)
+    return buffer
+}
+
+let file_exists = (path:string):>bool => {
+    let c_path = _c_path(path)
+    return __syscall2__(21 __load_i64__(c_path) 0) =? 0
+}
+
+let read_bytes = (path:string):>array<uint8> => {
+    let contents:array<uint8> = []
+    let c_path = _c_path(path)
+    let fd:int64 = __syscall3__(2 __load_i64__(c_path) 0 0)
+    if fd <? 0 { return contents }
+    let chunk:int64 = __alloca__(4096)
+    let count:int64 = __syscall3__(0 fd chunk 4096)
+    loop count >? 0 {
+        let i:int64 = 0
+        loop i <? count {
+            let address:int64 = chunk + i
+            let byte:uint8 = __load_u8__(address)
+            contents.push(byte)
+            i += 1
+        }
+        count = __syscall3__(0 fd chunk 4096)
+    }
+    let closed:int64 = __syscall1__(3 fd)
+    return contents
+}
+
+let write_bytes = (path:string bytes:array<uint8>):>bool => {
+    let c_path = _c_path(path)
+    # O_WRONLY|O_CREAT|O_TRUNC = 1|64|512 = 577, mode 0o644 = 420
+    let fd:int64 = __syscall3__(2 __load_i64__(c_path) 577 420)
+    if fd <? 0 { return false }
+    let data:int64 = __load_i64__(bytes)
+    let written:int64 = __syscall3__(1 fd data bytes.length)
+    let closed:int64 = __syscall1__(3 fd)
+    return written =? bytes.length
+}
+
+let write_text = (path:string text:string):>bool => {
+    let bytes:array<uint8> = text as array<uint8>
+    return write_bytes(path bytes)
+}

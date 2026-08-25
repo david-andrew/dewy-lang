@@ -883,15 +883,32 @@ class _InitializationChecker:
         if not isinstance(declaration.expr, hir.FunctionLiteral):
             self._main_error(declaration, '`main` must be a function')
         function = declaration.expr
+        argv_parameter = (
+            function.pos_or_kw_args[0]
+            if len(function.pos_or_kw_args) == 1
+            and not function.kw_only_args
+            and function.rest_args is None
+            else None
+        )
+        argv_ok = (
+            argv_parameter is not None
+            and isinstance(argv_parameter.type, ty.ArrayType)
+            and argv_parameter.type.length is None
+            and (
+                isinstance(argv_parameter.type.element, ty.StringType)
+                or argv_parameter.type.element == 'string'
+            )
+            and not argv_parameter.place
+        )
         if (
             function.pos_or_kw_args
             or function.kw_only_args
             or function.rest_args is not None
-        ):
+        ) and not argv_ok:
             self._main_error(
                 declaration,
-                '`main` must take no arguments',
-                'the root entrypoint is invoked without arguments',
+                '`main` must take no arguments or one `array<string>` argument',
+                'the root entrypoint receives the command line as `array<string>`',
             )
         if not (
             function.rettype == ty.VOID_TYPE

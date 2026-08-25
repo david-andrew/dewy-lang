@@ -167,6 +167,15 @@ class Assign(AST):
 class Bool(AST):
     value: bool
 
+
+@dataclass
+class TargetBool(Bool):
+    """A boolean folded from a compile-time `$target` comparison.
+
+    Flows conditioned on one select arms during checking: dead arms are
+    skipped entirely, so they may import target-specific files.
+    """
+
 @dataclass
 class Integer(AST):
     prefix: t0.BasePrefix
@@ -323,6 +332,11 @@ class IndexAssign(AST):
 @dataclass
 class String(AST):
     content: str
+
+
+@dataclass
+class TargetString(String):
+    """The value of `$target` for the current compilation."""
 
 
 @dataclass

@@ -57,6 +57,7 @@ class Context:
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
     grown_array_names: frozenset[str] = frozenset()  # names some `.push`/`.pop`/... targets
+    target: str = 'x86_64'  # backend target: `$target`
     allow_place_expression: bool = False
     # TODO: etc stuff
 
@@ -64,6 +65,7 @@ def typecheck_and_resolve(
     srcfile: SrcFile,
     *,
     include_prelude: bool | None = None,
+    target: str = 'x86_64',
 ) -> hir.AST:
     from .modules import typecheck_program
 
@@ -74,14 +76,25 @@ def typecheck_and_resolve(
             if include_prelude is None
             else include_prelude
         ),
+        target=target,
     )
 
 
-def _parse_module(srcfile: SrcFile) -> tuple[p0.Block, bool]:
+def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block, bool]:
     block = p0.parse(srcfile)
     no_prelude: bool | None = None
     items: list[p0.AST] = []
     for item in block.inner:
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == '='
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Metatag)
+            and item.left.item.name == 'supported_targets'
+        ):
+            _check_supported_targets(item, srcfile, target)
+            continue
         if not (
             isinstance(item, p0.BinOp)
             and isinstance(item.op, t1.Operator)
@@ -108,6 +121,26 @@ def _parse_module(srcfile: SrcFile) -> tuple[p0.Block, bool]:
     return replace(block, inner=items), bool(no_prelude)
 
 
+def _check_supported_targets(item: p0.BinOp, srcfile: SrcFile, target: str) -> None:
+    """`$supported_targets = ["x86_64" ...]` rejects compilation for other targets."""
+    supported: list[str] = []
+    entries = item.right.inner if isinstance(item.right, p0.Block) else [item.right]
+    for entry in entries:
+        if not (isinstance(entry, p0.Atom) and isinstance(entry.item, t1.String)):
+            user_error(
+                srcfile,
+                '`$supported_targets` must list string target names',
+                Pointer(span=entry.loc, message='expected a string such as `"x86_64"`'),
+            )
+        supported.append(entry.item.content)
+    if target not in supported:
+        user_error(
+            srcfile,
+            f'module does not support target `{target}`',
+            Pointer(span=item.loc, message='supported: ' + ', '.join(supported)),
+        )
+
+
 def _typecheck_module(
     srcfile: SrcFile,
     *,
@@ -116,7 +149,9 @@ def _typecheck_module(
     registry: sb.BindingRegistry | None = None,
     module_loader: object | None = None,
     prelude_bindings: dict[str, sb.Binding] | None = None,
+    target: str = 'x86_64',
 ) -> tuple[hir.Block, Context]:
+
     # set up the base type system/builtins
     if type_system is None:
         type_system = ty.TypeSystem()
@@ -145,6 +180,7 @@ def _typecheck_module(
         module_loader=module_loader,
         module_declared_names=declared_names,
         grown_array_names=_grown_array_names(block),
+        target=target,
     )
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
@@ -263,6 +299,11 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Integer(value=value)):
             parsed = t0.parse_integer(value.src, value.prefix)
             return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
+        case p0.Atom(item=t1.Metatag(name='target')):
+            # Compile-time string (udewy's `$target`); comparisons against
+            # literals fold, so `if $target =? "x86_64" { ... }` resolves
+            # during checking.
+            return hir.TargetString(ast.loc, ty.StringLiteralType(ctx.target), ctx.target)
         case p0.Atom(item=t1.Metatag(name=name)):
             return tcr_scope_metatag(ast, name=name, ctx=ctx)
         # case p0.Atom(item=t1.Real()): ...
@@ -1981,7 +2022,7 @@ def _tcr_loop_iterator(
     return condition, iterator_ctx
 
 
-def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.Flow:
+def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.AST:
     """Typecheck supported structured `if` and while-style `loop` flows."""
     if not ast.arms:
         raise ValueError('INTERNAL ERROR: Flow has no arms')
@@ -2010,6 +2051,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         continuing_paths: list[dict[int, ty.Type]] = []
         continuing_bounds: list[dict[int, int]] = []
         arm_ctx = ctx
+        constant_true = False
         for arm in ast.arms:
             if len(arm.parts) != 3:
                 raise ValueError(f'INTERNAL ERROR: malformed if arm: {arm.parts!r}')
@@ -2017,6 +2059,41 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             assert isinstance(condition_ast, p0.AST)
             assert isinstance(body_ast, p0.AST)
             condition = _check_flow_condition(condition_ast, ctx=arm_ctx)
+            if isinstance(condition, hir.TargetBool):
+                # Target queries (`$target =? "..."`) select arms during
+                # checking: dead arms are not checked at all (they may import
+                # files for other targets), and the live arm's `{}` body is
+                # spliced into the enclosing scope so gated imports and
+                # declarations bind there. Plain literal conditions keep the
+                # ordinary flow semantics (every arm checked).
+                if not condition.value:
+                    continue
+                constant_true = True
+                if (
+                    branch_expected is None
+                    and isinstance(body_ast, p0.Block)
+                    and body_ast.kind == '{}'
+                ):
+                    spliced = [
+                        typecheck_and_resolve_inner(item, ctx=arm_ctx)
+                        for item in body_ast.inner
+                    ]
+                    # ``scoped=False`` lets the enclosing block flatten it.
+                    return hir.Block(body_ast.loc, ty.VOID_TYPE, spliced, False)
+                else:
+                    body = typecheck_and_resolve_inner(
+                        body_ast,
+                        ctx=arm_ctx,
+                        expected=branch_expected,
+                    )
+                    if branch_expected is not None:
+                        body = check_against(body, branch_expected, ctx=ctx)
+                arms.append(hir.IfArm(arm.loc, body.type, condition, body))
+                bodies.append(body)
+                if body.type != ty.BOTTOM_TYPE:
+                    continuing_paths.append(dict(arm_ctx.refinements))
+                    continuing_bounds.append(dict(arm_ctx.length_bounds))
+                break
             body_ctx = _refine_condition_context(
                 arm_ctx,
                 condition,
@@ -2041,7 +2118,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             )
 
         default = None
-        if ast.default is not None:
+        if constant_true:
+            pass  # later arms and the default are dead
+        elif ast.default is not None:
             default = typecheck_and_resolve_inner(
                 ast.default,
                 ctx=arm_ctx,
@@ -2053,10 +2132,15 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if default.type != ty.BOTTOM_TYPE:
                 continuing_paths.append(dict(arm_ctx.refinements))
                 continuing_bounds.append(dict(arm_ctx.length_bounds))
-        else:
+        elif not constant_true:
             # No else: falling through means every condition was false.
             continuing_paths.append(dict(arm_ctx.refinements))
             continuing_bounds.append(dict(arm_ctx.length_bounds))
+        if constant_true and not arms:
+            raise ValueError('INTERNAL ERROR: constant-true flow without arms')
+        if not arms:
+            # Every arm was a compile-time false: nothing remains.
+            return hir.Void(ast.loc, ty.VOID_TYPE)
         if continuing_paths:
             # ``ctx.refinements`` is the dict shared by the enclosing block's
             # items, so updating it in place narrows the code after the flow.
@@ -2081,7 +2165,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             ctx.refinements.update(arm_ctx.refinements)
             ctx.length_bounds.clear()
             ctx.length_bounds.update(arm_ctx.length_bounds)
-        if ast.default is None and (
+        if ast.default is None and not constant_true and (
             branch_expected is not None
             and any(body.type != ty.BOTTOM_TYPE for body in bodies)
         ):
@@ -3552,9 +3636,20 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         if id(item) not in deferred_functions:
             continue
         results[index] = typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block)
-    checked_results = [result for result in results if result is not None]
-    if len(checked_results) != len(results):
-        raise ValueError('INTERNAL ERROR: block item was not checked')
+    checked_results: list[hir.AST] = []
+    for item, result in zip(block.inner, results, strict=True):
+        if result is None:
+            raise ValueError('INTERNAL ERROR: block item was not checked')
+        if (
+            isinstance(item, p0.Flow)
+            and isinstance(result, hir.Block)
+            and not result.scoped
+        ):
+            # A target-gated `{}` arm was already checked in this scope;
+            # its items belong to this block directly.
+            checked_results.extend(result.items)
+        else:
+            checked_results.append(result)
     results = checked_results
 
     match block.kind:
@@ -3798,6 +3893,18 @@ def _dispatch_builtin(
             _function_alternates(left) + _function_alternates(right),
         )
 
+    if (
+        fname in {'__eq__', '__ne__'}
+        and len(args) == 2
+        and all(isinstance(arg.type, ty.StringLiteralType) for arg in args)
+    ):
+        # Two exact strings compare at compile time (used by `$target`
+        # gating); this precedes contextual casts, which erase exactness.
+        equal = args[0].type.value == args[1].type.value
+        value = equal if fname == '__eq__' else not equal
+        if any(isinstance(arg, hir.TargetString) for arg in args):
+            return hir.TargetBool(loc, 'bool', value)
+        return hir.Bool(loc, 'bool', value)
     contextual_args = [
         check_against(
             _contextualize_flow_result(arg, param.type, ctx=ctx),

@@ -1,0 +1,12 @@
+# Linux x86_64 output primitives. `write` is syscall 1; stdout is fd 1 and
+# stderr is fd 2. The portable `io.dewy` builds `print`/`printl` on these, so
+# another target only needs to provide the same two bindings.
+let _write_stdout = (bytes:array<uint8>):>int64 => {
+    let data:int64 = __load_i64__(bytes)
+    return __syscall3__(1 1 data bytes.length)
+}
+
+let _write_stderr = (bytes:array<uint8>):>int64 => {
+    let data:int64 = __load_i64__(bytes)
+    return __syscall3__(1 2 data bytes.length)
+}

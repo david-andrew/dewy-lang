@@ -329,3 +329,11 @@ let main = ():>int64 => __dewy_top_level
     assert 'let __dewy_top_level:int64 = 0' in emitted
     assert 'let __dewy_top_level_2 = ():>void' in emitted
     assert '__dewy_top_level_2()' in emitted
+
+
+def test_main_may_take_argv_strings_only() -> None:
+    from dewy.reporting import SrcFile
+    from dewy.semantic import check
+    check.typecheck_and_resolve(SrcFile(None, 'let main = (args:array<string>):>int64 => args.length'))
+    with pytest.raises(UserError, match='array<string>'):
+        check.typecheck_and_resolve(SrcFile(None, 'let main = (n:int64):>int64 => n'))

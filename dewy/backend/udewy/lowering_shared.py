@@ -79,6 +79,10 @@ class LoweredFunction:
     symbol: str
     literal: hir.FunctionLiteral
 
+ARGC_NAME = '__dewy_argc'
+ARGV_NAME = '__dewy_argv'
+
+
 @dataclass
 class LoweredProgram:
     """Result of callable legalization.
@@ -95,6 +99,8 @@ class LoweredProgram:
     user_main_symbol: str | None
     startup_symbol: str
     needs_startup: bool
+    argv_prologue: list[hir.AST] | None = None
+    argv_value: hir.AST | None = None
 
 @dataclass
 class _Scope:
