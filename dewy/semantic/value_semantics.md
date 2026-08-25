@@ -86,7 +86,32 @@ Overlapping places in one call are an error: `swap(@x @x)` is two mutable aliase
 
 ## Functions
 
-A bare function name calls it if that would be a valid call. There is therefore no `g = f` copy the way there is for arrays and objects. In the planned function-handle model, `@fn` selects the function binding's place as the handle used for passing and partial evaluation. The same whole-route rule makes `@obj.fn` select the function-valued place `fn` at the end of the route; the old interpreter spelling `obj.@fn` is not the current direction. The exact interaction between automatic calls and member access through a function-valued intermediate route remains to be designed: the language must distinguish selecting a member of the function value from calling it and selecting a member of its result.
+A bare function name calls it if that would be a valid call. There is therefore no `g = f` copy the way there is for arrays and objects. In the planned function-handle model, `@fn` selects the function binding's place as the handle used for passing and partial evaluation. The same whole-route rule makes `@obj.fn` select the function-valued place `fn` at the end of the route; the old interpreter spelling `obj.@fn` is not the current direction.
+
+A leading `@` puts the complete ungrouped selector-and-application chain in place-selection mode and suppresses calls at every function-valued node in that chain. This does not materialize each intermediate node as a separately observable place; the place remains the endpoint of the whole route. Argument groups inside the `@` chain partially evaluate the selected function rather than invoking it. Grouping ends the `@` chain, after which an argument group is an ordinary call.
+
+```dewy
+@worker.callback.metadata     # `metadata` on the callback function value
+worker.callback().metadata    # call callback, then read result.metadata
+(@worker.callback)(5).metadata # select callback, call it, then read result.metadata
+```
+
+The ordinary call resolves its callee without first automatically calling it. `@sum(5)` saves an argument, whereas `(@sum)(5)` calls the selected function. Repeated argument groups remain inside the same `@` chain, so `@sum(1)(2)` performs two stages of partial evaluation. To call after the first stage, terminate the chain with grouping: `(@sum(1))(2)`.
+
+An empty argument group inside the chain is an empty partial evaluation. It does not call the function or evaluate signature defaults. Thus `@worker.callback(5)()` is still a partially evaluated function; `(@worker.callback(5))()` invokes that function.
+
+The selected function may be at the end of a member route. Partial evaluation applies to that endpoint and preserves the receiver captured by the function field:
+
+```dewy
+on_item = @worker.callback(5)   # save 5 in worker.callback; do not call it
+```
+
+If the function is a member of an object produced by another call, bind that result first and then select the inner function. `@` cannot begin a place route at a temporary, and `@make_worker()` is an empty partial evaluation of `make_worker` rather than a call.
+
+```dewy
+worker = make_worker()
+on_item = @worker.callback(5)
+```
 
 ```dewy
 sum = (a b) => a + b

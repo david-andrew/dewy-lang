@@ -137,6 +137,38 @@ Explicitly supplied partial arguments are saved immediately. Defaults remain per
 
 The route rule is the same as for data places: `@worker.callback` selects the function-valued place at the end of the entire route, and `@` cannot appear as `worker.@callback`. The parser's intermediate `(@worker).callback` grouping does not make `@worker` the semantic result.
 
-> **Open edge:** Dewy's automatic call behavior still needs an exact rule for member access when a function-valued node occurs before the end of a route. In particular, the language must distinguish deliberately selecting a member of a function value from calling the function and selecting a member of its result. The leading-`@` whole-route rule above is settled; that auto-call interaction is not.
+A leading `@` disables calls throughout its complete ungrouped selector-and-application chain. This lets a route continue through the function value itself. Argument groups within the chain save arguments; grouping ends the chain, allowing a following argument group to call the selected function.
+
+```dewy
+@worker.callback.metadata     # select metadata on the callback value
+worker.callback().metadata    # call callback, then read result.metadata
+(@worker.callback)(5).metadata # select callback, call it, then read result.metadata
+```
+
+The ordinary call resolves `callback` as its callee without first automatically calling it. The partial-evaluation and call boundaries are visible in the grouping:
+
+```dewy
+@sum(1)(2)       # save 1, then save 2
+(@sum(1))(2)     # save 1, then call with 2
+@sum(1)()        # an empty second partial evaluation
+(@sum(1))()      # call the partially evaluated function
+```
+
+An empty partial evaluation neither invokes the function nor evaluates defaults. Consequently, `@worker.callback(5)()` remains a function; `(@worker.callback(5))()` calls it.
+
+The function can be an inner member of a stable object route:
+
+```dewy
+let on_item = @worker.callback(5)
+```
+
+This selects `worker.callback`, preserves its receiver, and saves `5` without calling it. If a call produces the object, bind its result before selecting the inner function:
+
+```dewy
+let worker = make_worker()
+let on_item = @worker.callback(5)
+```
+
+The binding is required because a temporary call result is not a place-route root. `@make_worker()` would instead mean an empty partial evaluation of `make_worker`.
 
 Rest capture, spreading, and complete handle semantics are summarized in the [design appendix](../appendices/language-and-compiler.md). Exact argument binding is defined in the [Reference](../../reference/functions-and-calls.html).

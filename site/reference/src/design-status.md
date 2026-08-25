@@ -30,7 +30,6 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - user-written generic functions and generic structural objects;
 - inference for unannotated function parameters when the body requires overloaded operations;
 - first-class function handles, partial evaluation, captures, and closure identity;
-- automatic-call behavior when a function-valued node occurs before the end of a member route;
 - the exact liquid-refinement language, proof boundary, and `unsafe` obligations;
 - the general effect vocabulary and effect-polymorphic contracts;
 - multidimensional array shape syntax, broadcasting, and contiguous layout selection;

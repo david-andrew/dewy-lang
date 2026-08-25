@@ -114,7 +114,39 @@ let add5 = @sum(5)
 
 Selectors use the ordinary whole-route place rule: `@worker.on_event` selects the function-valued place at the end of the route, and it cannot be written `worker.@on_event`. Although parsing groups the leading prefix first, `@worker` is not the semantic result of that complete expression.
 
-The interaction between automatic calls and member access through a function-valued intermediate route remains open. A future rule must distinguish selecting a member of a function value from calling the function and selecting a member of its result without weakening the leading-`@` rule.
+A leading `@` suppresses calls at every function-valued node in its complete ungrouped selector-and-application chain. The route still selects only its final place; intermediate nodes are not separately observable place values. Argument groups within that chain partially evaluate functions. A grouping boundary ends the `@` chain, so an argument group outside it performs an ordinary call.
+
+```dewy
+@worker.on_event.metadata     # metadata belonging to the function value
+worker.on_event().metadata    # call on_event, then read result.metadata
+(@worker.on_event)(5).metadata # select on_event, call it, then read result.metadata
+```
+
+An ordinary call resolves the callable at that node without automatically calling it first. `@sum(5)` saves `5`, while `(@sum)(5)` invokes the selected function. Repeated argument groups do not implicitly end the chain:
+
+```dewy
+@sum(1)(2)       # two stages of partial evaluation
+(@sum(1))(2)     # partially evaluate with 1, then call with 2
+@sum(1)()        # empty second partial evaluation; still a function
+(@sum(1))()      # call the partially evaluated function with no arguments
+```
+
+An empty partial evaluation does not invoke the function or evaluate its signature defaults. If code needs a place within a returned value, it must bind that result and select a place from the stable binding; `@` does not make a temporary call result into an escaping place.
+
+Partial evaluation also works when the selected function is an object member:
+
+```dewy
+let on_item = @worker.on_event(5)
+```
+
+This selects `on_event` at the endpoint of the route, preserves its receiver, and saves `5`; it does not call either `worker` or `on_event`. When the object must first be produced by a call, bind that result before selecting its function member:
+
+```dewy
+let worker = make_worker()
+let on_item = @worker.on_event(5)
+```
+
+`@make_worker()` means an empty partial evaluation of `make_worker`, not an explicit call followed by place selection. A temporary call result is not a valid root for a place route.
 
 Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.
 
