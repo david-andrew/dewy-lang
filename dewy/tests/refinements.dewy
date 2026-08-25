@@ -1,0 +1,15 @@
+# Types can carry liquid refinement conditions.
+Positive = int< i=>i>?0 >
+NonEmptyArray = array< length>?0 >
+
+score:Positive = 42
+values:NonEmptyArray<int> = [3 5 8]
+
+# Proven facts can remove checks and guide layout.
+first = values[0]
+
+let main = ():>int64 => {
+    let total:int64 = (first transmute int64) + (score transmute int64)
+    printl"{total}"
+    return total
+}

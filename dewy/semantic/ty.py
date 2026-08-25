@@ -287,7 +287,7 @@ class ModuleType:
         return next((field for field in self.fields if field.name == name), None)
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 type TypeAliasValue = TypeExpr | GenericTypeAlias
 
@@ -362,6 +362,61 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     # tbd misc stuff
     'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
 ]
+
+@dataclass(frozen=True)
+class Proposition:
+    """One liquid refinement condition, `<subject> <op> <value>`.
+
+    ``subject`` is ``'self'`` (the value itself, written with a one-argument
+    lambda such as `i => i >? 0`) or ``'length'`` (a container length).
+    """
+
+    subject: str
+    op: str
+    value: int
+
+    def holds(self, fact: int) -> bool:
+        match self.op:
+            case '>?': return fact > self.value
+            case '>=?': return fact >= self.value
+            case '<?': return fact < self.value
+            case '<=?': return fact <= self.value
+            case '=?': return fact == self.value
+            case 'not=?': return fact != self.value
+        raise ValueError(f'INTERNAL ERROR: unknown proposition operator {self.op!r}')
+
+    def lower_bound(self) -> int | None:
+        """The minimum value this proposition guarantees, if it is a lower bound."""
+        if self.op == '>?':
+            return self.value + 1
+        if self.op in {'>=?', '=?'}:
+            return self.value
+        return None
+
+    def upper_bound(self) -> int | None:
+        if self.op == '<?':
+            return self.value - 1
+        if self.op in {'<=?', '=?'}:
+            return self.value
+        return None
+
+
+@dataclass(frozen=True)
+class RefinedType:
+    """A type together with liquid propositions its values must satisfy.
+
+    Refined types appear in annotations only: checking a value against one
+    proves the propositions from compile-time facts, and the binding then
+    carries the base type plus the proven facts.
+    """
+
+    base: 'TypeExpr'
+    propositions: tuple[Proposition, ...]
+
+
+def strip_refinement(type_: 'TypeExpr') -> 'TypeExpr':
+    return type_.base if isinstance(type_, RefinedType) else type_
+
 
 @dataclass(frozen=True)
 class RationalLiteralType:
@@ -624,6 +679,11 @@ class TypeSystem:
             if a == b or self.is_subtype(b.bound, a):
                 return b
             return None
+        if isinstance(a, RefinedType) or isinstance(b, RefinedType):
+            if a == b:
+                return a
+            refined, other = (a, b) if isinstance(a, RefinedType) else (b, a)
+            return refined if self._meet_atoms(refined.base, other) == refined.base else None
         for literal, other in ((a, b), (b, a)):
             if (
                 isinstance(literal, (IntegerLiteralType, RationalLiteralType))
@@ -756,6 +816,10 @@ class TypeSystem:
             return a == b or self.is_subtype(a.bound, b)
         if isinstance(b, TypeVariable):
             return a == b
+        if isinstance(a, RefinedType):
+            return a == b or self.is_subtype(a.base, b)
+        if isinstance(b, RefinedType):
+            return False  # refinements are proven at the checking boundary, never assumed
         if isinstance(a, (IntegerLiteralType, RationalLiteralType)) and isinstance(b, ObjectType):
             # Compile-time numbers materialize into the runtime rational or
             # fixed representation at the checking boundary.
@@ -1370,7 +1434,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
+type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1528,7 +1592,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
+    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, RefinedType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1631,6 +1695,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return t
     if isinstance(t, RationalLiteralType):
         return t
+    if isinstance(t, RefinedType):
+        return RefinedType(substitute_type(t.base, bindings), t.propositions)
     if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType)):
         return t
     if isinstance(t, QuantityType):

@@ -20,6 +20,15 @@ def type_to_dewy(t: ty.Type) -> str:
         return t.name
     if isinstance(t, ty.RationalLiteralType):
         return f'{t.numerator}/{t.denominator}'
+    if isinstance(t, ty.RefinedType):
+        conditions = ' '.join(
+            (f'i => i {p.op.replace("not=?", "not =?")} {p.value}' if p.subject == 'self' else f'{p.subject} {p.op.replace("not=?", "not =?")} {p.value}')
+            for p in t.propositions
+        )
+        base = type_to_dewy(t.base)
+        if base.endswith('>'):
+            return f'{base[:-1]} {conditions}>'
+        return f'{base}<{conditions}>'
     if isinstance(t, ty.IntegerLiteralType):
         return str(t.value)
     if isinstance(t, ty.StringLiteralType):

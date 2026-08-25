@@ -220,6 +220,8 @@ class _BoundsValidator:
             return current
         if isinstance(node, hir.Declare):
             interval = self._eval(node.expr, current, validate=validate)
+            if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
+                interval = self._seed_refinements(node, current, interval)
             if isinstance(node.expr, hir.FunctionLiteral):
                 self._analyze_function(node.expr, validate=validate)
             elif isinstance(node.expr, hir.OverloadedFunction):
@@ -1181,6 +1183,39 @@ class _BoundsValidator:
         if name == '__eq__' and truth:
             return other
         return None
+
+    def _seed_refinements(
+        self,
+        node: hir.Declare,
+        state: State,
+        interval: Interval | None,
+    ) -> Interval | None:
+        """Facts a refined annotation proved at the declaration boundary."""
+        assert isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None
+        lower: int | None = None
+        upper: int | None = None
+        length_lower: int | None = None
+        for proposition in node.annotation.propositions:
+            if proposition.subject == 'self':
+                lower = _maximum_lower(lower, proposition.lower_bound())
+                upper = _minimum_upper(upper, proposition.upper_bound())
+            elif proposition.subject == 'length':
+                length_lower = _maximum_lower(length_lower, proposition.lower_bound())
+        if lower is not None or upper is not None:
+            declared = Interval(lower, upper)
+            interval = declared if interval is None else interval.intersect(declared)
+        base = ty.strip_refinement(node.annotation)
+        if (
+            length_lower is not None
+            and isinstance(base, ty.ArrayType)
+            and base.length is None
+            and isinstance(node.expr.type, ty.ArrayType)
+            and node.expr.type.length is None
+        ):
+            key = _length_key(node.binding_id)
+            current = state.get(key, Interval(0, _MAX_LENGTH))
+            state[key] = current.intersect(Interval(length_lower, _MAX_LENGTH))
+        return interval
 
     @staticmethod
     def _set_interval(

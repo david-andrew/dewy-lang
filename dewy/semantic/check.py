@@ -507,6 +507,97 @@ def _widen_inferred_let_value(expr: hir.AST, *, ctx: Context) -> hir.AST:
     return expr
 
 
+def _tcr_annotated_declaration(
+    ast: p0.AST,
+    keyword: str,
+    name: str,
+    typeexpr: p0.AST,
+    right: p0.AST,
+    *,
+    ctx: Context,
+) -> hir.AST:
+    """`let name:T = value` (and the keyword-less `name:T = value`)."""
+    # decl assign + type annotation: check the expression against the annotation
+    annotation = ast_to_type(typeexpr, ctx=ctx)
+    refined_annotation = annotation if isinstance(annotation, ty.RefinedType) else None
+    annotation = ty.strip_refinement(annotation)
+    if annotation == ty.TYPE_TYPE:
+        binding = ctx.binding_registry.by_syntax.get(id(ast))
+        type_value = (
+            binding.type_value
+            if binding is not None and binding.type_value is not None
+            else _type_alias_value(right, ctx=ctx)
+        )
+        expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, type_value)
+        ctx.declarations[name] = ty.TYPE_TYPE
+        declaration = _complete_binding(
+            ast,
+            hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
+            ctx=ctx,
+        )
+        binding = ctx.binding_registry.by_id[declaration.binding_id]
+        binding.type = ty.TYPE_TYPE
+        binding.type_value = type_value
+        return declaration
+    if (
+        isinstance(annotation, ty.TypeParameterize)
+        and annotation.t == 'dict'
+        and len(annotation.args) == 2
+        and isinstance(right, p0.Block)
+        and right.kind == '[]'
+        and (not right.inner or _dict_literal_block(right) is not None)
+    ):
+        return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=annotation)
+    optional_payload = ty.optional_payload(annotation)
+    expression_expected = (
+        optional_payload
+        if optional_payload is not None
+        and isinstance(right, p0.Block)
+        and right.kind == '[]'
+        else annotation
+    )
+    expr = typecheck_and_resolve_inner(
+        right,
+        ctx=ctx,
+        expected=expression_expected,
+    )
+    expr = check_against(expr, refined_annotation or annotation, ctx=ctx)
+    optional_annotation_payload = ty.optional_payload(annotation)
+    growable = (
+        keyword == 'let'
+        and name in ctx.grown_array_names
+        and isinstance(annotation, ty.ArrayType)
+        and annotation.length is None
+        and isinstance(expr.type, ty.ArrayType)
+        and expr.type.length is not None
+    )
+    ctx.declarations[name] = (
+        annotation
+        if growable
+        else expr.type
+        if isinstance(annotation, (ty.ArrayType, ty.ObjectType))
+        and isinstance(expr.type, type(annotation))
+        else ty.optional(expr.type)
+        if isinstance(optional_annotation_payload, (ty.ArrayType, ty.ObjectType))
+        and isinstance(expr.type, type(optional_annotation_payload))
+        else annotation
+    )
+    declaration = _complete_binding(
+        ast,
+        hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, refined_annotation or annotation, expr),
+        ctx=ctx,
+    )
+    if refined_annotation is not None and declaration.binding_id is not None:
+        _record_refinement_facts(declaration.binding_id, refined_annotation, ctx=ctx)
+    if growable and declaration.binding_id is not None:
+        # A runtime-length binding initialized from an exact-length
+        # value keeps that exact length as a refinement until a
+        # length-changing operation invalidates it, so index proofs
+        # still work while the length is known.
+        ctx.refinements[declaration.binding_id] = expr.type
+    return declaration
+
+
 def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     """
     let|const <id>
@@ -578,81 +669,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 op=t1.Operator(symbol='='|'::'|':='),
                 right=p0.AST() as right)
             ]:
-            # decl assign + type annotation: check the expression against the annotation
-            annotation = ast_to_type(typeexpr, ctx=ctx)
-            if annotation == ty.TYPE_TYPE:
-                binding = ctx.binding_registry.by_syntax.get(id(ast))
-                type_value = (
-                    binding.type_value
-                    if binding is not None and binding.type_value is not None
-                    else _type_alias_value(right, ctx=ctx)
-                )
-                expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, type_value)
-                ctx.declarations[name] = ty.TYPE_TYPE
-                declaration = _complete_binding(
-                    ast,
-                    hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
-                    ctx=ctx,
-                )
-                binding = ctx.binding_registry.by_id[declaration.binding_id]
-                binding.type = ty.TYPE_TYPE
-                binding.type_value = type_value
-                return declaration
-            if (
-                isinstance(annotation, ty.TypeParameterize)
-                and annotation.t == 'dict'
-                and len(annotation.args) == 2
-                and isinstance(right, p0.Block)
-                and right.kind == '[]'
-                and (not right.inner or _dict_literal_block(right) is not None)
-            ):
-                return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=annotation)
-            optional_payload = ty.optional_payload(annotation)
-            expression_expected = (
-                optional_payload
-                if optional_payload is not None
-                and isinstance(right, p0.Block)
-                and right.kind == '[]'
-                else annotation
-            )
-            expr = typecheck_and_resolve_inner(
-                right,
-                ctx=ctx,
-                expected=expression_expected,
-            )
-            expr = check_against(expr, annotation, ctx=ctx)
-            optional_annotation_payload = ty.optional_payload(annotation)
-            growable = (
-                keyword == 'let'
-                and name in ctx.grown_array_names
-                and isinstance(annotation, ty.ArrayType)
-                and annotation.length is None
-                and isinstance(expr.type, ty.ArrayType)
-                and expr.type.length is not None
-            )
-            ctx.declarations[name] = (
-                annotation
-                if growable
-                else expr.type
-                if isinstance(annotation, (ty.ArrayType, ty.ObjectType))
-                and isinstance(expr.type, type(annotation))
-                else ty.optional(expr.type)
-                if isinstance(optional_annotation_payload, (ty.ArrayType, ty.ObjectType))
-                and isinstance(expr.type, type(optional_annotation_payload))
-                else annotation
-            )
-            declaration = _complete_binding(
-                ast,
-                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, annotation, expr),
-                ctx=ctx,
-            )
-            if growable and declaration.binding_id is not None:
-                # A runtime-length binding initialized from an exact-length
-                # value keeps that exact length as a refinement until a
-                # length-changing operation invalidates it, so index proofs
-                # still work while the length is known.
-                ctx.refinements[declaration.binding_id] = expr.type
-            return declaration
+            return _tcr_annotated_declaration(ast, keyword, name, typeexpr, right, ctx=ctx)
         
         case [
             t1.Keyword(name='let'|'const'),
@@ -682,6 +699,36 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     assert isinstance(ast.op, t1.Operator)
     if ast.op.symbol != '=':
         not_implemented(ctx.srcfile, ast.op.loc, f'assignment operator `{ast.op.symbol}`')
+
+    if (
+        isinstance(ast.left, p0.BinOp)
+        and isinstance(ast.left.op, t1.Operator)
+        and ast.left.op.symbol == ':'
+        and isinstance(ast.left.left, p0.Atom)
+        and isinstance(ast.left.left.item, t1.Identifier)
+        and ast.left.left.item.name not in ctx.declarations
+    ):
+        # `score:Positive = 42` declares like `let score:Positive = 42`
+        return _tcr_annotated_declaration(
+            ast, 'let', ast.left.left.item.name, ast.left.right, ast.right, ctx=ctx,
+        )
+
+    alias_binding = ctx.binding_registry.by_syntax.get(id(ast))
+    if (
+        alias_binding is not None
+        and alias_binding.type_value is not None
+        and isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Identifier)
+    ):
+        # `Positive = int< i => i >? 0 >`: prebound as a type alias
+        name = ast.left.item.name
+        expr = hir.TypeValue(ast.right.loc, ty.TYPE_TYPE, alias_binding.type_value)
+        ctx.declarations[name] = ty.TYPE_TYPE
+        return _complete_binding(
+            ast,
+            hir.Declare(ast.loc, ty.VOID_TYPE, 'let', name, ty.TYPE_TYPE, expr),
+            ctx=ctx,
+        )
 
     if (
         isinstance(ast.left, p0.Atom)
@@ -2360,13 +2407,57 @@ def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
     return None
 
 
+def _type_expression_root(ast: p0.AST) -> str | None:
+    """The identifier a would-be type expression is rooted at (`int`, `array<...>`, alias names)."""
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier):
+        return ast.item.name
+    if isinstance(ast, p0.BinOp) and isinstance(ast.op, t2.TypeParamJuxtapose):
+        return _type_expression_root(ast.left)
+    return None
+
+
+def _implicit_type_alias_rhs(item: p0.AST, known_aliases: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
+    """`Name = <type expression>` without `let`/`:type` declares a type alias."""
+    if not (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+    ):
+        return None
+    if item.left.item.name in ctx.declarations:
+        return None  # an assignment to an existing binding
+    root = _type_expression_root(item.right)
+    if root is None or root in {'undefined', 'void', 'end', 'new', 'ellipsis'}:
+        return None  # value keywords that also name types
+    binding = ctx.binding_scopes.get(root)
+    if not (
+        root in known_aliases
+        or (binding is not None and binding.type_value is not None)
+        or (binding is None and root not in ctx.declarations and root in ctx.type_system._named_types)
+    ):
+        return None
+    return item.left.item.name, item.right
+
+
+def _record_refinement_facts(binding_id: int, refined: ty.RefinedType, *, ctx: Context) -> None:
+    """Keep proven length facts where the checker's own proofs look."""
+    for proposition in refined.propositions:
+        lower = proposition.lower_bound()
+        if proposition.subject == 'length' and lower is not None:
+            ctx.length_bounds[binding_id] = max(ctx.length_bounds.get(binding_id, 0), lower)
+
+
 def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
     aliases: list[sb.Binding] = []
+    known_aliases: set[str] = set()
     for item in block.inner:
-        alias = _type_alias_rhs(item)
+        alias = _type_alias_rhs(item) or _implicit_type_alias_rhs(item, known_aliases, ctx=ctx)
         if alias is None:
             continue
         name, rhs = alias
+        known_aliases.add(name)
         binding = ctx.binding_registry.by_syntax.get(id(item))
         if binding is None:
             binding = ctx.binding_registry.allocate(item, name, 'value', item.loc)
@@ -5850,6 +5941,145 @@ def _instantiate_type_alias(
     return ty.substitute_type(alias.body, bindings)
 
 
+_REFINEMENT_COMPARISONS = {'>?', '>=?', '<?', '<=?', '=?'}
+_INVERTED_REFINEMENT_COMPARISONS = {'=?': 'not=?', '>?': '<=?', '>=?': '<?', '<?': '>=?', '<=?': '>?'}
+
+
+def _literal_integer_ast(ast: p0.AST) -> int | None:
+    """An integer literal, possibly parenthesized or negated, in type position."""
+    if isinstance(ast, p0.Block) and ast.kind == '()' and len(ast.inner) == 1:
+        return _literal_integer_ast(ast.inner[0])
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Integer):
+        return t0.parse_integer(ast.item.value.src, ast.item.value.prefix)
+    if (
+        isinstance(ast, p0.Prefix)
+        and isinstance(ast.op, t1.Operator)
+        and ast.op.symbol == '-'
+    ):
+        inner = _literal_integer_ast(ast.item)
+        return None if inner is None else -inner
+    return None
+
+
+def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx: Context) -> ty.Proposition | None:
+    """`<subject> <op> <int>` (or mirrored) as a proposition; None if not that shape."""
+    if not isinstance(ast, p0.BinOp):
+        return None
+    if isinstance(ast.op, t2.InvertedComparisonOp):
+        op = _INVERTED_REFINEMENT_COMPARISONS.get(ast.op.op)
+        if op is None:
+            return None
+    elif isinstance(ast.op, t1.Operator) and ast.op.symbol in _REFINEMENT_COMPARISONS:
+        op = ast.op.symbol
+    else:
+        return None
+
+    def names_subject(node: p0.AST) -> bool:
+        return isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier) and node.item.name == subject_name
+
+    if names_subject(ast.left):
+        value = _literal_integer_ast(ast.right)
+        if value is None:
+            not_implemented(ctx.srcfile, ast.right.loc, 'refinement conditions beyond integer literals')
+        return ty.Proposition(subject, op, value)
+    if names_subject(ast.right):
+        value = _literal_integer_ast(ast.left)
+        if value is None:
+            not_implemented(ctx.srcfile, ast.left.loc, 'refinement conditions beyond integer literals')
+        mirrored = {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op)
+        return ty.Proposition(subject, mirrored, value)
+    return None
+
+
+def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | None:
+    """Classify one parameterize-block entry as a refinement condition.
+
+    Conditions are a one-argument lambda (`i => i >? 0`, about the value) or
+    a `?`-comparison on `length`; anything else is a type parameter.
+    """
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '=>'
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+    ):
+        proposition = _comparison_proposition(item.right, item.left.item.name, 'self', ctx=ctx)
+        if proposition is None:
+            not_implemented(ctx.srcfile, item.right.loc, 'this refinement proposition')
+        return proposition
+    if isinstance(item, p0.BinOp) and (
+        isinstance(item.op, t2.InvertedComparisonOp)
+        or (isinstance(item.op, t1.Operator) and item.op.symbol in _REFINEMENT_COMPARISONS)
+    ):
+        proposition = _comparison_proposition(item, 'length', 'length', ctx=ctx)
+        if proposition is None:
+            not_implemented(ctx.srcfile, item.loc, 'refinement conditions on measures other than `length`')
+        return proposition
+    return None
+
+
+def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition], *, loc: Span, ctx: Context) -> None:
+    for proposition in propositions:
+        if proposition.subject == 'length' and not (
+            base == 'array' or base == 'string' or isinstance(base, (ty.ArrayType, ty.StringType))
+        ):
+            type_error(
+                ctx.srcfile,
+                'refinement subject does not apply',
+                Pointer(span=loc, message=f'`{type_to_dewy(base)}` has no `length`'),
+            )
+        if proposition.subject == 'self' and not ctx.type_system.is_subtype(base, 'int'):
+            not_implemented(ctx.srcfile, loc, f'value refinements on `{type_to_dewy(base)}`')
+
+
+def _refined(base: ty.Type, propositions: list[ty.Proposition]) -> ty.Type:
+    if not propositions:
+        return base
+    if isinstance(base, ty.RefinedType):
+        return ty.RefinedType(base.base, (*base.propositions, *propositions))
+    return ty.RefinedType(base, tuple(propositions))
+
+
+def _describe_proposition(proposition: ty.Proposition) -> str:
+    op = proposition.op.replace('not=?', 'not =?')
+    return f'{"value" if proposition.subject == "self" else "length"} {op} {proposition.value}'
+
+
+def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) -> None:
+    """Prove each proposition from compile-time facts, or report refuted/unknown."""
+    for proposition in refined.propositions:
+        fact: int | None
+        if proposition.subject == 'self':
+            fact = _constant_integer(node, ctx=ctx)
+        else:
+            fact = (
+                node.type.length if isinstance(node.type, ty.ArrayType)
+                else _known_string_length(node.type) if _is_string_type(node.type)
+                else None
+            )
+        requirement = _describe_proposition(proposition)
+        if fact is None:
+            type_error(
+                ctx.srcfile,
+                'cannot prove refinement',
+                Pointer(
+                    span=node.loc,
+                    message=f'no compile-time fact establishes `{requirement}` (neither proven nor refuted)',
+                ),
+                hint='initialize from a literal, or (later) refine through a runtime check or an explicit `unsafe` claim',
+            )
+        if not proposition.holds(fact):
+            type_error(
+                ctx.srcfile,
+                'refinement refuted',
+                Pointer(
+                    span=node.loc,
+                    message=f'the {"value" if proposition.subject == "self" else "length"} is {fact}, but `{requirement}` is required',
+                ),
+            )
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
     if (
@@ -5860,6 +6090,24 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         and (alias_value := _named_type_alias_value(ast.left, ctx=ctx))
         is not None
     ):
+        if isinstance(alias_value, ty.RefinedType) and alias_value.base == 'array':
+            # `NonEmptyArray = array<length >? 0>` keeps the element open.
+            conditions = [
+                proposition
+                for item in ast.right.inner
+                if (proposition := _refinement_condition(item, ctx=ctx)) is not None
+            ]
+            parameters = [item for item in ast.right.inner if _refinement_condition(item, ctx=ctx) is None]
+            if len(parameters) != 1:
+                type_error(
+                    ctx.srcfile,
+                    'array type requires an element type',
+                    Pointer(span=ast.right.loc, message=f'use `{type_to_dewy(alias_value)}<T>`'),
+                )
+            element = ast_to_type(parameters[0], ctx=ctx)
+            if element in ('int', 'uint'):
+                element = 'int64' if element == 'int' else 'uint64'
+            return _refined(ty.ArrayType(element, None), [*alias_value.propositions, *conditions])
         if not isinstance(alias_value, ty.GenericTypeAlias):
             type_error(
                 ctx.srcfile,
@@ -5962,7 +6210,14 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         ):
             element_ast: p0.AST | None = None
             length: int | None = None
+            conditions: list[ty.Proposition] = []
             for item in items:
+                condition = _refinement_condition(item, ctx=ctx)
+                if condition is not None:
+                    if condition.subject != 'length':
+                        not_implemented(ctx.srcfile, item.loc, 'value refinements on arrays')
+                    conditions.append(condition)
+                    continue
                 if (
                     isinstance(item, p0.BinOp)
                     and isinstance(item.op, t1.Operator)
@@ -6008,12 +6263,18 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                     )
                 element_ast = item
             if element_ast is None:
+                if conditions and length is None:
+                    return _refined('array', conditions)  # element supplied on application
                 user_error(
                     ctx.srcfile,
                     'array type requires an element type',
                     Pointer(span=ast.loc, message='use `array<T>`'),
                 )
             element = ast_to_type(element_ast, ctx=ctx)
+            if element in ('int', 'uint'):
+                # Abstract integers currently take the 64-bit word representation
+                # (the hidden-width selection pass is still ahead).
+                element = 'int64' if element == 'int' else 'uint64'
             if not _supported_array_element_type(element):
                 type_error(
                     ctx.srcfile,
@@ -6026,7 +6287,18 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                         ),
                     ),
                 )
-            return ty.ArrayType(element, length)
+            return _refined(ty.ArrayType(element, length), conditions)
+
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
+            left=p0.AST() as base_ast,
+            right=p0.Block(kind='<>', inner=items),
+        ) if items and all(_refinement_condition(item, ctx=ctx) is not None for item in items):
+            # `int< i => i >? 0 >`: a parameterize block holding only conditions
+            base = ast_to_type(base_ast, ctx=ctx)
+            propositions = [_refinement_condition(item, ctx=ctx) for item in items]
+            _check_refinement_subjects(ty.strip_refinement(base), propositions, loc=ast.loc, ctx=ctx)
+            return _refined(base, propositions)
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
@@ -7180,6 +7452,10 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     Subsumption passes the node through unchanged; a legal numeric promotion wraps it in a
     ValueCast; anything else is a type error.
     """
+    if isinstance(expected, ty.RefinedType):
+        checked = check_against(node, expected.base, ctx=ctx)
+        _prove_refinements(checked, expected, ctx=ctx)
+        return checked
     if node.type == expected:
         return node
     if node.type == ty.BOTTOM_TYPE:
@@ -7260,7 +7536,7 @@ def tcr_identifier(
             binding is not None and binding.type_value is not None
         ):
             not_implemented(ctx.srcfile, id.loc, 'runtime type values')
-        resolved_type = (
+        resolved_type = ty.strip_refinement(
             ctx.refinements.get(binding.id, declared_type)
             if refined and binding is not None
             else declared_type

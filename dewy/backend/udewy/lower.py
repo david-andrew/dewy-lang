@@ -67,7 +67,7 @@ from .lowering_strings import _StringLowering
 
 
 def _erase_dimensions(root: object) -> None:
-    """Physical dimensions have no runtime representation.
+    """Physical dimensions and refinements have no runtime representation.
 
     Every node and annotation typed as a quantity is retyped in place by its
     numeric representation, so the rest of the lowering never sees a
@@ -77,6 +77,8 @@ def _erase_dimensions(root: object) -> None:
     seen: set[int] = set()
 
     def erase(type_: object) -> object:
+        if isinstance(type_, ty.RefinedType):
+            type_ = type_.base  # refinements were proven during checking
         return type_.number if isinstance(type_, ty.QuantityType) else type_
 
     def walk(value: object) -> None:
