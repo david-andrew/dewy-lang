@@ -57,3 +57,11 @@ Nonescaping place calls have settled semantics. Storing or returning a place, sh
 The intended `@?` operation asks whether two place expressions designate the same semantic place. It does not expose unobservable storage sharing used to optimize independent values.
 
 Function handles build on the same root-and-route interpretation of `@`; see [Functions and Calls](functions-and-calls.md#function-handles).
+
+## Explicit Managed Handles
+
+A library-defined shared-ownership type such as `Rc<T>` is intended to remain an ordinary Dewy value. Copying the handle retains its explicitly shared payload; copying an object containing such a handle does the same recursively. This does not make ordinary arrays or objects reference-semantic values.
+
+`@rc` selects the place occupied by the handle, allowing a callee to replace that handle in the caller's binding. It does not select the allocation behind the handle. Payload access will instead use lifetime-bounded places supplied by the handle type: read-only while shared, and mutable only after unique ownership is established or through a separate checked-mutation abstraction.
+
+The required userland lifecycle and allocation hooks are provisional and not implemented. The current design direction is recorded in the compiler's [`user_managed_storage.md`](https://github.com/david-andrew/dewy-lang/blob/main/dewy/semantic/user_managed_storage.md) note.

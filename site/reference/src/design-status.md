@@ -40,6 +40,7 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - transformed exception propagation, recovery helpers, and whether pipes join automatic exception forwarding;
 - complete physical-dimension arithmetic, units, and conversion policy;
 - runtime-length aggregate ownership, returns, and escaping places;
+- user-defined managed handles, including lifecycle hooks, typed allocation capabilities, and lifetime-bounded payload places;
 - pattern matching, stored generators, and general unpack/collect behavior;
 - compile-time evaluation and metaprogramming beyond type-valued expressions and imports;
 - the final Unicode identifier repertoire and source-normalization policy.

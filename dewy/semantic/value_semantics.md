@@ -144,3 +144,9 @@ A good design probably would use different strategies by type:
 - User-defined types: perhaps let library authors choose whether a value type is plain-copy, move-only, or CoW-backed.
 
 Dewy doesn't necessarily need to use exactly this breakdown, but the goal is for consistent/predictable performance suitable for low level work
+
+## Explicit managed handles
+
+A user-defined shared-ownership type such as `Rc<T>` remains compatible with value semantics: the value being copied is an explicit handle, whose copy operation retains its shared payload. `@rc` selects the caller's storage for that handle; it does not mean "the payload behind this handle" and is not the mechanism that makes the payload escape.
+
+Supporting such types requires deterministic copy/transfer/release hooks, typed allocation capabilities, and lifetime-bounded payload places. The provisional substrate and its relationship to `@` are recorded in [`user_managed_storage.md`](user_managed_storage.md).

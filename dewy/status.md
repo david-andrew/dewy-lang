@@ -79,6 +79,8 @@ Growable arrays (B2), runtime dictionaries and sets (B3), runtime-sized union me
 
 Consequences for pending items: the array descriptor's unused `capacity` and `owner` fields become the arena/ownership metadata (or are removed if the tier design does not need them); growable arrays and dictionaries take their storage from the current arena; recursive union members (`Node = Leaf | Pair`) use arena-allocated indirection; fixed-layout union members need none of this and can be implemented now as inline maximum-size payload trees. Open details to settle during B2: arena granularity (per function versus explicit regions), how a value escapes an arena into a longer-lived one (copy into the outer arena at the boundary, guided by escape analysis), and the concrete liveness analysis for moves.
 
+An additional, opt-in systems escape hatch is now outlined in [`semantic/user_managed_storage.md`](semantic/user_managed_storage.md). A library-defined `Rc<T>` should be an ordinary explicit handle value, not an escaping `@` place and not Dewy's default storage strategy. Making that implementable in user code eventually requires deterministic copy/transfer/release hooks, typed unsafe allocation and layout capabilities, lifetime-bounded places into managed payloads, and atomics only for a later cross-thread `Arc<T>`. This is design work after the current arena and ownership slice, not a reason to introduce universal reference counting.
+
 ### Sequencing
 
 Phase 0 → phase 1 → A1 → A2 → A3 → B1 → B2 → B3 → B4, with A4 and A5 interleaved as parallel long-poles (they touch different compiler layers than the ownership work) → B5–B8 → B9 → the tokenizer-in-Dewy checkpoint.
