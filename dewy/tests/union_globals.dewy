@@ -1,0 +1,20 @@
+# Module-level union bindings live in static tag-and-payload cells; functions
+# read, narrow, and retag them like locals.
+let state:int64|string = 5
+let label:bool|string = "idle"
+
+let set_text = (text:string):>void => {
+    state = text
+    label = true
+}
+
+let main = ():>int64 => {
+    let total:int64 = 0
+    if state is? int64 { total = total + state }          # 5
+    set_text("hello")
+    if state is? string { total = total + state.length } # +5
+    if label is? bool { total = total + 100 }            # +100
+    state = 7
+    if state is? int64 { total = total + state }          # +7
+    return total
+}

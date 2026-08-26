@@ -67,6 +67,7 @@ LOWERED_CASES = [
     ('refinements.dewy', 45),
     ('abstract_int.dewy', 133),
     ('union_exhaustive.dewy', 157),
+    ('union_globals.dewy', 117),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

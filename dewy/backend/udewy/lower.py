@@ -159,6 +159,7 @@ class _Lowerer(
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
         self.optional_globals_initialized: set[int] = set()
+        self.union_globals_initialized: set[int] = set()
         self.object_globals_initialized: set[int] = set()
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
         self.call_union_args: dict[int, list[tuple[ty.TypeExpr, ...] | None]] = {}
@@ -942,6 +943,9 @@ class _Lowerer(
         if isinstance(annotation, ty.ObjectType):
             annotation = 'int64'
         if ty.optional_payload(annotation) is not None:
+            annotation = 'int64'
+        if ty.runtime_union_members(annotation) is not None:
+            # a tag-and-payload cell in static storage, addressed by this word
             annotation = 'int64'
         if annotation == 'bool':
             initializer: hir.AST = hir.Bool(declaration.loc, 'bool', False)
@@ -2706,11 +2710,30 @@ class _Lowerer(
                     self._target_error(
                         node, f'union compound assignment `{node.op}`'
                     )
-                return self._union_write(
-                    replace(node.target, type='int64'),
-                    node.value,
-                    members,
-                )
+                cell = replace(node.target, type='int64')
+                prologue: list[hir.AST] = []
+                binding = self.binding_by_semantic_id.get(node.target.binding_id)
+                if (
+                    self.lowering_module_startup
+                    and binding is not None
+                    and binding.owner_function is None
+                    and node.target.binding_id not in self.union_globals_initialized
+                ):
+                    # A module-level union binding: its declaration became this
+                    # startup assignment, so allocate the static cell (and the
+                    # aggregate members' storage trees) here first.
+                    prologue.append(
+                        hir.Assign(
+                            node.loc,
+                            ty.VOID_TYPE,
+                            cell,
+                            '=',
+                            self._union_cell_allocation(members, node.loc),
+                        )
+                    )
+                    prologue.extend(self._union_prepare_trees(cell, members, node.loc))
+                    self.union_globals_initialized.add(node.target.binding_id)
+                return [*prologue, *self._union_write(cell, node.value, members)]
             payload = (
                 self.optional_payloads.get(node.target.binding_id)
                 if node.target.binding_id is not None

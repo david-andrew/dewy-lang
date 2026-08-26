@@ -3,6 +3,7 @@ import pytest
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir
 from dewy.semantic.errors import UserError
+from dewy.backend.udewy import codegen
 
 
 def _check(source: str) -> hir.Block:
@@ -56,3 +57,19 @@ def test_statement_chains_do_not_need_to_be_exhaustive() -> None:
         '    if v is? int64 { let x = v }\n'
         '}'
     )
+
+
+def test_module_level_unions_get_static_cells() -> None:
+    emitted = codegen(SrcFile(None, (
+        '$no_prelude = true\n'
+        'let state:int64|string = 5\n'
+        'let boxed:[value:int64]|bool = [value = 9]\n'
+        'let main = ():>int64 => {\n'
+        '    state = "x"\n'
+        '    if boxed is? [value:int64] { return boxed.value }\n'
+        '    return 0\n'
+        '}\n'
+    )))
+    startup = emitted.split('let __dewy_top_level', 1)[1]
+    assert startup.count('__static_alloca__(') >= 2  # one cell per union global (plus member trees)
+    assert 'let state:int64 = 0' in emitted and 'let boxed:int64 = 0' in emitted
