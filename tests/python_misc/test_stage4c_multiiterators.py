@@ -226,9 +226,12 @@ loop [k v] in pairs {}
     keys, values = condition.iterators
     assert keys.target.name == 'k'
     assert values.target.name == 'v'
+    # the iterables are the dictionary's entry arrays, compacted on entry to
+    # the loop; their length is a runtime value
+    assert isinstance(keys.iterable, hir.DictEntries) and keys.iterable.name == 'keys'
+    assert isinstance(values.iterable, hir.DictEntries) and values.iterable.name == 'values'
     assert isinstance(keys.iterable.type, ty.ArrayType)
-    assert keys.count == 2
-    assert values.count == 2
+    assert keys.count is None and values.count is None
 
 
 def test_dict_unpacking_over_arrays_is_not_implemented() -> None:
@@ -317,7 +320,7 @@ let f = ():>int64 => {
     assert declared['v'].expr.type == 'int64'  # the store proves the key
     assert declared['v'].expr.proven
     assert isinstance(declared['present'].expr, hir.DictContains)
-    assert isinstance(declared['n'].expr, hir.ArrayLength)
+    assert isinstance(declared['n'].expr, hir.MemberAccess) and declared['n'].expr.name == 'live'
 
 
 def test_dict_key_and_value_types_are_checked() -> None:

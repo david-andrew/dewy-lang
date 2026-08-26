@@ -357,7 +357,7 @@ def test_dictionary_declarations_are_branded_objects() -> None:
     declared = next(item for item in root.items if isinstance(item, hir.Declare) and item.name == 'd')
     assert isinstance(declared.expr, hir.ObjectLiteral)
     assert ty.dict_key_value(declared.expr.type) == ('int64', 'int64')  # literal entries widen to words
-    assert [f.name for f in declared.expr.type.fields] == ['keys', 'values']
+    assert [f.name for f in declared.expr.type.fields] == ['keys', 'values', 'hashes', 'indices', 'live']
     assert declared.expr.type != ty.ObjectType(declared.expr.type.fields)  # the brand distinguishes it
 
 

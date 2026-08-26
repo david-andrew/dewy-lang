@@ -72,3 +72,35 @@ def test_key_facts_join_across_branches() -> None:
     _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    if k in? d { d[k] = 2 } else { d[k] = 3 }\n    let v = d[k]")
     with pytest.raises(UserError, match='not proven present'):
         _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    let flag:bool = true\n    if flag { d[k] = 2 }\n    let v = d[k]")
+
+
+def test_pop_needs_a_proven_key_and_keeps_positions() -> None:
+    with pytest.raises(UserError, match='not proven present'):
+        _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    let v = d.pop(k)")
+    # a removal leaves a tombstone: the other keys stay proven at their entries
+    root = _check("    let d = ['a' -> 1 'b' -> 2]\n    let x = d.pop('a')\n    let y = d['b']")
+    lookups = _lookups(root)
+    assert lookups[0].proven and lookups[0].static_position == 1
+
+
+def test_stores_and_iteration_forget_positions() -> None:
+    # a store may resize (compacting entries); iteration compacts too
+    root = _check("    let d = ['a' -> 1 'b' -> 2]\n    d['c'] = 3\n    let y = d['b']\n    loop [k v] in d { }\n    let z = d['c']")
+    lookups = _lookups(root)
+    assert lookups[0].proven and lookups[0].static_position is None and lookups[0].position is None
+    assert lookups[1].proven and lookups[1].position is None
+
+
+def test_clear_forgets_every_key() -> None:
+    with pytest.raises(UserError, match='not proven present'):
+        _check("    let d = ['a' -> 1]\n    d.clear\n    let v = d['a']")
+
+
+def test_pop_with_a_default_needs_no_proof() -> None:
+    root = _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    let v = d.pop(k default=0)")
+    removes = [item for item in root.items[0].expr.body.items if isinstance(item, hir.Declare) and item.name == 'v']
+    assert isinstance(removes[0].expr, hir.DictRemove) and removes[0].expr.default is not None
+    assert removes[0].expr.type == 'int64'
+    with pytest.raises(UserError, match='not proven present') as info:
+        _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    let v = d.pop(k)")
+    assert 'default=' in str(info.value.report)

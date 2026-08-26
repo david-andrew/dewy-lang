@@ -1449,6 +1449,17 @@ class _Lowerer(
             self._discover_node(node.key, scope, current_function)
             self._discover_node(node.value, scope, current_function)
             return
+        if isinstance(node, hir.DictRemove):
+            self._discover_node(node.keys, scope, current_function, array_use='grow')
+            self._discover_node(node.values, scope, current_function, array_use='grow')
+            if node.key is not None:
+                self._discover_node(node.key, scope, current_function)
+            if node.default is not None:
+                self._discover_node(node.default, scope, current_function)
+            return
+        if isinstance(node, hir.DictEntries):
+            self._discover_node(node.dictionary, scope, current_function)
+            return
         if isinstance(node, hir.StringLength):
             self._discover_node(node.string, scope, current_function)
             return
@@ -2028,6 +2039,16 @@ class _Lowerer(
                 key=self._require_node(self._transform_node(node.key)),
                 value=self._require_node(self._transform_node(node.value)),
             )
+        if isinstance(node, hir.DictRemove):
+            return replace(
+                node,
+                keys=self._require_node(self._transform_node(node.keys)),
+                values=self._require_node(self._transform_node(node.values)),
+                key=self._require_node(self._transform_node(node.key)) if node.key is not None else None,
+                default=self._require_node(self._transform_node(node.default)) if node.default is not None else None,
+            )
+        if isinstance(node, hir.DictEntries):
+            return replace(node, dictionary=self._require_node(self._transform_node(node.dictionary)))
         if isinstance(node, hir.StringLength):
             return replace(
                 node,
@@ -3119,6 +3140,10 @@ class _Lowerer(
             return self._extract_dict_contains(node)
         if isinstance(node, hir.DictStore):
             return self._extract_dict_store(node)
+        if isinstance(node, hir.DictRemove):
+            return self._extract_dict_remove(node)
+        if isinstance(node, hir.DictEntries):
+            return self._extract_dict_entries(node)
         if isinstance(node, hir.FunctionCall):
             if isinstance(node.func, hir.ArrayMethod):
                 return self._extract_array_method_call(node)

@@ -1,0 +1,27 @@
+# `d.pop(key)` removes a proven key and yields its value, keeping insertion
+# order for the rest; `d.pop(key default=v)` needs no proof and yields `v`
+# when the key is absent; `d.clear` empties the dictionary.
+let drop = (@table:dict<string int64> key:string):>int64 => {
+    if key in? table { return table.pop(key) }      # guard-proven; reuses the position
+    return 0
+}
+
+let main = ():>int64 => {
+    let ages = ['ann' -> 30 'bob' -> 41 'cat' -> 7 'dan' -> 12]
+    let bob = ages.pop('bob')                # literal key: entry 1
+    let order:int64 = 0
+    loop [name age] in ages { order = order * 100 + age }    # 30, 7, 12 -> 300712
+    let checks:int64 = 0
+    if 'bob' in? ages { checks += 1 }        # gone
+    if ages.length =? 3 { checks += 2 }
+    let removed = drop(@ages 'dan')          # 12
+    if drop(@ages 'zed') =? 0 { checks += 4 }
+    if ages.pop('zed' default=(-3)) =? -3 { checks += 16 }     # absent: the default, nothing removed
+    let ann = ages.pop('ann' default=0)      # present: removed and returned, 30
+    ages['eve'] = 5
+    let eve = ages['eve']                    # stored: proven
+    ages.clear
+    if ages.length =? 0 { checks += 8 }
+    printl"{bob} {order} {removed} {eve} {ann} {checks}"
+    return bob + removed + eve + ann + checks      # 41 + 12 + 5 + 30 + 30
+}

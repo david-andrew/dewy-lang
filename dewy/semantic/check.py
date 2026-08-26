@@ -956,6 +956,7 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
     )
     keys, values = _dict_arrays(dictionary, ast.loc, ctx=ctx)
     _invalidate_dict_lengths(dictionary, ctx=ctx)
+    _forget_positions(dictionary, ctx=ctx)  # a store may resize, which compacts entries
     position = _new_key_position_name()
     _record_key_fact(dictionary, key, ctx=ctx, position=position)
     return hir.DictStore(ast.loc, ty.VOID_TYPE, keys, values, key, value, position=position)
@@ -1843,7 +1844,13 @@ def _tcr_dict_unpack_iterators(
         for item in targets
         if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier)
     ]
-    keys, values = _dict_arrays(found_dict[0], condition_ast.loc, ctx=ctx)
+    dictionary, key_type, value_type = found_dict
+    # iteration compacts away removed entries, which moves entries: forget
+    # remembered positions and exact lengths
+    _forget_positions(dictionary, ctx=ctx)
+    _invalidate_dict_lengths(dictionary, ctx=ctx)
+    keys: hir.AST = hir.DictEntries(condition_ast.loc, ty.ArrayType(key_type, None), dictionary, 'keys')
+    values: hir.AST = hir.DictEntries(condition_ast.loc, ty.ArrayType(value_type, None), dictionary, 'values')
     key_iterator, ctx_after_key = _array_expression_iterator(
         names[0], targets[0].loc, keys, condition_ast.loc, ctx=ctx,
     )
@@ -2867,10 +2874,18 @@ def _tcr_dict_literal(
         )
     dict_object = annotation if key_value is not None else ty.dict_type(keys.type.element, values.type.element)
     assert isinstance(dict_object, ty.ObjectType)
+    count = len(entries)
     return hir.ObjectLiteral(
         block.loc,
         dict_object,
-        [hir.ObjectField(keys.loc, 'keys', keys), hir.ObjectField(values.loc, 'values', values)],
+        [
+            hir.ObjectField(keys.loc, 'keys', keys),
+            hir.ObjectField(values.loc, 'values', values),
+            # hashes and the probe table are built lazily on first use
+            hir.ObjectField(block.loc, 'hashes', hir.ArrayLiteral(block.loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(block.loc, 'indices', hir.ArrayLiteral(block.loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(block.loc, 'live', hir.Integer(block.loc, ty.IntegerLiteralType(count), '0d', count)),
+        ],
     )
 
 
@@ -3122,8 +3137,11 @@ def _mark_object_receiver(
 
 
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
-    if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod)):
+    if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod, hir.DictMethod)):
         return node
+    if isinstance(node, hir.DictMethod) and isinstance(node.type, ty.FunctionType) and not node.type.pos_or_kw:
+        call = hir.FunctionCall(node.loc, node.type.ret, node, [], {})
+        return _dict_method_call(node, call, ctx=ctx)
     optional_only = (
         isinstance(node, hir.ArrayMethod)
         and isinstance(node.type, ty.FunctionType)
@@ -3635,27 +3653,41 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.ArrayType):
             return _tcr_array_method(value, name, binop.loc, ctx=ctx)
-    if name == 'get':
+    if name in {'get', 'pop', 'clear'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         found_dict = _dict_value(value)
         if found_dict is not None:
             dictionary, key_type, value_type = found_dict
-            signature = ty.FunctionType(
-                [ty.PosOrKwArg('key', key_type), ty.PosOrKwArg('default', value_type, required=False)],
-                [], None, ty.optional(value_type),
-            )
-            return hir.DictMethod(binop.loc, signature, dictionary, 'get')
+            if name == 'get':
+                signature = ty.FunctionType(
+                    [ty.PosOrKwArg('key', key_type), ty.PosOrKwArg('default', value_type, required=False)],
+                    [], None, ty.optional(value_type),
+                )
+            elif name == 'pop':
+                # `default` is name-only: with it the key need not be proven present
+                signature = ty.FunctionType(
+                    [ty.PosOrKwArg('key', key_type)],
+                    [ty.PosOrKwArg('default', value_type, required=False)],
+                    None,
+                    value_type,
+                )
+            else:
+                signature = ty.FunctionType([], [], None, ty.VOID_TYPE)
+            if name != 'get':
+                root = _member_root_binding(dictionary, ctx=ctx)
+                if root is not None and root.declaration is not None and root.declaration.decltype == 'const':
+                    user_error(
+                        ctx.srcfile,
+                        'cannot mutate a const dictionary',
+                        Pointer(span=binop.left.loc, message=f'`{root.name}` is declared const'),
+                    )
+            return hir.DictMethod(binop.loc, signature, dictionary, name)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         found_dict = _dict_value(value)
         if found_dict is not None:
-            keys, _values = _dict_arrays(found_dict[0], binop.loc, ctx=ctx)
-            assert isinstance(keys.type, ty.ArrayType)
-            return hir.ArrayLength(
-                binop.loc,
-                ty.IntegerLiteralType(keys.type.length) if keys.type.length is not None else 'int64',
-                keys,
-            )
+            # the live entry count (removed entries stay as tombstones)
+            return hir.MemberAccess(binop.loc, 'int64', found_dict[0], 'live')
         if isinstance(value.type, ty.BinaryLiteralType):
             value = hir.RepresentationCast(
                 value.loc,
@@ -7626,8 +7658,86 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
             left, call.loc, ctx=ctx, index=_array_method_index_argument(left.name, call),
         )
     if isinstance(left, hir.DictMethod):
-        return _dict_get_call(left, call, ctx=ctx)
+        return _dict_method_call(left, call, ctx=ctx)
     return _specialize_interpolated_output(call, ctx=ctx)
+
+
+def _dict_method_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Context) -> hir.AST:
+    if method.name == 'get':
+        return _dict_get_call(method, call, ctx=ctx)
+    found = _dict_value(method.dictionary)
+    assert found is not None
+    dictionary, _key_type, value_type = found
+    keys, values = _dict_arrays(dictionary, call.loc, ctx=ctx)
+    if method.name == 'clear':
+        _forget_dictionary(dictionary, keys, values, cleared=True, ctx=ctx)
+        return hir.DictRemove(call.loc, ty.VOID_TYPE, keys, values, None)
+    # pop: the key must be proven present unless a default is supplied
+    key = call.pos_args[0] if call.pos_args else call.kw_args['key']
+    default = call.kw_args.get('default')
+    fact = _proven_key(dictionary, key, ctx=ctx)
+    if fact is None and default is None:
+        user_error(
+            ctx.srcfile,
+            'dictionary key is not proven present',
+            Pointer(span=key.loc, message='`pop` removes a key that is known to be in the dictionary'),
+            hint='guard with `if key in? d { d.pop(key) }`, or pass `default=...` to get a value when the key is absent',
+        )
+    position, static_position = fact if fact is not None else (None, None)
+    _forget_dictionary(dictionary, keys, values, cleared=False, removed=key, ctx=ctx)
+    return hir.DictRemove(
+        call.loc, value_type, keys, values, key,
+        position=position, static_position=static_position, default=default,
+    )
+
+
+def _forget_dictionary(
+    dictionary: hir.AST,
+    keys: hir.AST,
+    values: hir.AST,
+    *,
+    cleared: bool,
+    ctx: Context,
+    removed: hir.AST | None = None,
+) -> None:
+    """Update length and key facts after `pop`/`clear`.
+
+    Removal leaves a tombstone, so the other keys stay proven *with* their
+    positions; only the removed key's fact goes. `clear` forgets every key.
+    """
+    dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    removed_identity = _key_identity(removed, ctx=ctx) if removed is not None else None
+    for fact_key in list(ctx.key_facts):
+        route_id, identity = fact_key
+        if route_id != dictionary_id:
+            continue
+        if cleared or identity == removed_identity:
+            del ctx.key_facts[fact_key]
+    for member in (keys, values):
+        route_id = sb.array_route_id(member, ctx.binding_registry)
+        if route_id is None:
+            continue
+        current = ctx.refinements.get(route_id)
+        exact = current.length if isinstance(current, ty.ArrayType) else None
+        minimum = ctx.length_bounds.get(route_id, 0) if exact is None else exact
+        assert isinstance(member.type, ty.ArrayType)
+        if cleared:
+            ctx.refinements[route_id] = ty.ArrayType(member.type.element, 0)
+            ctx.length_bounds[route_id] = 0
+        else:
+            # the entry arrays keep their length (tombstone); a later
+            # compaction shrinks them, so exact lengths are no longer known
+            del exact, minimum
+            ctx.refinements.pop(route_id, None)
+            ctx.length_bounds.pop(route_id, None)
+
+
+def _forget_positions(dictionary: hir.AST, *, ctx: Context) -> None:
+    """Entries may move (compaction on resize or iteration): keys stay proven, positions do not."""
+    dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    for fact_key, fact in list(ctx.key_facts.items()):
+        if fact_key[0] == dictionary_id and fact != (None, None):
+            ctx.key_facts[fact_key] = (None, None)
 
 
 def _dict_get_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Context) -> hir.DictLookup:

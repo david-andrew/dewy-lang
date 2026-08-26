@@ -362,7 +362,9 @@ class _InitializationChecker:
                 parameters,
                 call_stack,
             )
-        if isinstance(node, (hir.DictLookup, hir.DictStore, hir.DictContains)):
+        if isinstance(node, hir.DictEntries):
+            return self._check_eager(node.dictionary, initialized, parameters, call_stack)
+        if isinstance(node, (hir.DictLookup, hir.DictStore, hir.DictContains, hir.DictRemove)):
             current = initialized
             for child in (
                 node.keys,

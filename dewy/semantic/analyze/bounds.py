@@ -741,6 +741,24 @@ class _BoundsValidator:
         if isinstance(node, hir.DictContains):
             self._eval(node.key, state, validate=validate)
             return None
+        if isinstance(node, hir.DictRemove):
+            if node.key is not None:
+                self._eval(node.key, state, validate=validate)
+            if node.default is not None:
+                self._eval(node.default, state, validate=validate)
+            for array in (node.keys, node.values):
+                array_id = _runtime_array_id(array, self.registry)
+                if array_id is not None:
+                    key = _length_key(array_id)
+                    if node.key is None:
+                        state[key] = Interval.exact(0)
+                    else:
+                        state.pop(key, None)  # tombstone now, compaction later
+                    _drop_index_facts(state, array_id=array_id)
+            return None
+        if isinstance(node, hir.DictEntries):
+            self._eval(node.dictionary, state, validate=validate)
+            return None
         if isinstance(node, hir.DictStore):
             self._eval(node.key, state, validate=validate)
             self._eval(node.value, state, validate=validate)

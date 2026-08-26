@@ -432,7 +432,16 @@ def dict_type(key: 'TypeExpr', value: 'TypeExpr') -> ObjectType:
             return 'string'
         return type_
     return ObjectType(
-        (ObjectField('keys', ArrayType(canonical(key), None)), ObjectField('values', ArrayType(canonical(value), None))),
+        (
+            ObjectField('keys', ArrayType(canonical(key), None)),
+            ObjectField('values', ArrayType(canonical(value), None)),
+            # compact-dict machinery: per-entry hashes (-1 marks a removed
+            # entry), the power-of-two probe table (-1 empty, -2 dummy, else
+            # an entry index), and the live entry count
+            ObjectField('hashes', ArrayType('int64', None)),
+            ObjectField('indices', ArrayType('int64', None)),
+            ObjectField('live', 'int64'),
+        ),
         'dict',
     )
 

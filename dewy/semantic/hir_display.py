@@ -238,6 +238,10 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'DictLookup'
     if isinstance(node, hir.DictMethod):
         return f'DictMethod({node.name})'
+    if isinstance(node, hir.DictRemove):
+        return 'DictRemove' if node.key is not None else 'DictClear'
+    if isinstance(node, hir.DictEntries):
+        return f'DictEntries({node.name})'
     if isinstance(node, hir.DictStore):
         return 'DictStore'
     if isinstance(node, hir.DictContains):
@@ -364,6 +368,10 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.DictLookup):
         return [('keys', node.keys), ('values', node.values), ('key', node.key), *([('default', node.default)] if node.default is not None else [])]
     if isinstance(node, hir.DictMethod):
+        return [('dictionary', node.dictionary)]
+    if isinstance(node, hir.DictRemove):
+        return [('keys', node.keys), ('values', node.values), *([('key', node.key)] if node.key is not None else [])]
+    if isinstance(node, hir.DictEntries):
         return [('dictionary', node.dictionary)]
     if isinstance(node, hir.DictStore):
         return [('keys', node.keys), ('values', node.values), ('key', node.key), ('value', node.value)]
@@ -792,6 +800,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent), _text(']'))
     if isinstance(node, hir.DictMethod):
         return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
+    if isinstance(node, hir.DictEntries):
+        return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
+    if isinstance(node, hir.DictRemove):
+        if node.key is None:
+            return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.clear'))
+        return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.pop('), _to_doc(node.key, 0, indent), _text(')'))
     if isinstance(node, hir.DictStore):
         return _seq(
             _to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent),

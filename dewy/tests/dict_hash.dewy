@@ -1,0 +1,41 @@
+# The dictionary's hash table: thousands of entries force table rebuilds,
+# `pop` leaves tombstones, iteration compacts them away, and re-insertion
+# reuses the table. String keys hash their bytes.
+let main = ():>int64 => {
+    let table:dict<int64 int64> = []
+    let i:int64 = 0
+    loop i <? 2000 {
+        table[(i * 7919) % 100003] = i
+        i = i + 1
+    }
+    let removed:int64 = 0
+    i = 0
+    loop i <? 2000 {
+        let key:int64 = (i * 7919) % 100003
+        if key in? table { removed = removed + table.pop(key) }
+        i = i + 2
+    }
+    let survivors:int64 = 0
+    loop [k v] in table { survivors = survivors + v }
+    i = 2000
+    loop i <? 2500 {
+        table[(i * 7919) % 100003] = i
+        i = i + 1
+    }
+    let present:int64 = 0
+    i = 0
+    loop i <? 2500 {
+        if (i * 7919) % 100003 in? table { present = present + 1 }
+        i = i + 1
+    }
+    let words:dict<string int64> = []
+    let j:int64 = 0
+    loop j <? 300 {
+        words["k{j % 97}"] = j
+        j = j + 1
+    }
+    let word_total:int64 = 0
+    loop [w c] in words { word_total = word_total + c }
+    printl"{removed} {survivors} {table.length} {present} {word_total} {words.length}"
+    return (removed + survivors + table.length + present + word_total + words.length) % 256
+}

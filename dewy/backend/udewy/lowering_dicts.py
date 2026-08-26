@@ -1,244 +1,484 @@
-"""Dictionary lowering: linear search over the hidden key/value arrays.
+"""Dictionary lowering: a compact hash table over insertion-ordered entries.
 
-Dictionaries are hidden parallel arrays (insertion order is entry order).
-Lookup, store, and membership search the key array linearly; the compact
-hash-index table from the reference design can replace the search later
-without changing these semantics.
+The dictionary object is ``[keys values hashes indices live]``:
+
+- ``keys``/``values``/``hashes`` are the dense *entries* in insertion order;
+  ``hashes[i]`` is the entry's stored hash (never recomputed on resize) or
+  ``-1`` for an entry removed by ``pop`` (a tombstone).
+- ``indices`` is the sparse probe table: a power of two of ``int64`` slots
+  holding ``-1`` (empty), ``-2`` (dummy: a removed entry once lived here,
+  probing continues) or an entry index. Probing is CPython's
+  ``i = (5*i + perturb + 1) mod size`` with ``perturb >>= 5``, ``perturb``
+  starting as the hash. The table is (re)built lazily and kept under 2/3
+  load counting tombstones; rebuilding compacts the entries.
+- ``live`` counts entries that are not tombstones (``d.length``).
+
+Hashes are the low 63 bits of a multiplicative mix for word keys and FNV-1a
+over UTF-8 bytes for strings.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from ...reporting import Span
 from ...semantic import hir, ty
-from .lowering_shared import ARRAY_LENGTH_OFFSET
+from .lowering_shared import ARRAY_LENGTH_OFFSET, STRING_BYTE_LENGTH_OFFSET
+
+EMPTY = -1
+DUMMY = -2
+DEAD = -1
+MIN_TABLE = 8
+HASH_MASK = (1 << 63) - 1
+WORD_MIX = 0x9E3779B97F4A7C15
+
+
+@dataclass
+class _DictParts:
+    """Lowered access to one dictionary object."""
+
+    pointer: hir.AST
+    offsets: dict[str, int]
+    key_type: ty.TypeExpr
+    value_type: ty.TypeExpr
 
 
 class _DictLowering:
-    def _dict_search(
-        self,
-        keys: hir.AST,
-        key: hir.AST,
-        key_type: ty.TypeExpr,
-        loc: Span,
-    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier, hir.ExpressedIdentifier]:
-        """Emit a search for ``key``; returns (statements, found, index)."""
-        found = hir.ExpressedIdentifier(loc, 'bool', self._new_array_name('dict_found'))
-        at = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('dict_at'))
-        index = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('dict_index'))
-        length = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('dict_length'))
-        keys_word = replace(keys, type='int64') if isinstance(keys, hir.ExpressedIdentifier) else keys
-        element = self._array_load(
-            self._array_element_address(keys_word, index, key_type, loc),
-            key_type,
-            loc,
-        )
-        if self._is_string_valued(key_type):
-            equal_prelude, equal = self._extract_string_equal(
-                hir.StringEqual(loc, 'bool', element, key)
-            )
-        else:
-            equal_prelude, equal = [], self._typed_equality(element, key, key_type, loc)
+    # ------------------------------------------------------------------ parts
+    def _dict_parts(self, keys: hir.AST) -> tuple[list[hir.AST], _DictParts]:
+        """The dictionary object behind a `keys` member route of a dict node."""
+        if not isinstance(keys, hir.MemberAccess):
+            raise TypeError('INTERNAL ERROR: dictionary node without a member route')
+        dictionary = keys.value
+        object_type = dictionary.type
+        if not isinstance(object_type, ty.ObjectType) or ty.dict_key_value(object_type) is None:
+            raise TypeError('INTERNAL ERROR: dictionary node on a non-dictionary')
+        key_type, value_type = ty.dict_key_value(object_type)
+        prelude, pointer = self._extract_object_pointer(dictionary)
+        name = hir.ExpressedIdentifier(keys.loc, 'int64', self._new_array_name('dict'))
+        _size, offsets = self._object_layout(object_type, dictionary)
+        return [*prelude, hir.Declare(keys.loc, ty.VOID_TYPE, 'let', name.name, 'int64', pointer)], _DictParts(name, offsets, key_type, value_type)
 
-        def assign(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.Assign:
-            return hir.Assign(loc, ty.VOID_TYPE, target, '=', value)
+    def _dict_descriptor(self, parts: _DictParts, field: str, loc: Span) -> hir.AST:
+        return self._load_i64_field(parts.pointer, parts.offsets[field], loc)
 
-        body = hir.Block(
-            loc,
-            ty.VOID_TYPE,
-            [
-                *equal_prelude,
-                hir.Flow(
-                    loc,
-                    ty.VOID_TYPE,
-                    [
-                        hir.IfArm(
-                            loc,
-                            ty.VOID_TYPE,
-                            equal,
-                            hir.Block(
-                                loc,
-                                ty.VOID_TYPE,
-                                [
-                                    assign(found, hir.Bool(loc, 'bool', True)),
-                                    assign(at, index),
-                                    assign(index, length),
-                                ],
-                                True,
-                            ),
-                        )
-                    ],
-                    hir.Block(
-                        loc,
-                        ty.VOID_TYPE,
-                        [assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc))],
-                        True,
-                    ),
-                ),
-            ],
-            True,
+    def _dict_live(self, parts: _DictParts, loc: Span) -> hir.AST:
+        return self._load_i64_field(parts.pointer, parts.offsets['live'], loc)
+
+    def _dict_set_live(self, parts: _DictParts, value: hir.AST, loc: Span) -> hir.AST:
+        return self._store_i64_field(parts.pointer, parts.offsets['live'], value, loc)
+
+    def _dict_length_of(self, descriptor: hir.AST, loc: Span) -> hir.AST:
+        return self._load_i64_field(descriptor, ARRAY_LENGTH_OFFSET, loc)
+
+    def _dict_element(self, descriptor: hir.AST, index: hir.AST, element: ty.TypeExpr, loc: Span) -> hir.AST:
+        return self._array_load(self._array_element_address(descriptor, index, element, loc), element, loc)
+
+    def _dict_store_element(self, descriptor: hir.AST, index: hir.AST, value: hir.AST, element: ty.TypeExpr, loc: Span) -> hir.AST:
+        return self._array_store(value, self._array_element_address(descriptor, index, element, loc), element, loc)
+
+    def _dict_push(self, parts: _DictParts, field: str, element: ty.TypeExpr, value: hir.AST, loc: Span) -> list[hir.AST]:
+        member = hir.MemberAccess(loc, ty.ArrayType(element, None), self._dict_object_node(parts, loc), field)
+        method = hir.ArrayMethod(loc, ty.FunctionType([ty.PosOrKwArg('value', element)], [], None, ty.VOID_TYPE), member, 'push')
+        prelude, call = self._extract_array_method_call(hir.FunctionCall(loc, ty.VOID_TYPE, method, [value], {}))
+        return [*prelude, call]
+
+    def _dict_truncate(self, parts: _DictParts, field: str, element: ty.TypeExpr, count: hir.AST, loc: Span) -> list[hir.AST]:
+        member = hir.MemberAccess(loc, ty.ArrayType(element, None), self._dict_object_node(parts, loc), field)
+        method = hir.ArrayMethod(loc, ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE), member, 'truncate')
+        prelude, call = self._extract_array_method_call(hir.FunctionCall(loc, ty.VOID_TYPE, method, [count], {}))
+        return [*prelude, call]
+
+    def _dict_object_node(self, parts: _DictParts, loc: Span) -> hir.AST:
+        """The dictionary as an object-typed expression for member routes (already a pointer)."""
+        object_type = ty.dict_type(parts.key_type, parts.value_type)
+        return replace(parts.pointer, type=object_type)
+
+    # ------------------------------------------------------------------ words
+    def _word(self, name: str, left: hir.AST, right: hir.AST, loc: Span) -> hir.FunctionCall:
+        ops = ty.FunctionType([ty.PosOrKwArg('left', 'uint64'), ty.PosOrKwArg('right', 'uint64')], [], None, 'uint64', [])
+        return hir.FunctionCall(loc, 'uint64', hir.ExpressedIdentifier(loc, ops, name), [left, right], {})
+
+    def _uword(self, value: int, loc: Span) -> hir.Integer:
+        return hir.Integer(loc, 'uint64', '0d', value)
+
+    def _declare(self, name: hir.ExpressedIdentifier, value: hir.AST, loc: Span, type_: ty.Type = 'int64') -> hir.Declare:
+        return hir.Declare(loc, ty.VOID_TYPE, 'let', name.name, type_, value)
+
+    def _assign(self, name: hir.ExpressedIdentifier, value: hir.AST, loc: Span) -> hir.Assign:
+        return hir.Assign(loc, ty.VOID_TYPE, name, '=', value)
+
+    def _name(self, role: str, loc: Span, type_: ty.Type = 'int64') -> hir.ExpressedIdentifier:
+        return hir.ExpressedIdentifier(loc, type_, self._new_array_name(role))
+
+    def _while(self, condition: hir.AST, body: list[hir.AST], loc: Span) -> hir.Flow:
+        return hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, body, True))], None)
+
+    def _if(self, condition: hir.AST, body: list[hir.AST], loc: Span, otherwise: list[hir.AST] | None = None) -> hir.Flow:
+        return hir.Flow(
+            loc, ty.VOID_TYPE,
+            [hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, body, True))],
+            hir.Block(loc, ty.VOID_TYPE, otherwise, True) if otherwise is not None else None,
         )
-        statements: list[hir.AST] = [
-            hir.Declare(loc, ty.VOID_TYPE, 'let', found.name, 'bool', hir.Bool(loc, 'bool', False)),
-            hir.Declare(loc, ty.VOID_TYPE, 'let', at.name, 'int64', self._int64_literal(loc, 0)),
-            hir.Declare(loc, ty.VOID_TYPE, 'let', index.name, 'int64', self._int64_literal(loc, 0)),
-            hir.Declare(
-                loc, ty.VOID_TYPE, 'let', length.name, 'int64',
-                self._load_i64_field(keys_word, ARRAY_LENGTH_OFFSET, loc),
-            ),
-            hir.Flow(
+
+    def _counting(self, role: str, limit: hir.AST, body_of, loc: Span) -> list[hir.AST]:
+        counter = self._name(role, loc)
+        one = self._int64_literal(loc, 1)
+        return [
+            self._declare(counter, self._int64_literal(loc, 0), loc),
+            self._while(
+                self._int64_comparison('__lt__', counter, limit, loc),
+                [*body_of(counter), self._assign(counter, self._int64_binary('__add__', counter, one, loc), loc)],
                 loc,
-                ty.VOID_TYPE,
-                [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), body)],
-                None,
             ),
         ]
-        return statements, found, at
 
-    def _dict_types(self, keys: hir.AST, values: hir.AST) -> tuple[ty.TypeExpr, ty.TypeExpr]:
-        if not isinstance(keys.type, ty.ArrayType) or not isinstance(values.type, ty.ArrayType):
-            raise TypeError('INTERNAL ERROR: dictionary arrays are not arrays')
-        return keys.type.element, values.type.element
+    # ------------------------------------------------------------------ hashing
+    def _dict_hash(self, key: hir.AST, key_type: ty.TypeExpr, loc: Span) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """A non-negative int64 hash of a word or string key."""
+        result = self._name('dict_hash', loc)
+        if self._is_string_valued(key_type):
+            # FNV-1a over the UTF-8 bytes
+            accumulator = self._name('dict_fnv', loc, 'uint64')
+            byte_count = self._load_i64_field(key, STRING_BYTE_LENGTH_OFFSET, loc)
+            data = self._string_data_start(key, loc)
+            statements: list[hir.AST] = [self._declare(accumulator, self._uword(0xCBF29CE484222325, loc), loc, 'uint64')]
 
+            def step(index: hir.ExpressedIdentifier) -> list[hir.AST]:
+                byte = self._intrinsic_call('__load_u8__', [self._int64_binary('__add__', data, index, loc)], 'uint8', loc)
+                widened = hir.Transmute(loc, 'uint64', byte)
+                mixed = self._word('__mul__', self._word('__xor__', accumulator, widened, loc), self._uword(0x100000001B3, loc), loc)
+                return [self._assign(accumulator, mixed, loc)]
+
+            statements.extend(self._counting('dict_byte', byte_count, step, loc))
+            masked = self._word('__and__', accumulator, self._uword(HASH_MASK, loc), loc)
+            statements.append(self._declare(result, hir.Transmute(loc, 'int64', masked), loc))
+            return statements, result
+        word = hir.Transmute(loc, 'uint64', key)
+        mixed = self._word('__mul__', word, self._uword(WORD_MIX, loc), loc)
+        folded = self._word('__xor__', mixed, self._word('__rshift__', mixed, self._uword(29, loc), loc), loc)
+        masked = self._word('__and__', folded, self._uword(HASH_MASK, loc), loc)
+        return [self._declare(result, hir.Transmute(loc, 'int64', masked), loc)], result
+
+    # ------------------------------------------------------------------ table
+    def _dict_rebuild(self, parts: _DictParts, capacity: hir.AST, loc: Span) -> list[hir.AST]:
+        """Compact the entries (dropping tombstones), fill missing hashes, and build a fresh table."""
+        keys = self._dict_descriptor(parts, 'keys', loc)
+        values = self._dict_descriptor(parts, 'values', loc)
+        hashes = self._dict_descriptor(parts, 'hashes', loc)
+        indices = self._dict_descriptor(parts, 'indices', loc)
+        entry_count = self._dict_length_of(keys, loc)
+        hash_count = self._dict_length_of(hashes, loc)
+        writer = self._name('dict_write', loc)
+        statements: list[hir.AST] = [self._declare(writer, self._int64_literal(loc, 0), loc)]
+
+        # 1. compact: keep entries whose hash is not DEAD (entries without a
+        #    hash yet are live)
+        def compact(reader: hir.ExpressedIdentifier) -> list[hir.AST]:
+            has_hash = self._int64_comparison('__lt__', reader, hash_count, loc)
+            dead = hir.ShortCircuit(
+                loc, 'bool', 'and', has_hash,
+                self._typed_equality(self._dict_element(hashes, reader, 'int64', loc), self._int64_literal(loc, DEAD), 'int64', loc),
+            )
+            moved = self._int64_comparison('__lt__', writer, reader, loc)
+            copy = [
+                self._dict_store_element(keys, writer, self._dict_element(keys, reader, parts.key_type, loc), parts.key_type, loc),
+                self._dict_store_element(values, writer, self._dict_element(values, reader, parts.value_type, loc), parts.value_type, loc),
+                self._if(has_hash, [self._dict_store_element(hashes, writer, self._dict_element(hashes, reader, 'int64', loc), 'int64', loc)], loc),
+            ]
+            return [self._if(dead, [], loc, [
+                self._if(moved, copy, loc),
+                self._assign(writer, self._int64_binary('__add__', writer, self._int64_literal(loc, 1), loc), loc),
+            ])]
+
+        statements.extend(self._counting('dict_read', entry_count, compact, loc))
+        statements.extend(self._dict_truncate(parts, 'keys', parts.key_type, writer, loc))
+        statements.extend(self._dict_truncate(parts, 'values', parts.value_type, writer, loc))
+        statements.extend(self._dict_truncate(parts, 'hashes', 'int64', writer, loc))
+        statements.append(self._dict_set_live(parts, writer, loc))
+
+        # 2. hashes for entries that never had one (a fresh literal)
+        missing = self._name('dict_unhashed', loc)
+        hash_prelude, hashed = self._dict_hash(self._dict_element(keys, missing, parts.key_type, loc), parts.key_type, loc)
+        statements.append(self._declare(missing, self._dict_length_of(hashes, loc), loc))
+        statements.append(self._while(
+            self._int64_comparison('__lt__', missing, self._dict_length_of(keys, loc), loc),
+            [*hash_prelude, *self._dict_push(parts, 'hashes', 'int64', hashed, loc),
+             self._assign(missing, self._int64_binary('__add__', missing, self._int64_literal(loc, 1), loc), loc)],
+            loc,
+        ))
+
+        # 3. the table: `capacity` empty slots, then every entry inserted by its hash
+        size = self._name('dict_size', loc)
+        statements.append(self._declare(size, capacity, loc))
+        statements.extend(self._dict_truncate(parts, 'indices', 'int64', self._int64_literal(loc, 0), loc))
+        statements.extend(self._counting('dict_slot', size, lambda _slot: self._dict_push(parts, 'indices', 'int64', self._int64_literal(loc, EMPTY), loc), loc))
+        mask = self._name('dict_mask', loc)
+        statements.append(self._declare(mask, self._int64_binary('__sub__', size, self._int64_literal(loc, 1), loc), loc))
+
+        def insert(entry: hir.ExpressedIdentifier) -> list[hir.AST]:
+            entry_hash = self._dict_element(hashes, entry, 'int64', loc)
+            slot = self._name('dict_i', loc)
+            perturb = self._name('dict_perturb', loc, 'uint64')
+            probe_step = self._probe_step(slot, perturb, mask, loc)
+            occupied = hir.FunctionCall(
+                loc, 'bool',
+                hir.ExpressedIdentifier(loc, ty.FunctionType([ty.PosOrKwArg('l', 'int64'), ty.PosOrKwArg('r', 'int64')], [], None, 'bool', []), '__ne__'),
+                [self._dict_element(indices, slot, 'int64', loc), self._int64_literal(loc, EMPTY)], {},
+            )
+            return [
+                self._declare(slot, self._int64_binary('__and__', entry_hash, mask, loc), loc),
+                self._declare(perturb, hir.Transmute(loc, 'uint64', entry_hash), loc, 'uint64'),
+                self._while(occupied, probe_step, loc),
+                self._dict_store_element(indices, slot, entry, 'int64', loc),
+            ]
+
+        statements.extend(self._counting('dict_entry', self._dict_length_of(keys, loc), insert, loc))
+        return statements
+
+    def _probe_step(self, slot: hir.ExpressedIdentifier, perturb: hir.ExpressedIdentifier, mask: hir.AST, loc: Span) -> list[hir.AST]:
+        """`perturb >>= 5; i = (5*i + perturb + 1) & mask`."""
+        return [
+            self._assign(perturb, self._word('__rshift__', perturb, self._uword(5, loc), loc), loc),
+            self._assign(slot, self._int64_binary(
+                '__and__',
+                self._int64_binary(
+                    '__add__',
+                    self._int64_binary('__add__', self._int64_binary('__mul__', self._int64_literal(loc, 5), slot, loc), hir.Transmute(loc, 'int64', perturb), loc),
+                    self._int64_literal(loc, 1), loc,
+                ),
+                mask, loc,
+            ), loc),
+        ]
+
+    def _table_capacity_for(self, entries: hir.AST, loc: Span) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """The smallest power of two of at least MIN_TABLE keeping `entries` under 2/3 load."""
+        capacity = self._name('dict_capacity', loc)
+        needed = self._int64_binary('__mul__', entries, self._int64_literal(loc, 3), loc)
+        return [
+            self._declare(capacity, self._int64_literal(loc, MIN_TABLE), loc),
+            self._while(
+                self._int64_comparison('__le__', self._int64_binary('__mul__', capacity, self._int64_literal(loc, 2), loc), needed, loc),
+                [self._assign(capacity, self._int64_binary('__mul__', capacity, self._int64_literal(loc, 2), loc), loc)],
+                loc,
+            ),
+        ], capacity
+
+    def _dict_ensure_table(self, parts: _DictParts, loc: Span, *, room_for: int = 0) -> list[hir.AST]:
+        """Build the table on first use, or rebuild when `room_for` more entries would exceed 2/3 load."""
+        indices = self._dict_descriptor(parts, 'indices', loc)
+        keys = self._dict_descriptor(parts, 'keys', loc)
+        entries = self._int64_binary('__add__', self._dict_length_of(keys, loc), self._int64_literal(loc, room_for), loc)
+        capacity_prelude, capacity = self._table_capacity_for(self._int64_binary('__add__', self._dict_live(parts, loc), self._int64_literal(loc, room_for), loc), loc)
+        too_full = self._int64_comparison(
+            '__gt__',
+            self._int64_binary('__mul__', entries, self._int64_literal(loc, 3), loc),
+            self._int64_binary('__mul__', self._dict_length_of(indices, loc), self._int64_literal(loc, 2), loc),
+            loc,
+        )
+        return [self._if(too_full, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)]
+
+    def _dict_probe(
+        self,
+        parts: _DictParts,
+        key: hir.AST,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier, hir.ExpressedIdentifier, hir.ExpressedIdentifier]:
+        """Search for `key`: (statements, found, entry position, table slot).
+
+        The slot is the entry's slot when found, else the first dummy or the
+        empty slot that ended the probe — where an insertion goes.
+        """
+        keys = self._dict_descriptor(parts, 'keys', loc)
+        hashes = self._dict_descriptor(parts, 'hashes', loc)
+        indices = self._dict_descriptor(parts, 'indices', loc)
+        hash_prelude, key_hash = self._dict_hash(key, parts.key_type, loc)
+        found = self._name('dict_found', loc, 'bool')
+        position = self._name('dict_pos', loc)
+        slot = self._name('dict_slot', loc)
+        cursor = self._name('dict_i', loc)
+        perturb = self._name('dict_perturb', loc, 'uint64')
+        searching = self._name('dict_searching', loc, 'bool')
+        mask = self._name('dict_mask', loc)
+        entry = self._name('dict_entry', loc)
+        entry_key = self._dict_element(keys, entry, parts.key_type, loc)
+        if self._is_string_valued(parts.key_type):
+            equal_prelude, keys_equal = self._extract_string_equal(hir.StringEqual(loc, 'bool', entry_key, key))
+        else:
+            equal_prelude, keys_equal = [], self._typed_equality(entry_key, key, parts.key_type, loc)
+        same_hash = self._typed_equality(self._dict_element(hashes, entry, 'int64', loc), key_hash, 'int64', loc)
+        remember_slot = self._if(self._int64_comparison('__lt__', slot, self._int64_literal(loc, 0), loc), [self._assign(slot, cursor, loc)], loc)
+        body = [
+            self._declare(entry, self._dict_element(indices, cursor, 'int64', loc), loc),
+            self._if(
+                self._typed_equality(entry, self._int64_literal(loc, EMPTY), 'int64', loc),
+                [remember_slot, self._assign(searching, hir.Bool(loc, 'bool', False), loc)],
+                loc,
+                [self._if(
+                    self._typed_equality(entry, self._int64_literal(loc, DUMMY), 'int64', loc),
+                    [remember_slot, *self._probe_step(cursor, perturb, mask, loc)],
+                    loc,
+                    [*equal_prelude, self._if(
+                        hir.ShortCircuit(loc, 'bool', 'and', same_hash, keys_equal),
+                        [
+                            self._assign(found, hir.Bool(loc, 'bool', True), loc),
+                            self._assign(position, entry, loc),
+                            self._assign(slot, cursor, loc),
+                            self._assign(searching, hir.Bool(loc, 'bool', False), loc),
+                        ],
+                        loc,
+                        self._probe_step(cursor, perturb, mask, loc),
+                    )],
+                )],
+            ),
+        ]
+        statements: list[hir.AST] = [
+            *hash_prelude,
+            self._declare(found, hir.Bool(loc, 'bool', False), loc, 'bool'),
+            self._declare(position, self._int64_literal(loc, -1), loc),
+            self._declare(slot, self._int64_literal(loc, -1), loc),
+            self._declare(mask, self._int64_binary('__sub__', self._dict_length_of(indices, loc), self._int64_literal(loc, 1), loc), loc),
+            self._declare(cursor, self._int64_binary('__and__', key_hash, mask, loc), loc),
+            self._declare(perturb, hir.Transmute(loc, 'uint64', key_hash), loc, 'uint64'),
+            self._declare(searching, hir.Bool(loc, 'bool', True), loc, 'bool'),
+            self._while(searching, body, loc),
+        ]
+        return statements, found, position, slot
+
+    # ------------------------------------------------------------------ nodes
     def _extract_dict_lookup(self, node: hir.DictLookup) -> tuple[list[hir.AST], hir.AST]:
         loc = node.loc
-        key_type, value_type = self._dict_types(node.keys, node.values)
-        keys_prelude, keys = self._extract_expression(node.keys)
-        values_prelude, values = self._extract_expression(node.values)
+        prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
-        values_word = replace(values, type='int64') if isinstance(values, hir.ExpressedIdentifier) else values
+        values = self._dict_descriptor(parts, 'values', loc)
 
         def value_at(index: hir.AST) -> hir.AST:
-            return self._array_load(self._array_element_address(values_word, index, value_type, loc), value_type, loc)
+            return self._dict_element(values, index, parts.value_type, loc)
 
         if node.proven:
-            # the key is present: read it at the position a guard, store, or
-            # the literal established, or search knowing the search succeeds
             if node.static_position is not None:
-                position: hir.AST = self._int64_literal(loc, node.static_position)
                 search: list[hir.AST] = []
+                position: hir.AST = self._int64_literal(loc, node.static_position)
             elif node.position is not None:
-                position = hir.ExpressedIdentifier(loc, 'int64', node.position)
                 search = []
+                position = hir.ExpressedIdentifier(loc, 'int64', node.position)
             else:
-                search, _found, position = self._dict_search(keys, key, key_type, loc)
-            result = hir.ExpressedIdentifier(loc, value_type, self._new_array_name('dict_value'))
-            return [
-                *keys_prelude, *values_prelude, *key_prelude, *search,
-                hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, value_type, value_at(position)),
-            ], result
-        search, found, at = self._dict_search(keys, key, key_type, loc)
+                search = [*self._dict_ensure_table(parts, loc)]
+                probe, _found, position, _slot = self._dict_probe(parts, key, loc)
+                search.extend(probe)
+            result = self._name('dict_value', loc, parts.value_type)
+            return [*prelude, *key_prelude, *search, self._declare(result, value_at(position), loc, parts.value_type)], result
+        search = [*self._dict_ensure_table(parts, loc)]
+        probe, found, position, _slot = self._dict_probe(parts, key, loc)
+        search.extend(probe)
         if node.default is not None:
-            # `d.get(key default)`: the default unless the key is found
             default_prelude, default = self._extract_expression(node.default)
-            result = hir.ExpressedIdentifier(loc, value_type, self._new_array_name('dict_value'))
+            result = self._name('dict_value', loc, parts.value_type)
             return [
-                *keys_prelude, *values_prelude, *key_prelude, *default_prelude, *search,
-                hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, value_type, default),
-                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                    loc, ty.VOID_TYPE, found,
-                    hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, result, '=', value_at(at))], True),
-                )], None),
+                *prelude, *key_prelude, *default_prelude, *search,
+                self._declare(result, default, loc, parts.value_type),
+                self._if(found, [self._assign(result, value_at(position), loc)], loc),
             ], result
         payload = ty.optional_payload(node.type)
         if payload is None:
             raise TypeError('INTERNAL ERROR: dictionary lookup is not optional')
         cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('dict_value'))
         cell_word = replace(cell, type='int64')
-        statements: list[hir.AST] = [
-            *keys_prelude,
-            *values_prelude,
-            *key_prelude,
-            *search,
+        return [
+            *prelude, *key_prelude, *search,
             hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
             *self._optional_write(cell_word, hir.Undefined(loc, 'undefined'), payload),
-            hir.Flow(
-                loc,
-                ty.VOID_TYPE,
-                [
-                    hir.IfArm(
-                        loc,
-                        ty.VOID_TYPE,
-                        found,
-                        hir.Block(loc, ty.VOID_TYPE, self._optional_write(cell_word, value_at(at), payload), True),
-                    )
-                ],
-                None,
-            ),
-        ]
-        return statements, cell
+            self._if(found, self._optional_write(cell_word, value_at(position), payload), loc),
+        ], cell
 
     def _extract_dict_contains(self, node: hir.DictContains) -> tuple[list[hir.AST], hir.AST]:
         loc = node.loc
-        if not isinstance(node.keys.type, ty.ArrayType):
-            raise TypeError('INTERNAL ERROR: dictionary keys are not an array')
-        keys_prelude, keys = self._extract_expression(node.keys)
+        prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
-        search, found, at = self._dict_search(keys, key, node.keys.type.element, loc)
-        position: list[hir.AST] = []
+        ensure = self._dict_ensure_table(parts, loc)
+        probe, found, position, _slot = self._dict_probe(parts, key, loc)
+        remembered: list[hir.AST] = []
         if node.position is not None:
-            # a guarded lookup reuses the search result
-            position.append(hir.Declare(loc, ty.VOID_TYPE, 'let', node.position, 'int64', at))
-        return [*keys_prelude, *key_prelude, *search, *position], found
+            remembered.append(hir.Declare(loc, ty.VOID_TYPE, 'let', node.position, 'int64', position))
+        return [*prelude, *key_prelude, *ensure, *probe, *remembered], found
 
     def _extract_dict_store(self, node: hir.DictStore) -> tuple[list[hir.AST], hir.AST]:
         loc = node.loc
-        key_type, value_type = self._dict_types(node.keys, node.values)
-        keys_prelude, keys = self._extract_expression(node.keys)
-        values_prelude, values = self._extract_expression(node.values)
+        prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
         value_prelude, value = self._extract_expression(node.value)
-        search, found, at = self._dict_search(keys, key, key_type, loc)
-        values_word = replace(values, type='int64') if isinstance(values, hir.ExpressedIdentifier) else values
-        replace_value = self._array_store(
-            value,
-            self._array_element_address(values_word, at, value_type, loc),
-            value_type,
-            loc,
-        )
-
-        def push(array: hir.AST, item: hir.AST, element: ty.TypeExpr) -> list[hir.AST]:
-            method = hir.ArrayMethod(
-                loc,
-                ty.FunctionType([ty.PosOrKwArg('value', element)], [], None, ty.VOID_TYPE),
-                array,
-                'push',
-            )
-            prelude, call = self._extract_array_method_call(
-                hir.FunctionCall(loc, ty.VOID_TYPE, method, [item], {})
-            )
-            return [*prelude, call]
-
-        position_statements: list[hir.AST] = []
-        appended: list[hir.AST] = []
+        values = self._dict_descriptor(parts, 'values', loc)
+        keys = self._dict_descriptor(parts, 'keys', loc)
+        indices = self._dict_descriptor(parts, 'indices', loc)
+        ensure = self._dict_ensure_table(parts, loc, room_for=1)
+        probe, found, position, slot = self._dict_probe(parts, key, loc)
+        hash_prelude, key_hash = self._dict_hash(key, parts.key_type, loc)
+        new_position = self._name('dict_new', loc)
+        remembered: list[hir.AST] = []
         if node.position is not None:
-            # a following lookup of this key reads the entry directly: the
-            # found index, or the index of the appended entry
-            position = hir.ExpressedIdentifier(loc, 'int64', node.position)
-            position_statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', position.name, 'int64', at))
-            keys_word = replace(keys, type='int64') if isinstance(keys, hir.ExpressedIdentifier) else keys
-            appended.append(hir.Assign(
-                loc, ty.VOID_TYPE, position, '=',
-                self._load_i64_field(keys_word, ARRAY_LENGTH_OFFSET, loc),
-            ))
-        statements: list[hir.AST] = [
-            *keys_prelude,
-            *values_prelude,
-            *key_prelude,
-            *value_prelude,
-            *search,
-            *position_statements,
-            hir.Flow(
-                loc,
-                ty.VOID_TYPE,
-                [hir.IfArm(loc, ty.VOID_TYPE, found, hir.Block(loc, ty.VOID_TYPE, [replace_value], True))],
-                hir.Block(
-                    loc,
-                    ty.VOID_TYPE,
-                    [*appended, *push(node.keys, key, key_type), *push(node.values, value, value_type)],
-                    True,
-                ),
-            ),
+            remembered.append(hir.Declare(loc, ty.VOID_TYPE, 'let', node.position, 'int64', position))
+        replace_value = [self._dict_store_element(values, position, value, parts.value_type, loc)]
+        append = [
+            self._declare(new_position, self._dict_length_of(keys, loc), loc),
+            *self._dict_push(parts, 'keys', parts.key_type, key, loc),
+            *self._dict_push(parts, 'values', parts.value_type, value, loc),
+            *hash_prelude,
+            *self._dict_push(parts, 'hashes', 'int64', key_hash, loc),
+            self._dict_store_element(indices, slot, new_position, 'int64', loc),
+            self._dict_set_live(parts, self._int64_binary('__add__', self._dict_live(parts, loc), self._int64_literal(loc, 1), loc), loc),
+            *([hir.Assign(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, 'int64', node.position), '=', new_position)] if node.position is not None else []),
         ]
-        return statements, hir.Void(loc, ty.VOID_TYPE)
+        return [
+            *prelude, *key_prelude, *value_prelude, *ensure, *probe, *remembered,
+            self._if(found, replace_value, loc, append),
+        ], hir.Void(loc, ty.VOID_TYPE)
+
+    def _extract_dict_remove(self, node: hir.DictRemove) -> tuple[list[hir.AST], hir.AST]:
+        """`d.pop(key)` tombstones the entry; `d.clear` empties everything."""
+        loc = node.loc
+        prelude, parts = self._dict_parts(node.keys)
+        if node.key is None:
+            statements: list[hir.AST] = [*prelude]
+            for field, element in (('keys', parts.key_type), ('values', parts.value_type), ('hashes', 'int64'), ('indices', 'int64')):
+                statements.extend(self._dict_truncate(parts, field, element, self._int64_literal(loc, 0), loc))
+            statements.append(self._dict_set_live(parts, self._int64_literal(loc, 0), loc))
+            return statements, hir.Void(loc, ty.VOID_TYPE)
+        key_prelude, key = self._extract_expression(node.key)
+        values = self._dict_descriptor(parts, 'values', loc)
+        hashes = self._dict_descriptor(parts, 'hashes', loc)
+        indices = self._dict_descriptor(parts, 'indices', loc)
+        # a remembered position still needs the slot: probing by key finds
+        # both (the key is proven present, so the probe succeeds)
+        ensure = self._dict_ensure_table(parts, loc)
+        probe, found, position, slot = self._dict_probe(parts, key, loc)
+        removed = self._name('dict_removed', loc, parts.value_type)
+        take = [
+            self._assign(removed, self._dict_element(values, position, parts.value_type, loc), loc),
+            self._dict_store_element(hashes, position, self._int64_literal(loc, DEAD), 'int64', loc),
+            self._dict_store_element(indices, slot, self._int64_literal(loc, DUMMY), 'int64', loc),
+            self._dict_set_live(parts, self._int64_binary('__sub__', self._dict_live(parts, loc), self._int64_literal(loc, 1), loc), loc),
+        ]
+        if node.default is None:
+            # proven present: the probe succeeds
+            return [
+                *prelude, *key_prelude, *ensure, *probe,
+                self._declare(removed, self._dict_element(values, position, parts.value_type, loc), loc, parts.value_type),
+                *take[1:],
+            ], removed
+        default_prelude, default = self._extract_expression(node.default)
+        return [
+            *prelude, *key_prelude, *default_prelude, *ensure, *probe,
+            self._declare(removed, default, loc, parts.value_type),
+            self._if(found, take, loc),
+        ], removed
+
+    def _extract_dict_entries(self, node: hir.DictEntries) -> tuple[list[hir.AST], hir.AST]:
+        """The entry array for iteration, compacted first if removals left tombstones."""
+        loc = node.loc
+        member = hir.MemberAccess(loc, node.type, node.dictionary, 'keys')
+        prelude, parts = self._dict_parts(member)
+        keys = self._dict_descriptor(parts, 'keys', loc)
+        has_dead = self._int64_comparison('__gt__', self._dict_length_of(keys, loc), self._dict_live(parts, loc), loc)
+        capacity_prelude, capacity = self._table_capacity_for(self._dict_live(parts, loc), loc)
+        compact = self._if(has_dead, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)
+        return [*prelude, compact], self._dict_descriptor(parts, node.name, loc)

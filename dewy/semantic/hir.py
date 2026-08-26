@@ -304,6 +304,32 @@ class DictContains(AST):
 
 
 @dataclass
+class DictRemove(AST):
+    """``d.pop(key)`` (proven key): remove the entry, shifting later entries
+    down so insertion order is kept, and yield its value. ``d.clear`` is the
+    same node with ``key`` None. ``position``/``static_position`` locate the
+    entry as for lookups."""
+
+    keys: AST
+    values: AST
+    key: AST | None
+    position: str | None = None
+    static_position: int | None = None
+    default: AST | None = None
+    """`d.pop(key default=v)`: the key need not be proven; `v` results when it is absent."""
+
+
+@dataclass
+class DictEntries(AST):
+    """The `keys` or `values` entry array of a dictionary for iteration: the
+    dictionary is compacted first when removals left dead entries, so the
+    array holds exactly the live entries in insertion order."""
+
+    dictionary: AST
+    name: str
+
+
+@dataclass
 class DictMethod(AST):
     """A compiler-provided method bound to a dictionary value (``get``).
 

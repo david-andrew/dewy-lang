@@ -74,6 +74,8 @@ LOWERED_CASES = [
     ('object_dynamic_fields_calls.dewy', 83),
     ('dict_calls.dewy', 86),
     ('dict_proofs.dewy', 133),
+    ('dict_remove.dewy', 118),
+    ('dict_hash.dewy', 204),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
