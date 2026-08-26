@@ -71,6 +71,7 @@ LOWERED_CASES = [
     ('array_edit.dewy', 111),
     ('array_sort.dewy', 33),
     ('object_growable_fields.dewy', 73),
+    ('object_dynamic_fields_calls.dewy', 83),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

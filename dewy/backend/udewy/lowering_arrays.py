@@ -1049,6 +1049,15 @@ class _ArrayLowering:
             or self._is_string_valued(element)
         )
 
+    @staticmethod
+    def _is_word_element_static(element: ty.Type) -> bool:
+        """Elements copied as one word: scalars and immutable string handles."""
+        return (
+            element == 'bool'
+            or ty.fixed_integer_layout(element) is not None
+            or _Lowerer_static_is_string_valued(element)
+        )
+
     def _array_grow_statements(
         self,
         descriptor: hir.AST,
@@ -1976,10 +1985,15 @@ class _ArrayLowering:
         cls,
         array_type: ty.ArrayType,
     ) -> bool:
-        """Whether callers can prepare the complete mutable result layout."""
+        """Whether callers can prepare the complete mutable result layout.
+
+        Runtime-length arrays with word elements are returnable as *fields*:
+        the caller holds a handle slot and the callee fills it with an
+        arena-backed copy (see ``_arena_array_field_value``).
+        """
 
         if array_type.length is None:
-            return False
+            return cls._is_word_element_static(array_type.element)
         element_type = array_type.element
         return (
             array_type.length == 0
@@ -2360,7 +2374,14 @@ class _ArrayLowering:
         """Recursively copy an array into already-prepared mutable storage."""
 
         if array_type.length is None:
-            self._target_error(source_node, 'runtime-length escaping array results')
+            # a handle slot: fill it with an arena-backed copy that outlives the callee
+            source: hir.AST = (
+                replace(source_node, type='int64')
+                if source_is_pointer and isinstance(source_node, hir.ExpressedIdentifier)
+                else source_node
+            )
+            prelude, copied = self._clone_dynamic_array_value(source, array_type, arena=True)
+            return [*prelude, *self._value_store(copied, dest, array_type, loc)]
         if source_is_pointer:
             raw_representation = None
             prelude, source = [], replace(source_node, type='int64')

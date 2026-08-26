@@ -29,6 +29,15 @@ class ModuleRecord:
     prelude: bool = False
 
 
+def _has_runtime_array_field(object_type: ty.ObjectType) -> bool:
+    for field in object_type.fields:
+        if isinstance(field.type, ty.ArrayType) and field.type.length is None:
+            return True
+        if isinstance(field.type, ty.ObjectType) and _has_runtime_array_field(field.type):
+            return True
+    return False
+
+
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
@@ -265,6 +274,10 @@ class ModuleCompiler:
             if isinstance(value, hir.FunctionLiteral):
                 rettype = value.rettype
                 if isinstance(rettype, ty.ArrayType) and rettype.length is None:
+                    found = True
+                    return
+                if isinstance(rettype, ty.ObjectType) and _has_runtime_array_field(rettype):
+                    # runtime-length array fields of an object result are arena-backed
                     found = True
                     return
             if isinstance(value, (hir.ArrayMethod, hir.DictStore)):

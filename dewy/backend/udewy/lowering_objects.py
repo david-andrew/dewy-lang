@@ -131,6 +131,8 @@ class _ObjectLowering:
         statements: list[hir.AST] = []
         for field in object_type.fields:
             address = self._field_address(dest, offsets[field.name], loc)
+            if isinstance(field.type, ty.ArrayType) and field.type.length is None:
+                continue  # a handle slot the callee fills with an arena-backed array
             if isinstance(field.type, ty.ArrayType):
                 nested_statements, nested = self._allocate_array_result_value(
                     field.type,
@@ -838,7 +840,11 @@ class _ObjectLowering:
                 expected = object_type.field(field.name)
                 field_type = expected.type if expected is not None else field.value.type
                 address = self._field_address(dest, offsets[field.name], field.loc)
-                if isinstance(field_type, ty.ArrayType):
+                if isinstance(field_type, ty.ArrayType) and field_type.length is None:
+                    prelude, handle = self._arena_array_field_value(field.value, field_type)
+                    statements.extend(prelude)
+                    statements.extend(self._value_store(handle, address, field_type, field.loc))
+                elif isinstance(field_type, ty.ArrayType):
                     nested_dest = self._value_load(
                         address,
                         field_type,
@@ -869,6 +875,22 @@ class _ObjectLowering:
             self.object_literal_contexts.pop()
         return statements
 
+    def _arena_array_field_value(
+        self,
+        node: hir.AST,
+        array_type: ty.ArrayType,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """An arena-backed array handle for a runtime-length field of a result."""
+        source = self._copy_source_expression(node)
+        if (
+            isinstance(source, hir.FunctionCall)
+            and isinstance(source.type, ty.ArrayType)
+            and source.type.length is None
+        ):
+            # a runtime-length call result is already arena-backed
+            return self._extract_expression(node)
+        return self._clone_dynamic_array_value(node, array_type, arena=True)
+
     def _copy_object_into_result_storage(
         self,
         dest: hir.AST,
@@ -886,7 +908,14 @@ class _ObjectLowering:
         for field in object_type.fields:
             dest_address = self._field_address(dest, offsets[field.name], loc)
             source_address = self._field_address(src, offsets[field.name], loc)
-            if isinstance(field.type, ty.ArrayType):
+            if isinstance(field.type, ty.ArrayType) and field.type.length is None:
+                source_array = self._value_load(source_address, field.type, loc)
+                prelude, copied = self._clone_dynamic_array_value(
+                    replace(source_array, type='int64'), field.type, arena=True,
+                )
+                statements.extend(prelude)
+                statements.extend(self._value_store(copied, dest_address, field.type, loc))
+            elif isinstance(field.type, ty.ArrayType):
                 target_array = self._value_load(dest_address, field.type, loc)
                 source_array = self._value_load(source_address, field.type, loc)
                 statements.extend(

@@ -1,0 +1,31 @@
+# Objects with growable array fields cross call boundaries: results carry
+# arena-backed copies of the fields, value parameters copy (or borrow when
+# read-only), and place parameters mutate the caller's object.
+let Bag:type = [items:array<int64> total:int64]
+
+let empty = ():>Bag => [items = [] total = 0]
+
+let grow = (bag:Bag value:int64):>Bag => {
+    bag.items.push(value)          # mutates the callee's copy
+    bag.total = bag.total + value
+    return bag
+}
+
+let count = (bag:Bag):>int64 => bag.items.length   # read-only: borrowed
+
+let fill = (@bag:Bag value:int64):>void => {
+    bag.items.push(value)          # a place: the caller's object grows
+    bag.total = bag.total + value
+}
+
+let main = ():>int64 => {
+    let bag = empty()
+    let bigger = grow(bag 10)
+    let biggest = grow(bigger 20)
+    fill(@biggest 5)
+    let sum:int64 = 0
+    let i:int64 = 0
+    loop i <? biggest.items.length { sum = sum + biggest.items[i]  i = i + 1 }   # 35
+    printl"{count(bag)} {count(bigger)} {count(biggest)} {biggest.total} {sum}"
+    return count(bag) * 100 + count(bigger) * 10 + count(biggest) + biggest.total + sum   # 0 + 10 + 3 + 35 + 35
+}
