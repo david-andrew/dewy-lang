@@ -123,9 +123,9 @@ A scope metatag can name its directly contained loops so an exit can target one 
 
 The label belongs to the scope, not textually to the next loop. It cannot duplicate or shadow an active label, and labels do not cross function boundaries.
 
-## Collecting Produced Values
+## Loop Capture
 
-A loop expresses the non-`void` values produced by its body. Surrounding `[]` collects them into an array:
+A loop expresses the non-`void` values produced by its body. Surrounding `[]` collects them into an array; this is loop capture:
 
 ```dewy
 let squares = [

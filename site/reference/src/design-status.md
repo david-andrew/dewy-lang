@@ -12,6 +12,8 @@ The following principles organize the language and should be treated as normativ
 - `@` explicitly selects a place or function binding when reference-like behavior is intended.
 - Strings are immutable grapheme-cluster sequences with explicit lower-level views.
 - Arrays are homogeneous values and may carry length or shape facts in their types.
+- Loop capture is collecting a loop's non-`void` expressed values in a surrounding collector such as `[]`.
+- Sequences combine through their construction syntax: interpolation joins strings, and `...` spreads an array into a surrounding `[]` literal.
 - Objects are structural values. User-defined constructors are ordinary functions, while a structural or hybrid type may directly contextualize an object literal.
 - Defaults are per-call fallbacks and do not remove their parameters from positional binding.
 - Types are compile-time values and use the ordinary expression grammar where practical.

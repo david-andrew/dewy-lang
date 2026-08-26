@@ -19,7 +19,7 @@ probably could be more in depth highlighting with e.g. tree sitter. such as high
 
 ## Marking expressed vs suppressed values that are captured by some higher context
 basically I think there should be some indicator, perhaps a highlight or something, which tells you when a value is being expressed (rather than void/suppressed), and it is being captured in the higher context.
-I think this will mainly be useful when making list comprehensions since any expressed value gets captured
+I think this will mainly be useful when making loop captures since any expressed value gets captured
 ```dewy
 apple = 5
 my_gen = [

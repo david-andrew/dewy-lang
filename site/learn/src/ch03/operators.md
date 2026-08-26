@@ -44,6 +44,7 @@ Adjacent expressions reuse one syntactic relationship:
 function(argument)    # call
 values[index]         # index
 2distance             # multiplication
+values...             # spread into a surrounding collector
 ```
 
 The parser keeps meaningful alternatives until types and context select the operation. This is why function calls, indexing, and mathematical notation can share a consistent surface form without textual heuristics.

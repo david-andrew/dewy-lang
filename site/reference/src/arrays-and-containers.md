@@ -21,6 +21,10 @@ The compiler may implement an unobservable copy as a move, borrowed read, shared
 
 `.length` reports the length. Integer indexes select elements, and range indexes select slices. The compiler must prove an ordinary index valid; operations that perform explicit runtime validation are separate checked interfaces.
 
+A loop inside `[]` is loop capture: the collector receives each non-`void` value the loop expresses and produces an array.
+
+A trailing `...` after a sequence inserts its elements into a surrounding array literal. Fixed elements and spreads may mix: `[heads... tails...]`, `[0 xs... 1]`.
+
 ## Shapes and Dimensions
 
 Arrays are also the intended foundation for vectors, matrices, and tensors. Shape belongs in array type information rather than requiring unrelated matrix classes.
@@ -32,6 +36,7 @@ The exact general multidimensional literal and type syntax remains provisional. 
 A dictionary literal uses `->` pairs; a bidictionary uses `<->` pairs and supports lookup in both directions:
 
 <!-- dewy-example: design-only -->
+
 ```dewy
 let scores = ["Ada" -> 10 "Grace" -> 12]
 let names = [1 <-> "one" 2 <-> "two"]
@@ -40,6 +45,7 @@ let names = [1 <-> "one" 2 <-> "two"]
 Dictionaries retain insertion order, and iteration yields key/value pairs in that order:
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 let scores = ["Ada" -> 10 "Grace" -> 12]
 
@@ -54,6 +60,7 @@ The broad literal distinction and insertion-order guarantee are settled, while c
 The intended set form is `set[...]`:
 
 <!-- dewy-example: design-only -->
+
 ```dewy
 let permissions = set["read" "write"]
 ```

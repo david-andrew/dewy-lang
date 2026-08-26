@@ -10,16 +10,16 @@ A literal introduces a value directly in source. Literal syntax may preserve mor
 
 Decimal integers require no prefix. Integer numerals support the following bases and case-insensitive alphabetic digits:
 
-| Base | Prefix | Digits |
-| ---: | :---: | --- |
-| 2 | `0b` | `0`–`1` |
-| 3 | `0t` | `0`–`2` |
-| 4 | `0q` | `0`–`3` |
-| 6 | `0s` | `0`–`5` |
-| 8 | `0o` | `0`–`7` |
-| 10 | `0d` | `0`–`9` |
-| 12 | `0z` | `0`–`9`, `x`, `e` |
-| 16 | `0x` | `0`–`9`, `a`–`f` |
+| Base | Prefix | Digits            |
+| ---: | :----: | ----------------- |
+|    2 |  `0b`  | `0`–`1`           |
+|    3 |  `0t`  | `0`–`2`           |
+|    4 |  `0q`  | `0`–`3`           |
+|    6 |  `0s`  | `0`–`5`           |
+|    8 |  `0o`  | `0`–`7`           |
+|   10 |  `0d`  | `0`–`9`           |
+|   12 |  `0z`  | `0`–`9`, `x`, `e` |
+|   16 |  `0x`  | `0`–`9`, `a`–`f`  |
 
 ```dewy
 42
@@ -72,6 +72,7 @@ Non-power-of-two dense packing remains a provisional design because the width of
 Square brackets use the top-level contents to determine the constructed form:
 
 <!-- dewy-example: design-only -->
+
 ```dewy
 [1 2 3]                       # array
 [name="Ada" active=true]     # object

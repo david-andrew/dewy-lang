@@ -64,7 +64,7 @@ A block can express several values when its surrounding context knows how to col
 let digits = [{ 1 2 3 }]
 ```
 
-Loops use the same rule, which is why an array-producing loop needs no separate comprehension syntax.
+Loops use the same rule, which is why an array-producing loop needs no separate comprehension syntax. [Loop Capture](../ch03/loops.md#loop-capture) falls out for free.
 
 ## Comments
 

@@ -6,7 +6,7 @@ Dewy has a broad feature set, but a small number of ideas explain how those feat
 
 Literals, calls, blocks, conditionals, and loops are expressions. An expression may produce one value, several values for a surrounding construct to collect, `void`, or no possible value at all.
 
-This is why Dewy does not need a separate ternary operator, list-comprehension grammar, or statement-only form of control flow.
+This is why Dewy does not need a separate ternary operator, loop-capture grammar, or statement-only form of control flow.
 
 ## One Grammar, Reused
 

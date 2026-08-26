@@ -29,7 +29,7 @@ sort(@names)
 set(@triple[1])
 ```
 
-## Building Arrays with Loops
+## Loop Capture
 
 A loop can express values for `[]` to collect:
 
@@ -42,17 +42,29 @@ let squares = [
 
 This is the ordinary loop expression, not a separate comprehension grammar.
 
+## Spreading Arrays
+
+A trailing `...` inserts every element of an existing array into a surrounding literal. Fixed elements and spreads can mix:
+
+```dewy
+let heads = [1 2]
+let tails = [8 9]
+let both = [heads... tails...]
+let padded = [0 both... 10]
+```
+
 ## Shapes and Multidimensional Data
 
 Arrays are also the foundation for vectors, matrices, and tensors. Dewy's shape and literal syntax must support contiguous multidimensional representations without preventing ordinary arrays of arrays.
 
-> **Provisional design:** Exact multidimensional shape annotations, dimension separators, broadcasting, and axis selection are still being unified. The one-dimensional `array<T length=N>` form and nested array values are settled.
+> **Provisional design:** Exact multidimensional shape annotations, dimension separators, broadcasting, and axis selection are still being unified. The one-dimensional `array<T length=N>` form and nested array values are settled. Multidimensional arrays will likely look like `array<T length=[l1 l2 ... lN]>`, and make use of `;` and newlines for tracking new dimensions in array literals (tbd how it interplays with loop capture)
 
 ## Dictionaries and Bidictionaries
 
 A dictionary collects key/value pairs written with `->`:
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 let ratings = [
     "star trek" -> 89
@@ -63,6 +75,7 @@ let ratings = [
 Dictionaries retain insertion order. Iteration yields key/value pairs in that order:
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 let ratings = [
     "star trek" -> 89
@@ -80,6 +93,7 @@ loop [title score] in ratings
 The intended set literal makes its unordered meaning explicit:
 
 <!-- dewy-example: design-only -->
+
 ```dewy
 let permissions = set["read" "write"]
 "read" in? permissions

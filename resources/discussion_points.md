@@ -8,7 +8,7 @@ need to decide if all loops should be lazy, or there should be an explicit `lazy
 
 ## bind expressions or statements [DONE: bind is an expression that returns void]
 
-need to decide if bind expressions e.g. `x = 1` express values that are capturable. e.g. in a list comprehension, you might be doing work
+need to decide if bind expressions e.g. `x = 1` express values that are capturable. e.g. in a loop capture, you might be doing work
 
 ```
 mylist = [
@@ -19,7 +19,7 @@ mylist = [
 ]
 ```
 
-like it's clear that `a = 2` shouldn't be capturable by the comprehension, rather it's just statement, not an expression. The alternative is that bind expressions are full fledged expressions that can be captured and used as values. To not capture in a comprehension, you'd need to suppress the value probably using ;. Honestly I'm not a fan and think it should be one of the rare exceptions that is a statement, rather than an expression. If they were expressions, the semantics would be really weird, like you could capture a bind and pass it into a different context, which doesn't really make sense. E.g. you could do
+like it's clear that `a = 2` shouldn't be capturable by the loop capture, rather it's just statement, not an expression. The alternative is that bind expressions are full fledged expressions that can be captured and used as values. To not capture in a loop capture, you'd need to suppress the value probably using ;. Honestly I'm not a fan and think it should be one of the rare exceptions that is a statement, rather than an expression. If they were expressions, the semantics would be really weird, like you could capture a bind and pass it into a different context, which doesn't really make sense. E.g. you could do
 
 ```
 some_function = () => {
@@ -123,7 +123,7 @@ my_tensor = [
 ]
 ```
 
-## will complex list comprehensions be column vectors if people use usual spacing? [it doesn't matter. row and column vectors are still 1D (not 2D like in matlab row vectors), so complex spaced comprehensions/etc. are free to not be marked as row vs column, but can still have a concrete shape=[N] or length=N. See `### small note on row vs column vectors`]
+## will complex loop captures be column vectors if people use usual spacing? [it doesn't matter. row and column vectors are still 1D (not 2D like in matlab row vectors), so complex spaced loop captures/etc. are free to not be marked as row vs column, but can still have a concrete shape=[N] or length=N. See `### small note on row vs column vectors`]
 
 e.g.
 
@@ -149,7 +149,7 @@ col_vec = [
 row_vec = [1 2 3]
 ```
 
-(perhaps comprehensions are just the default vector dimension by default, regardless of how the spacing inside was)
+(perhaps loop captures are just the default vector dimension by default, regardless of how the spacing inside was)
 
 ~~Alternatively in most cases it won't matter whether the list is a row or column vector. In cases where it does matter, the user can make use of either \ and ; to specify the opposite vector dimension. e.g.~~
 
@@ -163,7 +163,7 @@ row_vec = [
 col_vec = [1; 2; 3]
 ```
 
-~~So if a person wanted to make the original comprehension return a row vector instead of a column vector, they'd do~~
+~~So if a person wanted to make the original loop capture return a row vector instead of a column vector, they'd do~~
 
 ```
 primes = [
@@ -195,7 +195,7 @@ primes: int[10 1] = [
 ][..10)
 ```
 
-Alternatively, a clean thing would just be to prepend `row` or `col` in front of the comprehension to indicate which it should be
+Alternatively, a clean thing would just be to prepend `row` or `col` in front of the loop capture to indicate which it should be
 ```dewy
 // this is a column vector
 primes = col[
@@ -253,7 +253,7 @@ result = cv * A * rv   # error
 ```
 basically an internal property would be kept on the array object (perhaps just compiletime metadata), keeping track of if its a row or column vector, and that participates in the type checking process for matric math (in addition to all the type checking to ensure the dimensions match up)
 
-This makes it not matter so much when doing complex comprehensions
+This makes it not matter so much when doing complex loop captures
 ```dewy
 let complex_example = [
     1 2 3 4

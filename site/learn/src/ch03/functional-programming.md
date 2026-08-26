@@ -33,6 +33,7 @@ The parentheses around `@worker.callback` terminate the selection chain. This us
 A function handle can bind some arguments now and leave the rest open:
 
 <!-- dewy-example: design-only -->
+
 ```dewy
 let add = (left:int64 right:int64) => left + right
 let add5 = @add(5)
@@ -92,6 +93,7 @@ The array collects what the loop expresses. No separate comprehension or callbac
 Reusable library functions can be built from the same pattern once generic function contracts are available:
 
 <!-- dewy-example: design-only -->
+
 ```dewy
 let map = <T U>(
     transform:<(value:T):>U>

@@ -20,6 +20,7 @@ Braces inside a string literal evaluate an ordinary Dewy expression and convert 
 
 ```dewy
 let message = "item {index}: {value}"
+let combined = "{left}{right}"
 ```
 
 The intended conversion path is the same conversion used by `value as string`, so user-defined formatting participates in the general conversion protocol rather than a string-only hook.

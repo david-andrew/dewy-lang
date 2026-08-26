@@ -26,6 +26,7 @@ Adjacent expressions can form several operations:
 function(argument)
 values[index]
 2distance
+values...
 ```
 
 Parsing retains the meaningful call, index, and multiplication alternatives. Semantic analysis resolves the operation from the operand types and context. General juxtaposition multiplication is still a provisional implementation area, but its place in the expression grammar is settled.
@@ -34,38 +35,38 @@ Parsing retains the meaningful call, index, and multiplication alternatives. Sem
 
 The following table is ordered from highest to lowest. “Fail” means an ungrouped repetition at that level is rejected rather than given an arbitrary associativity. “Flat” produces one n-ary sequence.
 
-| Associativity | Operators or forms |
-| --- | --- |
-| prefix | `@` |
-| left | member `.`, call juxtaposition, index juxtaposition |
-| fail | type-parameter juxtaposition, ellipsis juxtaposition |
-| postfix / prefix | `` ` `` |
-| prefix | `not`, `~` |
-| postfix | `?` |
-| right | `^` |
-| left | multiplication juxtaposition |
-| prefix | `*`, `/`, `//` |
-| left | `*`, `/`, `//`, `%` |
-| prefix | `+`, `-` |
-| left | `+`, `-` |
-| left | `<<`, `>>`, `<<<`, `>>>` |
-| flat | `,` |
-| flat | range juxtaposition (`1..2`) |
-| fail | iterator `in` |
-| left | comparisons, membership, type tests, place identity |
-| left | `and`, `nand`, `&` |
-| left | `xor`, `xnor` |
-| left | `or`, `nor`, `|` |
-| left | `as`, `transmute` |
-| fail | `of`, `has` |
-| fail | `:` |
-| left | `:>` |
-| right | `=>` |
-| left | `|>` |
-| right | `<|` |
-| fail | `->`, `<->` |
-| fail | assignment and combined assignment |
-| left | attached semicolon suppression |
+| Associativity    | Operators or forms                                   |
+| ---------------- | ---------------------------------------------------- |
+| prefix           | `@`                                                  |
+| left             | member `.`, call juxtaposition, index juxtaposition  |
+| fail             | type-parameter juxtaposition, ellipsis juxtaposition |
+| postfix / prefix | `` ` ``                                              |
+| prefix           | `not`, `~`                                           |
+| postfix          | `?`                                                  |
+| right            | `^`                                                  |
+| left             | multiplication juxtaposition                         |
+| prefix           | `*`, `/`, `//`                                       |
+| left             | `*`, `/`, `//`, `%`                                  |
+| prefix           | `+`, `-`                                             |
+| left             | `+`, `-`                                             |
+| left             | `<<`, `>>`, `<<<`, `>>>`                             |
+| flat             | `,`                                                  |
+| flat             | range juxtaposition (`1..2`)                         |
+| fail             | iterator `in`                                        |
+| left             | comparisons, membership, type tests, place identity  |
+| left             | `and`, `nand`, `&`                                   |
+| left             | `xor`, `xnor`                                        |
+| left             | `or`, `nor`, `\|`                                    |
+| left             | `as`, `transmute`                                    |
+| fail             | `of`, `has`                                          |
+| fail             | `:`                                                  |
+| left             | `:>`                                                 |
+| right            | `=>`                                                 |
+| left             | `\|>`                                                |
+| right            | `<\|`                                                |
+| fail             | `->`, `<->`                                          |
+| fail             | assignment and combined assignment                   |
+| left             | attached semicolon suppression                       |
 
 `else` attaches flow alternatives outside these operator levels. Grouping with `()` or a scoped `{}` is required when the precedence table does not express the intended tree.
 

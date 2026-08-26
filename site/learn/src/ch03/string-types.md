@@ -14,11 +14,12 @@ Single and double quotes have the same string semantics.
 
 ## Interpolation
 
-Braces insert an expression into a string:
+Braces insert an expression into a string. Adjacent fields produce one string:
 
 ```dewy
 let unread = 3
 printl"You have {unread} unread messages."
+let combined = "{greeting}{name}"
 ```
 
 Interpolation uses the same conversion as `value as string`. A type can therefore participate through the general conversion protocol rather than needing a special interpolation-only method.
