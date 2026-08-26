@@ -1271,6 +1271,10 @@ class _ArrayLowering:
             return [*prelude], self._store_i64_field(
                 descriptor, ARRAY_LENGTH_OFFSET, self._int64_literal(loc, 0), loc
             )
+        if method.name == 'sort':
+            return [*prelude, length_declare, *self._array_sort_statements(
+                descriptor, data, length, element_type, element_bytes, node, loc,
+            )], hir.Void(loc, ty.VOID_TYPE)
         if method.name == 'reserve':
             count_prelude, count = self._extract_expression(node.pos_args[0])
             return [
@@ -1279,6 +1283,181 @@ class _ArrayLowering:
                 *self._array_grow_statements(descriptor, count, element_type, element_bytes, loc),
             ], hir.Void(loc, ty.VOID_TYPE)
         self._target_error(node, f'array method `{method.name}`')
+
+    SORT_SMALL_LIMIT = 32
+
+    def _array_sort_statements(
+        self,
+        descriptor: hir.AST,
+        data: hir.AST,
+        length: hir.AST,
+        element_type: ty.Type,
+        element_bytes: int,
+        node: hir.AST,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """In-place ascending sort of fixed-width integer elements.
+
+        Dispatch by length: at most ``SORT_SMALL_LIMIT`` elements use an
+        insertion sort; longer arrays use an LSD radix sort over 8-bit digits
+        (one pass per element byte) with an arena-allocated swap buffer. Keys
+        are the element's bit pattern with the sign bit flipped for signed
+        types, so the order is numeric for every width. This is the seed of
+        the planned dispatcher: comparison sorts join it when comparators and
+        non-integer elements arrive.
+        """
+        _, signed = self._array_element_layout(element_type, node)
+        bits = element_bytes * 8
+        one = self._int64_literal(loc, 1)
+        zero = self._int64_literal(loc, 0)
+        word_ops = ty.FunctionType(
+            [ty.PosOrKwArg('left', 'uint64'), ty.PosOrKwArg('right', 'uint64')], [], None, 'uint64', [],
+        )
+        compare_type = ty.FunctionType(
+            [ty.PosOrKwArg('left', element_type), ty.PosOrKwArg('right', element_type)], [], None, 'bool', [],
+        )
+
+        def word(name: str, left: hir.AST, right: hir.AST) -> hir.FunctionCall:
+            return hir.FunctionCall(loc, 'uint64', hir.ExpressedIdentifier(loc, word_ops, name), [left, right], {})
+
+        def greater(left: hir.AST, right: hir.AST) -> hir.FunctionCall:
+            return hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, compare_type, '__gt__'), [left, right], {})
+
+        def name(role: str) -> hir.ExpressedIdentifier:
+            return hir.ExpressedIdentifier(loc, 'int64', self._new_array_name(role))
+
+        def declare(identifier: hir.ExpressedIdentifier, value: hir.AST, type_: ty.Type = 'int64') -> hir.Declare:
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', identifier.name, type_, value)
+
+        def assign(identifier: hir.ExpressedIdentifier, value: hir.AST) -> hir.Assign:
+            return hir.Assign(loc, ty.VOID_TYPE, identifier, '=', value)
+
+        def add(left: hir.AST, right: hir.AST) -> hir.AST:
+            return self._int64_binary('__add__', left, right, loc)
+
+        def counting_loop(role: str, limit: hir.AST, body_of) -> list[hir.AST]:
+            # a fresh counter per loop: udewy forbids redeclaring a name in one scope
+            counter = name(role)
+            return [
+                declare(counter, zero),
+                hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+                    loc, ty.VOID_TYPE, self._int64_comparison('__lt__', counter, limit, loc),
+                    hir.Block(loc, ty.VOID_TYPE, [*body_of(counter), assign(counter, add(counter, one))], True),
+                )], None),
+            ]
+
+        def load_word(address: hir.AST) -> hir.AST:
+            return self._intrinsic_call('__load_i64__', [address], 'int64', loc)
+
+        def store_word(value: hir.AST, address: hir.AST) -> hir.AST:
+            return self._intrinsic_call('__store_i64__', [value, address], ty.VOID_TYPE, loc)
+
+        def element_at(base: hir.AST, index: hir.AST) -> hir.AST:
+            return self._pointer_element_address(base, index, element_bytes, loc)
+
+        def key_of(value: hir.AST) -> hir.AST:
+            # numeric order as an unsigned bit pattern of the element's width
+            key: hir.AST = hir.Transmute(loc, 'uint64', value)
+            if signed:
+                key = word('__xor__', key, hir.Integer(loc, 'uint64', '0d', 1 << (bits - 1)))
+            if bits < 64:
+                key = word('__and__', key, hir.Integer(loc, 'uint64', '0d', (1 << bits) - 1))
+            return key
+
+        # --- insertion sort for short arrays ---
+        outer, inner = name('sort_i'), name('sort_j')
+        key = hir.ExpressedIdentifier(loc, element_type, self._new_array_name('sort_key'))
+        previous = self._int64_binary('__sub__', inner, one, loc)
+        insertion = [
+            declare(outer, one),
+            hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+                loc, ty.VOID_TYPE, self._int64_comparison('__lt__', outer, length, loc),
+                hir.Block(loc, ty.VOID_TYPE, [
+                    declare(key, self._array_load(element_at(data, outer), element_type, loc), element_type),
+                    declare(inner, outer),
+                    hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+                        loc, ty.VOID_TYPE,
+                        hir.ShortCircuit(
+                            loc, 'bool', 'and',
+                            self._int64_comparison('__gt__', inner, zero, loc),
+                            greater(self._array_load(element_at(data, previous), element_type, loc), key),
+                        ),
+                        hir.Block(loc, ty.VOID_TYPE, [
+                            self._array_store(self._array_load(element_at(data, previous), element_type, loc), element_at(data, inner), element_type, loc),
+                            assign(inner, previous),
+                        ], True),
+                    )], None),
+                    self._array_store(key, element_at(data, inner), element_type, loc),
+                    assign(outer, add(outer, one)),
+                ], True),
+            )], None),
+        ]
+
+        # --- LSD radix sort for longer arrays ---
+        counts, buffer, source, target, swap = name('sort_counts'), name('sort_buffer'), name('sort_src'), name('sort_dst'), name('sort_swap')
+        total = name('sort_total')
+
+        def bucket_address(digit: hir.AST) -> hir.AST:
+            return add(counts, self._int64_binary('__mul__', digit, self._int64_literal(loc, 8), loc))
+
+        element = hir.ExpressedIdentifier(loc, element_type, self._new_array_name('sort_elem'))
+        digit = name('sort_digit')
+        slot = name('sort_slot')
+        position = name('sort_pos')
+
+        def one_pass(digit_pass: hir.ExpressedIdentifier) -> list[hir.AST]:
+            shift = self._int64_binary('__mul__', digit_pass, self._int64_literal(loc, 8), loc)
+
+            def digit_of(value: hir.AST) -> hir.AST:
+                shifted = word('__rshift__', key_of(value), hir.Transmute(loc, 'uint64', shift))
+                return hir.Transmute(loc, 'int64', word('__and__', shifted, hir.Integer(loc, 'uint64', '0d', 255)))
+
+            return [
+                *counting_loop('sort_bucket', self._int64_literal(loc, 256), lambda bucket: [store_word(zero, bucket_address(bucket))]),
+                *counting_loop('sort_index', length, lambda index: [
+                    declare(digit, digit_of(self._array_load(element_at(source, index), element_type, loc))),
+                    declare(slot, bucket_address(digit)),
+                    store_word(add(load_word(slot), one), slot),
+                ]),
+                declare(total, zero),
+                *counting_loop('sort_bucket', self._int64_literal(loc, 256), lambda bucket: [
+                    declare(slot, bucket_address(bucket)),
+                    declare(position, load_word(slot)),
+                    store_word(total, slot),
+                    assign(total, add(total, position)),
+                ]),
+                *counting_loop('sort_index', length, lambda index: [
+                    declare(element, self._array_load(element_at(source, index), element_type, loc), element_type),
+                    declare(digit, digit_of(element)),
+                    declare(slot, bucket_address(digit)),
+                    declare(position, load_word(slot)),
+                    self._array_store(element, element_at(target, position), element_type, loc),
+                    store_word(add(position, one), slot),
+                ]),
+                declare(swap, source),
+                assign(source, target),
+                assign(target, swap),
+            ]
+
+        radix = [
+            declare(counts, self._intrinsic_call('__alloca__', [self._int64_literal(loc, 256 * 8)], 'int64', loc)),
+            declare(buffer, self._arena_allocation(self._int64_binary('__mul__', length, self._int64_literal(loc, element_bytes), loc), loc)),
+            declare(source, data),
+            declare(target, buffer),
+            *counting_loop('sort_pass', self._int64_literal(loc, element_bytes), one_pass),
+        ]
+        if element_bytes % 2 == 1:
+            # an odd number of passes leaves the result in the buffer
+            radix.extend(counting_loop('sort_index', length, lambda index: [
+                self._array_store(self._array_load(element_at(source, index), element_type, loc), element_at(data, index), element_type, loc),
+            ]))
+        return [
+            hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                loc, ty.VOID_TYPE,
+                self._int64_comparison('__le__', length, self._int64_literal(loc, self.SORT_SMALL_LIMIT), loc),
+                hir.Block(loc, ty.VOID_TYPE, insertion, True),
+            )], hir.Block(loc, ty.VOID_TYPE, radix, True)),
+        ]
 
     def _dynamic_array_result_write(self, item: hir.AST) -> list[hir.AST]:
         """Return a runtime-length array as an arena-backed descriptor."""

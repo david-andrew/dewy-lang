@@ -88,6 +88,16 @@ def _length_key(array_id: int) -> int:
     return -array_id - 1
 
 
+def _is_length_key(key: int) -> bool:
+    return key < 0 and key > -_FACT_BASE
+
+
+def _known_interval(state: State, key: int) -> Interval:
+    """The interval a key currently has; lengths default to `[0, _MAX_LENGTH]`."""
+    default = Interval(0, _MAX_LENGTH) if _is_length_key(key) else UNKNOWN_INTERVAL
+    return state.get(key, default)
+
+
 def _index_fact_key(index_id: int, array_id: int) -> int:
     return -(_FACT_BASE + (index_id << _FACT_SHIFT) + array_id)
 
@@ -1316,7 +1326,7 @@ class _BoundsValidator:
         if left_binding is not None and right_interval is not None:
             constraint = self._comparison_constraint(name, right_interval, truth)
             if constraint is not None:
-                previous = refined.get(left_binding, UNKNOWN_INTERVAL)
+                previous = _known_interval(refined, left_binding)
                 narrowed = previous.intersect(constraint)
                 if narrowed.is_empty:
                     return None
@@ -1338,7 +1348,7 @@ class _BoundsValidator:
         ):
             constraint = self._comparison_constraint(inverse, left_interval, truth)
             if constraint is not None:
-                previous = refined.get(right_binding, UNKNOWN_INTERVAL)
+                previous = _known_interval(refined, right_binding)
                 narrowed = previous.intersect(constraint)
                 if narrowed.is_empty:
                     return None
@@ -1462,10 +1472,17 @@ class _BoundsValidator:
     @staticmethod
     def _widen_states(previous: State, current: State) -> State:
         common = previous.keys() & current.keys()
-        return {
-            binding_id: previous[binding_id].widen(current[binding_id])
-            for binding_id in common
-        }
+        widened: State = {}
+        for binding_id in common:
+            interval = previous[binding_id].widen(current[binding_id])
+            if _is_length_key(binding_id):
+                # array lengths never leave [0, _MAX_LENGTH], even when widened
+                interval = Interval(
+                    0 if interval.lower is None else interval.lower,
+                    _MAX_LENGTH if interval.upper is None else interval.upper,
+                )
+            widened[binding_id] = interval
+        return widened
 
 
 def _union_intervals(intervals: list[Interval]) -> Interval:

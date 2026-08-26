@@ -1,0 +1,53 @@
+# `xs.sort` orders integer elements ascending, in place. Short arrays use an
+# insertion sort; longer ones an LSD radix sort.
+let is_sorted = (xs:array<int64>):>bool => {
+    if xs.length >? 0 {
+        let last:int64 = xs[0]
+        let i:int64 = 1
+        loop i <? xs.length {
+            if xs[i] <? last { return false }
+            last = xs[i]
+            i = i + 1
+        }
+    }
+    return true
+}
+
+let main = ():>int64 => {
+    let xs:array<int64> = [30 (-5) 12 7 (-5) 100 0]
+    xs.sort
+    printl"{xs[0]} {xs[1]} {xs[6]} {is_sorted(xs)}"
+    let bytes:array<uint8> = [200 3 150]
+    bytes.sort                                # unsigned order: 3 150 200
+    let big:array<uint64> = [18446744073709551615 1 9223372036854775808]
+    big.sort                                  # unsigned: 1, 2^63, 2^64-1
+    # a long pseudo-random array exercises the radix path (negatives too)
+    let long:array<int64> = []
+    let seed:int64 = 12345
+    let before:int64 = 0
+    let n:int64 = 0
+    loop n <? 500 {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        let value:int64 = seed % 100000 - 50000
+        long.push(value)
+        before = before + value
+        n = n + 1
+    }
+    long.sort
+    let after:int64 = 0
+    let k:int64 = 0
+    loop k <? long.length { after = after + long[k]  k = k + 1 }
+    let narrow:array<int16> = []
+    let m:int64 = 0
+    loop m <? 40 { narrow.push(((m * 7919) % 200 - 100) transmute int16)  m = m + 1 }
+    narrow.sort
+    let checks:int64 = 0
+    if is_sorted(xs) { checks += 1 }
+    if bytes[0] =? 3 and bytes[2] =? 200 { checks += 2 }
+    if big[0] =? 1 and big[2] =? 18446744073709551615 { checks += 4 }
+    if is_sorted(long) and before =? after and long.length =? 500 { checks += 8 }
+    if narrow.length >? 39 {                 # push counts are not tracked through loops; guard
+        if narrow[0] <=? narrow[39] and narrow[0] <? 0 { checks += 16 }
+    }
+    return checks + xs[0] + xs.length         # 31 - 5 + 7
+}

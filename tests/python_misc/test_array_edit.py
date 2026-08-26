@@ -2,7 +2,7 @@ import pytest
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check
-from dewy.semantic.errors import UserError
+from dewy.semantic.errors import NotImplementedYet, UserError
 from dewy.backend.udewy import codegen
 
 
@@ -51,3 +51,12 @@ def test_truncate_resets_index_proofs_and_negative_counts_are_rejected() -> None
         _check('    let xs:array<int64> = [1 2 3]\n    xs.truncate((-1))')
     with pytest.raises(UserError, match='out of bounds|not proven'):
         _check('    let xs:array<int64> = [1 2 3]\n    xs.truncate(1)\n    let a = xs[2]')
+
+
+def test_sort_keeps_length_facts() -> None:
+    _check('    let xs:array<int64> = [3 1 2]\n    xs.sort\n    let a = xs[2]\n    let b = xs.pop')
+
+
+def test_sort_is_limited_to_integer_elements_for_now() -> None:
+    with pytest.raises(NotImplementedYet, match='`sort` on `string` elements'):
+        _check('    let xs:array<string> = ["b" "a"]\n    xs.sort')

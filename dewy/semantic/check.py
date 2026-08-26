@@ -3177,7 +3177,7 @@ def _tcr_object_literal(
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
 
-_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'insert', 'truncate'})
+_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'insert', 'truncate', 'sort'})
 
 
 def _apply_array_method_transition(
@@ -3260,7 +3260,7 @@ def _apply_array_method_transition(
     elif method.name == 'clear':
         new_exact = 0
         new_minimum = 0
-    else:  # reserve
+    else:  # reserve, sort: the length is unchanged
         new_exact = exact
         new_minimum = minimum
     if new_exact is not None:
@@ -3411,7 +3411,11 @@ def _tcr_array_method(
         'truncate': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
         'clear': ty.FunctionType([], [], None, ty.VOID_TYPE),
         'reserve': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
+        # ascending in-place sort of integer elements (comparators later)
+        'sort': ty.FunctionType([], [], None, ty.VOID_TYPE),
     }
+    if name == 'sort' and not (isinstance(element, str) and element in ty.FIXED_INTEGER_TYPES):
+        not_implemented(ctx.srcfile, loc, f'`sort` on `{type_to_dewy(element)}` elements')
     return hir.ArrayMethod(loc, signatures[name], value, name)
 
 
