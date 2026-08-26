@@ -1221,6 +1221,41 @@ def _flow_value_type(
     return ty.union(*values)
 
 
+def _unhandled_type_test_members(
+    arms: list[hir.IfArm | hir.LoopArm],
+    fall_through: Context,
+    *,
+    ctx: Context,
+) -> ty.Type | None:
+    """For a chain of `is?` tests on one union binding, the members no arm handles.
+
+    Returns None when the arms are not such a chain; `ty.BOTTOM_TYPE` when the
+    chain is exhaustive.
+    """
+    binding_id: int | None = None
+    for arm in arms:
+        if not isinstance(arm, hir.IfArm):
+            return None
+        condition = arm.condition
+        if not (
+            isinstance(condition, hir.TypeTest)
+            and not condition.negated
+            and isinstance(condition.value, hir.ExpressedIdentifier)
+            and condition.value.binding_id is not None
+        ):
+            return None
+        if binding_id is None:
+            binding_id = condition.value.binding_id
+        elif binding_id != condition.value.binding_id:
+            return None
+    if binding_id is None or binding_id not in fall_through.refinements:
+        return None
+    residual = fall_through.refinements[binding_id]
+    if isinstance(residual, ty.TypeOr) and not residual.items:
+        return ty.BOTTOM_TYPE
+    return residual
+
+
 def _refine_type_test(
     current: ty.Type,
     test: ty.TypeExpr,
@@ -2181,8 +2216,17 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             )
 
         default = None
+        # An `is?` chain that rules out every member of the tested union is
+        # exhaustive: the last arm becomes the default (its condition can only
+        # be true on that path), so downstream passes see an ordinary if/else.
+        unhandled = _unhandled_type_test_members(arms, arm_ctx, ctx=ctx) if ast.default is None and not constant_true else None
+        chain_exhaustive = unhandled is not None and unhandled == ty.BOTTOM_TYPE
         if constant_true:
             pass  # later arms and the default are dead
+        elif chain_exhaustive:
+            last = arms.pop()
+            assert isinstance(last, hir.IfArm)
+            default = last.body
         elif ast.default is not None:
             default = typecheck_and_resolve_inner(
                 ast.default,
@@ -2199,6 +2243,10 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             # No else: falling through means every condition was false.
             continuing_paths.append(dict(arm_ctx.refinements))
             continuing_bounds.append(dict(arm_ctx.length_bounds))
+        if chain_exhaustive and not arms and default is not None:
+            # a single-arm chain covering the whole union is just its body
+            arms.append(hir.IfArm(ast.arms[0].loc, default.type, hir.Bool(ast.loc, 'bool', True), default))
+            default = None
         if constant_true and not arms:
             raise ValueError('INTERNAL ERROR: constant-true flow without arms')
         if not arms:
@@ -2228,15 +2276,21 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             ctx.refinements.update(arm_ctx.refinements)
             ctx.length_bounds.clear()
             ctx.length_bounds.update(arm_ctx.length_bounds)
-        if ast.default is None and not constant_true and (
+        if ast.default is None and not constant_true and not chain_exhaustive and (
             branch_expected is not None
             and any(body.type != ty.BOTTOM_TYPE for body in bodies)
         ):
+            missing = (
+                f'`{type_to_dewy(unhandled)}` is not handled by any `is?` arm'
+                if unhandled is not None
+                else 'this conditional is not exhaustive'
+            )
             user_error(
                 ctx.srcfile,
                 'value-producing conditional requires a default branch',
-                Pointer(span=ast.loc, message='this conditional is not exhaustive'),
-                hint='add an `else` branch that produces the missing value',
+                Pointer(span=ast.loc, message=missing),
+                hint='add an `else` branch that produces the missing value' if unhandled is None
+                else 'add an arm for the unhandled member, or an `else` branch',
             )
 
         result_type = _flow_value_type(

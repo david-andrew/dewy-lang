@@ -1,0 +1,23 @@
+# An `is?` chain that covers every member of a union is exhaustive: no
+# `else` is needed, whether the chain returns or produces a value.
+let describe = (v:int64|string):>int64 => {
+    if v is? int64 {
+        return v * 2
+    } else if v is? string {
+        return v.length
+    }
+}
+
+let weight = (v:int64|bool):>int64 => {
+    let w:int64 = if v is? int64 v else if v is? bool 100
+    return w + 1
+}
+
+let main = ():>int64 => {
+    let a:int64|string = 20
+    let b:int64|string = "hello"
+    let c:int64|undefined = undefined
+    let d:int64 = if c is? int64 c else if c is? undefined 7
+    let flag:int64|bool = true
+    return describe(a) + describe(b) + weight(flag) + weight(3) + d   # 40 + 5 + 101 + 4 + 7
+}
