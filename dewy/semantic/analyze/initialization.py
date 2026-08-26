@@ -364,6 +364,8 @@ class _InitializationChecker:
             )
         if isinstance(node, hir.DictEntries):
             return self._check_eager(node.dictionary, initialized, parameters, call_stack)
+        if isinstance(node, hir.DictView):
+            return self._check_eager(node.dictionary, initialized, parameters, call_stack)
         if isinstance(node, hir.SetAlgebra):
             current = self._check_eager(node.left, initialized, parameters, call_stack)
             return self._check_eager(node.right, current, parameters, call_stack)

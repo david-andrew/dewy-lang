@@ -248,6 +248,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'DictEntries({node.name})'
     if isinstance(node, hir.SetAlgebra):
         return f'SetAlgebra({node.op})'
+    if isinstance(node, hir.DictView):
+        return f'DictView({node.name})'
     if isinstance(node, hir.DictStore):
         return 'DictStore'
     if isinstance(node, hir.DictContains):
@@ -381,6 +383,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('dictionary', node.dictionary)]
     if isinstance(node, hir.SetAlgebra):
         return [('left', node.left), ('right', node.right)]
+    if isinstance(node, hir.DictView):
+        return [('dictionary', node.dictionary)]
     if isinstance(node, hir.DictStore):
         return [('keys', node.keys), *([('values', node.values)] if node.values is not None else []), ('key', node.key), *([('value', node.value)] if node.value is not None else [])]
     if isinstance(node, hir.DictContains):
@@ -809,6 +813,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
     if isinstance(node, hir.DictMethod):
         return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
     if isinstance(node, hir.DictEntries):
+        return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
+    if isinstance(node, hir.DictView):
         return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
     if isinstance(node, hir.SetAlgebra):
         symbol = {'union': ' | ', 'intersection': ' & ', 'difference': ' - ', 'symmetric': ' xor '}[node.op]

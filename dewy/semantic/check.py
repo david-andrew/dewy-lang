@@ -3771,6 +3771,23 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.ArrayType):
             return _tcr_array_method(value, name, binop.loc, ctx=ctx)
+    if name in {'keys', 'values'}:
+        value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        found_dict = _dict_value(value)
+        if found_dict is not None:
+            # fresh values, never the entry arrays themselves (which hold tombstones)
+            dictionary, key_type, value_type = found_dict
+            if value_type is None and name == 'keys':
+                user_error(
+                    ctx.srcfile,
+                    'sets have no keys',
+                    Pointer(span=binop.right.loc, message='use `.values` for the members as an array'),
+                )
+            view_type: ty.Type = (
+                ty.set_type(key_type) if name == 'keys'
+                else ty.ArrayType(value_type if value_type is not None else key_type, None)
+            )
+            return hir.DictView(binop.loc, view_type, dictionary, name)
     if name in {'get', 'pop', 'clear', 'add'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         found_dict = _dict_value(value)
@@ -4777,9 +4794,24 @@ def _dispatch_set_algebra(
     source_name: str,
     ctx: Context,
 ) -> hir.AST | None:
-    """`a | b`, `a & b`, `a - b`, `a xor b` on two sets of one element type."""
-    if len(args) != 2 or not any(ty.set_element(arg.type) is not None for arg in args):
+    """`a | b`, `a & b`, `a - b`, `a xor b` on two sets of one element type; `d1 | d2` on dictionaries."""
+    if len(args) != 2 or not any(ty.container_entry_types(arg.type) is not None for arg in args):
         return None
+    if all(ty.dict_key_value(arg.type) is not None for arg in args):
+        if fname != '__or__':
+            type_error(
+                ctx.srcfile,
+                f'no matching overload for operator `{source_name}`',
+                *[Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`') for arg in args],
+                hint='dictionaries combine with `|`/`or` (the right value wins for shared keys); use `.keys` for set algebra',
+            )
+        if args[0].type != args[1].type:
+            type_error(
+                ctx.srcfile,
+                'dictionary operands have different types',
+                *[Pointer(span=arg.loc, message=f'`{type_to_dewy(arg.type)}`') for arg in args],
+            )
+        return hir.SetAlgebra(loc, args[0].type, 'union', args[0], args[1])
     elements = [ty.set_element(arg.type) for arg in args]
     if elements[0] is None or elements[1] is None or fname not in _SET_ALGEBRA:
         type_error(

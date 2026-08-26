@@ -521,11 +521,14 @@ class _DictLowering:
     def _extract_set_algebra(self, node: hir.SetAlgebra) -> tuple[list[hir.AST], hir.AST]:
         """Build a new set from two: union, intersection, difference, symmetric difference."""
         loc = node.loc
-        element = ty.set_element(node.type)
-        assert element is not None
-        set_type = ty.set_type(element)
+        entry_types = ty.container_entry_types(node.type)
+        assert entry_types is not None
+        element, value_type = entry_types
+        assert isinstance(node.type, ty.ObjectType)
+        set_type = node.type
         empty = hir.ObjectLiteral(loc, set_type, [
             hir.ObjectField(loc, 'keys', hir.ArrayLiteral(loc, ty.ArrayType(element, 0), [])),
+            *([hir.ObjectField(loc, 'values', hir.ArrayLiteral(loc, ty.ArrayType(value_type, 0), []))] if value_type is not None else []),
             hir.ObjectField(loc, 'hashes', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
             hir.ObjectField(loc, 'indices', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
             hir.ObjectField(loc, 'live', hir.Integer(loc, 'int64', '0d', 0)),
@@ -545,19 +548,28 @@ class _DictLowering:
         ]
 
         def add_members(source: _DictParts, other: _DictParts | None, *, when_found: bool) -> list[hir.AST]:
-            """Add each live member of `source` (filtered by membership in `other`) to the result."""
+            """Add each live entry of `source` (filtered by membership in `other`) to the result."""
             keys = self._dict_descriptor(source, 'keys', loc)
             hashes = self._dict_descriptor(source, 'hashes', loc)
             hash_count = self._dict_length_of(hashes, loc)
+            values = self._dict_descriptor(source, 'values', loc) if value_type is not None else None
 
             def body(index: hir.ExpressedIdentifier) -> list[hir.AST]:
                 member = self._name('set_member', loc, element)
+                entry_value = self._name('dict_entry_value', loc, value_type) if value_type is not None else None
                 add_prelude, add = self._extract_dict_store(hir.DictStore(
                     loc, ty.VOID_TYPE,
                     hir.MemberAccess(loc, ty.ArrayType(element, None), result_object, 'keys'),
-                    None, member, None,
+                    hir.MemberAccess(loc, ty.ArrayType(value_type, None), result_object, 'values') if value_type is not None else None,
+                    member,
+                    entry_value,
                 ))
                 adding = [*add_prelude, add]
+                if entry_value is not None and values is not None and value_type is not None:
+                    adding = [
+                        self._declare(entry_value, self._dict_element(values, index, value_type, loc), loc, value_type),
+                        *adding,
+                    ]
                 if other is not None:
                     probe, found, _position, _slot = self._dict_probe(other, member, loc)
                     adding = [*probe, self._if(found, adding, loc) if when_found else self._if(found, [], loc, adding)]
@@ -588,3 +600,33 @@ class _DictLowering:
             statements.extend(add_members(left, right, when_found=False))
             statements.extend(add_members(right, left, when_found=False))
         return statements, result_name
+
+    def _extract_dict_view(self, node: hir.DictView) -> tuple[list[hir.AST], hir.AST]:
+        """`d.keys` (a set), `d.values` / `s.values` (an array): fresh copies of the live entries."""
+        loc = node.loc
+        entry_types = ty.container_entry_types(node.dictionary.type)
+        assert entry_types is not None
+        key_type, value_type = entry_types
+        prelude, parts = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(key_type, None), node.dictionary, 'keys'))
+        keys = self._dict_descriptor(parts, 'keys', loc)
+        has_dead = self._int64_comparison('__gt__', self._dict_length_of(keys, loc), self._dict_live(parts, loc), loc)
+        capacity_prelude, capacity = self._table_capacity_for(self._dict_live(parts, loc), loc)
+        compact = self._if(has_dead, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)
+        source = self._dict_object_node(parts, loc)
+        if node.name == 'values':
+            element = value_type if value_type is not None else key_type
+            field = 'values' if value_type is not None else 'keys'
+            copy_prelude, copied = self._clone_dynamic_array_value(
+                hir.MemberAccess(loc, ty.ArrayType(element, None), source, field), ty.ArrayType(element, None),
+            )
+            return [*prelude, compact, *copy_prelude], copied
+        # keys: a set over copies of the entries and their hashes (table rebuilt lazily)
+        assert isinstance(node.type, ty.ObjectType)
+        fresh = hir.ObjectLiteral(loc, node.type, [
+            hir.ObjectField(loc, 'keys', hir.MemberAccess(loc, ty.ArrayType(key_type, None), source, 'keys')),
+            hir.ObjectField(loc, 'hashes', hir.MemberAccess(loc, ty.ArrayType('int64', None), source, 'hashes')),
+            hir.ObjectField(loc, 'indices', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(loc, 'live', hir.MemberAccess(loc, 'int64', source, 'live')),
+        ])
+        set_prelude, pointer = self._extract_object_pointer(fresh)
+        return [*prelude, compact, *set_prelude], pointer

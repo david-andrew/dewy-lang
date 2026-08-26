@@ -1467,6 +1467,9 @@ class _Lowerer(
             self._discover_node(node.left, scope, current_function)
             self._discover_node(node.right, scope, current_function)
             return
+        if isinstance(node, hir.DictView):
+            self._discover_node(node.dictionary, scope, current_function)
+            return
         if isinstance(node, hir.StringLength):
             self._discover_node(node.string, scope, current_function)
             return
@@ -2062,6 +2065,8 @@ class _Lowerer(
                 left=self._require_node(self._transform_node(node.left)),
                 right=self._require_node(self._transform_node(node.right)),
             )
+        if isinstance(node, hir.DictView):
+            return replace(node, dictionary=self._require_node(self._transform_node(node.dictionary)))
         if isinstance(node, hir.StringLength):
             return replace(
                 node,
@@ -3159,6 +3164,8 @@ class _Lowerer(
             return self._extract_dict_entries(node)
         if isinstance(node, hir.SetAlgebra):
             return self._extract_set_algebra(node)
+        if isinstance(node, hir.DictView):
+            return self._extract_dict_view(node)
         if isinstance(node, hir.FunctionCall):
             if isinstance(node.func, hir.ArrayMethod):
                 return self._extract_array_method_call(node)

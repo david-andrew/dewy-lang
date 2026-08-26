@@ -763,6 +763,9 @@ class _BoundsValidator:
             self._eval(node.left, state, validate=validate)
             self._eval(node.right, state, validate=validate)
             return None
+        if isinstance(node, hir.DictView):
+            self._eval(node.dictionary, state, validate=validate)
+            return None
         if isinstance(node, hir.DictStore):
             self._eval(node.key, state, validate=validate)
             if node.value is not None:

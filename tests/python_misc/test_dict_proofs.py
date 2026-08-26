@@ -145,3 +145,16 @@ def test_set_algebra_dispatches_on_set_operands() -> None:
     assert all(ty.set_element(body[name].expr.type) == 'int64' for name in ('u', 'i', 'd', 'x'))
     with pytest.raises(TypeCheckError, match='different element types'):
         _check("    let a = set[1 2]\n    let b = set['x']\n    let u = a | b")
+
+
+def test_dictionary_union_and_views() -> None:
+    root = _check("    let a = ['x' -> 1]\n    let b = ['y' -> 2]\n    let u = a | b\n    let ks = a.keys\n    let vs = a.values\n    let s = set[1]\n    let ms = s.values")
+    body = {item.name: item for item in root.items[0].expr.body.items if isinstance(item, hir.Declare)}
+    assert isinstance(body['u'].expr, hir.SetAlgebra) and ty.dict_key_value(body['u'].expr.type) == ('string', 'int64')
+    assert isinstance(body['ks'].expr, hir.DictView) and ty.set_element(body['ks'].expr.type) == 'string'
+    assert isinstance(body['vs'].expr, hir.DictView) and body['vs'].expr.type == ty.ArrayType('int64', None)
+    assert isinstance(body['ms'].expr, hir.DictView) and body['ms'].expr.type == ty.ArrayType('int64', None)
+    with pytest.raises(TypeCheckError, match='no matching overload for operator `&`'):
+        _check("    let a = ['x' -> 1]\n    let b = ['y' -> 2]\n    let u = a & b")
+    with pytest.raises(UserError, match='sets have no keys'):
+        _check("    let s = set[1]\n    let k = s.keys")

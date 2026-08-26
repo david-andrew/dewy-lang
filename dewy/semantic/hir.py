@@ -324,10 +324,22 @@ class DictRemove(AST):
 
 
 @dataclass
+class DictView(AST):
+    """A fresh value of a container's entries: ``d.keys`` is a ``set<K>``,
+    ``d.values`` an ``array<V>`` (insertion order), ``s.values`` an
+    ``array<T>``. The container is compacted first if removals left dead
+    entries."""
+
+    dictionary: AST
+    name: str
+
+
+@dataclass
 class SetAlgebra(AST):
     """A new set from two sets of the same element type: ``union`` (`|`/`or`),
     ``intersection`` (`&`/`and`), ``difference`` (`-`), or ``symmetric``
-    difference (`xor`)."""
+    difference (`xor`); or a new dictionary from two dictionaries (``union``
+    only: `d1 | d2`, the right value winning for shared keys, left order kept)."""
 
     op: str
     left: AST

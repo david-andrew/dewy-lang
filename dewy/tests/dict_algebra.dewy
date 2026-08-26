@@ -1,0 +1,25 @@
+# `d1 | d2` merges dictionaries (the right value wins for shared keys, left
+# insertion order is kept); `d.keys` is a set, `d.values` an array, and
+# `s.values` an array — fresh values, so set algebra works on keys.
+let main = ():>int64 => {
+    let base = ['a' -> 1 'b' -> 2 'c' -> 3]
+    let extra = ['c' -> 30 'd' -> 4]
+    let merged = base or extra                   # a b c d with c = 30
+    let order:int64 = 0
+    loop [k v] in merged { order = order * 100 + v }      # 1, 2, 30, 4
+    let shared = base.keys and extra.keys        # c
+    let all_keys = base.keys | extra.keys        # a b c d
+    let only_base = base.keys - extra.keys       # a b
+    let values = merged.values                   # [1 2 30 4]
+    let total:int64 = 0
+    let i:int64 = 0
+    loop i <? values.length { total = total + values[i]  i = i + 1 }
+    let members = all_keys.values                # ["a" "b" "c" "d"]
+    let checks:int64 = 0
+    if shared.length =? 1 and 'c' in? shared { checks += 1 }
+    if all_keys.length =? 4 and only_base.length =? 2 and 'c' not in? only_base { checks += 2 }
+    if members.length =? 4 and base.length =? 3 and base['c'] =? 3 { checks += 4 }   # base is untouched
+    if merged.length =? 4 { checks += 8 }
+    printl"{order} {total} {shared.length} {members.length} {checks}"
+    return (order + total + checks) % 256          # (1023004 + 37 + 15) % 256
+}

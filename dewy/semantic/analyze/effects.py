@@ -483,6 +483,9 @@ class _EffectAnalyzer:
             self._visit(node.left, params)
             self._visit(node.right, params)
             return
+        if isinstance(node, hir.DictView):
+            self._visit(node.dictionary, params)
+            return
         if isinstance(node, hir.DictRemove):
             for array in (node.keys, *([node.values] if node.values is not None else [])):
                 resolved = self._resolve_route(array, params)
