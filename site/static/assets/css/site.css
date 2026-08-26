@@ -307,14 +307,6 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
   box-shadow: inset 0 0 0 1px rgba(52, 39, 12, .12);
 }
 .tag.planned { background: rgba(127, 196, 232, .13); color: var(--unit); }
-.tag-footnote {
-  margin-left: .1em;
-  color: inherit;
-  text-decoration: none;
-}
-.tag-footnote:hover { color: #fff; }
-.tag.partial .tag-footnote:hover { color: #6a4800; }
-.tag-footnote sup { font-size: .72em; line-height: 0; }
 .code-pane pre {
   margin: 0;
   padding: clamp(1.2rem, 3vw, 2.2rem) clamp(1.3rem, 4vw, 3rem) clamp(1.7rem, 4vw, 2.8rem);
@@ -358,41 +350,6 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
 .next-list li:last-child { border-bottom: 0; }
 .next-list a { font-weight: 750; text-decoration: none; }
 .next-list a:hover { text-decoration: underline; }
-.implementation-notes {
-  width: min(var(--content), calc(100% - 3rem));
-  margin: 3rem auto 0;
-  padding-top: 1.1rem;
-  scroll-margin-top: 5rem;
-  border-top: 1px solid var(--edge-strong);
-}
-.implementation-notes ol {
-  margin: 0;
-  padding-left: .5rem;
-  list-style: none;
-}
-.implementation-notes li {
-  display: grid;
-  grid-template-columns: 1.2rem minmax(0, 1fr);
-  gap: .35rem;
-  scroll-margin-top: 5rem;
-  color: var(--muted);
-  font-size: .8rem;
-  line-height: 1.55;
-}
-.tag[id^="badge-"] { scroll-margin-top: 5.5rem; }
-.implementation-notes li + li { margin-top: .7rem; }
-.implementation-notes li p { margin: 0; }
-.note-back {
-  color: var(--gutter);
-  font-weight: 700;
-  text-decoration: none;
-}
-.note-back:hover { color: var(--green-deep); }
-.note-example-link {
-  color: var(--green-deep);
-  text-decoration: none;
-}
-.note-example-link code { color: inherit; }
 .next-row { border-bottom: 1px solid var(--slate-edge); }
 
 html:has(.lost-page),
@@ -603,10 +560,11 @@ html:has(.lost-page) body {
 .udewy-page .home-hero {
   padding-bottom: clamp(3.6rem, 8vw, 6rem);
 }
-.udewy-page .site-footer {
+/* both home pages run their last example row straight into the footer */
+.home-page .site-footer {
   margin-top: 0;
 }
-.udewy-page .showcase-row:last-of-type {
+.home-page .showcase-row:last-of-type {
   border-bottom: 0;
 }
 
@@ -762,7 +720,6 @@ html[data-site="udewy"][data-theme="dark"] {
 
 @media (max-width: 600px) {
   .home-hero, .showcase-intro { width: calc(100% - 1.5rem); }
-  .implementation-notes { width: calc(100% - 1.5rem); }
   .hero-brand { transform: translateX(-.25rem); }
   .drop-b, .drop-c { display: none; }
   .dewline { flex-wrap: wrap; padding: .9rem 1.05rem; border-radius: 18px; }

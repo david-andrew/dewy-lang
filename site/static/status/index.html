@@ -39,16 +39,21 @@
         <li>Homogeneous arrays with statically or flow-proven indexing, <code>end</code>, and fixed-range slicing</li>
         <li>Structural objects, mutating object methods, optionals, and flow-sensitive narrowing</li>
         <li>Unicode grapheme strings, slicing, iteration, representation-changing views, and streamed interpolation</li>
-        <li>Compile-time time dimensions, <code>Duration&lt;T&gt;</code>, <code>ns</code>/<code>ms</code>/<code>s</code>, and Linux x86_64 <code>sleep</code></li>
+        <li>All eight base dimensions with a canonical-scale unit catalog (SI units, prefixes, <code>N</code>/<code>J</code>/<code>W</code>, degrees and turns), dimension algebra through <code>* / ^</code>, and <code>cos</code>/<code>sin</code>/<code>tan</code></li>
+        <li>Exact rationals (<code>1/3</code>, decimal literals), Q32.32 fixed-point, integer and rational powers, and proof-based 64-bit lowering of abstract <code>int</code></li>
+        <li>Growable arrays (<code>push</code>/<code>pop</code>/<code>insert</code>/<code>truncate</code>/<code>sort</code>) with proven indexes, and runtime-length arrays as results and object fields</li>
+        <li>Dictionaries and sets as values: insertion order, compact hash tables, proven-key lookups, <code>get</code>/<code>pop</code> with defaults, <code>keys</code>/<code>values</code>, and set algebra</li>
+        <li>Liquid refinements on bindings (<code>int&lt; i=&gt;i&gt;?0 &gt;</code>, <code>array&lt; length&gt;?0 &gt;</code>) with proven/refuted/unknown diagnostics; exhaustive <code>is?</code> chains</li>
+        <li>Target-gated imports (<code>$target</code>, <code>$supported_targets</code>), <code>main(args)</code>, and file I/O on Linux</li>
       </ul>
     </section>
     <section class="content-section">
       <h2>Important limits</h2>
       <ul>
-        <li>Abstract <code>int</code> promises arbitrary precision, but the backend does not have a bigint runtime yet.</li>
+        <li>Abstract <code>int</code> promises arbitrary precision; values are lowered to 64-bit words only when proven to fit, and unproven arithmetic is a compile error rather than a silent overflow.</li>
         <li>Capturing local functions are analyzed but do not lower as closures.</li>
-        <li>General runtime unions, escaping arrays, user-defined generic functions, floats, effects, and pattern matching are not complete.</li>
-        <li>Physical units currently cover time only, and interpolated strings lower through <code>print</code>/<code>printl</code> rather than materializing as first-class strings.</li>
+        <li>Recursive union members, user-defined generic functions, effects, error values, and pattern matching are not complete; floating-point arithmetic is deliberately absent.</li>
+        <li>Runtime-sized storage uses a single process arena; deterministic release and scoped arenas are designed but not built.</li>
         <li>Host capabilities and the Dewy prelude are not portable across every µDewy backend yet.</li>
         <li>The public documentation contains aspirational syntax and is being separated from the implemented reference.</li>
       </ul>
@@ -58,16 +63,16 @@
       <div class="route-grid" style="grid-template-columns:1fr 1fr">
         <article class="route-card"><span class="badge works">Now</span><h3>Compiler convergence</h3><p>Stabilize the new typed compiler, µDewy lowering, module system, installation path, and behavior parity.</p></article>
         <article class="route-card"><span class="badge works">Now</span><h3>Representation analysis</h3><p>Use bounds, alias, and lifetime facts to choose safe compact layouts and calling conventions.</p></article>
-        <article class="route-card"><span class="badge planned">Next</span><h3>Liquid refinements</h3><p>Make common safety conditions provable from normal code, with useful diagnostics at unknown obligations.</p></article>
+        <article class="route-card"><span class="badge planned">Next</span><h3>Closures, errors, memory</h3><p>Lower closures, add error values, then deterministic release and scoped arenas on the ownership model.</p></article>
         <article class="route-card"><span class="badge planned">Long term</span><h3>Auditable self-hosting</h3><p>Complete the path from a small trusted bootstrap through µDewy to a full compiler written in Dewy.</p></article>
       </div>
       <div class="future-features">
         <h3>Future features</h3>
         <ul>
-          <li>Complete arbitrary-precision integers and add floating-point, rational, real, complex, and quaternion numbers.</li>
-          <li>Extend physical units beyond time with derived-unit algebra, conversions, broadcasting, and multidimensional arrays.</li>
-          <li>Dictionaries, bidirectional maps, sets, and richer generic container types.</li>
-          <li>Liquid refinement contracts, checked proofs, and safe handling of partial operations such as indexing and division.</li>
+          <li>A bigint tier for arbitrary-precision integers, plus real, complex, and quaternion numbers.</li>
+          <li>Display units for printing quantities, <code>as unit</code>, offset units, library-declared dimensions, broadcasting, and multidimensional arrays.</li>
+          <li>Bidirectional maps, container equality, and user-defined generic containers implemented in Dewy itself.</li>
+          <li>Refined parameters and results, checked proofs, and <code>unsafe</code> claims.</li>
           <li>First-class interpolation materialization and conversion hooks, pattern matching, effects and error values, generators, and unpack-and-collect syntax.</li>
           <li>Partial application, compile-time evaluation, and metaprogramming.</li>
           <li>A portable standard library, packages, versioned releases, and installers for more platforms.</li>

@@ -33,9 +33,15 @@ Values, constants, functions, overload sets, and type aliases are importable. Im
 
 Reachable source modules share a coherent type environment, initialize once in dependency order, and reject unresolved names, cycles, and collisions. A source suffix is conventional and does not select different Dewy semantics.
 
+## Targets
+
+`$target` is a compile-time string naming the backend (`x86_64`, `riscv`, `arm`, `c`, `wasm32`). Comparing `$target` with a string literal (`=?`, `not =?`, `in?` and `not in?` against a literal list, combined with `not`, `and`, `or`) folds during checking; an `if` whose condition is such a comparison skips its dead arms without checking them — they may import files that exist only for other targets — and splices the live arm's `{}` body into the enclosing scope so gated imports and declarations bind there. Plain literal conditions keep ordinary flow semantics.
+
+`$supported_targets = ["x86_64" ...]` lists the backends a module accepts; compiling for another target is an error.
+
 ## Prelude
 
-Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings. `$no_prelude = true` disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.
+Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings: paths, printing, `rational` and `fixed` numbers, units, and the current target's services layer. `$no_prelude = true` disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.
 
 ## Provisional Package Facilities
 

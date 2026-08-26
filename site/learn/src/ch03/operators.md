@@ -16,6 +16,8 @@ base ^ exponent
 
 Prefix `+` and `-` express sign. Prefix `/value` is reciprocal. Composite operator chains such as `value^/2` retain the first operator's precedence and can express roots compactly.
 
+`/` on integers produces an exact rational (`1/3`), while `//` is floor division. `^` raises integers and rationals to integer powers; a negative constant exponent makes the result rational. On sets, `|`/`or`, `&`/`and`, `-`, and `xor` are union, intersection, difference, and symmetric difference, and `|` also merges dictionaries.
+
 ## Comparison and Tests
 
 Dewy distinguishes tests from assignment:

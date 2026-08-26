@@ -39,6 +39,10 @@ Underscores may group digits without affecting the value: `1_000_000`.
 
 Prefixes for bases above 16 are available only on quoted packed data. An unquoted higher-base digit sequence is rejected rather than silently tokenized as a different value.
 
+## Decimal and Exponent Literals
+
+A numeral with a fraction or a decimal exponent — `9.8`, `1.25e2`, `5e-1` — is an exact rational (`49/5`, `125`, `1/2`), never a floating-point approximation. Binary exponents and non-decimal bases in such literals are not yet supported.
+
 Integer numeral prefixes and packed based-string prefixes are related spellings with different results. An unquoted `0x2a` is an integer; quoted `0x"2a"` is packed data.
 
 ## Strings
@@ -80,4 +84,4 @@ Square brackets use the top-level contents to determine the constructed form:
 set[1 2 3]                    # set
 ```
 
-Array and object forms are settled. Dictionary, bidictionary, set, and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).
+Array, object, dictionary, and set forms are settled; a dictionary or set literal may appear in any expression, and an empty one needs a `dict<K V>` or `set<T>` context. Bidictionary and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).

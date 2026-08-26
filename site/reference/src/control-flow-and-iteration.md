@@ -17,6 +17,8 @@ An exhaustive conditional may produce a value when its alternatives have a compa
 
 Facts established by a condition narrow values inside the corresponding body and along later paths where earlier alternatives are known false.
 
+A chain whose arms are all `is?` tests on one union binding is exhaustive when the alternatives excluded by every arm leave no member; such a chain needs no `else` for return coverage or for producing a value, and a value-producing chain that misses a member reports which member is unhandled. Statement-form chains may remain partial.
+
 ## Loops
 
 `loop condition body` reevaluates its condition and executes its body according to the condition's Boolean or iterator behavior.

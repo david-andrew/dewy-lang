@@ -59,9 +59,22 @@ File suffixes are conventional; a file containing Dewy source does not acquire d
 
 Reachable modules initialize once in dependency order. Their top-level expressions run before the entry module proceeds to `main`.
 
+## Targets
+
+`$target` is the compile-time name of the backend being compiled for (`x86_64`, `riscv`, `arm`, `c`, `wasm32`), the same names udewy uses. Comparing it selects code during checking, so an arm for another target is skipped entirely and may import files that exist only there:
+
+```dewy
+if $target in? ["x86_64" "riscv" "arm" "c"] {
+    from p"linux/io.dewy" import (_write_stdout _write_stderr)
+}
+if $target not =? "wasm32" { import p"native_only.dewy" }
+```
+
+`$supported_targets = ["x86_64" "c"]` rejects compilation for any other target. Only comparisons of `$target` fold this way; an ordinary `if true` still checks every arm.
+
 ## The Source Prelude
 
-Ordinary modules receive a small set of default imports, including path construction, basic I/O, time scales, and host facilities such as `sleep` where the target supplies them.
+Ordinary modules receive a small set of default imports: path construction, printing, rationals and fixed-point numbers, units, and host facilities such as `sleep` where the target supplies them. The prelude's portable files import their target-specific primitives with the same `$target` gating.
 
 A module can opt out:
 

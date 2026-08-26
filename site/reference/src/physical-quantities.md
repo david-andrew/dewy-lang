@@ -21,14 +21,22 @@ let timeout = 300ms
 let distance = 10m
 ```
 
-A unit carries an exact scale and dimension. Constant expressions may fold that scale completely; for example, an implementation may lower `300ms` to an integer count in the canonical time scale while retaining no runtime unit tag.
+A unit carries an exact scale and dimension. Constant expressions fold that scale completely; a quantity that reaches runtime carries only its number in the canonical scale and no unit tag.
 
-Addition and comparison require compatible dimensions. Multiplication and division combine dimensions. Conversion between units preserves the physical value rather than reinterpreting the numeric bits.
+## Dimensions and Canonical Scales
+
+The base dimensions are `Time`, `Length`, `Mass`, `Current`, `Temperature`, `Amount`, `Luminosity`, and `Angle`. Their canonical units are the second, metre, kilogram, ampere, kelvin, mole, candela, and the whole turn. Every other unit is a rational scale of a canonical unit, so prefixes and derived units are exact: `ms` is `1/1000 s`, `N` is `kg * m / s^2` with scale one, `°` is `1/360 turn`. The radian's scale is irrational and is represented in fixed point.
+
+Addition, subtraction, and comparison require identical dimensions and are otherwise compile errors. Multiplication and division combine dimensions; `^` with a constant integer exponent raises them. Dividing a quantity by a unit of the same dimension yields the dimensionless count in that unit. A quantity's number is an integer, rational, or fixed-point value, promoted by the same rules as dimensionless arithmetic.
+
+## Trigonometry
+
+`cos`, `sin`, and `tan` accept a rational or fixed-point angle quantity and return `fixed`. Range reduction happens exactly on the turn count before evaluation.
 
 ## Time and Sleeping
 
-`ns`, `ms`, and `s`, together with their written names, denote exact time scales. `sleep` accepts a duration, so a dimensionless number is rejected even when its machine representation would be accepted by the host system call.
+`s`, `ms`, `us`, and `ns`, together with their written names and `minute`/`hour`, denote exact time scales. `sleep` accepts a rational time quantity and converts it to whole nanoseconds at the system boundary; a dimensionless number is rejected.
 
 ## Provisional Scope
 
-The general type-product model, representation parameterization, and erasure of compile-time dimensions are settled directions. The complete base-dimension catalog, unit import organization, offset scales such as Celsius, calendar-relative durations, noninteger runtime arithmetic, and canonical conversion policies remain provisional.
+The type-product model, representation parameterization, the base-dimension algebra with canonical scales, and erasure are settled. Provisional: a quantity's display unit (printing `4500 J` rather than the canonical number) and `x as km` to select one, declaring base dimensions in library code, offset scales such as Celsius and their point/delta semantics, calendar-relative durations, and catalog organization.

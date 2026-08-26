@@ -155,6 +155,10 @@ let table = [
 ]
 ```
 
+## Iterating Dictionaries and Sets
+
+`loop [key value] in dictionary` unpacks each entry in insertion order, and `loop member in set` visits each member in first-seen order. The iterated key or member is a proven key inside the body, so `dictionary[key]` needs no check there. A loop must not change the container it iterates — stores, `pop`, and `clear` on it inside the body are compile errors, the static counterpart of Python's "changed size during iteration".
+
 > **Provisional design:** General destructuring in iterator targets and collecting dictionary or multidimensional results must extend this model without creating a separate loop grammar. Their complete binding and shape rules are still being designed.
 
 The Reference defines the exact [iterator advancement and exhaustion rules](../../reference/ranges-and-iteration.html).

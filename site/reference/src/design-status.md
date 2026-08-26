@@ -17,7 +17,11 @@ The following principles organize the language and should be treated as normativ
 - Objects are structural values. User-defined constructors are ordinary functions, while a structural or hybrid type may directly contextualize an object literal.
 - Defaults are per-call fallbacks and do not remove their parameters from positional binding.
 - Types are compile-time values and use the ordinary expression grammar where practical.
-- Physical dimensions participate in types and may erase from runtime representations.
+- Physical dimensions participate in types and may erase from runtime representations; every dimension has a canonical unit and other units are exact rational scales of it.
+- Integers are arbitrary precision, `/` yields exact rationals, `fixed` is the fixed-point domain, and there is no floating-point arithmetic.
+- Operations that would raise an exception in Python — indexing, dictionary lookup, `pop`, division by a literal zero — must be proven safe at compile time or use an explicit alternative (`get`, `default=`); non-failing behavior stays Python-shaped, and shared names (`length`, `pop`) mean the same thing on every container.
+- Dictionaries and sets are values with insertion-ordered iteration, proven-key lookups, and hash-table representations; a container may not be mutated by a loop that iterates it.
+- Every value has one owner and storage is released deterministically; placement (stack, static, arena) is a proof-gated optimization and never changes whether a program is valid.
 - Expected failures are direct union alternatives belonging to a nominal `error` family rather than values wrapped in a `Result` container.
 - Any alternative descended from nominal `exception` forwards through receiver navigation. Both `error` and `undefined` descend from it, while all ordinary alternatives remain subject to member checking; call arguments never forward implicitly.
 - Returned errors and evaluation effects occupy separate parts of a function contract.
@@ -35,11 +39,11 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - the exact liquid-refinement language, proof boundary, and `unsafe` obligations;
 - the general effect vocabulary and effect-polymorphic contracts;
 - multidimensional array shape syntax, broadcasting, and contiguous layout selection;
-- dictionary, bidictionary, and set mutation, collision, deletion, and equality rules;
-- the complete numeric hierarchy beyond integers;
+- bidictionaries, container equality and ordering, compound container operators, and keys beyond words and strings;
+- the numeric hierarchy beyond integers, rationals, and fixed-point (reals, complex, quaternions);
 - the overloadable string-conversion protocol beyond built-in conversions;
 - transformed exception propagation, recovery helpers, and whether pipes join automatic exception forwarding;
-- complete physical-dimension arithmetic, units, and conversion policy;
+- display units for printing quantities, `as unit`, offset units, and declaring base dimensions in library code;
 - runtime-length aggregate ownership, returns, and escaping places;
 - user-defined managed handles, including lifecycle hooks, typed allocation capabilities, and lifetime-bounded payload places;
 - pattern matching, stored generators, and general unpack/collect behavior;

@@ -25,9 +25,30 @@ triple[0..1]
 Array values copy by meaning. If a function should deliberately update an existing array or element, pass its [place](values-and-places.md):
 
 ```dewy
-sort(@names)
+fill(@names)
 set(@triple[1])
 ```
+
+## Growing Arrays
+
+An array declared without an exact length can change length through methods on the value itself:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let xs:array<int64> = [10 20]
+xs.push(30)              # [10 20 30]
+xs.insert(15 1)          # [10 15 20 30]
+let last = xs.pop        # 30
+let first = xs.pop(0)    # 10
+xs.truncate(1)           # [15]
+xs.sort
+xs.clear
+```
+
+`push`, `pop`, `insert`, `truncate`, `clear`, `reserve`, and `sort` are the growth methods; `pop` yields the removed element. Container operations always live on the container: there is no free `push(xs x)`.
+
+Operations that could fail must be proven safe at compile time. `xs.pop` needs a proven non-empty array, `xs.pop(i)` and `xs.insert(v i)` need a proven index, and an ordinary `xs[i]` needs a proven bound. Literal lengths, `push`/`pop` stepping those lengths, and guards such as `if i <? xs.length` all supply the proof; see [Refinements](refinements.md).
 
 ## Loop Capture
 
@@ -86,19 +107,85 @@ loop [title score] in ratings
     printl"{title}: {score}"
 ```
 
+### Looking Up Keys
+
+Indexing a dictionary is only allowed when the compiler can prove the key is present. A key is proven when it came from the literal, was just stored, is being iterated, or was tested with `in?`:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let ratings = ["star trek" -> 89 "star wars" -> 73]
+let trek = ratings["star trek"]        # from the literal
+
+ratings["dune"] = 91
+let dune = ratings["dune"]              # just stored
+
+let title = "alien"
+if title in? ratings
+    printl"{ratings[title]}"           # proven by the guard; the guard's search is reused
+```
+
+This is Dewy's general rule for operations that raise exceptions in Python: they must be proven safe or they do not compile. When a key may be missing, say so with `get`:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let ratings = ["star trek" -> 89 "star wars" -> 73]
+let maybe = ratings.get("alien")        # int64 | undefined
+let score = ratings.get("alien" 0)      # 0 when absent
+```
+
+### Changing a Dictionary
+
+`d[key] = value` stores a value, replacing the value of an existing key in place or appending a new entry at the end. `pop` removes a proven key and yields its value; with the name-only `default` argument the key need not be proven:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let ratings = ["star trek" -> 89 "dune" -> 91]
+let removed = ratings.pop("dune")                   # proven present
+let gone = ratings.pop("alien" default=(-1))        # -1 when absent
+ratings.clear
+```
+
+`d.length` counts entries, `d.keys` is a set of the keys, `d.values` an array of the values in insertion order, and `d1 | d2` (or `d1 or d2`) merges two dictionaries the way Python does: shared keys take the right value while keeping the left position, and new keys append. A dictionary must not change while a loop iterates it; the compiler rejects stores, `pop`, and `clear` inside such a loop.
+
+Dictionaries are ordinary values: they can be passed to functions, returned, stored in objects, and written as literals in any expression. A callee that stores into a dictionary parameter works on its own copy unless the parameter is a place.
+
 `<->` describes a bidirectional mapping whose values can be looked up from either side.
 
 ## Sets
 
-The intended set literal makes its unordered meaning explicit:
+A set holds each member once and remembers first-seen order:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: compiler -->
 
 ```dewy
-let permissions = set["read" "write"]
+let permissions = set["read" "write" "read"]     # two members
+permissions.add("execute")
 "read" in? permissions
+permissions.length
+
+let taken = permissions.pop("read")               # proven: it came from the literal
+permissions.pop("nope" default=undefined);        # absent: nothing happens
 ```
 
-> **Provisional design:** Dictionary insertion order and key/value iteration are settled. Their complete runtime storage, lookup, collision, deletion, equality, and mutation rules—and the corresponding bidictionary and set rules—remain under design.
+`pop` follows the dictionary rule: a proven member, or a `default` when it may be missing. `s.values` is an array of the members, and the set operators produce new sets:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let evens = set[0 2 4 6]
+let small = set[0 1 2 3]
+
+let both = evens & small        # intersection: 0 2   (`and` also works)
+let either = evens | small      # union: 0 2 4 6 1 3  (`or` also works)
+let only = evens - small        # difference: 4 6
+let odd_one_out = evens xor small
+```
+
+Because `d.keys` is a set, the same operators compare the keys of two dictionaries.
+
+> **Provisional design:** Bidirectional dictionaries, equality and ordering of containers, compound operator forms such as `|=`, and keys beyond words and strings remain under design.
 
 Objects also use square brackets, but named fields with `=` distinguish them from positional containers. Continue with [Structural Objects](object-types.md), or consult the exact [array and container reference](../../reference/arrays-and-containers.html).

@@ -56,6 +56,22 @@ if answer isnt? undefined
 
 Earlier failed alternatives also establish facts in later ones. Assignment or a call that may mutate the tested value invalidates facts that are no longer guaranteed.
 
+A chain of `is?` tests that covers every alternative of a union is exhaustive, so it needs no `else` — whether it returns or produces a value:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let describe = (v:int64 | string):>int64 => {
+    if v is? int64 {
+        return v * 2
+    } else if v is? string {
+        return v.length
+    }
+}
+```
+
+When a value-producing chain misses an alternative, the error names it: `` `undefined` is not handled by any `is?` arm``.
+
 ## Short-Circuit Conditions
 
 `and` evaluates its right side only if the left side succeeds. `or` evaluates its right side only if the left side fails. `nand`, `nor`, `xor`, and `xnor` follow their Boolean definitions.

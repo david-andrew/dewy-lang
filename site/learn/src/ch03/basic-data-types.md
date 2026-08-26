@@ -20,7 +20,35 @@ let counter:uint64 = 1
 
 An integer literal begins as the exact number written. Context can place it in a compatible integer type, but an out-of-range literal is rejected instead of truncated.
 
-Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program.
+Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program. In the current compiler an `int` value is stored as a 64-bit word exactly when its range is proven to fit; arithmetic whose range cannot be proven is reported so the program can annotate a fixed width or narrow the value with a comparison.
+
+## Rationals and Fixed-Point
+
+Dividing integers with `/` produces an exact rational, and a decimal literal is an exact rational too:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let third = 1/3              # rational
+let price = 9.8              # 49/5, exactly
+let sum = third + 2/3        # 1
+let ratio = (2/3)^2          # 4/9
+```
+
+Rationals print as `n/d` (or as an integer when whole). `//` remains floor division on integers. A literal zero divisor is a compile error.
+
+`fixed` is a fixed-point number with 32 fraction bits, the representation trigonometry produces. A fixed value absorbs integers and rationals in arithmetic, and constants convert exactly:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let x:fixed = 1/3
+let y = x * 2 + 0.25
+```
+
+`^` raises integers and rationals to integer powers: constant powers fold, a negative constant exponent yields a rational (`2^(-3)` is `1/8`), and a runtime exponent must be a constant or unsigned so that an integer result is sound.
+
+Dewy deliberately provides no floating-point arithmetic: the core targets are integer-only, and rationals and fixed-point cover exact and approximate fractions with predictable behavior. Floating-point types may return later purely for host interoperability.
 
 ## Booleans
 
@@ -98,6 +126,6 @@ let pause:Duration<int64> = 300ms
 
 ## Broader Numeric Domains
 
-> **Provisional design:** Dewy's numeric hierarchy is intended to include exact rationals, reals, concrete floating-point representations, complex values, and quaternions. Their complete construction, promotion, rounding, exceptional-value, and literal rules are not yet specified, so this book does not invent syntax for them.
+> **Provisional design:** Beyond integers, rationals, and fixed-point, Dewy's numeric hierarchy is intended to include reals, complex values, and quaternions. Their construction, promotion, rounding, and literal rules are not yet specified, so this book does not invent syntax for them.
 
 The Reference defines the settled [numeric rules](../../reference/numeric-types.html) and [type/conversion model](../../reference/types-and-conversions.html).
