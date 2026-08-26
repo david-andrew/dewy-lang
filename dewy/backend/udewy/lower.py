@@ -1445,13 +1445,16 @@ class _Lowerer(
             return
         if isinstance(node, hir.DictStore):
             self._discover_node(node.keys, scope, current_function, array_use='grow')
-            self._discover_node(node.values, scope, current_function, array_use='grow')
+            if node.values is not None:
+                self._discover_node(node.values, scope, current_function, array_use='grow')
             self._discover_node(node.key, scope, current_function)
-            self._discover_node(node.value, scope, current_function)
+            if node.value is not None:
+                self._discover_node(node.value, scope, current_function)
             return
         if isinstance(node, hir.DictRemove):
             self._discover_node(node.keys, scope, current_function, array_use='grow')
-            self._discover_node(node.values, scope, current_function, array_use='grow')
+            if node.values is not None:
+                self._discover_node(node.values, scope, current_function, array_use='grow')
             if node.key is not None:
                 self._discover_node(node.key, scope, current_function)
             if node.default is not None:
@@ -1459,6 +1462,10 @@ class _Lowerer(
             return
         if isinstance(node, hir.DictEntries):
             self._discover_node(node.dictionary, scope, current_function)
+            return
+        if isinstance(node, hir.SetAlgebra):
+            self._discover_node(node.left, scope, current_function)
+            self._discover_node(node.right, scope, current_function)
             return
         if isinstance(node, hir.StringLength):
             self._discover_node(node.string, scope, current_function)
@@ -2035,20 +2042,26 @@ class _Lowerer(
             return replace(
                 node,
                 keys=self._require_node(self._transform_node(node.keys)),
-                values=self._require_node(self._transform_node(node.values)),
+                values=self._require_node(self._transform_node(node.values)) if node.values is not None else None,
                 key=self._require_node(self._transform_node(node.key)),
-                value=self._require_node(self._transform_node(node.value)),
+                value=self._require_node(self._transform_node(node.value)) if node.value is not None else None,
             )
         if isinstance(node, hir.DictRemove):
             return replace(
                 node,
                 keys=self._require_node(self._transform_node(node.keys)),
-                values=self._require_node(self._transform_node(node.values)),
+                values=self._require_node(self._transform_node(node.values)) if node.values is not None else None,
                 key=self._require_node(self._transform_node(node.key)) if node.key is not None else None,
                 default=self._require_node(self._transform_node(node.default)) if node.default is not None else None,
             )
         if isinstance(node, hir.DictEntries):
             return replace(node, dictionary=self._require_node(self._transform_node(node.dictionary)))
+        if isinstance(node, hir.SetAlgebra):
+            return replace(
+                node,
+                left=self._require_node(self._transform_node(node.left)),
+                right=self._require_node(self._transform_node(node.right)),
+            )
         if isinstance(node, hir.StringLength):
             return replace(
                 node,
@@ -3144,6 +3157,8 @@ class _Lowerer(
             return self._extract_dict_remove(node)
         if isinstance(node, hir.DictEntries):
             return self._extract_dict_entries(node)
+        if isinstance(node, hir.SetAlgebra):
+            return self._extract_set_algebra(node)
         if isinstance(node, hir.FunctionCall):
             if isinstance(node.func, hir.ArrayMethod):
                 return self._extract_array_method_call(node)

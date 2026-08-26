@@ -493,7 +493,28 @@ def _complete_binding(
     if isinstance(declaration.expr, hir.FunctionLiteral):
         binding.function = declaration.expr
     ctx.binding_scopes[declaration.name] = binding
+    _seed_container_facts(declaration, ctx=ctx)
     return declaration
+
+
+def _seed_container_facts(declaration: hir.Declare, *, ctx: Context) -> None:
+    """A dictionary or set declared from a literal starts with its members proven at their entries."""
+    if declaration.binding_id is None:
+        return
+    literal = _unwrap_parens(declaration.expr)
+    while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
+        literal = literal.expr
+    if not (isinstance(literal, hir.ObjectLiteral) and ty.container_entry_types(literal.type) is not None):
+        return
+    declared = ty.strip_refinement(declaration.annotation) if declaration.annotation is not None else literal.type
+    _seed_field_routes(declaration.binding_id, declared, literal, (), ctx=ctx)
+    dictionary = hir.ExpressedIdentifier(declaration.loc, literal.type, declaration.name, binding_id=declaration.binding_id)
+    keys_literal = literal.fields[0].value
+    while isinstance(keys_literal, (hir.RepresentationCast, hir.ValueCast)):
+        keys_literal = keys_literal.expr
+    if isinstance(keys_literal, hir.ArrayLiteral):
+        for index, key in enumerate(keys_literal.items):
+            _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
 
 
 def _widen_inferred_let_value(expr: hir.AST, *, ctx: Context) -> hir.AST:
@@ -927,7 +948,7 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
         return None
     binding = ctx.binding_scopes.get(left.left.item.name)
     if binding is None or ty.dict_key_value(binding.type) is None:
-        return None
+        return None  # (a set target falls through to the index-assignment error)
     if not isinstance(left.right, p0.Block) or len(left.right.inner) != 1:
         user_error(
             ctx.srcfile,
@@ -942,7 +963,7 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
         )
     dictionary = tcr_identifier(left.left.item, ctx=ctx)
     found = _dict_value(dictionary)
-    assert found is not None
+    assert found is not None and found[2] is not None
     dictionary, key_type, value_type = found
     key = check_against(
         typecheck_and_resolve_inner(left.right.inner[0], ctx=ctx, expected=key_type),
@@ -1943,6 +1964,14 @@ def _tcr_range_iterator(
                 )
             target_type = element_type
             count = iterable.type.length
+        elif ty.set_element(iterable.type) is not None:
+            # a set iterates its live members in insertion order (compacting
+            # first when removals left tombstones)
+            target_type = ty.set_element(iterable.type)
+            count = None
+            _forget_positions(iterable, ctx=ctx)
+            _invalidate_dict_lengths(iterable, ctx=ctx)
+            iterable = hir.DictEntries(iterable.loc, ty.ArrayType(target_type, None), iterable, 'keys')
         if target_type is not None:
             binding = ctx.binding_registry.allocate_param(
                 identifier.name,
@@ -1964,6 +1993,9 @@ def _tcr_range_iterator(
                 identifier.name,
                 binding_id=binding.id,
             )
+            if isinstance(iterable, hir.DictEntries):
+                iterator_ctx = replace(iterator_ctx, key_facts=dict(iterator_ctx.key_facts))
+                _record_key_fact(iterable.dictionary, target, ctx=iterator_ctx)
             return (
                 hir.IteratorExpression(
                     condition_ast.loc,
@@ -2471,7 +2503,17 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # A refinement established before the loop is only sound inside the
         # body if nothing in the body can invalidate it on a later iteration,
         # so drop refinements of every binding the body assigns or grows.
+        iterated_containers = _iterated_container_names(condition)
         for mutated_name in _mutated_binding_names(body_ast):
+            if mutated_name in iterated_containers:
+                # Python raises "changed size during iteration" at runtime;
+                # entries may move (compaction, resize), so it is rejected here
+                user_error(
+                    ctx.srcfile,
+                    f'cannot mutate `{mutated_name}` while iterating it',
+                    Pointer(span=body_ast.loc, message=f'this loop body changes `{mutated_name}`, the container it iterates'),
+                    hint='collect the changes and apply them after the loop',
+                )
             mutated_binding = ctx.binding_scopes.get(mutated_name)
             if mutated_binding is not None:
                 invalidated = [
@@ -2805,36 +2847,41 @@ def _dict_literal_block(ast: p0.AST) -> p0.Block | None:
     return None
 
 
-def _dict_value(node: hir.AST) -> tuple[hir.AST, ty.TypeExpr, ty.TypeExpr] | None:
-    """`(dictionary, K, V)` when a checked expression is a runtime dictionary."""
+def _dict_value(node: hir.AST) -> tuple[hir.AST, ty.TypeExpr, ty.TypeExpr | None] | None:
+    """`(container, K, V)` for a runtime dictionary, `(container, T, None)` for a set."""
     while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
         node = node.items[0]
-    key_value = ty.dict_key_value(node.type)
-    if key_value is None:
+    entry_types = ty.container_entry_types(node.type)
+    if entry_types is None:
         return None
-    return node, key_value[0], key_value[1]
+    return node, entry_types[0], entry_types[1]
 
 
-def _dict_arrays(dictionary: hir.AST, loc: Span, *, ctx: Context) -> tuple[hir.AST, hir.AST]:
-    """The `keys` and `values` member routes of a dictionary, with exact lengths when known."""
-    key_value = ty.dict_key_value(dictionary.type)
-    assert key_value is not None
+def _container_fields(dictionary: hir.AST) -> list[tuple[str, ty.TypeExpr]]:
+    entry_types = ty.container_entry_types(dictionary.type)
+    assert entry_types is not None
+    fields = [('keys', entry_types[0])]
+    if entry_types[1] is not None:
+        fields.append(('values', entry_types[1]))
+    return fields
+
+
+def _dict_arrays(dictionary: hir.AST, loc: Span, *, ctx: Context) -> tuple[hir.AST, hir.AST | None]:
+    """The `keys` (and `values`) member routes of a container, with exact lengths when known."""
     result: list[hir.AST] = []
-    for field, element in (('keys', key_value[0]), ('values', key_value[1])):
+    for field, element in _container_fields(dictionary):
         member = hir.MemberAccess(loc, ty.ArrayType(element, None), dictionary, field)
         route_id = sb.array_route_id(member, ctx.binding_registry)
         refined = ctx.refinements.get(route_id) if route_id is not None else None
         if isinstance(refined, ty.ArrayType):
             member = replace(member, type=refined)
         result.append(member)
-    return result[0], result[1]
+    return result[0], (result[1] if len(result) > 1 else None)
 
 
 def _invalidate_dict_lengths(dictionary: hir.AST, *, ctx: Context) -> None:
     """A store may append: the entry arrays' exact lengths are no longer known."""
-    key_value = ty.dict_key_value(dictionary.type)
-    assert key_value is not None
-    for field, element in (('keys', key_value[0]), ('values', key_value[1])):
+    for field, element in _container_fields(dictionary):
         member = hir.MemberAccess(dictionary.loc, ty.ArrayType(element, None), dictionary, field)
         route_id = sb.array_route_id(member, ctx.binding_registry)
         if route_id is not None:
@@ -2885,6 +2932,55 @@ def _tcr_dict_literal(
             hir.ObjectField(block.loc, 'hashes', hir.ArrayLiteral(block.loc, ty.ArrayType('int64', 0), [])),
             hir.ObjectField(block.loc, 'indices', hir.ArrayLiteral(block.loc, ty.ArrayType('int64', 0), [])),
             hir.ObjectField(block.loc, 'live', hir.Integer(block.loc, ty.IntegerLiteralType(count), '0d', count)),
+        ],
+    )
+
+
+def _tcr_set_literal(
+    block: p0.Block,
+    loc: Span,
+    *,
+    expected: ty.Type | None,
+    ctx: Context,
+) -> hir.ObjectLiteral:
+    """`set[a b c]`: the set object over the distinct members, in first-seen order."""
+    annotation = ty.strip_refinement(expected) if expected is not None else None
+    element = ty.set_element(annotation) if annotation is not None else None
+    if element is None and not block.inner:
+        user_error(
+            ctx.srcfile,
+            'empty set literal needs a set type',
+            Pointer(span=loc, message='annotate it, for example `let s:set<string> = set[]`'),
+        )
+    members = typecheck_and_resolve_inner(
+        block, ctx=ctx, expected=ty.ArrayType(element, len(block.inner)) if element is not None else None,
+    )
+    if not isinstance(members, hir.ArrayLiteral) or not isinstance(members.type, ty.ArrayType):
+        not_implemented(ctx.srcfile, block.loc, 'set literals from non-literal member lists')
+    # duplicates collapse at compile time, so `live` is exact; members must
+    # be constants for that (runtime members dedupe at the first table build)
+    seen: dict[object, int] = {}
+    distinct: list[hir.AST] = []
+    for item in members.items:
+        identity = _key_identity(item, ctx=ctx)
+        if identity is None or identity[0] != 'c':
+            not_implemented(ctx.srcfile, item.loc, 'set literal members that are not constants')
+        if identity[1] in seen:
+            continue
+        seen[identity[1]] = len(distinct)
+        distinct.append(item)
+    set_object = annotation if element is not None else ty.set_type(members.type.element)
+    assert isinstance(set_object, ty.ObjectType)
+    keys = replace(members, items=distinct, type=ty.ArrayType(members.type.element, len(distinct)))
+    count = len(distinct)
+    return hir.ObjectLiteral(
+        loc,
+        set_object,
+        [
+            hir.ObjectField(keys.loc, 'keys', keys),
+            hir.ObjectField(loc, 'hashes', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(loc, 'indices', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(loc, 'live', hir.Integer(loc, ty.IntegerLiteralType(count), '0d', count)),
         ],
     )
 
@@ -3490,6 +3586,28 @@ def _grown_array_names(ast: p0.AST) -> frozenset[str]:
     return frozenset(names)
 
 
+def _iterated_container_names(condition: hir.AST) -> set[str]:
+    """Names of dictionaries and sets a loop condition iterates."""
+    iterators: list[hir.IteratorExpression] = []
+    if isinstance(condition, hir.IteratorExpression):
+        iterators.append(condition)
+    elif isinstance(condition, hir.MultiIteratorExpression):
+        iterators.extend(condition.iterators)
+    names: set[str] = set()
+    for iterator in iterators:
+        iterable = iterator.iterable
+        if isinstance(iterable, hir.DictEntries):
+            root = iterable.dictionary
+            while isinstance(root, hir.MemberAccess):
+                root = root.value
+            if isinstance(root, hir.ExpressedIdentifier):
+                names.add(root.name)
+    return names
+
+
+_MUTATING_METHOD_NAMES = frozenset({*_ARRAY_METHOD_NAMES, 'add'})  # arrays, dictionaries, sets
+
+
 def _mutated_binding_names(ast: p0.AST) -> set[str]:
     """Names a syntax tree may assign or grow (a conservative pre-scan)."""
     names: set[str] = set()
@@ -3522,7 +3640,7 @@ def _mutated_binding_names(ast: p0.AST) -> set[str]:
                 and node.op.symbol == '.'
                 and isinstance(node.right, p0.Atom)
                 and isinstance(node.right.item, t1.Identifier)
-                and node.right.item.name in _ARRAY_METHOD_NAMES
+                and node.right.item.name in _MUTATING_METHOD_NAMES
             ):
                 names.add(left_name)
         if is_dataclass(node) and not isinstance(node, type):
@@ -3653,17 +3771,20 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.ArrayType):
             return _tcr_array_method(value, name, binop.loc, ctx=ctx)
-    if name in {'get', 'pop', 'clear'}:
+    if name in {'get', 'pop', 'clear', 'add'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         found_dict = _dict_value(value)
-        if found_dict is not None:
+        dict_methods = {'get', 'pop', 'clear'}
+        set_methods = {'add', 'pop', 'clear'}
+        if found_dict is not None and name in (set_methods if found_dict[2] is None else dict_methods):
             dictionary, key_type, value_type = found_dict
             if name == 'get':
+                assert value_type is not None
                 signature = ty.FunctionType(
                     [ty.PosOrKwArg('key', key_type), ty.PosOrKwArg('default', value_type, required=False)],
                     [], None, ty.optional(value_type),
                 )
-            elif name == 'pop':
+            elif name == 'pop' and value_type is not None:
                 # `default` is name-only: with it the key need not be proven present
                 signature = ty.FunctionType(
                     [ty.PosOrKwArg('key', key_type)],
@@ -3671,6 +3792,17 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                     None,
                     value_type,
                 )
+            elif name == 'pop':
+                # a set's pop removes a proven member and yields it; with the
+                # name-only `default` (any value, e.g. `undefined`) no proof is needed
+                signature = ty.FunctionType(
+                    [ty.PosOrKwArg('key', key_type)],
+                    [ty.PosOrKwArg('default', ty.optional(key_type), required=False)],
+                    None,
+                    key_type,
+                )
+            elif name == 'add':
+                signature = ty.FunctionType([ty.PosOrKwArg('key', key_type)], [], None, ty.VOID_TYPE)
             else:
                 signature = ty.FunctionType([], [], None, ty.VOID_TYPE)
             if name != 'get':
@@ -4634,6 +4766,37 @@ def _as_int64(arg: hir.AST, *, ctx: Context) -> hir.AST:
     return check_against(arg, 'int64', ctx=ctx)
 
 
+_SET_ALGEBRA = {'__or__': 'union', '__and__': 'intersection', '__sub__': 'difference', '__xor__': 'symmetric'}
+
+
+def _dispatch_set_algebra(
+    fname: str,
+    args: list[hir.AST],
+    *,
+    loc: Span,
+    source_name: str,
+    ctx: Context,
+) -> hir.AST | None:
+    """`a | b`, `a & b`, `a - b`, `a xor b` on two sets of one element type."""
+    if len(args) != 2 or not any(ty.set_element(arg.type) is not None for arg in args):
+        return None
+    elements = [ty.set_element(arg.type) for arg in args]
+    if elements[0] is None or elements[1] is None or fname not in _SET_ALGEBRA:
+        type_error(
+            ctx.srcfile,
+            f'no matching overload for operator `{source_name}`',
+            *[Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`') for arg in args],
+            hint='sets combine with `|`/`or` (union), `&`/`and` (intersection), `-` (difference), `xor` (symmetric difference)',
+        )
+    if elements[0] != elements[1]:
+        type_error(
+            ctx.srcfile,
+            'set operands have different element types',
+            *[Pointer(span=arg.loc, message=f'`{type_to_dewy(arg.type)}`') for arg in args],
+        )
+    return hir.SetAlgebra(loc, args[0].type, _SET_ALGEBRA[fname], args[0], args[1])
+
+
 def _dispatch_pow(
     args: list[hir.AST],
     *,
@@ -4758,6 +4921,9 @@ def _dispatch_builtin(
     ]
     if fname == '__pow__':
         return _dispatch_pow(args, loc=loc, ctx=ctx)
+    algebra = _dispatch_set_algebra(fname, args, loc=loc, source_name=source_name, ctx=ctx)
+    if algebra is not None:
+        return algebra
     rational = _dispatch_rational(fname, args, loc=loc, source_name=source_name, ctx=ctx)
     if rational is not None:
         return rational
@@ -5137,8 +5303,16 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     if source_place is not None:
         array = source_place.target
     found_dict = _dict_value(array)
+    if found_dict is not None and found_dict[2] is None:
+        user_error(
+            ctx.srcfile,
+            'sets are not indexable',
+            Pointer(span=binop.loc, message='a set has members, not values'),
+            hint='test membership with `x in? s`',
+        )
     if found_dict is not None:
         dictionary, key_type, value_type = found_dict
+        assert value_type is not None
         if not isinstance(binop.right, p0.Block) or len(binop.right.inner) != 1:
             user_error(
                 ctx.srcfile,
@@ -5418,6 +5592,16 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     # quantum juxtapose: which operator this is depends on the operand types,
     # so try each reading as a candidate like an Ambiguous node
+    if (
+        isinstance(binop.op, (t2.QJuxtapose, t2.IndexJuxtapose, t2.CallJuxtapose))
+        and isinstance(binop.left, p0.Atom)
+        and isinstance(binop.left.item, t1.Identifier)
+        and binop.left.item.name == 'set'
+        and 'set' not in ctx.declarations
+        and isinstance(binop.right, p0.Block)
+        and binop.right.kind == '[]'
+    ):
+        return _tcr_set_literal(binop.right, binop.loc, expected=expected, ctx=ctx)
     if isinstance(binop.op, t2.QJuxtapose):
         candidates: list[p0.AST] = [replace(binop, op=option) for option in binop.op.options]
         return typecheck_and_resolve_inner(p0.Ambiguous(binop.loc, candidates), ctx=ctx, type_block=type_block, expected=expected)
@@ -5512,6 +5696,13 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             membership = _target_membership(left, right, binop.loc)
             if membership is not None:
                 return replace(membership, value=not membership.value)
+            found_dict = _dict_value(right)
+            if found_dict is not None:
+                # `x not in? container` is the negated membership test
+                dictionary, key_type, _value_type = found_dict
+                keys, _values = _dict_arrays(dictionary, binop.loc, ctx=ctx)
+                contains = hir.DictContains(binop.loc, 'bool', keys, check_against(left, key_type, ctx=ctx))
+                return _dispatch_builtin('__not__', [contains], loc=binop.loc, op_loc=binop.op.loc, source_name='not', ctx=ctx)
         fname = builtins.INVERTED_COMPARISON_DUNDER_MAP.get(binop.op.op)
         if fname is None:
             not_implemented(ctx.srcfile, binop.op.loc, f'inverted comparison `not{binop.op.op}`')
@@ -6683,6 +6874,13 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
+            left=p0.Atom(item=t1.Identifier(name='set')),
+            right=p0.Block(kind='<>', inner=[element_ast]),
+        ):
+            return ty.set_type(ast_to_type(element_ast, ctx=ctx))
+
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
             left=p0.Atom(item=t1.Identifier(name='dict')),
             right=p0.Block(kind='<>', inner=[key_ast, value_ast]),
         ):
@@ -7672,19 +7870,45 @@ def _dict_method_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Co
     if method.name == 'clear':
         _forget_dictionary(dictionary, keys, values, cleared=True, ctx=ctx)
         return hir.DictRemove(call.loc, ty.VOID_TYPE, keys, values, None)
-    # pop: the key must be proven present unless a default is supplied
     key = call.pos_args[0] if call.pos_args else call.kw_args['key']
+    if method.name == 'add':
+        # a set store: appends the member unless present
+        _invalidate_dict_lengths(dictionary, ctx=ctx)
+        _forget_positions(dictionary, ctx=ctx)
+        position = _new_key_position_name()
+        _record_key_fact(dictionary, key, ctx=ctx, position=position)
+        return hir.DictStore(call.loc, ty.VOID_TYPE, keys, None, key, None, position=position)
+    # pop: the key must be proven present unless a default is supplied
     default = call.kw_args.get('default')
     fact = _proven_key(dictionary, key, ctx=ctx)
     if fact is None and default is None:
+        container = 'dictionary' if value_type is not None else 'set'
         user_error(
             ctx.srcfile,
-            'dictionary key is not proven present',
-            Pointer(span=key.loc, message='`pop` removes a key that is known to be in the dictionary'),
-            hint='guard with `if key in? d { d.pop(key) }`, or pass `default=...` to get a value when the key is absent',
+            f'{container} key is not proven present',
+            Pointer(span=key.loc, message=f'`pop` removes a key that is known to be in the {container}'),
+            hint=(
+                'guard with `if key in? d { d.pop(key) }`, or pass `default=...` to get a value when the key is absent'
+                if value_type is not None
+                else 'guard with `if x in? s { s.pop(x) }`, or pass `default=undefined` (or a member) for a removal that may miss'
+            ),
         )
     position, static_position = fact if fact is not None else (None, None)
     _forget_dictionary(dictionary, keys, values, cleared=False, removed=key, ctx=ctx)
+    if value_type is None:
+        # a set: the member, or the default when absent (`undefined` makes it optional)
+        if default is None:
+            result_type: ty.Type = _key_type
+        elif isinstance(_unwrap_parens(default), hir.Undefined):
+            default = hir.Undefined(default.loc, 'undefined')
+            result_type = ty.optional(_key_type)
+        else:
+            default = check_against(default, _key_type, ctx=ctx)
+            result_type = _key_type
+        return hir.DictRemove(
+            call.loc, result_type, keys, None, key,
+            position=position, static_position=static_position, default=default, lenient=default is not None,
+        )
     return hir.DictRemove(
         call.loc, value_type, keys, values, key,
         position=position, static_position=static_position, default=default,
@@ -7714,6 +7938,8 @@ def _forget_dictionary(
         if cleared or identity == removed_identity:
             del ctx.key_facts[fact_key]
     for member in (keys, values):
+        if member is None:
+            continue
         route_id = sb.array_route_id(member, ctx.binding_registry)
         if route_id is None:
             continue

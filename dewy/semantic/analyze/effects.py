@@ -463,7 +463,7 @@ class _EffectAnalyzer:
             self._visit(node.array, params)
             return
         if isinstance(node, hir.DictStore):
-            for array in (node.keys, node.values):
+            for array in (node.keys, *([node.values] if node.values is not None else [])):
                 resolved = self._resolve_route(array, params)
                 if resolved is not None:
                     binding_id, route, inner = resolved
@@ -473,13 +473,18 @@ class _EffectAnalyzer:
                 else:
                     self._visit(array, params)
             self._visit(node.key, params)
-            self._visit(node.value, params)
+            if node.value is not None:
+                self._visit(node.value, params)
             return
         if isinstance(node, hir.DictEntries):
             self._visit(node.dictionary, params)
             return
+        if isinstance(node, hir.SetAlgebra):
+            self._visit(node.left, params)
+            self._visit(node.right, params)
+            return
         if isinstance(node, hir.DictRemove):
-            for array in (node.keys, node.values):
+            for array in (node.keys, *([node.values] if node.values is not None else [])):
                 resolved = self._resolve_route(array, params)
                 if resolved is not None:
                     binding_id, route, inner = resolved

@@ -446,6 +446,43 @@ def dict_type(key: 'TypeExpr', value: 'TypeExpr') -> ObjectType:
     )
 
 
+def set_type(element: 'TypeExpr') -> ObjectType:
+    """The runtime set object for `set<T>`: a dictionary without values (same table machinery)."""
+    def canonical(type_: 'TypeExpr') -> 'TypeExpr':
+        if isinstance(type_, (StringType, StringLiteralType)):
+            return 'string'
+        return type_
+    return ObjectType(
+        (
+            ObjectField('keys', ArrayType(canonical(element), None)),
+            ObjectField('hashes', ArrayType('int64', None)),
+            ObjectField('indices', ArrayType('int64', None)),
+            ObjectField('live', 'int64'),
+        ),
+        'set',
+    )
+
+
+def set_element(type_: 'TypeExpr') -> 'TypeExpr | None':
+    """`T` when ``type_`` is a runtime set object."""
+    if isinstance(type_, ObjectType) and type_.brand == 'set':
+        keys = type_.fields[0].type
+        assert isinstance(keys, ArrayType)
+        return keys.element
+    return None
+
+
+def container_entry_types(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr | None'] | None:
+    """`(K, V)` for a dictionary, `(T, None)` for a set, else None."""
+    key_value = dict_key_value(type_)
+    if key_value is not None:
+        return key_value
+    element = set_element(type_)
+    if element is not None:
+        return element, None
+    return None
+
+
 def dict_key_value(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr'] | None:
     """`(K, V)` when ``type_`` is a runtime dictionary object."""
     if isinstance(type_, ObjectType) and type_.brand == 'dict':

@@ -1,0 +1,42 @@
+# Sets: `set[...]` literals, `add`, `in?`, `pop` (proven member, or any member
+# with `default=`), `clear`, `.length`, insertion-ordered iteration, and the
+# algebra `| & - xor` — the dictionary's hash table without values.
+let tally = (words:set<string>):>int64 => {
+    let total:int64 = 0
+    loop w in words { total = total + w.length }
+    return total
+}
+
+let main = ():>int64 => {
+    let seen = set["read" "write" "read"]        # duplicates collapse: 2 members
+    seen.add("execute")
+    seen.add("write")                            # already present: no change
+    let checks:int64 = 0
+    if "read" in? seen { checks += 1 }
+    if "delete" in? seen { checks += 100 }
+    if seen.length =? 3 { checks += 2 }
+    let gone = seen.pop("read")                  # proven: it came from the literal; yields the member
+    seen.pop("nope" default=undefined);          # absent: nothing happens
+    let name:string = "write"
+    if name in? seen { seen.pop(name); }         # proven by the guard; `;` drops the member
+    if seen.length =? 1 { checks += 4 }
+    let numbers:set<int64> = set[]
+    let i:int64 = 0
+    loop i <? 50 { numbers.add(i % 7)  i = i + 1 }
+    let sum:int64 = 0
+    loop n in numbers { sum = sum + n }          # 0..6 in first-seen order: 21
+    if numbers.length =? 7 { checks += 8 }
+    let evens = set[0 2 4 6 8]
+    let small = set[0 1 2 3]
+    let both = evens & small                     # 0 2
+    let either = evens | small                   # 0 2 4 6 8 1 3
+    let only = evens - small                     # 4 6 8
+    let odd_one_out = evens xor small            # 4 6 8 1 3
+    let algebra:int64 = 0
+    loop x in both { algebra = algebra + x }              # 2
+    loop x in either { algebra = algebra * 10 + x }       # in insertion order
+    if only.length =? 3 and odd_one_out.length =? 5 and 4 in? only and 1 in? odd_one_out and 0 not in? odd_one_out { checks += 16 }
+    printl"{seen.length} {tally(seen)} {sum} {numbers.length} {checks} {gone} {both.length} {either.length} {algebra}"
+    numbers.clear
+    return (tally(seen) + sum + numbers.length + checks + gone.length + algebra) % 256
+}

@@ -68,6 +68,10 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.ArrayType):
         length = f' length={t.length}' if t.length is not None else ''
         return f'array<{type_to_dewy(t.element)}{length}>'
+    if isinstance(t, ty.ObjectType) and t.brand == 'set':
+        element = ty.set_element(t)
+        assert element is not None
+        return f'set<{type_to_dewy(element)}>'
     if isinstance(t, ty.ObjectType) and t.brand == 'dict':
         key_value = ty.dict_key_value(t)
         assert key_value is not None
@@ -242,6 +246,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'DictRemove' if node.key is not None else 'DictClear'
     if isinstance(node, hir.DictEntries):
         return f'DictEntries({node.name})'
+    if isinstance(node, hir.SetAlgebra):
+        return f'SetAlgebra({node.op})'
     if isinstance(node, hir.DictStore):
         return 'DictStore'
     if isinstance(node, hir.DictContains):
@@ -370,11 +376,13 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.DictMethod):
         return [('dictionary', node.dictionary)]
     if isinstance(node, hir.DictRemove):
-        return [('keys', node.keys), ('values', node.values), *([('key', node.key)] if node.key is not None else [])]
+        return [('keys', node.keys), *([('values', node.values)] if node.values is not None else []), *([('key', node.key)] if node.key is not None else [])]
     if isinstance(node, hir.DictEntries):
         return [('dictionary', node.dictionary)]
+    if isinstance(node, hir.SetAlgebra):
+        return [('left', node.left), ('right', node.right)]
     if isinstance(node, hir.DictStore):
-        return [('keys', node.keys), ('values', node.values), ('key', node.key), ('value', node.value)]
+        return [('keys', node.keys), *([('values', node.values)] if node.values is not None else []), ('key', node.key), *([('value', node.value)] if node.value is not None else [])]
     if isinstance(node, hir.DictContains):
         return [('keys', node.keys), ('key', node.key)]
     if isinstance(node, hir.IteratorExpression):
@@ -802,11 +810,16 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
     if isinstance(node, hir.DictEntries):
         return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
+    if isinstance(node, hir.SetAlgebra):
+        symbol = {'union': ' | ', 'intersection': ' & ', 'difference': ' - ', 'symmetric': ' xor '}[node.op]
+        return _seq(_to_doc(node.left, _CALL_PREC, indent), _text(symbol), _to_doc(node.right, _CALL_PREC, indent))
     if isinstance(node, hir.DictRemove):
         if node.key is None:
             return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.clear'))
         return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.pop('), _to_doc(node.key, 0, indent), _text(')'))
     if isinstance(node, hir.DictStore):
+        if node.value is None:
+            return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.add('), _to_doc(node.key, 0, indent), _text(')'))
         return _seq(
             _to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent),
             _text('] = '), _to_doc(node.value, 0, indent),

@@ -39,8 +39,10 @@ class _DictParts:
 
     pointer: hir.AST
     offsets: dict[str, int]
+    object_type: ty.ObjectType
     key_type: ty.TypeExpr
-    value_type: ty.TypeExpr
+    value_type: ty.TypeExpr | None
+    """None for a set."""
 
 
 class _DictLowering:
@@ -51,13 +53,14 @@ class _DictLowering:
             raise TypeError('INTERNAL ERROR: dictionary node without a member route')
         dictionary = keys.value
         object_type = dictionary.type
-        if not isinstance(object_type, ty.ObjectType) or ty.dict_key_value(object_type) is None:
-            raise TypeError('INTERNAL ERROR: dictionary node on a non-dictionary')
-        key_type, value_type = ty.dict_key_value(object_type)
+        entry_types = ty.container_entry_types(object_type) if isinstance(object_type, ty.ObjectType) else None
+        if not isinstance(object_type, ty.ObjectType) or entry_types is None:
+            raise TypeError('INTERNAL ERROR: dictionary node on a non-container')
+        key_type, value_type = entry_types
         prelude, pointer = self._extract_object_pointer(dictionary)
         name = hir.ExpressedIdentifier(keys.loc, 'int64', self._new_array_name('dict'))
         _size, offsets = self._object_layout(object_type, dictionary)
-        return [*prelude, hir.Declare(keys.loc, ty.VOID_TYPE, 'let', name.name, 'int64', pointer)], _DictParts(name, offsets, key_type, value_type)
+        return [*prelude, hir.Declare(keys.loc, ty.VOID_TYPE, 'let', name.name, 'int64', pointer)], _DictParts(name, offsets, object_type, key_type, value_type)
 
     def _dict_descriptor(self, parts: _DictParts, field: str, loc: Span) -> hir.AST:
         return self._load_i64_field(parts.pointer, parts.offsets[field], loc)
@@ -91,8 +94,7 @@ class _DictLowering:
 
     def _dict_object_node(self, parts: _DictParts, loc: Span) -> hir.AST:
         """The dictionary as an object-typed expression for member routes (already a pointer)."""
-        object_type = ty.dict_type(parts.key_type, parts.value_type)
-        return replace(parts.pointer, type=object_type)
+        return replace(parts.pointer, type=parts.object_type)
 
     # ------------------------------------------------------------------ words
     def _word(self, name: str, left: hir.AST, right: hir.AST, loc: Span) -> hir.FunctionCall:
@@ -164,7 +166,7 @@ class _DictLowering:
     def _dict_rebuild(self, parts: _DictParts, capacity: hir.AST, loc: Span) -> list[hir.AST]:
         """Compact the entries (dropping tombstones), fill missing hashes, and build a fresh table."""
         keys = self._dict_descriptor(parts, 'keys', loc)
-        values = self._dict_descriptor(parts, 'values', loc)
+        values = self._dict_descriptor(parts, 'values', loc) if parts.value_type is not None else None
         hashes = self._dict_descriptor(parts, 'hashes', loc)
         indices = self._dict_descriptor(parts, 'indices', loc)
         entry_count = self._dict_length_of(keys, loc)
@@ -183,7 +185,8 @@ class _DictLowering:
             moved = self._int64_comparison('__lt__', writer, reader, loc)
             copy = [
                 self._dict_store_element(keys, writer, self._dict_element(keys, reader, parts.key_type, loc), parts.key_type, loc),
-                self._dict_store_element(values, writer, self._dict_element(values, reader, parts.value_type, loc), parts.value_type, loc),
+                *([self._dict_store_element(values, writer, self._dict_element(values, reader, parts.value_type, loc), parts.value_type, loc)]
+                  if values is not None and parts.value_type is not None else []),
                 self._if(has_hash, [self._dict_store_element(hashes, writer, self._dict_element(hashes, reader, 'int64', loc), 'int64', loc)], loc),
             ]
             return [self._if(dead, [], loc, [
@@ -193,7 +196,8 @@ class _DictLowering:
 
         statements.extend(self._counting('dict_read', entry_count, compact, loc))
         statements.extend(self._dict_truncate(parts, 'keys', parts.key_type, writer, loc))
-        statements.extend(self._dict_truncate(parts, 'values', parts.value_type, writer, loc))
+        if parts.value_type is not None:
+            statements.extend(self._dict_truncate(parts, 'values', parts.value_type, writer, loc))
         statements.extend(self._dict_truncate(parts, 'hashes', 'int64', writer, loc))
         statements.append(self._dict_set_live(parts, writer, loc))
 
@@ -406,8 +410,8 @@ class _DictLowering:
         loc = node.loc
         prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
-        value_prelude, value = self._extract_expression(node.value)
-        values = self._dict_descriptor(parts, 'values', loc)
+        value_prelude, value = self._extract_expression(node.value) if node.value is not None else ([], None)
+        values = self._dict_descriptor(parts, 'values', loc) if parts.value_type is not None else None
         keys = self._dict_descriptor(parts, 'keys', loc)
         indices = self._dict_descriptor(parts, 'indices', loc)
         ensure = self._dict_ensure_table(parts, loc, room_for=1)
@@ -417,11 +421,15 @@ class _DictLowering:
         remembered: list[hir.AST] = []
         if node.position is not None:
             remembered.append(hir.Declare(loc, ty.VOID_TYPE, 'let', node.position, 'int64', position))
-        replace_value = [self._dict_store_element(values, position, value, parts.value_type, loc)]
+        replace_value = (
+            [self._dict_store_element(values, position, value, parts.value_type, loc)]
+            if values is not None and value is not None and parts.value_type is not None
+            else []
+        )
         append = [
             self._declare(new_position, self._dict_length_of(keys, loc), loc),
             *self._dict_push(parts, 'keys', parts.key_type, key, loc),
-            *self._dict_push(parts, 'values', parts.value_type, value, loc),
+            *(self._dict_push(parts, 'values', parts.value_type, value, loc) if value is not None and parts.value_type is not None else []),
             *hash_prelude,
             *self._dict_push(parts, 'hashes', 'int64', key_hash, loc),
             self._dict_store_element(indices, slot, new_position, 'int64', loc),
@@ -439,37 +447,64 @@ class _DictLowering:
         prelude, parts = self._dict_parts(node.keys)
         if node.key is None:
             statements: list[hir.AST] = [*prelude]
-            for field, element in (('keys', parts.key_type), ('values', parts.value_type), ('hashes', 'int64'), ('indices', 'int64')):
+            fields: list[tuple[str, ty.TypeExpr]] = [('keys', parts.key_type)]
+            if parts.value_type is not None:
+                fields.append(('values', parts.value_type))
+            fields.extend([('hashes', 'int64'), ('indices', 'int64')])
+            for field, element in fields:
                 statements.extend(self._dict_truncate(parts, field, element, self._int64_literal(loc, 0), loc))
             statements.append(self._dict_set_live(parts, self._int64_literal(loc, 0), loc))
             return statements, hir.Void(loc, ty.VOID_TYPE)
         key_prelude, key = self._extract_expression(node.key)
-        values = self._dict_descriptor(parts, 'values', loc)
         hashes = self._dict_descriptor(parts, 'hashes', loc)
         indices = self._dict_descriptor(parts, 'indices', loc)
         # a remembered position still needs the slot: probing by key finds
-        # both (the key is proven present, so the probe succeeds)
+        # both (a proven key's probe succeeds)
         ensure = self._dict_ensure_table(parts, loc)
         probe, found, position, slot = self._dict_probe(parts, key, loc)
-        removed = self._name('dict_removed', loc, parts.value_type)
-        take = [
-            self._assign(removed, self._dict_element(values, position, parts.value_type, loc), loc),
+        tombstone = [
             self._dict_store_element(hashes, position, self._int64_literal(loc, DEAD), 'int64', loc),
             self._dict_store_element(indices, slot, self._int64_literal(loc, DUMMY), 'int64', loc),
             self._dict_set_live(parts, self._int64_binary('__sub__', self._dict_live(parts, loc), self._int64_literal(loc, 1), loc), loc),
         ]
+        if parts.value_type is None:
+            # a set: `pop(x)` (proven) yields the member; `pop(x default=v)`
+            # yields the member when present (removing it) else `v`
+            if not node.lenient:
+                return [*prelude, *key_prelude, *ensure, *probe, *tombstone], key
+            assert node.default is not None
+            payload = ty.optional_payload(node.type)
+            if payload is not None:
+                # `default=undefined`: an optional cell, undefined unless the member was present
+                cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('set_popped'))
+                cell_word = replace(cell, type='int64')
+                return [
+                    *prelude, *key_prelude, *ensure, *probe,
+                    hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
+                    *self._optional_write(cell_word, hir.Undefined(loc, 'undefined'), payload),
+                    self._if(found, [*self._optional_write(cell_word, key, payload), *tombstone], loc),
+                ], cell
+            default_prelude, default = self._extract_expression(node.default)
+            popped = self._name('set_popped', loc, parts.key_type)
+            return [
+                *prelude, *key_prelude, *default_prelude, *ensure, *probe,
+                self._declare(popped, default, loc, parts.key_type),
+                self._if(found, [self._assign(popped, key, loc), *tombstone], loc),
+            ], popped
+        values = self._dict_descriptor(parts, 'values', loc)
+        removed = self._name('dict_removed', loc, parts.value_type)
         if node.default is None:
             # proven present: the probe succeeds
             return [
                 *prelude, *key_prelude, *ensure, *probe,
                 self._declare(removed, self._dict_element(values, position, parts.value_type, loc), loc, parts.value_type),
-                *take[1:],
+                *tombstone,
             ], removed
         default_prelude, default = self._extract_expression(node.default)
         return [
             *prelude, *key_prelude, *default_prelude, *ensure, *probe,
             self._declare(removed, default, loc, parts.value_type),
-            self._if(found, take, loc),
+            self._if(found, [self._assign(removed, self._dict_element(values, position, parts.value_type, loc), loc), *tombstone], loc),
         ], removed
 
     def _extract_dict_entries(self, node: hir.DictEntries) -> tuple[list[hir.AST], hir.AST]:
@@ -482,3 +517,74 @@ class _DictLowering:
         capacity_prelude, capacity = self._table_capacity_for(self._dict_live(parts, loc), loc)
         compact = self._if(has_dead, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)
         return [*prelude, compact], self._dict_descriptor(parts, node.name, loc)
+
+    def _extract_set_algebra(self, node: hir.SetAlgebra) -> tuple[list[hir.AST], hir.AST]:
+        """Build a new set from two: union, intersection, difference, symmetric difference."""
+        loc = node.loc
+        element = ty.set_element(node.type)
+        assert element is not None
+        set_type = ty.set_type(element)
+        empty = hir.ObjectLiteral(loc, set_type, [
+            hir.ObjectField(loc, 'keys', hir.ArrayLiteral(loc, ty.ArrayType(element, 0), [])),
+            hir.ObjectField(loc, 'hashes', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(loc, 'indices', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
+            hir.ObjectField(loc, 'live', hir.Integer(loc, 'int64', '0d', 0)),
+        ])
+        result_prelude, result_pointer = self._extract_object_pointer(empty)
+        result_name = self._name('set_result', loc)
+        result_object = replace(result_name, type=set_type)
+        left_prelude, left = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), node.left, 'keys'))
+        right_prelude, right = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), node.right, 'keys'))
+        statements: list[hir.AST] = [
+            *result_prelude,
+            self._declare(result_name, result_pointer, loc),
+            *left_prelude,
+            *right_prelude,
+            *self._dict_ensure_table(left, loc),
+            *self._dict_ensure_table(right, loc),
+        ]
+
+        def add_members(source: _DictParts, other: _DictParts | None, *, when_found: bool) -> list[hir.AST]:
+            """Add each live member of `source` (filtered by membership in `other`) to the result."""
+            keys = self._dict_descriptor(source, 'keys', loc)
+            hashes = self._dict_descriptor(source, 'hashes', loc)
+            hash_count = self._dict_length_of(hashes, loc)
+
+            def body(index: hir.ExpressedIdentifier) -> list[hir.AST]:
+                member = self._name('set_member', loc, element)
+                add_prelude, add = self._extract_dict_store(hir.DictStore(
+                    loc, ty.VOID_TYPE,
+                    hir.MemberAccess(loc, ty.ArrayType(element, None), result_object, 'keys'),
+                    None, member, None,
+                ))
+                adding = [*add_prelude, add]
+                if other is not None:
+                    probe, found, _position, _slot = self._dict_probe(other, member, loc)
+                    adding = [*probe, self._if(found, adding, loc) if when_found else self._if(found, [], loc, adding)]
+                alive = hir.ShortCircuit(
+                    loc, 'bool', 'or',
+                    self._int64_comparison('__ge__', index, hash_count, loc),
+                    hir.FunctionCall(
+                        loc, 'bool',
+                        hir.ExpressedIdentifier(loc, ty.FunctionType([ty.PosOrKwArg('l', 'int64'), ty.PosOrKwArg('r', 'int64')], [], None, 'bool', []), '__ne__'),
+                        [self._dict_element(hashes, index, 'int64', loc), self._int64_literal(loc, DEAD)], {},
+                    ),
+                )
+                return [
+                    self._declare(member, self._dict_element(keys, index, element, loc), loc, element),
+                    self._if(alive, adding, loc),
+                ]
+
+            return self._counting('set_index', self._dict_length_of(keys, loc), body, loc)
+
+        if node.op == 'union':
+            statements.extend(add_members(left, None, when_found=True))
+            statements.extend(add_members(right, None, when_found=True))
+        elif node.op == 'intersection':
+            statements.extend(add_members(left, right, when_found=True))
+        elif node.op == 'difference':
+            statements.extend(add_members(left, right, when_found=False))
+        else:  # symmetric difference
+            statements.extend(add_members(left, right, when_found=False))
+            statements.extend(add_members(right, left, when_found=False))
+        return statements, result_name

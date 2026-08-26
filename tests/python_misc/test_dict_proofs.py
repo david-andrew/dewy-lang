@@ -2,7 +2,7 @@ import pytest
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import UserError
+from dewy.semantic.errors import TypeCheckError, UserError
 
 
 def _check(body: str) -> hir.Block:
@@ -104,3 +104,44 @@ def test_pop_with_a_default_needs_no_proof() -> None:
     with pytest.raises(UserError, match='not proven present') as info:
         _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    let v = d.pop(k)")
     assert 'default=' in str(info.value.report)
+
+
+def test_set_literals_and_methods() -> None:
+    root = _check("    let s = set[1 2 2 3]\n    s.add(4)\n    let n = s.length\n    let m = 2 in? s\n    let one = s.pop(1)\n    s.pop(9 default=undefined);\n    loop x in s { let y = x }")
+    body = root.items[0].expr.body.items
+    literal = body[0].expr
+    assert isinstance(literal, hir.ObjectLiteral) and ty.set_element(literal.type) == 'int64'
+    assert [f.name for f in literal.type.fields] == ['keys', 'hashes', 'indices', 'live']
+    assert len(literal.fields[0].value.items) == 3  # duplicates collapse
+
+
+def test_set_pop_needs_a_proof_unless_defaulted() -> None:
+    with pytest.raises(UserError, match='set key is not proven present') as info:
+        _check("    let s = set[1 2]\n    let k:int64 = 3\n    s.pop(k)")
+    assert 'default=undefined' in str(info.value.report)
+    root = _check("    let s = set[1 2]\n    let k:int64 = 3\n    let a = s.pop(k default=undefined)\n    let b = s.pop(k default=0)\n    if k in? s { s.pop(k); }")
+    body = {item.name: item for item in root.items[0].expr.body.items if isinstance(item, hir.Declare)}
+    assert ty.optional_payload(body['a'].expr.type) == 'int64'
+    assert body['b'].expr.type == 'int64'
+
+
+def test_sets_are_not_indexable_or_storable() -> None:
+    with pytest.raises(UserError, match='sets are not indexable'):
+        _check("    let s = set[1 2]\n    let v = s[1]")
+
+
+def test_mutating_a_container_while_iterating_it_is_rejected() -> None:
+    # Python raises at runtime ("changed size during iteration"); Dewy rejects it at compile time
+    with pytest.raises(UserError, match='cannot mutate `s` while iterating it'):
+        _check("    let s = set[1 2]\n    loop x in s { s.pop(x); }")
+    with pytest.raises(UserError, match='cannot mutate `d` while iterating it'):
+        _check("    let d = ['a' -> 1]\n    loop [k v] in d { d['z'] = 2 }")
+
+
+def test_set_algebra_dispatches_on_set_operands() -> None:
+    root = _check("    let a = set[1 2]\n    let b = set[2 3]\n    let u = a | b\n    let i = a and b\n    let d = a - b\n    let x = a xor b")
+    body = {item.name: item for item in root.items[0].expr.body.items if isinstance(item, hir.Declare)}
+    assert [body[name].expr.op for name in ('u', 'i', 'd', 'x')] == ['union', 'intersection', 'difference', 'symmetric']
+    assert all(ty.set_element(body[name].expr.type) == 'int64' for name in ('u', 'i', 'd', 'x'))
+    with pytest.raises(TypeCheckError, match='different element types'):
+        _check("    let a = set[1 2]\n    let b = set['x']\n    let u = a | b")

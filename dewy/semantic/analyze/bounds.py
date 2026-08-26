@@ -746,7 +746,7 @@ class _BoundsValidator:
                 self._eval(node.key, state, validate=validate)
             if node.default is not None:
                 self._eval(node.default, state, validate=validate)
-            for array in (node.keys, node.values):
+            for array in (node.keys, *([node.values] if node.values is not None else [])):
                 array_id = _runtime_array_id(array, self.registry)
                 if array_id is not None:
                     key = _length_key(array_id)
@@ -759,11 +759,16 @@ class _BoundsValidator:
         if isinstance(node, hir.DictEntries):
             self._eval(node.dictionary, state, validate=validate)
             return None
+        if isinstance(node, hir.SetAlgebra):
+            self._eval(node.left, state, validate=validate)
+            self._eval(node.right, state, validate=validate)
+            return None
         if isinstance(node, hir.DictStore):
             self._eval(node.key, state, validate=validate)
-            self._eval(node.value, state, validate=validate)
+            if node.value is not None:
+                self._eval(node.value, state, validate=validate)
             # A store may append to both hidden arrays.
-            for array in (node.keys, node.values):
+            for array in (node.keys, *([node.values] if node.values is not None else [])):
                 array_id = _runtime_array_id(array, self.registry)
                 if array_id is not None:
                     state.pop(_length_key(array_id), None)

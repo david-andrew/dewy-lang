@@ -280,7 +280,7 @@ class ModuleCompiler:
                     # runtime-length array fields of an object result are arena-backed
                     found = True
                     return
-            if isinstance(value, (hir.ArrayMethod, hir.DictStore, hir.DictRemove, hir.DictLookup, hir.DictContains, hir.DictEntries)):
+            if isinstance(value, (hir.ArrayMethod, hir.DictStore, hir.DictRemove, hir.DictLookup, hir.DictContains, hir.DictEntries, hir.SetAlgebra)):
                 # Growth methods and dictionary stores relocate data into the arena.
                 found = True
                 return

@@ -286,10 +286,11 @@ class DictStore(AST):
     it directly."""
 
     keys: AST
-    values: AST
+    values: AST | None
     key: AST
-    value: AST
+    value: AST | None
     position: str | None = None
+    """``values``/``value`` are None for a set (`s.add(key)`)."""
 
 
 @dataclass
@@ -311,12 +312,26 @@ class DictRemove(AST):
     entry as for lookups."""
 
     keys: AST
-    values: AST
+    values: AST | None
     key: AST | None
     position: str | None = None
     static_position: int | None = None
     default: AST | None = None
     """`d.pop(key default=v)`: the key need not be proven; `v` results when it is absent."""
+    lenient: bool = False
+    """A set's `pop(key default=v)`: no proof needed; the member (or `v`) results. A set's
+    plain `pop(key)` yields the removed member."""
+
+
+@dataclass
+class SetAlgebra(AST):
+    """A new set from two sets of the same element type: ``union`` (`|`/`or`),
+    ``intersection`` (`&`/`and`), ``difference`` (`-`), or ``symmetric``
+    difference (`xor`)."""
+
+    op: str
+    left: AST
+    right: AST
 
 
 @dataclass

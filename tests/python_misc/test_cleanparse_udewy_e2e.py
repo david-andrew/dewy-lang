@@ -76,6 +76,7 @@ LOWERED_CASES = [
     ('dict_proofs.dewy', 133),
     ('dict_remove.dewy', 118),
     ('dict_hash.dewy', 204),
+    ('sets.dewy', 92),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
