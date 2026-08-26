@@ -271,6 +271,17 @@ class _BoundsValidator:
             interval = self._eval(node.expr, current, validate=validate)
             if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
                 interval = self._seed_refinements(node, current, interval)
+            declared = ty.strip_refinement(node.annotation) if node.annotation is not None else None
+            if (
+                node.binding_id is not None
+                and isinstance(declared, ty.ArrayType)
+                and declared.length is None
+                and isinstance(node.expr.type, ty.ArrayType)
+                and node.expr.type.length is not None
+            ):
+                # A growable array initialized from an exact-length value starts
+                # with that length (the checker keeps the same fact as a refinement).
+                current[_length_key(node.binding_id)] = Interval.exact(node.expr.type.length)
             if isinstance(node.expr, hir.FunctionLiteral):
                 self._analyze_function(node.expr, validate=validate, enclosing=current)
             elif isinstance(node.expr, hir.OverloadedFunction):
@@ -778,24 +789,52 @@ class _BoundsValidator:
                 self._eval(item, state, validate=validate)
             return None
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod):
-            for arg in node.pos_args:
-                self._eval(arg, state, validate=validate)
+            arguments = [self._eval(arg, state, validate=validate) for arg in node.pos_args]
+            keyword_arguments = {
+                name: self._eval(arg, state, validate=validate) for name, arg in node.kw_args.items()
+            }
             array_id = _runtime_array_id(node.func.array)
+            name = node.func.name
+            if name == 'pop':
+                index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
+                index_interval = arguments[0] if arguments else keyword_arguments.get('idx')
+            elif name == 'insert':
+                index_arg = node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args.get('idx')
+                index_interval = arguments[1] if len(arguments) > 1 else keyword_arguments.get('idx')
+            elif name == 'truncate':
+                index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('count')
+                index_interval = arguments[0] if arguments else keyword_arguments.get('count')
+            else:
+                index_arg = None
+                index_interval = None
             if array_id is not None:
                 key = _length_key(array_id)
                 current = state.get(key, Interval(0, _MAX_LENGTH))
-                if node.func.name == 'push':
+                if validate and index_arg is not None and name in {'pop', 'insert'}:
+                    self._validate_method_index(
+                        node, index_arg, index_interval, state, array_id, current,
+                        allow_end=name == 'insert',
+                    )
+                if name in {'push', 'insert'}:
                     state[key] = Interval(
                         _add(current.lower, 1),
                         _minimum_upper(_add(current.upper, 1), _MAX_LENGTH),
                     )
-                elif node.func.name == 'pop':
+                elif name == 'pop':
                     state[key] = Interval(
                         max(0, (current.lower or 0) - 1),
                         _subtract(current.upper, 1),
                     )
                     _drop_index_facts(state, array_id=array_id)
-                elif node.func.name == 'clear':
+                elif name == 'truncate':
+                    cap_lower = 0 if index_interval is None or index_interval.lower is None else max(index_interval.lower, 0)
+                    cap_upper = None if index_interval is None else index_interval.upper
+                    state[key] = Interval(
+                        min(current.lower or 0, cap_lower),
+                        _minimum_upper(current.upper, cap_upper),
+                    )
+                    _drop_index_facts(state, array_id=array_id)
+                elif name == 'clear':
                     state[key] = Interval.exact(0)
                     _drop_index_facts(state, array_id=array_id)
             return None
@@ -1061,6 +1100,44 @@ class _BoundsValidator:
         if isinstance(type_, str) and type_ in {'char', 'grapheme'}:
             return 1
         return None
+
+    def _validate_method_index(
+        self,
+        node: hir.FunctionCall,
+        index: hir.AST,
+        interval: Interval | None,
+        state: State,
+        array_id: int,
+        length: Interval,
+        *,
+        allow_end: bool,
+    ) -> None:
+        """Prove `0 <= idx < length` for `pop(idx)` (or `<= length` for `insert`)."""
+        nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
+        if nonnegative:
+            minimum_length = length.lower or 0
+            limit = minimum_length + (1 if allow_end else 0)
+            if interval.upper is not None and interval.upper < limit:
+                return
+            index_id = self._binding_id(index)
+            if index_id is not None and _index_fact_key(index_id, array_id) in state:
+                return
+        known = (
+            'unknown'
+            if interval is None
+            else f'{interval.lower if interval.lower is not None else "-∞"}'
+            f'..{interval.upper if interval.upper is not None else "∞"}'
+        )
+        user_error(
+            self.srcfile,
+            f'`{node.func.name}` index is not proven in bounds',
+            Pointer(span=index.loc, message=f'the index interval here is `{known}`'),
+            hint=(
+                'establish a nonnegative lower bound and an upper bound '
+                + ('at or below' if allow_end else 'below')
+                + ' the array length (for example `if idx <? xs.length { ... }`)'
+            ),
+        )
 
     def _validate_index(
         self,

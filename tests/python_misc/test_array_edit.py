@@ -1,0 +1,53 @@
+import pytest
+
+from dewy.reporting import SrcFile
+from dewy.semantic import check
+from dewy.semantic.errors import UserError
+from dewy.backend.udewy import codegen
+
+
+def _check(body: str):
+    return check.typecheck_and_resolve(SrcFile(None, f'let main = ():>int64 => {{\n{body}\n    return 0\n}}'))
+
+
+def test_constant_indexes_are_proven_against_the_exact_length() -> None:
+    _check('    let xs:array<int64> = [1 2 3]\n    xs.insert(9 3)\n    let a = xs.pop(3)\n    xs.truncate(1)')
+
+
+def test_constant_pop_index_out_of_bounds() -> None:
+    with pytest.raises(UserError, match='pop index is out of bounds'):
+        _check('    let xs:array<int64> = [1 2 3]\n    let a = xs.pop(3)')
+
+
+def test_constant_insert_index_past_the_end() -> None:
+    with pytest.raises(UserError, match='insert index is out of bounds'):
+        _check('    let xs:array<int64> = [1 2 3]\n    xs.insert(9 4)')
+
+
+def test_runtime_index_needs_a_proof() -> None:
+    with pytest.raises(UserError, match='`pop` index is not proven in bounds'):
+        codegen(SrcFile(None, (
+            'let main = (args:array<string>):>int64 => {\n'
+            '    let xs:array<int64> = [1 2 3]\n'
+            '    let idx:int64 = args.length\n'
+            '    let a = xs.pop(idx)\n'
+            '    return a\n}'
+        )))
+
+
+def test_runtime_index_is_proven_by_a_guard() -> None:
+    emitted = codegen(SrcFile(None, (
+        'let main = (args:array<string>):>int64 => {\n'
+        '    let xs:array<int64> = [1 2 3]\n'
+        '    let idx:int64 = args.length\n'
+        '    if idx <? xs.length { xs.insert(7 idx) let a = xs.pop(idx) return a }\n'
+        '    return 0\n}'
+    )))
+    assert 'shift' in emitted
+
+
+def test_truncate_resets_index_proofs_and_negative_counts_are_rejected() -> None:
+    with pytest.raises(UserError, match='truncate length cannot be negative'):
+        _check('    let xs:array<int64> = [1 2 3]\n    xs.truncate((-1))')
+    with pytest.raises(UserError, match='out of bounds|not proven'):
+        _check('    let xs:array<int64> = [1 2 3]\n    xs.truncate(1)\n    let a = xs[2]')

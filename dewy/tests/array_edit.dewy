@@ -1,0 +1,18 @@
+# Positional editing: `insert(value idx)`, `pop(idx)`, and `truncate(count)`.
+let main = ():>int64 => {
+    let xs:array<int64> = [10 20 30]
+    xs.insert(15 1)            # [10 15 20 30]
+    xs.insert(40 4)            # append at the end: [10 15 20 30 40]
+    xs.insert(5 0)             # [5 10 15 20 30 40]
+    let taken = xs.pop(2)      # 15 -> [5 10 20 30 40]
+    let first = xs.pop(0)      # 5 -> [10 20 30 40]
+    xs.truncate(3)             # [10 20 30]
+    xs.truncate(9)             # no change
+    let sum:int64 = 0
+    let i:int64 = 0
+    loop i <? xs.length { sum = sum + xs[i]  i = i + 1 }   # 60
+    printl"{xs.length} {taken} {first} {sum}"
+    let idx:int64 = 1
+    if idx <? xs.length { let mid = xs.pop(idx) sum = sum + mid }   # +20, runtime-proven index
+    return sum + xs.length     # 80 + 2
+}

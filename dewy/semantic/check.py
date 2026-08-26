@@ -2974,7 +2974,14 @@ def _mark_object_receiver(
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
     if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod)):
         return node
-    if ty.is_zero_arg_function(node.type):
+    optional_only = (
+        isinstance(node, hir.ArrayMethod)
+        and isinstance(node.type, ty.FunctionType)
+        and all(not param.required for param in node.type.pos_or_kw)
+        and all(not param.required for param in node.type.kw_only)
+    )
+    if ty.is_zero_arg_function(node.type) or optional_only:
+        # `xs.pop` calls with every optional argument left to its default
         assert isinstance(node.type, ty.FunctionType)
         call = hir.FunctionCall(node.loc, node.type.ret, node, [], {})
         if isinstance(node, hir.ArrayMethod):
@@ -3170,7 +3177,7 @@ def _tcr_object_literal(
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
 
-_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve'})
+_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'insert', 'truncate'})
 
 
 def _apply_array_method_transition(
@@ -3178,13 +3185,16 @@ def _apply_array_method_transition(
     loc: Span,
     *,
     ctx: Context,
+    index: hir.AST | None = None,
 ) -> None:
     """Update length facts after a growth method call, proving `pop` first.
 
-    An exact-length refinement steps by one on `push`/`pop` and resets on
-    `clear`; otherwise a proven minimum length (from guards such as
-    `xs.length >? 0`) steps the same way. `pop` requires one of them to
-    prove the array is non-empty.
+    An exact-length refinement steps by one on `push`/`insert`/`pop` and
+    resets on `clear`; `truncate(n)` caps it; otherwise a proven minimum
+    length (from guards such as `xs.length >? 0`) steps the same way. `pop`
+    without an index requires one of them to prove the array is non-empty;
+    constant indexes for `pop`/`insert` are checked here and runtime ones by
+    the bounds analysis.
     """
     receiver = method.array
     if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id is None:
@@ -3195,25 +3205,58 @@ def _apply_array_method_transition(
     current = ctx.refinements.get(binding_id)
     exact = current.length if isinstance(current, ty.ArrayType) else None
     minimum = ctx.length_bounds.get(binding_id, 0) if exact is None else exact
+    index_value = _constant_integer(_unwrap_parens(index), ctx=ctx) if index is not None else None
     if method.name == 'pop':
-        if exact == 0:
-            user_error(
-                ctx.srcfile,
-                'pop on an empty array',
-                Pointer(span=loc, message='this array has length 0 here'),
-            )
-        if exact is None and minimum < 1:
-            user_error(
-                ctx.srcfile,
-                'cannot prove the array is non-empty',
-                Pointer(span=loc, message='`pop` needs a proven positive length'),
-                hint='guard the call with `if xs.length >? 0 { ... }`, or pop while the length is known',
-            )
+        if index is None:
+            if exact == 0:
+                user_error(
+                    ctx.srcfile,
+                    'pop on an empty array',
+                    Pointer(span=loc, message='this array has length 0 here'),
+                )
+            if exact is None and minimum < 1:
+                user_error(
+                    ctx.srcfile,
+                    'cannot prove the array is non-empty',
+                    Pointer(span=loc, message='`pop` needs a proven positive length'),
+                    hint='guard the call with `if xs.length >? 0 { ... }`, or pop while the length is known',
+                )
+        elif index_value is not None:
+            # a constant index is proven here; runtime indexes are proven by
+            # the bounds analysis from intervals and `i <? xs.length` facts
+            if index_value < 0 or (exact is not None and index_value >= exact):
+                user_error(
+                    ctx.srcfile,
+                    'pop index is out of bounds',
+                    Pointer(span=index.loc, message=f'index {index_value} into an array of length {exact}'),
+                )
         new_exact = None if exact is None else exact - 1
         new_minimum = minimum - 1
     elif method.name == 'push':
         new_exact = None if exact is None else exact + 1
         new_minimum = minimum + 1
+    elif method.name == 'insert':
+        if index_value is not None and (index_value < 0 or (exact is not None and index_value > exact)):
+            user_error(
+                ctx.srcfile,
+                'insert index is out of bounds',
+                Pointer(span=index.loc, message=f'index {index_value} into an array of length {exact} (the end, {exact}, is allowed)'),
+            )
+        new_exact = None if exact is None else exact + 1
+        new_minimum = minimum + 1
+    elif method.name == 'truncate':
+        if index_value is not None and index_value < 0:
+            user_error(
+                ctx.srcfile,
+                'truncate length cannot be negative',
+                Pointer(span=index.loc, message=f'got {index_value}'),
+            )
+        if index_value is None:
+            new_exact = None
+            new_minimum = 0
+        else:
+            new_exact = None if exact is None else min(exact, index_value)
+            new_minimum = min(minimum, index_value)
     elif method.name == 'clear':
         new_exact = 0
         new_minimum = 0
@@ -3361,7 +3404,11 @@ def _tcr_array_method(
     element = declared.element
     signatures: dict[str, ty.FunctionType] = {
         'push': ty.FunctionType([ty.PosOrKwArg('value', element)], [], None, ty.VOID_TYPE),
-        'pop': ty.FunctionType([], [], None, element),
+        # `xs.pop` removes the last element; `xs.pop(idx)` removes and returns
+        # the element at `idx`, shifting the rest down.
+        'pop': ty.FunctionType([ty.PosOrKwArg('idx', 'int64', required=False)], [], None, element),
+        'insert': ty.FunctionType([ty.PosOrKwArg('value', element), ty.PosOrKwArg('idx', 'int64')], [], None, ty.VOID_TYPE),
+        'truncate': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
         'clear': ty.FunctionType([], [], None, ty.VOID_TYPE),
         'reserve': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
     }
@@ -5299,6 +5346,21 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         case t2.IndexJuxtapose():
             not_implemented(ctx.srcfile, binop.loc, 'index juxtapose')
         case t2.MultiplyJuxtapose():
+            if (
+                isinstance(left, hir.FunctionCall)
+                and isinstance(left.func, (hir.ArrayMethod, hir.MemberAccess))
+                and not left.pos_args
+                and not left.kw_args
+                and isinstance(binop.right, p0.Block)
+                and binop.right.kind == '()'
+            ):
+                # `xs.pop(2)` is a call with arguments, never `(xs.pop) * (2)`:
+                # an auto-called method followed by parentheses is not a product
+                type_error(
+                    ctx.srcfile,
+                    'method followed by parentheses is a call',
+                    Pointer(span=binop.loc, message='this reads as a call, not a product'),
+                )
             return _dispatch_builtin(
                 '__mul__',
                 [left, right],
@@ -7348,8 +7410,21 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
     if isinstance(left, hir.ArrayMethod):
-        _apply_array_method_transition(left, call.loc, ctx=ctx)
+        _apply_array_method_transition(
+            left, call.loc, ctx=ctx, index=_array_method_index_argument(left.name, call),
+        )
     return _specialize_interpolated_output(call, ctx=ctx)
+
+
+def _array_method_index_argument(name: str, call: hir.FunctionCall) -> hir.AST | None:
+    """The index/count argument of `pop(idx)`, `insert(value idx)`, `truncate(count)`."""
+    if name == 'pop':
+        return call.pos_args[0] if call.pos_args else call.kw_args.get('idx')
+    if name == 'insert':
+        return call.pos_args[1] if len(call.pos_args) > 1 else call.kw_args.get('idx')
+    if name == 'truncate':
+        return call.pos_args[0] if call.pos_args else call.kw_args.get('count')
+    return None
 
 
 def _is_string_type(type_: ty.Type) -> bool:

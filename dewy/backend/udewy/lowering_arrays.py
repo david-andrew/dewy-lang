@@ -1137,7 +1137,7 @@ class _ArrayLowering:
         self,
         node: hir.FunctionCall,
     ) -> tuple[list[hir.AST], hir.AST]:
-        """Lower ``xs.push(v)``, ``xs.pop``, ``xs.clear``, ``xs.reserve(n)``."""
+        """Lower ``xs.push(v)``, ``xs.pop``/``xs.pop(idx)``, ``xs.insert(v idx)``, ``xs.truncate(n)``, ``xs.clear``, ``xs.reserve(n)``."""
         method = node.func
         assert isinstance(method, hir.ArrayMethod)
         array_type = method.array.type
@@ -1172,22 +1172,101 @@ class _ArrayLowering:
                     loc,
                 ),
             ], self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, next_length, loc)
+        one = self._int64_literal(loc, 1)
+
+        def shift_loop(cursor_start: hir.AST, condition_name: str, bound: hir.AST, source_delta: int, step: int) -> list[hir.AST]:
+            # Move elements one slot: `loop cursor <op> bound { xs[cursor] = xs[cursor + delta]; cursor += step }`
+            cursor = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('shift'))
+            source_index = self._int64_binary('__add__' if source_delta > 0 else '__sub__', cursor, one, loc)
+            body = hir.Block(loc, ty.VOID_TYPE, [
+                self._array_store(
+                    self._array_load(self._pointer_element_address(data, source_index, element_bytes, loc), element_type, loc),
+                    self._pointer_element_address(data, cursor, element_bytes, loc),
+                    element_type,
+                    loc,
+                ),
+                hir.Assign(loc, ty.VOID_TYPE, cursor, '=', self._int64_binary('__add__' if step > 0 else '__sub__', cursor, one, loc)),
+            ], True)
+            return [
+                hir.Declare(loc, ty.VOID_TYPE, 'let', cursor.name, 'int64', cursor_start),
+                hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison(condition_name, cursor, bound, loc), body)], None),
+            ]
+
         if method.name == 'pop':
-            last = self._int64_binary('__sub__', length, self._int64_literal(loc, 1), loc)
+            last = self._int64_binary('__sub__', length, one, loc)
             result = hir.ExpressedIdentifier(loc, element_type, self._new_array_name('popped'))
+            index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
+            if index_arg is None:
+                return [
+                    *prelude,
+                    length_declare,
+                    hir.Declare(
+                        loc, ty.VOID_TYPE, 'let', result.name, element_type,
+                        self._array_load(
+                            self._pointer_element_address(data, last, element_bytes, loc),
+                            element_type,
+                            loc,
+                        ),
+                    ),
+                    self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last, loc),
+                ], result
+            # `xs.pop(idx)`: take the element, shift the tail down, shrink
+            index_prelude, index = self._extract_expression(index_arg)
+            index_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('pop_index'))
+            last_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('last'))
             return [
                 *prelude,
+                *index_prelude,
                 length_declare,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', index_name.name, 'int64', index),
+                hir.Declare(loc, ty.VOID_TYPE, 'let', last_name.name, 'int64', last),
                 hir.Declare(
                     loc, ty.VOID_TYPE, 'let', result.name, element_type,
                     self._array_load(
-                        self._pointer_element_address(data, last, element_bytes, loc),
+                        self._pointer_element_address(data, index_name, element_bytes, loc),
                         element_type,
                         loc,
                     ),
                 ),
-                self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last, loc),
+                *shift_loop(index_name, '__lt__', last_name, +1, +1),
+                self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last_name, loc),
             ], result
+        if method.name == 'insert':
+            # grow, shift the tail up from the end, store, extend
+            value_prelude, value = self._extract_expression(node.pos_args[0])
+            index_arg = node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args['idx']
+            index_prelude, index = self._extract_expression(index_arg)
+            index_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('insert_index'))
+            next_length = self._int64_binary('__add__', length, one, loc)
+            return [
+                *prelude,
+                *value_prelude,
+                *index_prelude,
+                length_declare,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', index_name.name, 'int64', index),
+                *self._array_grow_statements(descriptor, next_length, element_type, element_bytes, loc),
+                *shift_loop(length, '__gt__', index_name, -1, -1),
+                self._array_store(
+                    value,
+                    self._pointer_element_address(data, index_name, element_bytes, loc),
+                    element_type,
+                    loc,
+                ),
+            ], self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, next_length, loc)
+        if method.name == 'truncate':
+            count_prelude, count = self._extract_expression(node.pos_args[0] if node.pos_args else node.kw_args['count'])
+            count_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('truncate_to'))
+            return [
+                *prelude,
+                *count_prelude,
+                length_declare,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', count_name.name, 'int64', count),
+                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                    loc, ty.VOID_TYPE,
+                    self._int64_comparison('__lt__', count_name, length, loc),
+                    self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, count_name, loc),
+                )], None),
+            ], hir.Void(loc, ty.VOID_TYPE)
         if method.name == 'clear':
             return [*prelude], self._store_i64_field(
                 descriptor, ARRAY_LENGTH_OFFSET, self._int64_literal(loc, 0), loc
