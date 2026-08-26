@@ -1,0 +1,28 @@
+# Growable array fields of objects take the array methods through the member
+# route, and length/index facts are tracked per route (`bag.items`).
+let Bag:type = [items:array<int64> total:int64]
+
+let main = ():>int64 => {
+    let bag:Bag = [items = [1 2] total = 3]
+    bag.items.push(10)
+    bag.items.push(20)
+    bag.items.insert(5 1)                  # [1 5 2 10 20]
+    bag.total = bag.total + 30
+    let i:int64 = 0
+    let sum:int64 = 0
+    loop i <? bag.items.length { sum = sum + bag.items[i]  i = i + 1 }   # 38
+    let third = bag.items[2]               # exact length 5 is still known: 2
+    bag.items.sort                         # [1 2 5 10 20]
+    let last = bag.items.pop               # 20, length known 5 -> 4
+    bag.items.truncate(2)                  # [1 2]
+    let checks:int64 = 0
+    if bag.items.length >? 0 {
+        let first = bag.items.pop(0)       # 1 (guard-proven index)
+        if first =? 1 { checks += 1 }
+    }
+    let other:Bag = [items = [7 8 9] total = 0]
+    bag = other                            # facts about `bag.items` are dropped
+    if bag.items.length >? 2 { checks += bag.items[2] }   # 9
+    printl"{sum} {third} {last} {bag.items.length} {checks}"
+    return sum + third + last + bag.items.length + checks   # 38 + 2 + 20 + 3 + 10
+}

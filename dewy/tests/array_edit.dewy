@@ -14,5 +14,6 @@ let main = ():>int64 => {
     printl"{xs.length} {taken} {first} {sum}"
     let idx:int64 = 1
     if idx <? xs.length { let mid = xs.pop(idx) sum = sum + mid }   # +20, runtime-proven index
-    return sum + xs.length     # 80 + 2
+    let last = xs.pop          # no index: the last element, 30
+    return sum + xs.length + last     # 80 + 1 + 30
 }

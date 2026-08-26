@@ -109,18 +109,17 @@ def _decode_index_fact(key: int) -> tuple[int, int] | None:
     return raw >> _FACT_SHIFT, raw & ((1 << _FACT_SHIFT) - 1)
 
 
-def _runtime_array_id(node: hir.AST) -> int | None:
-    """The binding id of a named runtime-length array, else None."""
+def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None) -> int | None:
+    """The fact id of a runtime-length array expression (binding or member route)."""
     while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
         node = node.expr
-    if (
-        isinstance(node, hir.ExpressedIdentifier)
-        and node.binding_id is not None
-        and isinstance(node.type, ty.ArrayType)
-        and node.type.length is None
-    ):
+    if not (isinstance(node.type, ty.ArrayType) and node.type.length is None):
+        return None
+    if isinstance(node, hir.ExpressedIdentifier):
         return node.binding_id
-    return None
+    if registry is None:
+        return None
+    return sb.array_route_id(node, registry)
 
 
 def _drop_index_facts(
@@ -292,6 +291,8 @@ class _BoundsValidator:
                 # A growable array initialized from an exact-length value starts
                 # with that length (the checker keeps the same fact as a refinement).
                 current[_length_key(node.binding_id)] = Interval.exact(node.expr.type.length)
+            if node.binding_id is not None and isinstance(declared, ty.ObjectType):
+                self._seed_field_routes(node.binding_id, declared, node.expr, (), current)
             if isinstance(node.expr, hir.FunctionLiteral):
                 self._analyze_function(node.expr, validate=validate, enclosing=current)
             elif isinstance(node.expr, hir.OverloadedFunction):
@@ -328,6 +329,7 @@ class _BoundsValidator:
                 # Whole-array replacement: nothing is known about the new length.
                 current.pop(_length_key(binding_id), None)
                 _drop_index_facts(current, array_id=binding_id)
+            self._drop_route_facts(current, binding_id)
             return current
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
@@ -723,7 +725,7 @@ class _BoundsValidator:
                 length = node.array.type.length
                 if length is not None:
                     return Interval.exact(length)
-                array_id = _runtime_array_id(node.array)
+                array_id = _runtime_array_id(node.array, self.registry)
                 if array_id is not None:
                     return state.get(_length_key(array_id), Interval(0, _MAX_LENGTH))
                 return Interval(0, _MAX_LENGTH)
@@ -742,7 +744,7 @@ class _BoundsValidator:
             self._eval(node.value, state, validate=validate)
             # A store may append to both hidden arrays.
             for array in (node.keys, node.values):
-                array_id = _runtime_array_id(array)
+                array_id = _runtime_array_id(array, self.registry)
                 if array_id is not None:
                     state.pop(_length_key(array_id), None)
                     _drop_index_facts(state, array_id=array_id)
@@ -803,7 +805,7 @@ class _BoundsValidator:
             keyword_arguments = {
                 name: self._eval(arg, state, validate=validate) for name, arg in node.kw_args.items()
             }
-            array_id = _runtime_array_id(node.func.array)
+            array_id = _runtime_array_id(node.func.array, self.registry)
             name = node.func.name
             if name == 'pop':
                 index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
@@ -948,6 +950,10 @@ class _BoundsValidator:
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             self._eval(node.value, state, validate=validate)
+            assigned = sb.member_path(node.target)
+            if assigned is not None:
+                root_id, path = assigned
+                self._drop_route_facts(state, root_id, path)
             return None
         if isinstance(node, hir.TypeValue):
             return None
@@ -1058,6 +1064,44 @@ class _BoundsValidator:
         else:
             return None
         return self._fit_type(result, result_type)
+
+    def _seed_field_routes(
+        self,
+        root_id: int,
+        declared: ty.ObjectType,
+        expr: hir.AST,
+        path: tuple[str, ...],
+        state: State,
+    ) -> None:
+        """Growable array fields initialized by an object literal start with the literal's length."""
+        literal = expr
+        while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)) or (
+            isinstance(literal, hir.Block) and not literal.scoped and len(literal.items) == 1
+        ):
+            literal = literal.expr if isinstance(literal, (hir.RepresentationCast, hir.ValueCast)) else literal.items[0]
+        if not isinstance(literal, hir.ObjectLiteral):
+            return
+        for field_value in literal.fields:
+            field = declared.field(field_value.name)
+            if field is None:
+                continue
+            field_path = (*path, field_value.name)
+            if (
+                isinstance(field.type, ty.ArrayType)
+                and field.type.length is None
+                and isinstance(field_value.value.type, ty.ArrayType)
+                and field_value.value.type.length is not None
+            ):
+                route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
+                state[_length_key(route_id)] = Interval.exact(field_value.value.type.length)
+            elif isinstance(field.type, ty.ObjectType):
+                self._seed_field_routes(root_id, field.type, field_value.value, field_path, state)
+
+    def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
+        """Member routes under a reassigned binding or field lose their length and index facts."""
+        for route_id in self.registry.routes_under(root_id, prefix):
+            state.pop(_length_key(route_id), None)
+            _drop_index_facts(state, array_id=route_id)
 
     def _report_unfit(self, node: hir.AST, interval: Interval | None, word: str) -> None:
         if interval is None or (interval.lower is None and interval.upper is None):
@@ -1182,7 +1226,7 @@ class _BoundsValidator:
             # Runtime-length array: prove `0 <= index` from the interval and
             # `index < length` from either a proven minimum length or an
             # `index <? xs.length` fact about this index binding.
-            array_id = _runtime_array_id(node.array)
+            array_id = _runtime_array_id(node.array, self.registry)
             nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
             if array_id is not None and nonnegative:
                 minimum_length = state.get(_length_key(array_id), Interval(0, _MAX_LENGTH)).lower or 0
@@ -1304,7 +1348,7 @@ class _BoundsValidator:
             if name == '__lt__':
                 index_id = self._binding_id(left)
                 array_id = (
-                    _runtime_array_id(right.array)
+                    _runtime_array_id(right.array, self.registry)
                     if isinstance(right, hir.ArrayLength)
                     else None
                 )
@@ -1313,7 +1357,7 @@ class _BoundsValidator:
             elif name == '__gt__':
                 index_id = self._binding_id(right)
                 array_id = (
-                    _runtime_array_id(left.array)
+                    _runtime_array_id(left.array, self.registry)
                     if isinstance(left, hir.ArrayLength)
                     else None
                 )
@@ -1355,12 +1399,11 @@ class _BoundsValidator:
                 refined[right_binding] = narrowed
         return refined
 
-    @staticmethod
-    def _binding_id(node: hir.AST) -> int | None:
+    def _binding_id(self, node: hir.AST) -> int | None:
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
         if isinstance(node, hir.ArrayLength):
-            array_id = _runtime_array_id(node.array)
+            array_id = _runtime_array_id(node.array, self.registry)
             return None if array_id is None else _length_key(array_id)
         return (
             node.binding_id

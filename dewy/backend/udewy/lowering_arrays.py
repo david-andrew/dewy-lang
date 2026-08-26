@@ -1133,6 +1133,21 @@ class _ArrayLowering:
             hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, lt(capacity, needed), grow)], None),
         ]
 
+    @staticmethod
+    def _optional_method_argument(node: hir.FunctionCall, name: str) -> hir.AST | None:
+        """The argument bound to an optional parameter, or None when it was left out.
+
+        Call canonicalization lowers a missing optional argument to a placeholder
+        value followed by a `false` presence flag (and a present one to the
+        value followed by `true`), so the flag decides.
+        """
+        args = node.pos_args
+        if len(args) >= 2 and isinstance(args[1], hir.Bool):
+            return args[0] if args[1].value else None
+        if args:
+            return args[0]
+        return node.kw_args.get(name)
+
     def _extract_array_method_call(
         self,
         node: hir.FunctionCall,
@@ -1195,7 +1210,7 @@ class _ArrayLowering:
         if method.name == 'pop':
             last = self._int64_binary('__sub__', length, one, loc)
             result = hir.ExpressedIdentifier(loc, element_type, self._new_array_name('popped'))
-            index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
+            index_arg = self._optional_method_argument(node, 'idx')
             if index_arg is None:
                 return [
                     *prelude,

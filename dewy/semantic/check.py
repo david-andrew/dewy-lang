@@ -589,6 +589,8 @@ def _tcr_annotated_declaration(
     )
     if refined_annotation is not None and declaration.binding_id is not None:
         _record_refinement_facts(declaration.binding_id, refined_annotation, ctx=ctx)
+    if declaration.binding_id is not None:
+        _seed_field_routes(declaration.binding_id, annotation, expr, (), ctx=ctx)
     if growable and declaration.binding_id is not None:
         # A runtime-length binding initialized from an exact-length
         # value keeps that exact length as a refinement until a
@@ -782,6 +784,10 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
                 object_receiver=True,
                 object_type=target.value.type,
             )
+        assigned = sb.member_path(target)
+        if assigned is not None:
+            root_id, path = assigned
+            _invalidate_routes(root_id, ctx=ctx, prefix=path)
         return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, value)
     if _is_range_type(target.type):
         # Range bindings resolve to their initializer at compile time, so a
@@ -790,7 +796,52 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     if target.binding_id is not None:
         ctx.refinements.pop(target.binding_id, None)
         ctx.length_bounds.pop(target.binding_id, None)
+        _invalidate_routes(target.binding_id, ctx=ctx)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
+
+
+def _seed_field_routes(
+    root_id: int,
+    declared: ty.Type,
+    expr: hir.AST,
+    path: tuple[str, ...],
+    *,
+    ctx: Context,
+) -> None:
+    """Record exact lengths of growable array fields initialized by an object literal.
+
+    `let bag:Bag = [items = [1 2]]` gives the route `bag.items` the same
+    exact-length refinement a named growable array gets from its initializer.
+    """
+    declared = ty.strip_refinement(declared)
+    literal = _unwrap_parens(expr)
+    while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
+        literal = literal.expr
+    if not (isinstance(declared, ty.ObjectType) and isinstance(literal, hir.ObjectLiteral)):
+        return
+    for field_value in literal.fields:
+        field = declared.field(field_value.name)
+        if field is None:
+            continue
+        field_path = (*path, field_value.name)
+        if (
+            isinstance(field.type, ty.ArrayType)
+            and field.type.length is None
+            and isinstance(field_value.value.type, ty.ArrayType)
+            and field_value.value.type.length is not None
+        ):
+            route_id = ctx.binding_registry.route_id(root_id, field_path, field.type, field_value.loc)
+            ctx.refinements[route_id] = ty.ArrayType(field.type.element, field_value.value.type.length)
+            ctx.length_bounds[route_id] = field_value.value.type.length
+        elif isinstance(field.type, ty.ObjectType):
+            _seed_field_routes(root_id, field.type, field_value.value, field_path, ctx=ctx)
+
+
+def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = ()) -> None:
+    """Drop length facts of the member routes under a reassigned binding or field."""
+    for route_id in ctx.binding_registry.routes_under(root_id, prefix):
+        ctx.refinements.pop(route_id, None)
+        ctx.length_bounds.pop(route_id, None)
 
 
 def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
@@ -1294,12 +1345,8 @@ def _length_bound_fact(
     name = condition.func.name
 
     def length_binding(node: hir.AST) -> int | None:
-        if (
-            isinstance(node, hir.ArrayLength)
-            and isinstance(node.array, hir.ExpressedIdentifier)
-            and node.array.binding_id is not None
-        ):
-            return node.array.binding_id
+        if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):
+            return sb.array_route_id(node.array, ctx.binding_registry)
         return None
 
     binding_id = length_binding(left)
@@ -2325,7 +2372,11 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         for mutated_name in _mutated_binding_names(body_ast):
             mutated_binding = ctx.binding_scopes.get(mutated_name)
             if mutated_binding is not None:
-                invalidated = [mutated_binding.id, *(mutated_binding.dict_arrays or ())]
+                invalidated = [
+                    mutated_binding.id,
+                    *(mutated_binding.dict_arrays or ()),
+                    *ctx.binding_registry.routes_under(mutated_binding.id),
+                ]
                 for invalidated_id in invalidated:
                     ctx.refinements.pop(invalidated_id, None)
                     body_ctx.refinements.pop(invalidated_id, None)
@@ -3197,9 +3248,9 @@ def _apply_array_method_transition(
     the bounds analysis.
     """
     receiver = method.array
-    if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id is None:
+    binding_id = sb.array_route_id(receiver, ctx.binding_registry)
+    if binding_id is None:
         return
-    binding_id = receiver.binding_id
     assert isinstance(receiver.type, ty.ArrayType)
     element = receiver.type.element
     current = ctx.refinements.get(binding_id)
@@ -3382,6 +3433,27 @@ def _tcr_array_method(
     ever reached through the container value.
     """
     assert isinstance(value.type, ty.ArrayType)
+    if isinstance(value, hir.MemberAccess):
+        # `bag.items.push(x)`: a growable array field of a named object. Length
+        # and index facts are keyed by the member route (see `array_route_id`).
+        root = _member_root_binding(value, ctx=ctx)
+        if root is None:
+            not_implemented(ctx.srcfile, loc, 'array methods on an unnamed array value')
+        if root.declaration is not None and root.declaration.decltype == 'const':
+            user_error(
+                ctx.srcfile,
+                'cannot mutate a field of a const binding',
+                Pointer(span=value.loc, message=f'`{root.name}` is declared const'),
+            )
+        if value.type.length is not None:
+            user_error(
+                ctx.srcfile,
+                'exact-length arrays cannot change length',
+                Pointer(span=value.loc, message=f'this field has type `{type_to_dewy(value.type)}`'),
+                hint='declare the field as `array<T>` to allow growth',
+            )
+        declared = value.type
+        return _bind_array_method(value, declared, name, loc, ctx=ctx)
     if not isinstance(value, hir.ExpressedIdentifier) or value.binding_id is None:
         not_implemented(ctx.srcfile, loc, 'array methods on an unnamed array value')
     binding = ctx.binding_registry.by_id[value.binding_id]
@@ -3400,6 +3472,17 @@ def _tcr_array_method(
             ),
             hint='declare the binding as `array<T>` to allow growth',
         )
+    return _bind_array_method(value, declared, name, loc, ctx=ctx)
+
+
+def _bind_array_method(
+    value: hir.AST,
+    declared: ty.ArrayType,
+    name: str,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> hir.ArrayMethod:
     value = replace(value, type=declared)
     element = declared.element
     signatures: dict[str, ty.FunctionType] = {
@@ -5075,8 +5158,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     constant_index = _constant_integer(index, ctx=index_ctx)
     if length is None and not (
         isinstance(array.type, ty.ArrayType)
-        and isinstance(array, hir.ExpressedIdentifier)
-        and array.binding_id is not None
+        and sb.array_route_id(array, ctx.binding_registry) is not None
     ):
         user_error(
             ctx.srcfile,

@@ -60,3 +60,26 @@ def test_sort_keeps_length_facts() -> None:
 def test_sort_is_limited_to_integer_elements_for_now() -> None:
     with pytest.raises(NotImplementedYet, match='`sort` on `string` elements'):
         _check('    let xs:array<string> = ["b" "a"]\n    xs.sort')
+
+
+def _check_bag(body: str):
+    return check.typecheck_and_resolve(SrcFile(None, (
+        'let Bag:type = [items:array<int64> total:int64]\n'
+        f'let main = ():>int64 => {{\n    let bag:Bag = [items = [1 2 3] total = 0]\n{body}\n    return 0\n}}'
+    )))
+
+
+def test_member_route_facts_prove_indexes_and_methods() -> None:
+    _check_bag('    bag.items.push(4)\n    let a = bag.items[3]\n    let b = bag.items.pop\n    bag.items.insert(9 3)')
+
+
+def test_assigning_the_root_drops_member_route_facts() -> None:
+    with pytest.raises(UserError, match='index is not proven'):
+        _check_bag('    let other:Bag = [items = [1] total = 0]\n    bag = other\n    let a = bag.items[2]')
+
+
+def test_assigning_the_field_drops_member_route_facts() -> None:
+    with pytest.raises(UserError, match='index is not proven'):
+        _check_bag('    bag.items = [1]\n    let a = bag.items[2]')
+    with pytest.raises(UserError, match='empty array|non-empty'):
+        _check_bag('    bag.items = []\n    bag.items.clear\n    let a = bag.items.pop')
