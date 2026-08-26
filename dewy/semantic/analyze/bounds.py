@@ -735,6 +735,8 @@ class _BoundsValidator:
             return None
         if isinstance(node, hir.DictLookup):
             self._eval(node.key, state, validate=validate)
+            if node.default is not None:
+                self._eval(node.default, state, validate=validate)
             return None
         if isinstance(node, hir.DictContains):
             self._eval(node.key, state, validate=validate)

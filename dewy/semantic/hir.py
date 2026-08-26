@@ -259,31 +259,59 @@ class ArrayLength(AST):
 
 @dataclass
 class DictLookup(AST):
-    """``d[key]`` on a dictionary: ``V | undefined`` by linear search over the
-    hidden key array, reading the matching value."""
+    """A dictionary read.
+
+    ``d[key]`` is *proven*: the key is known to be present (from a guard, a
+    store, the literal, or iteration) and the type is ``V``. A proving
+    ``key in? d`` guard or store may hand over the entry position it found
+    (``position`` names that hidden local; ``static_position`` is a literal
+    entry), so the value is read without a second search. ``d.get(key)`` is
+    unproven and yields ``V | undefined``, or ``V`` with ``default``.
+    """
 
     keys: AST
     values: AST
     key: AST
+    proven: bool = False
+    position: str | None = None
+    static_position: int | None = None
+    default: AST | None = None
 
 
 @dataclass
 class DictStore(AST):
     """``d[key] = value``: replace the value of an existing key, else append
-    the entry (insertion order is the entry order)."""
+    the entry (insertion order is the entry order). ``position`` names the
+    hidden local receiving the entry's index, so a following ``d[key]`` reads
+    it directly."""
 
     keys: AST
     values: AST
     key: AST
     value: AST
+    position: str | None = None
 
 
 @dataclass
 class DictContains(AST):
-    """``key in? d`` on a dictionary."""
+    """``key in? d`` on a dictionary. ``position`` names the hidden local that
+    receives the found index when the test directly guards an ``if`` arm, so
+    the guarded ``d[key]`` reuses the search."""
 
     keys: AST
     key: AST
+    position: str | None = None
+
+
+@dataclass
+class DictMethod(AST):
+    """A compiler-provided method bound to a dictionary value (``get``).
+
+    ``type`` is the method's FunctionType; the call becomes a ``DictLookup``.
+    """
+
+    dictionary: AST
+    name: str
 
 
 @dataclass

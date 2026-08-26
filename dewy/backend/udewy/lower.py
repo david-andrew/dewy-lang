@@ -1439,6 +1439,8 @@ class _Lowerer(
             self._discover_node(node.keys, scope, current_function, array_use='index_read')
             if isinstance(node, hir.DictLookup):
                 self._discover_node(node.values, scope, current_function, array_use='index_read')
+                if node.default is not None:
+                    self._discover_node(node.default, scope, current_function)
             self._discover_node(node.key, scope, current_function)
             return
         if isinstance(node, hir.DictStore):
@@ -2006,6 +2008,11 @@ class _Lowerer(
                 keys=self._require_node(self._transform_node(node.keys)),
                 values=self._require_node(self._transform_node(node.values)),
                 key=self._require_node(self._transform_node(node.key)),
+                default=(
+                    self._require_node(self._transform_node(node.default))
+                    if node.default is not None
+                    else None
+                ),
             )
         if isinstance(node, hir.DictContains):
             return replace(

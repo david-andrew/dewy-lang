@@ -1,0 +1,27 @@
+# `d[k]` requires the key to be proven present: from the literal, a store, a
+# guard (`k in? d`, whose search position the lookup reuses), or iteration.
+# `d.get(k)` / `d.get(k default)` are the explicit lookups that may miss.
+let describe = (table:dict<string int64> key:string):>int64 => {
+    if key in? table {
+        return table[key] * 2           # proven by the guard; reuses its position
+    }
+    return table.get(key (-1))          # explicit default
+}
+
+let main = ():>int64 => {
+    let ages = ['ann' -> 30 'bob' -> 41]
+    let literal = ages['bob']            # a literal key: read at its entry
+    ages['cat'] = 7
+    let stored = ages['cat']             # stored just above: reuses the store's position
+    let sum:int64 = 0
+    loop [name age] in ages {
+        sum = sum + ages[name]           # the iterated key is present
+    }
+    let missing = ages.get('dan')
+    let checks:int64 = 0
+    if missing is? undefined { checks += 1 }
+    if ages.get('dan' 5) =? 5 { checks += 2 }
+    if describe(ages 'ann') =? 60 and describe(ages 'zed') =? -1 { checks += 4 }
+    printl"{literal} {stored} {sum} {checks}"
+    return literal + stored + sum + checks      # 41 + 7 + 78 + 7
+}

@@ -25,9 +25,6 @@ class Binding:
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
     literal_path_parameter: str | None = None
-    dict_arrays: tuple[int, int] | None = None
-    """For a dictionary binding: binding ids of its hidden parallel key and
-    value arrays. Dictionaries currently exist only at compile time."""
     route_root: int | None = None
     """For a hidden *route* binding (`bag.items`): the root binding's id.
     Length and index facts are keyed by these ids so member arrays get the

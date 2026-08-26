@@ -1,0 +1,27 @@
+# Dictionaries are runtime objects `[keys values]`: they pass to functions
+# (borrowed when read-only, copied when the callee stores), return from
+# functions, mutate through place parameters, and appear as literals anywhere.
+let lookup = (table:dict<string int64> key:string):>int64 => {
+    return table.get(key (-1))
+}
+
+let with_entry = (table:dict<string int64> key:string value:int64):>dict<string int64> => {
+    table[key] = value          # the callee's copy
+    return table
+}
+
+let bump = (@table:dict<string int64> key:string):>void => {
+    table[key] = table.get(key 0) + 1
+}
+
+let main = ():>int64 => {
+    let scores = ['ann' -> 10 'bob' -> 20]
+    let more = with_entry(scores 'cat' 30)
+    bump(@more 'ann')
+    bump(@more 'dan')
+    let inline = lookup(['x' -> 7] 'x')                       # a literal argument
+    let total:int64 = 0
+    loop [name score] in more { total = total + score }        # 11 + 20 + 30 + 1 = 62
+    printl"{scores.length} {more.length} {lookup(scores 'cat')} {lookup(more 'cat')} {inline} {total}"
+    return scores.length + more.length + lookup(more 'ann') + inline + total   # 2 + 4 + 11 + 7 + 62
+}

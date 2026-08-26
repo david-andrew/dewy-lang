@@ -68,6 +68,10 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.ArrayType):
         length = f' length={t.length}' if t.length is not None else ''
         return f'array<{type_to_dewy(t.element)}{length}>'
+    if isinstance(t, ty.ObjectType) and t.brand == 'dict':
+        key_value = ty.dict_key_value(t)
+        assert key_value is not None
+        return f'dict<{type_to_dewy(key_value[0])} {type_to_dewy(key_value[1])}>'
     if isinstance(t, ty.ObjectType):
         fields = ' '.join(
             f'{"const " if not field.mutable else ""}{field.name}:{type_to_dewy(field.type)}'
@@ -232,6 +236,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return f'ArrayMethod({node.name})'
     if isinstance(node, hir.DictLookup):
         return 'DictLookup'
+    if isinstance(node, hir.DictMethod):
+        return f'DictMethod({node.name})'
     if isinstance(node, hir.DictStore):
         return 'DictStore'
     if isinstance(node, hir.DictContains):
@@ -356,7 +362,9 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
     if isinstance(node, hir.ArrayMethod):
         return [('array', node.array)]
     if isinstance(node, hir.DictLookup):
-        return [('keys', node.keys), ('values', node.values), ('key', node.key)]
+        return [('keys', node.keys), ('values', node.values), ('key', node.key), *([('default', node.default)] if node.default is not None else [])]
+    if isinstance(node, hir.DictMethod):
+        return [('dictionary', node.dictionary)]
     if isinstance(node, hir.DictStore):
         return [('keys', node.keys), ('values', node.values), ('key', node.key), ('value', node.value)]
     if isinstance(node, hir.DictContains):
@@ -782,6 +790,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text(f'.{node.name}'))
     if isinstance(node, hir.DictLookup):
         return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent), _text(']'))
+    if isinstance(node, hir.DictMethod):
+        return _seq(_to_doc(node.dictionary, _CALL_PREC, indent), _text(f'.{node.name}'))
     if isinstance(node, hir.DictStore):
         return _seq(
             _to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent),

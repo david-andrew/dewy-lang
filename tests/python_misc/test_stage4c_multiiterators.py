@@ -314,7 +314,8 @@ let f = ():>int64 => {
     assert 'DictStore' in kinds
     declared = {item.name: item for item in body.items if isinstance(item, hir.Declare)}
     assert isinstance(declared['v'].expr, hir.DictLookup)
-    assert declared['v'].expr.type == ty.optional('int64')
+    assert declared['v'].expr.type == 'int64'  # the store proves the key
+    assert declared['v'].expr.proven
     assert isinstance(declared['present'].expr, hir.DictContains)
     assert isinstance(declared['n'].expr, hir.ArrayLength)
 

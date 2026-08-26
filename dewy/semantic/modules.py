@@ -285,6 +285,15 @@ class ModuleCompiler:
                 found = True
                 return
             if (
+                isinstance(value, hir.ObjectLiteral)
+                and isinstance(value.type, ty.ObjectType)
+                and _has_runtime_array_field(value.type)
+            ):
+                # runtime-length array fields are copied into the arena at
+                # module startup and when the object is returned
+                found = True
+                return
+            if (
                 isinstance(value, hir.Declare)
                 and value.name == 'main'
                 and isinstance(value.expr, hir.FunctionLiteral)

@@ -351,15 +351,21 @@ def test_object_types_require_exact_field_types() -> None:
     assert not types.is_subtype(unnamed, named)
 
 
-def test_dictionary_declarations_desugar_to_parallel_arrays() -> None:
-    # Declaring a dictionary now works: the binding becomes hidden parallel
-    # key/value arrays with no runtime dictionary representation.
-    _check('let f = ():>int64 => { let d = [1 -> 2] return 0 }')
+def test_dictionary_declarations_are_branded_objects() -> None:
+    # A dictionary is the runtime object `[keys values]` branded `dict`.
+    root = _check('let d = [1 -> 2]')
+    declared = next(item for item in root.items if isinstance(item, hir.Declare) and item.name == 'd')
+    assert isinstance(declared.expr, hir.ObjectLiteral)
+    assert ty.dict_key_value(declared.expr.type) == ('int64', 'int64')  # literal entries widen to words
+    assert [f.name for f in declared.expr.type.fields] == ['keys', 'values']
+    assert declared.expr.type != ty.ObjectType(declared.expr.type.fields)  # the brand distinguishes it
 
 
-def test_dictionary_literals_outside_declarations_are_not_implemented() -> None:
-    with pytest.raises(NotImplementedYet, match='dictionary'):
-        _check('let d = ([1 -> 2])')
+def test_dictionary_literals_outside_declarations() -> None:
+    root = _check('let d = ([1 -> 2])\nlet e:dict<int64 int64> = []')
+    names = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    assert ty.dict_key_value(names['d'].expr.type) is not None
+    assert ty.dict_key_value(names['e'].expr.type) == ('int64', 'int64')
 
 
 def test_runtime_type_values_are_not_implemented() -> None:

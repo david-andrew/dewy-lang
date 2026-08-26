@@ -1049,13 +1049,13 @@ class _ArrayLowering:
             or self._is_string_valued(element)
         )
 
-    @staticmethod
-    def _is_word_element_static(element: ty.Type) -> bool:
+    @classmethod
+    def _is_word_element_static(cls, element: ty.Type) -> bool:
         """Elements copied as one word: scalars and immutable string handles."""
         return (
             element == 'bool'
             or ty.fixed_integer_layout(element) is not None
-            or _Lowerer_static_is_string_valued(element)
+            or cls._is_string_valued(element)
         )
 
     def _array_grow_statements(
@@ -1524,10 +1524,9 @@ class _ArrayLowering:
         """
 
         if self.lowering_module_startup and not arena:
-            self._target_error(
-                node,
-                'runtime-length array copies at module scope',
-            )
+            # module-level storage lives for the whole process: the arena is
+            # the right home for a copy made during startup
+            arena = True
         if arena:
             element = array_type.element
             if not self._is_word_element(element):

@@ -368,6 +368,7 @@ class _InitializationChecker:
                 node.keys,
                 getattr(node, 'values', None),
                 node.key,
+                getattr(node, 'default', None),
                 getattr(node, 'value', None),
             ):
                 if child is not None:

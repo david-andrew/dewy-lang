@@ -52,6 +52,8 @@ class Context:
     function_boundary_labels: dict[str, Span] = field(default_factory=dict)
     refinements: dict[int, ty.Type] = field(default_factory=dict)
     length_bounds: dict[int, int] = field(default_factory=dict)  # proven minimum lengths of runtime-length arrays
+    key_facts: dict[tuple[int, tuple[str, object]], tuple[str | None, int | None]] = field(default_factory=dict)
+    """Proven dictionary keys: (dictionary route id, key identity) -> (position local, literal entry index)."""
     type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
     resolving_type_aliases: set[int] = field(default_factory=set)
     module_loader: object | None = None
@@ -206,6 +208,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     module_namespaces=ctx.module_namespaces.new_child(),
                     refinements=dict(ctx.refinements),
                     length_bounds=dict(ctx.length_bounds),
+                    key_facts=dict(ctx.key_facts),
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
                     passes.append((typecheck_and_resolve_inner(candidate, ctx=fork, type_block=type_block, expected=expected), fork))
@@ -238,6 +241,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             ctx.refinements.update(fork.refinements)
             ctx.length_bounds.clear()
             ctx.length_bounds.update(fork.length_bounds)
+            ctx.key_facts.clear()
+            ctx.key_facts.update(fork.key_facts)
             if ctx.catcher is not None:
                 assert fork.catcher is not None
                 ctx.catcher.returns[:] = fork.catcher.returns
@@ -540,9 +545,7 @@ def _tcr_annotated_declaration(
         binding.type_value = type_value
         return declaration
     if (
-        isinstance(annotation, ty.TypeParameterize)
-        and annotation.t == 'dict'
-        and len(annotation.args) == 2
+        ty.dict_key_value(annotation) is not None
         and isinstance(right, p0.Block)
         and right.kind == '[]'
         and (not right.inner or _dict_literal_block(right) is not None)
@@ -797,6 +800,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         ctx.refinements.pop(target.binding_id, None)
         ctx.length_bounds.pop(target.binding_id, None)
         _invalidate_routes(target.binding_id, ctx=ctx)
+        _drop_key_facts(ctx, dictionary_id=target.binding_id)
+        _drop_key_facts(ctx, key_id=target.binding_id)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
 
 
@@ -842,6 +847,70 @@ def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = 
     for route_id in ctx.binding_registry.routes_under(root_id, prefix):
         ctx.refinements.pop(route_id, None)
         ctx.length_bounds.pop(route_id, None)
+        _drop_key_facts(ctx, dictionary_id=route_id)
+    if not prefix:
+        _drop_key_facts(ctx, dictionary_id=root_id)
+
+
+def _drop_key_facts(ctx: Context, *, dictionary_id: int | None = None, key_id: int | None = None) -> None:
+    """Forget proven keys of a reassigned dictionary, or facts about a reassigned key binding."""
+    for fact_key in list(ctx.key_facts):
+        route_id, identity = fact_key
+        if dictionary_id is not None and route_id == dictionary_id:
+            del ctx.key_facts[fact_key]
+        elif key_id is not None and identity == ('b', key_id):
+            del ctx.key_facts[fact_key]
+
+
+_key_position_counter = count(1)
+
+
+def _new_key_position_name() -> str:
+    return f'__dewy_key_pos_{next(_key_position_counter)}'
+
+
+def _key_identity(key: hir.AST, *, ctx: Context) -> tuple[str, object] | None:
+    """How a key expression is tracked in facts: a binding or a constant."""
+    key = _unwrap_parens(key)
+    while isinstance(key, (hir.RepresentationCast, hir.ValueCast)):
+        key = key.expr
+    if isinstance(key, hir.ExpressedIdentifier) and key.binding_id is not None:
+        return ('b', key.binding_id)
+    if isinstance(key, hir.String):
+        return ('c', key.content)
+    if isinstance(key.type, ty.StringLiteralType):
+        return ('c', key.type.value)
+    constant = _constant_integer(key, ctx=ctx)
+    if constant is not None:
+        return ('c', constant)
+    return None
+
+
+def _dictionary_fact_id(dictionary: hir.AST, *, ctx: Context) -> int | None:
+    return sb.array_route_id(dictionary, ctx.binding_registry)
+
+
+def _record_key_fact(
+    dictionary: hir.AST,
+    key: hir.AST,
+    *,
+    ctx: Context,
+    position: str | None = None,
+    static_position: int | None = None,
+) -> None:
+    dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    identity = _key_identity(key, ctx=ctx)
+    if dictionary_id is None or identity is None:
+        return
+    ctx.key_facts[(dictionary_id, identity)] = (position, static_position)
+
+
+def _proven_key(dictionary: hir.AST, key: hir.AST, *, ctx: Context) -> tuple[str | None, int | None] | None:
+    dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    identity = _key_identity(key, ctx=ctx)
+    if dictionary_id is None or identity is None:
+        return None
+    return ctx.key_facts.get((dictionary_id, identity))
 
 
 def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
@@ -857,7 +926,7 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
     if not (isinstance(left.left, p0.Atom) and isinstance(left.left.item, t1.Identifier)):
         return None
     binding = ctx.binding_scopes.get(left.left.item.name)
-    if binding is None or binding.dict_arrays is None:
+    if binding is None or ty.dict_key_value(binding.type) is None:
         return None
     if not isinstance(left.right, p0.Block) or len(left.right.inner) != 1:
         user_error(
@@ -865,7 +934,16 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
             'dictionary store takes one key',
             Pointer(span=left.right.loc, message='expected exactly one key expression'),
         )
-    key_type, value_type = _dict_key_value_types(binding)
+    if binding.declaration is not None and binding.declaration.decltype == 'const':
+        user_error(
+            ctx.srcfile,
+            'cannot store into a const dictionary',
+            Pointer(span=left.left.loc, message=f'`{binding.name}` is declared const'),
+        )
+    dictionary = tcr_identifier(left.left.item, ctx=ctx)
+    found = _dict_value(dictionary)
+    assert found is not None
+    dictionary, key_type, value_type = found
     key = check_against(
         typecheck_and_resolve_inner(left.right.inner[0], ctx=ctx, expected=key_type),
         key_type,
@@ -876,9 +954,11 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
         value_type,
         ctx=ctx,
     )
-    keys, values = _dict_array_identifiers(binding, ast.loc, ctx=ctx)
-    _invalidate_dict_lengths(binding, ctx=ctx)
-    return hir.DictStore(ast.loc, ty.VOID_TYPE, keys, values, key, value)
+    keys, values = _dict_arrays(dictionary, ast.loc, ctx=ctx)
+    _invalidate_dict_lengths(dictionary, ctx=ctx)
+    position = _new_key_position_name()
+    _record_key_fact(dictionary, key, ctx=ctx, position=position)
+    return hir.DictStore(ast.loc, ty.VOID_TYPE, keys, values, key, value, position=position)
 
 
 def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
@@ -1391,6 +1471,18 @@ def _refine_condition_context(
     truth: bool,
 ) -> Context:
     refinements = dict(ctx.refinements)
+    key_facts = dict(ctx.key_facts)  # facts are path-sensitive: every refined context owns its copy
+    if isinstance(condition, hir.DictContains) and truth:
+        # `key in? d` proves the key; when the test directly guards an `if`
+        # arm the found position is reused by the guarded lookup
+        dictionary = condition.keys.value if isinstance(condition.keys, hir.MemberAccess) else None
+        if dictionary is not None:
+            refined = replace(ctx, refinements=refinements, key_facts=key_facts)
+            _record_key_fact(
+                dictionary, condition.key, ctx=refined,
+                position=condition.position if getattr(condition, 'hoisted', False) else None,
+            )
+            return refined
     if isinstance(condition, hir.TypeTest):
         value = condition.value
         if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
@@ -1401,13 +1493,13 @@ def _refine_condition_context(
                 matches=truth != condition.negated,
                 ctx=ctx,
             )
-        return replace(ctx, refinements=refinements)
+        return replace(ctx, refinements=refinements, key_facts=key_facts)
     length_fact = _length_bound_fact(condition, truth, ctx=ctx)
     if length_fact is not None:
         binding_id, minimum = length_fact
         length_bounds = dict(ctx.length_bounds)
         length_bounds[binding_id] = max(length_bounds.get(binding_id, 0), minimum)
-        return replace(ctx, refinements=refinements, length_bounds=length_bounds)
+        return replace(ctx, refinements=refinements, length_bounds=length_bounds, key_facts=key_facts)
     if isinstance(condition, hir.ShortCircuit):
         if condition.op == 'and' and truth:
             left_ctx = _refine_condition_context(ctx, condition.left, truth=True)
@@ -1421,7 +1513,7 @@ def _refine_condition_context(
         if condition.op == 'nor' and truth:
             left_ctx = _refine_condition_context(ctx, condition.left, truth=False)
             return _refine_condition_context(left_ctx, condition.right, truth=False)
-    return ctx
+    return replace(ctx, refinements=refinements, key_facts=key_facts)
 
 
 @dataclass(frozen=True)
@@ -1705,56 +1797,6 @@ def _tcr_range_membership(
     return hir.Bool(value.loc, 'bool', included)
 
 
-def _array_binding_iterator(
-    target_name: str,
-    target_loc: Span,
-    array_binding_id: int,
-    loc: Span,
-    *,
-    ctx: Context,
-) -> tuple[hir.IteratorExpression, Context]:
-    """Build an iterator over a hidden fixed-length array binding."""
-    array_binding = ctx.binding_registry.by_id[array_binding_id]
-    array_type = ctx.refinements.get(array_binding_id, array_binding.type)
-    assert isinstance(array_type, ty.ArrayType)
-    element_type = array_type.element
-    binding = ctx.binding_registry.allocate_param(
-        target_name,
-        element_type,
-        target_loc,
-    )
-    iterator_ctx = replace(
-        ctx,
-        declarations=ctx.declarations.new_child({target_name: element_type}),
-        binding_scopes=ctx.binding_scopes.new_child({target_name: binding}),
-    )
-    target = hir.ExpressedIdentifier(
-        target_loc,
-        element_type,
-        target_name,
-        binding_id=binding.id,
-    )
-    iterable = hir.ExpressedIdentifier(
-        loc,
-        array_type,
-        array_binding.name,
-        binding_id=array_binding_id,
-    )
-    return (
-        hir.IteratorExpression(
-            loc,
-            ty.TypeParameterize('iterator', [element_type]),
-            target,
-            iterable,
-            0,
-            1,
-            None if array_type.length is None else array_type.length - 1,
-            array_type.length,
-        ),
-        iterator_ctx,
-    )
-
-
 def _tcr_dict_unpack_iterators(
     condition_ast: p0.AST,
     *,
@@ -1780,13 +1822,8 @@ def _tcr_dict_unpack_iterators(
     ):
         return None
     iterable = typecheck_and_resolve_inner(condition_ast.right, ctx=ctx)
-    binding = (
-        ctx.binding_registry.by_id.get(iterable.binding_id)
-        if isinstance(iterable, hir.ExpressedIdentifier)
-        and iterable.binding_id is not None
-        else None
-    )
-    if binding is None or binding.dict_arrays is None:
+    found_dict = _dict_value(iterable)
+    if found_dict is None:
         not_implemented(
             ctx.srcfile,
             condition_ast.loc,
@@ -1806,21 +1843,50 @@ def _tcr_dict_unpack_iterators(
         for item in targets
         if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier)
     ]
-    key_iterator, ctx_after_key = _array_binding_iterator(
-        names[0],
-        targets[0].loc,
-        binding.dict_arrays[0],
-        condition_ast.loc,
-        ctx=ctx,
+    keys, values = _dict_arrays(found_dict[0], condition_ast.loc, ctx=ctx)
+    key_iterator, ctx_after_key = _array_expression_iterator(
+        names[0], targets[0].loc, keys, condition_ast.loc, ctx=ctx,
     )
-    value_iterator, ctx_after_value = _array_binding_iterator(
-        names[1],
-        targets[1].loc,
-        binding.dict_arrays[1],
-        condition_ast.loc,
-        ctx=ctx_after_key,
+    value_iterator, ctx_after_value = _array_expression_iterator(
+        names[1], targets[1].loc, values, condition_ast.loc, ctx=ctx_after_key,
     )
+    ctx_after_value = replace(ctx_after_value, key_facts=dict(ctx_after_value.key_facts))
+    _record_key_fact(found_dict[0], key_iterator.target, ctx=ctx_after_value)
     return (key_iterator, value_iterator), ctx_after_value
+
+
+def _array_expression_iterator(
+    target_name: str,
+    target_loc: Span,
+    iterable: hir.AST,
+    loc: Span,
+    *,
+    ctx: Context,
+) -> tuple[hir.IteratorExpression, Context]:
+    """Build an iterator over an array-typed expression (a dictionary's entry arrays)."""
+    array_type = iterable.type
+    assert isinstance(array_type, ty.ArrayType)
+    element_type = array_type.element
+    binding = ctx.binding_registry.allocate_param(target_name, element_type, target_loc)
+    iterator_ctx = replace(
+        ctx,
+        declarations=ctx.declarations.new_child({target_name: element_type}),
+        binding_scopes=ctx.binding_scopes.new_child({target_name: binding}),
+    )
+    target = hir.ExpressedIdentifier(target_loc, element_type, target_name, binding_id=binding.id)
+    return (
+        hir.IteratorExpression(
+            loc,
+            ty.TypeParameterize('iterator', [element_type]),
+            target,
+            iterable,
+            0,
+            1,
+            None if array_type.length is None else array_type.length - 1,
+            array_type.length,
+        ),
+        iterator_ctx,
+    )
 
 
 def _tcr_range_iterator(
@@ -2195,6 +2261,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # after the flow; the continuation keeps their join.
         continuing_paths: list[dict[int, ty.Type]] = []
         continuing_bounds: list[dict[int, int]] = []
+        continuing_keys: list[dict] = []
         arm_ctx = ctx
         constant_true = False
         for arm in ast.arms:
@@ -2204,6 +2271,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             assert isinstance(condition_ast, p0.AST)
             assert isinstance(body_ast, p0.AST)
             condition = _check_flow_condition(condition_ast, ctx=arm_ctx)
+            if isinstance(condition, hir.DictContains):
+                condition.hoisted = True  # its search runs right before the flow: the position is in scope
             if isinstance(condition, hir.TargetBool):
                 # Target queries (`$target =? "..."`) select arms during
                 # checking: dead arms are not checked at all (they may import
@@ -2238,6 +2307,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 if body.type != ty.BOTTOM_TYPE:
                     continuing_paths.append(dict(arm_ctx.refinements))
                     continuing_bounds.append(dict(arm_ctx.length_bounds))
+                    continuing_keys.append(dict(arm_ctx.key_facts))
                 break
             body_ctx = _refine_condition_context(
                 arm_ctx,
@@ -2256,6 +2326,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if body.type != ty.BOTTOM_TYPE:
                 continuing_paths.append(dict(body_ctx.refinements))
                 continuing_bounds.append(dict(body_ctx.length_bounds))
+                continuing_keys.append(dict(body_ctx.key_facts))
             arm_ctx = _refine_condition_context(
                 arm_ctx,
                 condition,
@@ -2286,10 +2357,12 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if default.type != ty.BOTTOM_TYPE:
                 continuing_paths.append(dict(arm_ctx.refinements))
                 continuing_bounds.append(dict(arm_ctx.length_bounds))
+                continuing_keys.append(dict(arm_ctx.key_facts))
         elif not constant_true:
             # No else: falling through means every condition was false.
             continuing_paths.append(dict(arm_ctx.refinements))
             continuing_bounds.append(dict(arm_ctx.length_bounds))
+            continuing_keys.append(dict(arm_ctx.key_facts))
         if chain_exhaustive and not arms and default is not None:
             # a single-arm chain covering the whole union is just its body
             arms.append(hir.IfArm(ast.arms[0].loc, default.type, hir.Bool(ast.loc, 'bool', True), default))
@@ -2305,17 +2378,37 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             # A binding stays refined only when every continuing path refines
             # it; the joined type is the union of the per-path types.
             joined: dict[int, ty.Type] = {}
+            length_minimums: dict[int, int] = {}
             for binding_id in set.intersection(*(set(path) for path in continuing_paths)):
-                joined[binding_id] = ty.union(
-                    *[path[binding_id] for path in continuing_paths]
-                )
+                types = [path[binding_id] for path in continuing_paths]
+                if all(isinstance(item, ty.ArrayType) for item in types):
+                    # exact-length refinements join to one exact length, or
+                    # to a proven minimum when the paths disagree
+                    arrays = cast(list[ty.ArrayType], types)
+                    lengths = {array.length for array in arrays}
+                    if len(lengths) == 1:
+                        joined[binding_id] = arrays[0]
+                    elif None not in lengths:
+                        length_minimums[binding_id] = min(cast(set[int], lengths))
+                    continue
+                joined[binding_id] = ty.union(*types)
             ctx.refinements.clear()
             ctx.refinements.update(joined)
             joined_bounds: dict[int, int] = {}
             for binding_id in set.intersection(*(set(path) for path in continuing_bounds)):
                 joined_bounds[binding_id] = min(path[binding_id] for path in continuing_bounds)
+            for binding_id, minimum in length_minimums.items():
+                joined_bounds[binding_id] = max(joined_bounds.get(binding_id, 0), minimum)
             ctx.length_bounds.clear()
             ctx.length_bounds.update(joined_bounds)
+            # a key stays proven only on every path; a shared position only
+            # when every path found it at the same local
+            joined_keys: dict = {}
+            for fact_key in set.intersection(*(set(path) for path in continuing_keys)):
+                positions = {path[fact_key] for path in continuing_keys}
+                joined_keys[fact_key] = positions.pop() if len(positions) == 1 else (None, None)
+            ctx.key_facts.clear()
+            ctx.key_facts.update(joined_keys)
         else:
             # Everything diverges: the continuation is unreachable, keep the
             # all-conditions-false state.
@@ -2323,6 +2416,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             ctx.refinements.update(arm_ctx.refinements)
             ctx.length_bounds.clear()
             ctx.length_bounds.update(arm_ctx.length_bounds)
+            ctx.key_facts.clear()
+            ctx.key_facts.update(arm_ctx.key_facts)
         if ast.default is None and not constant_true and not chain_exhaustive and (
             branch_expected is not None
             and any(body.type != ty.BOTTOM_TYPE for body in bodies)
@@ -2374,7 +2469,6 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             if mutated_binding is not None:
                 invalidated = [
                     mutated_binding.id,
-                    *(mutated_binding.dict_arrays or ()),
                     *ctx.binding_registry.routes_under(mutated_binding.id),
                 ]
                 for invalidated_id in invalidated:
@@ -2382,6 +2476,10 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     body_ctx.refinements.pop(invalidated_id, None)
                     ctx.length_bounds.pop(invalidated_id, None)
                     body_ctx.length_bounds.pop(invalidated_id, None)
+                    _drop_key_facts(ctx, dictionary_id=invalidated_id)
+                    _drop_key_facts(body_ctx, dictionary_id=invalidated_id)
+                    _drop_key_facts(ctx, key_id=invalidated_id)
+                    _drop_key_facts(body_ctx, key_id=invalidated_id)
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
@@ -2700,47 +2798,80 @@ def _dict_literal_block(ast: p0.AST) -> p0.Block | None:
     return None
 
 
-def _dict_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
-    """The dictionary binding a checked expression names, if any."""
+def _dict_value(node: hir.AST) -> tuple[hir.AST, ty.TypeExpr, ty.TypeExpr] | None:
+    """`(dictionary, K, V)` when a checked expression is a runtime dictionary."""
     while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
         node = node.items[0]
-    if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
-        binding = ctx.binding_registry.by_id.get(node.binding_id)
-        if binding is not None and binding.dict_arrays is not None:
-            return binding
-    return None
+    key_value = ty.dict_key_value(node.type)
+    if key_value is None:
+        return None
+    return node, key_value[0], key_value[1]
 
 
-def _dict_array_identifiers(
-    binding: sb.Binding,
-    loc: Span,
-    *,
-    ctx: Context,
-) -> tuple[hir.ExpressedIdentifier, hir.ExpressedIdentifier]:
-    """Identifiers for a dictionary's hidden key and value arrays."""
-    assert binding.dict_arrays is not None
-    result: list[hir.ExpressedIdentifier] = []
-    for array_id in binding.dict_arrays:
-        array_binding = ctx.binding_registry.by_id[array_id]
-        array_type = ctx.refinements.get(array_id, array_binding.type)
-        assert isinstance(array_type, ty.ArrayType)
-        result.append(
-            hir.ExpressedIdentifier(loc, array_type, array_binding.name, binding_id=array_id)
-        )
+def _dict_arrays(dictionary: hir.AST, loc: Span, *, ctx: Context) -> tuple[hir.AST, hir.AST]:
+    """The `keys` and `values` member routes of a dictionary, with exact lengths when known."""
+    key_value = ty.dict_key_value(dictionary.type)
+    assert key_value is not None
+    result: list[hir.AST] = []
+    for field, element in (('keys', key_value[0]), ('values', key_value[1])):
+        member = hir.MemberAccess(loc, ty.ArrayType(element, None), dictionary, field)
+        route_id = sb.array_route_id(member, ctx.binding_registry)
+        refined = ctx.refinements.get(route_id) if route_id is not None else None
+        if isinstance(refined, ty.ArrayType):
+            member = replace(member, type=refined)
+        result.append(member)
     return result[0], result[1]
 
 
-def _dict_key_value_types(binding: sb.Binding) -> tuple[ty.TypeExpr, ty.TypeExpr]:
-    assert isinstance(binding.type, ty.TypeParameterize) and len(binding.type.args) == 2
-    return binding.type.args[0], binding.type.args[1]
+def _invalidate_dict_lengths(dictionary: hir.AST, *, ctx: Context) -> None:
+    """A store may append: the entry arrays' exact lengths are no longer known."""
+    key_value = ty.dict_key_value(dictionary.type)
+    assert key_value is not None
+    for field, element in (('keys', key_value[0]), ('values', key_value[1])):
+        member = hir.MemberAccess(dictionary.loc, ty.ArrayType(element, None), dictionary, field)
+        route_id = sb.array_route_id(member, ctx.binding_registry)
+        if route_id is not None:
+            ctx.refinements.pop(route_id, None)
+            ctx.length_bounds.pop(route_id, None)
 
 
-def _invalidate_dict_lengths(binding: sb.Binding, *, ctx: Context) -> None:
-    """A store may append: the hidden arrays' exact lengths are no longer known."""
-    assert binding.dict_arrays is not None
-    for array_id in binding.dict_arrays:
-        ctx.refinements.pop(array_id, None)
-        ctx.length_bounds.pop(array_id, None)
+def _tcr_dict_literal(
+    block: p0.Block,
+    *,
+    expected: ty.Type | None,
+    ctx: Context,
+) -> hir.ObjectLiteral:
+    """Check `[k -> v ...]` (or `[]` against a dictionary type) as the object `[keys values]`."""
+    entries = [item for item in block.inner if isinstance(item, p0.BinOp)]
+    keys_block = p0.Block(block.loc, [item.left for item in entries], '[]', None)
+    values_block = p0.Block(block.loc, [item.right for item in entries], '[]', None)
+    expected_keys = expected_values = None
+    annotation = ty.strip_refinement(expected) if expected is not None else None
+    key_value = ty.dict_key_value(annotation) if annotation is not None else None
+    if key_value is not None:
+        expected_keys = ty.ArrayType(key_value[0], len(entries))
+        expected_values = ty.ArrayType(key_value[1], len(entries))
+    elif not entries:
+        user_error(
+            ctx.srcfile,
+            'empty dictionary literal needs a dictionary type',
+            Pointer(span=block.loc, message='annotate it, for example `let d:dict<string int64> = []`'),
+        )
+    keys = typecheck_and_resolve_inner(keys_block, ctx=ctx, expected=expected_keys)
+    values = typecheck_and_resolve_inner(values_block, ctx=ctx, expected=expected_values)
+    if not isinstance(keys.type, ty.ArrayType) or not isinstance(values.type, ty.ArrayType):
+        not_implemented(
+            ctx.srcfile,
+            block.loc,
+            'dictionary entries without homogeneous key and value types',
+        )
+    dict_object = annotation if key_value is not None else ty.dict_type(keys.type.element, values.type.element)
+    assert isinstance(dict_object, ty.ObjectType)
+    return hir.ObjectLiteral(
+        block.loc,
+        dict_object,
+        [hir.ObjectField(keys.loc, 'keys', keys), hir.ObjectField(values.loc, 'values', values)],
+    )
 
 
 def _tcr_dict_declare(
@@ -2749,64 +2880,32 @@ def _tcr_dict_declare(
     block: p0.Block,
     *,
     ctx: Context,
-    annotation: ty.TypeParameterize | None = None,
+    annotation: ty.ObjectType | None = None,
 ) -> hir.AST:
-    """Declare a dictionary as two hidden parallel arrays.
+    """Declare a dictionary: the runtime object `[keys values]` (insertion order).
 
-    Dictionaries are compile-time values for now: the visible binding has no
-    runtime storage. Iteration desugars to a lockstep multiiterator over the
-    hidden key and value arrays; every other use reports the pending runtime
-    dictionary representation.
+    The literal's entries become the exact-length initializers of the two
+    growable arrays; their exact lengths are kept as route refinements
+    (`d.keys`, `d.values`) until a store may append.
     """
-    entries = [item for item in block.inner if isinstance(item, p0.BinOp)]
-    keys_block = p0.Block(block.loc, [item.left for item in entries], '[]', None)
-    values_block = p0.Block(block.loc, [item.right for item in entries], '[]', None)
-    expected_keys = expected_values = None
-    if annotation is not None:
-        key_type, value_type = annotation.args
-        expected_keys = ty.ArrayType(key_type, len(entries))
-        expected_values = ty.ArrayType(value_type, len(entries))
-    keys = typecheck_and_resolve_inner(keys_block, ctx=ctx, expected=expected_keys)
-    values = typecheck_and_resolve_inner(values_block, ctx=ctx, expected=expected_values)
-    if not isinstance(keys.type, ty.ArrayType) or not isinstance(
-        values.type, ty.ArrayType
-    ):
-        not_implemented(
-            ctx.srcfile,
-            block.loc,
-            'dictionary entries without homogeneous key and value types',
-        )
-    suffix = next(_dict_literal_counter)
-    parts: list[hir.Declare] = []
-    part_ids: list[int] = []
-    for side, value in (('keys', keys), ('values', values)):
-        hidden_name = f'__dewy_dict_{name}_{side}_{suffix}'
-        binding = ctx.binding_registry.allocate(value, hidden_name, 'value', loc)
-        assert isinstance(value.type, ty.ArrayType)
-        # The hidden arrays are growable (runtime-length) with the literal's
-        # exact length kept as a refinement until a store may append.
-        runtime_type = ty.ArrayType(value.type.element, None)
-        binding.type = runtime_type
-        declaration = hir.Declare(
-            loc,
-            ty.VOID_TYPE,
-            'let',
-            hidden_name,
-            runtime_type,
-            value,
-            binding_id=binding.id,
-        )
-        binding.declaration = declaration
-        ctx.refinements[binding.id] = value.type
-        parts.append(declaration)
-        part_ids.append(binding.id)
-    dict_type = ty.TypeParameterize('dict', [keys.type.element, values.type.element])
-    visible = ctx.binding_registry.allocate(block, name, 'value', loc)
-    visible.type = dict_type
-    visible.dict_arrays = (part_ids[0], part_ids[1])
-    ctx.declarations[name] = dict_type
-    ctx.binding_scopes[name] = visible
-    return hir.Block(loc, ty.VOID_TYPE, list(parts), False)
+    literal = _tcr_dict_literal(block, expected=annotation, ctx=ctx)
+    dict_object = literal.type
+    assert isinstance(dict_object, ty.ObjectType)
+    binding = ctx.binding_registry.allocate(block, name, 'value', loc)
+    binding.type = dict_object
+    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, dict_object, literal, binding_id=binding.id)
+    binding.declaration = declaration
+    ctx.declarations[name] = dict_object
+    ctx.binding_scopes[name] = binding
+    _seed_field_routes(binding.id, dict_object, literal, (), ctx=ctx)
+    dictionary = hir.ExpressedIdentifier(loc, dict_object, name, binding_id=binding.id)
+    keys_literal = literal.fields[0].value
+    while isinstance(keys_literal, (hir.RepresentationCast, hir.ValueCast)):
+        keys_literal = keys_literal.expr
+    if isinstance(keys_literal, hir.ArrayLiteral):
+        for index, key in enumerate(keys_literal.items):
+            _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
+    return declaration
 
 
 def _is_top_level_arrow(item: p0.AST) -> bool:
@@ -3536,11 +3635,21 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.ArrayType):
             return _tcr_array_method(value, name, binop.loc, ctx=ctx)
+    if name == 'get':
+        value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        found_dict = _dict_value(value)
+        if found_dict is not None:
+            dictionary, key_type, value_type = found_dict
+            signature = ty.FunctionType(
+                [ty.PosOrKwArg('key', key_type), ty.PosOrKwArg('default', value_type, required=False)],
+                [], None, ty.optional(value_type),
+            )
+            return hir.DictMethod(binop.loc, signature, dictionary, 'get')
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
-        dictionary = _dict_binding(value, ctx=ctx)
-        if dictionary is not None:
-            keys, _values = _dict_array_identifiers(dictionary, binop.loc, ctx=ctx)
+        found_dict = _dict_value(value)
+        if found_dict is not None:
+            keys, _values = _dict_arrays(found_dict[0], binop.loc, ctx=ctx)
             assert isinstance(keys.type, ty.ArrayType)
             return hir.ArrayLength(
                 binop.loc,
@@ -3866,8 +3975,10 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
                 Pointer(span=arrows[0].loc, message='dictionary arrows must all use the same operator'),
             )
         kind = _bracket_kind(block.inner)
-        if kind in {'dict', 'bidict'}:
-            not_implemented(ctx.srcfile, block.loc, 'dictionary literals')
+        if kind == 'bidict':
+            not_implemented(ctx.srcfile, block.loc, 'bidirectional dictionary literals')
+        if kind == 'dict' or (not block.inner and expected is not None and ty.dict_key_value(ty.strip_refinement(expected)) is not None):
+            return _tcr_dict_literal(block, expected=expected, ctx=ctx)
         if kind == 'object' or isinstance(expected, ty.ObjectType):
             return _tcr_object_literal(block, expected=expected, ctx=ctx)
 
@@ -4993,22 +5104,38 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     source_place = array if isinstance(array, hir.Place) else None
     if source_place is not None:
         array = source_place.target
-    dictionary = _dict_binding(array, ctx=ctx)
-    if dictionary is not None:
+    found_dict = _dict_value(array)
+    if found_dict is not None:
+        dictionary, key_type, value_type = found_dict
         if not isinstance(binop.right, p0.Block) or len(binop.right.inner) != 1:
             user_error(
                 ctx.srcfile,
                 'dictionary lookup takes one key',
                 Pointer(span=binop.right.loc, message='expected exactly one key expression'),
             )
-        key_type, value_type = _dict_key_value_types(dictionary)
         key = check_against(
             typecheck_and_resolve_inner(binop.right.inner[0], ctx=ctx, expected=key_type),
             key_type,
             ctx=ctx,
         )
-        keys, values = _dict_array_identifiers(dictionary, binop.loc, ctx=ctx)
-        return hir.DictLookup(binop.loc, ty.optional(value_type), keys, values, key)
+        keys, values = _dict_arrays(dictionary, binop.loc, ctx=ctx)
+        fact = _proven_key(dictionary, key, ctx=ctx)
+        if fact is None:
+            user_error(
+                ctx.srcfile,
+                'dictionary key is not proven present',
+                Pointer(
+                    span=binop.right.loc,
+                    message='no fact establishes that this key is in the dictionary (neither proven nor refuted)',
+                ),
+                hint='guard with `if key in? d { ... }`, iterate the dictionary, store the key first, '
+                'or use `d.get(key)` (optionally `d.get(key default)`) for a lookup that may miss',
+            )
+        position, static_position = fact
+        return hir.DictLookup(
+            binop.loc, value_type, keys, values, key,
+            proven=True, position=position, static_position=static_position,
+        )
     if isinstance(array.type, ty.BinaryLiteralType):
         array = hir.RepresentationCast(
             array.loc,
@@ -5415,15 +5542,16 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         )
         if range_operand is not None:
             return _tcr_range_membership(left, range_operand, ctx=ctx)
-        dictionary = _dict_binding(right, ctx=ctx)
-        if dictionary is not None:
-            key_type, _value_type = _dict_key_value_types(dictionary)
-            keys, _values = _dict_array_identifiers(dictionary, binop.loc, ctx=ctx)
+        found_dict = _dict_value(right)
+        if found_dict is not None:
+            dictionary, key_type, _value_type = found_dict
+            keys, _values = _dict_arrays(dictionary, binop.loc, ctx=ctx)
             return hir.DictContains(
                 binop.loc,
                 'bool',
                 keys,
                 check_against(left, key_type, ctx=ctx),
+                position=_new_key_position_name(),
             )
     
     match binop.op:
@@ -5945,6 +6073,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         function_boundary_labels=function_boundary_labels,
         refinements={},
         length_bounds={},
+        key_facts={},
     )
     body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
 
@@ -6525,10 +6654,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             left=p0.Atom(item=t1.Identifier(name='dict')),
             right=p0.Block(kind='<>', inner=[key_ast, value_ast]),
         ):
-            return ty.TypeParameterize(
-                'dict',
-                [ast_to_type(key_ast, ctx=ctx), ast_to_type(value_ast, ctx=ctx)],
-            )
+            return ty.dict_type(ast_to_type(key_ast, ctx=ctx), ast_to_type(value_ast, ctx=ctx))
 
         case p0.Block(kind='<>'|'()', inner=[inner]):
             return ast_to_type(inner, ctx=ctx)
@@ -7499,7 +7625,21 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         _apply_array_method_transition(
             left, call.loc, ctx=ctx, index=_array_method_index_argument(left.name, call),
         )
+    if isinstance(left, hir.DictMethod):
+        return _dict_get_call(left, call, ctx=ctx)
     return _specialize_interpolated_output(call, ctx=ctx)
+
+
+def _dict_get_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Context) -> hir.DictLookup:
+    """`d.get(key)` is `V | undefined`; `d.get(key default)` is `V`."""
+    found = _dict_value(method.dictionary)
+    assert found is not None
+    dictionary, _key_type, value_type = found
+    key = call.pos_args[0] if call.pos_args else call.kw_args['key']
+    default = call.pos_args[1] if len(call.pos_args) > 1 else call.kw_args.get('default')
+    keys, values = _dict_arrays(dictionary, call.loc, ctx=ctx)
+    result_type = value_type if default is not None else ty.optional(value_type)
+    return hir.DictLookup(call.loc, result_type, keys, values, key, default=default)
 
 
 def _array_method_index_argument(name: str, call: hir.FunctionCall) -> hir.AST | None:

@@ -233,9 +233,15 @@ class ObjectField:
 
 @dataclass(frozen=True)
 class ObjectType:
-    """A structural object whose field order is part of the type."""
+    """A structural object whose field order is part of the type.
+
+    ``brand`` names a compiler-provided object family that is distinct from
+    any structurally identical user object: ``'dict'`` is the runtime
+    dictionary ``[keys:array<K> values:array<V>]``.
+    """
 
     fields: tuple[ObjectField, ...]
+    brand: str | None = None
 
     def field(self, name: str) -> ObjectField | None:
         for object_field in self.fields:
@@ -412,6 +418,32 @@ class RefinedType:
 
     base: 'TypeExpr'
     propositions: tuple[Proposition, ...]
+
+
+def dict_type(key: 'TypeExpr', value: 'TypeExpr') -> ObjectType:
+    """The runtime dictionary object for `dict<K V>`: parallel entry arrays in insertion order.
+
+    Entry types are canonical so literal-inferred and annotated dictionaries
+    agree: any string representation is the primitive ``string`` (exact
+    lengths of literal keys are not part of the dictionary's type).
+    """
+    def canonical(type_: 'TypeExpr') -> 'TypeExpr':
+        if isinstance(type_, (StringType, StringLiteralType)):
+            return 'string'
+        return type_
+    return ObjectType(
+        (ObjectField('keys', ArrayType(canonical(key), None)), ObjectField('values', ArrayType(canonical(value), None))),
+        'dict',
+    )
+
+
+def dict_key_value(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr'] | None:
+    """`(K, V)` when ``type_`` is a runtime dictionary object."""
+    if isinstance(type_, ObjectType) and type_.brand == 'dict':
+        keys, values = type_.fields[0].type, type_.fields[1].type
+        assert isinstance(keys, ArrayType) and isinstance(values, ArrayType)
+        return keys.element, values.element
+    return None
 
 
 def strip_refinement(type_: 'TypeExpr') -> 'TypeExpr':
@@ -1574,7 +1606,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
             tuple(
                 ObjectField(field.name, to_nnf(field.type), field.mutable)
                 for field in t.fields
-            )
+            ),
+            t.brand,
         )
     if isinstance(t, ModuleType):
         return t
@@ -1717,7 +1750,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
                     field.mutable,
                 )
                 for field in t.fields
-            )
+            ),
+            t.brand,
         )
     if isinstance(t, TypeAnd):
         return TypeAnd([substitute_type(x, bindings) for x in t.items])
