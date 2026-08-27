@@ -84,4 +84,4 @@ Square brackets use the top-level contents to determine the constructed form:
 set[1 2 3]                    # set
 ```
 
-Array, object, dictionary, and set forms are settled; a dictionary or set literal may appear in any expression, and an empty one needs a `dict<K V>` or `set<T>` context. Bidictionary and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).
+Array, object, dictionary, and set forms are settled; a dictionary or set literal may appear in any expression, and an empty one needs a `dict<K V>` or `set<T>` context. Spreading an existing container into a literal with postfix `...` (`[base... c=3]`, `[xs... 0 ys...]`) is the planned way to combine containers (`+` never concatenates); it is not implemented yet. Bidictionary and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).
