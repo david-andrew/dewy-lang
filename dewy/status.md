@@ -4,9 +4,9 @@ This document tracks language features in the cleanparse compiler. Checked items
 
 ## Current focus
 
-The current compiler-development focus is recursive, transitive effect analysis for aggregate parameters. The analysis should distinguish reads, mutation, whole-value rebinding, and escapes; follow field and index routes; propagate effects through direct calls; and remain conservative at unresolved or indirect calls. Its first use is to make value-semantic borrowing and copying correct for nested arrays and structural objects, replacing the current array-specific boundary checks.
+Milestone B is being finished in bootstrap-need order (see Sequencing). The next slice is **B1b: recursive and runtime-sized union members** — the representation is "handle to storage of the member's representation" with the allocation site pluggable (the process-lifetime arena is the first tier, never baked into the layout), plus the three-member `int64|string|undefined` parameter/result limit. A compiler is a recursive AST of sum types, so this is the single biggest bootstrap blocker; `match` syntax is designed alongside it or deferred in favor of `is?` chains.
 
-The intended follow-on slice is iteration over arrays of structural objects; caller-owned materialization of interpolated string results has landed (see roadmap item A1). Runtime-length array returns now use the arena tier (see roadmap item B2); whole-array place rebinding of runtime-length arrays remains deferred.
+After B1b: string building and byte decoding (B8 and the B6 remainder), then error values as union members with a propagation idiom (a minimal B5). At that point the **Dewy-written bootstrap compiler begins, and David writes it himself initially** (tokenizer first); the assistant does not write any of the bootstrap compiler and instead continues with other compiler features (B4 closures, B7 generics, the memory track) while it takes shape, using the gaps the bootstrap work surfaces as the highest-priority input.
 
 ## Roadmap
 
@@ -99,7 +99,17 @@ An additional, opt-in systems escape hatch is now outlined in [`semantic/user_ma
 
 ### Sequencing
 
-Phase 0 → phase 1 → A1 → A2 → A3 → B1 → B2 → B3 → B4, with A4 and A5 interleaved as parallel long-poles (they touch different compiler layers than the ownership work) → B5–B8 → B9 → the tokenizer-in-Dewy checkpoint.
+Original order: phase 0 → phase 1 → A1 → A2 → A3 → B1 → B2 → B3 → B4, with A4 and A5 interleaved as parallel long-poles → B5–B8 → B9 → the tokenizer-in-Dewy checkpoint. Everything through B3 (and A4/A5, plus `bigint`) is done or down to parked leftovers.
+
+**Revised (2026-08-27), ranking the rest of Milestone B by what a compiler written in Dewy needs:**
+
+1. **B1b** — recursive and runtime-sized union members; the 3-member-with-`undefined` limit; `match` designed or deferred.
+2. **B8 + B6 remainder** — `join`, a string builder, `array<uint8> as string` decoding.
+3. **B5, minimal** — error values as union members (`T | error`) with a propagation idiom; the full effects design stays later.
+4. **Bootstrap compiler in Dewy, starting with the tokenizer** — written by David, not the assistant (at least initially). It is the dogfooding driver: like `library/bigint.dewy` did for the analyses, it will show what B4/B7 and the memory model actually need. Meanwhile the assistant works on the items below.
+5. **B4 closures**, then **B7 user generics**, then **B9** (the harness, on the Dewy test framework once that exists).
+
+Memory: deterministic release and scoped arenas start when the Dewy-written front end shows real memory pressure, not before — a compiler is a short-lived process and the process-lifetime arena is acceptable for bootstrap as long as B1b's handle representation keeps the allocation site pluggable.
 
 ## Core declarations and expressions
 
