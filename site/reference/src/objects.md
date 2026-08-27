@@ -41,14 +41,59 @@ Nested array and object fields recursively follow the same value rule.
 
 ## Constructors
 
-A constructor is an ordinary function returning an object:
+Calling an object type constructs a value of it. The field list is the constructor's signature, read exactly like a function's: positional arguments fill fields in declaration order, keyword arguments name them, and a field declared with a default (`name:type = default`) may be left out — a default may refer to earlier fields by name.
+
+<!-- dewy-example: compiler -->
+```dewy
+let Span:type = [start:int64 stop:int64 = start label:string = "span"]
+
+let a = Span(1 9)                      # positional
+let b = Span(stop=5 start=2 label="b") # keywords, in any order
+let c = Span(7)                        # stop = start, label = "span"
+```
+
+The call is checked as the object literal `[start=1 stop=9 label="span"]` against the type: an unknown field, a field given twice, too many positional arguments, or a missing field without a default is an error. Types are values, so in a value context the name is the constructor and in a type context it is the type, with no separate class declaration.
+
+Construction that needs more than filling fields is an ordinary function added to the type's **constructor overload set** with `&=`; a call dispatches over the field-wise signature and the overloads by the usual most-specific rule, so keyword-only parameters, validation, and error-value results live where functions already have them:
+
+<!-- dewy-example: compiler -->
+```dewy
+let Range:type = [start:int64 stop:int64]
+Range &= (text:string):>Range => Range(0 text.length)
+
+let a = Range(1 9)          # field-wise
+let b = Range("seven..")    # the overload
+```
+
+A constructor can also be an ordinary function returning an object:
 
 ```dewy
 let make_pair = (left:int64 right:int64):>Pair =>
     [left=left right=right]
 ```
 
-Dewy does not require a separate class declaration syntax.
+## Methods
+
+An object type may declare methods: `name = (params) => body` rows among the fields. Inside a method, bare names of the type's fields and methods refer to the instance (`stop - start`, `width`); a method that assigns or grows a field takes its receiver as a place, so it must be called on a binding or a field, not on a temporary. Calls are `value.method(args)`, and a zero-argument method is called by `value.method` alone.
+
+<!-- dewy-example: compiler -->
+```dewy
+let Span:type = [
+    start:int64
+    stop:int64 = start
+    width = () => stop - start
+    grow = (by:int64) => { stop += by }
+    shifted = (by:int64):>Span => Span(start + by stop + by)
+]
+
+let main = ():>int64 => {
+    let s = Span(3 7)
+    s.grow(2)                       # 3..9
+    return s.width + s.shifted(1).start   # 6 + 4
+}
+```
+
+Methods are compiled as ordinary functions taking the instance first (`Span__width(self)`), so no function value is stored in the object; they are not values yet (`s.grow` without a call is an error). Methods and constructor overloads are declared on module-level types only.
 
 A structural or hybrid type can also contextually construct an object literal:
 

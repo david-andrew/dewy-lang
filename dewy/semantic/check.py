@@ -58,6 +58,12 @@ class Context:
     resolving_type_aliases: set[int] = field(default_factory=set)
     named_types: dict[int, ty.NamedType] = field(default_factory=dict)  # recursive alias references, by alias binding id
     generic_instances: list[hir.Declare] = field(default_factory=list)  # hoisted instantiations of generic functions (shared list)
+    module: 'Context | None' = None  # the module-level context (methods are declared in it)
+    pending_methods: list[tuple[sb.Binding, ty.ObjectType]] = field(default_factory=list)  # aliases whose methods are not declared yet (shared list)
+    synthesized: list[object] = field(default_factory=list)
+    """Syntax the checker synthesizes (assert directives, constructor literals,
+    method bodies) is kept alive for the whole compile: bindings are keyed by
+    `id(node)`, and a freed node's id could otherwise be reused."""
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
@@ -209,9 +215,12 @@ def _typecheck_module(
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
         raise TypeError('INTERNAL ERROR: source module did not produce a block')
+    _declare_pending_methods(ctx=ctx.module if ctx.module is not None else ctx)  # methods never called still get checked
     if ctx.generic_instances:
-        # instantiations of generic functions are ordinary module-level functions
-        checked = replace(checked, items=[*checked.items, *ctx.generic_instances])
+        # instantiations of generic functions, methods, and constructor
+        # overloads are ordinary module-level functions; they carry no state,
+        # so they are declared first and module-level code may call them
+        checked = replace(checked, items=[*ctx.generic_instances, *checked.items])
     return checked, ctx
 
 def _sink_ambiguity(ast: p0.AST) -> p0.AST:
@@ -277,6 +286,7 @@ def _pair_assert_directives(items: list[p0.AST], *, ctx: Context) -> list[p0.AST
             )
         paired.append(_AssertDirective(Span(item.loc.start, following.loc.stop), metatag.name, following))
         index += 2
+    ctx.synthesized.append(paired)
     return paired
 
 
@@ -1068,11 +1078,11 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
             'dictionary store takes one key',
             Pointer(span=left.right.loc, message='expected exactly one key expression'),
         )
-    if binding.declaration is not None and binding.declaration.decltype == 'const':
+    if (reason := _read_only_reason(binding)) is not None:
         user_error(
             ctx.srcfile,
             'cannot store into a const dictionary',
-            Pointer(span=left.left.loc, message=f'`{binding.name}` is declared const'),
+            Pointer(span=left.left.loc, message=f'`{binding.name}` {reason}'),
         )
     dictionary = tcr_identifier(left.left.item, ctx=ctx)
     found = _dict_value(dictionary)
@@ -1096,12 +1106,18 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
     return hir.DictStore(ast.loc, ty.VOID_TYPE, keys, values, key, value, position=position)
 
 
-def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
-    """Typecheck a simple compound assignment while retaining its source operator."""
+def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
+    """Typecheck a simple compound assignment while retaining its source operator.
+
+    `Type &= (…) => …` is not an assignment: it adds a constructor overload to
+    an object type (see `_declare_constructor_overload`).
+    """
     assert isinstance(ast.op, t2.CombinedAssignmentOp)
     if not isinstance(ast.op.op, t1.Operator):
         not_implemented(ctx.srcfile, ast.op.loc, 'broadcast compound assignment')
     symbol = ast.op.op.symbol
+    if symbol == '&' and (constructor := _type_constructor_target(ast.left, ctx=ctx)) is not None:
+        return _declare_constructor_overload(constructor, ast.right, ctx=ctx)
     if symbol not in builtins.BINOP_DUNDER_MAP:
         not_implemented(ctx.srcfile, ast.op.loc, f'compound assignment operator `{symbol}=`')
 
@@ -1138,12 +1154,6 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
             ast.left.loc,
             'compound indexed assignment',
         )
-    if isinstance(target, hir.MemberAccess):
-        not_implemented(
-            ctx.srcfile,
-            ast.left.loc,
-            'compound member assignment',
-        )
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
     result = _dispatch_builtin(
         builtins.BINOP_DUNDER_MAP[symbol],
@@ -1154,7 +1164,14 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.Assign:
         ctx=ctx,
         expected=target.type,
     )
-    check_against(result, target.type, ctx=ctx)
+    result = check_against(result, target.type, ctx=ctx)
+    if isinstance(target, hir.MemberAccess):
+        # `obj.field += v` is `obj.field = obj.field + v`
+        assigned = sb.member_path(target)
+        if assigned is not None:
+            root_id, path = assigned
+            _invalidate_routes(root_id, ctx=ctx, prefix=path)
+        return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, result)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, f'{symbol}=', value)
 
 
@@ -2123,7 +2140,7 @@ def _tcr_range_iterator(
                 or ty.fixed_integer_layout(element_type) is not None
                 or isinstance(
                     element_type,
-                    (ty.FunctionType, ty.StringLiteralType, ty.StringType),
+                    (ty.FunctionType, ty.StringLiteralType, ty.StringType, ty.ObjectType),
                 )
                 or isinstance(element_type, str)
                 and element_type in {'string', 'grapheme', 'char'}
@@ -2149,6 +2166,9 @@ def _tcr_range_iterator(
                 target_type,
                 identifier.loc,
             )
+            if isinstance(target_type, ty.ObjectType):
+                # the loop variable borrows the element (no copy per iteration)
+                binding.read_only_reason = 'borrows the array element, so it is read-only (copy it with `let` to change it)'
             iterator_ctx = replace(
                 ctx,
                 declarations=ctx.declarations.new_child(
@@ -2909,7 +2929,10 @@ def _checked_call(func: hir.AST, arguments: list[hir.AST], *, loc: Span, ctx: Co
     params = func.type.pos_or_kw
     if len(params) != len(arguments):
         raise ValueError(f'INTERNAL ERROR: `{getattr(func, "name", func)}` takes {len(params)} arguments, got {len(arguments)}')
-    checked = [check_against(argument, param.type, ctx=ctx) for argument, param in zip(arguments, params)]
+    checked = [
+        argument if isinstance(argument, hir.Place) else check_against(argument, param.type, ctx=ctx)
+        for argument, param in zip(arguments, params)
+    ]
     return hir.FunctionCall(loc, func.type.ret, func, checked, {})
 
 
@@ -2958,12 +2981,27 @@ def _assert_failure_report(
         message = typecheck_and_resolve_inner(message_ast, ctx=ctx)
     else:
         message = text('this condition was false')
-    statements: list[hir.AST] = [
-        call('_report_begin', text('error'), text('assertion failed')),
-        call('_report_point', integer(condition_start), integer(condition_stop), message),
-    ]
     if message_ast is not None:
-        statements.append(call('_report_dim', integer(condition_stop), integer(byte_offset(message_ast.loc.stop))))
+        message = typecheck_and_resolve_inner(message_ast, ctx=ctx)
+    else:
+        message = text('this condition was false')
+    dim_stop = byte_offset(message_ast.loc.stop) if message_ast is not None else condition_stop
+    report_alias = ctx.binding_scopes.get('Report')
+    if report_alias is None or report_alias.type_value is None:
+        not_implemented(ctx.srcfile, loc, '`$runtime_assert` without the prelude (`Report` is not available)')
+    report_type = ty.unfold(report_alias.type_value)
+    assert isinstance(report_type, ty.ObjectType)
+    # the report lives in a hidden local of the failure block
+    local = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_assert_report_{ctx.binding_registry.next_id}', 'value', loc)
+    local.type = report_type
+    report = hir.ExpressedIdentifier(loc, report_type, local.name, binding_id=local.id)
+    declaration = hir.Declare(
+        loc, ty.VOID_TYPE, 'let', local.name, report_type,
+        call('_assertion_report', integer(condition_start), integer(condition_stop), integer(dim_stop), message),
+        binding_id=local.id,
+    )
+    local.declaration = declaration
+    statements: list[hir.AST] = [declaration]
     seen: set[str] = set()
     for operand_ast in _assert_operands(condition_ast):
         operand_source = _assert_source(operand_ast, ctx=ctx)
@@ -2977,8 +3015,8 @@ def _assert_failure_report(
         if not _assert_note_value_supported(value.type, ctx=ctx):
             continue  # values interpolation cannot show are left out
         note = hir.InterpolatedString(loc, ty.StringType(), [text(f'`{operand_source}` is '), value])
-        statements.append(call('_report_note', note))
-    statements.append(call('_report_render', text(path), integer(row), text(line)))
+        statements.append(call('_assertion_note', hir.Place(loc, report_type, report), note))
+    statements.append(call('_assertion_render', report, text(path), integer(row), text(line)))
     statements.append(call('_exit', integer(101)))
     return statements
 
@@ -2988,6 +3026,296 @@ def _assert_note_value_supported(type_: ty.Type, *, ctx: Context) -> bool:
     if _is_string_type(type_) or type_ == 'bool' or isinstance(type_, ty.IntegerLiteralType):
         return True
     return isinstance(type_, str) and type_ not in ('int', 'uint') and ctx.type_system.is_subtype(type_, 'int')
+
+
+_MUTATING_METHODS = {'push', 'pop', 'insert', 'clear', 'truncate', 'reserve', 'sort', 'add'}
+
+
+def _method_row(item: p0.AST) -> tuple[str, p0.AST] | None:
+    """`name = (params) => body` inside an object type: a method."""
+    if (
+        isinstance(item, p0.BinOp)
+        and _operator_symbol(item.op) == '='
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+        and isinstance(item.right, p0.BinOp)
+        and _operator_symbol(item.right.op) == '=>'
+    ):
+        return item.left.item.name, item.right
+    return None
+
+
+def _function_literal_parts(literal: p0.BinOp) -> tuple[p0.Block, p0.AST | None, p0.AST]:
+    """(parameter block, result annotation, body) of a `(params):>ret => body` literal."""
+    signature = literal.left
+    result: p0.AST | None = None
+    if isinstance(signature, p0.BinOp) and _operator_symbol(signature.op) == ':>':
+        result = signature.right
+        signature = signature.left
+    if not isinstance(signature, p0.Block):
+        signature = p0.Block(signature.loc, [signature], '()', None)  # `x => …`
+    return signature, result, literal.right
+
+
+def _parameter_names(params: p0.Block) -> set[str]:
+    names: set[str] = set()
+    for item in params.inner:
+        node: p0.AST = item
+        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == '=':
+            node = node.left
+        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == ':':
+            node = node.left
+        if isinstance(node, p0.Prefix):
+            node = node.item
+        if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier):
+            names.add(node.item.name)
+    return names
+
+
+def _local_names(body: p0.AST) -> set[str]:
+    """Names declared inside a method body (`let`/`const`, loop targets): they shadow members."""
+    names: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if isinstance(node, p0.KeywordExpr):
+            parts = _declaration_parts(node)
+            if parts is not None:
+                names.add(parts[0])
+            walk([part for part in node.parts if isinstance(part, (p0.AST, list))])
+            return
+        if isinstance(node, p0.BinOp):
+            if _operator_symbol(node.op) == 'in' and isinstance(node.left, p0.Atom) and isinstance(node.left.item, t1.Identifier):
+                names.add(node.left.item.name)
+            walk(node.left)
+            walk(node.right)
+            return
+        if isinstance(node, p0.AST):
+            for field_info in fields(node):
+                value = getattr(node, field_info.name)
+                if isinstance(value, (p0.AST, list)):
+                    walk(value)
+
+    walk(body)
+    return names
+
+
+def _rewrite_members_to_self(node: p0.AST, members: set[str]) -> p0.AST:
+    """Bare references to fields/methods inside a method body become `self.name`."""
+
+    def self_access(atom: p0.Atom) -> p0.AST:
+        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, 'self')), atom)
+
+    def rewrite(value: object) -> object:
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        if isinstance(value, p0.Atom):
+            if isinstance(value.item, t1.Identifier) and value.item.name in members:
+                return self_access(value)
+            return value
+        if isinstance(value, p0.BinOp) and _operator_symbol(value.op) == '.':
+            return replace(value, left=rewrite(value.left))  # the member name on the right stays
+        if isinstance(value, p0.AST):
+            changes = {}
+            for field_info in fields(value):
+                current = getattr(value, field_info.name)
+                if isinstance(current, (p0.AST, list)):
+                    changes[field_info.name] = rewrite(current)
+            return replace(value, **changes) if changes else value
+        return value
+
+    result = rewrite(node)
+    assert isinstance(result, p0.AST)
+    return result
+
+
+def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
+    """Whether a method body assigns a field, mutates one in place, or takes its place."""
+
+    def root_name(node: p0.AST) -> str | None:
+        while isinstance(node, p0.BinOp) and (
+            _operator_symbol(node.op) == '.' or isinstance(node.op, (t2.IndexJuxtapose, t2.QJuxtapose))
+        ):
+            node = node.left
+        if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier):
+            return node.item.name
+        return None
+
+    found = False
+
+    def walk(value: object) -> None:
+        nonlocal found
+        if found:
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+            return
+        if isinstance(value, p0.BinOp):
+            symbol = _operator_symbol(value.op)
+            if (symbol == '=' or isinstance(value.op, t2.CombinedAssignmentOp)) and root_name(value.left) in members:
+                found = True
+                return
+            if isinstance(value.op, (t2.CallJuxtapose, t2.QJuxtapose)) and isinstance(value.left, p0.BinOp) and _operator_symbol(value.left.op) == '.':
+                right = value.left.right
+                if isinstance(right, p0.Atom) and isinstance(right.item, t1.Identifier) and right.item.name in _MUTATING_METHODS and root_name(value.left.left) in members:
+                    found = True
+                    return
+        if isinstance(value, p0.Prefix) and _operator_symbol(value.op) == '@' and root_name(value.item) in members:
+            found = True
+            return
+        if isinstance(value, p0.AST):
+            for field_info in fields(value):
+                current = getattr(value, field_info.name)
+                if isinstance(current, (p0.AST, list)):
+                    walk(current)
+
+    walk(body)
+    return found
+
+
+def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context) -> sb.Binding:
+    """Typecheck a synthesized function literal as a module-level function (like a generic instance)."""
+    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', literal.loc)
+    checked = tcr_function_literal(literal, ctx=ctx)
+    binding.type = checked.type
+    declaration = hir.Declare(literal.loc, ty.VOID_TYPE, 'let', name, None, checked, binding_id=binding.id)
+    binding.declaration = declaration
+    binding.function = checked
+    # the module's own scope (`ctx` is the module root block context)
+    ctx.declarations.maps[0][name] = checked.type
+    ctx.binding_scopes.maps[0][name] = binding
+    ctx.generic_instances.append(declaration)
+    return binding
+
+
+def _declare_pending_methods(*, ctx: Context, for_type: ty.ObjectType | None = None) -> None:
+    """Declare the methods of every pending alias (or of one type) in the module context."""
+    module_ctx = ctx.module if ctx.module is not None else ctx
+    pending = list(ctx.pending_methods)
+    for alias, object_type in pending:
+        if for_type is not None and object_type is not for_type:
+            continue
+        ctx.pending_methods.remove((alias, object_type))
+        _declare_type_methods(alias, object_type, ctx=module_ctx)
+
+
+def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx: Context) -> None:
+    """Compile a type's methods as hidden functions `Type__method(self …)`.
+
+    Inside a method, bare names of the type's fields and methods mean
+    `self.name`; `self` is a place parameter when the body assigns or
+    mutates fields, so the call site passes the receiver as a place.
+    """
+    if alias.name not in ctx.module_declared_names:
+        not_implemented(ctx.srcfile, alias.loc, 'methods on a type declared inside a function')
+    members = {f.name for f in object_type.fields} | {m.name for m in object_type.methods}
+    for method in object_type.methods:
+        if method.binding_id is not None:
+            continue
+        literal = method.literal
+        assert isinstance(literal, p0.BinOp)
+        params, result, body = _function_literal_parts(literal)
+        if 'self' in _parameter_names(params):
+            user_error(ctx.srcfile, '`self` is the hidden receiver parameter of a method', Pointer(span=literal.loc, message='rename this parameter'))
+        visible = members - _parameter_names(params) - _local_names(body)
+        loc = literal.loc
+        self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, 'self'))
+        method.place_self = _body_mutates_members(body, visible)
+        if method.place_self:
+            self_name = p0.Prefix(loc, t1.Operator(loc, '@'), self_name)
+        self_param = p0.BinOp(loc, t1.Operator(loc, ':'), self_name, p0.Atom(loc, t1.Identifier(loc, alias.name)))
+        new_params = replace(params, inner=[self_param, *params.inner])
+        signature: p0.AST = new_params
+        if result is not None:
+            signature = p0.BinOp(loc, t1.Operator(loc, ':>'), new_params, result)
+        rewritten = _rewrite_members_to_self(body, visible)
+        new_literal = replace(literal, left=signature, right=rewritten)
+        ctx.synthesized.append(new_literal)
+        method.binding_id = _hoist_hidden_function(f'{alias.name}__{method.name}', new_literal, ctx=ctx).id
+
+
+def _declare_constructor_overload(constructor: hir.TypeValue, literal: p0.AST, *, ctx: Context) -> hir.AST:
+    """`Type &= (…) => …` adds an ordinary function to the type's constructor overload set."""
+    object_type = _constructed_object_type(constructor)
+    assert object_type is not None and constructor.name is not None
+    if constructor.name not in ctx.module_declared_names:
+        not_implemented(ctx.srcfile, constructor.loc, 'constructor overloads on a type declared inside a function')
+    if not (isinstance(literal, p0.BinOp) and _operator_symbol(literal.op) == '=>'):
+        user_error(
+            ctx.srcfile,
+            'a constructor overload must be a function literal',
+            Pointer(span=literal.loc, message='expected `(params):>Type => …`'),
+        )
+    binding = _hoist_hidden_function(f'{constructor.name}__new_{len(object_type.constructors) + 1}', literal, ctx=ctx)
+    object_type.constructors.append(binding.id)
+    return hir.Void(constructor.loc, ty.VOID_TYPE)
+
+
+def _select_constructor_overload(
+    left: hir.TypeValue,
+    object_type: ty.ObjectType,
+    right: p0.AST,
+    *,
+    ctx: Context,
+) -> hir.ExpressedIdentifier | None:
+    """Dispatch a constructor call over the field-wise signature and the `&=` overloads.
+
+    Returns the overload to call, or None when the field-wise constructor
+    (or none of them) applies — the literal path then reports its errors.
+    """
+    if not object_type.constructors:
+        return None
+    pos_args, kw_args, _order = parse_call_arguments(right, ctx=ctx, method=None)
+    pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'constructor argument') for a in pos_args]
+    kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
+    field_wise = ty.FunctionType(
+        [ty.PosOrKwArg(f.name, f.type, f.default is None) for f in object_type.fields],
+        [],
+        None,
+        object_type,
+        [],
+    )
+    overloads = [ctx.binding_registry.by_id[binding_id] for binding_id in object_type.constructors]
+    methods: list[ty.FunctionType] = [field_wise]
+    for overload in overloads:
+        assert isinstance(overload.type, ty.FunctionType)
+        methods.append(overload.type)
+    try:
+        result = ctx.type_system.match_best_function(methods, pos_types, kw_types)
+    except ty.DispatchError:
+        return None
+    if result.method_index == 0:
+        return None
+    chosen = overloads[result.method_index - 1]
+    assert isinstance(chosen.type, ty.FunctionType)
+    return hir.ExpressedIdentifier(left.loc, chosen.type, chosen.name, binding_id=chosen.id)
+
+
+def _fresh_syntax(ctx: Context) -> object:
+    """A stand-in syntax object for a hidden binding, kept alive so its `id()` is never reused."""
+    sentinel = object()
+    ctx.synthesized.append(sentinel)
+    return sentinel
+
+
+def _declaration_pointers(binding: sb.Binding) -> list[Pointer]:
+    """The `const declaration is here` pointer, when the binding has a declaration."""
+    if binding.declaration is None:
+        return []
+    return [Pointer(span=binding.declaration.loc, message='const declaration is here')]
+
+
+def _read_only_reason(binding: sb.Binding | None) -> str | None:
+    """Why a binding rejects writes: `const` declarations and borrowed loop variables."""
+    if binding is None:
+        return None
+    if binding.declaration is not None and binding.declaration.decltype == 'const':
+        return 'is declared const'
+    return binding.read_only_reason
 
 
 def _declaration_parts(
@@ -3433,7 +3761,7 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
     instance_type = ty.instantiate_method(generic.type, bindings)
     name = _instantiation_name(generic.name, bindings, source.params)
     key = tuple((param.name, repr(bindings[param.name])) for param in source.params)
-    binding = ctx.binding_registry.allocate(object(), name, 'function', generic.loc)
+    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', generic.loc)
     binding.type = instance_type
     source.instances[key] = binding  # registered first, so a recursive call finds it
     # the instance is visible under its own name in the defining scope (recursion, other instances)
@@ -3489,6 +3817,10 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
         _validate_recursive_alias(binding, value, named, ctx=ctx)
         named.resolve(value)
     binding.type_value = value
+    if isinstance(value, ty.ObjectType) and value.methods:
+        # declared at first use (or at the end of the module): the bodies may
+        # call functions declared after the alias
+        ctx.pending_methods.append((binding, value))
     return binding.type_value
 
 
@@ -3962,6 +4294,10 @@ def _auto_call_function_value(node: hir.AST, *, ctx: Context, expected: ty.Type 
 
 
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
+    if isinstance(node, hir.BoundMethod):
+        if ty.is_zero_arg_function(node.type):
+            return tcr_function_call(node, p0.Block(node.loc, [], '()', None), ctx=ctx)
+        type_error(ctx.srcfile, 'a method must be called', Pointer(span=node.loc, message='this method takes arguments; methods are not values yet'))
     if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod, hir.DictMethod)):
         return node
     if isinstance(node, hir.DictMethod) and isinstance(node.type, ty.FunctionType) and not node.type.pos_or_kw:
@@ -4455,11 +4791,11 @@ def _tcr_array_method(
         root = _member_root_binding(value, ctx=ctx)
         if root is None:
             not_implemented(ctx.srcfile, loc, 'array methods on an unnamed array value')
-        if root.declaration is not None and root.declaration.decltype == 'const':
+        if (reason := _read_only_reason(root)) is not None:
             user_error(
                 ctx.srcfile,
                 'cannot mutate a field of a const binding',
-                Pointer(span=value.loc, message=f'`{root.name}` is declared const'),
+                Pointer(span=value.loc, message=f'`{root.name}` {reason}'),
             )
         if value.type.length is not None:
             user_error(
@@ -4615,11 +4951,11 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 signature = ty.FunctionType([], [], None, ty.VOID_TYPE)
             if name != 'get':
                 root = _member_root_binding(dictionary, ctx=ctx)
-                if root is not None and root.declaration is not None and root.declaration.decltype == 'const':
+                if (reason := _read_only_reason(root)) is not None:
                     user_error(
                         ctx.srcfile,
                         'cannot mutate a const dictionary',
-                        Pointer(span=binop.left.loc, message=f'`{root.name}` is declared const'),
+                        Pointer(span=binop.left.loc, message=f'`{root.name}` {reason}'),
                     )
             return hir.DictMethod(binop.loc, signature, dictionary, name)
     if name == 'length':
@@ -4679,6 +5015,15 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         )
     field = value.type.field(name)
     if field is None:
+        method = value.type.method(name)
+        if method is not None and method.binding_id is None:
+            _declare_pending_methods(ctx=ctx, for_type=value.type)
+        if method is not None and method.binding_id is not None:
+            function_binding = ctx.binding_registry.by_id[method.binding_id]
+            assert isinstance(function_binding.type, ty.FunctionType)
+            function = hir.ExpressedIdentifier(binop.right.loc, function_binding.type, function_binding.name, binding_id=function_binding.id)
+            bound_type = replace(function_binding.type, pos_or_kw=function_binding.type.pos_or_kw[1:])
+            return hir.BoundMethod(binop.loc, bound_type, function, value)
         user_error(
             ctx.srcfile,
             f'unknown object field `{name}`',
@@ -5041,6 +5386,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     # open a new scope if the block is a scoped block
     type_block = False
     if block.kind == '{}':
+        outer = ctx
         ctx = replace(
             ctx,
             declarations=ctx.declarations.new_child(),
@@ -5048,6 +5394,11 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             module_namespaces=ctx.module_namespaces.new_child(),
             label_scopes=(*ctx.label_scopes, _collect_label_scope(block, ctx=ctx)),
         )
+        if outer.module is None:
+            # the module's root block: methods and overloads are declared in
+            # this scope, and the module checker sweeps it at the end
+            outer.module = ctx
+            ctx.module = ctx
 
     if block.kind == '[]':
         arrows = [item for item in block.inner if _is_top_level_arrow(item)]
@@ -6263,21 +6614,15 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
             )
         binding = _member_root_binding(target, ctx=ctx)
         if binding is not None:
-            if (
-                binding.declaration is not None
-                and binding.declaration.decltype == 'const'
-            ):
+            if (reason := _read_only_reason(binding)) is not None:
                 user_error(
                     ctx.srcfile,
                     'cannot pass a const binding as a mutable place',
                     Pointer(
                         span=prefix.loc,
-                        message=f'`{binding.name}` is declared const',
+                        message=f'`{binding.name}` {reason}',
                     ),
-                    Pointer(
-                        span=binding.declaration.loc,
-                        message='const declaration is here',
-                    ),
+                    *_declaration_pointers(binding),
                 )
         return hir.Place(prefix.loc, target.type, target)
     if prefix.op.symbol not in builtins.UNARY_PREFIX_DUNDER_MAP:
@@ -6744,10 +7089,22 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             not_implemented(ctx.srcfile, spread.loc, 'spreading into a set literal (members need a runtime add)')
         return _tcr_set_literal(binop.right, binop.loc, expected=expected, ctx=ctx)
     if isinstance(binop.op, t2.QJuxtapose):
+        constructor = _type_constructor_target(binop.left, ctx=ctx)
+        if constructor is not None:
+            # a type cannot be multiplied: `Span(1 9)` is only ever a construction
+            return tcr_function_call(constructor, binop.right, ctx=ctx, expected=expected)
+        if isinstance(binop.left, p0.BinOp) and _operator_symbol(binop.left.op) == '.':
+            # `s.grow(2)`: a method is only ever called, never multiplied
+            member = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
+            if isinstance(member, hir.BoundMethod):
+                return tcr_function_call(member, binop.right, ctx=ctx, expected=expected)
         candidates: list[p0.AST] = [replace(binop, op=option) for option in binop.op.options]
         return typecheck_and_resolve_inner(p0.Ambiguous(binop.loc, candidates), ctx=ctx, type_block=type_block, expected=expected)
 
     if isinstance(binop.op, t2.CallJuxtapose):
+        constructor = _type_constructor_target(binop.left, ctx=ctx)
+        if constructor is not None:
+            return tcr_function_call(constructor, binop.right, ctx=ctx, expected=expected)
         left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
         if (
             isinstance(binop.left, p0.Prefix)
@@ -7061,6 +7418,13 @@ def tcr_assignment_target(
     if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
         resolved = tcr_identifier(target.item, ctx=ctx, refined=refined)
         assert isinstance(resolved, hir.ExpressedIdentifier)
+        binding = ctx.binding_registry.by_id.get(resolved.binding_id) if resolved.binding_id is not None else None
+        if binding is not None and binding.read_only_reason is not None:
+            user_error(
+                ctx.srcfile,
+                'cannot assign to a read-only binding',
+                Pointer(span=target.loc, message=f'`{binding.name}` {binding.read_only_reason}'),
+            )
         return resolved
 
     if isinstance(target, p0.BinOp):
@@ -7082,22 +7446,13 @@ def tcr_assignment_target(
                     Pointer(span=target.loc, message='this field is const'),
                 )
             binding = _member_root_binding(access, ctx=ctx)
-            if (
-                binding is not None
-                and binding.declaration is not None
-                and binding.declaration.decltype == 'const'
-            ):
+            if (reason := _read_only_reason(binding)) is not None:
+                assert binding is not None
                 user_error(
                     ctx.srcfile,
                     'cannot mutate a field of a const object',
-                    Pointer(
-                        span=access.value.loc,
-                        message=f'`{binding.name}` is declared const',
-                    ),
-                    Pointer(
-                        span=binding.declaration.loc,
-                        message='const declaration is here',
-                    ),
+                    Pointer(span=access.value.loc, message=f'`{binding.name}` {reason}'),
+                    *_declaration_pointers(binding),
                 )
             return access
         if isinstance(target.op, t2.QJuxtapose):
@@ -7141,21 +7496,15 @@ def tcr_assignment_target(
                 break
             if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
                 binding = ctx.binding_registry.by_id[root.binding_id]
-                if (
-                    binding.declaration is not None
-                    and binding.declaration.decltype == 'const'
-                ):
+                if (reason := _read_only_reason(binding)) is not None:
                     user_error(
                         ctx.srcfile,
                         'cannot mutate an element of a const array',
                         Pointer(
                             span=root.loc,
-                            message=f'`{root.name}` is declared const',
+                            message=f'`{root.name}` {reason}',
                         ),
-                        Pointer(
-                            span=binding.declaration.loc,
-                            message='const declaration is here',
-                        ),
+                        *_declaration_pointers(binding),
                     )
             return resolved
 
@@ -7560,7 +7909,11 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
 
 
 def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
-    """Parse one `name:type` row of an object type, including `fn:(T):>U` desugaring."""
+    """Parse one `name:type` row of an object type, including `fn:(T):>U` desugaring.
+
+    `name:type = default` declares a default: the type's constructor may omit
+    the field, and the default may refer to earlier fields by name.
+    """
 
     mutable = True
     if (
@@ -7572,6 +7925,16 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
     ):
         mutable = item.parts[0].name != 'const'
         item = item.parts[1]
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.BinOp)
+        and isinstance(item.left.op, t1.Operator)
+        and item.left.op.symbol == ':'
+    ):
+        declared = _object_type_member(item.left, ctx=ctx)
+        return replace(declared, mutable=mutable, default=item.right)
     if (
         isinstance(item, p0.BinOp)
         and isinstance(item.op, t1.Operator)
@@ -7966,19 +8329,26 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         case p0.Block(kind='[]', inner=items):
             seen: dict[str, Span] = {}
             fields: list[ty.ObjectField] = []
+            methods: list[ty.MethodSpec] = []
             for item in items:
-                field = _object_type_member(item, ctx=ctx)
-                previous = seen.get(field.name)
+                method_row = _method_row(item)
+                if method_row is not None:
+                    member_name, literal = method_row
+                    methods.append(ty.MethodSpec(member_name, literal))
+                else:
+                    field = _object_type_member(item, ctx=ctx)
+                    member_name = field.name
+                    fields.append(field)
+                previous = seen.get(member_name)
                 if previous is not None:
                     user_error(
                         ctx.srcfile,
-                        f'duplicate object field `{field.name}`',
-                        Pointer(span=item.loc, message='this field repeats a name'),
-                        Pointer(span=previous, message='the earlier field is here'),
+                        f'duplicate object member `{member_name}`',
+                        Pointer(span=item.loc, message='this member repeats a name'),
+                        Pointer(span=previous, message='the earlier member is here'),
                     )
-                seen[field.name] = item.loc
-                fields.append(field)
-            return ty.ObjectType(tuple(fields))
+                seen[member_name] = item.loc
+            return ty.ObjectType(tuple(fields), methods=tuple(methods))
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
@@ -8833,9 +9203,105 @@ def _specialize_interpolated_output(
     return hir.Block(call.loc, ty.VOID_TYPE, statements, False)
 
 
+def _type_constructor_target(ast: p0.AST, *, ctx: Context) -> hir.TypeValue | None:
+    """`Span` in call position, when `Span` names an object type: the value being called is the type."""
+    if not (isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier)):
+        return None
+    binding = ctx.binding_scopes.get(ast.item.name)
+    if binding is None or binding.type_value is None or isinstance(binding.type_value, ty.GenericTypeAlias):
+        return None
+    candidate = hir.TypeValue(ast.loc, ty.TYPE_TYPE, binding.type_value, ast.item.name)
+    return candidate if _constructed_object_type(candidate) is not None else None
+
+
+def _constructed_object_type(left: hir.AST) -> ty.ObjectType | None:
+    """The object type a call target names, when calling it constructs a value."""
+    if not isinstance(left, hir.TypeValue) or isinstance(left.value, ty.GenericTypeAlias):
+        return None
+    unfolded = ty.unfold(left.value)
+    if isinstance(unfolded, ty.ObjectType) and unfolded.brand is None:
+        return unfolded
+    return None
+
+
+def _tcr_type_constructor_call(
+    left: hir.TypeValue,
+    object_type: ty.ObjectType,
+    right: p0.AST,
+    *,
+    ctx: Context,
+) -> hir.AST:
+    """`Span(1 9)` / `Span(stop=9 start=1)`: the field list read as the constructor's signature.
+
+    Positional arguments fill fields in declaration order, keywords name
+    them, and a field left out takes its declared default (checked in field
+    order, so a default may use earlier fields). The call becomes the object
+    literal `[start=1 stop=9]` checked against the type.
+    """
+    overload = _select_constructor_overload(left, object_type, right, ctx=ctx)
+    if overload is not None:
+        return tcr_function_call(overload, right, ctx=ctx)
+    items = right.inner if isinstance(right, p0.Block) else [right]
+    given: dict[str, p0.AST] = {}
+    positional: list[p0.AST] = []
+    for item in items:
+        if (
+            isinstance(item, p0.BinOp)
+            and _operator_symbol(item.op) == '='
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Identifier)
+        ):
+            name = item.left.item.name
+            if name in given:
+                user_error(ctx.srcfile, f'field `{name}` is given twice', Pointer(span=item.loc, message='this repeats an earlier argument'))
+            if not any(f.name == name for f in object_type.fields):
+                user_error(ctx.srcfile, f'`{(left.name or type_to_dewy(left.value))}` has no field `{name}`', Pointer(span=item.left.loc, message='unknown field'))
+            given[name] = item.right
+        else:
+            positional.append(item)
+    if len(positional) > len(object_type.fields):
+        user_error(
+            ctx.srcfile,
+            'too many constructor arguments',
+            Pointer(span=positional[len(object_type.fields)].loc, message=f'`{(left.name or type_to_dewy(left.value))}` has {len(object_type.fields)} fields'),
+        )
+    for field_, value in zip(object_type.fields, positional):
+        if field_.name in given:
+            user_error(ctx.srcfile, f'field `{field_.name}` is given twice', Pointer(span=value.loc, message='this positional argument names a field also given by keyword'))
+        given[field_.name] = value
+    literal_items: list[p0.AST] = []
+    for field_ in object_type.fields:
+        value = given.get(field_.name)
+        if value is None:
+            if field_.default is None:
+                user_error(
+                    ctx.srcfile,
+                    f'missing constructor argument `{field_.name}`',
+                    Pointer(span=right.loc, message=f'`{(left.name or type_to_dewy(left.value))}` needs `{field_.name}:{type_to_dewy(field_.type)}`'),
+                    hint='give it positionally, by keyword, or declare a default in the type (`name:type = default`)',
+                )
+            value = field_.default
+            assert isinstance(value, p0.AST)
+        loc = Span(right.loc.start, right.loc.stop)
+        literal_items.append(p0.BinOp(loc, t1.Operator(loc, '='), p0.Atom(loc, t1.Identifier(loc, field_.name)), value))
+    literal = p0.Block(right.loc, literal_items, '[]', None)
+    ctx.synthesized.append(literal)
+    return typecheck_and_resolve_inner(literal, ctx=ctx, expected=left.value)
+
+
 def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
     if isinstance(left, hir.Block) and not left.scoped and len(left.items) == 1:
         left = left.items[0]
+
+    receiver: hir.AST | None = None
+    if isinstance(left, hir.BoundMethod):
+        receiver = left.receiver
+        left = left.function
+
+    constructed = _constructed_object_type(left)
+    if constructed is not None:
+        assert isinstance(left, hir.TypeValue)
+        return _tcr_type_constructor_call(left, constructed, right, ctx=ctx)
 
     methods: list[ty.FunctionType]
     if isinstance(left.type, ty.FunctionType):
@@ -8847,11 +9313,28 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
             Pointer(span=left.loc, message=f'this has type `{type_to_dewy(left.type)}`, which is not callable'))
 
     contextual_method = methods[0] if len(methods) == 1 and not methods[0].type_params else None
+    if receiver is not None and contextual_method is not None:
+        # the arguments written at the call site do not include `self`
+        contextual_method = replace(contextual_method, pos_or_kw=contextual_method.pos_or_kw[1:])
     pos_args, kw_args, argument_order = parse_call_arguments(
         right,
         ctx=ctx,
         method=contextual_method,
     )
+    if receiver is not None:
+        # a method call: the receiver is the hidden first parameter `self`
+        self_param = methods[0].pos_or_kw[0]
+        if self_param.place:
+            if not isinstance(receiver, (hir.ExpressedIdentifier, hir.MemberAccess)):
+                user_error(
+                    ctx.srcfile,
+                    'this method changes the object, so it needs a place',
+                    Pointer(span=receiver.loc, message='this value is not a binding or a field'),
+                    hint='bind the value first (`let s = …`), then call the method on `s`',
+                )
+            receiver = hir.Place(receiver.loc, receiver.type, receiver)
+        pos_args = [receiver, *pos_args]
+        argument_order = [None, *argument_order]
     for name, arg in kw_args.items():
         if not any(
             method.rest is not None

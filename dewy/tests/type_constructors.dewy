@@ -1,0 +1,25 @@
+# Calling an object type constructs it: the field list is the signature.
+# Positional arguments fill fields in order, keywords name them, and a
+# field with a declared default may be left out (a default may use earlier
+# fields).
+let Span:type = [start:int64 stop:int64 = start label:string = "span"]
+let Pointer:type = [span:Span message:string]
+
+let width = (s:Span):>int64 => s.stop - s.start
+
+let main = ():>int64 => {
+    let a:Span = Span(1 9)                         # positional
+    let b = Span(stop=5 start=2 label="b")         # keywords in any order
+    let c = Span(7)                                # stop defaults to start, label to "span"
+    let p:Pointer = Pointer(Span(3 4) "here")      # nested construction
+    let spans:array<Span> = []
+    spans.push(Span(0 10))
+    spans.push(c)
+    let checks:int64 = 0
+    if width(a) =? 8 and a.label =? "span" { checks += 1 }
+    if width(b) =? 3 and b.label =? "b" { checks += 2 }
+    if width(c) =? 0 and c.start =? 7 { checks += 4 }
+    if width(p.span) =? 1 and p.message =? "here" { checks += 8 }
+    if spans.length =? 2 and width(spans[0]) =? 10 { checks += 16 }
+    return checks + 11                             # 31 + 11 = 42
+}

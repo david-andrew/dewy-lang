@@ -69,9 +69,21 @@ const LabeledLocation:type = Located & Labeled
 
 Fields present on only one side are retained. When both sides contain the same field, its required type is the intersection of the two field types. If that becomes `never`, the complete object type is impossible. The two declarations must also agree about whether the field is mutable; silently choosing one would break the other contract.
 
-## Constructors Are Functions
+## Constructing Objects
 
-A constructor is an ordinary function returning an object:
+A named object type is its own constructor: call it with the fields in order, or by name, and leave out any field the type gives a default for.
+
+<!-- dewy-example: compiler -->
+```dewy
+let Span:type = [start:int64 stop:int64 = start label:string = "span"]
+
+let a = Span(1 9)
+let b = Span(stop=5 start=2 label="b")
+let c = Span(7)                        # stop defaults to start
+printl"{a.stop - a.start} {b.label} {c.stop}"   # 8 b 7
+```
+
+The field list is the signature — the same rules as a function's parameters, with defaults allowed to use earlier fields — so there is no separate class declaration to write. A constructor can still be an ordinary function returning an object when construction needs more than filling fields:
 
 ```dewy
 let make_pair = (left:int64 right:int64):>Pair =>
@@ -80,8 +92,6 @@ let make_pair = (left:int64 right:int64):>Pair =>
 let pair = make_pair(20 22)
 ```
 
-Default parameters, overloads, and generics apply to constructors exactly as they apply to other functions.
-
 A type with a structural body can construct that body directly:
 
 ```dewy
@@ -89,6 +99,31 @@ let unit_x = Pair[left=1 right=0]
 ```
 
 The object literal is checked against the named structure. When a type also carries nominal ancestry, the constructed value retains that identity; [Defining Exceptions](errors-as-values.md#defining-exceptions) shows such a hybrid type.
+
+## Methods
+
+A named type can carry behavior: method rows next to the fields, whose bodies use the fields by name. A method that changes fields needs a binding to work on; one that only reads can be called on anything.
+
+<!-- dewy-example: compiler -->
+```dewy
+let Span:type = [
+    start:int64
+    stop:int64 = start
+    width = () => stop - start
+    grow = (by:int64) => { stop += by }
+]
+
+let s = Span(3 7)
+s.grow(2)
+printl"{s.start}..{s.stop} is {s.width} wide"   # 3..9 is 6 wide
+```
+
+When construction itself needs logic, add a constructor overload with `&=` — an ordinary function returning the type — and `Span(…)` picks the field-wise constructor or the overload by the arguments:
+
+```dewy
+Span &= (text:string):>Span => Span(0 text.length)
+let whole = Span("seven..")     # 0..7
+```
 
 ## Behavior Inside Objects
 

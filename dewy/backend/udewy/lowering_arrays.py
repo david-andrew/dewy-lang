@@ -968,11 +968,15 @@ class _ArrayLowering:
         self,
         node: hir.AST,
         array_type: ty.ArrayType,
+        *,
+        arena: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Materialize a fresh array descriptor and recursively copied buffer."""
 
         if array_type.length is None:
-            return self._clone_dynamic_array_value(node, array_type)
+            return self._clone_dynamic_array_value(node, array_type, arena=arena)
+        if arena:
+            self._target_error(node, 'an arena-backed copy of an exact-length array (inside an element of a growable array)')
         source_is_raw = self._array_use_representation(node) is not None
         source_prelude, source = self._extract_expression(node)
         allocation, target = self._allocate_array_value(array_type, node.loc)
@@ -1041,6 +1045,20 @@ class _ArrayLowering:
             {},
         )
 
+    def _is_growable_element(self, element: ty.Type) -> bool:
+        """Elements a growable (arena-backed) array may hold: words, string handles, objects (as handles)."""
+        return self._is_word_element(element) or isinstance(element, ty.ObjectType)
+
+    def _growable_element_value(
+        self,
+        node: hir.AST,
+        element_type: ty.Type,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """A value to store into a growable array: objects are copied into the arena (value semantics)."""
+        if isinstance(element_type, ty.ObjectType):
+            return self._clone_object_value(node, element_type, arena=True)
+        return self._extract_expression(node)
+
     def _is_word_element(self, element: ty.Type) -> bool:
         """Elements copied as one word: scalars and immutable string handles."""
         return (
@@ -1094,6 +1112,7 @@ class _ArrayLowering:
             self._pointer_element_address(new_data, index, element_bytes, loc),
             element_type,
             loc,
+            arena=True,
         )
         copy_body.append(
             assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc))
@@ -1170,8 +1189,8 @@ class _ArrayLowering:
         element_type = array_type.element
         if method.name == 'join':
             return self._join_string_array(node, method, array_type)
-        if not self._is_word_element(element_type):
-            self._target_error(node, 'growing an array whose elements are not word scalars or string handles')
+        if not self._is_growable_element(element_type):
+            self._target_error(node, 'growing an array whose elements are not word scalars, string handles, or objects')
         loc = node.loc
         prelude, descriptor = self._extract_expression(method.array)
         if isinstance(descriptor, hir.ExpressedIdentifier):
@@ -1184,7 +1203,7 @@ class _ArrayLowering:
         )
         data = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
         if method.name == 'push':
-            value_prelude, value = self._extract_expression(node.pos_args[0])
+            value_prelude, value = self._growable_element_value(node.pos_args[0], element_type)
             next_length = self._int64_binary('__add__', length, self._int64_literal(loc, 1), loc)
             return [
                 *prelude,
@@ -1259,7 +1278,7 @@ class _ArrayLowering:
             ], result
         if method.name == 'insert':
             # grow, shift the tail up from the end, store, extend
-            value_prelude, value = self._extract_expression(node.pos_args[0])
+            value_prelude, value = self._growable_element_value(node.pos_args[0], element_type)
             index_arg = node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args['idx']
             index_prelude, index = self._extract_expression(index_arg)
             index_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('insert_index'))
@@ -1531,10 +1550,10 @@ class _ArrayLowering:
             arena = True
         if arena:
             element = array_type.element
-            if not self._is_word_element(element):
+            if not self._is_growable_element(element):
                 self._target_error(
                     node,
-                    'an arena-backed array whose elements are not word scalars or string handles',
+                    'an arena-backed array whose elements are not word scalars, string handles, or objects',
                 )
         source_prelude, source = self._extract_expression(node)
         element_bytes, _signed = self._array_element_layout(
@@ -1574,6 +1593,9 @@ class _ArrayLowering:
             target_address,
             array_type.element,
             node.loc,
+            # this copy runs in a loop: frame storage for an element object
+            # would not survive the iteration, so objects go to the arena
+            arena=arena or isinstance(array_type.element, ty.ObjectType),
         )
         copy_body.append(hir.Assign(
             node.loc,
@@ -1797,6 +1819,7 @@ class _ArrayLowering:
                 self._pointer_element_address(data_pointer, cursor, element_bytes, loc),
                 element,
                 loc,
+                arena=isinstance(element, ty.ObjectType),  # a copy loop: see `_clone_dynamic_array_value`
             )
             body.extend([
                 assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc)),
@@ -1952,6 +1975,8 @@ class _ArrayLowering:
         target_address: hir.AST,
         element_type: ty.Type,
         loc: Span,
+        *,
+        arena: bool = False,
     ) -> list[hir.AST]:
         """Copy one stored element, recursively materializing mutable values."""
 
@@ -1960,11 +1985,13 @@ class _ArrayLowering:
             prelude, copied = self._clone_array_value(
                 replace(source_value, type='int64'),
                 element_type,
+                arena=arena,
             )
         elif isinstance(element_type, ty.ObjectType):
             prelude, copied = self._clone_object_value(
                 replace(source_value, type='int64'),
                 element_type,
+                arena=arena,
             )
         else:
             prelude, copied = [], source_value
@@ -2077,7 +2104,13 @@ class _ArrayLowering:
         """
 
         if array_type.length is None:
-            return cls._is_word_element_static(array_type.element)
+            # word elements, and objects (arena-backed handles) whose own
+            # layout is returnable
+            element = array_type.element
+            return cls._is_word_element_static(element) or (
+                isinstance(element, ty.ObjectType)
+                and cls._object_result_fields_are_returnable(element)
+            )
         element_type = array_type.element
         return (
             array_type.length == 0

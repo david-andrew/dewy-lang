@@ -1,0 +1,44 @@
+# Growable arrays of objects: elements are handles to arena-backed copies, so
+# push/insert copy the value in (value semantics), pop hands the element back,
+# indexing and iteration read them, and such arrays are returned and stored
+# in fields like any other growable array.
+let Span:type = [start:int64 stop:int64 label:string]
+let Bag:type = [name:string spans:array<Span>]
+
+let width = (s:Span):>int64 => s.stop - s.start
+
+let collect = (count:int64):>array<Span> => {
+    let spans:array<Span> = []
+    let i:int64 = 0
+    loop i <? count {
+        spans.push([start=i stop=i * 2 label="s{i}"])
+        i += 1
+    }
+    return spans
+}
+
+let total_width = (spans:array<Span>):>int64 => {
+    let total:int64 = 0
+    loop s in spans { total += width(s) }
+    return total
+}
+
+let main = ():>int64 => {
+    let spans:array<Span> = collect(4)        # widths 0 1 2 3
+    let first:Span = [start=10 stop=12 label="first"]
+    spans.insert(first 0)                     # widths 2 0 1 2 3
+    first.stop = 99                           # the stored copy is independent
+    let last:Span = spans.pop                 # width 3
+    spans.push([start=0 stop=5 label="tail"]) # widths 2 0 1 2 5
+    let bag:Bag = [name="bag" spans=spans]
+    bag.spans.push([start=1 stop=2 label="extra"])
+    let checks:int64 = 0
+    if spans.length =? 5 and bag.spans.length =? 6 { checks += 1 }
+    if width(spans[0]) =? 2 and spans[0].label =? "first" { checks += 2 }
+    if width(last) =? 3 and last.label =? "s3" { checks += 4 }
+    if total_width(spans) =? 10 and total_width(bag.spans) =? 11 { checks += 8 }
+    let names:int64 = 0
+    loop s in bag.spans { if s.label.length =? 2 { names += 1 } }   # s0 s1 s2 (s3 was popped)
+    if names =? 3 { checks += 16 }
+    return checks + 11                        # 31 + 11 = 42
+}

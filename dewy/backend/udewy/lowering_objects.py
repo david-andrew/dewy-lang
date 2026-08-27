@@ -58,8 +58,10 @@ class _ObjectLowering:
         self,
         node: hir.AST,
         object_type: ty.ObjectType,
+        *,
+        arena: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Materialize an independent structural object value."""
+        """Materialize an independent structural object value (in the arena when it must outlive the frame)."""
 
         source_prelude, source = self._extract_object_pointer(node)
         size, _offsets = self._object_layout(object_type, node)
@@ -72,9 +74,9 @@ class _ObjectLowering:
                 'let',
                 target.name,
                 'int64',
-                self._object_allocation(node.loc, size),
+                self._object_allocation(node.loc, size, arena=arena),
             ),
-            *self._object_copy(target, source, object_type, node.loc),
+            *self._object_copy(target, source, object_type, node.loc, arena=arena),
         ]
         return statements, target
 
@@ -254,7 +256,10 @@ class _ObjectLowering:
             and type_ in {'string', 'grapheme', 'char'}
         )
 
-    def _object_allocation(self, loc: Span, size: int) -> hir.FunctionCall:
+    def _object_allocation(self, loc: Span, size: int, *, arena: bool = False) -> hir.FunctionCall:
+        if arena:
+            # storage that outlives the frame: elements of growable arrays
+            return self._arena_allocation(self._int64_literal(loc, size), loc)
         allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
         return self._intrinsic_call(
             allocator,
@@ -279,7 +284,10 @@ class _ObjectLowering:
         src: hir.AST,
         object_type: ty.ObjectType,
         loc: Span,
+        *,
+        arena: bool = False,
     ) -> list[hir.AST]:
+        """Copy every field; with ``arena``, nested mutable storage is arena-backed too."""
         _size, offsets = self._object_layout(object_type, dest)
         statements: list[hir.AST] = []
         for field in object_type.fields:
@@ -289,12 +297,13 @@ class _ObjectLowering:
             if members is not None:
                 statements.extend(self._union_copy_cell(dest_addr, src_addr, members, loc, prepared=False))
             elif isinstance(field.type, ty.ObjectType):
-                statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc))
+                statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc, arena=arena))
             elif isinstance(field.type, ty.ArrayType):
                 source = self._value_load(src_addr, field.type, loc)
                 prelude, copied = self._clone_array_value(
                     replace(source, type='int64'),
                     field.type,
+                    arena=arena,
                 )
                 statements.extend(prelude)
                 statements.extend(

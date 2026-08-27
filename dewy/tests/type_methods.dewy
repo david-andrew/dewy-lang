@@ -1,0 +1,39 @@
+# Methods declared in an object type, and `&=` constructor overloads.
+# A method's bare field names mean the instance's fields; a method that
+# changes fields takes its receiver as a place.
+let Span:type = [
+    start:int64
+    stop:int64 = start
+    width = () => stop - start
+    is_zero_width = () => start =? stop
+    grow = (by:int64) => { stop += by }
+    shifted = (by:int64):>Span => Span(start + by stop + by)
+    contains = (position:int64):>bool => position >=? start and position <? stop
+    describe = ():>string => "{start}..{stop} ({width})"
+]
+Span &= (text:string):>Span => Span(0 text.length)             # the span of a string
+Span &= (center:int64 radius:int64 wide:bool):>Span => {
+    if wide { return Span(center - 2 * radius center + 2 * radius) }
+    return Span(center - radius center + radius)
+}
+
+let main = ():>int64 => {
+    let s = Span(3 7)
+    let z = Span(5)
+    let parsed = Span("seven..")                # 0..7
+    let around = Span(10 3 false)               # 7..13
+    let checks:int64 = 0
+    if s.width =? 4 and z.is_zero_width and not s.is_zero_width { checks += 1 }
+    s.grow(2)                                     # 3..9
+    if s.width =? 6 and s.contains(8) and not s.contains(9) { checks += 2 }
+    let t = s.shifted(10)                         # 13..19
+    if t.start =? 13 and t.width =? 6 and s.start =? 3 { checks += 4 }
+    if parsed.width =? 7 and parsed.describe =? "0..7 (7)" and around.width =? 6 { checks += 8 }
+    let spans:array<Span> = []
+    spans.push(t)
+    spans.push(Span(0 1))
+    let total:int64 = 0
+    loop item in spans { total += item.width }
+    if total =? 7 { checks += 16 }
+    return checks + 11                            # 31 + 11 = 42
+}

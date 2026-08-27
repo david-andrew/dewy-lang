@@ -316,10 +316,19 @@ class MemberAssign(AST):
 
 
 @dataclass
+class BoundMethod(AST):
+    """`value.method`: a type's method with its receiver; only ever called (see `tcr_function_call`)."""
+
+    function: ExpressedIdentifier  # the hidden `Type__method(self …)` function
+    receiver: AST
+
+
+@dataclass
 class TypeValue(AST):
     """A compile-time type used as a named alias."""
 
     value: ty.TypeAliasValue
+    name: str | None = None  # the alias name it was spelled with, for diagnostics
 
 
 @dataclass

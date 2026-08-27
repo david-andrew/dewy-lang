@@ -3,14 +3,14 @@
 # at too), a pointer on the next line, a message line, notes, and help. The
 # test compares the output with the compiler's renderer.
 let main = ():>int64 => {
-    _report_begin("error" "sample")
-    _report_describe("two pointers on one line")
-    _report_point(12 17 "first operand")
-    _report_point(20 25 "second operand")
-    _report_point(36 41 "next line")
-    _report_note("a note")
-    _report_note("another")
-    _report_hint("hint")
-    _report_render("input" 1 "let total = price * count + tax\nlet other = 1")
+    let report = Report("error" "sample")
+    report.describe("two pointers on one line")
+    report.point(12 17 "first operand")
+    report.point(20 25 "second operand")
+    report.point(36 41 "next line")
+    report.note("a note")
+    report.note("another")
+    report.help("hint")
+    report.render(SrcFile("input" 1 "let total = price * count + tax\nlet other = 1"))
     return 42
 }

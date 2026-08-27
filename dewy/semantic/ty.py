@@ -224,11 +224,32 @@ class ArrayType:
 
 @dataclass(frozen=True)
 class ObjectField:
-    """One named field in source order."""
+    """One named field in source order.
+
+    ``default`` is the field's default expression (parser syntax, kept opaque
+    here) when the type declares one: calling the type as a constructor may
+    omit the field. Defaults do not take part in type identity.
+    """
 
     name: str
     type: TypeExpr
     mutable: bool = True
+    default: object = field(default=None, compare=False, hash=False)
+
+
+@dataclass
+class MethodSpec:
+    """A method declared in an object type (`name = (params) => body`).
+
+    Compiled as a hidden module-level function taking the instance as its
+    first parameter `self` (a place when the body assigns fields); the
+    checker fills ``binding_id`` when it declares that function.
+    """
+
+    name: str
+    literal: object  # the `(params) => body` syntax
+    binding_id: int | None = None
+    place_self: bool = False
 
 
 @dataclass(frozen=True)
@@ -242,6 +263,13 @@ class ObjectType:
 
     fields: tuple[ObjectField, ...]
     brand: str | None = None
+    methods: tuple[MethodSpec, ...] = field(default=(), compare=False, hash=False)
+    """Methods declared in the type; not part of structural identity."""
+    constructors: list[int] = field(default_factory=list, compare=False, hash=False)
+    """Binding ids of `&=` constructor overloads, in declaration order."""
+
+    def method(self, name: str) -> 'MethodSpec | None':
+        return next((m for m in self.methods if m.name == name), None)
 
     def field(self, name: str) -> ObjectField | None:
         for object_field in self.fields:

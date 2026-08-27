@@ -25,6 +25,9 @@ class Binding:
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
     literal_path_parameter: str | None = None
+    read_only_reason: str | None = None
+    """Why the binding cannot be written, when it is not a `const` declaration
+    (a loop variable borrowing an array element)."""
     route_root: int | None = None
     """For a hidden *route* binding (`bag.items`): the root binding's id.
     Length and index facts are keyed by these ids so member arrays get the
@@ -36,6 +39,7 @@ class BindingRegistry:
     """Allocate identities and retain semantic metadata for checked HIR."""
 
     next_id: int = 1
+    next_route_id: int = 1 << 19  # member-route bindings (see `route_id`); ids stay below the bounds analysis's 20-bit fact packing
     by_id: dict[int, Binding] = field(default_factory=dict)
     by_syntax: dict[int, Binding] = field(default_factory=dict)
     route_ids: dict[tuple[int, tuple[str, ...]], int] = field(default_factory=dict)
@@ -49,9 +53,12 @@ class BindingRegistry:
         if existing is not None:
             return existing
         root = self.by_id[root_id]
-        binding = Binding(self.next_id, f'{root.name}.{".".join(path)}', 'value', loc, type_)
+        # routes have their own id range: they are allocated lazily (also by
+        # the analyses after checking), so sharing `next_id` would let a
+        # validation-only compile shift every later binding id
+        binding = Binding(self.next_route_id, f'{root.name}.{".".join(path)}', 'value', loc, type_)
         binding.route_root = root_id
-        self.next_id += 1
+        self.next_route_id += 1
         self.by_id[binding.id] = binding
         self.route_ids[key] = binding.id
         self.routes_by_root.setdefault(root_id, []).append(binding.id)
