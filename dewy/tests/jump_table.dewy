@@ -2,7 +2,7 @@ let add_one = (value:int64):>int64 => value + 1
 let double = (value:int64):>int64 => value * 2
 let add_ten = (value:int64):>int64 => value + 10
 
-const handlers = [add_one double add_ten]
+const handlers = [@add_one @double @add_ten]
 const program:array<uint8> = 0q"000000010002"
 
 let main = ():>int64 => {

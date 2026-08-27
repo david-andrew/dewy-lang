@@ -639,12 +639,6 @@ class Wasm32Backend(Backend):
             self._emit("i64.const 0")
             self._emit("i64.sub")
     
-    def pipe_call(self) -> None:
-        """Handle pipe operator."""
-        self._indirect_arities.add(1)
-        self._emit("i32.wrap_i64")
-        self._emit(f"call_indirect (type {self._fn_type_name(1)})")
-    
     # ========================================================================
     # Memory operations
     # ========================================================================

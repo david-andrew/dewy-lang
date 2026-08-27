@@ -23,7 +23,7 @@ let table_only_handler = (value:int):>int => {
 let main = ():>int => {
     if __load__(words) not=? 7 { return 1 }
     let fn:int = __load__(words + 8)
-    if (fn)(41) not=? 42 { return 2 }
+    if (@fn)(41) not=? 42 { return 2 }
     if __load__(words + 16) not=? text { return 3 }
     if __load__(words + 24) not=? scratch { return 4 }
     if __load__(words + 32) not=? nested { return 5 }
@@ -147,7 +147,7 @@ let handler = (value:int):>int => { return value + 1 }
 
 let main = ():>int => {
     let fn:int = function_global
-    if (fn)(41) not=? 42 { return 1 }
+    if (@fn)(41) not=? 42 { return 1 }
     if string_global not=? text { return 2 }
     function_global = 7
     string_global = 9

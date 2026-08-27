@@ -60,18 +60,6 @@ let main = ():>int => {
     if (1 <? 2 and 3 <? 4 or false) not=? true {
         return 5
     }
-    let piped_sum:int = 1 + 2 |> double
-    if piped_sum not=? 6 {
-        return 6
-    }
-    let piped_chain:int = 1 |> double |> double
-    if piped_chain not=? 4 {
-        return 7
-    }
-    let piped_indirect:int = 1 + 2 |> choose()
-    if piped_indirect not=? 6 {
-        return 8
-    }
     if add(1 + 2 * 3 4 + 5 * 6) not=? 41 {
         return 9
     }

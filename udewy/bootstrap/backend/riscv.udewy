@@ -812,13 +812,6 @@ let rv_binary_op = (op_kind:int):>void => {
     return void
 }
 
-let rv_pipe_call = ():>void => {
-    rv_emit_2op("mv" "t5" "a0")
-    rv_pop_saved_into("a0")
-    rv_emit_indented("jalr ra, t5, 0")
-    return void
-}
-
 let rv_load_mem = (width:int signed:int):>void => {
     if width =? 64 { rv_emit_mem("ld" "a0" 0 "a0") }
     else if width =? 32 {
@@ -1405,7 +1398,6 @@ let rv_install_backend = ():>void => {
     be_restore_value = rv_restore_value
     be_unary_op = rv_unary_op
     be_binary_op = rv_binary_op
-    be_pipe_call = rv_pipe_call
     be_begin_if = rv_begin_if
     be_begin_else = rv_begin_else
     be_end_if = rv_end_if

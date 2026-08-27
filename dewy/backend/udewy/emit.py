@@ -310,7 +310,11 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
         case hir.Assign(): return emit_assign(ast, ctx)
         case hir.ValueCast(): return emit_ast(ast.expr, ctx)
         case hir.Transmute(): return emit_transmute(ast, ctx)
-        case hir.ExpressedIdentifier(): return ast.name
+        case hir.ExpressedIdentifier():
+            # a function used as a value: `@name` reads the same under udewy and Dewy
+            if isinstance(ast.type, (ty.FunctionType, ty.OverloadType)):
+                return f'@{ast.name}'
+            return ast.name
         case hir.FunctionCall(): return emit_function_call(ast, ctx)
         case _:
             raise NotImplementedError(f'emit_ast not implemented for AST type: {type(ast).__name__}')
@@ -348,7 +352,9 @@ def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:
 
 
 def emit_assign(assign: hir.Assign, ctx: EmitContext) -> str:
-    return f'{emit_ast(assign.target, ctx)} {assign.op} {emit_ast(assign.value, ctx)}'
+    # the target is a place, never a function value: no `@` even for function-typed bindings
+    target = assign.target.name if isinstance(assign.target, hir.ExpressedIdentifier) else emit_ast(assign.target, ctx)
+    return f'{target} {assign.op} {emit_ast(assign.value, ctx)}'
 
 
 def emit_flow(flow: hir.Flow, ctx: EmitContext) -> str:
@@ -506,16 +512,15 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
     if call.kw_args:
         raise ValueError('INTERNAL ERROR: keyword argument reached udewy emission')
     args = ' '.join(_emit_call_arg(arg, ctx) for arg in call.pos_args)
-    callee = emit_ast(call.func, ctx)
-    if (
-        isinstance(call.func, hir.ExpressedIdentifier)
-        and (
+    if isinstance(call.func, hir.ExpressedIdentifier):
+        if (
             call.func.name in ctx.direct_function_names
             or call.func.name in UDEWY_INTRINSICS
-        )
-        and call.func.name not in ctx.local_names
-    ):
-        return f'{callee}({args})'
+        ) and call.func.name not in ctx.local_names:
+            return f'{call.func.name}({args})'
+        # an indirect call through a name: udewy requires the `@` spelling
+        return f'(@{call.func.name})({args})'
+    callee = emit_ast(call.func, ctx)
     if isinstance(call.func, hir.Block) and not call.func.scoped:
         return f'{callee}({args})'
     return f'({callee})({args})'

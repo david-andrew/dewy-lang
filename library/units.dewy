@@ -62,10 +62,10 @@ const W = J / s
 # Trigonometry takes an angle quantity and yields a dimensionless fixed value.
 let _cos_rational = (angle:(rational * Angle)):>fixed => _cos_turns(_fixed_from_rational(angle transmute rational))
 let _cos_fixed = (angle:(fixed * Angle)):>fixed => _cos_turns(angle transmute fixed)
-let cos = _cos_rational & _cos_fixed
+let cos = @_cos_rational & @_cos_fixed
 let _sin_rational = (angle:(rational * Angle)):>fixed => _sin_turns(_fixed_from_rational(angle transmute rational))
 let _sin_fixed = (angle:(fixed * Angle)):>fixed => _sin_turns(angle transmute fixed)
-let sin = _sin_rational & _sin_fixed
+let sin = @_sin_rational & @_sin_fixed
 let _tan_rational = (angle:(rational * Angle)):>fixed => _tan_turns(_fixed_from_rational(angle transmute rational))
 let _tan_fixed = (angle:(fixed * Angle)):>fixed => _tan_turns(angle transmute fixed)
-let tan = _tan_rational & _tan_fixed
+let tan = @_tan_rational & @_tan_fixed

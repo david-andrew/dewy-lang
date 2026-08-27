@@ -104,7 +104,7 @@ let helper = ():>int => {
 }
 
 let main = ():>int => {
-    return (helper_ref)()
+    return (@helper_ref)()
 }
 """
 

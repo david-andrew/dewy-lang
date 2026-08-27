@@ -245,7 +245,7 @@ def test_nonliteral_function_field_is_rejected_before_lowering() -> None:
     with pytest.raises(NotImplementedYet, match='non-literal function'):
         _check(
             'let inc = (x:int64):>int64 => x + 1\n'
-            'let f = ():>int64 => { let o = [fn = inc] return o.fn(41) }'
+            'let f = ():>int64 => { let o = [fn = @inc] return o.fn(41) }'
         )
 
 

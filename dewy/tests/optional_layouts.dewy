@@ -4,14 +4,14 @@ let main = ():>int64 => {
     let enabled:bool|undefined = true
     let byte:uint8|undefined = 40
     let values:array<int64>|undefined = [2]
-    let callback:<(value:int64):>int64>|undefined = increment
+    let callback:<(value:int64):>int64>|undefined = @increment
 
     if enabled is? bool and enabled
         and byte is? uint8 and byte =? 40
         and values is? array<int64>
         and callback is? <(value:int64):>int64>
     {
-        return (callback)(values[0] + 39)
+        return callback(values[0] + 39)
     }
     return 0
 }

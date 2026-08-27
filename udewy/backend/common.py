@@ -330,15 +330,6 @@ class Backend(ABC):
         """
 
     @abstractmethod
-    def pipe_call(self) -> None:
-        """
-        Apply the pipe operator.
-
-        Logical stack order is [... left_value fn_ptr]. The backend should call
-        the function pointer with the left value as its first argument and leave
-        the result on the value stack.
-        """
-    
     # ========================================================================
     # Memory operations (intrinsics)
     # ========================================================================

@@ -6,8 +6,8 @@ def test_and_dispatch_constructs_overloads_only_for_callables() -> None:
     source = """
 let f = (x:int):>int => x
 let g = (x:string):>string => x
-let h = f & g
-let k = h & f
+let h = @f & @g
+let k = @h & @f
 let b = true & false
 """
     root = check.typecheck_and_resolve(SrcFile(None, source))

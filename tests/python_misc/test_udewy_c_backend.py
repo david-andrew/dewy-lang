@@ -21,7 +21,7 @@ let choose = ():>int => {
 
 let main = ():>int => {
     let fn:int = choose()
-    let piped:int = 6 |> fn
+    let piped:int = (@fn)(6)
     let tmp:int = __alloca__(16)
     __store__(piped tmp)
     if __load__(tmp) not=? 12 {

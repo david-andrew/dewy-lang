@@ -59,7 +59,7 @@ def test_unknown_callback_use_is_checked_conservatively() -> None:
     source = """
 let invoke = (fn:<():>int64>):>int64 => fn()
 let first = ():>int64 => later()
-invoke(first)
+invoke(@first)
 let later = ():>int64 => 42
 """
     with pytest.raises(UserError, match='`later` used before initialization'):
@@ -70,7 +70,7 @@ def test_actual_callback_effect_does_not_include_unrelated_functions() -> None:
     source = """
 let invoke = (fn:<():>int64>):>int64 => fn()
 let ready = ():>int64 => 42
-invoke(ready)
+invoke(@ready)
 let unrelated = ():>int64 => 0
 """
     _check(source)
@@ -79,9 +79,9 @@ let unrelated = ():>int64 => 0
 def test_callback_effects_propagate_through_function_parameters() -> None:
     source = """
 let invoke = (fn:<():>int64>):>int64 => fn()
-let relay = (fn:<():>int64>):>int64 => invoke(fn)
+let relay = (fn:<():>int64>):>int64 => invoke(@fn)
 let ready = ():>int64 => 42
-relay(ready)
+relay(@ready)
 let unrelated = ():>int64 => 0
 """
     _check(source)
@@ -92,7 +92,7 @@ def test_callable_alternatives_union_their_initialization_effects() -> None:
 let condition:bool = true
 let ready = ():>int64 => 42
 let first = ():>int64 => later()
-let callback:<():>int64> = if condition ready else first
+let callback:<():>int64> = if condition @ready else @first
 callback()
 let later = ():>int64 => 0
 """
@@ -146,7 +146,7 @@ let main = ():>int64 => {
 
 def test_function_defaults_are_initialized_at_the_declaration_site() -> None:
     source = """
-let invoke = (... fn:<():>int64>=later):>int64 => fn()
+let invoke = (... fn:<():>int64>=@later):>int64 => fn()
 let later = ():>int64 => 42
 """
     with pytest.raises(UserError, match='`later` used before initialization'):
@@ -156,7 +156,7 @@ let later = ():>int64 => 42
 def test_positional_default_callback_uses_its_call_site_effects() -> None:
     source = """
 let callback = ():>int64 => later()
-let invoke = (fn:<():>int64>=callback):>int64 => fn()
+let invoke = (fn:<():>int64>=@callback):>int64 => fn()
 invoke()
 let later = ():>int64 => 42
 """
@@ -218,8 +218,8 @@ def test_reassigned_callable_effect_is_reported_as_unresolved() -> None:
     source = """
 let ready = ():>int64 => 42
 let first = ():>int64 => later()
-let callback:<():>int64> = ready
-callback = first
+let callback:<():>int64> = @ready
+callback = @first
 callback()
 let later = ():>int64 => 0
 """

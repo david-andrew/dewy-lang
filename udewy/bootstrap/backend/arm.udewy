@@ -959,13 +959,6 @@ let arm_binary_op = (op_kind:int):>void => {
     return void
 }
 
-let arm_pipe_call = ():>void => {
-    arm_emit_indented("mov x9, x0")
-    arm_pop_saved_into("x0")
-    arm_emit_indented("blr x9")
-    return void
-}
-
 let arm_load_mem = (width:int signed:int):>void => {
     if width =? 64      { arm_emit_indented("ldr x0, [x0]") }
     else if width =? 32 {
@@ -1591,7 +1584,6 @@ let arm_install_backend = ():>void => {
     be_restore_value = arm_restore_value
     be_unary_op = arm_unary_op
     be_binary_op = arm_binary_op
-    be_pipe_call = arm_pipe_call
     be_begin_if = arm_begin_if
     be_begin_else = arm_begin_else
     be_end_if = arm_end_if

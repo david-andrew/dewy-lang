@@ -79,7 +79,7 @@ let execute = (program:int len:int):>int => {
         }
 
         let fn:int = __load__(handlers + opcode * 8)
-        if (fn)(val) {
+        if (@fn)(val) {
             stack_ptr = stack_ptr - 1
             return __load__(calc_stack + stack_ptr * 8)
         }

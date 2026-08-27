@@ -64,7 +64,7 @@ let main = ():>int => {
 '''
 
 STATIC_WORDS_SRC = """
-const handler_alias:int = handler
+const handler_alias:int = @handler
 const text:int = "ok"
 const words:int = __static_words__(7 handler_alias)
 let handler_global:int = handler_alias
@@ -77,8 +77,8 @@ let handler = (value:int):>int => {
 let main = ():>int => {
     if __load__(words) not=? 7 { return 1 }
     let fn:int = __load__(words + 8)
-    if (fn)(41) not=? 42 { return 2 }
-    if (handler_global)(41) not=? 42 { return 3 }
+    if (@fn)(41) not=? 42 { return 2 }
+    if (@handler_global)(41) not=? 42 { return 3 }
     if text_global not=? text { return 4 }
     handler_global = 7
     text_global = 9

@@ -104,9 +104,9 @@ let _print_bigint = (value:BigInt):>void => {
     return void
 }
 
-let print = _print_string & _print_int64 & _print_bool & _print_rational & _print_fixed & _print_bigint
+let print = @_print_string & @_print_int64 & @_print_bool & @_print_rational & @_print_fixed & @_print_bigint
 
-let printl = (s:string):>void => {
+let printl = (s:string=''):>void => {
     print(s)
     print("\n")
 }

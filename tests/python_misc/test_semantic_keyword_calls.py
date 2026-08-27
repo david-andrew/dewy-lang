@@ -173,7 +173,7 @@ def test_named_argument_selects_overload() -> None:
     declarations = _declarations("""
 let integer = (value:int64):>int64 => value
 let boolean = (value:bool):>bool => value
-let overloaded = integer & boolean
+let overloaded = @integer & @boolean
 let result = overloaded(value=true)
 """)
 

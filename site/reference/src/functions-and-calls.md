@@ -104,7 +104,7 @@ Ambiguous or unmatched calls are errors. Runtime multifunction values remain par
 
 ## Function Handles
 
-A bare function name calls the function whenever a valid call is available. `@fn` selects the function binding as a first-class callable handle instead:
+A bare function name is always a call: a function whose parameters all have defaults is called with none, and mentioning a function with required parameters without its arguments is an error rather than a reference. `@fn` selects the function binding as a first-class value instead:
 
 ```dewy
 let sum = (a:int64 b:int64) => a + b

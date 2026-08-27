@@ -395,6 +395,8 @@ def try_parse_stable_expr(
         return None
 
     backend = state.backend
+    if toks[idx].kind == t1.Kind.TK_AT and idx + 1 < len(toks) and toks[idx + 1].kind == t1.Kind.TK_IDENT:
+        idx = idx + 1    # decorative `@name`
     kind = toks[idx].kind
 
     if kind == t1.Kind.TK_NUMBER:
@@ -681,7 +683,6 @@ def declare_extern_function(
 # Operator precedence
 # ============================================================================
 
-PREC_PIPE = 1
 PREC_OR = 2
 PREC_XOR = 3
 PREC_AND = 4
@@ -708,8 +709,6 @@ def get_precedence(kind: t1.Kind) -> int:
         return PREC_ADD
     if kind == t1.Kind.TK_MUL or kind == t1.Kind.TK_IDIV or kind == t1.Kind.TK_MOD:
         return PREC_MUL
-    if kind == t1.Kind.TK_PIPE:
-        return PREC_PIPE
     return 0
 
 
@@ -873,6 +872,14 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
         return idx
 
     if kind == t1.Kind.TK_LEFT_PAREN:
+        if (
+            idx + 3 < len(toks)
+            and toks[idx + 1].kind == t1.Kind.TK_IDENT
+            and toks[idx + 2].kind == t1.Kind.TK_RIGHT_PAREN
+            and toks[idx + 3].kind == t1.Kind.TK_EXPR_CALL
+        ):
+            name = get_token_name(toks, idx + 1, state.src)
+            error(state.src, toks[idx + 1].location, f"an indirect call through a name is written `(@{name})(...)`")
         idx = idx + 1
         if state.ctx.in_condition and not paren_in_condition_is_value_expr(toks, idx - 1):
             idx = parse_condition_expr(toks, idx, state, 0)
@@ -893,6 +900,13 @@ def parse_prefix( toks: list[t1.Token], idx: int, state: ParseState) -> int:
         idx = parse_prefix(toks, idx, state)
         backend.unary_op(t1.Kind.TK_NOT)
         return idx
+
+    if kind == t1.Kind.TK_AT:
+        # decorative: `@name` is the value of `name`, spelled so the program
+        # reads the same under Dewy (where a bare function name is a call)
+        if idx + 1 >= len(toks) or toks[idx + 1].kind != t1.Kind.TK_IDENT:
+            error(state.src, toks[idx].location, "`@` must be followed by a name")
+        return parse_atom(toks, idx + 1, state)
 
     if kind == t1.Kind.TK_MINUS:
         idx = idx + 1
@@ -958,11 +972,7 @@ def _parse_expr(
         
         idx = idx + 1
 
-        if kind == t1.Kind.TK_PIPE:
-            backend.save_value()
-            idx = _parse_expr(toks, idx, state, prec + 1, condition=condition)
-            backend.pipe_call()
-        elif condition and kind == t1.Kind.TK_AND:
+        if condition and kind == t1.Kind.TK_AND:
             false_label = backend.cond_and_split()
             idx = _parse_expr(toks, idx, state, prec + 1, condition=True)
             backend.cond_and_join(false_label)
@@ -1148,7 +1158,7 @@ def skip_ignored_atom(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_BRACE)
         return skip_ignored_type_suffix(toks, idx)
 
-    if kind in (t1.Kind.TK_NOT, t1.Kind.TK_MINUS):
+    if kind in (t1.Kind.TK_NOT, t1.Kind.TK_MINUS, t1.Kind.TK_AT):
         return skip_ignored_atom(toks, idx + 1, state)
 
     error(state.src, toks[idx].location, "Expected expression in ignored type declaration")
@@ -1175,7 +1185,7 @@ def skip_ignored_expr(
             idx = skip_ignored_group(toks, idx, state, t1.Kind.TK_RIGHT_PAREN)
             continue
 
-        if kind == t1.Kind.TK_PIPE or is_binop(kind):
+        if is_binop(kind):
             idx = skip_ignored_atom(toks, idx + 1, state)
             continue
 

@@ -831,15 +831,6 @@ let c_binary_op = (op_kind:int):>void => {
     return void
 }
 
-let c_pipe_call = ():>void => {
-    let fn_expr:int = c_current_expr
-    let arg:int = c_pop_saved()
-    let args:int = vec_new(1)
-    vec_push(args arg)
-    c_set_current(c_emit_temp(c_indirect_call_expr(fn_expr args)))
-    return void
-}
-
 let c_load_mem = (width:int signed:int):>void => {
     let suffix_n:int = width
     let helper_flag:int = 0
@@ -1764,7 +1755,6 @@ let c_install_backend = ():>void => {
     be_restore_value = c_restore_value
     be_unary_op = c_unary_op
     be_binary_op = c_binary_op
-    be_pipe_call = c_pipe_call
     be_begin_if = c_begin_if
     be_begin_else = c_begin_else
     be_end_if = c_end_if

@@ -906,13 +906,6 @@ let x86_binary_op = (op_kind:int):>void => {
     return void
 }
 
-let x86_pipe_call = ():>void => {
-    x86_emit_op_2("movq" "%rax" "%r11")
-    x86_pop_saved_into("%rdi")
-    x86_emit_indented("call *%r11")
-    return void
-}
-
 # ----------------------------------------------------------------------------
 # Memory ops
 # ----------------------------------------------------------------------------
@@ -1587,7 +1580,6 @@ let x86_install_backend = ():>void => {
 
     be_unary_op = x86_unary_op
     be_binary_op = x86_binary_op
-    be_pipe_call = x86_pipe_call
 
     be_begin_if = x86_begin_if
     be_begin_else = x86_begin_else

@@ -40,7 +40,7 @@ let main = ():>int => {
 
     # Indirect overflow call through a function pointer.
     let fn_ptr:int = choose_tail_score10()
-    let indirect_overflow:int = (fn_ptr)(10 9 8 7 6 5 4 3 2 1)
+    let indirect_overflow:int = (@fn_ptr)(10 9 8 7 6 5 4 3 2 1)
 
     # Force many live saved values while evaluating arguments so the
     # register-backed cache has to spill to the real stack.
@@ -59,8 +59,8 @@ let main = ():>int => {
         inc(11)
     )
 
-    # Keep a pipe-based function-pointer call in the mix too.
-    let piped:int = 5 |> choose_inc() |> choose_inc() |> choose_inc()
+    # Keep chained expression calls through computed function pointers in the mix too.
+    let piped:int = (choose_inc())((choose_inc())((choose_inc())(5)))
 
     # Expected value: (90 + 20 + 650 + 8) % 241 = 45
     return (direct_overflow + indirect_overflow + spill_overflow + piped) % 241

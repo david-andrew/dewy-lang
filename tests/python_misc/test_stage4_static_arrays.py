@@ -239,7 +239,7 @@ def test_selected_overload_records_one_safe_array_boundary() -> None:
     lowerer, names = _analyze_arrays('''
 let read_array = (items:array<int64 length=2>):>int64 => items[0]
 let identity = (value:int64):>int64 => value
-let selected = read_array & identity
+let selected = @read_array & @identity
 let read = ():>int64 => {
     let values = [42 0]
     return selected(values)
@@ -296,7 +296,7 @@ let read = ():>uint8 => mutate(bytes)
             '''
 let first = (items:array<int64 length=2>):>int64 => items[0]
 let read = ():>int64 => {
-    let indirect = first
+    let indirect = @first
     let values = [42 0]
     return indirect(values)
 }
@@ -433,7 +433,7 @@ def test_selected_overload_call_uses_descriptor_adapter() -> None:
     emitted = codegen(SrcFile(None, '''
 let read_array = (items:array<int64 length=2>):>int64 => items[0]
 let identity = (value:int64):>int64 => value
-let selected = read_array & identity
+let selected = @read_array & @identity
 let read = ():>int64 => {
     let values = [42 0]
     return selected(values)
@@ -598,7 +598,7 @@ def test_module_const_function_array_uses_typed_static_words() -> None:
     emitted = codegen(SrcFile(None, '''
 let increment = (value:int64):>int64 => value + 1
 let decrement = (value:int64):>int64 => value - 1
-const handlers = [increment decrement]
+const handlers = [@increment @decrement]
 let main = ():>void => {
     let selected = handlers[0]
     return void
@@ -607,7 +607,7 @@ let main = ():>void => {
 
     assert (
         'const handlers:int64 = '
-        '__static_words__(increment decrement)'
+        '__static_words__(@increment @decrement)'
     ) in emitted
     assert 'let selected:<(value:int64):>int64> = __load_i64__(handlers)' in emitted
     assert '__static_alloca__(48)' not in emitted
@@ -618,15 +618,15 @@ def test_local_function_array_uses_typed_stack_data() -> None:
 let increment = (value:int64):>int64 => value + 1
 let decrement = (value:int64):>int64 => value - 1
 let apply = ():>int64 => {
-    let handlers = [increment decrement]
+    let handlers = [@increment @decrement]
     let selected = handlers[0]
     return selected(41)
 }
 '''))
 
     assert 'let handlers:int64 = __alloca__(16)' in emitted
-    assert '__store_i64__((increment transmute int64) handlers)' in emitted
-    assert '__store_i64__((decrement transmute int64) handlers + 8)' in emitted
+    assert '__store_i64__((@increment transmute int64) handlers)' in emitted
+    assert '__store_i64__((@decrement transmute int64) handlers + 8)' in emitted
     assert 'let selected:<(value:int64):>int64> = __load_i64__(handlers)' in emitted
     assert '__alloca__(48)' not in emitted
 
@@ -820,7 +820,7 @@ let main = ():>int64 => {
             '''
 let increment = (value:int64):>int64 => value + 1
 let decrement = (value:int64):>int64 => value - 1
-const handlers = [increment decrement]
+const handlers = [@increment @decrement]
 let main = ():>int64 => {
     let selected = handlers[0]
     return increment(41)
@@ -833,7 +833,7 @@ let main = ():>int64 => {
 let increment = (value:int64):>int64 => value + 1
 let decrement = (value:int64):>int64 => value - 1
 let main = ():>int64 => {
-    let handlers = [increment decrement]
+    let handlers = [@increment @decrement]
     let selected = handlers[0]
     return selected(41)
 }
@@ -922,7 +922,7 @@ let main = ():>int64 => mutate(bytes)
 let read_array = (items:array<int64 length=2>):>int64 =>
     items[0] + items[1]
 let identity = (value:int64):>int64 => value
-let selected = read_array & identity
+let selected = @read_array & @identity
 let main = ():>int64 => {
     let values = [40 2]
     return selected(values)

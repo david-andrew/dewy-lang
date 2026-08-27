@@ -84,7 +84,7 @@ OPERATOR_KINDS = {
     t1.Kind.TK_ASSIGN,
     t1.Kind.TK_UPDATE_ASSIGN,
     t1.Kind.TK_FN_ARROW,
-    t1.Kind.TK_PIPE,
+    t1.Kind.TK_AT,
 }
 
 KEYWORD_TOKEN_TEXT = {
@@ -117,6 +117,7 @@ SINGLE_CHAR_TOKEN_TEXT = {
     t1.Kind.TK_MUL: "*",
     t1.Kind.TK_MOD: "%",
     t1.Kind.TK_ASSIGN: "=",
+    t1.Kind.TK_AT: "@",
 }
 
 MULTI_CHAR_TOKEN_TEXT = {
@@ -130,7 +131,6 @@ MULTI_CHAR_TOKEN_TEXT = {
     t1.Kind.TK_LEFT_SHIFT: "<<",
     t1.Kind.TK_RIGHT_SHIFT: ">>",
     t1.Kind.TK_FN_ARROW: "=>",
-    t1.Kind.TK_PIPE: "|>",
 }
 
 

@@ -600,12 +600,6 @@ class ArmBackend(Backend):
             self._emit("cmp x0, x9")
             self._emit("csetm x0, le")
     
-    def pipe_call(self) -> None:
-        """Handle pipe operator: call function with left as arg."""
-        self._emit("mov x9, x0")       # save fn ptr
-        self._pop_saved_into("x0")     # arg1
-        self._emit("blr x9")
-    
     # ========================================================================
     # Memory operations
     # ========================================================================

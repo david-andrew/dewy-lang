@@ -121,6 +121,6 @@ Grouping several piped arguments keeps any named bindings local to the group.
 
 ## Functions as Values
 
-Functions can also be passed, stored, and configured for a later call. Because a bare function name normally calls it whenever a valid call is available, Dewy uses `@` to select the function itself.
+Functions can also be passed, stored, and configured for a later call. Because a bare function name is always a call — a function with required parameters cannot even be mentioned without them — Dewy uses `@` to select the function itself.
 
 That topic builds on places, object members, and grouping, so it is developed later in [Function Values and Composition](functional-programming.md). The Reference defines exact [argument binding](../../reference/functions-and-calls.html#argument-binding) independently of those function-handle details.

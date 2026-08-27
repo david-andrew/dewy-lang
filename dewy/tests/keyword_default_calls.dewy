@@ -5,7 +5,7 @@ let next_default = ():>int64 => {
 }
 let lazy = (... value:int64=next_default()):>int64 => value
 let forty_two = ():>int64 => 42
-let invoke = (... fn:<():>int64>=forty_two):>int64 => fn()
+let invoke = (... fn:<():>int64>=@forty_two):>int64 => fn()
 let add = (x:int64 y:int64=2):>int64 => x + y
 let inferred = (x:int64 y=2):>int64 => x + y
 let interleaved = (x:int64 y:int64=2 z:int64):>int64 => x + y + z
@@ -13,7 +13,7 @@ let subtract = (x:int64 y:int64):>int64 => x - y
 let required = (x:int64 ... y:int64):>int64 => x + y
 let integer = (x:int64 y:int64=2):>int64 => x + y
 let boolean = (x:bool y:int64=2):>int64 => if x 40 + y else y
-let selected = integer & boolean
+let selected = @integer & @boolean
 
 let fresh = (... items:array<int64 length=2>=[0 2]):>int64 => {
     let result:int64 = items[0] + items[1]
@@ -22,7 +22,7 @@ let fresh = (... items:array<int64 length=2>=[0 2]):>int64 => {
 }
 
 let main = ():>int64 => {
-    let fn = add
+    let fn = @add
     let object = [
         base = 40
         method = (value:int64=2):>int64 => base + value
@@ -36,7 +36,7 @@ let main = ():>int64 => {
     let positional_override:int64 = add(39 3)
     let reordered:int64 = subtract(y=0 x=42)
     let piped:int64 = 40 |> add
-    let indirect:int64 = (fn)(40)
+    let indirect:int64 = (@fn)(40)
     let overloaded:int64 = selected(40)
     let method:int64 = object.method()
     let keyword_only:int64 = required(40 y=2)

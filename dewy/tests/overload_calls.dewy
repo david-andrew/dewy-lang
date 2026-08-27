@@ -7,8 +7,8 @@ let identity = (x:int64):>int64 => {
 let sum = (left:int64 right:int64):>int64 => {
     return left + right
 }
-let choose = zero & identity
-let nested = choose & sum
+let choose = @zero & @identity
+let nested = @choose & @sum
 let main = ():>int64 => {
     return nested() + nested(2) + nested(10 10)
 }

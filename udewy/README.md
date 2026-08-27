@@ -320,7 +320,6 @@ Precedence levels (highest to lowest):
 | 3 | `and` | Bitwise/logical AND |
 | 2 | `xor` | Bitwise/logical XOR |
 | 1 | `or` | Bitwise/logical OR |
-| 0 | `\|>` | Pipe |
 
 **Examples:**
 ```udewy
@@ -404,17 +403,6 @@ Due to the boolean representation (`true` = all 1s, `false` = all 0s), these ope
 
 **Important:** In ordinary expressions, `and` and `or` are **bitwise** and both operands are always evaluated. In `if` and `loop` conditions only, `and` and `or` use **logical short-circuit** evaluation (compatible with Dewy bool conditions): the right-hand side is skipped when the result is already determined.
 
-### Pipe Operator
-
-The pipe operator `|>` passes the left operand as the first argument to the function on the right:
-
-```udewy
-result = x |> double |> add_one
-# equivalent to: add_one(double(x))
-```
-
-The right operand must evaluate to a function pointer.
-
 ### Parentheses and Grouping
 
 Parentheses override precedence and grouping:
@@ -433,12 +421,14 @@ result = add(1 2)
 **Expression call** (calling a computed function pointer):
 ```udewy
 let fn_ptr:int = get_handler()
-(fn_ptr)(arg1 arg2)
+(@fn_ptr)(arg1 arg2)
 ```
 
 Arguments are space-separated (no commas).
 
-> NOTE: Indirect calls require parentheses around the callee. Bare `fn_ptr(arg1 arg2)` is always a named call: it looks up a top-level function `fn_ptr` and ignores any local or global binding of that name. Use `(fn_ptr)(arg1 arg2)` or `arg1 |> fn_ptr` to call through a value. Consequently, binding a local or global with the same name as an existing top-level function is ill-formed — `name(...)` will still call the function, not the binding.
+> NOTE: Indirect calls require parentheses around the callee. Bare `fn_ptr(arg1 arg2)` is always a named call: it looks up a top-level function `fn_ptr` and ignores any local or global binding of that name. Use `(@fn_ptr)(arg1 arg2)` to call through a value. Consequently, binding a local or global with the same name as an existing top-level function is ill-formed — `name(...)` will still call the function, not the binding.
+>
+> `@name` is decorative in udewy: it is the value of `name`, exactly as the bare name is. It exists so a udewy program reads the same under Dewy, where a bare function name is always a call and `@name` means the function itself. Write it wherever a function is used as a value — `return @double`, `let handler:int = @on_start` — and it is *required* when a name in parentheses is called: `(fn_ptr)(args)` is rejected, because under Dewy that would call `fn_ptr()` first and apply the arguments to its result.
 
 ---
 
@@ -826,7 +816,7 @@ Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings
 ```udewy
 const handlers:int = __static_words__(on_start on_update on_stop)
 let handler:int = __load__(handlers + state * 8)
-(handler)(context)
+(@handler)(context)
 ```
 
 Integer entries use the target's native 64-bit byte order. References use the backend's normal runtime representation: addresses on native and C targets, linear-memory addresses for WASM data, and WASM function-table indices for functions. This makes `__static_words__` suitable for vtables, lookup tables, and ABI descriptors interpreted by the consumer. Use based strings instead when the bytes must be identical across targets.
@@ -1156,7 +1146,6 @@ binop           ::= '+' | '-' | '*' | '//' | '%'
                   | '<<' | '>>'
                   | '=?' | 'not=?' | '>?' | '<?' | '>=?' | '<=?'
                   | 'and' | 'or' | 'xor'
-                  | '|>'
 
 const_expr      ::= NUMBER | STRING | BASED_STRING | IDENT
 

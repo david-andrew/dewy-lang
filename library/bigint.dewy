@@ -218,26 +218,22 @@ let _bigint_ge = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) >=? 0
 # decimal digits, most significant first, by repeated division by 10^9
 let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {
     let chunks:array<uint64> = []          # least significant chunk first
-    let current:array<uint64> = limbs
+    let current:array<uint64> = limbs      # a copy, divided in place
     loop current.length >? 0 {
-        let next:array<uint64> = []
+        # short division by 10^9, most significant limb first: each quotient
+        # limb depends only on the limb it replaces and the running remainder
         let i:int64 = current.length
         let remainder:uint64 = 0
-        let quotient:array<uint64> = []
         loop i >? 0 {
             i = i - 1
             if i <? current.length {
                 let value:uint64 = (remainder << 32) or current[i]
-                quotient.push(value // 1000000000)
+                current[i] = value // 1000000000
                 remainder = value % 1000000000
             }
         }
-        # quotient was built most significant first: reverse into next
-        let j:int64 = quotient.length
-        loop j >? 0 { j = j - 1  if j <? quotient.length { next.push(quotient[j]) } }
-        _bigint_trim(@next)
+        _bigint_trim(@current)
         chunks.push(remainder)
-        current = next
     }
     return chunks
 }

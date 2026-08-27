@@ -526,16 +526,6 @@ class X86_64Backend(Backend):
             self._emit("movzbq %al, %rax")
             self._emit("negq %rax")
     
-    def pipe_call(self) -> None:
-        """
-        Handle pipe operator: call function with left as arg.
-        
-        Right (function pointer) is in rax, left (arg) was saved.
-        """
-        self._emit("movq %rax, %r11")  # save fn ptr
-        self._pop_saved_into("%rdi")   # arg1
-        self._emit("call *%r11")
-    
     # ========================================================================
     # Memory operations
     # ========================================================================

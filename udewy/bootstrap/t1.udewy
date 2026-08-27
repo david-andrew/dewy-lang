@@ -57,8 +57,8 @@ const TK_FN_COLON_TMP:int   = 44   # _TK_FN_COLON
 const TK_TYPE:int           = 45
 const TK_FN_TYPE:int        = 46
 const TK_FN_ARROW:int       = 47
-const TK_PIPE:int           = 48
-const TK_TRANSMUTE:int      = 49
+const TK_TRANSMUTE:int      = 48
+const TK_AT:int             = 49   # `@name`: decorative marker on a name used as a value
 
 const T1_KIND_NAMES:int = __static_words__(
     "TK_UNKNOWN"
@@ -71,7 +71,7 @@ const T1_KIND_NAMES:int = __static_words__(
     "TK_NOT" "TK_LEFT_SHIFT" "TK_RIGHT_SHIFT" "TK_ASSIGN" "TK_UPDATE_ASSIGN"
     "TK_EXPR_CALL" "TK_LEFT_PAREN" "TK_RIGHT_PAREN" "TK_LEFT_BRACE" "TK_RIGHT_BRACE"
     "TK_LEFT_BRACKET" "TK_RIGHT_BRACKET" "_TK_COLON" "_TK_FN_COLON" "TK_TYPE"
-    "TK_FN_TYPE" "TK_FN_ARROW" "TK_PIPE" "TK_TRANSMUTE"
+    "TK_FN_TYPE" "TK_FN_ARROW" "TK_TRANSMUTE" "TK_AT"
 )
 
 # ----------------------------------------------------------------------------
@@ -90,10 +90,10 @@ const T1_CH_LANGLE:int = 60
 const T1_CH_RANGLE:int = 62
 const T1_CH_EQ:int = 61
 const T1_CH_QUESTION:int = 63
-const T1_CH_PIPE:int = 124
 const T1_CH_COLON:int = 58
 const T1_CH_PLUS:int = 43
 const T1_CH_MINUS:int = 45
+const T1_CH_AT:int = 64
 const T1_CH_STAR:int = 42
 const T1_CH_SLASH:int = 47
 const T1_CH_PERCENT:int = 37
@@ -317,10 +317,6 @@ let t1_match_symbol = (src:int n:int i:int len_out:int):>int => {
             __store__(2 len_out)
             return TK_FN_ARROW
         }
-        if (a2 =? T1_CH_PIPE) and (b2 =? T1_CH_RANGLE) {
-            __store__(2 len_out)
-            return TK_PIPE
-        }
         if (a2 =? T1_CH_LANGLE) and (b2 =? T1_CH_LANGLE) {
             __store__(2 len_out)
             return TK_LEFT_SHIFT
@@ -334,6 +330,7 @@ let t1_match_symbol = (src:int n:int i:int len_out:int):>int => {
         let a3:int = __load_u8__(src + i)
         if a3 =? T1_CH_PLUS { __store__(1 len_out)  return TK_PLUS }
         if a3 =? T1_CH_MINUS { __store__(1 len_out)  return TK_MINUS }
+        if a3 =? T1_CH_AT { __store__(1 len_out)  return TK_AT }
         if a3 =? T1_CH_STAR { __store__(1 len_out)  return TK_MUL }
         if a3 =? T1_CH_PERCENT { __store__(1 len_out)  return TK_MOD }
         if a3 =? T1_CH_LPAREN { __store__(1 len_out)  return TK_LEFT_PAREN }

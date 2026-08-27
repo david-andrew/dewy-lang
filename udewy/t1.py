@@ -63,8 +63,8 @@ class Kind(Enum):
     TK_TYPE          = auto()
     TK_FN_TYPE       = auto()    # `:>` e.g. `let foo = ():>bar => { ... }`
     TK_FN_ARROW      = auto()    # `=>`
-    TK_PIPE          = auto()    # `|>` e.g. `x |> f1 |> f2 |> f3`
     TK_TRANSMUTE     = auto()    # `transmute` i.e. `<expr> transmute <(ident typeparam?)|typeparam>` e.g. `true transmute uint64`, `buffer transmute array<byte>`, `foo transmute <int | string | bool>`, etc.
+    TK_AT            = auto()    # `@name`: decorative marker on a name used as a value (never a call)
 
 # operators that can be in place operators 
 POSSIBLE_IN_PLACE_OPS: set[Kind] = {
@@ -122,13 +122,13 @@ SYMBOL_TOKENS: list[tuple[str, Kind]] = [
     ("<?",  Kind.TK_LT),
     (":>",  Kind._TK_FN_COLON),
     ("=>",  Kind.TK_FN_ARROW),
-    ("|>",  Kind.TK_PIPE),
     ("<<",  Kind.TK_LEFT_SHIFT),
     (">>",  Kind.TK_RIGHT_SHIFT),
 
     # SINGLE_CHAR_TOKENS
     ("+", Kind.TK_PLUS),
     ("-", Kind.TK_MINUS),
+    ("@", Kind.TK_AT),
     ("*", Kind.TK_MUL),
     ("%", Kind.TK_MOD),
     ("(", Kind.TK_LEFT_PAREN),

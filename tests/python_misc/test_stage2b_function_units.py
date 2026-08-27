@@ -19,8 +19,8 @@ def test_overload_calls_record_flat_method_indices() -> None:
 let zero = ():>int64 => 20
 let identity = (x:int64):>int64 => x
 let sum = (left:int64 right:int64):>int64 => left + right
-let choose = zero & identity
-let nested = choose & sum
+let choose = @zero & @identity
+let nested = @choose & @sum
 let main = ():>int64 => {
     let a:int64 = nested()
     let b:int64 = nested(2)
@@ -48,8 +48,8 @@ def test_nested_overloads_lower_to_existing_concrete_symbols() -> None:
 let zero = ():>int64 => 20
 let identity = (x:int64):>int64 => x
 let sum = (left:int64 right:int64):>int64 => left + right
-let choose = zero & identity
-let nested = choose & sum
+let choose = @zero & @identity
+let nested = @choose & @sum
 let main = ():>int64 => {
     return nested() + nested(2) + nested(10 10)
 }
@@ -99,8 +99,8 @@ def test_runtime_multifunction_values_are_rejected() -> None:
     source = """
 let zero = ():>int64 => 20
 let identity = (x:int64):>int64 => x
-let choose = zero & identity
-let get = () => choose
+let choose = @zero & @identity
+let get = () => @choose
 let main = ():>int64 => 42
 """
     with pytest.raises(NotImplementedYet, match='runtime multifunction values'):

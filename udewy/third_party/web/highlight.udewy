@@ -45,7 +45,7 @@ const HL_TOKEN_COLORS:int = __static_words__(
     HL_KEYWORD HL_OPERATOR HL_OPERATOR HL_OPERATOR HL_OPERATOR
     HL_PUNCTUATION HL_PUNCTUATION HL_PUNCTUATION HL_BRACE HL_BRACE
     HL_PUNCTUATION HL_PUNCTUATION 0 0 HL_TYPE
-    HL_TYPE HL_OPERATOR HL_OPERATOR HL_KEYWORD
+    HL_TYPE HL_OPERATOR HL_KEYWORD HL_OPERATOR
 )
 
 # ----------------------------------------------------------------------------
@@ -471,7 +471,6 @@ let hl_token_end = (src:int n:int loc:int val:int kind:int):>int => {
     if kind =? TK_LEFT_SHIFT { return loc + 2 }
     if kind =? TK_RIGHT_SHIFT { return loc + 2 }
     if kind =? TK_FN_ARROW { return loc + 2 }
-    if kind =? TK_PIPE { return loc + 2 }
     if kind =? TK_GT_EQ { return loc + 3 }
     if kind =? TK_LT_EQ { return loc + 3 }
     # keywords

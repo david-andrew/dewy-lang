@@ -390,8 +390,8 @@ def test_function_values_lower_to_udewy_indirect_calls(
 
     assert 'let choose = ():><(x:int64):>int64>' in emitted
     assert 'let fn_ptr:<(x:int64):>int64> = choose()' in emitted
-    assert 'let indirect:int64 = (fn_ptr)(5)' in emitted
-    assert 'let piped:int64 = (fn_ptr)(6)' in emitted
+    assert 'let indirect:int64 = (@fn_ptr)(5)' in emitted
+    assert 'let piped:int64 = (@fn_ptr)(6)' in emitted
 
     udewy_path = tmp_path / 'indirect_calls.udewy'
     udewy_path.write_text(emitted)
@@ -414,12 +414,12 @@ def test_jump_table_codegen_uses_raw_static_storage() -> None:
 
     assert (
         'const handlers:int64 = '
-        '__static_words__(add_one double add_ten)'
+        '__static_words__(@add_one @double @add_ten)'
     ) in emitted
     assert 'const program:int64 = 0x"000102"' in emitted
     assert '0q"' not in emitted
     assert '__load_i64__(handlers + (opcode * 8))' in emitted
-    assert 'accumulator = (handler)(accumulator)' in emitted
+    assert 'accumulator = (@handler)(accumulator)' in emitted
     assert 'alloca__(48)' not in emitted
     assert '__store_i64__(' not in emitted
 

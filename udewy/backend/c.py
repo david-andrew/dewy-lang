@@ -1180,11 +1180,6 @@ class CBackend(Backend):
             raise RuntimeError(f"unsupported binary operator: {op_kind}")
         self._set_current(self._emit_temp(expr))
 
-    def pipe_call(self) -> None:
-        fn_expr = self._current_expr()
-        arg_expr = self._pop_saved()
-        self._set_current(self._emit_temp(f"{self._fn_cast_expr(fn_expr, 1)}({arg_expr})"))
-
     # ========================================================================
     # Memory operations (intrinsics)
     # ========================================================================

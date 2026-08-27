@@ -578,12 +578,6 @@ class RiscvBackend(Backend):
             self._emit("seqz a0, a0")
             self._emit("neg a0, a0")
     
-    def pipe_call(self) -> None:
-        """Handle pipe operator: call function with left as arg."""
-        self._emit("mv t5, a0")      # save fn ptr
-        self._pop_saved_into("a0")   # arg1
-        self._emit("jalr ra, t5, 0")
-    
     # ========================================================================
     # Memory operations
     # ========================================================================

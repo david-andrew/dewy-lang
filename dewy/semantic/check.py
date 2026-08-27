@@ -281,7 +281,11 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
         case p0.Atom(item=t1.Identifier(name='undefined')):
             return hir.Undefined(ast.item.loc, 'undefined')
-        case p0.Atom(item=t1.Identifier()): return tcr_identifier(ast.item, ctx=ctx)
+        case p0.Atom(item=t1.Identifier()):
+            resolved = tcr_identifier(ast.item, ctx=ctx)
+            if call_target or type_block:
+                return resolved
+            return _auto_call_function_value(resolved, ctx=ctx, expected=expected)
         case p0.Atom(item=t1.String(content=content)):
             from .unicode.graphemes import unicode_scalars
 
@@ -3238,6 +3242,31 @@ def _mark_object_receiver(
     )
 
 
+def _accepts_no_arguments(type_: ty.Type) -> bool:
+    """Whether a callable type has some method every parameter of which is optional."""
+    methods = type_.methods if isinstance(type_, ty.OverloadType) else [type_]
+    return any(
+        isinstance(method, ty.FunctionType)
+        and all(not param.required for param in method.pos_or_kw)
+        and all(not param.required for param in method.kw_only)
+        for method in methods
+    )
+
+
+def _auto_call_function_value(node: hir.AST, *, ctx: Context, expected: ty.Type | None = None) -> hir.AST:
+    """A bare function name is a call. `@name` is the way to mean the function itself."""
+    if not isinstance(node, hir.ExpressedIdentifier) or not isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
+        return node
+    if _accepts_no_arguments(node.type):
+        return tcr_function_call(node, p0.Block(node.loc, [], '()', None), ctx=ctx, expected=expected)
+    type_error(
+        ctx.srcfile,
+        f'`{node.name}` needs arguments',
+        Pointer(span=node.loc, message='a bare function name calls the function, and this one has required parameters'),
+        hint=f'call it with its arguments, or write `@{node.name}` to mean the function itself',
+    )
+
+
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
     if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod, hir.DictMethod)):
         return node
@@ -5299,6 +5328,14 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
     if not isinstance(prefix.op, t1.Operator):
         not_implemented(ctx.srcfile, prefix.op.loc, 'broadcast prefix operator')
     if prefix.op.symbol == '@':
+        handle_ast = prefix.item
+        if isinstance(handle_ast, p0.Block) and handle_ast.kind == '()' and len(handle_ast.inner) == 1:
+            handle_ast = handle_ast.inner[0]
+        if isinstance(handle_ast, p0.Atom) and isinstance(handle_ast.item, t1.Identifier):
+            handle = tcr_identifier(handle_ast.item, ctx=ctx)
+            if isinstance(handle.type, (ty.FunctionType, ty.OverloadType)):
+                # `@name` selects the function value instead of calling it
+                return handle
         if not ctx.allow_place_expression:
             type_error(
                 ctx.srcfile,
@@ -5808,6 +5845,13 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     if isinstance(binop.op, t2.CallJuxtapose):
         left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
+        if (
+            isinstance(binop.left, p0.Prefix)
+            and isinstance(binop.left.op, t1.Operator)
+            and binop.left.op.symbol == '@'
+            and isinstance(left.type, (ty.FunctionType, ty.OverloadType))
+        ):
+            not_implemented(ctx.srcfile, binop.loc, 'partial application with `@`')
         return tcr_function_call(left, binop.right, ctx=ctx, expected=expected)
 
     if isinstance(binop.op, t2.CombinedAssignmentOp):
@@ -5985,17 +6029,18 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         case t2.MultiplyJuxtapose():
             if (
                 isinstance(left, hir.FunctionCall)
-                and isinstance(left.func, (hir.ArrayMethod, hir.MemberAccess))
+                and isinstance(left.func, (hir.ArrayMethod, hir.MemberAccess, hir.ExpressedIdentifier))
                 and not left.pos_args
                 and not left.kw_args
                 and isinstance(binop.right, p0.Block)
                 and binop.right.kind == '()'
             ):
-                # `xs.pop(2)` is a call with arguments, never `(xs.pop) * (2)`:
-                # an auto-called method followed by parentheses is not a product
+                # `xs.pop(2)` and `choose(22)` are calls with arguments, never
+                # `(xs.pop) * (2)`: an auto-called function followed by
+                # parentheses is not a product
                 type_error(
                     ctx.srcfile,
-                    'method followed by parentheses is a call',
+                    'function followed by parentheses is a call',
                     Pointer(span=binop.loc, message='this reads as a call, not a product'),
                 )
             return _dispatch_builtin(

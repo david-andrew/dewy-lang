@@ -649,13 +649,6 @@ let w_binary_op = (op_kind:int):>void => {
     return void
 }
 
-let w_pipe_call = ():>void => {
-    intset_add(w_indirect_arities 1)
-    w_emit("i32.wrap_i64")
-    w_emit("call_indirect (type $type_fn1)")
-    return void
-}
-
 let w_load_mem = (width:int signed:int):>void => {
     w_emit("i32.wrap_i64")
     if width =? 64 { w_emit("i64.load") }
@@ -3291,7 +3284,6 @@ let w_install_backend = ():>void => {
     be_restore_value = w_restore_value
     be_unary_op = w_unary_op
     be_binary_op = w_binary_op
-    be_pipe_call = w_pipe_call
     be_begin_if = w_begin_if
     be_begin_else = w_begin_else
     be_end_if = w_end_if

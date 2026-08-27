@@ -61,16 +61,16 @@ let double = (x:int64):>int64 => {
     return x * 2
 }
 let choose = ():><(x:int64):>int64> => {
-    return double
+    return @double
 }
 let apply = (fn:<(x:int64):>int64> value:int64):>int64 => {
     return fn(value)
 }
 let main = ():>int64 => {
     let fn_ptr:<(x:int64):>int64> = choose()
-    let indirect:int64 = (fn_ptr)(5)
+    let indirect:int64 = (@fn_ptr)(5)
     let piped:int64 = 6 |> fn_ptr
-    return apply(fn_ptr indirect + piped)
+    return apply(@fn_ptr indirect + piped)
 }
 """
     root = check.typecheck_and_resolve(SrcFile(None, source))

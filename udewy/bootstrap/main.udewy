@@ -141,7 +141,7 @@ let main = (argc:int argv:int):>int => {
     }
     let combined:int = loaded_source(loaded)
     diag_set_source(input_cstr combined str_len(combined))
-    (be_set_imported_sources)(loaded_sources(loaded))
+    (@be_set_imported_sources)(loaded_sources(loaded))
     let toks:int = t1_tokenize(combined)
     let asm:int = parse_run(toks combined)
 
@@ -159,7 +159,7 @@ let main = (argc:int argv:int):>int => {
         cache_dir = path_join(cache_dir cache_parent)
     }
     let input_stem:int = path_stem(cache_rel)
-    let exe_path:int = (be_compile_and_link)(asm input_stem cache_dir opts)
+    let exe_path:int = (@be_compile_and_link)(asm input_stem cache_dir opts)
 
     if g_compile_only {
         eprint("Compiled: ")
@@ -167,5 +167,5 @@ let main = (argc:int argv:int):>int => {
         return 0
     }
 
-    return (be_run)(exe_path g_script_args opts)
+    return (@be_run)(exe_path g_script_args opts)
 }
