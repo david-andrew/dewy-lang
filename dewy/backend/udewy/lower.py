@@ -1410,6 +1410,8 @@ class _Lowerer(
         if isinstance(node, hir.Suppress):
             self._discover_node(node.item, scope, current_function)
             return
+        if isinstance(node, hir.Assert):
+            return  # proven during checking; nothing of it is lowered
         if isinstance(node, hir.ExpressedIdentifier):
             binding = (
                 self.binding_by_semantic_id.get(node.binding_id)
@@ -2810,7 +2812,7 @@ class _Lowerer(
         """Return target statements, inserting expression-extraction preludes."""
         if isinstance(node, hir.Suppress):
             return self._lower_statement(node.item)
-        if isinstance(node, hir.ScopeMetatag):
+        if isinstance(node, (hir.ScopeMetatag, hir.Assert)):
             return []
         if isinstance(node, hir.Block):
             if not node.scoped:

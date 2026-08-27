@@ -1,0 +1,33 @@
+# `$assert` is proven at compile time; `$runtime_assert` checks at runtime
+# and its failure path diverges, so the facts flow past it like a guard.
+let xs:array<int64> = [1 2 3]
+$assert 1 + 1 =? 2
+$assert xs.length =? 3, "three elements"
+$assert "ab" =? "ab"
+
+let index_after_guard = (ys:array<int64> i:int64):>int64 => {
+    $runtime_assert i >=? 0 and i <? ys.length, "index {i} out of range"
+    return ys[i]
+}
+
+let get_or_zero = (ys:array<int64> i:int64):>int64 => {
+    if i <? 0 or i >=? ys.length { return 0 }
+    return ys[i]                      # the early return proves the index
+}
+
+let describe = (v:int64|string):>int64 => {
+    $runtime_assert v is? int64
+    return v + 1
+}
+
+let main = ():>int64 => {
+    let x:int64 = 3
+    $assert x <? 5
+    $runtime_assert x >? 0, "x is {x}"
+    let total:int64 = index_after_guard(xs 1) + get_or_zero(xs 2) + get_or_zero(xs 9)
+    loop i in 0..2 {
+        $assert i <? 3
+        total += xs[i]                # 6
+    }
+    return total + describe(30)       # 2 + 3 + 0 + 6 + 31 = 42
+}

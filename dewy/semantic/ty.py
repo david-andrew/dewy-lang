@@ -1329,6 +1329,14 @@ class TypeSystem:
             if name in contextual_type_vars:
                 return self.is_subtype(actual, current)
             if current == actual:
+                # `T` bound to the same singleton twice still names the operand
+                # type, not the result: `1 + 1` is an `int`, not the singleton `1`
+                if isinstance(current, IntegerLiteralType):
+                    bindings[name] = 'int'
+                elif isinstance(current, StringLiteralType):
+                    bindings[name] = StringType()
+                elif isinstance(current, BinaryLiteralType):
+                    bindings[name] = ArrayType('uint8', len(current.value))
                 return True
             if isinstance(current, IntegerLiteralType) and isinstance(actual, IntegerLiteralType):
                 bindings[name] = 'int'

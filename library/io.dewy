@@ -7,9 +7,20 @@ if $target in? ["x86_64" "riscv" "arm" "c"] {
     from p"linux/io.dewy" import (_write_stdout _write_stderr)
 }
 
+# Diagnostics (a failed `$runtime_assert`) switch all printing to stderr.
+let _stderr_output:bool = false
+let _set_output_stderr = (enabled:bool):>void => {
+    _stderr_output = enabled
+    return void
+}
+
 let _print_string = (s:string):>void => {
     let bytes:array<uint8> = s as array<uint8>
-    let written:int64 = _write_stdout(bytes)
+    if _stderr_output {
+        let written:int64 = _write_stderr(bytes)
+    } else {
+        let written:int64 = _write_stdout(bytes)
+    }
     return void
 }
 

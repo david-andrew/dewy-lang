@@ -31,6 +31,33 @@ An ordinary partial operation is valid when its precondition is proven. Examples
 
 When a fact cannot be proven statically, the program chooses an explicit checked operation, establishes the fact with control flow, supplies a checked proof, or crosses an explicit `unsafe` boundary. The compiler must not insert a hidden semantic fallback that changes the operation's type.
 
+## Assertions
+
+`$assert condition` states a fact the compiler must prove; `$assert condition, message` adds a string literal to the diagnostic. It has the three refinement outcomes: proven (nothing is emitted), refuted (`assertion refuted`), or unknown (`cannot prove assertion` — the fact is neither proven nor refuted). Facts come from the checker's folding and from the bounds analysis: constants, exact and minimum lengths, integer intervals, and index facts from guards.
+
+A refuted or unproven `$assert` underlines the condition, uses the message as the pointer text, and explains in `note:` lines what the analysis knows about each operand and what that decides for each comparison (`` `i` is 3 ``, `` `xs.length` is 3 (the array has exactly 3 elements) ``, ``so `i <? xs.length` is false``).
+
+`$runtime_assert condition` and `$runtime_assert condition, message` evaluate the condition at runtime. When it fails, the program writes the same report shape to stderr through `library/reporting.dewy` — the excerpt with the condition underlined, the message (which may interpolate values) as the pointer text, and `note:` lines with the value of each non-literal comparison operand (re-evaluated on the failure path) — and exits with status 101. The failure path diverges, so the code after the assertion holds the condition's facts exactly as code after an early-return guard does. A runtime assertion whose condition the analyses refute is still a compile-time error.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let xs:array<int64> = [1 2 3]
+$assert xs.length =? 3, "three elements"
+
+let get = (ys:array<int64> i:int64):>int64 => {
+    $runtime_assert i >=? 0 and i <? ys.length, "index {i} out of range"
+    return ys[i]                      # proven by the assertion
+}
+
+let main = ():>int64 => {
+    loop i in 0..2 { $assert i <? 3 }
+    return get(xs 1)                  # 2
+}
+```
+
+The comma binds tighter than comparisons, so `x <? 3, "message"` is read as the condition `x <? 3` with the message split off the end of the expression. A compile-time message must be a string literal.
+
 ## Effects
 
 An effect describes observable behavior relevant beyond a function's return value. The intended effect model covers at least mutation, allocation, blocking, I/O or host capability access, failure, nonreturning control flow, and escape of storage or handles.

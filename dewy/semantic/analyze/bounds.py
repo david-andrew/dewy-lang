@@ -355,12 +355,108 @@ class _BoundsValidator:
             return current
         if isinstance(node, hir.Flow):
             return self._analyze_flow(node, current, validate=validate)
+        if isinstance(node, hir.Assert):
+            self._eval(node.condition, current, validate=validate)
+            if validate:
+                self._validate_assert(node, current)
+            if node.runtime:
+                return current  # the flow it guards refines the continuation
+            held = self._refine(current, node.condition, truth=True)
+            return current if held is None else held
         if isinstance(node, hir.Return):
             if node.item is not None:
                 self._eval(node.item, current, validate=validate)
             return current
         self._eval(node, current, validate=validate)
         return current
+
+    def _validate_assert(self, node: hir.Assert, state: State) -> None:
+        """`$assert` is proven when its false path is impossible, refuted when its true path is."""
+        if self._refine(state, node.condition, truth=False) is None:
+            return
+        refuted = self._refine(state, node.condition, truth=True) is None
+        if node.runtime and not refuted:
+            return
+        if node.message is not None:
+            detail = node.message
+        elif refuted:
+            detail = 'this condition is false for every value the analysis admits'
+        else:
+            detail = 'no compile-time fact establishes this condition (neither proven nor refuted)'
+        user_error(
+            self.srcfile,
+            'assertion refuted' if refuted else 'cannot prove assertion',
+            Pointer(span=node.condition.loc, message=detail),
+            notes=self._explain_condition(node.condition, state),
+            dimmed=[node.dimmed] if node.dimmed is not None else None,
+            hint=None if refuted else 'check it at runtime with `$runtime_assert`, or establish the fact with a guard',
+        )
+
+    def _explain_condition(self, condition: hir.AST, state: State) -> list[str]:
+        """What the analysis knows about each operand, and what that decides for each comparison."""
+        lines: list[str] = []
+        described: set[str] = set()
+
+        def source(node: hir.AST) -> str:
+            return ' '.join(self.srcfile.body[node.loc.start:node.loc.stop].split())
+
+        def describe_operand(node: hir.AST) -> None:
+            if isinstance(node, (hir.Integer, hir.Bool, hir.String)):
+                return
+            text = source(node)
+            if text in described:
+                return
+            described.add(text)
+            interval = self._eval(node, state, validate=False)
+            lines.append(f'`{text}` {self._describe_interval(interval, array=isinstance(node, hir.ArrayLength))}')
+
+        def verdict(node: hir.AST) -> str:
+            if self._refine(state, node, truth=True) is None:
+                return 'so `{}` is false'
+            if self._refine(state, node, truth=False) is None:
+                return 'so `{}` holds'
+            return '`{}` cannot be decided from these facts'
+
+        def visit(node: hir.AST) -> None:
+            if isinstance(node, hir.ShortCircuit):
+                visit(node.left)
+                visit(node.right)
+                return
+            if (
+                isinstance(node, hir.FunctionCall)
+                and isinstance(node.func, hir.ExpressedIdentifier)
+                and node.func.name in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}
+                and len(node.pos_args) == 2
+            ):
+                for operand in node.pos_args:
+                    describe_operand(operand)
+                lines.append(verdict(node).format(source(node)))
+                return
+            lines.append(verdict(node).format(source(node)))
+
+        visit(condition)
+        return lines
+
+    @staticmethod
+    def _describe_interval(interval: Interval | None, *, array: bool) -> str:
+        if interval is None or (interval.lower is None and interval.upper is None):
+            return 'has no known bound' if not array else 'is a runtime length the analysis knows nothing about'
+        if array and interval.lower is not None and (interval.upper is None or interval.upper >= (1 << 48) - 1):
+            # the address-space cap is not a fact worth showing
+            return f'is a runtime length of at least {interval.lower}'
+        if interval.lower is not None and interval.lower == interval.upper:
+            return (
+                f'is {interval.lower} (the array has exactly {interval.lower} elements)'
+                if array else f'is {interval.lower}'
+            )
+        if interval.lower is not None and interval.upper is not None:
+            return f'lies in [{interval.lower}, {interval.upper}]'
+        if interval.lower is not None:
+            return (
+                f'is at least {interval.lower} (the array has at least {interval.lower} elements)'
+                if array else f'is at least {interval.lower}'
+            )
+        return f'is at most {interval.upper}'
 
     def _analyze_function(
         self,
@@ -425,14 +521,18 @@ class _BoundsValidator:
             self._eval(arm.condition, remaining, validate=validate)
             true_state = self._refine(remaining, arm.condition, truth=True)
             if true_state is not None:
-                exits.append(self._analyze(arm.body, true_state, validate=validate))
+                exit_state = self._analyze(arm.body, true_state, validate=validate)
+                if arm.body.type != ty.BOTTOM_TYPE:  # a diverging arm never reaches the continuation
+                    exits.append(exit_state)
             false_state = self._refine(remaining, arm.condition, truth=False)
             if false_state is None:
                 remaining = None
                 break
             remaining = false_state
         if node.default is not None and remaining is not None:
-            exits.append(self._analyze(node.default, remaining, validate=validate))
+            exit_state = self._analyze(node.default, remaining, validate=validate)
+            if node.default.type != ty.BOTTOM_TYPE:
+                exits.append(exit_state)
         elif node.default is None and remaining is not None:
             exits.append(remaining)
         return dict(state) if not exits else self._join_states(exits)
@@ -627,8 +727,9 @@ class _BoundsValidator:
             isinstance(arm, hir.LoopArm) for arm in node.arms
         ):
             return self._conditional_transfer(node, state, validate=validate)
+        normal = self._analyze(node, state, validate=validate)
         return _LoopTransfer(
-            self._analyze(node, state, validate=validate),
+            None if node.type == ty.BOTTOM_TYPE else normal,  # `return` leaves the loop without a normal exit
             {},
             {},
         )
@@ -1452,9 +1553,18 @@ class _BoundsValidator:
             return refined
         name = condition.func.name
         left, right = condition.pos_args
-        if truth:
+        decided = self._decide_comparison(
+            name,
+            self._eval(left, refined, validate=False),
+            self._eval(right, refined, validate=False),
+        )
+        if decided is not None and decided != truth:
+            return None  # the operand intervals settle the comparison: this path is impossible
+        # `i <? xs.length` holding, or `i >=? xs.length` failing, is the same index fact
+        settled = name if truth else {'__ge__': '__lt__', '__le__': '__gt__'}.get(name)
+        if settled in {'__lt__', '__gt__'}:
             fact: tuple[int, int] | None = None
-            if name == '__lt__':
+            if settled == '__lt__':
                 index_id = self._binding_id(left)
                 array_id = (
                     _runtime_array_id(right.array, self.registry)
@@ -1463,7 +1573,7 @@ class _BoundsValidator:
                 )
                 if index_id is not None and array_id is not None:
                     fact = (index_id, array_id)
-            elif name == '__gt__':
+            else:
                 index_id = self._binding_id(right)
                 array_id = (
                     _runtime_array_id(left.array, self.registry)
@@ -1530,6 +1640,41 @@ class _BoundsValidator:
             if isinstance(node, hir.ExpressedIdentifier)
             else None
         )
+
+    @staticmethod
+    def _decide_comparison(name: str, left: Interval | None, right: Interval | None) -> bool | None:
+        """The comparison's outcome when the operand intervals settle it either way."""
+        if left is None or right is None:
+            return None
+
+        def less(a: Interval, b: Interval, *, strict: bool) -> bool | None:
+            if a.upper is not None and b.lower is not None and (a.upper < b.lower if strict else a.upper <= b.lower):
+                return True
+            if a.lower is not None and b.upper is not None and (a.lower >= b.upper if strict else a.lower > b.upper):
+                return False
+            return None
+
+        if name == '__lt__':
+            return less(left, right, strict=True)
+        if name == '__gt__':
+            return less(right, left, strict=True)
+        if name == '__le__':
+            return less(left, right, strict=False)
+        if name == '__ge__':
+            return less(right, left, strict=False)
+        if name in {'__eq__', '__ne__'}:
+            exact = (
+                left.lower is not None and left.lower == left.upper
+                and right.lower is not None and right.lower == right.upper
+            )
+            if exact:
+                equal = left.lower == right.lower
+            elif less(left, right, strict=True) is True or less(right, left, strict=True) is True:
+                equal = False
+            else:
+                return None
+            return equal if name == '__eq__' else not equal
+        return None
 
     @staticmethod
     def _comparison_constraint(

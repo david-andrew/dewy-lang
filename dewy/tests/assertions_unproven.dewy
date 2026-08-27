@@ -1,0 +1,9 @@
+# A compile-time assertion the analyses can neither prove nor refute: this
+# file does not compile. Nothing bounds a parameter, so the fact is unknown —
+# `$runtime_assert` would check it instead, and a guard would establish it.
+let get = (ys:array<int64> i:int64):>int64 => {
+    $assert i >=? 0 and i <? ys.length
+    return ys[i]
+}
+
+let main = ():>int64 => get([1 2 3] 1)

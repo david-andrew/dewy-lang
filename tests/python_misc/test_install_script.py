@@ -19,6 +19,7 @@ def _make_source_archive(path: Path) -> None:
         REPO_ROOT / "library" / "fixed.dewy",
         REPO_ROOT / "library" / "bigint.dewy",
         REPO_ROOT / "library" / "io.dewy",
+        REPO_ROOT / "library" / "reporting.dewy",
         REPO_ROOT / "library" / "units.dewy",
         REPO_ROOT / "library" / "linux" / "io.dewy",
         REPO_ROOT / "library" / "linux" / "system.dewy",

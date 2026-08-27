@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace, field, fields, is_dataclass
 from fractions import Fraction
 from collections import ChainMap
 from itertools import count
-from typing import Literal, cast
+from typing import Literal, NoReturn, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
 from . import builtins, hir, ty
@@ -243,6 +243,43 @@ def _sink_ambiguity(ast: p0.AST) -> p0.AST:
     return ast
 
 
+_ASSERT_DIRECTIVES = {'assert', 'runtime_assert'}
+_ASSERT_LOGICAL_OPERATORS = {'and', 'or', 'nand', 'nor', 'xor', 'xnor'}
+_ASSERT_COMPARISON_OPERATORS = {'=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?', 'has?', 'of?', '@?'}
+
+
+@dataclass
+class _AssertDirective(p0.AST):
+    """`$assert expr` / `$runtime_assert expr`: the metatag paired with the statement after it."""
+
+    name: str
+    expr: p0.AST
+
+
+def _pair_assert_directives(items: list[p0.AST], *, ctx: Context) -> list[p0.AST]:
+    """Pair each assertion metatag with the expression that follows it."""
+    paired: list[p0.AST] = []
+    index = 0
+    while index < len(items):
+        item = items[index]
+        metatag = _direct_scope_metatag(item)
+        if metatag is None or metatag.name not in _ASSERT_DIRECTIVES:
+            paired.append(item)
+            index += 1
+            continue
+        following = items[index + 1] if index + 1 < len(items) else None
+        if following is None or _direct_scope_metatag(following) is not None or isinstance(following, p0.KeywordExpr):
+            user_error(
+                ctx.srcfile,
+                f'`${metatag.name}` needs a condition',
+                Pointer(span=item.loc, message='expected a boolean expression after the metatag'),
+                hint=f'`${metatag.name} condition` or `${metatag.name} condition, message`',
+            )
+        paired.append(_AssertDirective(Span(item.loc.start, following.loc.stop), metatag.name, following))
+        index += 2
+    return paired
+
+
 def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     ast = _sink_ambiguity(ast)
     match ast:
@@ -364,6 +401,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Integer(value=value)):
             parsed = t0.parse_integer(value.src, value.prefix)
             return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
+        case _AssertDirective():
+            return tcr_assert(ast, ctx=ctx)
         case p0.Atom(item=t1.Metatag(name='target')):
             # Compile-time string (udewy's `$target`); comparisons against
             # literals fold, so `if $target =? "x86_64" { ... }` resolves
@@ -2692,7 +2731,7 @@ def _collect_label_scope(block: p0.Block, *, ctx: Context) -> LabelScope:
     labels: dict[str, Span] = {}
     for item in block.inner:
         metatag = _direct_scope_metatag(item)
-        if metatag is None:
+        if metatag is None or metatag.name in _ASSERT_DIRECTIVES:
             continue
         previous = labels.get(metatag.name)
         duplicate = previous is not None
@@ -2721,6 +2760,234 @@ def tcr_scope_metatag(ast: p0.Atom, *, name: str, ctx: Context) -> hir.ScopeMeta
     if not ctx.label_scopes or ctx.label_scopes[-1].labels.get(name) != ast.loc:
         not_implemented(ctx.srcfile, ast.loc, 'metatag expression outside a direct scoped-block declaration')
     return hir.ScopeMetatag(ast.loc, ty.VOID_TYPE, name)
+
+
+def _operator_symbol(op: object) -> str | None:
+    """The source operator of a p0 operator token (`not=?` reports its base comparison)."""
+    symbol = getattr(op, 'symbol', None)
+    return symbol if symbol is not None else getattr(op, 'op', None)
+
+
+def _is_literal_atom(node: p0.AST) -> bool:
+    return isinstance(node, p0.Atom) and isinstance(
+        node.item, (t1.Integer, t1.Real, t1.String, t1.BasedString, t1.Bool)
+    )
+
+
+def _split_assert_message(node: p0.AST, *, ctx: Context) -> tuple[p0.AST, p0.AST | None]:
+    """Separate `condition, message`.
+
+    The comma binds tighter than comparisons and logical operators, so
+    `x <? 3, "m"` parses as `x <? (3, "m")`: the message is the last item of
+    the comma group at the end of the expression's right spine.
+    """
+    if isinstance(node, p0.Flat) and _operator_symbol(node.op) == ',':
+        if len(node.items) != 2:
+            user_error(
+                ctx.srcfile,
+                'an assertion takes a condition and at most one message',
+                Pointer(span=node.loc, message=f'{len(node.items)} comma-separated items'),
+            )
+        return node.items[0], node.items[1]
+    if isinstance(node, p0.BinOp):
+        right, message = _split_assert_message(node.right, ctx=ctx)
+        if message is None:
+            return node, None
+        return replace(node, loc=Span(node.loc.start, right.loc.stop), right=right), message
+    if isinstance(node, p0.Prefix):
+        item, message = _split_assert_message(node.item, ctx=ctx)
+        if message is None:
+            return node, None
+        return replace(node, loc=Span(node.loc.start, item.loc.stop), item=item), message
+    return node, None
+
+
+def _assert_operands(node: p0.AST) -> list[p0.AST]:
+    """The non-literal operands of the comparisons inside a condition, for the failure report."""
+    node = _sink_ambiguity(node)
+    if isinstance(node, p0.BinOp):
+        symbol = _operator_symbol(node.op)
+        if symbol in _ASSERT_LOGICAL_OPERATORS:
+            return [*_assert_operands(node.left), *_assert_operands(node.right)]
+        if symbol in _ASSERT_COMPARISON_OPERATORS:
+            return [side for side in (node.left, node.right) if not _is_literal_atom(side)]
+        return []
+    if isinstance(node, p0.Prefix) and _operator_symbol(node.op) == 'not':
+        return _assert_operands(node.item)
+    if isinstance(node, p0.Block) and node.kind == '()' and len(node.inner) == 1:
+        return _assert_operands(node.inner[0])
+    return []
+
+
+def _assert_source(node: p0.AST, *, ctx: Context) -> str:
+    return ' '.join(ctx.srcfile.body[node.loc.start:node.loc.stop].split())
+
+
+def _report_refuted_assertion(loc: Span, source: str, message: str | None, *, dimmed: Span | None, ctx: Context) -> NoReturn:
+    user_error(
+        ctx.srcfile,
+        'assertion refuted',
+        Pointer(span=loc, message=message if message is not None else 'this condition is false at compile time'),
+        notes=[f'`{source}` folds to `false`'],
+        dimmed=[dimmed] if dimmed is not None else None,
+    )
+
+
+def tcr_assert(ast: _AssertDirective, *, ctx: Context) -> hir.AST:
+    """`$assert` is a compile-time obligation; `$runtime_assert` checks at runtime and diverges on failure.
+
+    Both take `condition` or `condition, message`. A condition the checker
+    already folds is decided here; otherwise `$assert` leaves a `hir.Assert`
+    for the bounds analysis to prove (or refute), and `$runtime_assert`
+    becomes `if condition {} else { report; _exit(101) }` whose failure body
+    diverges, so the code after it keeps the condition's facts exactly as
+    code after an early-return guard does.
+    """
+    condition_ast, message_ast = _split_assert_message(_sink_ambiguity(ast.expr), ctx=ctx)
+    condition = _check_flow_condition(condition_ast, ctx=ctx)
+    if isinstance(condition, hir.DictContains):
+        condition.hoisted = True
+    source = _assert_source(condition_ast, ctx=ctx)
+    # the `, message` tail is greyed out in reports so the condition stands out
+    dimmed = Span(condition_ast.loc.stop, message_ast.loc.stop) if message_ast is not None else None
+    if ast.name == 'assert':
+        message: str | None = None
+        if message_ast is not None:
+            checked = typecheck_and_resolve_inner(message_ast, ctx=ctx)
+            if not isinstance(checked, hir.String):
+                user_error(
+                    ctx.srcfile,
+                    'a compile-time assertion message must be a string literal',
+                    Pointer(span=message_ast.loc, message='the message is reported at compile time, so it cannot depend on runtime values'),
+                    hint='`$runtime_assert` messages may interpolate values',
+                )
+            message = checked.content
+        if isinstance(condition, hir.Bool):
+            if not condition.value:
+                _report_refuted_assertion(condition_ast.loc, source, message, dimmed=dimmed, ctx=ctx)
+            return hir.Void(ast.loc, ty.VOID_TYPE)
+        return hir.Assert(ast.loc, ty.VOID_TYPE, condition, source, message, dimmed=dimmed)
+
+    if isinstance(condition, hir.Bool):
+        if not condition.value:
+            _report_refuted_assertion(condition_ast.loc, source, None, dimmed=dimmed, ctx=ctx)
+        if message_ast is not None:
+            typecheck_and_resolve_inner(message_ast, ctx=ctx)
+        return hir.Void(ast.loc, ty.VOID_TYPE)
+    failure_ctx = _refine_condition_context(ctx, condition, truth=False)
+    failure = hir.Block(
+        ast.loc,
+        ty.BOTTOM_TYPE,
+        _assert_failure_report(ast, condition_ast, message_ast, source, ctx=failure_ctx),
+        True,
+    )
+    flow = hir.Flow(
+        ast.loc,
+        ty.VOID_TYPE,
+        [hir.IfArm(ast.loc, ty.VOID_TYPE, condition, hir.Void(ast.loc, ty.VOID_TYPE))],
+        failure,
+    )
+    # the analyses still reject a condition they can refute outright
+    obligation = hir.Assert(ast.loc, ty.VOID_TYPE, condition, source, None, runtime=True, dimmed=dimmed)
+    # The code after the assertion runs only when the condition held (the
+    # failure path diverges), like the continuation of an early-return guard.
+    held = _refine_condition_context(ctx, condition, truth=True)
+    refinements, bounds, keys = dict(held.refinements), dict(held.length_bounds), dict(held.key_facts)
+    ctx.refinements.clear()
+    ctx.refinements.update(refinements)
+    ctx.length_bounds.clear()
+    ctx.length_bounds.update(bounds)
+    ctx.key_facts.clear()
+    ctx.key_facts.update(keys)
+    return hir.Block(ast.loc, ty.VOID_TYPE, [obligation, flow], False)
+
+
+def _checked_call(func: hir.AST, arguments: list[hir.AST], *, loc: Span, ctx: Context) -> hir.FunctionCall:
+    """A positional call to a single-method function with already-checked arguments."""
+    if not isinstance(func.type, ty.FunctionType):
+        raise ValueError(f'INTERNAL ERROR: `{getattr(func, "name", func)}` is not a single function')
+    params = func.type.pos_or_kw
+    if len(params) != len(arguments):
+        raise ValueError(f'INTERNAL ERROR: `{getattr(func, "name", func)}` takes {len(params)} arguments, got {len(arguments)}')
+    checked = [check_against(argument, param.type, ctx=ctx) for argument, param in zip(arguments, params)]
+    return hir.FunctionCall(loc, func.type.ret, func, checked, {})
+
+
+def _assert_failure_report(
+    ast: _AssertDirective,
+    condition_ast: p0.AST,
+    message_ast: p0.AST | None,
+    source: str,
+    *,
+    ctx: Context,
+) -> list[hir.AST]:
+    """The failure path of a `$runtime_assert`.
+
+    Fills the report model of `library/reporting.dewy` — the condition as the
+    pointer with the message as its text, the `, message` tail dimmed, the
+    operands' values as notes — renders it over the condition's source line,
+    then `_exit(101)`.
+    """
+    loc = ast.loc
+
+    def text(content: str) -> hir.String:
+        return hir.String(loc, ty.StringLiteralType(content), content)
+
+    def integer(value: int) -> hir.Integer:
+        return hir.Integer(loc, ty.IntegerLiteralType(value), '0d', value)
+
+    def call(name: str, *arguments: hir.AST) -> hir.FunctionCall:
+        return _checked_call(tcr_identifier(t1.Identifier(loc, name), ctx=ctx), list(arguments), loc=loc, ctx=ctx)
+
+    body = ctx.srcfile.body
+    line_start = body.rfind('\n', 0, condition_ast.loc.start) + 1
+    line_end = body.find('\n', condition_ast.loc.start)
+    if line_end < 0:
+        line_end = len(body)
+    row = body.count('\n', 0, condition_ast.loc.start) + 1
+    line = body[line_start:line_end]
+
+    def byte_offset(index: int) -> int:
+        """A source index on the line as a byte offset into the excerpt."""
+        return len(line[:max(0, min(index, line_end) - line_start)].encode('utf-8'))
+
+    condition_start = byte_offset(condition_ast.loc.start)
+    condition_stop = byte_offset(condition_ast.loc.stop)
+    path = 'input' if ctx.srcfile.path is None else str(ctx.srcfile.path)
+    if message_ast is not None:
+        message = typecheck_and_resolve_inner(message_ast, ctx=ctx)
+    else:
+        message = text('this condition was false')
+    statements: list[hir.AST] = [
+        call('_report_begin', text('error'), text('assertion failed')),
+        call('_report_point', integer(condition_start), integer(condition_stop), message),
+    ]
+    if message_ast is not None:
+        statements.append(call('_report_dim', integer(condition_stop), integer(byte_offset(message_ast.loc.stop))))
+    seen: set[str] = set()
+    for operand_ast in _assert_operands(condition_ast):
+        operand_source = _assert_source(operand_ast, ctx=ctx)
+        if operand_source in seen:
+            continue
+        seen.add(operand_source)
+        try:
+            value = typecheck_and_resolve_inner(operand_ast, ctx=ctx)  # re-evaluated on the failure path
+        except ReportException:
+            continue
+        if not _assert_note_value_supported(value.type, ctx=ctx):
+            continue  # values interpolation cannot show are left out
+        note = hir.InterpolatedString(loc, ty.StringType(), [text(f'`{operand_source}` is '), value])
+        statements.append(call('_report_note', note))
+    statements.append(call('_report_render', text(path), integer(row), text(line)))
+    statements.append(call('_exit', integer(101)))
+    return statements
+
+
+def _assert_note_value_supported(type_: ty.Type, *, ctx: Context) -> bool:
+    """Types a materialized interpolated string renders: fixed-width integers, booleans, strings."""
+    if _is_string_type(type_) or type_ == 'bool' or isinstance(type_, ty.IntegerLiteralType):
+        return True
+    return isinstance(type_, str) and type_ not in ('int', 'uint') and ctx.type_system.is_subtype(type_, 'int')
 
 
 def _declaration_parts(
@@ -4860,15 +5127,16 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     # block (skipping void/never items like declarations), and when expected is a
     # SequenceType distribute it pointwise across those slots. Can't forward expected to
     # every item blindly: `{ let x = 1; x }` must not shove the outer expected into the decl.
-    results: list[hir.AST | None] = [None] * len(block.inner)
-    for index, item in enumerate(block.inner):
+    items = _pair_assert_directives(block.inner, ctx=ctx)
+    results: list[hir.AST | None] = [None] * len(items)
+    for index, item in enumerate(items):
         if id(item) in deferred_functions:
             continue
         item_expected = (
             expected.element
             if block.kind == '[]' and isinstance(expected, ty.ArrayType)
             else expected
-            if expected is not None and len(block.inner) == 1
+            if expected is not None and len(items) == 1
             else None
         )
         results[index] = typecheck_and_resolve_inner(
@@ -4877,12 +5145,12 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             type_block=type_block,
             expected=item_expected,
         )
-    for index, item in enumerate(block.inner):
+    for index, item in enumerate(items):
         if id(item) not in deferred_functions:
             continue
         results[index] = typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block)
     checked_results: list[hir.AST] = []
-    for item, result in zip(block.inner, results, strict=True):
+    for item, result in zip(items, results, strict=True):
         if result is None:
             raise ValueError('INTERNAL ERROR: block item was not checked')
         if (

@@ -10,3 +10,11 @@ let _write_stderr = (bytes:array<uint8>):>int64 => {
     let data:int64 = __load_i64__(bytes)
     return __syscall3__(1 2 data bytes.length)
 }
+
+# Whether stderr is a terminal: ioctl(2)=16 with TCGETS (0x5401) succeeds only
+# on a tty. The termios buffer is 64 bytes, more than the kernel writes.
+let _stderr_is_terminal = ():>bool => {
+    let termios:int64 = __alloca__(64)
+    let status:int64 = __syscall3__(16 2 21505 termios)
+    return status =? 0
+}

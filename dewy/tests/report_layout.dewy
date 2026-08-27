@@ -1,0 +1,16 @@
+# `library/reporting.dewy` rendering a report the way `dewy/reporting.py`
+# does: two pointers on one line (drawn above, since the next line is pointed
+# at too), a pointer on the next line, a message line, notes, and help. The
+# test compares the output with the compiler's renderer.
+let main = ():>int64 => {
+    _report_begin("error" "sample")
+    _report_describe("two pointers on one line")
+    _report_point(12 17 "first operand")
+    _report_point(20 25 "second operand")
+    _report_point(36 41 "next line")
+    _report_note("a note")
+    _report_note("another")
+    _report_hint("hint")
+    _report_render("input" 1 "let total = price * count + tax\nlet other = 1")
+    return 42
+}

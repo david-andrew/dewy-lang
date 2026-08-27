@@ -20,6 +20,7 @@ PORTABLE_LIBRARIES = (
     library / 'fixed.dewy',
     library / 'bigint.dewy',
     library / 'io.dewy',
+    library / 'reporting.dewy',
     library / 'units.dewy',
 )
 

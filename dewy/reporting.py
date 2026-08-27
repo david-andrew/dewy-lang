@@ -47,6 +47,7 @@ from bisect import bisect_right
 from os import PathLike
 from typing import Literal, NoReturn, TypeAlias
 import re
+import os
 import sys
 
 Severity: TypeAlias = Literal["error", "warning", "info", "hint"]
@@ -131,6 +132,10 @@ class ColorTheme:
     
     def help_label(self, text:str) -> str:
         return self._wrap(text, FG_LIGHT_GRAY)
+
+    def dim(self, text:str) -> str:
+        """De-emphasized source text (a report's `dimmed` spans)."""
+        return self._wrap(text, FG_DIM_GRAY)
 
     def color_char(self, char:str, color_code:str|None) -> str:
         return self._wrap(char, color_code)
@@ -252,6 +257,8 @@ class Report:
     message:str|None=None
     pointer_messages:Pointer|list[Pointer]=field(default_factory=list)
     hint:str|None=None
+    notes:list[str]=field(default_factory=list)  # `note:` lines between the excerpt and the help
+    dimmed:list[Span]=field(default_factory=list)  # source spans greyed out in the excerpt (with colors only)
     use_color:bool=True
     
     def __post_init__(self) -> None:
@@ -292,6 +299,7 @@ class Report:
             out.append(f"{body_indent}{theme.marker(marker, self.severity)} {self.message}")
         if not self.pointer_messages:
             # nothing points into the source: a summary report has no excerpt
+            out.extend(self._labelled_lines("note:", self.notes, body_indent, theme))
             if self.hint:
                 out.append(f"{body_indent}{theme.help_label('help:')} {self.hint}")
             return "\n".join(out)
@@ -306,16 +314,19 @@ class Report:
             out.extend(self._render_line(line_idx, per_line, block_indent, line_no_width, theme))
         
         out.append(f"{block_indent}{gutter_pad}╰───")
+        out.extend(self._labelled_lines("note:", self.notes, body_indent, theme))
         if self.hint:
-            label_text = "help:"
-            label = theme.help_label(label_text)
-            first, *rest = self.hint.splitlines() or [""]
-            out.append(f"{body_indent}{label} {first}")
-            if rest:
-                continuation = " " * (len(body_indent) + len(label_text) + 1)
-                for chunk in rest:
-                    out.append(f"{continuation}{chunk}")
+            out.extend(self._labelled_lines("help:", self.hint.splitlines() or [""], body_indent, theme))
         return "\n".join(out)
+
+    @staticmethod
+    def _labelled_lines(label_text:str, lines:list[str], body_indent:str, theme:ColorTheme) -> list[str]:
+        """`  label: first line` followed by the other lines aligned under the first."""
+        if not lines:
+            return []
+        first, *rest = lines
+        continuation = " " * (len(body_indent) + len(label_text) + 1)
+        return [f"{body_indent}{theme.help_label(label_text)} {first}", *(f"{continuation}{line}" for line in rest)]
     
     @staticmethod
     def _find_adjacent_segments(segments:list[_Segment]) -> dict[int, set[int]]:
@@ -720,7 +731,8 @@ class Report:
         sf = self.srcfile
         line_no = line_idx + 1
         line_text = sf.line_text(line_idx)
-        line_display = self._line_display(line_text, segments, theme)
+        line_start, _ = sf.line_bounds(line_idx)
+        line_display = self._line_display(line_text, segments, theme, line_start)
         
         line_no_text = theme.line_number(f"{line_no:>{line_no_width}}")
         line_prefix = f"  {line_no_text} | "
@@ -745,26 +757,44 @@ class Report:
     def _visible_length(text:str) -> int:
         return len(ANSI_ESCAPE_RE.sub("", text))
     
-    def _visualize_control_chars(self, line_text:str, theme:ColorTheme) -> str:
-        """Convert control characters like \f, \v, \r, \0, etc. to their visual representations ␌, ␋, ␍, ␀, etc."""
+    def _visualize_control_chars(self, line_text:str, theme:ColorTheme, line_start:int=0) -> str:
+        """Convert control characters like \f, \v, \r, \0, etc. to their visual representations ␌, ␋, ␍, ␀, etc.
+
+        Characters inside the report's ``dimmed`` spans are greyed out (runs of
+        plain characters are wrapped together; control glyphs keep their own color).
+        """
         out:list[str] = []
-        for ch in line_text:
+        dim_run:list[str] = []
+
+        def flush_dim() -> None:
+            if dim_run:
+                out.append(theme.dim("".join(dim_run)))
+                dim_run.clear()
+
+        for index, ch in enumerate(line_text):
             code = ord(ch)
+            offset = line_start + index
+            dimmed = any(span.start <= offset < span.stop for span in self.dimmed)
             if (code < 0x20 and ch not in ("\t", "\n")) or code == 0x7F:
+                flush_dim()
                 if code == 0x7F:
                     glyph = "\u2421"  # ␡
                 else:
                     glyph = chr(0x2400 + code)
                 out.append(theme._wrap(glyph, FG_WHITE_ON_RED))
+            elif dimmed:
+                dim_run.append(ch)
             else:
+                flush_dim()
                 out.append(ch)
+        flush_dim()
         return "".join(out)
     
-    def _line_display(self, line_text:str, segments:list[_Segment], theme:ColorTheme) -> str:
+    def _line_display(self, line_text:str, segments:list[_Segment], theme:ColorTheme, line_start:int=0) -> str:
         marker = self._blank_line_marker(line_text, segments, theme)
         if marker is not None:
             return marker
-        return self._visualize_control_chars(line_text, theme)
+        return self._visualize_control_chars(line_text, theme, line_start)
     
     @staticmethod
     def _blank_line_marker(line_text:str, segments:list[_Segment], theme:ColorTheme) -> str|None:
@@ -1000,8 +1030,15 @@ class ReportException(Exception):
         return str(self.report).splitlines()
 
 
+def color_enabled(stream: object) -> bool:
+    """ANSI colors go to terminals only, and never when `NO_COLOR` is set."""
+    isatty = getattr(stream, "isatty", None)
+    return bool(isatty and isatty()) and not os.environ.get("NO_COLOR")
+
+
 def _report_excepthook(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
     if isinstance(exc, ReportException):
+        exc.report.use_color = color_enabled(sys.stderr)
         sys.stderr.write(str(exc.report) + "\n")
         return
     sys.__excepthook__(exc_type, exc, tb)

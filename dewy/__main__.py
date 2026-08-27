@@ -16,7 +16,7 @@ from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
 from .backend.udewy import codegen
-from .reporting import Info, Pointer, SrcFile
+from .reporting import Info, Pointer, SrcFile, color_enabled
 from .targets import TARGETS, identify_host_target
 
 
@@ -90,7 +90,7 @@ def analyze(argv: list[str]) -> int:
     srcfile = SrcFile.from_path(Path(args.file))
     check.typecheck_and_resolve(srcfile, include_prelude=True, target=_resolve_target(args.target))
 
-    use_color = sys.stdout.isatty()
+    use_color = color_enabled(sys.stdout)
     notes = representation.last_notes
     for note in notes:
         print(Info(

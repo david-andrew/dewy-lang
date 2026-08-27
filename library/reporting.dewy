@@ -1,0 +1,567 @@
+# Runtime diagnostics in the layout of the compiler's reports (`dewy/reporting.py`):
+#
+#   Error: title
+#
+#     × message
+#       ╭─[path:row:column]
+#     N | source line
+#       ·      ─┬─
+#       ·       ╰─ pointer message
+#       ╰───
+#     note: first note
+#           later notes
+#     help: text
+#
+# A report is built into module-level state — `_report_begin`, then any of
+# `_report_describe`, `_report_point`, `_report_dim`, `_report_note`,
+# `_report_hint` — and `_report_render` lays it out. Spans are byte offsets
+# into the excerpt given to `_report_render` (one or more source lines with no
+# trailing newline); `first_row` is the excerpt's first line number. Columns
+# count characters (UTF-8 lead bytes). Everything goes to stderr, colored only
+# when stderr is a terminal.
+#
+# Mirrors `reporting.py` for pointers within one line: several pointers per
+# line in palette colors, underlines below the line (or above, for the first
+# of two adjacent pointed lines), stacked messages with `│` connectors,
+# zero-width pointers as `╱╲`, dimmed spans, notes, and help. Not yet:
+# pointers spanning lines, blank-line markers, control-character glyphs,
+# multi-line messages.
+if $target in? ["x86_64" "riscv" "arm" "c"] {
+    from p"linux/io.dewy" import (_write_stderr _stderr_is_terminal)
+}
+
+let _report_red = "\u001b[31m"
+let _report_yellow = "\u001b[33m"
+let _report_blue = "\u001b[34m"
+let _report_cyan = "\u001b[36m"
+let _report_label_color = "\u001b[38;5;245m"
+let _report_dim_color = "\u001b[90m"
+let _report_reset = "\u001b[0m"
+
+# The pointer palette, in the compiler's order.
+let _report_pointer_color = (index:int64):>string => {
+    let slot:int64 = index % 7
+    if slot =? 0 { return "\u001b[96m" }         # cyan
+    if slot =? 1 { return "\u001b[92m" }         # green
+    if slot =? 2 { return "\u001b[93m" }         # yellow
+    if slot =? 3 { return "\u001b[94m" }         # blue
+    if slot =? 4 { return "\u001b[38;5;135m" }   # purple
+    if slot =? 5 { return "\u001b[38;5;211m" }   # pink
+    return "\u001b[38;5;214m"                    # light orange
+}
+
+# ---- the report being built ----
+let _report_severity:string = "error"
+let _report_title:string = ""
+let _report_message:string = ""
+let _report_has_message:bool = false
+let _report_hint_text:string = ""
+let _report_has_hint:bool = false
+let _report_color:bool = false
+let _pointer_starts:array<int64> = []
+let _pointer_stops:array<int64> = []
+let _pointer_messages:array<string> = []
+let _dim_starts:array<int64> = []
+let _dim_stops:array<int64> = []
+let _report_notes:array<string> = []
+
+# ---- render scratch ----
+let _line_starts:array<int64> = []     # byte offset of each excerpt line, then a sentinel one past the end
+let _line_above:array<int64> = []      # per line: 1 when its pointers are drawn above the line
+let _line_pointers:array<int64> = []   # the pointers on the line being rendered
+let _cols:array<int64> = []            # their start column
+let _ends:array<int64> = []            # their end column (exclusive; equals the start for zero-width pointers)
+let _anchors:array<int64> = []         # the column of their `┬`/`┴`/`╰`/`╭`
+let _printed:array<int64> = []         # 1 once their message line is out
+
+let _report_begin = (severity:string title:string):>void => {
+    _report_severity = severity
+    _report_title = title
+    _report_has_message = false
+    _report_has_hint = false
+    _pointer_starts.clear
+    _pointer_stops.clear
+    _pointer_messages.clear
+    _dim_starts.clear
+    _dim_stops.clear
+    _report_notes.clear
+    return void
+}
+
+# The `× message` line under the title.
+let _report_describe = (message:string):>void => {
+    _report_message = message
+    _report_has_message = true
+    return void
+}
+
+let _report_point = (start:int64 stop:int64 message:string):>void => {
+    _pointer_starts.push(start)
+    _pointer_stops.push(stop)
+    _pointer_messages.push(message)
+    return void
+}
+
+# Source bytes in [start, stop) are greyed out in the excerpt.
+let _report_dim = (start:int64 stop:int64):>void => {
+    _dim_starts.push(start)
+    _dim_stops.push(stop)
+    return void
+}
+
+let _report_note = (text:string):>void => {
+    _report_notes.push(text)
+    return void
+}
+
+let _report_hint = (text:string):>void => {
+    _report_hint_text = text
+    _report_has_hint = true
+    return void
+}
+
+# ---- output helpers ----
+let _paint = (code:string):>void => {
+    if _report_color {
+        print(code)
+    }
+    return void
+}
+
+let _print_repeated = (s:string count:int64):>void => {
+    let i:int64 = 0
+    loop i <? count {
+        print(s)
+        i += 1
+    }
+    return void
+}
+
+let _digit_count = (value:int64):>int64 => {
+    let digits:int64 = 1
+    let rest:int64 = value
+    loop rest >=? 10 {
+        rest = rest // 10
+        digits += 1
+    }
+    return digits
+}
+
+let _write_byte = (byte:uint8):>void => {
+    let one:array<uint8> = [byte]
+    let written:int64 = _write_stderr(one)
+    return void
+}
+
+let _is_continuation_byte = (byte:uint8):>bool => byte >=? 128 and byte <? 192
+
+# Characters (UTF-8 lead bytes) in bytes[first, stop).
+let _chars_between = (bytes:array<uint8> first:int64 stop:int64):>int64 => {
+    let count:int64 = 0
+    let i:int64 = first
+    loop i <? stop {
+        if i >=? 0 and i <? bytes.length {
+            if not _is_continuation_byte(bytes[i]) { count += 1 }
+        }
+        i += 1
+    }
+    return count
+}
+
+let _report_label_for = (severity:string):>string => {
+    if severity =? "warning" { return "Warning" }
+    if severity =? "info" { return "Info" }
+    if severity =? "hint" { return "Hint" }
+    return "Error"
+}
+
+let _report_color_for = (severity:string):>string => {
+    if severity =? "warning" { return _report_yellow }
+    if severity =? "info" { return _report_blue }
+    if severity =? "hint" { return _report_cyan }
+    return _report_red
+}
+
+# ---- excerpt geometry ----
+let _find_line_starts = (bytes:array<uint8>):>void => {
+    _line_starts.clear
+    _line_starts.push(0)
+    let i:int64 = 0
+    loop i <? bytes.length {
+        if bytes[i] =? 10 { _line_starts.push(i + 1) }
+        i += 1
+    }
+    _line_starts.push(bytes.length + 1)
+    return void
+}
+
+let _line_count = ():>int64 => _line_starts.length - 1
+
+let _line_start = (line:int64):>int64 => {
+    if line >=? 0 and line <? _line_starts.length { return _line_starts[line] }
+    return 0
+}
+
+# One past the last byte of the line, excluding its newline.
+let _line_end = (line:int64):>int64 => {
+    let next:int64 = line + 1
+    if next >=? 0 and next <? _line_starts.length { return _line_starts[next] - 1 }
+    return 0
+}
+
+let _line_of = (offset:int64):>int64 => {
+    let line:int64 = 0
+    let last:int64 = _line_count() - 1
+    loop line <? last {
+        if _line_start(line + 1) >? offset { return line }
+        line += 1
+    }
+    return line
+}
+
+let _in_dim = (offset:int64):>bool => {
+    let d:int64 = 0
+    loop d <? _dim_starts.length {
+        if d <? _dim_stops.length {
+            if _dim_starts[d] <=? offset and offset <? _dim_stops[d] { return true }
+        }
+        d += 1
+    }
+    return false
+}
+
+let _pointer_start = (index:int64):>int64 => {
+    if index >=? 0 and index <? _pointer_starts.length { return _pointer_starts[index] }
+    return 0
+}
+
+let _pointer_stop = (index:int64):>int64 => {
+    if index >=? 0 and index <? _pointer_stops.length { return _pointer_stops[index] }
+    return 0
+}
+
+let _pointer_message = (index:int64):>string => {
+    if index >=? 0 and index <? _pointer_messages.length { return _pointer_messages[index] }
+    return ""
+}
+
+let _line_has_pointer = (line:int64):>bool => {
+    let p:int64 = 0
+    loop p <? _pointer_starts.length {
+        if _line_of(_pointer_starts[p]) =? line { return true }
+        p += 1
+    }
+    return false
+}
+
+# ---- one line of the excerpt ----
+let _scratch_get = (values:array<int64> index:int64):>int64 => {
+    if index >=? 0 and index <? values.length { return values[index] }
+    return 0
+}
+
+# Pointers on `line` with their columns; the line's underline width.
+let _collect_line_pointers = (bytes:array<uint8> line:int64):>int64 => {
+    _line_pointers.clear
+    _cols.clear
+    _ends.clear
+    _anchors.clear
+    _printed.clear
+    let line_begin:int64 = _line_start(line)
+    let line_stop:int64 = _line_end(line)
+    let width:int64 = 0
+    let p:int64 = 0
+    loop p <? _pointer_starts.length {
+        let start:int64 = _pointer_start(p)
+        if _line_of(start) =? line {
+            let stop:int64 = _pointer_stop(p)
+            if stop >? line_stop { stop = line_stop }
+            let start_col:int64 = _chars_between(bytes line_begin start)
+            let end_col:int64 = start_col
+            let anchor:int64 = start_col
+            if stop <=? start {
+                # zero width: drawn as `╱╲` just before the position
+                if start_col >? 0 { start_col -= 1 }
+                end_col = start_col
+                anchor = start_col
+                if start_col + 2 >? width { width = start_col + 2 }
+            } else {
+                end_col = start_col + _chars_between(bytes start stop)
+                anchor = start_col + (end_col - start_col - 1) // 2
+                if end_col >? width { width = end_col }
+            }
+            _line_pointers.push(p)
+            _cols.push(start_col)
+            _ends.push(end_col)
+            _anchors.push(anchor)
+            _printed.push(0)
+        }
+        p += 1
+    }
+    return width
+}
+
+let _gutter = (digits:int64):>void => {
+    let pad:int64 = 3 + digits
+    _print_repeated(" " pad)
+    return void
+}
+
+# `·` and the space before column 0.
+let _marker_prefix = (digits:int64):>void => {
+    _gutter(digits)
+    print"· "
+    return void
+}
+
+let _print_colored = (text:string color:string):>void => {
+    _paint(color)
+    print(text)
+    _paint(_report_reset)
+    return void
+}
+
+# The `──┬──` (or `──┴──`) layer under (or over) the line.
+let _print_baseline = (digits:int64 width:int64 above:bool):>void => {
+    _marker_prefix(digits)
+    let col:int64 = 0
+    loop col <? width {
+        let glyph:string = " "
+        let color:string = ""
+        let q:int64 = 0
+        loop q <? _line_pointers.length {
+            let start_col:int64 = _scratch_get(_cols q)
+            let end_col:int64 = _scratch_get(_ends q)
+            let pointer_color:string = _report_pointer_color(_scratch_get(_line_pointers q))
+            if end_col =? start_col {
+                if col =? start_col {
+                    glyph = "╲"
+                    if not above { glyph = "╱" }
+                    color = pointer_color
+                } else if col =? start_col + 1 {
+                    glyph = "╱"
+                    if not above { glyph = "╲" }
+                    color = pointer_color
+                }
+            } else if start_col <=? col and col <? end_col {
+                glyph = "─"
+                if col =? _scratch_get(_anchors q) {
+                    glyph = "┬"
+                    if above { glyph = "┴" }
+                }
+                color = pointer_color
+            }
+            q += 1
+        }
+        if glyph =? " " {
+            print(glyph)
+        } else {
+            _print_colored(glyph color)
+        }
+        col += 1
+    }
+    print"\n"
+    return void
+}
+
+# One `╰─ message` (below) or `╭─ message` (above) line for line pointer `q`,
+# with `│` connectors for the pointers whose messages are still pending
+# (below) or already out (above).
+let _print_message_line = (digits:int64 q:int64 above:bool):>void => {
+    _marker_prefix(digits)
+    let anchor:int64 = _scratch_get(_anchors q)
+    let col:int64 = 0
+    loop col <? anchor {
+        let glyph:string = " "
+        let color:string = ""
+        let other:int64 = 0
+        loop other <? _line_pointers.length {
+            let connects:bool = _scratch_get(_printed other) =? 1
+            if not above { connects = _scratch_get(_printed other) =? 0 }
+            if other not=? q and connects and _scratch_get(_anchors other) =? col {
+                glyph = "│"
+                color = _report_pointer_color(_scratch_get(_line_pointers other))
+            }
+            other += 1
+        }
+        if glyph =? " " {
+            print(glyph)
+        } else {
+            _print_colored(glyph color)
+        }
+        col += 1
+    }
+    let pointer:int64 = _scratch_get(_line_pointers q)
+    _paint(_report_pointer_color(pointer))
+    if above { print"╭─ " } else { print"╰─ " }
+    print(_pointer_message(pointer))
+    _paint(_report_reset)
+    print"\n"
+    return void
+}
+
+# All message lines of the current line: below, from the rightmost anchor
+# inward; above, from the leftmost outward.
+let _print_message_lines = (digits:int64 above:bool):>void => {
+    let remaining:int64 = _line_pointers.length
+    loop remaining >? 0 {
+        let chosen:int64 = -1
+        let best:int64 = 0
+        let q:int64 = 0
+        loop q <? _line_pointers.length {
+            if _scratch_get(_printed q) =? 0 {
+                let anchor:int64 = _scratch_get(_anchors q)
+                let better:bool = chosen <? 0
+                if not better {
+                    if above { better = anchor <? best } else { better = anchor >? best }
+                }
+                if better {
+                    chosen = q
+                    best = anchor
+                }
+            }
+            q += 1
+        }
+        if chosen >=? 0 {
+            _print_message_line(digits chosen above)
+            if chosen <? _printed.length { _printed[chosen] = 1 }
+        }
+        remaining -= 1
+    }
+    return void
+}
+
+# `  N | source line`, right-aligning the number to `digits`, dimming dimmed spans.
+let _print_source_line = (bytes:array<uint8> line:int64 row:int64 digits:int64):>void => {
+    print"  "
+    let pad:int64 = digits - _digit_count(row)
+    _print_repeated(" " pad)
+    _paint(_report_label_color)
+    print(row)
+    _paint(_report_reset)
+    print" | "
+    let dimming:bool = false
+    let i:int64 = _line_start(line)
+    let stop:int64 = _line_end(line)
+    loop i <? stop {
+        if i >=? 0 and i <? bytes.length {
+            let dim:bool = _in_dim(i)
+            if dim and not dimming { _paint(_report_dim_color) }
+            if dimming and not dim { _paint(_report_reset) }
+            dimming = dim
+            _write_byte(bytes[i])
+        }
+        i += 1
+    }
+    if dimming { _paint(_report_reset) }
+    print"\n"
+    return void
+}
+
+let _print_labelled = (label:string text:string):>void => {
+    print"  "
+    _print_colored(label _report_label_color)
+    print" {text}\n"
+    return void
+}
+
+# `note:` lines and `help:` after the excerpt.
+let _print_trailer = ():>void => {
+    let n:int64 = 0
+    loop n <? _report_notes.length {
+        if n =? 0 {
+            _print_labelled("note:" _report_notes[n])
+        } else {
+            print"        {_report_notes[n]}\n"
+        }
+        n += 1
+    }
+    if _report_has_hint { _print_labelled("help:" _report_hint_text) }
+    return void
+}
+
+# ---- the whole report ----
+let _report_render = (path:string first_row:int64 excerpt:string):>void => {
+    _set_output_stderr(true)
+    _report_color = _stderr_is_terminal()
+    let bytes:array<uint8> = excerpt as array<uint8>
+    _find_line_starts(bytes)
+
+    let severity_color:string = _report_color_for(_report_severity)
+    let label:string = _report_label_for(_report_severity)
+    print"{label}: "
+    _print_colored(_report_title severity_color)
+    print"\n\n"
+    if _report_has_message {
+        print"  "
+        if _report_severity =? "error" {
+            _print_colored("×" severity_color)
+        } else {
+            _print_colored("•" severity_color)
+        }
+        print" {_report_message}\n"
+    }
+    if _pointer_starts.length =? 0 {
+        _print_trailer()
+        return void
+    }
+
+    # the header points at the earliest pointer
+    let first_offset:int64 = _pointer_start(0)
+    let first_line:int64 = _line_of(first_offset)
+    let last_line:int64 = first_line
+    let p:int64 = 0
+    loop p <? _pointer_starts.length {
+        let start:int64 = _pointer_starts[p]
+        if start <? first_offset { first_offset = start }
+        let line:int64 = _line_of(start)
+        if line <? first_line { first_line = line }
+        if line >? last_line { last_line = line }
+        p += 1
+    }
+    let digits:int64 = _digit_count(first_row + last_line)
+    let header_line:int64 = _line_of(first_offset)
+    let header_row:int64 = first_row + header_line
+    let header_col:int64 = 1 + _chars_between(bytes _line_start(header_line) first_offset)
+    _gutter(digits)
+    print"╭─[{path}:{header_row}:{header_col}]\n"
+
+    # two adjacent pointed lines draw the first one's pointers above it
+    _line_above.clear
+    let l:int64 = 0
+    let lines:int64 = _line_count()
+    loop l <? lines {
+        _line_above.push(0)
+        l += 1
+    }
+    l = first_line
+    loop l <=? last_line {
+        if _line_has_pointer(l) and _line_has_pointer(l + 1) {
+            if l >=? 0 and l <? _line_above.length { _line_above[l] = 1 }
+            l += 2
+        } else {
+            l += 1
+        }
+    }
+
+    l = first_line
+    loop l <=? last_line {
+        let width:int64 = _collect_line_pointers(bytes l)
+        let above:bool = _scratch_get(_line_above l) =? 1
+        if _line_pointers.length >? 0 and above {
+            _print_message_lines(digits true)
+            _print_baseline(digits width true)
+        }
+        let row:int64 = first_row + l
+        _print_source_line(bytes l row digits)
+        if _line_pointers.length >? 0 and not above {
+            _print_baseline(digits width false)
+            _print_message_lines(digits false)
+        }
+        l += 1
+    }
+    _gutter(digits)
+    print"╰───\n"
+    _print_trailer()
+    return void
+}

@@ -160,6 +160,17 @@ class ScopeMetatag(AST):
 
 
 @dataclass
+class Assert(AST):
+    """A compile-time `$assert`: the analyses must prove ``condition``; nothing is lowered."""
+
+    condition: AST
+    source: str
+    message: str | None = None
+    runtime: bool = False  # a `$runtime_assert`: only a refuted condition is a compile-time error
+    dimmed: Span | None = None  # the `, message` tail, greyed out in reports
+
+
+@dataclass
 class Break(AST):
     """Exit an enclosing loop, optionally selected through a scope metatag."""
 

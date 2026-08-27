@@ -51,6 +51,26 @@ if index >=? 0 and index <? values.length
 
 Inside the body, the condition establishes the indexing precondition. Assignment or a call that may mutate a relevant value invalidates facts that are no longer guaranteed.
 
+## Assertions
+
+Sometimes the fact you rely on is not one the compiler would state on its own. `$assert` states it and asks the compiler to prove it — proven assertions cost nothing, refuted ones are errors, and an assertion the compiler cannot decide is reported as unproven rather than silently trusted:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let xs:array<int64> = [1 2 3]
+$assert xs.length =? 3, "three elements"
+
+let get = (ys:array<int64> i:int64):>int64 => {
+    $runtime_assert i >=? 0 and i <? ys.length, "index {i} out of range"
+    return ys[i]
+}
+
+let main = ():>int64 => get(xs 1)     # 2
+```
+
+`$runtime_assert` checks at runtime instead. Its failure path leaves the program with a report on stderr laid out like a compiler error — the line with the condition underlined, the message under it, and notes with the values that went into it — and exit status 101, so after it the compiler knows the condition held: `ys[i]` above needs no further proof, just as it would not after `if i <? 0 or i >=? ys.length { return 0 }`.
+
 ## Explicit Boundaries
 
 The intended model distinguishes several outcomes:

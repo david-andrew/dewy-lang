@@ -25,12 +25,12 @@ class NotImplementedYet(ReportException):
     """construct not yet handled by the semantic phase"""
 
 
-def type_error(srcfile: SrcFile, title: str, *pointers: Pointer, message: str | None = None, hint: str | None = None) -> NoReturn:
-    raise TypeCheckError(Error(srcfile=srcfile, title=title, message=message, pointer_messages=list(pointers), hint=hint))
+def type_error(srcfile: SrcFile, title: str, *pointers: Pointer, message: str | None = None, hint: str | None = None, dimmed: list[Span] | None = None) -> NoReturn:
+    raise TypeCheckError(Error(srcfile=srcfile, title=title, message=message, pointer_messages=list(pointers), hint=hint, dimmed=dimmed or []))
 
 
-def user_error(srcfile: SrcFile, title: str, *pointers: Pointer, message: str | None = None, hint: str | None = None) -> NoReturn:
-    raise UserError(Error(srcfile=srcfile, title=title, message=message, pointer_messages=list(pointers), hint=hint))
+def user_error(srcfile: SrcFile, title: str, *pointers: Pointer, message: str | None = None, hint: str | None = None, notes: list[str] | None = None, dimmed: list[Span] | None = None) -> NoReturn:
+    raise UserError(Error(srcfile=srcfile, title=title, message=message, pointer_messages=list(pointers), hint=hint, notes=notes or [], dimmed=dimmed or []))
 
 
 def not_implemented(srcfile: SrcFile, loc: Span, what: str) -> NoReturn:

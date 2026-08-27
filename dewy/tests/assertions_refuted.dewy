@@ -1,0 +1,10 @@
+# A compile-time assertion the analyses refute: this file does not compile.
+# `i` is exactly 3 and `xs.length` is exactly 3, so `i <? xs.length` is false
+# for every value the analysis admits.
+let xs:array<int64> = [1 2 3]
+
+let main = ():>int64 => {
+    let i:int64 = 3
+    $assert i <? xs.length, "the index must stay inside the array"
+    return xs[i]
+}

@@ -1,0 +1,18 @@
+# A `$runtime_assert` that fails: the report goes to stderr — the condition,
+# where it is, the values of its operands, and the message — and the process
+# exits with status 101, so `after` is never printed.
+let Account:type = [name:string balance:int64]
+
+let withdraw = (account:Account amount:int64):>int64 => {
+    $runtime_assert amount >? 0 and amount <=? account.balance, "cannot withdraw {amount} from {account.name}"
+    return account.balance - amount
+}
+
+let main = ():>int64 => {
+    let alice:Account = [name="alice" balance=30]
+    let after:int64 = withdraw(alice 10)
+    printl"after 10: {after}"
+    after = withdraw(alice 50)         # fails: 50 > 30
+    printl"after 50: {after}"
+    return 0
+}
