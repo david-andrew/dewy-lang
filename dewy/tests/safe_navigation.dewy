@@ -1,0 +1,44 @@
+# Safe navigation: member access on an exception-bearing receiver reads the
+# member from an ordinary alternative and forwards an exception alternative
+# (`error` subtypes, `undefined`) unchanged; each route segment applies the
+# rule again, so `load(id).address.city` is `string|NotFound|undefined`.
+let NotFound:type = type of error
+let Address:type = [city:string zip:int64]
+let User:type = [name:string address:Address|undefined]
+
+let load = (id:int64):>User|NotFound|undefined => {
+    if id <? 0 { return undefined }
+    if id >? 100 { return NotFound }
+    if id =? 7 { return [name="nowhere" address=undefined] }
+    return [name="ada" address=[city="paris" zip=75000]]
+}
+
+let Customer:type = [name:string id:int64]
+let Organization:type = [name:string members:int64]
+let find = (id:int64):>Customer|Organization =>
+    if id >? 0 [name="ada" id=id] else [name="acme" members=3]
+
+let city_of = (id:int64):>string|NotFound|undefined => load(id).address.city
+let name_of = (id:int64):>string|NotFound|undefined => load(id).name
+let zip_of = (id:int64):>int64|NotFound|undefined => load(id).address.zip
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let n = name_of(1)
+    if n is? string { if n =? "ada" { checks += 1 } }
+    if name_of(500) is? NotFound { checks += 2 }
+    if name_of(-1) is? undefined { checks += 4 }
+    let c = city_of(1)
+    if c is? string { if c =? "paris" { checks += 8 } }
+    if city_of(7) is? undefined { checks += 16 }      # the address itself is absent
+    if city_of(500) is? NotFound { checks += 32 }
+    let z = zip_of(1)
+    if z is? int64 { if z =? 75000 { checks += 64 } }
+    let u = load(1)
+    let direct = u.name                                 # string|NotFound|undefined
+    if direct is? string { checks += 128 }
+    let who = find(-3)                                  # Customer|Organization: no exceptions
+    if who.name =? "acme" { checks += 256 }             # a common member reads as plain `string`
+    if find(4).name =? "ada" { checks += 512 }
+    return checks - 981                                 # 42
+}

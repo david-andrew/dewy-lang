@@ -845,6 +845,79 @@ class _Lowerer(
         result_prelude, value = self._extract_expression(result)
         return [*prelude, holder, *test_prelude, flow, *result_prelude], value
 
+    def _hold_union_value(self, value: hir.AST, name: str, binding_id: int, loc: Span) -> tuple[list[hir.AST], tuple[ty.TypeExpr, ...]]:
+        """Materialize a union/optional value's cell under a hidden binding and
+        register its storage members; returns the statements and the members."""
+        members = ty.runtime_union_members(value.type)
+        if members is not None:
+            prelude, cell = self._materialize_union(value, members)
+            self.union_cells[binding_id] = members
+        else:
+            payload = ty.optional_payload(value.type)
+            if payload is None:
+                self._target_error(value, 'a union operand that is not a runtime union')
+            prelude, cell = self._materialize_optional(value, payload)
+            self.optional_payloads[binding_id] = payload
+            members = ('undefined', payload)
+        holder = hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(cell, type='int64'), binding_id=binding_id)
+        return [*prelude, holder], members
+
+    def _extract_forwarding_access(self, node: hir.ForwardingAccess) -> tuple[list[hir.AST], hir.AST]:
+        """Safe navigation: read the member from an ordinary alternative, else
+        retag the exception alternative into the result union."""
+        loc = node.loc
+        statements, members = self._hold_union_value(node.value, node.name, node.binding_id, loc)
+        system = ty.TypeSystem()
+        result_members = ty.runtime_union_members(node.type)
+        result = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('forwarded'))
+        if result_members is not None:
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, 'int64', self._union_cell_allocation(result_members, loc)))
+            statements.extend(self._union_prepare_trees(result, result_members, loc))
+            def write(value: hir.AST) -> list[hir.AST]:
+                return self._union_write(result, value, result_members)
+        elif ty.optional_payload(node.type) is not None:
+            payload = ty.optional_payload(node.type)
+            assert payload is not None
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, 'int64', self._optional_allocation(loc)))
+            def write(value: hir.AST) -> list[hir.AST]:
+                return self._optional_write(result, value, payload)
+        else:
+            # every alternative has the member at one type: a plain value
+            result = hir.ExpressedIdentifier(loc, self._lower_runtime_value_type(node.type), self._new_optional_name('common'))
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, result.type, self._placeholder(replace(node, type=node.type))))
+            def write(value: hir.AST) -> list[hir.AST]:
+                prelude, lowered = self._extract_expression(value)
+                return [*prelude, hir.Assign(loc, ty.VOID_TYPE, result, '=', lowered)]
+        tag = self._optional_tag(hir.ExpressedIdentifier(loc, 'int64', node.name), loc)
+        arms: list[hir.IfArm | hir.LoopArm] = []
+        for index, member in enumerate(members):
+            if system.is_subtype(member, ty.EXCEPTION_TYPE):
+                continue
+            unfolded = ty.unfold(member)
+            assert isinstance(unfolded, ty.ObjectType)
+            field = unfolded.field(node.field)
+            assert field is not None
+            receiver = hir.ExpressedIdentifier(loc, unfolded, node.name, binding_id=node.binding_id)
+            access = hir.MemberAccess(loc, field.type, receiver, node.field)
+            arms.append(hir.IfArm(
+                loc, ty.VOID_TYPE,
+                self._typed_equality(tag, self._uint8_literal(loc, index), 'uint8', loc),
+                hir.Block(loc, ty.VOID_TYPE, write(access), True),
+            ))
+        # the exception alternatives forward: the receiver's cell, viewed as its
+        # exception subset, retags into the result
+        if node.exception_type == ty.BOTTOM_TYPE:
+            # common-member access on an ordinary union: some arm always matches
+            statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
+            return statements, result
+        forwarded: hir.AST
+        if node.exception_type == 'undefined':
+            forwarded = hir.Undefined(loc, 'undefined')
+        else:
+            forwarded = hir.ExpressedIdentifier(loc, node.exception_type, node.name, binding_id=node.binding_id)
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, write(forwarded), True)))
+        return statements, result
+
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         if ty.optional_payload(type_) is not None:
             return 'int64'
@@ -1464,7 +1537,7 @@ class _Lowerer(
                 array_use='grow',
             )
             return
-        if isinstance(node, hir.OrThrow):
+        if isinstance(node, (hir.OrThrow, hir.ForwardingAccess)):
             self._discover_node(node.value, scope, current_function)
             return
         if isinstance(node, (hir.DictLookup, hir.DictContains)):
@@ -2043,6 +2116,8 @@ class _Lowerer(
                 value=self._require_node(self._transform_node(node.value)),
                 propagated=self._require_node(self._transform_node(node.propagated)),
             )
+        if isinstance(node, hir.ForwardingAccess):
+            return replace(node, value=self._require_node(self._transform_node(node.value)))
         if isinstance(node, hir.MemberAssign):
             target = self._transform_node(node.target)
             if not isinstance(target, hir.MemberAccess):
@@ -3009,6 +3084,8 @@ class _Lowerer(
             return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
         if isinstance(node, hir.OrThrow):
             return self._extract_or_throw(node)
+        if isinstance(node, hir.ForwardingAccess):
+            return self._extract_forwarding_access(node)
         if isinstance(node, hir.TypeTest):
             # Union operands test tags at runtime; fully narrowed operands
             # fold statically below. A union-typed identifier uses its

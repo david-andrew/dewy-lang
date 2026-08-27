@@ -72,6 +72,20 @@ class ErrorValue(AST):
 
 
 @dataclass
+class ForwardingAccess(AST):
+    """``receiver.name`` on an exception-bearing receiver ``V… | X…``: the
+    member is read from an ordinary alternative, an exception alternative is
+    forwarded unchanged. ``type`` is ``R… | X…``. ``name``/``binding_id`` name
+    the hidden binding holding the receiver; ``field`` is the member."""
+
+    value: AST
+    field: str
+    name: str
+    binding_id: int
+    exception_type: ty.TypeExpr
+
+
+@dataclass
 class OrThrow(AST):
     """``value or_throw``: return the exception alternative from the enclosing
     function, else continue with the ordinary alternatives (``type``).

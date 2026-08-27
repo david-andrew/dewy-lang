@@ -210,7 +210,37 @@ def _typecheck_module(
         raise TypeError('INTERNAL ERROR: source module did not produce a block')
     return checked, ctx
 
+def _sink_ambiguity(ast: p0.AST) -> p0.AST:
+    """Push a statement-level parse ambiguity below the operators its readings share.
+
+    `x = load(id).name` parses as two readings of the whole statement (call
+    vs. product inside), which the declaration forms cannot match. When every
+    reading is the same binary operator over the same left operand, the
+    ambiguity belongs to the right operand only.
+    """
+    if isinstance(ast, p0.KeywordExpr) and len(ast.parts) == 2 and isinstance(ast.parts[1], p0.Ambiguous):
+        return replace(ast, parts=[ast.parts[0], _sink_ambiguity(ast.parts[1])])
+    if not isinstance(ast, p0.Ambiguous):
+        return ast
+    candidates = ast.candidates
+    first = candidates[0]
+    if (
+        isinstance(first, p0.BinOp)
+        and all(
+            isinstance(candidate, p0.BinOp)
+            and type(candidate.op) is type(first.op)
+            and getattr(candidate.op, 'symbol', None) == getattr(first.op, 'symbol', None)
+            and candidate.left == first.left
+            for candidate in candidates[1:]
+        )
+    ):
+        right = _sink_ambiguity(p0.Ambiguous(ast.loc, [candidate.right for candidate in candidates]))
+        return replace(first, right=right)
+    return ast
+
+
 def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
+    ast = _sink_ambiguity(ast)
     match ast:
         case p0.Ambiguous(candidates=candidates):
             # speculatively check each candidate reading against a forked declarations layer
@@ -811,6 +841,13 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     if dict_store is not None:
         return dict_store
     target = tcr_assignment_target(ast.left, ctx=ctx)
+    if isinstance(target, hir.ForwardingAccess):
+        user_error(
+            ctx.srcfile,
+            'assignment through a union route',
+            Pointer(span=target.value.loc, message=f'this has type `{type_to_dewy(target.value.type)}`, so `{target.field}` is not one definite place'),
+            hint='narrow the receiver with `is?` (or propagate with `or_throw`) before assigning',
+        )
     if isinstance(target, hir.MemberAccess) and isinstance(target.value.type, ty.ObjectType):
         # a store accepts the field's declared type; an `is?` narrowing of the
         # route is forgotten below, not enforced on the new value
@@ -3499,6 +3536,20 @@ def _tcr_object_literal(
         # object member, if there is exactly one.
         # a recursive member unfolds to its object type for the literal
         candidates = [ty.unfold(item) for item in expected.items if isinstance(ty.unfold(item), ty.ObjectType)]
+        if len(candidates) > 1:
+            # several object members: the literal's field names choose
+            written = {
+                item.left.item.name
+                for item in block.inner
+                if isinstance(item, p0.BinOp)
+                and isinstance(item.op, t1.Operator)
+                and item.op.symbol == '='
+                and isinstance(item.left, p0.Atom)
+                and isinstance(item.left.item, t1.Identifier)
+            }
+            matching = [candidate for candidate in candidates if {field.name for field in candidate.fields} == written]
+            if len(matching) == 1:
+                candidates = matching
         if len(candidates) == 1:
             expected_object = candidates[0]
     if expected is not None and expected_object is None:
@@ -4106,6 +4157,10 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         value = source_place.target
     if isinstance(value.type, ty.NamedType):
         value = replace(value, type=ty.unfold(value.type))
+    if isinstance(value.type, ty.TypeOr) and source_place is None:
+        forwarding = _forwarding_member_access(value, name, binop, ctx=ctx)
+        if forwarding is not None:
+            return forwarding
     if not isinstance(value.type, ty.ObjectType):
         if name == 'length':
             type_error(
@@ -4149,6 +4204,46 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             Pointer(span=binop.loc, message='this field is const'),
         )
     return hir.Place(binop.loc, field.type, access)
+
+
+def _forwarding_member_access(value: hir.AST, name: str, binop: p0.BinOp, *, ctx: Context) -> hir.AST | None:
+    """Member access on a union receiver `V… | X…` (`X…` the exception
+    alternatives, possibly none). Every ordinary alternative must have the
+    member; the result is `R… | X…`: the member read from whichever ordinary
+    alternative is live, an exception alternative forwarded unchanged (see the
+    errors reference). With no exceptions this is plain common-member access."""
+    assert isinstance(value.type, ty.TypeOr)
+    members = list(value.type.items)
+    exceptions = [m for m in members if ctx.type_system.is_subtype(m, ty.EXCEPTION_TYPE)]
+    ordinary = [m for m in members if m not in exceptions]
+    if not ordinary:
+        return None
+    if not all(isinstance(ty.unfold(m), ty.ObjectType) for m in ordinary):
+        return None  # strings, arrays, …: the ordinary error paths explain
+    results: list[ty.TypeExpr] = []
+    for member in ordinary:
+        unfolded = ty.unfold(member)
+        field = unfolded.field(name) if isinstance(unfolded, ty.ObjectType) else None
+        if field is None:
+            type_error(
+                ctx.srcfile,
+                f'member access requires every ordinary alternative to have `{name}`',
+                Pointer(span=binop.right.loc, message=f'`{type_to_dewy(member)}` has no field `{name}`'),
+                Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`; only its exception alternatives forward'),
+                hint='narrow the value with `is?` first, or give every ordinary alternative the field',
+            )
+        results.append(field.type)
+    binding = ctx.binding_registry.allocate(binop, f'__dewy_forward_{ctx.binding_registry.next_id}', 'value', binop.loc)
+    binding.type = value.type
+    return hir.ForwardingAccess(
+        binop.loc,
+        ty.union(*results, *exceptions),
+        value,
+        name,
+        binding.name,
+        binding.id,
+        ty.union(*exceptions) if exceptions else ty.BOTTOM_TYPE,
+    )
 
 
 def _member_root_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
@@ -6382,6 +6477,13 @@ def tcr_assignment_target(
     if isinstance(target, p0.BinOp):
         if isinstance(target.op, t1.Operator) and target.op.symbol == '.':
             access = _tcr_member_access(target, ctx=ctx)
+            if isinstance(access, hir.ForwardingAccess):
+                user_error(
+                    ctx.srcfile,
+                    'assignment through a union route',
+                    Pointer(span=access.value.loc, message=f'this has type `{type_to_dewy(access.value.type)}`, so `{access.field}` is not one definite place'),
+                    hint='narrow the receiver with `is?` (or propagate with `or_throw`) before assigning',
+                )
             if not isinstance(access, hir.MemberAccess):
                 not_implemented(ctx.srcfile, target.loc, 'assignment to `.length`')
             if not access.mutable:

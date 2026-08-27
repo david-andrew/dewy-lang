@@ -57,12 +57,22 @@ Only `type of error` creates identity. A later alias such as `MyComplexError & [
 
 When a receiver might be an exception, Dewy applies a member operation to every ordinary alternative and forwards the exception unchanged:
 
-<!-- dewy-example: design-only -->
-```dewy
-let customer:Customer | DatabaseError | undefined = findCustomer(id)
-let city = customer.profile.address.city
+<!-- dewy-example: compiler -->
 
-# city has type string | DatabaseError | undefined
+```dewy
+let DatabaseError:type = type of error
+let Address:type = [city:string]
+let Profile:type = [address:Address|undefined]
+let Customer:type = [profile:Profile]
+
+let find_customer = (id:int64):>Customer | DatabaseError | undefined =>
+    if id >? 0 [profile=[address=[city="paris"]]] else DatabaseError
+
+let city_of = (id:int64):>string | DatabaseError | undefined => {
+    let customer = find_customer(id)
+    let city = customer.profile.address.city
+    return city                       # string | DatabaseError | undefined
+}
 ```
 
 If `customer` is a `Customer`, the route reads its `profile`, `address`, and `city`. If it is a `DatabaseError` or `undefined`, none of those accesses run; that exception becomes the value of `city`. Every later access in the route follows the same rule, so Dewy does not need a separate `?.` operator.

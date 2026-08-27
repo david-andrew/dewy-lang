@@ -49,9 +49,11 @@ let peek = (node:Node):>int64 => {
 }
 '''
     _declared(source)  # `node.next.value` reads the narrowed route
-    with pytest.raises(TypeCheckError, match='member access requires an object'):
+    # unnarrowed, `node.next.value` is safe navigation: `int64 | undefined`,
+    # which does not fit the `int64` result
+    with pytest.raises(TypeCheckError, match='type mismatch'):
         _declared(NODE + 'let peek = (node:Node):>int64 => node.next.value\n')
-    with pytest.raises(TypeCheckError, match='member access requires an object'):
+    with pytest.raises(TypeCheckError, match='type mismatch'):
         _declared(NODE + '''
 let peek = (node:Node other:Node):>int64 => {
     if node.next is? Node {

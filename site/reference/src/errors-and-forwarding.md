@@ -4,7 +4,7 @@ Dewy models expected failures as values belonging to nominal error types. A func
 
 Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `undefined` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
 
-Implemented today: unit-like error types minted with `type of error`, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), and postfix `or_throw`. Not yet implemented: errors carrying fields, forwarding member access through exception-bearing receivers, and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
+Implemented today: unit-like error types minted with `type of error`, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: errors carrying fields, forwarding through method calls, and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
 
 ## The `exception` Family
 
@@ -101,15 +101,40 @@ where each `Xi` descends from `exception` and no `Vi` does. For `receiver.member
 3. When the runtime receiver is an `Xi`, member lookup is not performed and that exception value is forwarded.
 4. If the member results have types `R1` through `Rn`, the result type is `R1 | ... | Rn | X1 | ... | Xm`.
 
-<!-- dewy-example: design-only -->
-```dewy
-let user:User | UserError | undefined = loadUser(id)
-let city = user.profile.address.city
+<!-- dewy-example: compiler -->
 
-# city: string | UserError | undefined
+```dewy
+let UserError:type = type of error
+let Address:type = [city:string]
+let User:type = [name:string address:Address|undefined]
+
+let load_user = (id:int64):>User | UserError | undefined =>
+    if id >? 0 [name="ada" address=[city="paris"]] else UserError
+
+let city_of = (id:int64):>string | UserError | undefined => {
+    let user = load_user(id)
+    let city = user.address.city      # city: string | UserError | undefined
+    return city
+}
 ```
 
 Each successive route segment applies the rule again. This gives exception-bearing receivers safe navigation without a separate `?.` spelling. Ordinary union alternatives never forward merely because they lack the requested member.
+
+The rule with no exception alternatives is plain common-member access: when every alternative of an ordinary union has the member, the access reads it without narrowing, at the union of the member types (one type when they agree):
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Customer:type = [name:string id:int64]
+let Organization:type = [name:string members:int64]
+
+let find = (id:int64):>Customer | Organization =>
+    if id >? 0 [name="ada" id=id] else [name="acme" members=3]
+
+let who = (id:int64):>string => find(id).name    # both alternatives have `name`
+```
+
+`find(id).id` is a type error there — `Organization` has no `id` — and so is assigning through any union route; narrow with `is?` first.
 
 Forwarding applies at the receiver's current type; it does not recursively search inside containers. An `array<int64 | ParseError>` is an array value, not a top-level `ParseError`. Code that wants to combine or reject exceptions among its elements must do so explicitly.
 

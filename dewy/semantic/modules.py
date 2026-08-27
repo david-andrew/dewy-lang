@@ -32,6 +32,27 @@ class ModuleRecord:
 _validated_prelude_modules: set[tuple[Path, int, str]] = set()
 
 
+def _has_handle_union_member(type_: object) -> bool:
+    """Whether a type stores an aggregate behind an arena handle: a union
+    member that is an object, array, or recursive reference inside an object
+    field (field cells have no prepared trees), anywhere in the type."""
+    if isinstance(type_, ty.ObjectType):
+        for field in type_.fields:
+            if isinstance(field.type, ty.TypeOr) and any(
+                isinstance(ty.unfold(item) if not isinstance(item, ty.NamedType) else item, (ty.ObjectType, ty.ArrayType, ty.NamedType))
+                for item in field.type.items
+            ):
+                return True
+            if _has_handle_union_member(field.type):
+                return True
+        return False
+    if isinstance(type_, ty.TypeOr):
+        return any(_has_handle_union_member(item) for item in type_.items)
+    if isinstance(type_, ty.ArrayType):
+        return _has_handle_union_member(type_.element)
+    return False
+
+
 def _has_runtime_array_field(object_type: ty.ObjectType) -> bool:
     for field in object_type.fields:
         if isinstance(field.type, ty.ArrayType) and field.type.length is None:
@@ -283,8 +304,15 @@ class ModuleCompiler:
             nonlocal found
             if found:
                 return
-            if isinstance(value, hir.TypeValue) and ty.mentions_named_type(value.value):
-                # recursive members live behind arena handles
+            if isinstance(value, hir.TypeValue) and (
+                ty.mentions_named_type(value.value) or _has_handle_union_member(value.value)
+            ):
+                # recursive members and aggregate union members of fields live behind arena handles
+                found = True
+                return
+            if isinstance(value, (hir.ObjectLiteral, hir.Declare)) and _has_handle_union_member(
+                value.type if isinstance(value, hir.ObjectLiteral) else (value.annotation or value.expr.type)
+            ):
                 found = True
                 return
             if (
