@@ -99,7 +99,7 @@ def test_keyword_patterns_cover_exactly_the_parser_keywords() -> None:
 
 def test_word_operators_match_the_parser_tables() -> None:
     pattern = _rule("word-operator")["match"]
-    word_ops = {op for op in t2.binary_ops | t2.prefix_ops if op.isalpha()}
+    word_ops = {op for op in t2.binary_ops | t2.prefix_ops | t2.postfix_ops if op.replace('_', '').isalpha()}
     for op in word_ops:
         assert fullmatch(pattern, op), op
     comparison = _rule("comparison-word")["match"]

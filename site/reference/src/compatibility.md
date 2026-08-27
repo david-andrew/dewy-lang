@@ -10,7 +10,7 @@ Its implemented core includes bindings, fixed-width integers and Booleans, funct
 
 Several normative areas are only partial. Notable examples include escaping and runtime-sized aggregate storage, user-defined interpolation conversions and unbounded result capacities, runtime range storage, function handles and closures, runtime dictionaries, general physical quantities, user-written generics, refinements, effects, and heterogeneous unions.
 
-The hosted type system records `exception` as the parent of `error` and `undefined`. Automatic exception forwarding and `or_return` are not yet implemented, so those rules describe the intended language rather than current compiler behavior.
+The hosted type system records `exception` as the parent of `error` and `undefined`. Automatic exception forwarding and `or_throw` are not yet implemented, so those rules describe the intended language rather than current compiler behavior.
 
 Generative `type of Parent`, hybrid `Type[field=value ...]` construction, and general structural-object intersection merging are also not yet implemented.
 

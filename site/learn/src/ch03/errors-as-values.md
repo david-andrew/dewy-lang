@@ -81,14 +81,14 @@ If a program needs a sentinel that does not forward, it defines an ordinary type
 
 ## Propagating an Exception
 
-Use `or_return` when the current function should pass an exception back to its caller:
+Use `or_throw` when the current function should pass an exception back to its caller:
 
 <!-- dewy-example: design-only -->
 ```dewy
 let loadGreeting = (id:CustomerId)
     :> string | NotFoundError | DatabaseError
 => {
-    let customer = loadCustomer(id) or_return
+    let customer = loadCustomer(id) or_throw
     return "Hello, {customer.name}!"
 }
 ```
@@ -102,7 +102,7 @@ Unlike navigation on a receiver, arguments do not forward implicitly:
 let amount:Money | ParseError = parseMoney(text)
 
 invoice.setAmount(amount)            # type error
-invoice.setAmount(amount or_return)  # passes Money or returns ParseError
+invoice.setAmount(amount or_throw)  # passes Money or returns ParseError
 ```
 
 Keeping arguments explicit prevents a call from acquiring hidden early exits for any exception-bearing expression supplied to it.
@@ -127,12 +127,40 @@ After both error alternatives have left the flow, `customer` is known to be a `C
 
 Not every alternative that describes an unsuccessful search should be an exception. `User | Missing` contains two ordinary domain outcomes and does not gain forwarding. `User | NotFoundError` says that the second alternative is an error intended to participate in propagation.
 
+## What the Compiler Does Today
+
+The current compiler implements the core of this chapter: unit-like error types minted with `type of error`, errors as ordinary union alternatives, `is?` to handle them (`is? error` covers the whole family), and `or_throw` to propagate. Errors carrying fields and forwarding member access are still design.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let NotFound:type = type of error
+let Invalid:type = type of error
+
+let lookup = (id:int64):>int64 | NotFound | Invalid => {
+    if id <? 0 { return Invalid }
+    if id >? 100 { return NotFound }
+    return id * 2
+}
+
+let twice = (id:int64):>int64 | NotFound | Invalid => {
+    let first = lookup(id) or_throw      # propagate NotFound / Invalid
+    return lookup(first) or_throw
+}
+
+let main = ():>int64 => {
+    let r = twice(30)
+    if r is? error { return 1 }           # NotFound: 60 -> 120 is out of range
+    return r                              # the ordinary alternative
+}
+```
+
 ## Errors, Absence, and Effects
 
 `undefined` represents absence. It is not an `error`, but it is an `exception`, so optional navigation forwards it automatically. This makes `T | undefined` the common option-like form: use the `T` normally, or carry its exceptional absence through the route. [Optional Values and Narrowing](optional-types.md) covers explicit tests and fallbacks.
 
 Errors are also separate from [effects](effects.md). An error appears in the returned union because it is a value the caller receives. Effects describe behavior such as I/O, blocking, or mutation even when a call succeeds.
 
-> **Design boundary:** Direct error unions, nominal exception creation, the `exception` forwarding family, safe receiver navigation, explicit argument handling, and the separation of errors from effects are the intended model. Transforming an exception during `or_return`, pattern matching, recovery helpers, and extending automatic forwarding to pipelines remain provisional.
+> **Design boundary:** Direct error unions, nominal exception creation, the `exception` forwarding family, safe receiver navigation, explicit argument handling, and the separation of errors from effects are the intended model. Transforming an exception during `or_throw`, pattern matching, recovery helpers, and extending automatic forwarding to pipelines remain provisional.
 
 The [Errors and Forwarding reference](../../reference/errors-and-forwarding.html) gives the exact type rules and collects the remaining open points.

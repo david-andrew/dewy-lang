@@ -260,6 +260,8 @@ class _OptionalLowering:
     def _union_member_supported(self, member: ty.TypeExpr) -> bool:
         if isinstance(member, ty.NamedType):
             return True  # a recursive reference is always a handle member
+        if ty.is_user_nominal(member):
+            return True  # a unit-like error: tag only, zero payload
         if isinstance(member, ty.ObjectType):
             return self._object_result_fields_are_returnable(member)
         if isinstance(member, ty.ArrayType):

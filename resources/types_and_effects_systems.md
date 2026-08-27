@@ -50,7 +50,7 @@ Private functions may infer their error alternatives, while public functions sho
 Error and absence propagation uses an explicit postfix construct:
 
 ```dewy
-let customer = loadCustomer(id) or_return
+let customer = loadCustomer(id) or_throw
 ```
 
 Conceptually:
@@ -64,14 +64,14 @@ let customer = match temporary {
 }
 ```
 
-`or_return` removes the forwarded alternatives from the local expression and returns them from the enclosing function.
+`or_throw` removes the forwarded alternatives from the local expression and returns them from the enclosing function.
 
 It may also transform the propagated value:
 
 ```dewy
 let customer =
     loadCustomer(id)
-    or_return CustomerLookupError(id)
+    or_throw CustomerLookupError(id)
 ```
 
 A callback form could expose the original value:
@@ -79,7 +79,7 @@ A callback form could expose the original value:
 ```dewy
 let customer =
     loadCustomer(id)
-    or_return error => CustomerLookupError(id, error)
+    or_throw error => CustomerLookupError(id, error)
 ```
 
 The replacement must be compatible with the enclosing function’s return type.
@@ -184,7 +184,7 @@ This is a type error because `setAmount` expects `Money`.
 The caller must resolve or propagate the alternative explicitly:
 
 ```dewy
-invoice.setAmount(amount or_return)
+invoice.setAmount(amount or_throw)
 ```
 
 Likewise:
@@ -199,7 +199,7 @@ receiver.send(request)
 The receiver may forward automatically, but the argument is invalid until explicitly narrowed:
 
 ```dewy
-receiver.send(request or_return)
+receiver.send(request or_throw)
 ```
 
 This avoids implicit branching at every call site and keeps argument evaluation and error precedence straightforward.
@@ -337,7 +337,7 @@ User | NotFoundError
 
 represents a successful value or a propagatable failure.
 
-Only members descended from `exception` participate in automatic navigation forwarding and `or_return`.
+Only members descended from `exception` participate in automatic navigation forwarding and `or_throw`.
 
 ### Effects Remain Separate
 
@@ -432,7 +432,7 @@ is invalid when `user.isAdmin` may be `Bool | UserError`.
 The caller must handle it explicitly:
 
 ```dewy
-if user.isAdmin or_return {
+if user.isAdmin or_throw {
     # ...
 }
 ```
@@ -464,7 +464,7 @@ Navigation:
 Arguments:
     Never forward implicitly.
 
-or_return:
+or_throw:
     Explicitly propagates forwarding alternatives to the enclosing function.
 
 ??:

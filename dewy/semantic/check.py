@@ -292,6 +292,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.IString(): return tcr_istring(ast, ctx=ctx)
         case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected)
         case p0.Prefix(): return tcr_prefix(ast, ctx=ctx, expected=expected)
+        case p0.Postfix(op=t1.Operator(symbol='or_throw')): return tcr_or_throw(ast, ctx=ctx)
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected, call_target=call_target)
         case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
         case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
@@ -1263,6 +1264,58 @@ def tcr_return(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
         item = check_against(item, ctx.catcher.expected, ctx=ctx)
     ctx.catcher.returns.append((kw_loc, item.type))
     return hir.Return(kw_loc, ty.BOTTOM_TYPE, item)
+
+
+def tcr_or_throw(ast: p0.Postfix, *, ctx: Context) -> hir.AST:
+    """`value or_throw`: propagate the exception alternatives (`error`
+    subtypes and `undefined`) out of the enclosing function; the expression
+    continues as the ordinary alternatives."""
+    value = typecheck_and_resolve_inner(ast.item, ctx=ctx)
+    require_valued(value.type, ctx.srcfile, value.loc, '`or_throw` operand')
+    members = list(value.type.items) if isinstance(value.type, ty.TypeOr) else [value.type]
+    exceptions = [m for m in members if ctx.type_system.is_subtype(m, ty.EXCEPTION_TYPE)]
+    ordinary = [m for m in members if m not in exceptions]
+    if not exceptions:
+        user_error(
+            ctx.srcfile,
+            'nothing to propagate',
+            Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`, which has no `error` or `undefined` alternative'),
+        )
+    if not ordinary:
+        user_error(
+            ctx.srcfile,
+            '`or_throw` always returns',
+            Pointer(span=value.loc, message=f'every alternative of `{type_to_dewy(value.type)}` is propagated'),
+            hint='write `return value` instead',
+        )
+    if ctx.catcher is None:
+        user_error(ctx.srcfile, '`or_throw` outside a function', Pointer(span=ast.op.loc, message='nothing here catches the propagated value'))
+    expected = ctx.catcher.expected
+    if expected is None or expected == ty.VOID_TYPE:
+        user_error(
+            ctx.srcfile,
+            'the enclosing function has no declared result type to propagate into',
+            Pointer(span=ast.op.loc, message='annotate the function result with `:>T | ...` including the propagated alternatives'),
+        )
+    for member in exceptions:
+        if not ctx.type_system.is_subtype(member, expected):
+            user_error(
+                ctx.srcfile,
+                f'the enclosing function does not return `{type_to_dewy(member)}`',
+                Pointer(span=ast.op.loc, message=f'`or_throw` would propagate `{type_to_dewy(member)}`, but the result type is `{type_to_dewy(expected)}`'),
+                hint=f'add `| {type_to_dewy(member)}` to the function result type, or handle it with `is?` first',
+            )
+    binding = ctx.binding_registry.allocate(ast, f'__dewy_or_throw_{ctx.binding_registry.next_id}', 'value', ast.loc)
+    binding.type = value.type
+    exception_type = ty.union(*exceptions)
+    tested = hir.ExpressedIdentifier(ast.loc, exception_type, binding.name, binding_id=binding.id)
+    if exception_type == 'undefined':
+        propagated: hir.AST = hir.Undefined(ast.loc, 'undefined')
+    else:
+        propagated = tested
+    propagated = check_against(propagated, expected, ctx=ctx)
+    ctx.catcher.returns.append((ast.op.loc, propagated.type))
+    return hir.OrThrow(ast.loc, ty.union(*ordinary), value, binding.name, binding.id, exception_type, propagated)
 
 
 def _loop_exit_metatag(ast: p0.KeywordExpr, *, ctx: Context) -> t1.Metatag | None:
@@ -2760,6 +2813,41 @@ def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
         _resolve_type_alias(binding, ctx=ctx)
 
 
+def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.TypeExpr | None:
+    """`let NotFound:type = type of error` mints a fresh nominal type named
+    after the alias, a subtype of the `of` operand. Only the `error` family is
+    supported so far; its canonical inhabitant is written with the type's name."""
+    if not (
+        isinstance(rhs, p0.BinOp)
+        and isinstance(rhs.op, t1.Operator)
+        and rhs.op.symbol == 'of'
+        and isinstance(rhs.left, p0.Atom)
+        and isinstance(rhs.left.item, t1.Identifier)
+        and rhs.left.item.name == 'type'
+    ):
+        return None
+    parent = ast_to_type(rhs.right, ctx=ctx)
+    if not (isinstance(parent, str) and ctx.type_system.is_subtype(parent, 'error')):
+        not_implemented(ctx.srcfile, rhs.loc, f'`type of {type_to_dewy(parent)}` (only error types can be minted so far)')
+    name = binding.name
+    known = ty.USER_NOMINAL_TYPES.get(name)
+    if known is not None and known != parent:
+        user_error(
+            ctx.srcfile,
+            f'error type `{name}` is already minted with a different parent',
+            Pointer(span=binding.loc, message=f'this one descends from `{parent}`; the earlier one from `{known}`'),
+        )
+    if known is None and name in ctx.type_system._named_types:
+        user_error(
+            ctx.srcfile,
+            f'`{name}` is already a type name',
+            Pointer(span=binding.loc, message='choose another name for this error type'),
+        )
+    ty.USER_NOMINAL_TYPES[name] = parent
+    ctx.type_system.register_user_nominals()
+    return name
+
+
 def _validate_recursive_alias(
     binding: sb.Binding,
     value: ty.TypeAliasValue,
@@ -2923,6 +3011,10 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
             ctx.named_types[binding.id] = named
         return named
     rhs = ctx.type_alias_asts[binding.id]
+    minted = _mint_nominal_type(binding, rhs, ctx=ctx)
+    if minted is not None:
+        binding.type_value = minted
+        return minted
     ctx.resolving_type_aliases.add(binding.id)
     try:
         value = _type_alias_value(rhs, ctx=ctx)
@@ -5361,6 +5453,10 @@ def _dispatch_builtin(
     methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
     try:
         expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
+        if isinstance(expected_return, ty.TypeOr):
+            # `return id * 2` into `int64 | NotFound`: the union does not
+            # choose the operator; the result converts to the union afterwards
+            expected_return = None
         if expected_return is not None:
             expected_number, _ = _number_and_dimension(expected_return)
             if _is_rational(expected_number, ctx=ctx) or _is_fixed(expected_number, ctx=ctx):
@@ -8661,6 +8757,10 @@ def tcr_identifier(
     if id.name in ctx.declarations:
         binding = ctx.binding_scopes.get(id.name)
         declared_type = ctx.declarations[id.name]
+        if binding is not None and ty.is_user_nominal(binding.type_value):
+            # the canonical inhabitant of a unit-like error type is spelled with its name
+            assert isinstance(binding.type_value, str)
+            return hir.ErrorValue(id.loc, binding.type_value, binding.type_value)
         if declared_type == ty.TYPE_TYPE or (
             binding is not None and binding.type_value is not None
         ):

@@ -38,6 +38,7 @@ bool_identifiers: set[str] = {
 word_operators: set[str] = {
     'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not',
     'as', 'in', 'transmute', 'of',
+    'or_throw',  # postfix: propagate exception alternatives out of the function
 }
 
 escape_map: dict[str, str] = {

@@ -10,7 +10,7 @@ def _check(source: str) -> hir.Block:
     return check.typecheck_and_resolve(SrcFile(None, '$no_prelude = true\n' + source))
 
 
-def test_exhaustive_is_chain_needs_no_else_for_returns() -> None:
+def test_exhaustive_is_chain_needs_no_else_for_throws() -> None:
     root = _check(
         'let f = (v:int64|string):>int64 => {\n'
         '    if v is? int64 { return v } else if v is? string { return 0 }\n'

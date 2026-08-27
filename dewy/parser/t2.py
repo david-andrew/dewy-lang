@@ -236,7 +236,7 @@ prefix_ops: set[str] = {
 }
 
 postfix_ops: set[str] = {
-    '`', '?',
+    '`', '?', 'or_throw',
 }
 
 # simple checks for it t1.Operator

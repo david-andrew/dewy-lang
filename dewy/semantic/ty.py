@@ -359,6 +359,16 @@ type TypeAliasValue = TypeExpr | GenericTypeAlias
 
 
 
+USER_NOMINAL_TYPES: dict[str, str] = {}
+"""Nominal types minted by programs (`let NotFound:type = type of error`),
+name -> parent. Every `TypeSystem` registers them, so the lowering's fresh
+instances agree with the checker's about `NotFound of? error`."""
+
+
+def is_user_nominal(type_: object) -> bool:
+    return isinstance(type_, str) and type_ in USER_NOMINAL_TYPES
+
+
 # some types to add:
 # insert basic types into the system
 # note, things like partial order, comparable, etc. will be represented in the structural type system, not the type graph
@@ -719,12 +729,19 @@ class TypeSystem:
         for t in system_types:
             if isinstance(t, tuple): self.add_type(*t) 
             else: self.add_type(t)
+        self.register_user_nominals()
 
     def add_type(self, name: str, parent: str = TOP_TYPE) -> None:
         if name in self._named_types:
             raise ValueError(f'Type {name} already defined')
         self._named_types.add(name)
         self.add_type_link(name, parent)
+
+    def register_user_nominals(self) -> None:
+        """Adopt every program-minted nominal type not yet known here."""
+        for name, parent in USER_NOMINAL_TYPES.items():
+            if name not in self._named_types and parent in self._named_types:
+                self.add_type(name, parent)
 
     def add_type_link(self, child: str, parent: str) -> None:
         if child not in self._named_types:

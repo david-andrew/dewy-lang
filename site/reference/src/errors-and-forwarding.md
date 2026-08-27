@@ -4,6 +4,8 @@ Dewy models expected failures as values belonging to nominal error types. A func
 
 Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `undefined` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
 
+Implemented today: unit-like error types minted with `type of error`, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), and postfix `or_throw`. Not yet implemented: errors carrying fields, forwarding member access through exception-bearing receivers, and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
+
 ## The `exception` Family
 
 The built-in hierarchy contains:
@@ -16,7 +18,7 @@ exception
 
 Any value whose type descends from `exception` is a forwarding value. Programs may define additional exception types. A type that does not descend from `exception` remains an ordinary union alternative even if programmers conventionally use it as a sentinel.
 
-“Exception” names a type category here. Exception values remain ordinary values; forwarding does not imply throwing, catching, or stack unwinding.
+“Exception” names a type category here. Exception values remain ordinary values; forwarding does not imply stack unwinding.
 
 ## Declaring Error Types
 
@@ -29,14 +31,18 @@ const MyCustomError:type = type of error
 
 A unit-like nominal error has one canonical inhabitant, written with the type's name. The question of whether that inhabitant is literally the type value itself remains open, but there is no separate `MyCustomError()` spelling:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: compiler -->
+
 ```dewy
-let maybeNumber = ():>int64 | MyCustomError => {
-    if random.coinflip
-        return MyCustomError
+let MyCustomError:type = type of error
+
+let maybeNumber = (flag:bool):>int64 | MyCustomError => {
+    if flag { return MyCustomError }
     return 42
 }
 ```
+
+Minted names are nominal: two `type of error` aliases are distinct types even though both descend from `error`, and a value of one is never a value of the other.
 
 Intersect the fresh nominal type with an object type when an error carries fields:
 
@@ -117,16 +123,16 @@ let service:Service | ServiceError = connect()
 let request:Request | ParseError = parseRequest(text)
 
 service.send(request)            # type error: request is still a union
-service.send(request or_return)  # explicit propagation
+service.send(request or_throw)  # explicit propagation
 ```
 
 The first call is invalid unless `send` actually accepts `Request | ParseError`. Receiver forwarding does not change the argument contract.
 
-## `or_return`
+## `or_throw`
 
-Postfix `or_return` is the intended spelling for passing exception alternatives out of the current function.
+Postfix `or_throw` is the intended spelling for passing exception alternatives out of the current function.
 
-For an expression of type `V | X`, where `X` contains its `exception` alternatives, `expression or_return`:
+For an expression of type `V | X`, where `X` contains its `exception` alternatives, `expression or_throw`:
 
 - evaluates `expression` once;
 - returns the encountered `X` value from the enclosing function; or
@@ -134,15 +140,25 @@ For an expression of type `V | X`, where `X` contains its `exception` alternativ
 
 The enclosing return contract must accept every propagated exception alternative. This includes `undefined` and user-defined exception kinds as well as errors.
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: compiler -->
+
 ```dewy
-let loadName = (id:UserId):>string | LookupError => {
-    let user = loadUser(id) or_return
-    return user.name
+let NotFound:type = type of error
+
+let lookup = (id:int64):>int64 | NotFound => {
+    if id >? 100 { return NotFound }
+    return id * 2
+}
+
+let twice = (id:int64):>int64 | NotFound | undefined => {
+    let first = lookup(id) or_throw      # first: int64
+    let second = lookup(first) or_throw
+    if second =? 8 { return undefined }
+    return second
 }
 ```
 
-Forms that replace or transform the propagated exception are part of the design direction, but their exact syntax and evaluation rules remain provisional.
+`or_throw` binds more loosely than calls and member access, so `lookup(id) or_throw` propagates the call's result. The propagated alternatives must each be accepted by the enclosing function's declared result type; a function without a declared result type cannot use it. Forms that replace or transform the propagated exception are part of the design direction, but their exact syntax and evaluation rules remain provisional.
 
 ## Explicit Handling
 
@@ -206,7 +222,7 @@ Here the union describes what the caller receives. `reads<database>` describes w
 The following details remain open:
 
 - pattern-selection and concise recovery syntax;
-- transformed `or_return` forms;
+- transformed `or_throw` forms;
 - whether pipes automatically forward exceptions, and the exact rule for broadcast pipes whose elements may be exceptions;
 - fallback operators for absence and errors; and
 - runtime layouts for general heterogeneous unions.

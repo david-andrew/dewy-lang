@@ -130,6 +130,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.postfix, ['?']),
     (Associativity.right,  ['^']),
     (Associativity.left, [t2.MultiplyJuxtapose]),  # x(y) (x)y
+    (Associativity.postfix, ['or_throw']),  # `load(id) or_throw`: below calls/juxtaposition so it takes the whole call
     (Associativity.prefix, ['*', '/', '//']),
     (Associativity.left, ['*', '/', '//', '%', '\\']),
     (Associativity.prefix, ['+', '-']),

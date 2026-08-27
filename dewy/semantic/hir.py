@@ -65,6 +65,30 @@ class Undefined(AST):
 
 
 @dataclass
+class ErrorValue(AST):
+    """The canonical inhabitant of a unit-like nominal error type (`type` is its name)."""
+
+    name: str
+
+
+@dataclass
+class OrThrow(AST):
+    """``value or_throw``: return the exception alternative from the enclosing
+    function, else continue with the ordinary alternatives (``type``).
+
+    ``name``/``binding_id`` identify the hidden binding that holds the tested
+    value; ``propagated`` is that binding read as its exception alternatives,
+    already converted to the function's result type.
+    """
+
+    value: AST
+    name: str
+    binding_id: int
+    exception_type: ty.TypeExpr
+    propagated: AST
+
+
+@dataclass
 class Return(AST):
     item: AST|None = None
 

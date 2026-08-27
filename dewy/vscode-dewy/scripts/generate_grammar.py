@@ -249,7 +249,7 @@ GRAMMAR = {
             ]
         },
         "comparison-word": {"patterns": [rule("keyword.other.word-operator.comparison", "\\b(?:in|is|isnt)\\?|\\bnot=\\?")]},
-        "word-operator": {"patterns": [rule("keyword.other.word-operator", "\\b(and|or|xor|nand|nor|xnor|not|as|in|of|transmute)\\b")]},
+        "word-operator": {"patterns": [rule("keyword.other.word-operator", "\\b(and|or|xor|nand|nor|xnor|not|as|in|of|transmute|or_throw)\\b")]},
         "builtin-type": {
             "patterns": [
                 rule("support.type.primitive", "\\b(int|uint|int8|int16|int32|int64|uint8|uint16|uint32|uint64|bool|string|char|rational|fixed|bigint|type)\\b"),

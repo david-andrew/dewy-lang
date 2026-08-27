@@ -19,7 +19,7 @@ Syntax highlighting and basic editor support for the **Dewy** programming langua
 The grammar aims to highlight the following (non-exhaustive) constructs:
 
 - **Keywords**: `let`, `const`, `local_const`, `overload_only`, `if`, `else`, `loop`, `match`, `return`, `yield`, `break`, `continue`, `import`, `from`
-- **Word operators**: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `not`, `as`, `in`, `of`, `transmute`, and the question forms `in?`, `is?`, `isnt?`, `not=?`
+- **Word operators**: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `not`, `as`, `in`, `of`, `transmute`, `or_throw`, and the question forms `in?`, `is?`, `isnt?`, `not=?`
 - **Operators**: `=?`, `>?`, `<?`, `>=?`, `<=?`, `<=>`, `=>`, `|>`, `<|`, `->`, `<->`, `:>`, `::`, `:=`, `..`, `...`, `??`, `@`, `@?`, `^`, `//`, `/`, `+`, `-`, `*`, `%`, `\`, `|`, `&`, `~`, `<<`, `>>`, `<<<`, `>>>`, `<<!`, `!>>`, compound assignments such as `+=` and `//=`
 - **Constants**: `true`, `false`, `void`, `undefined`, `end`, `∞`, `∅`
 - **Metatags**: `$target`, `$supported_targets`, `$no_prelude`, and other `$name` forms

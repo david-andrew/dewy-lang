@@ -1,0 +1,46 @@
+# Error values: `type of error` mints a nominal error type whose one value is
+# written with its name; functions expose failures as union alternatives;
+# `is?` handles them; `value or_throw` propagates the exception alternatives
+# (`error` subtypes and `undefined`) out of the enclosing function.
+let NotFound:type = type of error
+let Invalid:type = type of error
+
+let lookup = (id:int64):>int64|NotFound|Invalid => {
+    if id <? 0 { return Invalid }
+    if id >? 100 { return NotFound }
+    return id * 2
+}
+
+let describe = (id:int64):>int64 => {
+    let r = lookup(id)
+    if r is? NotFound { return -1 }
+    else if r is? Invalid { return -2 }
+    else { return r }
+}
+
+let twice = (id:int64):>int64|NotFound|Invalid|undefined => {
+    let first = lookup(id) or_throw
+    let second = lookup(first) or_throw
+    if second =? 8 { return undefined }
+    return second
+}
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    if describe(5) =? 10 { checks += 1 }
+    if describe(500) =? -1 { checks += 2 }
+    if describe(-5) =? -2 { checks += 4 }
+    let a = twice(3)                          # 12
+    if a is? int64 { if a =? 12 { checks += 8 } }
+    let b = twice(60)                         # 120 -> NotFound
+    if b is? NotFound { checks += 16 }
+    let c = twice(2)                          # 4 -> 8 -> undefined
+    if c is? undefined { checks += 32 }
+    if b is? error and a isnt? error { checks += 64 }
+    let e:NotFound = NotFound
+    let stored:int64|NotFound = e
+    if stored is? NotFound { checks += 128 }
+    let box:[result:int64|Invalid] = [result=Invalid]
+    if box.result is? Invalid { checks += 256 }
+    return checks - 469                       # 42
+}

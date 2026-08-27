@@ -213,7 +213,7 @@ class _ObjectLowering:
             width, _signed = layout
             size = width // 8
             return size, size
-        if self._is_handle_type(type_):
+        if self._is_handle_type(type_) or ty.is_user_nominal(type_):
             return 8, 8
         if self._field_union_members(type_) is not None:
             return 16, 8  # an inline union cell: tag word and payload word, no trees

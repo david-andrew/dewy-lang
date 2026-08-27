@@ -41,7 +41,7 @@ An exit may target an enclosing labeled loop through Dewy's scope metatag mechan
 
 `never` is the type of a path that cannot complete normally. It is distinct from `void`, which represents normal completion without a produced value.
 
-Postfix `or_return` propagates an [exception value](errors-and-forwarding.md) from an expression through the current function. Its ordinary alternatives continue locally; its exception alternatives must be accepted by the enclosing return contract.
+Postfix `or_throw` propagates an [exception value](errors-and-forwarding.md) from an expression through the current function. Its ordinary alternatives continue locally; its exception alternatives must be accepted by the enclosing return contract.
 
 ## Related Provisional Control Flow
 

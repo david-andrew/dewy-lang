@@ -821,9 +821,35 @@ class _Lowerer(
             ret=rettype,
         )
 
+    def _extract_or_throw(self, node: hir.OrThrow) -> tuple[list[hir.AST], hir.AST]:
+        """`value or_throw`: materialize the value's cell under the hidden
+        binding, return the exception alternatives, continue narrowed."""
+        loc = node.loc
+        value_type = node.value.type
+        members = ty.runtime_union_members(value_type)
+        if members is not None:
+            prelude, cell = self._materialize_union(node.value, members)
+            self.union_cells[node.binding_id] = members
+        else:
+            payload = ty.optional_payload(value_type)
+            if payload is None:
+                self._target_error(node, '`or_throw` on a value that is not a runtime union')
+            prelude, cell = self._materialize_optional(node.value, payload)
+            self.optional_payloads[node.binding_id] = payload
+        holder = hir.Declare(loc, ty.VOID_TYPE, 'let', node.name, 'int64', replace(cell, type='int64'), binding_id=node.binding_id)
+        tested = hir.ExpressedIdentifier(loc, value_type, node.name, binding_id=node.binding_id)
+        test_prelude, test = self._extract_expression(hir.TypeTest(loc, 'bool', tested, node.exception_type, False))
+        propagate = self._lower_statement(hir.Return(loc, ty.BOTTOM_TYPE, node.propagated))
+        flow = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, test, hir.Block(loc, ty.VOID_TYPE, propagate, True))], None)
+        result = hir.ExpressedIdentifier(loc, node.type, node.name, binding_id=node.binding_id)
+        result_prelude, value = self._extract_expression(result)
+        return [*prelude, holder, *test_prelude, flow, *result_prelude], value
+
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         if ty.optional_payload(type_) is not None:
             return 'int64'
+        if ty.is_user_nominal(type_):
+            return 'int64'  # a unit-like error is a word (its union tag carries the identity)
         if ty.runtime_union_members(type_) is not None:
             return 'int64'
         if isinstance(type_, ty.QuantityType):
@@ -853,6 +879,8 @@ class _Lowerer(
 
 
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
+        if ty.is_user_nominal(type_):
+            return 'int64'
         if ty.runtime_union_members(type_) is not None:
             self._target_error(
                 node,
@@ -1436,6 +1464,9 @@ class _Lowerer(
                 array_use='grow',
             )
             return
+        if isinstance(node, hir.OrThrow):
+            self._discover_node(node.value, scope, current_function)
+            return
         if isinstance(node, (hir.DictLookup, hir.DictContains)):
             self._discover_node(node.keys, scope, current_function, array_use='index_read')
             if isinstance(node, hir.DictLookup):
@@ -2005,6 +2036,12 @@ class _Lowerer(
             return replace(
                 node,
                 value=self._require_node(self._transform_node(node.value)),
+            )
+        if isinstance(node, hir.OrThrow):
+            return replace(
+                node,
+                value=self._require_node(self._transform_node(node.value)),
+                propagated=self._require_node(self._transform_node(node.propagated)),
             )
         if isinstance(node, hir.MemberAssign):
             target = self._transform_node(node.target)
@@ -2967,6 +3004,11 @@ class _Lowerer(
             return self._extract_member_access(node)
         if isinstance(node, hir.Undefined):
             self._target_error(node, '`undefined` value without an optional context')
+        if isinstance(node, hir.ErrorValue):
+            # a unit-like error is its tag; the payload word is zero
+            return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
+        if isinstance(node, hir.OrThrow):
+            return self._extract_or_throw(node)
         if isinstance(node, hir.TypeTest):
             # Union operands test tags at runtime; fully narrowed operands
             # fold statically below. A union-typed identifier uses its
@@ -3627,7 +3669,7 @@ class _Lowerer(
         if isinstance(type_, ty.FunctionType):
             loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)
             return hir.Transmute(loc, self._lower_callable_type(type_), loaded)
-        if self._is_handle_type(type_):
+        if self._is_handle_type(type_) or ty.is_user_nominal(type_):
             loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)
             return replace(loaded, type=type_)
         self._target_error(address, f'object field load `{type_to_dewy(type_)}`')
