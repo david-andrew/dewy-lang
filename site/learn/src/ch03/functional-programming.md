@@ -115,6 +115,23 @@ let counter = (start:int64=0) => [
 ]
 ```
 
+A local function may read the locals and parameters of the functions around it, and it sees them as they are when it is called:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let base:int64 = 10
+    let scale = (v:int64):>int64 => v * base
+    let a = scale(2)          # 20
+    base = 100
+    let b = scale(2)          # 200: the current value of `base`
+    return a + b
+}
+```
+
+In the current compiler such a function is *lambda-lifted*: the values it reads become hidden trailing parameters, passed at every direct call. Two things follow from that and are rejected for now: a local function cannot assign to a captured variable (keep shared mutable state in an object, or return the new value), and a capturing function cannot be used as a value — stored, passed to another function, or returned — because that needs a closure record, which is not implemented yet. Non-capturing functions are unrestricted as values.
+
 > **Provisional design:** The lexical meaning of captures is settled. Escaping closure storage, handle identity, explicit function copying, and general user-written generics remain under design and implementation.
 
 See [Functions and Calls](function-types.md) for ordinary argument behavior and the Reference for exact [function-handle rules](../../reference/functions-and-calls.html#function-handles).

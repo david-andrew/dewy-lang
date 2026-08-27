@@ -1,9 +1,7 @@
-import pytest
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import NotImplementedYet
 from dewy.semantic.hir_display import type_to_dewy
 
 
@@ -108,7 +106,7 @@ let main = ():>int64 => {
     assert 'return local(42)' in emitted
 
 
-def test_udewy_backend_rejects_captured_local_values() -> None:
+def test_udewy_backend_lifts_captured_local_values() -> None:
     source = """
 let outer = (value:int64):>int64 => {
     let local = ():>int64 => value
@@ -116,5 +114,7 @@ let outer = (value:int64):>int64 => {
 }
 let main = ():>int64 => outer(42)
 """
-    with pytest.raises(NotImplementedYet, match='captures `value`'):
-        codegen(SrcFile(None, source))
+    emitted = codegen(SrcFile(None, source))
+    # the captured parameter becomes a hidden trailing parameter, passed at the call
+    assert 'let local = (value:int64):>int64' in emitted
+    assert 'local(value)' in emitted

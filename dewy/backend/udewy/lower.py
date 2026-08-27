@@ -176,6 +176,13 @@ class _Lowerer(
         self.array_parameters: dict[int, tuple[_FunctionDef, hir.Param]] = {}
         self.array_parameter_analyses: dict[int, ArrayParameterAnalysis] = {}
         self.array_calls: list[hir.FunctionCall] = []
+        # lambda lifting: a local function reading enclosing locals receives
+        # them as trailing hidden parameters; every direct call passes them
+        self.lifted: dict[int, list[_Binding]] = {}          # id(function) -> captured bindings
+        self.lifted_types: dict[int, ty.Type] = {}           # id(binding) -> runtime parameter type
+        self.direct_calls: list[tuple[_FunctionDef | None, hir.FunctionCall]] = []
+        self.callee_nodes: set[int] = set()                  # ids of nodes in callee position
+        self.identifier_nodes: dict[int, hir.ExpressedIdentifier] = {}
         self.array_call_boundary_analyses: dict[
             tuple[int, int | str],
             ArrayCallBoundaryAnalysis,
@@ -655,6 +662,8 @@ class _Lowerer(
                     None,
                 ),
             ])
+        for binding in self.lifted.get(id(function), []):
+            lowered_pos.append(hir.Param(binding.emitted_name or binding.name, self.lifted_types[id(binding)]))
         receiver = None
         if literal.object_receiver:
             receiver_name = self._new_object_name('self')
@@ -747,6 +756,11 @@ class _Lowerer(
             else:
                 body = hir.Block(body.loc, body.type, [*parameter_prologue, body], True)
         function_type = self._lower_callable_type(literal.type)
+        if self.lifted.get(id(function)) and isinstance(function_type, ty.FunctionType):
+            function_type = replace(
+                function_type,
+                pos_or_kw=[*function_type.pos_or_kw, *(ty.PosOrKwArg(None, self.lifted_types[id(binding)]) for binding in self.lifted[id(function)])],
+            )
         if literal.object_receiver and isinstance(function_type, ty.FunctionType):
             function_type = replace(
                 function_type,
@@ -1403,6 +1417,7 @@ class _Lowerer(
                 else scope.resolve(node.name)
             )
             self.identifier_bindings[id(node)] = binding
+            self.identifier_nodes[id(node)] = node
             if binding is not None and binding.semantic_id is not None:
                 effective_use = (
                     'representation'
@@ -1648,6 +1663,8 @@ class _Lowerer(
         if isinstance(node, hir.TypeValue):
             return
         if isinstance(node, hir.FunctionCall):
+            self.direct_calls.append((current_function, node))
+            self.callee_nodes.add(id(node.func))
             self._discover_node(node.func, scope, current_function)
             if any(
                 isinstance(arg.type, ty.ArrayType)
@@ -1759,26 +1776,157 @@ class _Lowerer(
         )
 
     def _check_captures(self) -> None:
-        """Reject function units that require an udewy closure environment."""
+        """Plan lambda lifting for local functions that read enclosing locals.
+
+        A capturing function gets each captured binding as a trailing hidden
+        parameter, named as the body already spells it, and every direct call
+        passes the caller's current value (which is itself a local or one of
+        the caller's own lifted parameters). Writes to captured bindings and
+        capturing functions used as values (closures that escape) are not
+        supported yet and are rejected here.
+        """
+        needed: dict[int, list[_Binding]] = {}
         for function in self.functions:
-            captures = self.captures.get(id(function.literal), [])
-            if not captures:
+            for use, binding in self.captures.get(id(function.literal), []):
+                bindings = needed.setdefault(id(function), [])
+                if binding not in bindings:
+                    bindings.append(binding)
+                self.lifted_types.setdefault(id(binding), self._lifted_param_type(binding, use))
+        for function in self.functions:
+            self._reject_captured_writes(function)
+        # callers must be able to pass what their callees need
+        changed = True
+        while changed:
+            changed = False
+            for caller, call in self.direct_calls:
+                callee = self._direct_call_function(call)
+                if callee is None or id(callee) not in needed:
+                    continue
+                for binding in needed[id(callee)]:
+                    if binding.owner_function is caller:
+                        continue
+                    if caller is None:
+                        self._target_error(call, f'a call passing `{binding.name}` from a function into module-level code')
+                    bindings = needed.setdefault(id(caller), [])
+                    if binding not in bindings:
+                        bindings.append(binding)
+                        changed = True
+        self.lifted = needed
+        for function in self.functions:
+            bindings = needed.get(id(function))
+            if not bindings:
                 continue
-            use, binding = captures[0]
-            raise NotImplementedYet(Error(
-                srcfile=self.srcfile,
-                title='udewy closure lowering is not implemented',
-                message=(
-                    f'nested function `{function.logical_name}` captures '
-                    f'`{binding.name}` from an enclosing function'
-                ),
-                pointer_messages=[
-                    Pointer(
-                        span=use.loc,
-                        message=f'`{binding.name}` is captured here',
+            names = ', '.join(f'`{binding.name}`' for binding in bindings)
+            if function.literal.object_receiver:
+                self._target_error(function.literal, f'an object method reading enclosing locals ({names})')
+            for node_id, binding in self.identifier_bindings.items():
+                if binding is not None and binding.function is function and node_id not in self.callee_nodes:
+                    raise NotImplementedYet(Error(
+                        srcfile=self.srcfile,
+                        title='a capturing function used as a value',
+                        message=f'`{function.logical_name}` reads {names} from an enclosing function, so it can only be called directly for now',
+                        pointer_messages=[Pointer(span=self.identifier_nodes[node_id].loc, message='this use needs a closure record, which is not implemented yet')],
+                        hint='call it directly, or pass the values it needs as parameters instead',
+                    ))
+            if function.logical_name == 'anon' and id(function.literal) not in self.callee_nodes:
+                raise NotImplementedYet(Error(
+                    srcfile=self.srcfile,
+                    title='a capturing function used as a value',
+                    message=f'this function reads {names} from an enclosing function, so it can only be called directly for now',
+                    pointer_messages=[Pointer(span=function.literal.loc, message='closure records are not implemented yet')],
+                    hint='bind it with `let` and call it by name, or pass the values it needs as parameters',
+                ))
+
+    def _lifted_param_type(self, binding: _Binding, use: hir.ExpressedIdentifier) -> ty.Type:
+        if binding.semantic_id is not None and (
+            binding.semantic_id in self.union_cells or binding.semantic_id in self.optional_payloads
+        ):
+            return 'int64'  # a cell pointer, whatever the use was narrowed to
+        return self._lower_runtime_value_type(ty.strip_refinement(use.type))
+
+    def _reject_captured_writes(self, function: _FunctionDef) -> None:
+        """A captured binding is read-only inside the capturing function."""
+
+        def root_identifier(node: hir.AST) -> hir.ExpressedIdentifier | None:
+            while True:
+                if isinstance(node, hir.MemberAccess):
+                    node = node.value
+                elif isinstance(node, hir.Index):
+                    node = node.array
+                elif isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
+                    node = node.expr
+                elif isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+                    node = node.items[0]
+                else:
+                    break
+            return node if isinstance(node, hir.ExpressedIdentifier) else None
+
+        def written(node: hir.AST) -> hir.AST | None:
+            if isinstance(node, hir.Assign):
+                return node.target
+            if isinstance(node, hir.MemberAssign):
+                return node.target
+            if isinstance(node, hir.IndexAssign):
+                return node.target
+            if isinstance(node, hir.Place):
+                return node.target
+            if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name != 'join':
+                return node.func.array
+            if isinstance(node, (hir.DictStore, hir.DictRemove)):
+                return node.keys
+            return None
+
+        def walk(value: object) -> None:
+            if isinstance(value, hir.FunctionLiteral):
+                return  # nested functions plan their own captures
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    walk(item)
+                return
+            if isinstance(value, hir.ObjectField):
+                walk(value.value)
+                return
+            if not isinstance(value, hir.AST):
+                return
+            target = written(value)
+            if target is not None:
+                root = root_identifier(target)
+                binding = self.identifier_bindings.get(id(root)) if root is not None else None
+                if (
+                    binding is not None
+                    and binding.kind in {'param', 'value'}
+                    and binding.owner_function is not None
+                    and binding.owner_function is not function
+                ):
+                    self._target_error_at(
+                        value,
+                        f'writing to `{binding.name}`, which belongs to an enclosing function',
+                        'a local function reads enclosing locals but cannot change them; keep shared mutable state in an object and pass it, or return the new value',
                     )
-                ],
-            ))
+            for field_info in fields(value):
+                if field_info.name in ('type', 'annotation'):
+                    continue
+                walk(getattr(value, field_info.name))
+
+        walk(function.literal.body)
+
+    def _target_error_at(self, node: hir.AST, message: str, hint: str) -> NoReturn:
+        raise NotImplementedYet(Error(
+            srcfile=self.srcfile,
+            title='udewy target cannot lower this construct',
+            pointer_messages=[Pointer(span=node.loc, message=message)],
+            hint=hint,
+        ))
+
+    def _lifted_arguments(self, call: hir.FunctionCall) -> list[hir.AST]:
+        """The caller's current values of everything the callee reads from enclosing scopes."""
+        callee = self._direct_call_function(call)
+        if callee is None:
+            return []
+        return [
+            hir.ExpressedIdentifier(call.loc, self.lifted_types[id(binding)], binding.emitted_name or binding.name)
+            for binding in self.lifted.get(id(callee), [])
+        ]
 
     def _allocate_symbols(self) -> None:
         """Assign deterministic, readable, collision-free udewy symbols.
@@ -2321,7 +2469,8 @@ class _Lowerer(
             transformed = replace(
                 node,
                 func=func,
-                pos_args=normalized,
+                # a lambda-lifted callee also receives the enclosing values it reads
+                pos_args=[*normalized, *self._lifted_arguments(node)],
                 kw_args={},
                 selected_method_index=None,
             )

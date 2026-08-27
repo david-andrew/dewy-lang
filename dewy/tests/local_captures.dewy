@@ -1,0 +1,51 @@
+# Local functions may read the locals and parameters of enclosing functions.
+# They lower by lambda lifting: each captured value is a hidden trailing
+# parameter, and every direct call passes the caller's current value, so a
+# local function sees the enclosing variable as it is when called.
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let base:int64 = 10
+    let label = "abc"
+    let words:array<string> = ["x" "yz"]
+    let maybe:int64|undefined = 5
+    let point = [x=3 y=4]
+
+    let scale = (v:int64):>int64 => v * base
+    if scale(2) =? 20 { checks += 1 }
+    base = 100
+    if scale(2) =? 200 { checks += 2 }             # the current value, not a snapshot
+
+    let describe = (v:int64):>int64 => {
+        let inner = ():>int64 => scale(v) + label.length   # v from describe, base via scale, label from main
+        return inner()
+    }
+    if describe(3) =? 303 { checks += 4 }
+
+    let count_letters = ():>int64 => {
+        let n:int64 = 0
+        loop w in words { n += w.length }
+        return n
+    }
+    if count_letters() =? 3 { checks += 8 }
+
+    let unwrap = ():>int64 => if maybe is? int64 maybe else 0   # a union cell is read and narrowed inside
+    if unwrap() =? 5 { checks += 16 }
+    maybe = undefined
+    if unwrap() =? 0 { checks += 32 }
+
+    let norm = ():>int64 => point.x * point.x + point.y * point.y
+    if norm() =? 25 { checks += 64 }
+
+    let fact = (n:int64):>int64 => if n <=? 1 base // 100 else n * fact(n - 1)   # recursion with a capture
+    if fact(4) =? 24 { checks += 128 }
+
+    let i:int64 = 0
+    let total:int64 = 0
+    loop i <? 3 {
+        let add_i = ():>int64 => i + base
+        total += add_i()
+        i += 1
+    }
+    if total =? 303 { checks += 256 }
+    return checks - 469                              # 42
+}

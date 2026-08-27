@@ -151,3 +151,5 @@ let on_item = @worker.on_event(5)
 Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.
 
 Handle identity, explicit function copying, escaping captures, and closure storage remain provisional.
+
+Implemented today: a local function may read enclosing locals and parameters (it observes their current values at each call, since the compiler lambda-lifts them into hidden trailing parameters); writes to captured bindings and capturing functions used as values (escaping closures) are rejected with a message naming the binding.
