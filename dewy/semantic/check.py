@@ -3282,6 +3282,45 @@ def _is_top_level_declare(item: p0.AST) -> bool:
     )
 
 
+def _spread_operand(item: p0.AST) -> p0.AST | None:
+    """The operand of a spread item `x...`, else None."""
+    if isinstance(item, p0.Ambiguous):
+        # `f(x)...` also reads as `f * (x)...`; in a literal item position the
+        # spread reading is the one meant
+        for candidate in item.candidates:
+            operand = _spread_operand(candidate)
+            if operand is not None:
+                return operand
+        return None
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t2.EllipsisJuxtapose)
+        and isinstance(item.right, p0.Atom)
+        and isinstance(item.right.item, t1.Identifier)
+        and item.right.item.name == '...'
+    ):
+        return item.left
+    return None
+
+
+def _spread_source(operand: p0.AST, *, ctx: Context) -> hir.AST:
+    """Check a spread operand: a named place, so reading it several times is one evaluation."""
+    value = typecheck_and_resolve_inner(operand, ctx=ctx)
+    if isinstance(value, hir.Place):
+        value = value.target
+    if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
+        not_implemented(ctx.srcfile, operand.loc, 'spreading a computed value (bind it to a name first)')
+    require_valued(value.type, ctx.srcfile, value.loc, 'spread operand')
+    if isinstance(value.type, ty.TypeOr):
+        user_error(
+            ctx.srcfile,
+            'cannot spread a union-typed value',
+            Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`'),
+            hint='narrow it with `is?` first',
+        )
+    return replace(value, type=ty.unfold(value.type))
+
+
 def _bracket_kind(items: list[p0.AST]) -> Literal['dict', 'bidict', 'object', 'array']:
     if items and all(
         isinstance(item, p0.BinOp)
@@ -3567,18 +3606,45 @@ def _tcr_object_literal(
         declarations=ctx.declarations.new_child(),
         binding_scopes=ctx.binding_scopes.new_child(),
     )
-    specs = [_object_field_syntax(item, ctx=ctx) for item in block.inner]
-    seen: dict[str, Span] = {}
-    for name, _annotation, _value, loc, _mutable in specs:
-        previous = seen.get(name)
-        if previous is not None:
+    # An entry is a written field or one copied in by a spread `obj...`
+    # (already checked: a member read of the spread source). Names repeat in
+    # the Python splat sense — the later entry wins, at the position of the
+    # first — except that two *written* fields with one name are a mistake.
+    entries: list[tuple[tuple[str, p0.AST | None, p0.AST | None, Span, bool], object, hir.AST | None]] = []
+    for item in block.inner:
+        operand = _spread_operand(item)
+        if operand is None:
+            entries.append((_object_field_syntax(item, ctx=ctx), item, None))
+            continue
+        source = _spread_source(operand, ctx=ctx)
+        if not isinstance(source.type, ty.ObjectType) or source.type.brand is not None:
+            user_error(
+                ctx.srcfile,
+                'object spread requires an object',
+                Pointer(span=source.loc, message=f'this has type `{type_to_dewy(source.type)}`'),
+            )
+        for field in source.type.fields:
+            read = hir.MemberAccess(item.loc, field.type, source, field.name, field.mutable)
+            entries.append(((field.name, None, None, item.loc, field.mutable), object(), read))
+    ordered: dict[str, int] = {}
+    merged: list[tuple[tuple[str, p0.AST | None, p0.AST | None, Span, bool], object, hir.AST | None]] = []
+    for entry in entries:
+        name, _annotation, _value, loc, _mutable = entry[0]
+        position = ordered.get(name)
+        if position is None:
+            ordered[name] = len(merged)
+            merged.append(entry)
+            continue
+        if entry[2] is None and merged[position][2] is None:
             user_error(
                 ctx.srcfile,
                 f'duplicate object field `{name}`',
                 Pointer(span=loc, message='this field repeats a name'),
-                Pointer(span=previous, message='the earlier field is here'),
+                Pointer(span=merged[position][0][3], message='the earlier field is here'),
             )
-        seen[name] = loc
+        merged[position] = entry  # later wins
+    entries = merged
+    specs = [entry[0] for entry in entries]
 
     if expected_object is not None:
         expected_names = [field.name for field in expected_object.fields]
@@ -3608,7 +3674,7 @@ def _tcr_object_literal(
             and value_ast.op.symbol == '=>'
             else 'value'
         )
-        binding = ctx.binding_registry.allocate(block.inner[index], name, kind, loc)
+        binding = ctx.binding_registry.allocate(entries[index][1], name, kind, loc)
         field_bindings.append(binding)
         if kind != 'function':
             continue
@@ -3632,7 +3698,12 @@ def _tcr_object_literal(
             field_expected = ast_to_type(annotation_ast, ctx=ctx)
         elif expected_object is not None:
             field_expected = expected_object.fields[index].type
-        value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
+        prechecked = entries[index][2]
+        if prechecked is not None:
+            value = prechecked  # a field copied in by a spread
+        else:
+            assert value_ast is not None
+            value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
         require_valued(value.type, ctx.srcfile, value.loc, 'object field')
         if isinstance(value.type, (ty.FunctionType, ty.OverloadType)) and not isinstance(
             value,
@@ -4409,6 +4480,73 @@ def _tcr_array_literal(
     return hir.ArrayLiteral(block.loc, array_type, checked_items)
 
 
+def _tcr_spread_array_literal(
+    block: p0.Block,
+    *,
+    expected: ty.Type | None,
+    ctx: Context,
+) -> hir.ArrayLiteral:
+    """`[xs... 0 ys...]`: elements of the spread arrays (a set spreads its
+    members) in order with the written elements. The length is exact when
+    every spread operand's length is."""
+    expected_array = expected if isinstance(expected, ty.ArrayType) else None
+    items: list[hir.AST] = []
+    plain: list[hir.AST] = []
+    for item in block.inner:
+        operand = _spread_operand(item)
+        if operand is None:
+            value = typecheck_and_resolve_inner(item, ctx=ctx, expected=expected_array.element if expected_array is not None else None)
+            require_valued(value.type, ctx.srcfile, value.loc, 'array element')
+            items.append(value)
+            plain.append(value)
+            continue
+        source = _spread_source(operand, ctx=ctx)
+        element = ty.set_element(source.type) if isinstance(source.type, ty.ObjectType) else None
+        if element is not None:
+            source = hir.DictView(item.loc, ty.ArrayType(element, None), source, 'values')
+        if not isinstance(source.type, ty.ArrayType):
+            user_error(
+                ctx.srcfile,
+                'array spread requires an array or set',
+                Pointer(span=source.loc, message=f'this has type `{type_to_dewy(source.type)}`'),
+                hint='dictionaries spread into dictionary literals; objects into object literals',
+            )
+        items.append(hir.Spread(item.loc, source.type, source))
+    if expected_array is not None:
+        element_type: ty.TypeExpr = expected_array.element
+    else:
+        # a spread fixes the element type (written elements adapt to it);
+        # with no spread the written elements infer as in a plain literal
+        first = next(item for item in items if isinstance(item, hir.Spread))
+        assert isinstance(first.type, ty.ArrayType)
+        element_type = first.type.element
+        if isinstance(element_type, ty.IntegerLiteralType | ty.StringLiteralType):
+            element_type = _tcr_array_literal(block, plain, expected=None, ctx=ctx).type.element if plain else element_type
+    checked: list[hir.AST] = []
+    length: int | None = 0
+    for item in items:
+        if isinstance(item, hir.Spread):
+            assert isinstance(item.type, ty.ArrayType)
+            if not ctx.type_system.is_subtype(item.type.element, element_type):
+                type_error(
+                    ctx.srcfile,
+                    'array elements are not homogeneous',
+                    Pointer(span=item.loc, message=f'this spreads `{type_to_dewy(item.type.element)}` elements into an array of `{type_to_dewy(element_type)}`'),
+                )
+            checked.append(item)
+            length = length + item.type.length if length is not None and item.type.length is not None else None
+        else:
+            checked.append(check_against(item, element_type, ctx=ctx))
+            length = length + 1 if length is not None else None
+    if expected_array is not None and expected_array.length is not None and expected_array.length != length:
+        type_error(
+            ctx.srcfile,
+            'array length mismatch',
+            Pointer(span=block.loc, message=f'expected length {expected_array.length}, got {length if length is not None else "a runtime length"}'),
+        )
+    return hir.ArrayLiteral(block.loc, ty.ArrayType(element_type, length), checked)
+
+
 def _supported_array_element_type(type_: ty.Type) -> bool:
     return (
         isinstance(
@@ -4484,7 +4622,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
 
     if block.kind == '[]':
         arrows = [item for item in block.inner if _is_top_level_arrow(item)]
-        if arrows and len(arrows) != len(block.inner):
+        if arrows and len(arrows) != len([item for item in block.inner if _spread_operand(item) is None]):
             user_error(
                 ctx.srcfile,
                 'cannot mix dictionary arrows with other `[]` items',
@@ -4501,13 +4639,25 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
                 'cannot mix `->` and `<->` in one container',
                 Pointer(span=arrows[0].loc, message='dictionary arrows must all use the same operator'),
             )
-        kind = _bracket_kind(block.inner)
+        spreads = [item for item in block.inner if _spread_operand(item) is not None]
+        kind = _bracket_kind([item for item in block.inner if _spread_operand(item) is None])
+        if spreads and kind == 'array' and len(spreads) == len(block.inner) and not isinstance(expected, (ty.ArrayType, ty.ObjectType)):
+            # `[a...]`: only the operand says whether this builds an object, a dictionary, or an array
+            first = _spread_source(_spread_operand(spreads[0]), ctx=ctx)
+            if isinstance(first.type, ty.ObjectType) and first.type.brand is None:
+                kind = 'object'
+            elif ty.dict_key_value(first.type) is not None:
+                kind = 'dict'
         if kind == 'bidict':
             not_implemented(ctx.srcfile, block.loc, 'bidirectional dictionary literals')
         if kind == 'dict' or (not block.inner and expected is not None and ty.dict_key_value(ty.strip_refinement(expected)) is not None):
+            if spreads:
+                not_implemented(ctx.srcfile, spreads[0].loc, 'spreading into a dictionary literal (entries need a runtime replace-or-append)')
             return _tcr_dict_literal(block, expected=expected, ctx=ctx)
         if kind == 'object' or isinstance(expected, ty.ObjectType):
             return _tcr_object_literal(block, expected=expected, ctx=ctx)
+        if spreads:
+            return _tcr_spread_array_literal(block, expected=expected, ctx=ctx)
 
     _collect_block_bindings(block, ctx=ctx)
     _prebind_type_aliases(block, ctx=ctx)
@@ -6153,6 +6303,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         and isinstance(binop.right, p0.Block)
         and binop.right.kind == '[]'
     ):
+        spread = next((item for item in binop.right.inner if _spread_operand(item) is not None), None)
+        if spread is not None:
+            not_implemented(ctx.srcfile, spread.loc, 'spreading into a set literal (members need a runtime add)')
         return _tcr_set_literal(binop.right, binop.loc, expected=expected, ctx=ctx)
     if isinstance(binop.op, t2.QJuxtapose):
         candidates: list[p0.AST] = [replace(binop, op=option) for option in binop.op.options]

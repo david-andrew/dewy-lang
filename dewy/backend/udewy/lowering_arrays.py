@@ -1696,6 +1696,8 @@ class _ArrayLowering:
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Allocate fresh backing storage and initialize one array value."""
 
+        if any(isinstance(item, hir.Spread) for item in node.items):
+            return self._extract_spread_array_literal(node)
         if not isinstance(node.type, ty.ArrayType) or node.type.length is None:
             self._target_error(node, 'array literal does not have an exact layout')
         if self.lowering_module_startup and not all(
@@ -1722,6 +1724,87 @@ class _ArrayLowering:
             statements.append(
                 self._array_store(value, address, node.type.element, item.loc)
             )
+        return statements, target
+
+    def _extract_spread_array_literal(
+        self,
+        node: hir.ArrayLiteral,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """`[xs... 0 ys...]`: sum the lengths, allocate once (the frame for an
+        exact length, the arena for a runtime length), then copy element by
+        element behind a running cursor."""
+        if not isinstance(node.type, ty.ArrayType):
+            raise TypeError('INTERNAL ERROR: spread literal is not an array')
+        if self.lowering_module_startup:
+            self._target_error(node, 'a top-level array literal with a spread')
+        loc = node.loc
+        element = node.type.element
+        element_bytes, _signed = self._array_element_layout(element, node)
+        statements: list[hir.AST] = []
+
+        def declare(role: str, value: hir.AST) -> hir.ExpressedIdentifier:
+            name = self._new_array_name(role)
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value))
+            return hir.ExpressedIdentifier(loc, 'int64', name)
+
+        def assign(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.AST:
+            return hir.Assign(loc, ty.VOID_TYPE, target, '=', value)
+
+        # sources first (once each), then the total length
+        sources: list[hir.AST | None] = []
+        total: hir.AST = self._int64_literal(loc, sum(1 for item in node.items if not isinstance(item, hir.Spread)))
+        for item in node.items:
+            if not isinstance(item, hir.Spread):
+                sources.append(None)
+                continue
+            prelude, source = self._extract_expression(item.value)
+            statements.extend(prelude)
+            held = declare('spread_source', replace(source, type='int64') if isinstance(source, hir.ExpressedIdentifier) else source)
+            sources.append(held)
+            total = self._int64_binary('__add__', total, self._load_i64_field(held, ARRAY_LENGTH_OFFSET, loc), loc)
+        length = declare('spread_length', total)
+        if node.type.length is not None:
+            allocation, target = self._allocate_array_value(node.type, loc)
+            statements.extend(allocation)
+            descriptor = replace(target, type='int64')
+        else:
+            bytes_needed: hir.AST = length if element_bytes == 1 else self._int64_binary('__mul__', length, self._int64_literal(loc, element_bytes), loc)
+            data = declare('spread_data', self._arena_allocation(bytes_needed, loc))
+            target = self._new_array_temp(node)
+            descriptor = replace(target, type='int64')
+            statements.extend([
+                hir.Declare(loc, ty.VOID_TYPE, 'let', target.name, 'int64', self._arena_allocation(self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc)),
+                self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, data, loc),
+                self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, length, loc),
+                self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, length, loc),
+                self._store_i64_field(descriptor, ARRAY_STRIDE_OFFSET, self._int64_literal(loc, element_bytes), loc),
+                self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE), loc),
+                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
+            ])
+        data_pointer = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
+        cursor = declare('spread_cursor', self._int64_literal(loc, 0))
+        for item, source in zip(node.items, sources):
+            if source is None:
+                item_prelude, value = self._array_storage_value(item, element)
+                statements.extend(item_prelude)
+                statements.append(self._array_store(value, self._pointer_element_address(data_pointer, cursor, element_bytes, loc), element, item.loc))
+                statements.append(assign(cursor, self._int64_binary('__add__', cursor, self._int64_literal(loc, 1), loc)))
+                continue
+            index = declare('spread_index', self._int64_literal(loc, 0))
+            count = self._load_i64_field(source, ARRAY_LENGTH_OFFSET, loc)
+            body = self._copy_array_element_between_addresses(
+                self._array_element_address(source, index, element, loc),
+                self._pointer_element_address(data_pointer, cursor, element_bytes, loc),
+                element,
+                loc,
+            )
+            body.extend([
+                assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc)),
+                assign(cursor, self._int64_binary('__add__', cursor, self._int64_literal(loc, 1), loc)),
+            ])
+            statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+                loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, count, loc), hir.Block(loc, ty.VOID_TYPE, body, True),
+            )], None))
         return statements, target
 
     def _allocate_array_value(

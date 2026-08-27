@@ -1521,6 +1521,10 @@ class _Lowerer(
             for item in node.items:
                 self._discover_node(item, scope, current_function)
             return
+        if isinstance(node, hir.Spread):
+            # the copy loop reads the operand through its descriptor
+            self._discover_node(node.value, scope, current_function, array_use='representation')
+            return
         if isinstance(node, hir.ArrayLength):
             self._discover_node(
                 node.array,
@@ -2094,6 +2098,8 @@ class _Lowerer(
                     for item in node.items
                 ],
             )
+        if isinstance(node, hir.Spread):
+            return replace(node, value=self._require_node(self._transform_node(node.value)))
         if isinstance(node, hir.ObjectLiteral):
             return replace(
                 node,

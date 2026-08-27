@@ -234,9 +234,18 @@ class RationalConstant(AST):
 
 @dataclass
 class ArrayLiteral(AST):
-    """A one-dimensional homogeneous array value."""
+    """A one-dimensional homogeneous array value. An item may be a ``Spread``
+    of another array, in which case the literal's length is the sum (runtime
+    when a spread operand's length is not known)."""
 
     items: list[AST]
+
+
+@dataclass
+class Spread(AST):
+    """``xs...`` inside an array literal: every element of ``value`` in order."""
+
+    value: AST
 
 
 @dataclass

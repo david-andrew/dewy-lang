@@ -63,16 +63,27 @@ let squares = [
 
 This is the ordinary loop expression, not a separate comprehension grammar.
 
-## Spreading Arrays
+## Spreading
 
-A trailing `...` inserts every element of an existing array into a surrounding literal. Fixed elements and spreads can mix:
+A trailing `...` inserts the contents of an existing container into a surrounding literal. Arrays (and sets) spread their elements into an array literal, mixed freely with written elements; objects spread their fields into an object literal, where a later entry with the same name wins — the natural "copy with changes" form:
+
+<!-- dewy-example: compiler -->
 
 ```dewy
-let heads = [1 2]
-let tails = [8 9]
-let both = [heads... tails...]
-let padded = [0 both... 10]
+let main = ():>int64 => {
+    let heads = [1 2]
+    let tails = [8 9]
+    let both = [heads... tails...]         # [1 2 8 9]
+    let padded = [0 both... 10]            # [0 1 2 8 9 10]
+
+    let point = [x=1 y=2]
+    let moved = [point... x=5]             # [x=5 y=2]
+    let tagged = [point... label="origin"] # [x=1 y=2 label="origin"]
+    return padded.length + moved.x + tagged.y    # 13
+}
 ```
+
+The result's length is known exactly when every spread operand's length is; otherwise it is a runtime-length array. Spreading into dictionary and set literals is not implemented yet.
 
 ## Shapes and Multidimensional Data
 

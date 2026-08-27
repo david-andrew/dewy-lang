@@ -315,6 +315,10 @@ class ModuleCompiler:
             ):
                 found = True
                 return
+            if isinstance(value, hir.ArrayLiteral) and isinstance(value.type, ty.ArrayType) and value.type.length is None:
+                # a spread literal of runtime length is built in the arena
+                found = True
+                return
             if (
                 isinstance(value, hir.RepresentationCast)
                 and ty.optional_payload(value.type) == ty.StringType()

@@ -846,6 +846,9 @@ class _BoundsValidator:
             for item in node.items:
                 self._eval(item, state, validate=validate)
             return None
+        if isinstance(node, hir.Spread):
+            self._eval(node.value, state, validate=validate)
+            return None
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod):
             arguments = [self._eval(arg, state, validate=validate) for arg in node.pos_args]
             keyword_arguments = {

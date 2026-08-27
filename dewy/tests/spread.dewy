@@ -1,0 +1,31 @@
+# Spreading: `x...` inside a literal copies x's contents into the new
+# container. Objects spread into object literals (later entries win, at the
+# position of the first), arrays and sets spread into array literals (the
+# length is exact when every operand's is, else runtime).
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let obj0 = [a=1 b=2]
+    let obj1 = [e=5 f=6]
+    let obj2 = [obj0... c=3 d=4 obj1...]
+    if obj2.a + obj2.b + obj2.c + obj2.d + obj2.e + obj2.f =? 21 { checks += 1 }
+    let updated = [obj0... b=20]                # a written field after the spread wins
+    if updated.a =? 1 and updated.b =? 20 { checks += 2 }
+    let base = [b=7 a=9]
+    let over = [obj0... base...]                # a later spread wins, order stays a then b
+    if over.a =? 9 and over.b =? 7 { checks += 4 }
+    let xs:array<int64 length=2> = [1 2]
+    let ys:array<int64> = [3 4 5]
+    let fixed = [xs... 0 xs...]                 # exact length 5
+    if fixed.length =? 5 and fixed[2] =? 0 and fixed[4] =? 2 { checks += 8 }
+    let dyn = [0 ys... 9 xs...]                 # runtime length 7
+    if dyn.length =? 7 and dyn[1] =? 3 and dyn[4] =? 9 and dyn[6] =? 2 { checks += 16 }
+    let s = set[7 8]
+    let from_set = [s... 1]                     # a set spreads its members
+    if from_set.length =? 3 and from_set[2] =? 1 { checks += 32 }
+    let words:array<string> = ["a" "b"]
+    let more = [words... "c"]
+    if more.join =? "abc" { checks += 64 }
+    let nested = [inner=[obj0... b=3] n=1]
+    if nested.inner.b =? 3 and nested.inner.a =? 1 { checks += 128 }
+    return checks - 213                         # 42
+}

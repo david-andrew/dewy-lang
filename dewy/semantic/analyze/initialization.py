@@ -762,9 +762,11 @@ class _InitializationChecker:
                 seen = {*seen, binding.id}
             if not isinstance(array, hir.ArrayLiteral):
                 return None
+            if any(isinstance(item, hir.Spread) for item in array.items):
+                return None  # positions do not map onto the written items
             items = (
                 [array.items[node.constant_index]]
-                if node.constant_index is not None
+                if node.constant_index is not None and node.constant_index < len(array.items)
                 else array.items
             )
             targets: list[hir.FunctionLiteral] = []
