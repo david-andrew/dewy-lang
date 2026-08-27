@@ -4,6 +4,8 @@ import pytest
 
 from udewy import t0
 
+SDL_ARTIFACTS_READY = (Path(__file__).resolve().parents[2] / "udewy" / "third_party" / "sdl" / "artifacts" / "link.udewy").exists()
+
 
 def test_import_non_udewy_path_becomes_link_artifact(tmp_path: Path) -> None:
     artifact = tmp_path / "libnative.a"
@@ -258,6 +260,7 @@ let main = ():>int => {
         t0.load_program(active_program, target_backend="c")
 
 
+@pytest.mark.skipif(not SDL_ARTIFACTS_READY, reason="SDL artifacts not built; run udewy/third_party/sdl/setup_sdl.py")
 def test_uzero_multi_unified_entrypoint_selects_target_module() -> None:
     source_path = Path("udewy/tests/uzero_multi/race.udewy")
 

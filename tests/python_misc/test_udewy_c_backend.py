@@ -9,6 +9,8 @@ import pytest
 from udewy import p0, t0, t1
 from udewy.backend import Backend, get_backend
 
+SDL_ARTIFACTS_READY = (Path(__file__).resolve().parents[2] / "udewy" / "third_party" / "sdl" / "artifacts" / "link.udewy").exists()
+
 
 CORE_RUNTIME_SOURCE = """
 let double = (x:int):>int => {
@@ -307,6 +309,7 @@ let main = ():>int => {
     assert exit_code == 56
 
 
+@pytest.mark.skipif(not SDL_ARTIFACTS_READY, reason="SDL artifacts not built; run udewy/third_party/sdl/setup_sdl.py")
 def test_c_backend_parses_sdl_wrapper_without_source_changes() -> None:
     source_path = Path("udewy/tests/uzero_multi/race.udewy")
     backend = get_backend("c")
@@ -320,6 +323,7 @@ def test_c_backend_parses_sdl_wrapper_without_source_changes() -> None:
 
 
 @pytest.mark.skipif(not cc_available(), reason="cc not available")
+@pytest.mark.skipif(not SDL_ARTIFACTS_READY, reason="SDL artifacts not built; run udewy/third_party/sdl/setup_sdl.py")
 def test_c_backend_builds_sdl_demo_when_artifacts_are_available() -> None:
     source_path = Path("udewy/tests/uzero_multi/race.udewy")
     loaded = t0.load_program(source_path, target_backend="c")

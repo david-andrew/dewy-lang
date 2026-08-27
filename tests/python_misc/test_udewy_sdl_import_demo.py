@@ -1,6 +1,8 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from udewy import p0, t0, t1
 from udewy.backend import get_backend
 from udewy.third_party.sdl.desktop_launch import (
@@ -10,6 +12,9 @@ from udewy.third_party.sdl.desktop_launch import (
     prepare_sdl_desktop_launch,
 )
 from udewy.third_party.sdl.generate_udewy_icon import ICON_MAGIC, render_icon_module
+
+SDL_ARTIFACTS_READY = (Path(__file__).resolve().parents[2] / "udewy" / "third_party" / "sdl" / "artifacts" / "link.udewy").exists()
+pytestmark = pytest.mark.skipif(not SDL_ARTIFACTS_READY, reason="SDL artifacts not built; run udewy/third_party/sdl/setup_sdl.py")
 
 
 def test_sdl_demo_collects_link_artifact() -> None:

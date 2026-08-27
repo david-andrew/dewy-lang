@@ -103,14 +103,18 @@ process.stdout.write(JSON.stringify(result));
 def compiler_wasm(tmp_path_factory) -> Path:
     if which("node") is None:
         pytest.skip("node not installed")
+    if which("wat2wasm") is None:
+        pytest.skip("wat2wasm (wabt) not installed")
     env = {**environ, "PYTHONPATH": str(REPO_ROOT)}
     # Make sure wabt.js exists for the node harness; setup_web.py is the
     # source of truth for that download.
     if not WABT_JS.exists():
-        subprocess.run(
+        setup = subprocess.run(
             [sys.executable, str(REPO_ROOT / "udewy" / "third_party" / "web" / "setup_web_compiler.py")],
-            check=True, env=env, capture_output=True,
+            env=env, capture_output=True, text=True, check=False,
         )
+        if setup.returncode != 0:
+            pytest.fail(f"setup_web_compiler.py failed ({setup.returncode}):\n{setup.stdout}\n{setup.stderr}")
     out_dir = tmp_path_factory.mktemp("playground")
     subprocess.run(
         [sys.executable, "-m", "udewy", "-c", "--target", "wasm32", str(WEB_COMPILER_SRC)],
@@ -158,6 +162,7 @@ def test_playground_surfaces_syntax_errors(compiler_wasm) -> None:
     assert "SyntaxError" in result["log"]
 
 
+@pytest.mark.skipif(which("wat2wasm") is None, reason="wat2wasm (wabt) not installed")
 def test_single_file_bundle_contains_everything() -> None:
     """End-to-end: run the artifact-generating script and then invoke
     `udewy -c` directly. The resulting HTML must inline the web-compiler
@@ -165,10 +170,12 @@ def test_single_file_bundle_contains_everything() -> None:
     mechanism -- no Python post-processing involved.
     """
     env = {**environ, "PYTHONPATH": str(REPO_ROOT)}
-    subprocess.run(
+    setup = subprocess.run(
         [sys.executable, str(REPO_ROOT / "udewy" / "third_party" / "web" / "setup_web_compiler.py")],
-        check=True, env=env, capture_output=True,
+        env=env, capture_output=True, text=True, check=False,
     )
+    if setup.returncode != 0:
+        pytest.fail(f"setup_web_compiler.py failed ({setup.returncode}):\n{setup.stdout}\n{setup.stderr}")
     subprocess.run(
         [sys.executable, "-m", "udewy", "-c", "--target", "wasm32",
          str(REPO_ROOT / "udewy" / "tests" / "web" / "playground.udewy")],

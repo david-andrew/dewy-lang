@@ -87,7 +87,7 @@ Expected failures appear as direct [error alternatives](errors-and-forwarding.md
 
 ## Calls and Pipes
 
-Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies values to the callable on its right; `<|` supplies right-hand values to the callable on its left according to their associativity.
+Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies values to the callable on its right; `<|` supplies right-hand values to the callable on its left according to their associativity. The callable operand of a pipe is an ordinary expression, not a call position: a named function is written `@name` (`3 |> @square`), and a function literal or any other function-valued expression pipes as written.
 
 Argument expressions evaluate from left to right before the function body begins, except that omitted defaults evaluate as part of completing the call.
 

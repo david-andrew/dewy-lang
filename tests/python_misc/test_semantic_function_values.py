@@ -69,7 +69,7 @@ let apply = (fn:<(x:int64):>int64> value:int64):>int64 => {
 let main = ():>int64 => {
     let fn_ptr:<(x:int64):>int64> = choose()
     let indirect:int64 = (@fn_ptr)(5)
-    let piped:int64 = 6 |> fn_ptr
+    let piped:int64 = 6 |> @fn_ptr
     return apply(@fn_ptr indirect + piped)
 }
 """

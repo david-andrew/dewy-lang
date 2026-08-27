@@ -110,11 +110,12 @@ An unmatched or ambiguous call is an error.
 
 ## Pipes
 
-Pipes are calls written in data-flow order:
+Pipes are calls written in data-flow order. The right operand is an ordinary expression, so a named function is selected with `@` (bare, it would be called); a function literal pipes as it is:
 
 ```dewy
-3 |> square
-("Grace" greeting="Welcome") |> greet
+3 |> @square
+("Grace" greeting="Welcome") |> @greet
+3 |> (x:int):>int => x * x
 ```
 
 Grouping several piped arguments keeps any named bindings local to the group.

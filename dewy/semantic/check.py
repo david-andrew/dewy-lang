@@ -5880,8 +5880,16 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     if symbol == '=>': return tcr_function_literal(binop, ctx=ctx, expected=expected)
 
     if symbol == '|>':
-        callable_value = typecheck_and_resolve_inner(binop.right, ctx=ctx, call_target=True)
+        # the right operand is an ordinary expression: a bare function name
+        # would be called, so a named function is written `@name`; function
+        # literals and function-valued expressions pipe as they are
+        callable_value = typecheck_and_resolve_inner(binop.right, ctx=ctx)
         return tcr_function_call(callable_value, binop.left, ctx=ctx, expected=expected)
+
+    if symbol == '<|':
+        # the mirror image: callable on the left, its argument on the right
+        callable_value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        return tcr_function_call(callable_value, binop.right, ctx=ctx, expected=expected)
 
     if symbol == 'transmute':
         item = typecheck_and_resolve_inner(binop.left, ctx=ctx)

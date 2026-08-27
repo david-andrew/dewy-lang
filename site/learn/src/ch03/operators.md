@@ -54,8 +54,8 @@ The parser keeps meaningful alternatives until types and context select the oper
 ## Pipes and Conversion
 
 ```dewy
-value |> transform
-transform <| value
+value |> @transform
+@transform <| value
 value as Destination
 value transmute Representation
 ```
