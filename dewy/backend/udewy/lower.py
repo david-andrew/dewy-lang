@@ -247,7 +247,7 @@ class _Lowerer(
                         (binding := self.declare_bindings.get(id(item))) is not None
                         and binding.kind in {'function', 'overload'}
                     )
-                    or isinstance(item.expr, hir.TypeValue)
+                    or isinstance(item.expr, (hir.TypeValue, hir.GenericFunction))
                     or self._is_range_valued(item.annotation or item.expr.type)
                     or self._is_compile_time_rational(item.annotation or item.expr.type)
                     or self._array_representation(item) in {
@@ -1660,7 +1660,7 @@ class _Lowerer(
             self._discover_node(node.target, scope, current_function)
             self._discover_node(node.value, scope, current_function)
             return
-        if isinstance(node, hir.TypeValue):
+        if isinstance(node, (hir.TypeValue, hir.GenericFunction)):
             return
         if isinstance(node, hir.FunctionCall):
             self.direct_calls.append((current_function, node))
@@ -2283,6 +2283,8 @@ class _Lowerer(
             )
         if isinstance(node, hir.TypeValue):
             return node
+        if isinstance(node, hir.GenericFunction):
+            self._target_error(node, 'a generic function used as a value')
         if isinstance(node, hir.ModuleNamespace):
             self._target_error(node, 'using a module namespace as a runtime value')
         if isinstance(node, (hir.ArrayLength, hir.ArrayMethod)):
@@ -2515,7 +2517,7 @@ class _Lowerer(
             binding = self.declare_bindings[id(node)]
             if binding.kind in {'function', 'overload'}:
                 return None
-            if isinstance(node.expr, hir.TypeValue):
+            if isinstance(node.expr, (hir.TypeValue, hir.GenericFunction)):
                 return None
             if self._is_range_valued(node.annotation or node.expr.type):
                 # Range bindings are compile-time values: every supported use

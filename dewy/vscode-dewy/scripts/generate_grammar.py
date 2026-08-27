@@ -113,6 +113,7 @@ GRAMMAR = {
         {"include": "#number"},
         {"include": "#metatag"},
         {"include": "#constant"},
+        {"include": "#generic-parameters"},
         {"include": "#type-annotation"},
         {"include": "#function-definition"},
         {"include": "#keyword"},
@@ -285,6 +286,24 @@ GRAMMAR = {
                 },
             ]
         },
+        "generic-parameters": {
+            # `<T U of Bound>` before a parameter list or object type: the type
+            # parameters of a generic function or alias. Names and bounds are
+            # types, `of` is a word operator, the angles are a bracket pair.
+            "name": f"meta.generic-parameters.{D}",
+            "begin": "<(?=[^<>\\n]*>\\s*[(\\[])",
+            "beginCaptures": {"0": {"name": f"punctuation.section.angle.begin.{D}"}},
+            "end": ">",
+            "endCaptures": {"0": {"name": f"punctuation.section.angle.end.{D}"}},
+            "patterns": [
+                {"include": "#comment"},
+                rule("keyword.other.word-operator", "\\bof\\b"),
+                {"include": "#type-parameter"},
+                {"include": "#builtin-type"},
+                rule("entity.name.type", f"{NOT_BEFORE}{IDENT}{NOT_AFTER}"),
+                {"include": "#punctuation"},
+            ],
+        },
         "type-parameter": {
             # `<…>` is a bracket group: bare names are types, `name=` and `name:`
             # are ordinary identifiers, and the right-hand side of `=` is an
@@ -304,6 +323,7 @@ GRAMMAR = {
                     "end": "(?=[\\s>\\])])",
                     "patterns": [{"include": "#group"}, {"include": "$self"}],
                 },
+                rule("keyword.other.word-operator", "\\bof\\b"),
                 {"include": "#type-annotation"},
                 {"include": "#type-parameter"},
                 {"include": "#bracketed-type"},

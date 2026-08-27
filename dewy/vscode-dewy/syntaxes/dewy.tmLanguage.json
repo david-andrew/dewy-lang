@@ -37,6 +37,9 @@
       "include": "#constant"
     },
     {
+      "include": "#generic-parameters"
+    },
+    {
       "include": "#type-annotation"
     },
     {
@@ -910,6 +913,43 @@
         }
       ]
     },
+    "generic-parameters": {
+      "name": "meta.generic-parameters.dewy",
+      "begin": "<(?=[^<>\\n]*>\\s*[(\\[])",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.angle.begin.dewy"
+        }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.angle.end.dewy"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "name": "keyword.other.word-operator.dewy",
+          "match": "\\bof\\b"
+        },
+        {
+          "include": "#type-parameter"
+        },
+        {
+          "include": "#builtin-type"
+        },
+        {
+          "name": "entity.name.type.dewy",
+          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
     "type-parameter": {
       "name": "meta.type-parameter.dewy",
       "begin": "<(?![?=<|-])",
@@ -949,6 +989,10 @@
               "include": "$self"
             }
           ]
+        },
+        {
+          "name": "keyword.other.word-operator.dewy",
+          "match": "\\bof\\b"
         },
         {
           "include": "#type-annotation"

@@ -1,0 +1,27 @@
+# User generic functions: `<T U>(params):>Ret => body` is checked per
+# instantiation — the type parameters bound to the concrete types inferred at
+# each call (literals widen: `1` is `int64`) — and each instance is hoisted as
+# an ordinary function, so the udewy backend never sees a type variable.
+let first = <T>(xs:array<T>):>T|undefined => if xs.length >? 0 xs[0] else undefined
+let pair_sum = <T of int>(a:T b:T):>T => a + b
+let swap = <T U>(a:T b:U):>[x:U y:T] => [x=b y=a]
+let count_down = <T of int>(n:T acc:T):>T => if n <=? 0 acc else count_down(n - 1 acc + n)
+let Box:type = <T>[value:T]
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let nums:array<int64 length=3> = [7 8 9]
+    let words:array<string> = ["hi" "there"]
+    let n = first(nums)
+    if n is? int64 { if n =? 7 { checks += 1 } }
+    let w = first(words)
+    if w is? string { if w =? "hi" { checks += 2 } }
+    if pair_sum(20 22) =? 42 { checks += 4 }
+    let s = swap(1 "one")
+    if s.x =? "one" and s.y =? 1 { checks += 8 }
+    if count_down(4 0) =? 10 { checks += 16 }
+    let boxed:Box<string> = [value="in a box"]
+    if boxed.value.length =? 8 { checks += 32 }
+    if count_down(4 0) + pair_sum(1 2) =? 13 { checks += 64 }     # instances are reused
+    return checks - 85                # 42
+}

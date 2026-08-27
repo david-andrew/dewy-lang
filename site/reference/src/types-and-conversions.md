@@ -98,6 +98,32 @@ array<int64 length=3>
 Duration<uint64>
 ```
 
+User type aliases take parameters the same way: `let Box:type = <T>[value:T]`, then `Box<int64>`.
+
+### Generic Functions
+
+A generic function declares its type parameters before the parameter list and must declare its result type:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let first = <T>(xs:array<T>):>T | undefined =>
+    if xs.length >? 0 xs[0] else undefined
+
+let swap = <T U>(a:T b:U):>[x:U y:T] => [x=b y=a]
+
+let total = <T of int>(a:T b:T):>T => a + b
+
+let main = ():>int64 => {
+    let words:array<string> = ["hi"]
+    let w = first(words)          # T = string
+    let s = swap(1 "one")         # T = int64, U = string
+    return total(20 22) + s.y     # 43
+}
+```
+
+Type arguments are inferred from the arguments (and a contextual result type), structurally through arrays, objects, and function types; a literal argument binds its ordinary type (`1` is `int64`, `"one"` is `string`). `T of Bound` restricts the arguments a call may supply. The body is checked per instantiation with the type parameters bound to the inferred types — an operation the instance's types do not support is reported at that use, as it would be in a plain function — and each distinct instantiation is compiled as an ordinary function (`first__string`). A generic function is declared with `let` at module level, is called by name, and cannot be used as a value. Generic type aliases that refer to themselves, and generic *local* functions, are not implemented yet.
+
 ## Refined Types
 
 Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.

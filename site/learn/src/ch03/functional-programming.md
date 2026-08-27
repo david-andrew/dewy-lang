@@ -104,6 +104,24 @@ let map = <T U>(
 ]
 ```
 
+Generic functions work today for the direct cases: declare the type parameters in `<…>` before the parameter list, give the result a type, and call the function by name — the compiler infers the type arguments from the call and compiles one instance per distinct binding:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let first = <T>(xs:array<T>):>T | undefined =>
+    if xs.length >? 0 xs[0] else undefined
+
+let main = ():>int64 => {
+    let nums:array<int64> = [7 8 9]
+    let n = first(nums)           # first<int64>
+    if n is? int64 { return n }
+    return 0
+}
+```
+
+`T of int` bounds a parameter to a family of types; inside the body, the operations available are those of the concrete types the call supplied, checked at that call. A generic function cannot yet be passed as a value or declared inside another function.
+
 ## Capturing an Enclosing Scope
 
 A nested function can use names from its lexical environment:

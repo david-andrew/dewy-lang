@@ -71,6 +71,27 @@ class ErrorValue(AST):
     name: str
 
 
+class GenericSource:
+    """The unchecked source of a generic function, kept off the dataclass
+    walkers: the `=>` literal, its type parameters, and the defining context."""
+
+    def __init__(self, literal: object, params: list[ty.GenericParam], context: object) -> None:
+        self.literal = literal
+        self.params = params
+        self.context = context
+        self.instances: dict[tuple, object] = {}
+
+
+@dataclass
+class GenericFunction(AST):
+    """A generic function declaration (`type` is its FunctionType with type
+    parameters). Bodies are checked per instantiation; the instances are
+    ordinary hoisted functions, so this node itself is never lowered."""
+
+    name: str
+    source: GenericSource
+
+
 @dataclass
 class ForwardingAccess(AST):
     """``receiver.name`` on an exception-bearing receiver ``V… | X…``: the

@@ -1363,13 +1363,42 @@ class TypeSystem:
             return True
 
         def match_param(param_t: TypeExpr, arg_t: TypeExpr) -> bool:
+            # a type variable binds; structure around it is matched pointwise
             if isinstance(param_t, str) and param_t in type_vars:
                 return bind_type_var(param_t, arg_t)
+            if isinstance(param_t, TypeVariable) and param_t.name in type_vars:
+                return bind_type_var(param_t.name, arg_t)
+            if isinstance(param_t, RefinedType):
+                return match_param(param_t.base, arg_t)
+            if isinstance(param_t, ArrayType) and isinstance(arg_t, ArrayType):
+                if param_t.length is not None and arg_t.length != param_t.length:
+                    return False
+                return match_param(param_t.element, arg_t.element)
+            if isinstance(param_t, ObjectType) and isinstance(arg_t, ObjectType) and param_t.brand == arg_t.brand:
+                if [f.name for f in param_t.fields] != [f.name for f in arg_t.fields]:
+                    return False
+                return all(match_param(pf.type, af.type) for pf, af in zip(param_t.fields, arg_t.fields))
+            if isinstance(param_t, FunctionType) and isinstance(arg_t, FunctionType) and not param_t.type_params:
+                if len(param_t.pos_or_kw) != len(arg_t.pos_or_kw):
+                    return False
+                return all(
+                    match_param(pp.type, ap.type) for pp, ap in zip(param_t.pos_or_kw, arg_t.pos_or_kw)
+                ) and match_param(param_t.ret, arg_t.ret)
+            if isinstance(param_t, TypeOr) and not isinstance(arg_t, TypeOr):
+                # `T | undefined` against `int64`: bind through the variable member
+                variables = [
+                    item for item in param_t.items
+                    if (isinstance(item, TypeVariable) and item.name in type_vars) or (isinstance(item, str) and item in type_vars)
+                ]
+                others = [item for item in param_t.items if item not in variables]
+                if len(variables) == 1 and not any(self.is_subtype(arg_t, other) for other in others):
+                    return match_param(variables[0], arg_t)
             return self.is_subtype(arg_t, param_t)
 
-        if expected_return is not None and isinstance(m.ret, str) and m.ret in type_vars:
-            bindings[m.ret] = expected_return
-            contextual_type_vars.add(m.ret)
+        ret_var = m.ret.name if isinstance(m.ret, TypeVariable) else m.ret
+        if expected_return is not None and isinstance(ret_var, str) and ret_var in type_vars:
+            bindings[ret_var] = expected_return
+            contextual_type_vars.add(ret_var)
 
         if len(pos_types) > len(m.pos_or_kw) and m.rest is None:
             return None

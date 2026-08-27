@@ -57,6 +57,7 @@ class Context:
     type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
     resolving_type_aliases: set[int] = field(default_factory=set)
     named_types: dict[int, ty.NamedType] = field(default_factory=dict)  # recursive alias references, by alias binding id
+    generic_instances: list[hir.Declare] = field(default_factory=list)  # hoisted instantiations of generic functions (shared list)
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
@@ -208,6 +209,9 @@ def _typecheck_module(
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
         raise TypeError('INTERNAL ERROR: source module did not produce a block')
+    if ctx.generic_instances:
+        # instantiations of generic functions are ordinary module-level functions
+        checked = replace(checked, items=[*checked.items, *ctx.generic_instances])
     return checked, ctx
 
 def _sink_ambiguity(ast: p0.AST) -> p0.AST:
@@ -711,6 +715,12 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             dict_block = _dict_literal_block(right)
             if dict_block is not None:
                 return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)
+            generic = _generic_signature(right, ctx=ctx) if isinstance(right, p0.BinOp) else None
+            if generic is not None:
+                signature, params = generic
+                expr = hir.GenericFunction(right.loc, signature, name, hir.GenericSource(right, params, ctx))
+                ctx.declarations[name] = signature
+                return _complete_binding(ast, hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr), ctx=ctx)
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
             require_valued(expr.type, ctx.srcfile, expr.loc, 'declaration initializer')
             if keyword == 'let':
@@ -2968,6 +2978,18 @@ def _generic_type_alias(
     *,
     ctx: Context,
 ) -> ty.GenericTypeAlias:
+    params, alias_ctx = _declare_generic_parameters(parameters, ctx=ctx)
+    if not params:
+        user_error(
+            ctx.srcfile,
+            'generic type alias requires at least one parameter',
+            Pointer(span=parameters.loc, message='this parameter list is empty'),
+        )
+    return ty.GenericTypeAlias(params, ast_to_type(body, ctx=alias_ctx))
+
+
+def _declare_generic_parameters(parameters: p0.Block, *, ctx: Context) -> tuple[list[ty.GenericParam], Context]:
+    """`<T U of Bound>`: the parameters, and a context in which each is a type variable."""
     alias_ctx = replace(
         ctx,
         declarations=ctx.declarations.new_child(),
@@ -3019,13 +3041,151 @@ def _generic_type_alias(
         binding.type_value = ty.TypeVariable(name, bound)
         alias_ctx.declarations[name] = ty.TYPE_TYPE
         alias_ctx.binding_scopes[name] = binding
-    if not params:
+    return params, alias_ctx
+
+
+def _generic_function_parts(fn_ast: p0.AST) -> tuple[p0.Block, p0.AST, p0.AST | None] | None:
+    """`<T…>(params):>Ret => body`: the type-parameter block, the parameter
+    block, and the result type (None when unannotated), else None."""
+    if not (isinstance(fn_ast, p0.BinOp) and isinstance(fn_ast.op, t1.Operator) and fn_ast.op.symbol == '=>'):
+        return None
+    signature = fn_ast.left
+    rettype: p0.AST | None = None
+    if isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>':
+        rettype = signature.right
+        signature = signature.left
+    if (
+        isinstance(signature, p0.BinOp)
+        and isinstance(signature.op, t2.TypeParamJuxtapose)
+        and isinstance(signature.left, p0.Block)
+        and signature.left.kind == '<>'
+    ):
+        return signature.left, signature.right, rettype
+    return None
+
+
+def _generic_signature(fn_ast: p0.BinOp, *, ctx: Context) -> tuple[ty.FunctionType, list[ty.GenericParam]] | None:
+    """The FunctionType (with type parameters) of a generic literal, else None."""
+    parts = _generic_function_parts(fn_ast)
+    if parts is None:
+        return None
+    type_block, params_block, rettype_ast = parts
+    if rettype_ast is None:
         user_error(
             ctx.srcfile,
-            'generic type alias requires at least one parameter',
-            Pointer(span=parameters.loc, message='this parameter list is empty'),
+            'a generic function needs a declared result type',
+            Pointer(span=type_block.loc, message='annotate the result with `:>T`, `:>array<T>`, …'),
         )
-    return ty.GenericTypeAlias(params, ast_to_type(body, ctx=alias_ctx))
+    params, generic_ctx = _declare_generic_parameters(type_block, ctx=ctx)
+    if not params:
+        user_error(ctx.srcfile, 'a generic function needs at least one type parameter', Pointer(span=type_block.loc, message='this parameter list is empty'))
+    rettype = ast_to_type(rettype_ast, ctx=generic_ctx)
+    pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(params_block, ctx=generic_ctx)
+    all_params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
+    if any(p.type == ty.INFERRED_TYPE for p in all_params):
+        user_error(ctx.srcfile, 'a generic function needs every parameter type declared', Pointer(span=params_block.loc, message='annotate each parameter'))
+    signature = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+    return replace(signature, type_params=params), params
+
+
+def _instantiation_name(name: str, bindings: dict[str, ty.TypeExpr], params: list[ty.GenericParam]) -> str:
+    rendered = '_'.join(type_to_dewy(bindings[param.name]) for param in params)
+    cleaned = ''.join(ch if ch.isalnum() else '_' for ch in rendered).strip('_')
+    while '__' in cleaned:
+        cleaned = cleaned.replace('__', '_')
+    return f'{name}__{cleaned}'
+
+
+def _widen_type_argument(type_: ty.TypeExpr) -> ty.TypeExpr:
+    """A type parameter bound from a literal takes the literal's ordinary type
+    (`1` → `int64`, `"a"` → `string`), as `let` would give the value."""
+    if isinstance(type_, ty.IntegerLiteralType):
+        return 'int64' if ty.integer_literal_fits(type_.value, 'int64') else 'int'
+    if type_ == 'int':
+        return 'int64'  # two integer literals meet at the abstract `int`: the instance is word-sized
+    if isinstance(type_, ty.StringLiteralType):
+        return ty.StringType()
+    if isinstance(type_, ty.BinaryLiteralType):
+        return ty.ArrayType('uint8', len(type_.value))
+    return ty.strip_refinement(type_)
+
+
+def _instantiate_generic_call(
+    left: hir.AST,
+    result: ty.DispatchResult,
+    pos_types: list[ty.TypeExpr],
+    kw_types: dict[str, ty.TypeExpr],
+    expected_return: ty.TypeExpr | None,
+    *,
+    ctx: Context,
+) -> tuple[hir.AST, ty.DispatchResult]:
+    """Replace a generic callee by (a reference to) its instance for these
+    arguments; the dispatch result becomes the instance's concrete signature."""
+    if not (isinstance(left, hir.ExpressedIdentifier) and left.binding_id is not None):
+        return left, result
+    binding = ctx.binding_registry.by_id.get(left.binding_id)
+    declaration = binding.declaration if binding is not None else None
+    if declaration is None or not isinstance(declaration.expr, hir.GenericFunction):
+        return left, result
+    generic = declaration.expr
+    assert isinstance(generic.type, ty.FunctionType)
+    bindings = ctx.type_system.infer_type_args(generic.type, pos_types, kw_types, expected_return)
+    if bindings is None:
+        user_error(
+            ctx.srcfile,
+            f'cannot infer the type parameters of `{generic.name}` from this call',
+            Pointer(span=left.loc, message='the arguments do not determine every type parameter'),
+        )
+    bindings = {name: _widen_type_argument(value) for name, value in bindings.items()}
+    source = generic.source
+    key = tuple((param.name, repr(bindings[param.name])) for param in source.params)
+    instance = source.instances.get(key)
+    if instance is None:
+        instance = _instantiate_generic_function(generic, bindings, ctx=ctx)
+    assert isinstance(instance.type, ty.FunctionType)
+    callee = hir.ExpressedIdentifier(left.loc, instance.type, instance.name, binding_id=instance.id)
+    return callee, ty.DispatchResult(instance.type, result.method_index, result.promote_pos)
+
+
+def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[str, ty.TypeExpr], *, ctx: Context) -> sb.Binding:
+    """Check the generic body with its type parameters bound to concrete types
+    and hoist the result as an ordinary module-level function."""
+    source = generic.source
+    defining: Context = source.context  # type: ignore[assignment]
+    instance_ctx = replace(
+        defining,
+        declarations=defining.declarations.new_child(),
+        binding_scopes=defining.binding_scopes.new_child(),
+    )
+    for param in source.params:
+        alias = instance_ctx.binding_registry.allocate_param(param.name, ty.TYPE_TYPE, generic.loc)
+        alias.type_value = bindings[param.name]
+        instance_ctx.declarations[param.name] = ty.TYPE_TYPE
+        instance_ctx.binding_scopes[param.name] = alias
+    assert isinstance(generic.type, ty.FunctionType)
+    instance_type = ty.instantiate_method(generic.type, bindings)
+    name = _instantiation_name(generic.name, bindings, source.params)
+    key = tuple((param.name, repr(bindings[param.name])) for param in source.params)
+    binding = ctx.binding_registry.allocate(object(), name, 'function', generic.loc)
+    binding.type = instance_type
+    source.instances[key] = binding  # registered first, so a recursive call finds it
+    # the instance is visible under its own name in the defining scope (recursion, other instances)
+    defining.declarations.maps[0][name] = instance_type
+    defining.binding_scopes.maps[0][name] = binding
+    literal_ast = source.literal
+    assert isinstance(literal_ast, p0.BinOp)
+    # check the literal without its `<T…>` prefix, under the instance bindings
+    signature = literal_ast.left
+    if isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>':
+        plain = replace(literal_ast, left=replace(signature, left=signature.left.right))
+    else:
+        plain = replace(literal_ast, left=signature.right)
+    literal = tcr_function_literal(plain, ctx=instance_ctx)
+    declaration = hir.Declare(generic.loc, ty.VOID_TYPE, 'let', name, None, literal, binding_id=binding.id)
+    binding.declaration = declaration
+    binding.function = literal
+    ctx.generic_instances.append(declaration)
+    return binding
 
 
 def _type_alias_value(ast: p0.AST, *, ctx: Context) -> ty.TypeAliasValue:
@@ -4557,6 +4717,8 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
                 ty.ObjectType,
                 ty.StringLiteralType,
                 ty.StringType,
+                ty.TypeVariable,  # concrete at instantiation
+                ty.NamedType,
             ),
         )
         or isinstance(type_, str)
@@ -5798,6 +5960,12 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
             handle_ast = handle_ast.inner[0]
         if isinstance(handle_ast, p0.Atom) and isinstance(handle_ast.item, t1.Identifier):
             handle = tcr_identifier(handle_ast.item, ctx=ctx)
+            if isinstance(handle.type, ty.FunctionType) and handle.type.type_params:
+                user_error(
+                    ctx.srcfile,
+                    'a generic function cannot be used as a value',
+                    Pointer(span=prefix.loc, message='it has no single representation; call it, or name an instance'),
+                )
             if isinstance(handle.type, (ty.FunctionType, ty.OverloadType)):
                 # `@name` selects the function value instead of calling it
                 return handle
@@ -6937,6 +7105,9 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
 
     Used by the pre-binding pass; unannotated (inference-requiring) functions stay order-dependent.
     """
+    generic = _generic_signature(fn_ast, ctx=ctx)
+    if generic is not None:
+        return generic[0]
     signature = fn_ast.left
     if not (isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>'):
         return None
@@ -6977,6 +7148,12 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     function literal: `args => body`
     """
     #analyze the signature
+    if _generic_function_parts(binop) is not None:
+        user_error(
+            ctx.srcfile,
+            'a generic function must be declared with `let`',
+            Pointer(span=binop.loc, message='its instances are created where it is called by name'),
+        )
     signature = binop.left
     rettype: ty.Type = ty.INFERRED_TYPE
     rettype_loc: Span | None = None
@@ -8536,6 +8713,10 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         type_error(ctx.srcfile, 'no matching method for call',
             Pointer(span=left.loc, message='calling this'),
             Pointer(span=right.loc, message=str(e)))
+
+    if isinstance(left.type, ty.FunctionType) and left.type.type_params:
+        # a user generic: the call targets a concrete instance from here on
+        left, result = _instantiate_generic_call(left, result, pos_types, kw_types, expected_return, ctx=ctx)
 
     if interleaved:
         # Re-bind once against the selected signature so generic instantiation

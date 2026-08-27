@@ -294,3 +294,17 @@ def test_word_operators_and_interpolation_use_keyword_and_template_scopes() -> N
     package = loads((GRAMMAR_PATH.parent.parent / "package.json").read_text())
     unbalanced = package["contributes"]["grammars"][0]["unbalancedBracketScopes"]
     assert not any(scope.startswith(("string", "comment", "meta")) for scope in unbalanced)
+
+
+def test_generic_parameter_blocks_are_bracket_groups_of_types() -> None:
+    generic = _repo("generic-parameters")
+    begin = generic["begin"]
+    for source in ("<T>(x:T):>T => x", "<T of int>(a:T b:T):>T => a + b", "<T U>(a:T b:U):>[x:U y:T] => [x=b y=a]", "<T>[value:T]"):
+        assert match(begin, source), source
+    for source in ("<? 3", "a <b", "<(x:int64):>int64> = @f", "<int64 length=2> = [0 2]"):
+        assert not match(begin, source), source
+    assert generic["beginCaptures"]["0"]["name"] == "punctuation.section.angle.begin.dewy"
+    of_rule = next(rule for rule in generic["patterns"] if rule.get("match") == "\\bof\\b")
+    assert of_rule["name"] == "keyword.other.word-operator.dewy"
+    type_rule = next(rule for rule in generic["patterns"] if rule.get("name") == "entity.name.type.dewy")
+    assert fullmatch(type_rule["match"], "T") and fullmatch(type_rule["match"], "real")
