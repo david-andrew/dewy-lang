@@ -14,6 +14,8 @@ Dewy is a general purpose programming language with a focus on engineering.
 
 The main compiler lives under [dewy/](dewy/)
 
+A VS Code extension with a TextMate grammar for Dewy lives under [dewy/vscode-dewy/](dewy/vscode-dewy/) (not yet published to the marketplace; install it from the folder with `code --install-extension` after packaging, or symlink it into `~/.vscode/extensions`).
+
 ### udewy
 
 The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). Currently only supports linux x86_64.

@@ -1,0 +1,52 @@
+{
+  "name": "dewy",
+  "displayName": "dewy",
+  "description": "Syntax highlighting for the Dewy programming language",
+  "version": "0.1.0",
+  "publisher": "RedFoxLabs",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "icon": "images/dewy_logo_128x128.png",
+  "files": [
+    "language-configuration.json",
+    "syntaxes/dewy.tmLanguage.json",
+    "images/dewy_logo_128x128.png",
+    "README.md",
+    "LICENSE"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "dewy",
+        "aliases": [
+          "Dewy",
+          "dewy"
+        ],
+        "extensions": [
+          ".dewy"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dewy",
+        "scopeName": "source.dewy",
+        "path": "./syntaxes/dewy.tmLanguage.json",
+        "unbalancedBracketScopes": [
+          "keyword.operator",
+          "punctuation.separator.angle"
+        ]
+      }
+    ]
+  },
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/david-andrew/dewy-lang"
+  }
+}

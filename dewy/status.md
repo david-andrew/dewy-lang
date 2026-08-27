@@ -434,7 +434,7 @@ In no particular order
 - [ ] full end to end self-hosted compiler via dewy->udewy frontend, udewy->asm backend
 - [ ] standard library
   - [ ] OS agnostic interfaces on top of OS-dependent implementations per supported OS/environment
-- [ ] LSP for syntax highlighting, type narrowed lookup, struct member listing, etc
+- [ ] LSP for syntax highlighting, type narrowed lookup, struct member listing, etc. A TextMate grammar (`dewy/vscode-dewy/`, generated from the tokenizer tables, 2026-08-27) covers lexical highlighting now; the LSP comes after the bootstrap Dewy compiler and will layer semantic highlighting, hover types (refinements, chosen integer representations), completion, rename, and diagnostics on top of it.
 - [ ] implementation of hello world examples from the different domains
 - [ ] test harness system.
   - [ ] self hosted unit tests with automation for running on all updates
