@@ -20,7 +20,7 @@ let counter:uint64 = 1
 
 An integer literal begins as the exact number written. Context can place it in a compatible integer type, but an out-of-range literal is rejected instead of truncated.
 
-Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program. The compiler stores an `int` as a 64-bit word when range analysis proves it fits, and as an arbitrary-precision big integer otherwise — the program's meaning does not change, only its cost. `dewy --analyze` prints a representation report listing every place a big integer was chosen and why. When you want arbitrary precision regardless of what the analysis can prove, annotate `bigint`:
+Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program. The compiler stores an `int` as a 64-bit word when range analysis proves it fits, and as an arbitrary-precision big integer otherwise — the program's meaning does not change, only its cost. `dewy analyze` prints a representation report listing every place a big integer was chosen and why. When you want arbitrary precision regardless of what the analysis can prove, annotate `bigint`:
 
 <!-- dewy-example: compiler -->
 

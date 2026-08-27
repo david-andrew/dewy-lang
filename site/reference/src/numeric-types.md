@@ -16,7 +16,7 @@ An integer literal is admitted to a numeric context only when its exact value be
 
 ## Representation and `bigint`
 
-The compiler chooses how an `int` is stored. Range analysis proves most values fit a 64-bit word, and those lower to machine integers. A value it cannot prove word-sized — an oversized literal, a product of unbounded operands, a loop accumulator without a bound — takes the arbitrary-precision representation automatically, and every binding it flows into follows. The semantics are the same either way; only the cost differs, and `dewy --analyze` reports each place a big integer was chosen and the range that forced it.
+The compiler chooses how an `int` is stored. Range analysis proves most values fit a 64-bit word, and those lower to machine integers. A value it cannot prove word-sized — an oversized literal, a product of unbounded operands, a loop accumulator without a bound — takes the arbitrary-precision representation automatically, and every binding it flows into follows. The semantics are the same either way; only the cost differs, and `dewy analyze` reports each place a big integer was chosen and the range that forced it.
 
 `bigint` names that representation explicitly: a `bigint` binding is always arbitrary precision, and any integer converts to it.
 

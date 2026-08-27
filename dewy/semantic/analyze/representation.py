@@ -10,7 +10,7 @@ parameters and results keep their word representation (a big value cannot
 cross such a boundary without a proof), which the report explains.
 
 The decisions are recorded as ``RepresentationNote``s for the analysis
-report (``dewy --analyze``).
+report (``dewy analyze``).
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ _COMPARISONS = {'__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__'}
 class RepresentationNote:
     """One decision the report shows: where a value became a big integer and why."""
 
+    srcfile: SrcFile
     loc: Span
     message: str
 
@@ -94,7 +95,7 @@ class _RepresentationPass:
         return self._prelude_call('_bigint_from_limbs', [hir.Bool(loc, 'bool', value < 0), array], loc)
 
     def _note(self, loc: Span, message: str) -> None:
-        self.notes.append(RepresentationNote(loc, message))
+        self.notes.append(RepresentationNote(self.srcfile, loc, message))
 
     @staticmethod
     def _describe(interval: object) -> str:

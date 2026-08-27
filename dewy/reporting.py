@@ -290,6 +290,11 @@ class Report:
         if self.message:
             marker = "×" if self.severity == "error" else "•"
             out.append(f"{body_indent}{theme.marker(marker, self.severity)} {self.message}")
+        if not self.pointer_messages:
+            # nothing points into the source: a summary report has no excerpt
+            if self.hint:
+                out.append(f"{body_indent}{theme.help_label('help:')} {self.hint}")
+            return "\n".join(out)
         out.append(f"{block_indent}{gutter_pad}╭─[{loc}:{row_idx+1}:{col_idx+1}]")
         
         segments_by_line:dict[int, list[_Segment]] = {}
