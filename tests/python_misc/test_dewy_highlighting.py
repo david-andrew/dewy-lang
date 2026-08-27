@@ -308,3 +308,12 @@ def test_generic_parameter_blocks_are_bracket_groups_of_types() -> None:
     assert of_rule["name"] == "keyword.other.word-operator.dewy"
     type_rule = next(rule for rule in generic["patterns"] if rule.get("name") == "entity.name.type.dewy")
     assert fullmatch(type_rule["match"], "T") and fullmatch(type_rule["match"], "real")
+
+
+def test_type_blocks_after_assignment_are_type_groups() -> None:
+    block = _repo("type-block")
+    assert search(block["begin"], 'let Mode:type = <1 | 2 | "fast">')
+    assert not search(block["begin"], "if a <? b")
+    assert not search(block["begin"], "let fn:<(x:int64):>int64> = @f")
+    assert not search(block["begin"], "x = 5")
+    assert block["beginCaptures"]["3"]["name"] == "punctuation.section.angle.begin.dewy"

@@ -7677,6 +7677,24 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 t0.parse_integer(value.src, value.prefix)
             )
 
+        case p0.Atom(item=t1.String(content=content)):
+            # a string literal in type position is its singleton type
+            from .unicode.graphemes import unicode_scalars
+
+            try:
+                unicode_scalars(content)
+            except ValueError:
+                user_error(
+                    ctx.srcfile,
+                    'string literal contains a Unicode surrogate',
+                    Pointer(span=ast.item.loc, message='Dewy strings contain Unicode scalar values only'),
+                )
+            return ty.StringLiteralType(content)
+        case p0.Atom(item=t1.BasedString() as literal):
+            packed, _digits = _pack_based_string(literal, ctx=ctx)
+            return ty.BinaryLiteralType(packed)
+        case p0.Atom(item=t1.Bool()):
+            not_implemented(ctx.srcfile, ast.loc, 'a boolean literal type (use `bool`)')
         case p0.Block(kind='[]', inner=items):
             seen: dict[str, Span] = {}
             fields: list[ty.ObjectField] = []

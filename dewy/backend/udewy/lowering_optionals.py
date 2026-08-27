@@ -270,7 +270,7 @@ class _OptionalLowering:
             member == 'undefined'
             or member == 'bool'
             or ty.fixed_integer_layout(member) is not None
-            or isinstance(member, (ty.StringType, ty.StringLiteralType))
+            or isinstance(member, (ty.StringType, ty.StringLiteralType, ty.IntegerLiteralType, ty.BinaryLiteralType))
             or member in {'string', 'grapheme', 'char'}
         )
 

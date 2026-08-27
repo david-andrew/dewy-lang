@@ -1,6 +1,6 @@
 # Literals
 
-A literal introduces a value directly in source. Literal syntax may preserve more exact type information than the eventual context requires.
+A literal introduces a value directly in source. Literal syntax may preserve more exact type information than the eventual context requires. In a type context the same literal is a singleton type — see [Literal Types](types-and-conversions.md#literal-types).
 
 ## Booleans and Absence
 

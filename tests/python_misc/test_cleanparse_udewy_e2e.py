@@ -87,6 +87,7 @@ LOWERED_CASES = [
     ('spread.dewy', 42),
     ('local_captures.dewy', 42),
     ('generics.dewy', 42),
+    ('literal_types.dewy', 42),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

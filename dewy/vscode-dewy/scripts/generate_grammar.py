@@ -114,6 +114,7 @@ GRAMMAR = {
         {"include": "#metatag"},
         {"include": "#constant"},
         {"include": "#generic-parameters"},
+        {"include": "#type-block"},
         {"include": "#type-annotation"},
         {"include": "#function-definition"},
         {"include": "#keyword"},
@@ -285,6 +286,30 @@ GRAMMAR = {
                     "captures": {"1": {"name": f"keyword.operator.type.{D}"}, "2": {"name": f"entity.name.type.{D}"}},
                 },
             ]
+        },
+        "type-block": {
+            # `= <1 | 2 | "fast">`: an explicit type block on the right of a
+            # type alias (or anywhere after `=`); its contents are a type
+            "name": f"meta.type-block.{D}",
+            "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|-])",
+            "beginCaptures": {
+                "1": {"name": f"keyword.operator.assignment.{D}"},
+                "3": {"name": f"punctuation.section.angle.begin.{D}"},
+            },
+            "end": "(?<![:-])>(?!\\?|=\\?)",
+            "endCaptures": {"0": {"name": f"punctuation.section.angle.end.{D}"}},
+            "patterns": [
+                {"include": "#comment"},
+                rule("keyword.other.word-operator", "\\bof\\b"),
+                {"include": "#type-parameter"},
+                {"include": "#bracketed-type"},
+                {"include": "#string"},
+                {"include": "#number"},
+                {"include": "#builtin-type"},
+                rule("keyword.operator.type", "[|&]"),
+                rule("entity.name.type", f"{NOT_BEFORE}{IDENT}{NOT_AFTER}"),
+                {"include": "#punctuation"},
+            ],
         },
         "generic-parameters": {
             # `<T U of Bound>` before a parameter list or object type: the type

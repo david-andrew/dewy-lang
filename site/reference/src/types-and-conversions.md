@@ -124,6 +124,45 @@ let main = ():>int64 => {
 
 Type arguments are inferred from the arguments (and a contextual result type), structurally through arrays, objects, and function types; a literal argument binds its ordinary type (`1` is `int64`, `"one"` is `string`). `T of Bound` restricts the arguments a call may supply. The body is checked per instantiation with the type parameters bound to the inferred types — an operation the instance's types do not support is reported at that use, as it would be in a plain function — and each distinct instantiation is compiled as an ordinary function (`first__string`). A generic function is declared with `let` at module level, is called by name, and cannot be used as a value. Generic type aliases that refer to themselves, and generic *local* functions, are not implemented yet.
 
+## Literal Types
+
+In a type context a literal denotes its singleton type: `x:5` admits only `5`, `d:0` only `0`, `s:"one"` only `"one"`, and a packed literal `0x"6869"` only those bytes. Type contexts are annotation positions (`name:T`, `:>T`), the right-hand side of `name:type = …`, and an explicit type block `<…>`; anywhere else a literal is a value, and `<…>` is the way to write a type expression where the context alone would read it as values (`<1 | 2 | 3>` is a type — as values `1 | 2 | 3` would be `or` between numbers).
+
+Unions of literals are enumerations, mixed freely with other types, and `is?` narrows them:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Mode:type = <1 | 2 | "fast" | "slow">
+
+let describe = (m:Mode):>int64 =>
+    if m is? 1 10 else if m is? 2 20 else if m is? "fast" 30 else 40
+
+let main = ():>int64 => {
+    let m:Mode = "slow"
+    return describe(m) + describe(2)    # 60
+}
+```
+
+A literal-typed parameter specializes an overload — dispatch picks the most specific applicable method, and each call has the selected method's result type:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let DivZero:type = type of error
+let safe_div = ((n:int64 d:0):>DivZero => DivZero)
+             & ((n:int64 d:int64):>int64 => n // d)
+
+let main = ():>int64 => {
+    let q = safe_div(6 3)             # int64
+    let e = safe_div(6 0)             # DivZero
+    if e is? DivZero { return q }     # 2
+    return 0
+}
+```
+
+The literal method wins exactly when the divisor is the literal `0`; the general method still admits a runtime zero, which a refinement on its divisor (`d:int64<i => i not=? 0>`) is meant to exclude once refined parameters are supported. Boolean literal types (`true`, `false`) are not implemented; use `bool`.
+
 ## Refined Types
 
 Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.

@@ -40,6 +40,9 @@
       "include": "#generic-parameters"
     },
     {
+      "include": "#type-block"
+    },
+    {
       "include": "#type-annotation"
     },
     {
@@ -910,6 +913,59 @@
               "name": "entity.name.type.dewy"
             }
           }
+        }
+      ]
+    },
+    "type-block": {
+      "name": "meta.type-block.dewy",
+      "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|-])",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.assignment.dewy"
+        },
+        "3": {
+          "name": "punctuation.section.angle.begin.dewy"
+        }
+      },
+      "end": "(?<![:-])>(?!\\?|=\\?)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.angle.end.dewy"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "name": "keyword.other.word-operator.dewy",
+          "match": "\\bof\\b"
+        },
+        {
+          "include": "#type-parameter"
+        },
+        {
+          "include": "#bracketed-type"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#builtin-type"
+        },
+        {
+          "name": "keyword.operator.type.dewy",
+          "match": "[|&]"
+        },
+        {
+          "name": "entity.name.type.dewy",
+          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
+        },
+        {
+          "include": "#punctuation"
         }
       ]
     },

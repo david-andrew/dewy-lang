@@ -1,0 +1,30 @@
+# Literal types: in a type context — an annotation, the right side of
+# `name:type =`, or an explicit `<…>` type block — a literal denotes its
+# singleton type. Unions of literals are enumerations; a literal-typed
+# parameter specializes an overload.
+let Mode:type = <1 | 2 | "fast" | "slow">
+let DivZero:type = type of error
+
+let describe = (m:Mode):>int64 =>
+    if m is? 1 10 else if m is? 2 20 else if m is? "fast" 30 else 40
+
+let safe_div = ((n:int64 d:0):>DivZero => DivZero)
+             & ((n:int64 d:int64):>int64 => n // d)
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let one:1 = 1
+    let word:"one" = "one"
+    if one + word.length =? 4 { checks += 1 }
+    let m:Mode = "slow"
+    if describe(m) + describe(2) + describe("fast") =? 90 { checks += 2 }
+    let a = safe_div(6 3)
+    let b = safe_div(6 0)
+    if a is? int64 and b is? DivZero { checks += 4 }
+    let bytes:0x"6869" = 0x"6869"
+    if bytes.length =? 2 { checks += 8 }
+    let picked:1|2|3 = 3
+    if picked is? 3 { checks += 16 }
+    if picked isnt? 1 { checks += 32 }
+    return checks - 21                # 42
+}

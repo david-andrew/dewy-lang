@@ -276,6 +276,8 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Bigint lowering for right-unbounded or finite out-of-`int64` ranges (the representation pass, 2026-08-26).
 - [ ] Using general range values beyond the currently supported iterator normalization.
 
+**Literal types (2026-08-27):** a literal in a type context is its singleton type — integer and string literals and packed based literals (`x:5`, `s:"one"`, `b:0x"6869"`); the type contexts are annotations, the right side of `name:type =`, and an explicit `<…>` type block (the disambiguating spelling David proposed: `<1 | 2 | "one">` is a type, while the bare form in value position would be `or` over values). Unions of literals are enumerations (`Mode:type = <1 | 2 | "fast">`, narrowed by `is?`, lowered as ordinary tagged unions — literal members are word members), and a literal-typed parameter specializes an overload with its own result type (`((n:int64 d:0):>DivZero => DivZero) & ((n:int64 d:int64):>int64 => n // d)` — a literal-zero call is typed `DivZero`, any other call `int64`). _Gap surfaced by that example (2026-08-27):_ the general method still admits a runtime zero and `n // d` with an unproven runtime divisor compiles silently (crashes at runtime) — a violation of the proof rule; the intended fix is refined parameters (`d:int64<i => i not=? 0>`, still ahead in A5: dispatch does not yet accept refined parameters at all, so call-site obligations and body facts are the next refinement slice) together with a division-by-possibly-zero obligation in the bounds analysis. Not yet: boolean literal types, rational literal types in unions.
+
 ## `undefined`, optional values, and type narrowing
 
 - [x] `undefined` as a value distinct from `void`.
