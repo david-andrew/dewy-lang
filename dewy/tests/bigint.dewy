@@ -1,0 +1,30 @@
+# `bigint` is arbitrary precision: integers widen into it, constants fold,
+# and `+ - * // % ^` plus comparisons work with Python's sign conventions.
+let factorial = (n:int64):>bigint => {
+    let result:bigint = 1
+    let i:int64 = 2
+    loop i <=? n {
+        result = result * i
+        i = i + 1
+    }
+    return result
+}
+
+let main = ():>int64 => {
+    let thirty = factorial(30)                       # 265252859812191058636308480000000
+    let big:bigint = 2^100                           # folded: 1267650600228229401496703205376
+    let huge:bigint = 123456789012345678901234567890
+    let sum = big + huge
+    let quotient = huge // 1000000007
+    let remainder = huge % 1000000007
+    let negative = -huge // 7                        # floor toward -infinity
+    printl"{thirty}"
+    printl"{big} {sum}"
+    printl"{quotient} {remainder} {negative} {(-7 * huge) % 100}"
+    let checks:int64 = 0
+    if thirty >? big { checks += 1 }
+    if huge =? 123456789012345678901234567890 { checks += 2 }
+    if big - big =? 0 and factorial(0) =? 1 { checks += 4 }
+    if 5 <? huge and huge >=? 5 { checks += 8 }
+    return checks
+}

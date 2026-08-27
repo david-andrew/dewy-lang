@@ -1,0 +1,243 @@
+# Arbitrary-precision integers. `bigint` is this object type: a sign and a
+# little-endian array of base-2^32 limbs (each held in a uint64 word so limb
+# products fit in 64 bits), with no leading zero limbs; zero has no limbs and
+# is never negative. Operations are ordinary Dewy functions; the checker only
+# routes `+ - * // % ^` and comparisons here and promotes integer operands.
+let BigInt:type = [negative:bool limbs:array<uint64>]
+
+let _LIMB_BASE:uint64 = 4294967296
+let _LIMB_MASK:uint64 = 4294967295
+
+let _bigint_trim = (@limbs:array<uint64>):>void => {
+    loop limbs.length >? 0 and limbs[limbs.length - 1] =? 0 {
+        limbs.pop;
+    }
+}
+
+let _bigint_from_limbs = (negative:bool limbs:array<uint64>):>BigInt => {
+    _bigint_trim(@limbs)
+    if limbs.length =? 0 { return [negative = false limbs = limbs] }
+    return [negative = negative limbs = limbs]
+}
+
+let _bigint_from_int = (value:int64):>BigInt => {
+    let negative:bool = value <? 0
+    let magnitude:uint64 = value transmute uint64
+    if negative { magnitude = (0 - value) transmute uint64 }   # wraps correctly for the minimum
+    let limbs:array<uint64> = []
+    loop magnitude not =? 0 {
+        limbs.push(magnitude and _LIMB_MASK)
+        magnitude = magnitude >> 32
+    }
+    return _bigint_from_limbs(negative limbs)
+}
+
+# --- magnitude helpers (limb arrays) ---
+let _mag_compare = (a:array<uint64> b:array<uint64>):>int64 => {
+    if a.length >? b.length { return 1 }
+    if a.length <? b.length { return -1 }
+    let i:int64 = a.length
+    loop i >? 0 {
+        i = i - 1
+        if i <? a.length and i <? b.length {
+            if a[i] >? b[i] { return 1 }
+            if a[i] <? b[i] { return -1 }
+        }
+    }
+    return 0
+}
+
+let _mag_add = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    let result:array<uint64> = []
+    let carry:uint64 = 0
+    let i:int64 = 0
+    loop i <? a.length or i <? b.length {
+        let sum:uint64 = carry
+        if i <? a.length { sum = sum + a[i] }
+        if i <? b.length { sum = sum + b[i] }
+        result.push(sum and _LIMB_MASK)
+        carry = sum >> 32
+        i = i + 1
+    }
+    if carry not =? 0 { result.push(carry) }
+    return result
+}
+
+# a - b for |a| >= |b|
+let _mag_sub = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    let result:array<uint64> = []
+    let borrow:uint64 = 0
+    let i:int64 = 0
+    loop i <? a.length {
+        let top:uint64 = a[i] + _LIMB_BASE
+        let subtract:uint64 = borrow
+        if i <? b.length { subtract = subtract + b[i] }
+        let diff:uint64 = top - subtract
+        result.push(diff and _LIMB_MASK)
+        borrow = 1 - (diff >> 32)
+        i = i + 1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+let _mag_mul = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    let result:array<uint64> = []
+    let n:int64 = 0
+    loop n <? a.length + b.length { result.push(0)  n = n + 1 }
+    let i:int64 = 0
+    loop i <? a.length {
+        let carry:uint64 = 0
+        let j:int64 = 0
+        loop j <? b.length {
+            let k:int64 = i + j
+            if k <? result.length {
+                let t:uint64 = a[i] * b[j] + result[k] + carry
+                result[k] = t and _LIMB_MASK
+                carry = t >> 32
+            }
+            j = j + 1
+        }
+        let k:int64 = i + b.length
+        loop carry not =? 0 and k <? result.length {
+            let t:uint64 = result[k] + carry
+            result[k] = t and _LIMB_MASK
+            carry = t >> 32
+            k = k + 1
+        }
+        i = i + 1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+let _mag_shift_left_one = (@limbs:array<uint64>):>void => {
+    let carry:uint64 = 0
+    let i:int64 = 0
+    loop i <? limbs.length {
+        let t:uint64 = (limbs[i] << 1) or carry
+        limbs[i] = t and _LIMB_MASK
+        carry = t >> 32
+        i = i + 1
+    }
+    if carry not =? 0 { limbs.push(carry) }
+}
+
+# quotient and remainder of magnitudes by binary long division (b non-zero)
+let _MagDivMod:type = [quotient:array<uint64> remainder:array<uint64>]
+let _mag_divmod = (a:array<uint64> b:array<uint64>):>_MagDivMod => {
+    let quotient:array<uint64> = []
+    let n:int64 = 0
+    loop n <? a.length { quotient.push(0)  n = n + 1 }
+    let remainder:array<uint64> = []
+    let i:int64 = a.length
+    loop i >? 0 {
+        i = i - 1
+        let bit:int64 = 32
+        loop bit >? 0 {
+            bit = bit - 1
+            _mag_shift_left_one(@remainder)
+            if i <? a.length {
+                let incoming:uint64 = (a[i] >> (bit transmute uint64)) and 1
+                if incoming not =? 0 {
+                    if remainder.length =? 0 { remainder.push(1) } else { remainder[0] = remainder[0] or 1 }
+                }
+            }
+            if _mag_compare(remainder b) >=? 0 {
+                remainder = _mag_sub(remainder b)
+                if i <? quotient.length { quotient[i] = quotient[i] or (1 << (bit transmute uint64)) }
+            }
+        }
+    }
+    _bigint_trim(@quotient)
+    _bigint_trim(@remainder)
+    return [quotient = quotient remainder = remainder]
+}
+
+# --- signed operations ---
+let _bigint_neg = (a:BigInt):>BigInt => _bigint_from_limbs(not a.negative a.limbs)
+
+let _bigint_add = (a:BigInt b:BigInt):>BigInt => {
+    if a.negative =? b.negative { return _bigint_from_limbs(a.negative _mag_add(a.limbs b.limbs)) }
+    let order:int64 = _mag_compare(a.limbs b.limbs)
+    if order =? 0 { return _bigint_from_limbs(false []) }
+    if order >? 0 { return _bigint_from_limbs(a.negative _mag_sub(a.limbs b.limbs)) }
+    return _bigint_from_limbs(b.negative _mag_sub(b.limbs a.limbs))
+}
+
+let _bigint_sub = (a:BigInt b:BigInt):>BigInt => _bigint_add(a _bigint_neg(b))
+
+let _bigint_mul = (a:BigInt b:BigInt):>BigInt =>
+    _bigint_from_limbs(a.negative xor b.negative _mag_mul(a.limbs b.limbs))
+
+# floor division and modulo with Python's sign conventions (b non-zero)
+let _bigint_floordiv = (a:BigInt b:BigInt):>BigInt => {
+    let parts = _mag_divmod(a.limbs b.limbs)
+    let quotient:BigInt = _bigint_from_limbs(a.negative xor b.negative parts.quotient)
+    if a.negative xor b.negative and parts.remainder.length >? 0 {
+        quotient = _bigint_sub(quotient _bigint_from_int(1))
+    }
+    return quotient
+}
+
+let _bigint_mod = (a:BigInt b:BigInt):>BigInt => {
+    let parts = _mag_divmod(a.limbs b.limbs)
+    let remainder:BigInt = _bigint_from_limbs(a.negative parts.remainder)
+    if a.negative xor b.negative and parts.remainder.length >? 0 {
+        remainder = _bigint_add(remainder b)
+    }
+    return remainder
+}
+
+let _bigint_pow = (base:BigInt exponent:int64):>BigInt => {
+    let result:BigInt = _bigint_from_int(1)
+    let factor:BigInt = base
+    loop exponent >? 0 {
+        if exponent % 2 =? 1 { result = _bigint_mul(result factor) }
+        factor = _bigint_mul(factor factor)
+        exponent = exponent // 2
+    }
+    return result
+}
+
+let _bigint_compare = (a:BigInt b:BigInt):>int64 => {
+    if a.negative and not b.negative { return -1 }
+    if b.negative and not a.negative { return 1 }
+    let order:int64 = _mag_compare(a.limbs b.limbs)
+    if a.negative { return 0 - order }
+    return order
+}
+
+let _bigint_eq = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) =? 0
+let _bigint_ne = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) not =? 0
+let _bigint_lt = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) <? 0
+let _bigint_le = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) <=? 0
+let _bigint_gt = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) >? 0
+let _bigint_ge = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) >=? 0
+
+# decimal digits, most significant first, by repeated division by 10^9
+let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {
+    let chunks:array<uint64> = []          # least significant chunk first
+    let current:array<uint64> = limbs
+    loop current.length >? 0 {
+        let next:array<uint64> = []
+        let i:int64 = current.length
+        let remainder:uint64 = 0
+        let quotient:array<uint64> = []
+        loop i >? 0 {
+            i = i - 1
+            if i <? current.length {
+                let value:uint64 = (remainder << 32) or current[i]
+                quotient.push(value // 1000000000)
+                remainder = value % 1000000000
+            }
+        }
+        # quotient was built most significant first: reverse into next
+        let j:int64 = quotient.length
+        loop j >? 0 { j = j - 1  if j <? quotient.length { next.push(quotient[j]) } }
+        _bigint_trim(@next)
+        chunks.push(remainder)
+        current = next
+    }
+    return chunks
+}

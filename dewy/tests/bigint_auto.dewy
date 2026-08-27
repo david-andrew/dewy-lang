@@ -1,0 +1,21 @@
+# An `int` the analysis cannot prove word-sized becomes a big integer on its
+# own: oversized literals, products with unknown range, loop accumulators.
+let main = ():>int64 => {
+    let seed = 3000000000
+    let cube = seed * seed * seed            # 2.7e28: big
+    let huge = 123456789012345678901234567890 # an oversized literal
+    let total = 0
+    let step = 7
+    let i:int64 = 0
+    loop i <? 5 { total = total + step  i = i + 1 }   # an accumulator: big
+    let mixed = huge + cube + total
+    printl"{cube}"
+    printl"{huge} {total}"
+    printl"{mixed}"
+    let small:bigint = 5
+    let checks:int64 = 0
+    if cube <? huge { checks += 1 }
+    if total =? 35 { checks += 2 }
+    if mixed - huge - cube =? small * 7 { checks += 4 }
+    return checks
+}

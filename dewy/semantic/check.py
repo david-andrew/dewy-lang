@@ -165,7 +165,7 @@ def _typecheck_module(
         for name, binding in prelude_bindings.items()
         if binding.type is not None
     }
-    for type_name, attribute in ((RATIONAL_TYPE_NAME, 'rational_object'), (FIXED_TYPE_NAME, 'fixed_object')):
+    for type_name, attribute in ((RATIONAL_TYPE_NAME, 'rational_object'), (FIXED_TYPE_NAME, 'fixed_object'), (BIGINT_TYPE_NAME, 'bigint_object')):
         prelude_type = prelude_bindings.get(type_name)
         if prelude_type is not None and prelude_type.type_value is not None:
             setattr(type_system, attribute, prelude_type.type_value)
@@ -2529,6 +2529,12 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     _drop_key_facts(body_ctx, dictionary_id=invalidated_id)
                     _drop_key_facts(ctx, key_id=invalidated_id)
                     _drop_key_facts(body_ctx, key_id=invalidated_id)
+        if iterator_result is None:
+            # The condition is re-evaluated before every iteration, so the
+            # facts it establishes hold at the top of the body even when the
+            # body mutates the tested bindings; only facts inherited from
+            # before the loop were dropped above.
+            body_ctx = _refine_condition_context(ctx, condition, truth=True)
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
@@ -4388,6 +4394,155 @@ def _rational_type(ctx: Context, loc: Span) -> ty.Type:
     return binding.type_value
 
 
+BIGINT_TYPE_NAME = 'BigInt'
+_BIGINT_BINARY_FUNCTIONS = {
+    '__add__': '_bigint_add',
+    '__sub__': '_bigint_sub',
+    '__mul__': '_bigint_mul',
+    '__floordiv__': '_bigint_floordiv',
+    '__mod__': '_bigint_mod',
+    '__eq__': '_bigint_eq',
+    '__ne__': '_bigint_ne',
+    '__lt__': '_bigint_lt',
+    '__le__': '_bigint_le',
+    '__gt__': '_bigint_gt',
+    '__ge__': '_bigint_ge',
+}
+
+
+def _bigint_type(ctx: Context, loc: Span) -> ty.Type:
+    """The prelude's `BigInt` object type, which `bigint` names."""
+    binding = ctx.binding_scopes.get(BIGINT_TYPE_NAME)
+    if binding is None or binding.type_value is None:
+        user_error(
+            ctx.srcfile,
+            'big integers need the prelude',
+            Pointer(span=loc, message='`BigInt` from `library/bigint.dewy` is not in scope'),
+        )
+    return binding.type_value
+
+
+def _is_bigint(type_: ty.Type, *, ctx: Context) -> bool:
+    binding = ctx.binding_scopes.get(BIGINT_TYPE_NAME)
+    return binding is not None and binding.type_value is not None and type_ == binding.type_value
+
+
+def _bigint_literal(value: int, *, loc: Span, ctx: Context) -> hir.AST:
+    """A big integer constant from its base-2^32 limbs."""
+    magnitude = abs(value)
+    limbs: list[int] = []
+    while magnitude:
+        limbs.append(magnitude & 0xFFFFFFFF)
+        magnitude >>= 32
+    limb_nodes = [hir.Integer(loc, 'uint64', '0d', limb) for limb in limbs]
+    return _prelude_call(
+        '_bigint_from_limbs',
+        [
+            hir.Bool(loc, 'bool', value < 0),
+            hir.ArrayLiteral(loc, ty.ArrayType('uint64', len(limbs)), limb_nodes),
+        ],
+        loc=loc,
+        ctx=ctx,
+    )
+
+
+def _to_bigint(arg: hir.AST, *, ctx: Context) -> hir.AST:
+    """An operand as a runtime `BigInt`; integers widen, constants fold."""
+    if _is_bigint(arg.type, ctx=ctx):
+        return arg
+    constant = _constant_integer(_unwrap_parens(arg), ctx=ctx)
+    if constant is not None:
+        return _bigint_literal(constant, loc=arg.loc, ctx=ctx)
+    if not ctx.type_system.is_subtype(arg.type, 'int'):
+        type_error(
+            ctx.srcfile,
+            'no big-integer conversion for this operand',
+            Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
+        )
+    return _prelude_call('_bigint_from_int', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx)
+
+
+def _dispatch_bigint(
+    fname: str,
+    args: list[hir.AST],
+    *,
+    loc: Span,
+    source_name: str,
+    ctx: Context,
+    expected: ty.Type | None = None,
+) -> hir.AST | None:
+    """Operations with a big-integer operand: the other integer operand widens.
+
+    Integer constants beyond the 64-bit range (such as a folded `2^100`) are
+    big-integer operands too, and a big-integer expected type selects this
+    path for integer constants.
+    """
+    if BIGINT_TYPE_NAME not in ctx.binding_scopes:
+        return None  # no prelude: integers stay words (µDewy-style programs)
+    fixed_widths = [
+        arg.type for arg in args
+        if isinstance(arg.type, str) and arg.type in ty.FIXED_INTEGER_TYPES
+    ]
+
+    def oversized(arg: hir.AST) -> bool:
+        # a constant beyond every word type present; a literal that fits the
+        # other operand's fixed width (`x =? 18446744073709551615` on uint64) is not
+        value = _constant_integer(_unwrap_parens(arg), ctx=ctx)
+        if value is None:
+            return False
+        # any 64-bit word (signed or unsigned) is still a word literal
+        candidates = [*fixed_widths, 'int64', 'uint64']
+        if isinstance(expected, str) and expected in ty.FIXED_INTEGER_TYPES:
+            candidates.append(expected)
+        return not any(ty.integer_literal_fits(value, width) for width in candidates)
+
+    if not any(_is_bigint(arg.type, ctx=ctx) or oversized(arg) for arg in args) and not (
+        expected is not None and _is_bigint(expected, ctx=ctx)
+    ):
+        return None
+    if fname == '__unary_sub__' and len(args) == 1:
+        constant = _constant_integer(_unwrap_parens(args[0]), ctx=ctx)
+        if constant is not None:
+            # `-9223372036854775808` negates an oversized literal into a word
+            negated = -constant
+            if ty.integer_literal_fits(negated, 'int64') and not (expected is not None and _is_bigint(expected, ctx=ctx)):
+                return hir.Integer(loc, ty.IntegerLiteralType(negated), '0d', negated)
+            return _bigint_literal(negated, loc=loc, ctx=ctx)
+        return _prelude_call('_bigint_neg', [_to_bigint(args[0], ctx=ctx)], loc=loc, ctx=ctx)
+    if fname == '__truediv__':
+        not_implemented(ctx.srcfile, loc, 'exact division of big integers (rationals over big integers)')
+    helper = _BIGINT_BINARY_FUNCTIONS.get(fname)
+    if helper is None or len(args) != 2:
+        type_error(
+            ctx.srcfile,
+            f'operator `{source_name}` is not defined for big integers',
+            Pointer(span=loc, message='big integers support `+ - * // % ^`, negation, and comparisons'),
+        )
+    if fname in {'__floordiv__', '__mod__'} and _constant_integer(_unwrap_parens(args[1]), ctx=ctx) == 0:
+        type_error(
+            ctx.srcfile,
+            'division by zero',
+            Pointer(span=args[1].loc, message='the divisor is the constant `0`'),
+        )
+    constants = [_constant_integer(_unwrap_parens(arg), ctx=ctx) for arg in args]
+    if all(value is not None for value in constants):
+        # both constants: fold exactly, then materialize
+        a, b = cast(list[int], constants)
+        folded = {
+            '__add__': a + b, '__sub__': a - b, '__mul__': a * b,
+            '__floordiv__': a // b if b else None, '__mod__': a % b if b else None,
+            '__eq__': a == b, '__ne__': a != b, '__lt__': a < b, '__le__': a <= b, '__gt__': a > b, '__ge__': a >= b,
+        }[fname]
+        if isinstance(folded, bool):
+            return hir.Bool(loc, 'bool', folded)
+        if folded is not None:
+            if ty.integer_literal_fits(folded, 'int64') and not (expected is not None and _is_bigint(expected, ctx=ctx)):
+                return hir.Integer(loc, ty.IntegerLiteralType(folded), '0d', folded)
+            return _bigint_literal(folded, loc=loc, ctx=ctx)
+    operands = [_to_bigint(arg, ctx=ctx) for arg in args]
+    return _prelude_call(helper, operands, loc=loc, ctx=ctx)
+
+
 FIXED_TYPE_NAME = 'Fixed'
 FIXED_SCALE = 1 << 32
 _FIXED_BINARY_FUNCTIONS = {
@@ -4861,6 +5016,16 @@ def _dispatch_pow(
         )
     if _is_fixed(number, ctx=ctx):
         not_implemented(ctx.srcfile, loc, '`^` on fixed-point bases')
+    if _is_bigint(number, ctx=ctx):
+        if exponent_value is not None and exponent_value < 0:
+            not_implemented(ctx.srcfile, loc, 'negative powers of big integers (rationals over big integers)')
+        if exponent_value is None and not ctx.type_system.is_subtype(exponent.type, 'uint'):
+            type_error(
+                ctx.srcfile,
+                'integer exponent must be known to be non-negative',
+                Pointer(span=exponent.loc, message='a negative exponent would make the result a rational'),
+            )
+        return _prelude_call('_bigint_pow', [base, _as_int64(exponent, ctx=ctx)], loc=loc, ctx=ctx)
     base_rational = _is_rational(number, ctx=ctx) or isinstance(number, ty.RationalLiteralType)
     if not base_rational and not ctx.type_system.is_subtype(number, 'int'):
         type_error(
@@ -4953,6 +5118,9 @@ def _dispatch_builtin(
     ]
     if fname == '__pow__':
         return _dispatch_pow(args, loc=loc, ctx=ctx)
+    big = _dispatch_bigint(fname, args, loc=loc, source_name=source_name, ctx=ctx, expected=expected)
+    if big is not None:
+        return big
     algebra = _dispatch_set_algebra(fname, args, loc=loc, source_name=source_name, ctx=ctx)
     if algebra is not None:
         return algebra
@@ -6773,6 +6941,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return _rational_type(ctx, ast.loc)
             if name == 'fixed' and FIXED_TYPE_NAME in ctx.binding_scopes:
                 return _fixed_type(ctx, ast.loc)
+            if name == 'bigint' and BIGINT_TYPE_NAME in ctx.binding_scopes:
+                return _bigint_type(ctx, ast.loc)
             return name
 
         case p0.Atom(item=t1.Integer(value=value)):
@@ -8199,6 +8369,12 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
+    if _is_bigint(expected, ctx=ctx) and not _is_bigint(node.type, ctx=ctx):
+        constant = _constant_integer(_unwrap_parens(node), ctx=ctx)
+        if constant is not None:
+            return _bigint_literal(constant, loc=node.loc, ctx=ctx)
+        if ctx.type_system.is_subtype(node.type, 'int'):
+            return _prelude_call('_bigint_from_int', [_as_int64(node, ctx=ctx)], loc=node.loc, ctx=ctx)
     node_number, node_dimension = _number_and_dimension(node.type)
     if isinstance(node_number, (ty.RationalLiteralType, ty.IntegerLiteralType)):
         # Compile-time numbers materialize into runtime rational or fixed

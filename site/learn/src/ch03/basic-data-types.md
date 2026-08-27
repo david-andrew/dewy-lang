@@ -20,7 +20,21 @@ let counter:uint64 = 1
 
 An integer literal begins as the exact number written. Context can place it in a compatible integer type, but an out-of-range literal is rejected instead of truncated.
 
-Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program. In the current compiler an `int` value is stored as a 64-bit word exactly when its range is proven to fit; arithmetic whose range cannot be proven is reported so the program can annotate a fixed width or narrow the value with a comparison.
+Fixed-width arithmetic retains its width and rolls over according to that bit representation. `int` does not acquire overflow merely because the compiler proves that a machine integer is an efficient representation for a particular program. The compiler stores an `int` as a 64-bit word when range analysis proves it fits, and as an arbitrary-precision big integer otherwise — the program's meaning does not change, only its cost. `dewy --analyze` prints a representation report listing every place a big integer was chosen and why. When you want arbitrary precision regardless of what the analysis can prove, annotate `bigint`:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let seed = 3000000000
+    let cube = seed * seed * seed       # 2.7e28: a big integer automatically
+    let factor:bigint = 2^100           # always a big integer
+    printl"{cube} {factor}"
+    return 0
+}
+```
+
+Big values stay inside boundaries that admit them: returning one from a function whose result is `int64`, or passing it to a word-sized parameter, is a compile error until a comparison proves the range or the signature says `bigint`.
 
 ## Rationals and Fixed-Point
 

@@ -35,3 +35,11 @@ def test_narrowing_an_unproven_int_is_rejected() -> None:
 def test_loop_accumulation_without_a_bound_is_rejected() -> None:
     with pytest.raises(UserError, match='cannot prove this integer fits'):
         codegen(SrcFile(None, 'let main = ():>int64 => {\n    let total = 0\n    let step = 3\n    loop i in 0..10 { total = total + step }\n    return total\n}'))
+
+
+def test_unproven_local_arithmetic_becomes_a_big_integer() -> None:
+    from dewy.semantic.analyze import representation
+
+    emitted = codegen(SrcFile(None, 'let main = ():>int64 => {\n    let seed = 3000000000\n    let cube = seed * seed * seed\n    printl"{cube}"\n    return 0\n}'))
+    assert '_bigint_mul' in emitted
+    assert any('`cube` is a big integer' in note.message for note in representation.last_notes)

@@ -78,6 +78,8 @@ LOWERED_CASES = [
     ('dict_hash.dewy', 204),
     ('sets.dewy', 92),
     ('dict_algebra.dewy', 80),
+    ('bigint.dewy', 15),
+    ('bigint_auto.dewy', 7),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

@@ -8,7 +8,7 @@ The hosted compiler parses and statically checks Dewy, lowers supported programs
 
 Its implemented core includes bindings, fixed-width integers and Booleans, functions and calls, defaults and keyword arguments, static overloads, structured control flow, compile-time-anchored range values and multiiterators, strings, graphemes, streamed and bounded materialized interpolation, homogeneous arrays, structural objects, optional values, initial dictionary literal iteration, nonescaping explicit places, source imports, and initial time quantities.
 
-Several normative areas are only partial. Notable examples include arbitrary-precision runtime integers, escaping and runtime-sized aggregate storage, user-defined interpolation conversions and unbounded result capacities, runtime range storage, function handles and closures, runtime dictionaries, general physical quantities, user-written generics, refinements, effects, and heterogeneous unions.
+Several normative areas are only partial. Notable examples include escaping and runtime-sized aggregate storage, user-defined interpolation conversions and unbounded result capacities, runtime range storage, function handles and closures, runtime dictionaries, general physical quantities, user-written generics, refinements, effects, and heterogeneous unions.
 
 The hosted type system records `exception` as the parent of `error` and `undefined`. Automatic exception forwarding and `or_return` are not yet implemented, so those rules describe the intended language rather than current compiler behavior.
 

@@ -22,6 +22,7 @@ parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided,
 parser.add_argument('-t', '--target', choices=TARGETS, help='backend target the program should compile to.')
 parser.add_argument('-v', '--version', action='version', version=f'dewy {get_version()}', help='Print version information and exit')
 parser.add_argument('-c', '--compile', action='store_true', help="compile only, don't run")
+parser.add_argument('--analyze', action='store_true', help='report representation decisions (big integers) after compiling')
 parser.add_argument('remainder', nargs=REMAINDER, default=[], help='arguments to pass to the program')
 args = parser.parse_args()
 
@@ -37,6 +38,16 @@ path = Path(args.file)
 srcfile = SrcFile.from_path(path)
 target = cast(BackendName, args.target or identify_host_target())
 udewy_src = codegen(srcfile, target=target)
+if args.analyze:
+    from .semantic.analyze import representation
+    if representation.last_notes:
+        print('representation report:')
+        for note in representation.last_notes:
+            line = srcfile.body.count('\n', 0, note.loc.start) + 1
+            column = note.loc.start - (srcfile.body.rfind('\n', 0, note.loc.start) + 1) + 1
+            print(f'  {path}:{line}:{column}: {note.message}')
+    else:
+        print('representation report: every integer is a 64-bit word')
 
 # set up udewy options, and save the udewy source code to a cache file
 options = EntryPointOptions(

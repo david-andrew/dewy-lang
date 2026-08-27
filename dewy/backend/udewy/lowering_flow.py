@@ -414,7 +414,10 @@ class _FlowLowering:
             self.next_flow_temp += 1
             if name not in self.source_names:
                 self.source_names.add(name)
-                return hir.ExpressedIdentifier(node.loc, node.type, name)
+                temp_type = node.type
+                if isinstance(temp_type, ty.IntegerLiteralType) or temp_type in ('int', 'uint'):
+                    temp_type = 'int64'  # abstract and literal integers are words by now
+                return hir.ExpressedIdentifier(node.loc, temp_type, name)
 
     def _is_fixed_width_shift(self, node: hir.FunctionCall) -> bool:
         """Whether ``node`` needs an explicit source-width shift guard."""
@@ -446,6 +449,10 @@ class _FlowLowering:
         operand_type = node.func.type.pos_or_kw[0].type
         assert isinstance(operand_type, str)
         width = FIXED_INTEGER_WIDTHS[operand_type]
+        if not (isinstance(node.type, str) and node.type in FIXED_INTEGER_WIDTHS):
+            # a literal left operand (`1 << n`) was promoted to the operand
+            # width; the result and its temporaries take that width too
+            node = replace(node, type=operand_type)
 
         left_prelude, left = self._extract_expression(node.pos_args[0])
         left_temp = self._new_shift_temp(left, operand_type, 'value')
@@ -858,6 +865,9 @@ class _FlowLowering:
             'uint64',
         }:
             return hir.Integer(node.loc, node.type, t0.base10, 0)
+        if isinstance(node.type, ty.IntegerLiteralType) or node.type in ('int', 'uint'):
+            # abstract and literal-typed integers are 64-bit words by lowering time
+            return hir.Integer(node.loc, 'int64', t0.base10, 0)
         if isinstance(node.type, ty.QuantityType):
             runtime_type = self._lower_runtime_value_type(node.type)
             if isinstance(runtime_type, str):

@@ -81,11 +81,28 @@ _FACT_SHIFT = 20
 
 # A runtime-length array's length is a nonnegative int64, which keeps
 # `i <? xs.length` bounded above so `i + 1` cannot roll over.
-_MAX_LENGTH = (1 << 63) - 1
+_MAX_LENGTH = (1 << 48) - 1  # more elements than any address space holds; keeps sums of lengths within int64
 
 
 def _length_key(array_id: int) -> int:
     return -array_id - 1
+
+
+def _is_inequality(name: str, truth: bool) -> bool:
+    """Whether a comparison outcome says the operands differ."""
+    return (name == '__eq__' and not truth) or (name == '__ne__' and truth)
+
+
+def _exclude_value(interval: Interval, value: int) -> Interval | None:
+    """The interval without `value`; None when nothing is left."""
+    lower, upper = interval.lower, interval.upper
+    if lower is not None and upper is not None and lower == upper == value:
+        return None
+    if lower is not None and lower == value:
+        lower += 1
+    if upper is not None and upper == value:
+        upper -= 1
+    return Interval(lower, upper)
 
 
 def _is_length_key(key: int) -> bool:
@@ -239,6 +256,7 @@ class _BoundsValidator:
     ) -> None:
         self.registry = registry
         self.srcfile = srcfile
+        self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
         assigned = _assigned_binding_ids(root)
         # Module-level `let` bindings that are never reassigned keep their
@@ -927,7 +945,16 @@ class _BoundsValidator:
             return result
         if isinstance(node, hir.ShortCircuit):
             self._eval(node.left, state, validate=validate)
-            self._eval(node.right, state, validate=validate)
+            # the right operand only runs when the left decided nothing yet:
+            # under `and` the left was true, under `or` it was false
+            if node.op in {'and', 'nand'}:
+                right_state = self._refine(state, node.left, truth=True)
+            elif node.op in {'or', 'nor'}:
+                right_state = self._refine(state, node.left, truth=False)
+            else:
+                right_state = dict(state)
+            if right_state is not None:
+                self._eval(node.right, right_state, validate=validate)
             return None
         if isinstance(node, hir.RangeMembership):
             self._eval(node.value, state, validate=validate)
@@ -1132,6 +1159,10 @@ class _BoundsValidator:
             _drop_index_facts(state, array_id=route_id)
 
     def _report_unfit(self, node: hir.AST, interval: Interval | None, word: str) -> None:
+        if self.unfit is not None:
+            # the representation pass gives this value a big integer instead
+            self.unfit[id(node)] = (node, interval, word)
+            return
         if interval is None or (interval.lower is None and interval.upper is None):
             known = 'no bound on this value is known'
         else:
@@ -1182,6 +1213,39 @@ class _BoundsValidator:
         if isinstance(type_, str) and type_ in {'char', 'grapheme'}:
             return 1
         return None
+
+    def _refine_after(self, state: State, left: hir.AST, right: hir.AST, *, right_truth: bool) -> State | None:
+        """Refine by `right` on the path where `left` decided nothing (its truth is the opposite of `right_truth`)."""
+        first = self._refine(state, left, truth=not right_truth)
+        if first is None:
+            return None
+        return self._refine(first, right, truth=right_truth)
+
+    def _join_alternatives(self, first: State | None, second: State | None) -> State | None:
+        """The state after either of two possible paths (None marks an impossible path)."""
+        alternatives = [state for state in (first, second) if state is not None]
+        if not alternatives:
+            return None
+        return self._join_states(alternatives)
+
+    def _length_offset_index(self, index: hir.AST, array_id: int) -> int | None:
+        """`k` when the index is `xs.length - k` for the same array with a constant `k >= 1`."""
+        while isinstance(index, (hir.ValueCast, hir.RepresentationCast)):
+            index = index.expr
+        if not (
+            isinstance(index, hir.FunctionCall)
+            and isinstance(index.func, hir.ExpressedIdentifier)
+            and index.func.name == '__sub__'
+            and len(index.pos_args) == 2
+        ):
+            return None
+        left, right = index.pos_args
+        if not isinstance(left, hir.ArrayLength) or _runtime_array_id(left.array, self.registry) != array_id:
+            return None
+        constant = self._constant_expr(right, set())
+        if constant is None or constant.lower is None or constant.lower != constant.upper or constant.lower < 1:
+            return None
+        return constant.lower
 
     def _validate_method_index(
         self,
@@ -1264,6 +1328,10 @@ class _BoundsValidator:
                     return
                 index_id = self._binding_id(index)
                 if index_id is not None and _index_fact_key(index_id, array_id) in state:
+                    return
+                # `xs[xs.length - k]` is in bounds when the length is at least k
+                offset = self._length_offset_index(index, array_id)
+                if offset is not None and minimum_length >= offset:
                     return
         known = (
             'unknown'
@@ -1355,6 +1423,11 @@ class _BoundsValidator:
                     if left is None:
                         return None
                     return self._refine(left, condition.right, truth=True)
+                # `a and b` false: either `a` was false, or `a` held and `b` was false
+                return self._join_alternatives(
+                    self._refine(refined, condition.left, truth=False),
+                    self._refine_after(refined, condition.left, condition.right, right_truth=False),
+                )
             if condition.op in {'or', 'nor'}:
                 effective_truth = truth if condition.op == 'or' else not truth
                 if not effective_truth:
@@ -1362,6 +1435,11 @@ class _BoundsValidator:
                     if left is None:
                         return None
                     return self._refine(left, condition.right, truth=False)
+                # `a or b` true: either `a` held, or `a` was false and `b` held
+                return self._join_alternatives(
+                    self._refine(refined, condition.left, truth=True),
+                    self._refine_after(refined, condition.left, condition.right, right_truth=True),
+                )
             return refined
         if not (
             isinstance(condition, hir.FunctionCall)
@@ -1403,6 +1481,12 @@ class _BoundsValidator:
                 if narrowed.is_empty:
                     return None
                 refined[left_binding] = narrowed
+            elif _is_inequality(name, truth) and right_interval.lower is not None and right_interval.lower == right_interval.upper:
+                # `x not =? c` (or a failed `x =? c`) excludes `c`: it tightens a bound it sits on
+                excluded = _exclude_value(_known_interval(refined, left_binding), right_interval.lower)
+                if excluded is None:
+                    return None
+                refined[left_binding] = excluded
 
         right_binding = self._binding_id(right)
         left_interval = self._eval(left, refined, validate=False)
@@ -1425,6 +1509,11 @@ class _BoundsValidator:
                 if narrowed.is_empty:
                     return None
                 refined[right_binding] = narrowed
+            elif _is_inequality(inverse, truth) and left_interval.lower is not None and left_interval.lower == left_interval.upper:
+                excluded = _exclude_value(_known_interval(refined, right_binding), left_interval.lower)
+                if excluded is None:
+                    return None
+                refined[right_binding] = excluded
         return refined
 
     def _binding_id(self, node: hir.AST) -> int | None:
@@ -1567,7 +1656,15 @@ def validate_bounds(
     root: hir.Block,
     registry: sb.BindingRegistry,
     srcfile: SrcFile,
+    unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None,
 ) -> None:
-    """Validate every dynamic array index against its source-position facts."""
+    """Validate every dynamic array index against its source-position facts.
 
-    _BoundsValidator(registry, srcfile, root).validate(root)
+    With ``unfit`` given, abstract-integer values that cannot be proven to fit
+    a 64-bit word are collected there (keyed by node id) for the representation
+    pass instead of being reported as errors.
+    """
+
+    validator = _BoundsValidator(registry, srcfile, root)
+    validator.unfit = unfit
+    validator.validate(root)

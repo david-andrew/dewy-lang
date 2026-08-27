@@ -654,6 +654,7 @@ class TypeSystem:
         # prelude's object types so compile-time numbers dispatch onto them.
         self.rational_object: TypeExpr | None = None
         self.fixed_object: TypeExpr | None = None
+        self.bigint_object: TypeExpr | None = None
 
         for t in system_types:
             if isinstance(t, tuple): self.add_type(*t) 
@@ -771,9 +772,17 @@ class TypeSystem:
             if (
                 isinstance(literal, (IntegerLiteralType, RationalLiteralType))
                 and isinstance(other, ObjectType)
-                and other in (self.rational_object, self.fixed_object)
+                and other in (self.rational_object, self.fixed_object, self.bigint_object)
             ):
                 return literal  # the compile-time number materializes into that representation
+            if (
+                isinstance(literal, str)
+                and isinstance(other, ObjectType)
+                and other == self.bigint_object
+                and other is not None
+                and self._is_nom_subtype(literal, 'int')
+            ):
+                return literal  # integers widen into big integers
         if isinstance(a, IntegerLiteralType) and isinstance(b, IntegerLiteralType):
             return a if a == b else None
         if isinstance(a, RationalLiteralType) and isinstance(b, RationalLiteralType):
@@ -904,13 +913,18 @@ class TypeSystem:
         if isinstance(b, RefinedType):
             return False  # refinements are proven at the checking boundary, never assumed
         if isinstance(a, (IntegerLiteralType, RationalLiteralType)) and isinstance(b, ObjectType):
-            # Compile-time numbers materialize into the runtime rational or
-            # fixed representation at the checking boundary.
+            # Compile-time numbers materialize into the runtime rational,
+            # fixed, or big-integer representation at the checking boundary.
             if b == self.fixed_object:
                 return True
             if b == self.rational_object:
                 return True
+            if b == self.bigint_object:
+                return isinstance(a, IntegerLiteralType)
             return False
+        if isinstance(a, str) and isinstance(b, ObjectType) and b == self.bigint_object and b is not None:
+            # every integer widens into a big integer without loss
+            return self._is_nom_subtype(a, 'int')
         if isinstance(a, IntegerLiteralType):
             if isinstance(b, IntegerLiteralType):
                 return a == b

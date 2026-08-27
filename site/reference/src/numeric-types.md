@@ -14,6 +14,23 @@ let offset:int32 = -12
 
 An integer literal is admitted to a numeric context only when its exact value belongs to that type.
 
+## Representation and `bigint`
+
+The compiler chooses how an `int` is stored. Range analysis proves most values fit a 64-bit word, and those lower to machine integers. A value it cannot prove word-sized — an oversized literal, a product of unbounded operands, a loop accumulator without a bound — takes the arbitrary-precision representation automatically, and every binding it flows into follows. The semantics are the same either way; only the cost differs, and `dewy --analyze` reports each place a big integer was chosen and the range that forced it.
+
+`bigint` names that representation explicitly: a `bigint` binding is always arbitrary precision, and any integer converts to it.
+
+```dewy
+let seed = 3000000000
+let cube = seed * seed * seed      # 2.7e28: stored as a big integer
+let big:bigint = 5                 # explicitly arbitrary precision
+let f = 2^100                      # constant, folded exactly
+```
+
+A big value cannot silently cross a word-sized boundary. Returning it from a function whose result type is `int` or `int64`, passing it to a word-sized parameter, or storing it in a fixed-width binding is a compile error unless a comparison proves the range or the boundary is annotated `bigint`; `int` in a signature is a 64-bit word, so functions that carry big values say `bigint`.
+
+Arithmetic, comparisons, `//`, `%`, and `^` apply to big integers; `/` (exact rational division) over big integers is not yet available.
+
 ## Shifts
 
 Shift counts are unsigned. A negative literal count is therefore a type error.

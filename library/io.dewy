@@ -77,7 +77,34 @@ let _print_fixed = (value:Fixed):>void => {
     return void
 }
 
-let print = _print_string & _print_int64 & _print_bool & _print_rational & _print_fixed
+# Big integers print in decimal from their base-10^9 chunks.
+let _print_bigint = (value:BigInt):>void => {
+    if value.negative { _print_string("-") }
+    if value.limbs.length =? 0 { _print_string("0") return void }
+    let chunks = _bigint_decimal_chunks(value.limbs)
+    let i:int64 = chunks.length
+    let first:bool = true
+    loop i >? 0 {
+        i = i - 1
+        if i <? chunks.length {
+            let chunk:int64 = chunks[i] transmute int64
+            if first {
+                _print_int64(chunk)
+                first = false
+            } else {
+                let pad:int64 = 100000000
+                loop pad >? chunk and pad >? 1 {
+                    _print_string("0")
+                    pad = pad // 10
+                }
+                _print_int64(chunk)
+            }
+        }
+    }
+    return void
+}
+
+let print = _print_string & _print_int64 & _print_bool & _print_rational & _print_fixed & _print_bigint
 
 let printl = (s:string):>void => {
     print(s)

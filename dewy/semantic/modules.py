@@ -11,7 +11,7 @@ from typing import Any
 from ..reporting import Pointer, Span, SrcFile
 from . import bindings as sb
 from . import builtins, hir, ty
-from .analyze import bounds, initialization
+from .analyze import bounds, initialization, representation
 from .errors import user_error
 from .prelude import prelude_files
 
@@ -27,6 +27,9 @@ class ModuleRecord:
     index: int
     entry: bool = False
     prelude: bool = False
+
+
+_validated_prelude_modules: set[tuple[Path, int, str]] = set()
 
 
 def _has_runtime_array_field(object_type: ty.ObjectType) -> bool:
@@ -53,6 +56,7 @@ class ModuleCompiler:
         self.prelude_bindings: dict[str, sb.Binding] = {}
         self.prelude_loaded = False
         self.prelude_paths: set[Path] = set()
+        self.representation_notes: list[representation.RepresentationNote] = []
         self.finished_roots: dict[int, hir.Block] = {}
 
     def _ensure_prelude(self) -> None:
@@ -128,6 +132,14 @@ class ModuleCompiler:
                 else None
             ),
         )
+        # Bounds are validated per module so diagnostics point into the right
+        # file (the merged program mixes prelude and user nodes). Prelude files
+        # are validated once per process: their checked form never changes.
+        validation_key = (path, path.stat().st_mtime_ns, self.target) if prelude else None
+        if validation_key is None or validation_key not in _validated_prelude_modules:
+            self._validate_and_select(root, srcfile, prelude_module=prelude, no_prelude=no_prelude)
+            if validation_key is not None:
+                _validated_prelude_modules.add(validation_key)
         exports: dict[str, sb.Binding] = {}
         for item in root.items:
             if not isinstance(item, hir.Declare) or item.binding_id is None:
@@ -357,6 +369,28 @@ class ModuleCompiler:
             close_over_references()
         return needed
 
+    def _validate_and_select(
+        self,
+        root: hir.Block,
+        srcfile: SrcFile,
+        *,
+        prelude_module: bool,
+        no_prelude: bool,
+    ) -> None:
+        """Bounds validation, then big-integer representation for unproven `int` values.
+
+        Prelude modules and `$no_prelude` programs keep the strict rule (an
+        unproven word is an error) because the big-integer fallback lives in
+        the prelude itself.
+        """
+        if prelude_module or no_prelude or 'BigInt' not in self.prelude_bindings:
+            bounds.validate_bounds(root, self.registry, srcfile)
+            return
+        unfit: dict = {}
+        bounds.validate_bounds(root, self.registry, srcfile, unfit)
+        notes = representation.select_representations(root, self.registry, srcfile, self.prelude_bindings, unfit)
+        self.representation_notes.extend(notes)
+
     def finish(self, entry: ModuleRecord) -> hir.Block:
         names = self._emitted_names(entry)
         needed_prelude = self._needed_prelude_binding_ids()
@@ -387,7 +421,6 @@ class ModuleCompiler:
             items,
             True,
         )
-        bounds.validate_bounds(root, self.registry, entry.srcfile)
         initialization.validate_initialization(root, self.registry, entry.srcfile)
         return root
 
@@ -398,6 +431,7 @@ def typecheck_program(
     include_prelude: bool = True,
     target: str = 'x86_64',
 ) -> hir.Block:
+    representation.last_notes.clear()
     compiler = ModuleCompiler(srcfile, target)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)
@@ -418,6 +452,7 @@ def typecheck_program(
         target=target,
         prelude_bindings=compiler.prelude_bindings if not no_prelude else None,
     )
+    compiler._validate_and_select(root, srcfile, prelude_module=False, no_prelude=no_prelude)
     exports = {
         item.name: compiler.registry.by_id[item.binding_id]
         for item in root.items
