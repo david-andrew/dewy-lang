@@ -189,6 +189,12 @@ class _StringLowering:
     ) -> tuple[list[hir.AST], hir.AST]:
         target = node.type
         source = node.expr
+        if (
+            isinstance(source.type, ty.ArrayType)
+            and source.type.element == 'uint8'
+            and ty.optional_payload(target) is not None
+        ):
+            return self._decode_utf8_optional(node, source)
         if isinstance(target, ty.ArrayType):
             if target.element == 'uint8':
                 if isinstance(source, hir.String) and isinstance(
@@ -2228,6 +2234,228 @@ class _StringLowering:
             scan_loop,
             final_boundary,
         ], grapheme_count
+
+    def _byte_copy_loop(self, dest: hir.AST, source: hir.AST, length: hir.AST, loc: Span) -> list[hir.AST]:
+        """`loop i <? length { dest[i] = source[i] }` over bytes."""
+        index = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'copy_index').name)
+        return [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', index.name, 'int64', self._int64_literal(loc, 0)),
+            hir.Flow(
+                loc,
+                ty.VOID_TYPE,
+                [hir.LoopArm(
+                    loc,
+                    ty.VOID_TYPE,
+                    self._int64_comparison('__lt__', index, length, loc),
+                    hir.Block(loc, ty.VOID_TYPE, [
+                        self._intrinsic_call(
+                            '__store_u8__',
+                            [
+                                self._intrinsic_call('__load_u8__', [self._int64_binary('__add__', source, index, loc)], 'uint8', loc),
+                                self._int64_binary('__add__', dest, index, loc),
+                            ],
+                            ty.VOID_TYPE,
+                            loc,
+                        ),
+                        hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc)),
+                    ], True),
+                )],
+                None,
+            ),
+        ]
+
+    def _join_string_array(
+        self,
+        node: hir.FunctionCall,
+        method: hir.ArrayMethod,
+        array_type: ty.ArrayType,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """`xs.join` / `xs.join(sep)`: concatenate string elements into a new
+        arena-backed string (so the result outlives the frame and can be
+        returned or stored), re-segmented so clusters may span the joins."""
+        loc = node.loc
+        statements: list[hir.AST] = []
+
+        def declare(suffix: str, value: hir.AST) -> hir.ExpressedIdentifier:
+            name = self._new_string_temp(loc, 'int64', suffix).name
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value))
+            return hir.ExpressedIdentifier(loc, 'int64', name)
+
+        def assign(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.AST:
+            return hir.Assign(loc, ty.VOID_TYPE, target, '=', value)
+
+        def add(left: hir.AST, right: hir.AST) -> hir.AST:
+            return self._int64_binary('__add__', left, right, loc)
+
+        prelude, array = self._extract_expression(method.array)
+        statements.extend(prelude)
+        array_word = replace(array, type='int64') if isinstance(array, hir.ExpressedIdentifier) else array
+        count = declare('join_count', self._load_i64_field(array_word, ARRAY_LENGTH_OFFSET, loc))
+        data = declare('join_data', self._load_i64_field(array_word, ARRAY_DATA_OFFSET, loc))
+        separator_arg = self._optional_method_argument(node, 'sep')
+        separator: hir.ExpressedIdentifier | None = None
+        separator_length: hir.ExpressedIdentifier | None = None
+        if separator_arg is not None:
+            sep_prelude, sep_value = self._extract_expression(separator_arg)
+            statements.extend(sep_prelude)
+            separator = declare('join_sep', replace(sep_value, type='int64') if isinstance(sep_value, hir.ExpressedIdentifier) else sep_value)
+            separator_length = declare('join_sep_length', self._load_i64_field(separator, STRING_BYTE_LENGTH_OFFSET, loc))
+
+        def element(index: hir.AST) -> hir.AST:
+            return self._intrinsic_call(
+                '__load_i64__',
+                [self._pointer_element_address(data, index, 8, loc)],
+                'int64',
+                loc,
+            )
+
+        # total bytes: every element, plus a separator between neighbours
+        total = declare('join_total', self._int64_literal(loc, 0))
+        index = declare('join_index', self._int64_literal(loc, 0))
+        sum_body: list[hir.AST] = [
+            assign(total, add(total, self._load_i64_field(element(index), STRING_BYTE_LENGTH_OFFSET, loc))),
+            assign(index, add(index, self._int64_literal(loc, 1))),
+        ]
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+            loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, count, loc), hir.Block(loc, ty.VOID_TYPE, sum_body, True),
+        )], None))
+        if separator_length is not None:
+            statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                loc, ty.VOID_TYPE,
+                self._int64_comparison('__gt__', count, self._int64_literal(loc, 1), loc),
+                hir.Block(loc, ty.VOID_TYPE, [assign(total, add(total, self._int64_binary(
+                    '__mul__', separator_length, self._int64_binary('__sub__', count, self._int64_literal(loc, 1), loc), loc,
+                )))], True),
+            )], None))
+        out = declare('join_out', self._arena_allocation(add(total, self._int64_literal(loc, 1)), loc))
+        cursor = declare('join_cursor', self._int64_literal(loc, 0))
+        statements.append(assign(index, self._int64_literal(loc, 0)))
+        piece = declare('join_piece', self._int64_literal(loc, 0))
+        piece_length = declare('join_piece_length', self._int64_literal(loc, 0))
+        copy_body: list[hir.AST] = []
+        if separator is not None and separator_length is not None:
+            copy_body.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                loc, ty.VOID_TYPE,
+                self._int64_comparison('__gt__', index, self._int64_literal(loc, 0), loc),
+                hir.Block(loc, ty.VOID_TYPE, [
+                    *self._byte_copy_loop(add(out, cursor), self._string_data_start(separator, loc), separator_length, loc),
+                    assign(cursor, add(cursor, separator_length)),
+                ], True),
+            )], None))
+        copy_body.extend([
+            assign(piece, element(index)),
+            assign(piece_length, self._load_i64_field(piece, STRING_BYTE_LENGTH_OFFSET, loc)),
+            *self._byte_copy_loop(add(out, cursor), self._string_data_start(piece, loc), piece_length, loc),
+            assign(cursor, add(cursor, piece_length)),
+            assign(index, add(index, self._int64_literal(loc, 1))),
+        ])
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+            loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, count, loc), hir.Block(loc, ty.VOID_TYPE, copy_body, True),
+        )], None))
+        boundaries = declare('join_boundaries', self._arena_allocation(
+            self._int64_binary('__mul__', add(total, self._int64_literal(loc, 1)), self._int64_literal(loc, 4), loc), loc,
+        ))
+        segmentation, grapheme_count = self._utf8_segmentation(loc, out, total, boundaries)
+        statements.extend(segmentation)
+        descriptor = self._new_string_temp(loc, ty.StringType(), 'joined')
+        descriptor_word = replace(descriptor, type='int64')
+        statements.extend([
+            hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', self._arena_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc)),
+            self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, out, loc),
+            self._store_i64_field(descriptor_word, STRING_BYTE_LENGTH_OFFSET, total, loc),
+            self._store_i64_field(descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
+            self._store_i64_field(descriptor_word, STRING_GRAPHEME_LENGTH_OFFSET, grapheme_count, loc),
+            self._store_i64_field(descriptor_word, STRING_START_OFFSET, self._int64_literal(loc, 0), loc),
+        ])
+        return statements, descriptor
+
+    def _decode_utf8_optional(
+        self,
+        node: hir.RepresentationCast,
+        source: hir.AST,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """`bytes as string | undefined`: validate UTF-8 (RFC 3629: no overlongs,
+        no surrogates, nothing above U+10FFFF), then build an arena string, else
+        `undefined`. The result is an optional cell."""
+        loc = node.loc
+        statements: list[hir.AST] = []
+
+        def declare(suffix: str, type_: str, value: hir.AST) -> hir.ExpressedIdentifier:
+            name = self._new_string_temp(loc, type_, suffix).name
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', name, type_, value))
+            return hir.ExpressedIdentifier(loc, type_, name)
+
+        def assign(target: hir.ExpressedIdentifier, value: hir.AST) -> hir.AST:
+            return hir.Assign(loc, ty.VOID_TYPE, target, '=', value)
+
+        prelude, array = self._extract_expression(source)
+        statements.extend(prelude)
+        array_word = replace(array, type='int64') if isinstance(array, hir.ExpressedIdentifier) else array
+        length = declare('decode_length', 'int64', self._load_i64_field(array_word, ARRAY_LENGTH_OFFSET, loc))
+        data = declare('decode_data', 'int64', self._load_i64_field(array_word, ARRAY_DATA_OFFSET, loc))
+        index = declare('decode_index', 'int64', self._int64_literal(loc, 0))
+        valid = declare('decode_valid', 'bool', hir.Bool(loc, 'bool', True))
+
+        def byte_at(delta: int) -> hir.AST:
+            address = self._int64_binary('__add__', data, index, loc)
+            if delta:
+                address = self._int64_binary('__add__', address, self._int64_literal(loc, delta), loc)
+            return hir.ValueCast(loc, 'int64', self._intrinsic_call('__load_u8__', [address], 'uint8', loc))
+
+        def between(value: hir.AST, low: int, high: int) -> hir.AST:
+            return hir.ShortCircuit(
+                loc, 'bool', 'and',
+                self._int64_comparison('__ge__', value, self._int64_literal(loc, low), loc),
+                self._int64_comparison('__le__', value, self._int64_literal(loc, high), loc),
+            )
+
+        def sequence(width: int, second: tuple[int, int]) -> hir.Block:
+            # the lead byte is accepted; the continuation bytes must exist and fit
+            conditions: list[hir.AST] = [self._int64_comparison(
+                '__le__', self._int64_binary('__add__', index, self._int64_literal(loc, width), loc), length, loc,
+            )]
+            ranges = [second] + [(0x80, 0xBF)] * (width - 2)
+            for delta, (low, high) in enumerate(ranges, start=1):
+                conditions.append(between(byte_at(delta), low, high))
+            condition: hir.AST = conditions[0]
+            for extra in conditions[1:]:
+                condition = hir.ShortCircuit(loc, 'bool', 'and', condition, extra)
+            return hir.Block(loc, ty.VOID_TYPE, [hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                loc, ty.VOID_TYPE, condition,
+                hir.Block(loc, ty.VOID_TYPE, [assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, width), loc))], True),
+            )], hir.Block(loc, ty.VOID_TYPE, [assign(valid, hir.Bool(loc, 'bool', False))], True))], True)
+
+        lead = byte_at(0)
+        arms = [
+            hir.IfArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', lead, self._int64_literal(loc, 0x80), loc),
+                      hir.Block(loc, ty.VOID_TYPE, [assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc))], True)),
+            hir.IfArm(loc, ty.VOID_TYPE, between(lead, 0xC2, 0xDF), sequence(2, (0x80, 0xBF))),
+            hir.IfArm(loc, ty.VOID_TYPE, self._int64_comparison('__eq__', lead, self._int64_literal(loc, 0xE0), loc), sequence(3, (0xA0, 0xBF))),
+            hir.IfArm(loc, ty.VOID_TYPE, self._int64_comparison('__eq__', lead, self._int64_literal(loc, 0xED), loc), sequence(3, (0x80, 0x9F))),
+            hir.IfArm(loc, ty.VOID_TYPE, between(lead, 0xE1, 0xEF), sequence(3, (0x80, 0xBF))),
+            hir.IfArm(loc, ty.VOID_TYPE, self._int64_comparison('__eq__', lead, self._int64_literal(loc, 0xF0), loc), sequence(4, (0x90, 0xBF))),
+            hir.IfArm(loc, ty.VOID_TYPE, self._int64_comparison('__eq__', lead, self._int64_literal(loc, 0xF4), loc), sequence(4, (0x80, 0x8F))),
+            hir.IfArm(loc, ty.VOID_TYPE, between(lead, 0xF1, 0xF3), sequence(4, (0x80, 0xBF))),
+        ]
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+            loc, ty.VOID_TYPE,
+            hir.ShortCircuit(loc, 'bool', 'and', valid, self._int64_comparison('__lt__', index, length, loc)),
+            hir.Block(loc, ty.VOID_TYPE, [hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, [assign(valid, hir.Bool(loc, 'bool', False))], True))], True),
+        )], None))
+        cell = declare('decoded', 'int64', self._optional_allocation(loc))
+        build, descriptor = self._string_from_bytes(data, length, loc)
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+            loc, ty.VOID_TYPE, valid,
+            hir.Block(loc, ty.VOID_TYPE, [
+                *build,
+                self._intrinsic_call('__store_u8__', [self._uint8_literal(loc, 1), cell], ty.VOID_TYPE, loc),
+                self._intrinsic_call('__store_i64__', [replace(descriptor, type='int64'), self._optional_payload_address(cell, loc)], ty.VOID_TYPE, loc),
+            ], True),
+        )], hir.Block(loc, ty.VOID_TYPE, [
+            self._intrinsic_call('__store_u8__', [self._uint8_literal(loc, 0), cell], ty.VOID_TYPE, loc),
+            self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._optional_payload_address(cell, loc)], ty.VOID_TYPE, loc),
+        ], True)))
+        return statements, cell
 
     def _string_from_bytes(
         self,

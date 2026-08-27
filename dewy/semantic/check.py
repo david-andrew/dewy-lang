@@ -3577,7 +3577,8 @@ def _tcr_object_literal(
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
 
-_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'insert', 'truncate', 'sort'})
+_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'insert', 'truncate', 'sort', 'join'})
+_READ_ONLY_ARRAY_METHOD_NAMES = frozenset({'join'})
 
 
 def _apply_array_method_transition(
@@ -3741,7 +3742,7 @@ def _iterated_container_names(condition: hir.AST) -> set[str]:
     return names
 
 
-_MUTATING_METHOD_NAMES = frozenset({*_ARRAY_METHOD_NAMES, 'add'})  # arrays, dictionaries, sets
+_MUTATING_METHOD_NAMES = frozenset({*(_ARRAY_METHOD_NAMES - _READ_ONLY_ARRAY_METHOD_NAMES), 'add'})  # arrays, dictionaries, sets
 
 
 def _mutated_binding_names(ast: p0.AST) -> set[str]:
@@ -3804,6 +3805,9 @@ def _tcr_array_method(
     ever reached through the container value.
     """
     assert isinstance(value.type, ty.ArrayType)
+    if name in _READ_ONLY_ARRAY_METHOD_NAMES:
+        # `xs.join`: reads any array value, named or not, of any length
+        return _bind_array_method(value, value.type, name, loc, ctx=ctx)
     if isinstance(value, hir.MemberAccess):
         # `bag.items.push(x)`: a growable array field of a named object. Length
         # and index facts are keyed by the member route (see `array_route_id`).
@@ -3867,9 +3871,19 @@ def _bind_array_method(
         'reserve': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
         # ascending in-place sort of integer elements (comparators later)
         'sort': ty.FunctionType([], [], None, ty.VOID_TYPE),
+        # `xs.join` concatenates string elements; `xs.join(sep)` / `xs.join"sep"`
+        # puts the separator between them. The result is a new string.
+        'join': ty.FunctionType([ty.PosOrKwArg('sep', 'string', required=False)], [], None, ty.StringType()),
     }
     if name == 'sort' and not (isinstance(element, str) and element in ty.FIXED_INTEGER_TYPES):
         not_implemented(ctx.srcfile, loc, f'`sort` on `{type_to_dewy(element)}` elements')
+    if name == 'join' and not _is_string_type(element):
+        user_error(
+            ctx.srcfile,
+            '`join` requires string elements',
+            Pointer(span=value.loc, message=f'this array has `{type_to_dewy(element)}` elements'),
+            hint='build the pieces as strings first, e.g. push `"{x}"` into an `array<string>`',
+        )
     return hir.ArrayMethod(loc, signatures[name], value, name)
 
 
@@ -8408,6 +8422,14 @@ def _explicit_value_conversion(
     target = _refine_string_materialization_target(source, target)
     if source == target:
         return node
+    if (
+        isinstance(source, ty.BinaryLiteralType)
+        and isinstance(target, ty.TypeOr)
+        and ty.optional_payload(target) in ('string', ty.StringType())
+    ):
+        # `0x"..." as string | undefined`: decode the packed bytes at runtime
+        bytes_node = hir.RepresentationCast(loc, ty.ArrayType('uint8', len(source.value)), node)
+        return hir.RepresentationCast(loc, ty.optional(ty.StringType()), bytes_node)
     if isinstance(source, ty.BinaryLiteralType):
         if ctx.type_system.is_subtype(source, target):
             return hir.RepresentationCast(loc, target, node)
@@ -8441,6 +8463,13 @@ def _explicit_value_conversion(
             if ctx.type_system.is_subtype(source, target):
                 return hir.RepresentationCast(loc, target, node)
     if isinstance(source, ty.ArrayType):
+        if (
+            source.element == 'uint8'
+            and isinstance(target, ty.TypeOr)
+            and ty.optional_payload(target) in ('string', ty.StringType())
+        ):
+            # the checked decode: `undefined` when the bytes are not valid UTF-8
+            return hir.RepresentationCast(loc, ty.optional(ty.StringType()), node)
         if target in {'string', 'grapheme', 'char'}:
             if source.element in {'uint8', 'uint32'}:
                 type_error(
@@ -8453,7 +8482,11 @@ def _explicit_value_conversion(
                             'contents form valid Unicode text'
                         ),
                     ),
-                    hint='validation-backed refinement types are not implemented yet',
+                    hint=(
+                        'write `bytes as string | undefined` for a decode that yields `undefined` on invalid UTF-8'
+                        if source.element == 'uint8'
+                        else 'validation-backed refinement types are not implemented yet'
+                    ),
                 )
             if (
                 source.element in {'grapheme', 'char'}

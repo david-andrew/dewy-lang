@@ -27,6 +27,31 @@ The intended conversion path is the same conversion used by `value as string`, s
 
 An implementation may stream the literal chunks and converted fields directly to a consumer such as `printl`, or materialize a string value when the surrounding context needs one. That representation choice is not observable.
 
+## Joining and Building
+
+`xs.join` concatenates the elements of a string array (`array<string>`, `array<grapheme>`) into a new string; `xs.join(sep)` — or, juxtaposed, `xs.join", "` — places the separator between neighbours. The result is re-segmented, so clusters may span the joins. `join` reads its receiver: it applies to any array value, of any length, and is not a mutation.
+
+Loop-built strings use an `array<string>` as the builder: push each piece (an interpolation such as `"{value}"` converts anything printable), then `join`:
+
+```dewy
+let render = (values:array<int64>):>string => {
+    let pieces:array<string> = []
+    loop v in values { pieces.push"{v}" }
+    return pieces.join", "
+}
+```
+
+`+` is not string concatenation; two strings combine by interpolation (`"{left}{right}"`), many by `join`.
+
+## Decoding Bytes
+
+`bytes as string` requires a proof that the bytes are valid UTF-8, which the compiler cannot make for runtime data. The checked form is `bytes as string | undefined`: it validates the bytes (RFC 3629 — no overlong forms, no surrogates, nothing above U+10FFFF, no truncated sequences) and yields the decoded string, or `undefined` for invalid input, so the program decides what to do at that point:
+
+```dewy
+let text = read_bytes(path) as string | undefined
+if text is? string { printl(text) } else { printl"not UTF-8" }
+```
+
 ## Representation Views
 
 Explicit array views expose lower-level representations:
@@ -37,7 +62,7 @@ Explicit array views expose lower-level representations:
 
 Converting a grapheme array to string concatenates its contents and segments the result again, so boundaries between adjacent inputs need not remain grapheme boundaries.
 
-Conversions from arbitrary integers to string representations require proof that the input is valid UTF-8 or valid Unicode scalar data.
+Conversions from arbitrary integers to string representations require proof that the input is valid UTF-8 or valid Unicode scalar data; `array<uint8>` has the checked form `as string | undefined` described above.
 
 ## Character Ranges
 

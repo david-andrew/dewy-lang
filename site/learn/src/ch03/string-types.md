@@ -26,6 +26,32 @@ Interpolation uses the same conversion as `value as string`. A type can therefor
 
 An implementation may stream literal chunks and converted values directly into `print` or `printl`. When the expression itself must survive as a string value, it materializes an equivalent immutable string. That representation difference is not visible to the program.
 
+## Joining Strings
+
+`+` does not concatenate. Two strings combine by interpolation, and any number of them by `join` on an array of strings:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let words:array<string> = ["one" "two" "three"]
+    printl(words.join", ")           # one, two, three
+
+    let pieces:array<string> = []    # the string builder is an array
+    let i:int64 = 0
+    loop i <? 3 {
+        pieces.push"{i * i}"
+        i += 1
+    }
+    printl(pieces.join"-")           # 0-1-4
+    return 0
+}
+```
+
+`join` without a separator concatenates directly. It never mutates the array, so it works on any array of strings — including exact-length ones — and the result can be returned or stored like any other string.
+
+Bytes that should be text are decoded with a check: `bytes as string | undefined` gives the string when the bytes are valid UTF-8 and `undefined` otherwise, so invalid input is a case to handle rather than an exception.
+
 ## Iterating Text
 
 Iteration yields graphemes:

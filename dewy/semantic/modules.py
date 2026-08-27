@@ -287,6 +287,14 @@ class ModuleCompiler:
                 # recursive members live behind arena handles
                 found = True
                 return
+            if (
+                isinstance(value, hir.RepresentationCast)
+                and ty.optional_payload(value.type) == ty.StringType()
+                and isinstance(value.expr.type, ty.ArrayType)
+            ):
+                # `bytes as string | undefined` builds the decoded string in the arena
+                found = True
+                return
             if isinstance(value, hir.FunctionLiteral):
                 rettype = value.rettype
                 if isinstance(rettype, ty.ArrayType) and rettype.length is None:

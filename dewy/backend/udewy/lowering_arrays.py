@@ -1168,6 +1168,8 @@ class _ArrayLowering:
         if not isinstance(array_type, ty.ArrayType):
             raise TypeError('INTERNAL ERROR: array method receiver is not an array')
         element_type = array_type.element
+        if method.name == 'join':
+            return self._join_string_array(node, method, array_type)
         if not self._is_word_element(element_type):
             self._target_error(node, 'growing an array whose elements are not word scalars or string handles')
         loc = node.loc
