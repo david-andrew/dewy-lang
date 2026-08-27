@@ -1,0 +1,63 @@
+# Recursive types: a type may refer to itself as a union member. The member
+# lives behind an arena handle, so `[value:int64 next:Node|undefined]` is
+# finite; copies are deep, narrowing works on member routes (`cur.next is?
+# Node`), and recursive functions take and return such unions.
+let Node:type = [value:int64 next:Node|undefined]
+let Tree:type = [value:int64 left:Tree|undefined right:Tree|undefined]
+
+let sum_list = (list:Node|undefined):>int64 => {
+    let total:int64 = 0
+    let cur:Node|undefined = list
+    loop cur is? Node {
+        total += cur.value
+        cur = cur.next
+    }
+    return total
+}
+
+let sum_tree = (tree:Tree|undefined):>int64 => {
+    if tree is? Tree {
+        return tree.value + sum_tree(tree.left) + sum_tree(tree.right)
+    }
+    return 0
+}
+
+let leaf = (value:int64):>Tree => [value=value left=undefined right=undefined]
+
+let depth = (tree:Tree|undefined):>int64 => {
+    if tree isnt? Tree { return 0 }
+    let l = depth(tree.left)
+    let r = depth(tree.right)
+    if l >? r { return l + 1 }
+    return r + 1
+}
+
+let main = ():>int64 => {
+    let list:Node|undefined = undefined
+    let i:int64 = 1
+    loop i <=? 4 {
+        list = [value=i next=list]          # 4 -> 3 -> 2 -> 1
+        i += 1
+    }
+    let a = sum_list(list)                  # 10
+    let copy:Node|undefined = list
+    if copy is? Node { copy.value = 100 }   # the copy is independent
+    let b = sum_list(list)                  # still 10
+    let c = sum_list(copy)                  # 106
+
+    let head:Node = [value=1 next=undefined]
+    head.next = list                        # assigning a union field
+    let d = sum_list(head)                  # 11
+    if head.next is? Node {
+        head.next.value = 40                # writing through a narrowed route
+    } else {
+        return 1
+    }
+    let e = sum_list(head)                  # 47
+
+    let tree:Tree = [value=1 left=leaf(2) right=[value=3 left=leaf(4) right=undefined]]
+    let f = sum_tree(tree)                  # 10
+    let g = depth(tree)                     # 3
+    let h = depth(tree.right)               # 2
+    return a + b + c + d + e + f + g + h - 157   # 42
+}

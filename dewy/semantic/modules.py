@@ -283,6 +283,10 @@ class ModuleCompiler:
             nonlocal found
             if found:
                 return
+            if isinstance(value, hir.TypeValue) and ty.mentions_named_type(value.value):
+                # recursive members live behind arena handles
+                found = True
+                return
             if isinstance(value, hir.FunctionLiteral):
                 rettype = value.rettype
                 if isinstance(rettype, ty.ArrayType) and rettype.length is None:

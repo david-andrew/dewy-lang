@@ -71,7 +71,20 @@ Function parameters, returns, container elements, object fields, assignments, an
 
 `A | B` accepts a value belonging to either alternative. `T | undefined` is an optional value. Type and literal tests such as `is?` and `isnt?` narrow the tested value along control-flow paths.
 
-General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.
+General runtime unions are tag-and-payload cells; `undefined`, when present, is always member 0, so an optional is the two-member case of the same layout. A union whose members include several concrete types together with `undefined` (`Node | int64 | undefined`) is an ordinary union, including as a parameter or result.
+
+Narrowing applies to member routes as well as bindings: after `if node.next is? Node`, `node.next` reads as `Node` until the field or its object is assigned. A store into a union field always accepts the field's declared type, and forgets any narrowing of that route.
+
+### Recursive Types
+
+A type alias may refer to itself, but only as a union member of one of its fields:
+
+```dewy
+let Node:type = [value:int64 next:Node|undefined]
+let Tree:type = [value:int64 left:Tree|undefined right:Tree|undefined]
+```
+
+The recursive member is stored behind a handle, which is what makes the object finite. A field typed exactly `Node` (no union) is rejected as an infinite value, and an alias whose every union member is itself has no base case and is rejected too. Values keep value semantics: copying a `Node | undefined` deep-copies the chain it points to, and narrowing a recursive member (`cur.next is? Node`) yields the object itself, so `cur.next.value` reads and writes through the handle.
 
 An alternative belonging to the nominal `exception` family receives special receiver-navigation behavior. Member access operates on every ordinary alternative that supports the member and forwards every exception alternative. Both `error` and `undefined` descend from `exception`; arbitrary union alternatives do not become skippable. See [Errors, Exceptions, and Forwarding](errors-and-forwarding.md).
 

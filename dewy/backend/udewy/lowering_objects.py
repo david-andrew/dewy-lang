@@ -215,6 +215,8 @@ class _ObjectLowering:
             return size, size
         if self._is_handle_type(type_):
             return 8, 8
+        if self._field_union_members(type_) is not None:
+            return 16, 8  # an inline union cell: tag word and payload word, no trees
         if isinstance(type_, ty.ObjectType):
             size, offsets = self._object_layout(type_, node)
             align = 1
@@ -223,6 +225,18 @@ class _ObjectLowering:
                 align = max(align, field_align)
             return size, align
         self._target_error(node, f'object field layout `{type_to_dewy(type_)}`')
+
+    @staticmethod
+    def _field_union_members(type_: ty.Type) -> tuple[ty.TypeExpr, ...] | None:
+        """The storage members of a union-typed field (an optional is the
+        two-member union `undefined | T`, whose tags coincide with optional cells)."""
+        members = ty.runtime_union_members(type_)
+        if members is not None:
+            return members
+        payload = ty.optional_payload(type_)
+        if payload is not None:
+            return ('undefined', payload)
+        return None
 
     @staticmethod
     def _is_handle_type(type_: ty.Type) -> bool:
@@ -271,7 +285,10 @@ class _ObjectLowering:
         for field in object_type.fields:
             dest_addr = self._field_address(dest, offsets[field.name], loc)
             src_addr = self._field_address(src, offsets[field.name], loc)
-            if isinstance(field.type, ty.ObjectType):
+            members = self._field_union_members(field.type)
+            if members is not None:
+                statements.extend(self._union_copy_cell(dest_addr, src_addr, members, loc, prepared=False))
+            elif isinstance(field.type, ty.ObjectType):
                 statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc))
             elif isinstance(field.type, ty.ArrayType):
                 source = self._value_load(src_addr, field.type, loc)
@@ -356,6 +373,10 @@ class _ObjectLowering:
                 address = self._field_address(dest, offsets[field.name], field.loc)
                 expected = node.type.field(field.name)
                 field_type = expected.type if expected is not None else field.value.type
+                members = self._field_union_members(field_type)
+                if members is not None:
+                    statements.extend(self._union_write(address, field.value, members, prepared=False))
+                    continue
                 if (
                     isinstance(field.value, hir.ObjectLiteral)
                     and isinstance(field_type, ty.ObjectType)
@@ -407,7 +428,27 @@ class _ObjectLowering:
         field_type = field.type if field is not None else node.type
         if isinstance(field_type, ty.ObjectType):
             return prelude, address
+        members = self._field_union_members(field_type)
+        if members is not None:
+            return prelude, self._union_field_read(address, members, node.type, node)
         return prelude, self._value_load(address, field_type, node.loc)
+
+    def _union_field_read(
+        self,
+        cell: hir.AST,
+        members: tuple[ty.TypeExpr, ...],
+        static_type: ty.Type,
+        node: hir.AST,
+    ) -> hir.AST:
+        """Read a union-typed field: the cell itself for a union view, else
+        the payload of the member the checker narrowed the route to."""
+        if isinstance(static_type, ty.TypeOr):
+            return replace(cell, type='int64')
+        system = ty.TypeSystem()
+        member = next((m for m in members if system.is_subtype(static_type, m)), None)
+        if member is None or member == 'undefined':
+            self._target_error(node, 'a union field read of this type')
+        return self._optional_load_payload(replace(cell, type='int64'), member, node.loc)
 
     def _extract_object_field_identifier(
         self,
@@ -422,6 +463,9 @@ class _ObjectLowering:
         field_type = field.type if field is not None else node.type
         if isinstance(field_type, ty.ObjectType):
             return [], address
+        members = self._field_union_members(field_type)
+        if members is not None:
+            return [], self._union_field_read(address, members, node.type, node)
         return [], self._value_load(address, field_type, node.loc)
 
     def _extract_literal_field_identifier(
@@ -437,6 +481,9 @@ class _ObjectLowering:
         field_type = field.type if field is not None else node.type
         if isinstance(field_type, ty.ObjectType):
             return [], address
+        members = self._field_union_members(field_type)
+        if members is not None:
+            return [], self._union_field_read(address, members, node.type, node)
         return [], self._value_load(address, field_type, node.loc)
 
     def _is_object_method_func(self, func: hir.AST) -> bool:
@@ -748,6 +795,9 @@ class _ObjectLowering:
         address = self._field_address(obj, offsets[node.target.name], node.loc)
         field = node.target.value.type.field(node.target.name)
         field_type = field.type if field is not None else node.target.type
+        members = self._field_union_members(field_type)
+        if members is not None:
+            return [*prelude, *self._union_write(address, node.value, members, prepared=False)]
         if isinstance(field_type, ty.ObjectType):
             value_prelude, src = self._extract_object_pointer(node.value)
             return [
@@ -840,7 +890,10 @@ class _ObjectLowering:
                 expected = object_type.field(field.name)
                 field_type = expected.type if expected is not None else field.value.type
                 address = self._field_address(dest, offsets[field.name], field.loc)
-                if isinstance(field_type, ty.ArrayType) and field_type.length is None:
+                members = self._field_union_members(field_type)
+                if members is not None:
+                    statements.extend(self._union_write(address, field.value, members, prepared=False))
+                elif isinstance(field_type, ty.ArrayType) and field_type.length is None:
                     prelude, handle = self._arena_array_field_value(field.value, field_type)
                     statements.extend(prelude)
                     statements.extend(self._value_store(handle, address, field_type, field.loc))
@@ -908,7 +961,10 @@ class _ObjectLowering:
         for field in object_type.fields:
             dest_address = self._field_address(dest, offsets[field.name], loc)
             source_address = self._field_address(src, offsets[field.name], loc)
-            if isinstance(field.type, ty.ArrayType) and field.type.length is None:
+            members = self._field_union_members(field.type)
+            if members is not None:
+                statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False))
+            elif isinstance(field.type, ty.ArrayType) and field.type.length is None:
                 source_array = self._value_load(source_address, field.type, loc)
                 prelude, copied = self._clone_dynamic_array_value(
                     replace(source_array, type='int64'), field.type, arena=True,

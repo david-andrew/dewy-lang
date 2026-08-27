@@ -24,6 +24,38 @@ let origin:Pair = [left=0 right=0]
 
 The alias does not create a runtime class object or nominal identity. Another value with the same required structure satisfies the same structural contract.
 
+## Recursive Shapes
+
+A named shape can refer to itself, as long as the recursion goes through a union — usually `| undefined`, so that a chain can end:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Node:type = [value:int64 next:Node|undefined]
+
+let sum = (list:Node|undefined):>int64 => {
+    let total:int64 = 0
+    let cur:Node|undefined = list
+    loop cur is? Node {
+        total += cur.value
+        cur = cur.next
+    }
+    return total
+}
+
+let main = ():>int64 => {
+    let list:Node|undefined = undefined
+    let i:int64 = 1
+    loop i <=? 4 {
+        list = [value=i next=list]
+        i += 1
+    }
+    return sum(list)      # 10
+}
+```
+
+`cur is? Node` narrows `cur` for the loop body, and `cur.next is? Node` would narrow the field itself. A field typed plainly `Node` is rejected: without a union there is no last node. Recursive values are still values — assigning a chain to another binding copies the whole chain.
+
 ## Combining Object Requirements
 
 `&` combines structural types without creating nominal identity:

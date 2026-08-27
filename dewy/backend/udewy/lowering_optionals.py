@@ -89,7 +89,8 @@ class _OptionalLowering:
                 self._lower_callable_type(payload),
                 loaded,
             )
-        return replace(loaded, type=payload)
+        # a handle member's payload is the object pointer, typed by the unfolded alias
+        return replace(loaded, type=ty.unfold(payload))
 
     def _optional_write(
         self,
@@ -99,6 +100,10 @@ class _OptionalLowering:
     ) -> list[hir.AST]:
         if isinstance(value, hir.ValueCast):
             return self._optional_write(cell, value.expr, payload)
+        if isinstance(payload, ty.NamedType):
+            # `Node | undefined`: the payload is a handle, deep-copied on every
+            # store, exactly as in a general union cell (the tags coincide)
+            return self._union_write(cell, value, ('undefined', payload), prepared=False)
         if isinstance(value, hir.Flow):
             prelude, flow = self._lower_optional_flow(value, cell, payload)
             return [*prelude, flow]
@@ -253,6 +258,8 @@ class _OptionalLowering:
     # present, matching optional tags) and one payload word at offset 8.
 
     def _union_member_supported(self, member: ty.TypeExpr) -> bool:
+        if isinstance(member, ty.NamedType):
+            return True  # a recursive reference is always a handle member
         if isinstance(member, ty.ObjectType):
             return self._object_result_fields_are_returnable(member)
         if isinstance(member, ty.ArrayType):
@@ -271,15 +278,138 @@ class _OptionalLowering:
     # Tagging to an aggregate member copies the value into its tree and points
     # the payload word at the tree root.
 
+    # A cell is *prepared* when it owns storage trees for its fixed-layout
+    # aggregate members (locals, parameters, results). A cell stored inline in
+    # an object field is unprepared: every aggregate member is a *handle* to
+    # arena storage allocated when the member is tagged. Recursive references
+    # (`ty.NamedType`) are handle members in every cell — that is what makes
+    # `[value:int64 next:Node|undefined]` finite. Reads never care: the payload
+    # word is the object pointer in both cases.
+
     @staticmethod
-    def _union_tree_slots(members: tuple[ty.TypeExpr, ...]) -> dict[int, int]:
+    def _union_member_kind(member: ty.TypeExpr, *, prepared: bool = True) -> str:
+        if isinstance(member, ty.NamedType):
+            return 'handle'
+        if isinstance(member, (ty.ObjectType, ty.ArrayType)):
+            return 'tree' if prepared else 'handle'
+        return 'word'
+
+    @classmethod
+    def _union_tree_slots(cls, members: tuple[ty.TypeExpr, ...], *, prepared: bool = True) -> dict[int, int]:
         slots: dict[int, int] = {}
         offset = 16
         for index, member in enumerate(members):
-            if isinstance(member, (ty.ObjectType, ty.ArrayType)):
+            if cls._union_member_kind(member, prepared=prepared) == 'tree':
                 slots[index] = offset
                 offset += 8
         return slots
+
+    def _union_source_pointer(self, cell: hir.AST, loc: Span) -> hir.AST:
+        """The active aggregate member's object pointer: the payload word."""
+        return self._intrinsic_call(
+            '__load_i64__',
+            [self._optional_payload_address(cell, loc)],
+            'int64',
+            loc,
+        )
+
+    def _union_handle_clone(
+        self,
+        source: hir.AST,
+        member: ty.TypeExpr,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """A fresh arena copy of the aggregate ``source`` points to, as a handle."""
+        if isinstance(member, ty.NamedType):
+            # recursion is dynamic: a synthesized function copies the alias
+            return [], self._named_copy_call(member, source, loc)
+        if isinstance(member, ty.ArrayType):
+            return self._clone_dynamic_array_value(replace(source, type='int64'), member, arena=True)
+        assert isinstance(member, ty.ObjectType)
+        size, _offsets = self._object_layout(member, hir.Void(loc, ty.VOID_TYPE))
+        dest = self._new_object_temp(loc)
+        statements: list[hir.AST] = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', dest.name, 'int64', self._arena_allocation(self._int64_literal(loc, size), loc)),
+            *self._initialize_object_result_storage(dest, member, loc),
+            *self._copy_object_into_result_storage(dest, replace(source, type='int64'), member, loc),
+        ]
+        return statements, dest
+
+    def _union_handle_value(
+        self,
+        value: hir.AST,
+        member: ty.TypeExpr,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Materialize ``value`` as arena storage of the member, as a handle."""
+        unfolded = ty.unfold(member)
+        if isinstance(unfolded, ty.ObjectType) and isinstance(value, hir.ObjectLiteral):
+            size, _offsets = self._object_layout(unfolded, value)
+            dest = self._new_object_temp(loc)
+            statements: list[hir.AST] = [
+                hir.Declare(loc, ty.VOID_TYPE, 'let', dest.name, 'int64', self._arena_allocation(self._int64_literal(loc, size), loc)),
+                *self._initialize_object_result_storage(dest, unfolded, loc),
+                *self._write_object_literal_result(dest, value, unfolded),
+            ]
+            return statements, dest
+        if isinstance(unfolded, ty.ObjectType):
+            prelude, source = self._extract_object_pointer(value)
+            clone_prelude, handle = self._union_handle_clone(source, member, loc)
+            return [*prelude, *clone_prelude], handle
+        assert isinstance(unfolded, ty.ArrayType)
+        return self._clone_dynamic_array_value(value, unfolded, arena=True)
+
+    def _named_copy_call(self, named: ty.NamedType, source: hir.AST, loc: Span) -> hir.FunctionCall:
+        symbol = self.named_copy_symbols.get(named.alias_id)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_copy_{named.name}')
+            self.named_copy_symbols[named.alias_id] = symbol
+            self.pending_named_copies.append(named)
+        function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+        return hir.FunctionCall(
+            loc,
+            'int64',
+            hir.ExpressedIdentifier(loc, function_type, symbol),
+            [replace(source, type='int64')],
+            {},
+        )
+
+    def _synthesize_named_copies(self) -> list:
+        """Deep-copy functions for recursive aliases: `(src:int64):>int64`."""
+        from .lowering_shared import LoweredFunction
+        synthesized = []
+        while self.pending_named_copies:
+            named = self.pending_named_copies.pop(0)
+            symbol = self.named_copy_symbols[named.alias_id]
+            object_type = ty.unfold(named)
+            assert isinstance(object_type, ty.ObjectType)
+            loc = self.root.loc
+            source = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src')
+            size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+            dest = self._new_object_temp(loc)
+            body = hir.Block(
+                loc,
+                ty.VOID_TYPE,
+                [
+                    hir.Declare(loc, ty.VOID_TYPE, 'let', dest.name, 'int64', self._arena_allocation(self._int64_literal(loc, size), loc)),
+                    *self._initialize_object_result_storage(dest, object_type, loc),
+                    *self._copy_object_into_result_storage(dest, source, object_type, loc),
+                    hir.Return(loc, ty.BOTTOM_TYPE, dest),
+                ],
+                True,
+            )
+            function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+            literal = hir.FunctionLiteral(
+                loc,
+                function_type,
+                [hir.Param('__dewy_src', 'int64')],
+                [],
+                None,
+                'int64',
+                body,
+            )
+            synthesized.append(LoweredFunction(symbol, literal))
+        return synthesized
 
     def _union_cell_allocation(
         self,
@@ -355,9 +485,15 @@ class _OptionalLowering:
         source: hir.AST,
         members: tuple[ty.TypeExpr, ...],
         loc: Span,
+        *,
+        prepared: bool = True,
     ) -> list[hir.AST]:
         """Copy a whole union cell, deep-copying an active aggregate member."""
-        slots = self._union_tree_slots(members)
+        slots = self._union_tree_slots(members, prepared=prepared)
+        aggregate_indexes = [
+            index for index, member in enumerate(members)
+            if self._union_member_kind(member, prepared=prepared) != 'word'
+        ]
         tag = hir.ExpressedIdentifier(loc, 'uint8', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
             hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'uint8', self._optional_tag(source, loc)),
@@ -377,59 +513,66 @@ class _OptionalLowering:
             ty.VOID_TYPE,
             loc,
         )
-        if not slots:
+        if not aggregate_indexes:
             return [*statements, word_copy]
         arms: list[hir.IfArm | hir.LoopArm] = []
-        for index, offset in slots.items():
+        for index in aggregate_indexes:
             member = members[index]
-            dest_prelude, dest_root = self._union_tree_root(dest, offset, member, loc)
-            source_prelude, source_root = self._union_tree_root(source, offset, member, loc)
-            if isinstance(member, ty.ObjectType):
-                copy = self._copy_object_into_result_storage(
-                    replace(dest_root, type='int64'),
-                    replace(source_root, type='int64'),
-                    member,
-                    loc,
-                )
-            else:
-                assert isinstance(member, ty.ArrayType)
-                copy = self._copy_array_into_result_storage(
-                    replace(dest_root, type='int64'),
-                    replace(source_root, type='int64'),
-                    member,
-                    loc,
-                    source_is_pointer=True,
-                )
+            body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, slots.get(index), loc)
             arms.append(
                 hir.IfArm(
                     loc,
                     ty.VOID_TYPE,
                     self._typed_equality(tag, self._uint8_literal(loc, index), 'uint8', loc),
-                    hir.Block(
-                        loc,
-                        ty.VOID_TYPE,
-                        [
-                            *dest_prelude,
-                            *source_prelude,
-                            *copy,
-                            self._intrinsic_call(
-                                '__store_i64__',
-                                [
-                                    replace(dest_root, type='int64'),
-                                    self._optional_payload_address(dest, loc),
-                                ],
-                                ty.VOID_TYPE,
-                                loc,
-                            ),
-                        ],
-                        True,
-                    ),
+                    hir.Block(loc, ty.VOID_TYPE, body, True),
                 )
             )
         statements.append(
             hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, [word_copy], True))
         )
         return statements
+
+    def _union_aggregate_copy_into(
+        self,
+        dest: hir.AST,
+        source_pointer: hir.AST,
+        member: ty.TypeExpr,
+        slot: int | None,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """Copy the aggregate at ``source_pointer`` into ``dest``'s member storage
+        (its prepared tree at ``slot``, else a fresh handle) and point the payload at it."""
+        if slot is not None:
+            dest_prelude, dest_root = self._union_tree_root(dest, slot, member, loc)
+            source_root = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('source'))
+            source_prelude = [hir.Declare(loc, ty.VOID_TYPE, 'let', source_root.name, 'int64', source_pointer)]
+            if isinstance(member, ty.ObjectType):
+                copy = self._copy_object_into_result_storage(
+                    replace(dest_root, type='int64'), source_root, member, loc,
+                )
+            else:
+                assert isinstance(member, ty.ArrayType)
+                copy = self._copy_array_into_result_storage(
+                    replace(dest_root, type='int64'), source_root, member, loc, source_is_pointer=True,
+                )
+            handle: hir.AST = replace(dest_root, type='int64')
+            prelude = [*dest_prelude, *source_prelude, *copy]
+        else:
+            source_root = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('source'))
+            clone_prelude, handle = self._union_handle_clone(source_root, member, loc)
+            prelude = [
+                hir.Declare(loc, ty.VOID_TYPE, 'let', source_root.name, 'int64', source_pointer),
+                *clone_prelude,
+            ]
+        return [
+            *prelude,
+            self._intrinsic_call(
+                '__store_i64__',
+                [handle, self._optional_payload_address(dest, loc)],
+                ty.VOID_TYPE,
+                loc,
+            ),
+        ]
 
     def _union_member_index(
         self,
@@ -451,19 +594,21 @@ class _OptionalLowering:
         cell: hir.AST,
         value: hir.AST,
         members: tuple[ty.TypeExpr, ...],
+        *,
+        prepared: bool = True,
     ) -> list[hir.AST]:
         """Store one value into a union cell, tagging it by member index."""
         if isinstance(value, hir.ValueCast):
-            return self._union_write(cell, value.expr, members)
+            return self._union_write(cell, value.expr, members, prepared=prepared)
         if (
             isinstance(value, hir.RepresentationCast)
             and ty.runtime_union_members(value.type) == members
         ):
             # Checking wraps member values in a conversion to the union type;
             # the tag-and-payload store below is that conversion.
-            return self._union_write(cell, value.expr, members)
+            return self._union_write(cell, value.expr, members, prepared=prepared)
         if isinstance(value, hir.Flow):
-            prelude, flow = self._lower_union_flow(value, cell, members)
+            prelude, flow = self._lower_union_flow(value, cell, members, prepared=prepared)
             return [*prelude, flow]
 
         def tag_store(tag: int) -> hir.FunctionCall:
@@ -486,7 +631,7 @@ class _OptionalLowering:
                     value.loc,
                 ),
             ]
-        if ty.runtime_union_members(value.type) == members:
+        if self._field_union_members(value.type) == members:
             # Same-union copy: tag, payload word, and the active aggregate tree.
             prelude, source = self._extract_expression(value)
             source_word = (
@@ -494,8 +639,8 @@ class _OptionalLowering:
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
-            return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc)]
-        source_members = ty.runtime_union_members(value.type)
+            return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared)]
+        source_members = self._field_union_members(value.type)
         if source_members is not None:
             if not all(member in members for member in source_members):
                 self._target_error(
@@ -510,7 +655,7 @@ class _OptionalLowering:
             )
             return [
                 *prelude,
-                *self._union_retag(cell, source_word, source_members, members, value.loc),
+                *self._union_retag(cell, source_word, source_members, members, value.loc, prepared=prepared),
             ]
         if isinstance(value.type, ty.TypeOr):
             self._target_error(
@@ -519,7 +664,19 @@ class _OptionalLowering:
             )
         index = self._union_member_index(members, value.type, value)
         member = members[index]
-        slots = self._union_tree_slots(members)
+        slots = self._union_tree_slots(members, prepared=prepared)
+        if self._union_member_kind(member, prepared=prepared) == 'handle':
+            handle_prelude, handle = self._union_handle_value(value, member, value.loc)
+            return [
+                *handle_prelude,
+                tag_store(index),
+                self._intrinsic_call(
+                    '__store_i64__',
+                    [replace(handle, type='int64'), self._optional_payload_address(cell, value.loc)],
+                    ty.VOID_TYPE,
+                    value.loc,
+                ),
+            ]
         if index in slots:
             root_prelude, root = self._union_tree_root(cell, slots[index], member, value.loc)
             if isinstance(member, ty.ObjectType):
@@ -559,10 +716,11 @@ class _OptionalLowering:
         source_members: tuple[ty.TypeExpr, ...],
         dest_members: tuple[ty.TypeExpr, ...],
         loc: Span,
+        *,
+        prepared: bool = True,
     ) -> list[hir.AST]:
         """Copy a union cell into a wider union, renumbering the tag."""
-        source_slots = self._union_tree_slots(source_members)
-        dest_slots = self._union_tree_slots(dest_members)
+        dest_slots = self._union_tree_slots(dest_members, prepared=prepared)
         tag = hir.ExpressedIdentifier(loc, 'uint8', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
             hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'uint8', self._optional_tag(source, loc)),
@@ -578,40 +736,12 @@ class _OptionalLowering:
                     loc,
                 ),
             ]
-            if source_index in source_slots:
-                dest_prelude, dest_root = self._union_tree_root(
-                    dest, dest_slots[dest_index], member, loc
-                )
-                source_prelude, source_root = self._union_tree_root(
-                    source, source_slots[source_index], member, loc
-                )
-                if isinstance(member, ty.ObjectType):
-                    copy = self._copy_object_into_result_storage(
-                        replace(dest_root, type='int64'),
-                        replace(source_root, type='int64'),
-                        member,
-                        loc,
+            if self._union_member_kind(member, prepared=prepared) != 'word':
+                body.extend(
+                    self._union_aggregate_copy_into(
+                        dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc,
                     )
-                else:
-                    assert isinstance(member, ty.ArrayType)
-                    copy = self._copy_array_into_result_storage(
-                        replace(dest_root, type='int64'),
-                        replace(source_root, type='int64'),
-                        member,
-                        loc,
-                        source_is_pointer=True,
-                    )
-                body.extend([
-                    *dest_prelude,
-                    *source_prelude,
-                    *copy,
-                    self._intrinsic_call(
-                        '__store_i64__',
-                        [replace(dest_root, type='int64'), self._optional_payload_address(dest, loc)],
-                        ty.VOID_TYPE,
-                        loc,
-                    ),
-                ])
+                )
             else:
                 body.append(
                     self._intrinsic_call(
@@ -645,6 +775,8 @@ class _OptionalLowering:
         node: hir.Flow,
         cell: hir.AST,
         members: tuple[ty.TypeExpr, ...],
+        *,
+        prepared: bool = True,
     ) -> tuple[list[hir.AST], hir.Flow]:
         prelude: list[hir.AST] = []
         arms: list[hir.IfArm | hir.LoopArm] = []
@@ -661,11 +793,11 @@ class _OptionalLowering:
                 replace(
                     arm,
                     condition=condition,
-                    body=self._union_flow_body(arm.body, cell, members),
+                    body=self._union_flow_body(arm.body, cell, members, prepared=prepared),
                 )
             )
         default = (
-            self._union_flow_body(node.default, cell, members)
+            self._union_flow_body(node.default, cell, members, prepared=prepared)
             if node.default is not None
             else None
         )
@@ -744,6 +876,8 @@ class _OptionalLowering:
         body: hir.AST,
         cell: hir.AST,
         members: tuple[ty.TypeExpr, ...],
+        *,
+        prepared: bool = True,
     ) -> hir.Block:
         if isinstance(body, hir.Block) and body.scoped:
             value_indices = [
@@ -756,14 +890,14 @@ class _OptionalLowering:
             statements: list[hir.AST] = []
             for index, item in enumerate(body.items):
                 if index == value_indices[0]:
-                    statements.extend(self._union_write(cell, item, members))
+                    statements.extend(self._union_write(cell, item, members, prepared=prepared))
                 else:
                     statements.extend(self._lower_statement(item))
             return replace(body, type=ty.VOID_TYPE, items=statements)
         return hir.Block(
             body.loc,
             ty.VOID_TYPE,
-            self._union_write(cell, body, members),
+            self._union_write(cell, body, members, prepared=prepared),
             True,
         )
 

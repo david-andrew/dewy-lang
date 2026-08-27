@@ -18,6 +18,8 @@ def type_to_dewy(t: ty.Type) -> str:
         return t
     if isinstance(t, ty.TypeVariable):
         return t.name
+    if isinstance(t, ty.NamedType):
+        return t.name
     if isinstance(t, ty.RationalLiteralType):
         return f'{t.numerator}/{t.denominator}'
     if isinstance(t, ty.RefinedType):

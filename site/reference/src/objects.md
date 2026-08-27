@@ -86,3 +86,7 @@ Extracting a method as a stored naked function, escaping captures, and full func
 `@object.field` selects the place occupied by the field at the end of the complete route. Although the parser groups the prefix first, the language does not expose an intermediate reference value for `object`. `@(object.field)` selects the same place. There is no separate `object.@field` syntax.
 
 See [Values, Copies, and Places](values.md) for aliasing and overlap rules.
+
+## Recursive Objects
+
+An object type may contain itself through a union-typed field: `let Node:type = [value:int64 next:Node|undefined]`. The self-referencing member is held behind a handle, copies are deep, and `is?` narrows the field route (`node.next is? Node`) so the field can be read and assigned as a `Node`. See [Recursive Types](types-and-conversions.md#recursive-types).

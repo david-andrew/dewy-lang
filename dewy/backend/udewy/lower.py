@@ -158,6 +158,8 @@ class _Lowerer(
         self.lowering_module_startup = False
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
+        self.named_copy_symbols: dict[int, str] = {}  # recursive alias id -> deep-copy function symbol
+        self.pending_named_copies: list[ty.NamedType] = []
         self.optional_globals_initialized: set[int] = set()
         self.union_globals_initialized: set[int] = set()
         self.object_globals_initialized: set[int] = set()
@@ -259,6 +261,7 @@ class _Lowerer(
             self._lower_function(function)
             for function in sorted(self.functions, key=lambda item: item.order)
         ]
+        lowered_functions.extend(self._synthesize_named_copies())
 
         globals_: list[hir.Declare] = []
         startup_sources: list[hir.AST] = []
@@ -318,6 +321,8 @@ class _Lowerer(
             if main is not None and main.function is not None
             else None
         )
+        # module startup may have requested more copy functions
+        lowered_functions.extend(self._synthesize_named_copies())
         return LoweredProgram(
             lowered_functions,
             globals_,
@@ -385,12 +390,8 @@ class _Lowerer(
         place_parameter_cells: dict[int, hir.ExpressedIdentifier] = {}
 
         def lower_param(param: hir.Param) -> hir.Param:
-            if (
-                isinstance(param.type, ty.TypeOr)
-                and 'undefined' in param.type.items
-                and ty.optional_payload(param.type) is None
-            ):
-                self._target_error(literal, 'heterogeneous optional parameter type')
+            # a union with `undefined` and several other members is an ordinary
+            # general union (`undefined` is member 0, so its tag matches optionals)
             if param.place:
                 if param.binding_id is None:
                     raise TypeError(
@@ -2980,6 +2981,13 @@ class _Lowerer(
                 stored = self.union_cells.get(node.value.binding_id)
                 if stored is not None:
                     members = stored
+            if isinstance(node.value, hir.MemberAccess) and isinstance(node.value.value.type, ty.ObjectType):
+                # a union field: its storage members are the declared field
+                # type's, whatever the route has been narrowed to
+                declared = node.value.value.type.field(node.value.name)
+                stored = self._field_union_members(declared.type) if declared is not None else None
+                if stored is not None:
+                    members = stored
             if members is not None:
                 union_prelude, union_value = self._extract_expression(node.value)
                 system = ty.TypeSystem()
@@ -3601,6 +3609,8 @@ class _Lowerer(
     def _value_load(self, address: hir.AST, type_: ty.Type, loc: Span) -> hir.AST:
         if isinstance(type_, ty.ObjectType):
             return replace(address, type='int64')
+        if self._field_union_members(type_) is not None:
+            return replace(address, type='int64')  # a union value is its cell
         if type_ == 'bool':
             loaded = self._intrinsic_call('__load_i8__', [address], 'int8', loc)
             return hir.Transmute(loc, 'bool', loaded)
@@ -3631,6 +3641,9 @@ class _Lowerer(
     ) -> list[hir.AST]:
         if isinstance(type_, ty.ObjectType):
             return self._object_copy(address, value, type_, loc)
+        members = self._field_union_members(type_)
+        if members is not None:
+            return self._union_write(address, value, members, prepared=False)
         if type_ == 'bool':
             stored = hir.Transmute(value.loc, 'uint8', value)
             return [self._intrinsic_call('__store_u8__', [stored, address], ty.VOID_TYPE, loc)]

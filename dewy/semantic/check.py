@@ -56,6 +56,7 @@ class Context:
     """Proven dictionary keys: (dictionary route id, key identity) -> (position local, literal entry index)."""
     type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
     resolving_type_aliases: set[int] = field(default_factory=set)
+    named_types: dict[int, ty.NamedType] = field(default_factory=dict)  # recursive alias references, by alias binding id
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
@@ -809,6 +810,12 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     if dict_store is not None:
         return dict_store
     target = tcr_assignment_target(ast.left, ctx=ctx)
+    if isinstance(target, hir.MemberAccess) and isinstance(target.value.type, ty.ObjectType):
+        # a store accepts the field's declared type; an `is?` narrowing of the
+        # route is forgotten below, not enforced on the new value
+        declared = target.value.type.field(target.name)
+        if declared is not None:
+            target = replace(target, type=declared.type)
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
     value = check_against(value, target.type, ctx=ctx)
     if isinstance(target, hir.Index):
@@ -1526,9 +1533,15 @@ def _refine_condition_context(
             return refined
     if isinstance(condition, hir.TypeTest):
         value = condition.value
+        fact_id: int | None = None
         if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
-            current = refinements.get(value.binding_id, value.type)
-            refinements[value.binding_id] = _refine_type_test(
+            fact_id = value.binding_id
+        elif isinstance(value, hir.MemberAccess):
+            # `node.next is? Node` narrows the field's route, like a binding
+            fact_id = sb.array_route_id(value, ctx.binding_registry)
+        if fact_id is not None:
+            current = refinements.get(fact_id, value.type)
+            refinements[fact_id] = _refine_type_test(
                 current,
                 condition.test_type,
                 matches=truth != condition.negated,
@@ -2747,6 +2760,70 @@ def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
         _resolve_type_alias(binding, ctx=ctx)
 
 
+def _validate_recursive_alias(
+    binding: sb.Binding,
+    value: ty.TypeAliasValue,
+    named: ty.NamedType,
+    *,
+    ctx: Context,
+) -> None:
+    """A recursive reference is only allowed as a union member of an object field.
+
+    That is the one position with a finite representation: the member lives
+    behind a handle in the union cell. A required field of the alias's own
+    type would be an infinite value; an alias that is merely a union of itself
+    has no base case.
+    """
+    if isinstance(value, ty.GenericTypeAlias):
+        not_implemented(ctx.srcfile, binding.loc, 'recursive generic type aliases')
+    if isinstance(value, ty.NamedType):
+        # `let A:type = B` / `let B:type = A`: aliases of each other and nothing else
+        user_error(
+            ctx.srcfile,
+            f'cyclic type alias involving `{binding.name}`',
+            Pointer(span=binding.loc, message='this alias is part of the cycle'),
+        )
+    if not isinstance(value, ty.ObjectType):
+        user_error(
+            ctx.srcfile,
+            f'recursive type `{binding.name}` must be an object type',
+            Pointer(span=binding.loc, message='the recursion has no object to carry it'),
+            hint=f'write `{binding.name}` as `[... {binding.name} | undefined ...]`: the self-reference lives in a field and is optional or one of several members',
+        )
+
+    def check(type_: object, in_union: bool) -> None:
+        if isinstance(type_, ty.NamedType):
+            if not in_union:
+                user_error(
+                    ctx.srcfile,
+                    f'recursive type `{binding.name}` refers to itself without a union',
+                    Pointer(span=binding.loc, message=f'a field typed exactly `{type_.name}` would be an infinite value'),
+                    hint=f'make the recursive field a union such as `{type_.name} | undefined`',
+                )
+            return
+        if isinstance(type_, ty.TypeOr):
+            if all(isinstance(item, ty.NamedType) for item in type_.items):
+                user_error(
+                    ctx.srcfile,
+                    f'recursive type `{binding.name}` has no base case',
+                    Pointer(span=binding.loc, message='every member of this union is the recursive type itself'),
+                )
+            for item in type_.items:
+                check(item, True)
+            return
+        if isinstance(type_, ty.ObjectType):
+            for field_ in type_.fields:
+                check(field_.type, False)
+            return
+        if isinstance(type_, ty.ArrayType):
+            check(type_.element, False)
+            return
+        if isinstance(type_, ty.RefinedType):
+            check(type_.base, in_union)
+
+    check(value, False)
+
+
 def _generic_type_alias_parts(
     ast: p0.AST,
 ) -> tuple[p0.Block, p0.AST] | None:
@@ -2838,17 +2915,24 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
     if binding.type_value is not None:
         return binding.type_value
     if binding.id in ctx.resolving_type_aliases:
-        user_error(
-            ctx.srcfile,
-            f'cyclic type alias involving `{binding.name}`',
-            Pointer(span=binding.loc, message='this alias is part of the cycle'),
-        )
+        # a recursive alias: the inner occurrence is a by-name reference that
+        # unfolds to the alias once it has resolved
+        named = ctx.named_types.get(binding.id)
+        if named is None:
+            named = ty.NamedType(binding.name, binding.id)
+            ctx.named_types[binding.id] = named
+        return named
     rhs = ctx.type_alias_asts[binding.id]
     ctx.resolving_type_aliases.add(binding.id)
     try:
-        binding.type_value = _type_alias_value(rhs, ctx=ctx)
+        value = _type_alias_value(rhs, ctx=ctx)
     finally:
         ctx.resolving_type_aliases.remove(binding.id)
+    named = ctx.named_types.get(binding.id)
+    if named is not None:
+        _validate_recursive_alias(binding, value, named, ctx=ctx)
+        named.resolve(value)
+    binding.type_value = value
     return binding.type_value
 
 
@@ -3316,11 +3400,13 @@ def _tcr_object_literal(
     expected: ty.Type | None,
     ctx: Context,
 ) -> hir.ObjectLiteral:
+    expected = ty.unfold(expected) if expected is not None else None
     expected_object = expected if isinstance(expected, ty.ObjectType) else None
     if expected_object is None and isinstance(expected, ty.TypeOr):
         # A literal checked against a union targets the union's unique
         # object member, if there is exactly one.
-        candidates = [item for item in expected.items if isinstance(item, ty.ObjectType)]
+        # a recursive member unfolds to its object type for the literal
+        candidates = [ty.unfold(item) for item in expected.items if isinstance(ty.unfold(item), ty.ObjectType)]
         if len(candidates) == 1:
             expected_object = candidates[0]
     if expected is not None and expected_object is None:
@@ -3912,6 +3998,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     source_place = value if isinstance(value, hir.Place) else None
     if source_place is not None:
         value = source_place.target
+    if isinstance(value.type, ty.NamedType):
+        value = replace(value, type=ty.unfold(value.type))
     if not isinstance(value.type, ty.ObjectType):
         if name == 'length':
             type_error(
@@ -3939,6 +4027,13 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             hint=f'available fields: {", ".join(item.name for item in value.type.fields) or "(none)"}',
         )
     access = hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
+    if isinstance(field.type, ty.TypeOr):
+        # a union field narrowed by an earlier `is?` on this route reads as
+        # the narrowed member (the route's refinement, dropped on assignment)
+        route_id = sb.array_route_id(access, ctx.binding_registry)
+        refined = ctx.refinements.get(route_id) if route_id is not None else None
+        if refined is not None:
+            access = replace(access, type=ty.unfold(refined))
     if source_place is None:
         return access
     if not field.mutable:
@@ -6910,6 +7005,28 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
             )
 
 
+def _canonical_union(type_: ty.TypeOr, *, ctx: Context) -> ty.TypeOr:
+    """Spell a recursive alias by reference wherever it is a union member.
+
+    `Node | undefined` written inside `Node`'s own body already resolves to the
+    reference; written elsewhere it resolves to the alias's object type. Both
+    must be the same union — the same member order, the same tags — so every
+    union member that is a recursive alias's object type becomes its reference.
+    """
+    if not ctx.named_types:
+        return type_
+    references = [named for named in ctx.named_types.values() if named._target]
+
+    def canonical(item: ty.TypeExpr) -> ty.TypeExpr:
+        if isinstance(item, ty.ObjectType):
+            for named in references:
+                if named.target == item:
+                    return named
+        return item
+
+    return ty.TypeOr([canonical(item) for item in type_.items])
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
     if (
@@ -7219,12 +7336,12 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             left = ast_to_type(ast.left, ctx=ctx)
             right = ast_to_type(ast.right, ctx=ctx)
             if isinstance(left, ty.TypeOr) and isinstance(right, ty.TypeOr):
-                return ty.TypeOr(left.items + right.items)
+                return _canonical_union(ty.TypeOr(left.items + right.items), ctx=ctx)
             elif isinstance(left, ty.TypeOr):
-                return ty.TypeOr(left.items + [right])
+                return _canonical_union(ty.TypeOr(left.items + [right]), ctx=ctx)
             elif isinstance(right, ty.TypeOr):
-                return ty.TypeOr([left] + right.items)
-            return ty.TypeOr([left, right])
+                return _canonical_union(ty.TypeOr([left] + right.items), ctx=ctx)
+            return _canonical_union(ty.TypeOr([left, right]), ctx=ctx)
         
         case p0.BinOp(op=t1.Operator(symbol='and'|'&')):
             left = ast_to_type(ast.left, ctx=ctx)
@@ -8515,11 +8632,11 @@ def tcr_identifier(
             binding is not None and binding.type_value is not None
         ):
             not_implemented(ctx.srcfile, id.loc, 'runtime type values')
-        resolved_type = ty.strip_refinement(
+        resolved_type = ty.unfold(ty.strip_refinement(
             ctx.refinements.get(binding.id, declared_type)
             if refined and binding is not None
             else declared_type
-        )
+        ))
         return hir.ExpressedIdentifier(
             id.loc,
             resolved_type,

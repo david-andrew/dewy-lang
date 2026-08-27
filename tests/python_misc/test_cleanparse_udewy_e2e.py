@@ -80,6 +80,7 @@ LOWERED_CASES = [
     ('dict_algebra.dewy', 80),
     ('bigint.dewy', 15),
     ('bigint_auto.dewy', 7),
+    ('union_recursive.dewy', 42),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

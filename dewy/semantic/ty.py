@@ -84,7 +84,7 @@ class TypeVariable:
     """A symbolic type inside a generic type-alias body."""
 
     name: str
-    bound: 'TypeExpr' = TOP_TYPE
+    bound: TypeExpr = TOP_TYPE
 
 
 @dataclass(frozen=True)
@@ -102,7 +102,7 @@ class DimensionType:
 class QuantityType:
     """A numeric runtime representation tagged with a physical dimension."""
 
-    number: 'TypeExpr'
+    number: TypeExpr
     dimension: DimensionType
 
 
@@ -152,7 +152,7 @@ class GenericTypeAlias:
     """A compile-time type constructor expanded by ``Alias<args...>``."""
 
     params: list[GenericParam]
-    body: 'TypeExpr'
+    body: TypeExpr
 
 @dataclass
 class FunctionType:
@@ -218,7 +218,7 @@ class StringType:
 class ArrayType:
     """A homogeneous mutable array, optionally refined to an exact length."""
 
-    element: 'TypeExpr'
+    element: TypeExpr
     length: int | None = None
 
 
@@ -227,7 +227,7 @@ class ObjectField:
     """One named field in source order."""
 
     name: str
-    type: 'TypeExpr'
+    type: TypeExpr
     mutable: bool = True
 
 
@@ -255,6 +255,65 @@ class PathType(ObjectType):
     """A thin path object containing its lexical text."""
 
 
+@dataclass(frozen=True, eq=False, repr=False)
+class NamedType:
+    """A by-name reference to a recursive type alias.
+
+    ``let Node:type = [value:int64 next:Node|undefined]`` cannot be a finite
+    structural tree, so the recursive occurrence is this reference; it unfolds
+    to the alias's object type on demand (``target``). Two references to the
+    same alias are equal. A reference may only appear as a union member, where
+    the lowering stores the member behind a handle; expression types are
+    always unfolded (see ``unfold``).
+    """
+
+    name: str
+    alias_id: int
+    _target: list[TypeExpr] = field(default_factory=list, compare=False, hash=False)
+
+    @property
+    def target(self) -> TypeExpr:
+        if not self._target:
+            raise ValueError(f'INTERNAL ERROR: recursive type `{self.name}` used before its alias resolved')
+        return self._target[0]
+
+    def resolve(self, target: TypeExpr) -> None:
+        self._target[:] = [target]
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, NamedType) and other.alias_id == self.alias_id
+
+    def __hash__(self) -> int:
+        return hash(('NamedType', self.alias_id))
+
+    def __repr__(self) -> str:
+        return f'NamedType({self.name!r})'
+
+
+def unfold(type_: Type) -> Type:
+    """An expression-level type: a recursive reference becomes its object type."""
+    return type_.target if isinstance(type_, NamedType) else type_
+
+
+def mentions_named_type(type_: object) -> bool:
+    """Whether a type contains a recursive reference anywhere (without unfolding it)."""
+    if isinstance(type_, NamedType):
+        return True
+    if isinstance(type_, (TypeOr, TypeAnd)):
+        return any(mentions_named_type(item) for item in type_.items)
+    if isinstance(type_, TypeNot):
+        return mentions_named_type(type_.type)
+    if isinstance(type_, ObjectType):
+        return any(mentions_named_type(field.type) for field in type_.fields)
+    if isinstance(type_, ArrayType):
+        return mentions_named_type(type_.element)
+    if isinstance(type_, RefinedType):
+        return mentions_named_type(type_.base)
+    if isinstance(type_, FunctionType):
+        return any(mentions_named_type(p.type) for p in [*type_.pos_or_kw, *type_.kw_only]) or mentions_named_type(type_.ret)
+    return False
+
+
 @dataclass(frozen=True, init=False)
 class PathLiteralType(PathType):
     """The singleton type inhabited by one exact lexical path."""
@@ -278,9 +337,9 @@ class ModuleField:
     """One compile-time member exported by a source module."""
 
     name: str
-    type: 'TypeExpr'
+    type: TypeExpr
     binding_id: int
-    type_value: 'TypeAliasValue | None' = None
+    type_value: TypeAliasValue | None = None
 
 
 @dataclass(frozen=True)
@@ -293,7 +352,7 @@ class ModuleType:
         return next((field for field in self.fields if field.name == name), None)
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType | NamedType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 type TypeAliasValue = TypeExpr | GenericTypeAlias
 
@@ -416,18 +475,18 @@ class RefinedType:
     carries the base type plus the proven facts.
     """
 
-    base: 'TypeExpr'
+    base: TypeExpr
     propositions: tuple[Proposition, ...]
 
 
-def dict_type(key: 'TypeExpr', value: 'TypeExpr') -> ObjectType:
+def dict_type(key: TypeExpr, value: TypeExpr) -> ObjectType:
     """The runtime dictionary object for `dict<K V>`: parallel entry arrays in insertion order.
 
     Entry types are canonical so literal-inferred and annotated dictionaries
     agree: any string representation is the primitive ``string`` (exact
     lengths of literal keys are not part of the dictionary's type).
     """
-    def canonical(type_: 'TypeExpr') -> 'TypeExpr':
+    def canonical(type_: TypeExpr) -> TypeExpr:
         if isinstance(type_, (StringType, StringLiteralType)):
             return 'string'
         return type_
@@ -446,9 +505,9 @@ def dict_type(key: 'TypeExpr', value: 'TypeExpr') -> ObjectType:
     )
 
 
-def set_type(element: 'TypeExpr') -> ObjectType:
+def set_type(element: TypeExpr) -> ObjectType:
     """The runtime set object for `set<T>`: a dictionary without values (same table machinery)."""
-    def canonical(type_: 'TypeExpr') -> 'TypeExpr':
+    def canonical(type_: TypeExpr) -> TypeExpr:
         if isinstance(type_, (StringType, StringLiteralType)):
             return 'string'
         return type_
@@ -463,7 +522,7 @@ def set_type(element: 'TypeExpr') -> ObjectType:
     )
 
 
-def set_element(type_: 'TypeExpr') -> 'TypeExpr | None':
+def set_element(type_: TypeExpr) -> TypeExpr | None:
     """`T` when ``type_`` is a runtime set object."""
     if isinstance(type_, ObjectType) and type_.brand == 'set':
         keys = type_.fields[0].type
@@ -472,7 +531,7 @@ def set_element(type_: 'TypeExpr') -> 'TypeExpr | None':
     return None
 
 
-def container_entry_types(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr | None'] | None:
+def container_entry_types(type_: TypeExpr) -> tuple[TypeExpr, TypeExpr | None] | None:
     """`(K, V)` for a dictionary, `(T, None)` for a set, else None."""
     key_value = dict_key_value(type_)
     if key_value is not None:
@@ -483,7 +542,7 @@ def container_entry_types(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr | No
     return None
 
 
-def dict_key_value(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr'] | None:
+def dict_key_value(type_: TypeExpr) -> tuple[TypeExpr, TypeExpr] | None:
     """`(K, V)` when ``type_`` is a runtime dictionary object."""
     if isinstance(type_, ObjectType) and type_.brand == 'dict':
         keys, values = type_.fields[0].type, type_.fields[1].type
@@ -492,7 +551,7 @@ def dict_key_value(type_: 'TypeExpr') -> tuple['TypeExpr', 'TypeExpr'] | None:
     return None
 
 
-def strip_refinement(type_: 'TypeExpr') -> 'TypeExpr':
+def strip_refinement(type_: TypeExpr) -> TypeExpr:
     return type_.base if isinstance(type_, RefinedType) else type_
 
 
@@ -517,6 +576,7 @@ STRUCTURAL_NOMINAL_MAP: dict[type, Primitive] = {
     ObjectType: 'object',
     PathType: 'object',
     PathLiteralType: 'object',
+    NamedType: 'object',
 
     # TBD about these
     # IteratorType: 'iterator',
@@ -763,6 +823,19 @@ class TypeSystem:
             if a == b or self.is_subtype(b.bound, a):
                 return b
             return None
+        if isinstance(a, NamedType) or isinstance(b, NamedType):
+            if a == b:
+                return a
+            met = self._meet_atoms(unfold(a), unfold(b))
+            if met is None:
+                return None
+            # keep the reference when it survives the meet, so union member
+            # lists stay spelled by reference
+            if isinstance(a, NamedType) and met == unfold(a):
+                return a
+            if isinstance(b, NamedType) and met == unfold(b):
+                return b
+            return met
         if isinstance(a, RefinedType) or isinstance(b, RefinedType):
             if a == b:
                 return a
@@ -908,6 +981,12 @@ class TypeSystem:
             return a == b or self.is_subtype(a.bound, b)
         if isinstance(b, TypeVariable):
             return a == b
+        if isinstance(a, NamedType) or isinstance(b, NamedType):
+            # a recursive reference stands for its alias's object type; equal
+            # references short-circuit so unfolding always terminates
+            if a == b:
+                return True
+            return self._atom_implies_atom(unfold(a), unfold(b))
         if isinstance(a, RefinedType):
             return a == b or self.is_subtype(a.base, b)
         if isinstance(b, RefinedType):
@@ -1426,7 +1505,7 @@ class TypeSystem:
         pos_types: list[TypeExpr],
         kw_types: dict[str, TypeExpr] | None = None,
         expected_return: TypeExpr | None = None,
-    ) -> 'DispatchResult':
+    ) -> DispatchResult:
         """Julia-style: unique most-specific applicable method, with promote-and-redispatch fallback."""
         kw_types = kw_types or {}
         apps = self._applicable_indexed(methods, pos_types, kw_types, expected_return)
@@ -1531,7 +1610,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType
+type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType | NamedType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -1690,7 +1769,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, RefinedType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType)):
+    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, RefinedType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType, NamedType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -1795,7 +1874,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return t
     if isinstance(t, RefinedType):
         return RefinedType(substitute_type(t.base, bindings), t.propositions)
-    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType)):
+    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType, NamedType)):
         return t
     if isinstance(t, QuantityType):
         return QuantityType(substitute_type(t.number, bindings), t.dimension)
