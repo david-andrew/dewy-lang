@@ -83,8 +83,23 @@ def typecheck_and_resolve(
     )
 
 
+_parsed_modules: dict[tuple[str, str], p0.Block] = {}
+"""Parse trees of path-backed modules, keyed by path and exact contents.
+
+Parsing the prelude dominates the cost of compiling a small program, and the
+checker never mutates a parse tree (every rewrite builds new nodes), so the
+same tree serves every compilation of an unchanged file. In-memory sources
+are not cached: each is parsed once per compilation anyway.
+"""
+
+
 def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block, bool]:
-    block = p0.parse(srcfile)
+    key = (str(srcfile.path), srcfile.body) if srcfile.path is not None else None
+    block = _parsed_modules.get(key) if key is not None else None
+    if block is None:
+        block = p0.parse(srcfile)
+        if key is not None:
+            _parsed_modules[key] = block
     no_prelude: bool | None = None
     items: list[p0.AST] = []
     for item in block.inner:
