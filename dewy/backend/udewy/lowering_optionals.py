@@ -603,17 +603,37 @@ class _OptionalLowering:
         members: tuple[ty.TypeExpr, ...],
         *,
         prepared: bool = True,
+        fresh: bool = False,
     ) -> list[hir.AST]:
-        """Store one value into a union cell, tagging it by member index."""
+        """Store one value into a union cell, tagging it by member index.
+
+        ``fresh`` says the cell is new storage nothing else refers to (a
+        declared binding, a function's result cell), so a union-returning
+        call may write its result there directly — never for an assignment,
+        whose target may be an argument of that very call.
+        """
         if isinstance(value, hir.ValueCast):
-            return self._union_write(cell, value.expr, members, prepared=prepared)
+            return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh)
         if (
             isinstance(value, hir.RepresentationCast)
             and ty.runtime_union_members(value.type) == members
         ):
             # Checking wraps member values in a conversion to the union type;
             # the tag-and-payload store below is that conversion.
-            return self._union_write(cell, value.expr, members, prepared=prepared)
+            return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh)
+        if (
+            fresh
+            and prepared
+            and isinstance(value, hir.FunctionCall)
+            and isinstance(cell, hir.ExpressedIdentifier)
+            and ty.runtime_union_members(value.type) == members
+        ):
+            self.union_result_destinations[id(value)] = cell
+            prelude, result = self._extract_expression(value)
+            if id(value) in self.union_result_destinations:
+                del self.union_result_destinations[id(value)]
+                raise TypeError('INTERNAL ERROR: union result destination was not consumed')
+            return prelude
         if isinstance(value, hir.Flow):
             prelude, flow = self._lower_union_flow(value, cell, members, prepared=prepared)
             return [*prelude, flow]
@@ -877,7 +897,7 @@ class _OptionalLowering:
             raise TypeError('INTERNAL ERROR: union result cell has no members')
         dest = replace(self.current_union_result, type='int64')
         return [
-            *self._union_write(dest, item, members),
+            *self._union_write(dest, item, members, fresh=True),   # the caller's fresh result cell
             hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
         ]
 

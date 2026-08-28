@@ -193,6 +193,11 @@ class _Lowerer(
         ] = {}
         self.array_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
         self.object_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
+        # union-returning calls whose result cell is a fresh destination (a
+        # declared binding, the enclosing function's result cell): the call
+        # writes there directly instead of into a temporary that is then
+        # deep-copied
+        self.union_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_array_result: hir.ExpressedIdentifier | None = None
@@ -515,6 +520,31 @@ class _Lowerer(
                     param.type,
                     incoming_name,
                 )
+                summary = (
+                    self.program_effects.for_param_binding(param.binding_id)
+                    if param.binding_id is not None
+                    else None
+                )
+                if summary is not None and summary.read_only:
+                    # As for objects: a body that never writes to or retains
+                    # the value borrows the caller's cell (`0 | [...]` values
+                    # are otherwise deep-copied — tree and limb arrays — on
+                    # every call).
+                    parameter_prologue.append(hir.Declare(
+                        literal.loc,
+                        ty.VOID_TYPE,
+                        'let',
+                        param.name,
+                        'int64',
+                        replace(incoming, type='int64'),
+                        binding_id=param.binding_id,
+                    ))
+                    return replace(
+                        param,
+                        name=incoming_name,
+                        type='int64',
+                        binding_id=None,
+                    )
                 cell = hir.ExpressedIdentifier(
                     literal.loc,
                     'int64',
@@ -2943,7 +2973,7 @@ class _Lowerer(
                 return [
                     declaration,
                     *self._union_prepare_trees(cell, members, node.loc),
-                    *self._union_write(cell, node.expr, members),
+                    *self._union_write(cell, node.expr, members, fresh=True),
                 ]
             payload = ty.optional_payload(declared_type)
             if payload is not None:
@@ -3704,24 +3734,28 @@ class _Lowerer(
                 return [*prelude, *place_postlude], replace(result, type=node.type)
             result_members = ty.runtime_union_members(node.type)
             if result_members is not None:
-                result = hir.ExpressedIdentifier(
-                    node.loc,
-                    'int64',
-                    self._new_optional_name('result_value'),
-                )
-                prelude.append(
-                    hir.Declare(
+                forwarded = self.union_result_destinations.pop(id(node), None)
+                if forwarded is not None:
+                    result = replace(forwarded, type='int64')
+                else:
+                    result = hir.ExpressedIdentifier(
                         node.loc,
-                        ty.VOID_TYPE,
-                        'let',
-                        result.name,
                         'int64',
-                        self._union_cell_allocation(result_members, node.loc),
+                        self._new_optional_name('result_value'),
                     )
-                )
-                prelude.extend(
-                    self._union_prepare_trees(result, result_members, node.loc)
-                )
+                    prelude.append(
+                        hir.Declare(
+                            node.loc,
+                            ty.VOID_TYPE,
+                            'let',
+                            result.name,
+                            'int64',
+                            self._union_cell_allocation(result_members, node.loc),
+                        )
+                    )
+                    prelude.extend(
+                        self._union_prepare_trees(result, result_members, node.loc)
+                    )
                 prelude.append(
                     replace(
                         node,
