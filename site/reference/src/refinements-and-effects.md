@@ -61,6 +61,17 @@ let main = ():>int64 => {
 
 Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`) are tracked by member route, like array lengths, until the field or its object is reassigned; and a loop over an array or dictionary literal of constants that is never mutated bounds the loop variable by those constants.
 
+## No Traps
+
+Dewy is a trap-free language. A compiled program never aborts, panics, or crashes on a path the programmer did not write: the only exits are the ones spelled out in the source — `return`, a failed `$runtime_assert`, an explicit call to exit. Every operation that could fail is handled in one of two ways, and never a third:
+
+1. **A compile-time proof.** If the precondition is provable — an index within a proven length, a divisor a guard or refinement makes nonzero, a refinement an obligation discharges — the operation compiles to the bare instruction, with no check at runtime. If it is *not* proven, that is a compile error, and the fix is more facts (a guard, a refined type, an assertion), not a runtime check inserted by the compiler.
+2. **A value.** If a failure is genuinely undecidable at compile time — arithmetic on 64-bit parts that may overflow, `tan` of an angle whose cosine may be exactly zero, reading a file that may not exist — the operation's type says so: `rational | Overflow`, `fixed | DivisionByZero`, `T | undefined`, and the caller handles that branch explicitly (`is?`, `or_throw`, a default).
+
+The compiler therefore never emits a fallback that changes an operation's meaning, and the library never contains one: no silent wrap-to-zero, no clamping, no "unreachable" abort. The rule follows from proofs-over-exceptions — whatever raises in Python must in Dewy be proven safe or return a value — and it is what makes the proofs worth trusting: a program that compiles has no hidden exit.
+
+The same holds for code written *for* others. It is unidiomatic for a library to exit the process on its own account: an explicit exit is a decision about the whole program, which only the program's author can make. A library that cannot prove a precondition moves the proof to its caller (a refined parameter — `divide = (a:int64 b:int64 & ~0)`), and one that meets a failure it cannot rule out returns it (`:> T | Overflow`). Exits and `$runtime_assert` belong in applications, at the points their authors chose. The standard library is written this way throughout.
+
 ## Operation Preconditions
 
 An ordinary partial operation is valid when its precondition is proven. Examples include indexing within bounds, dividing by a nonzero value, narrowing a number into a smaller representation, and satisfying a function's refined input contract. Integer `//` and `%` require the divisor proven nonzero: an interval that excludes zero (`d >? 0`, a loop variable over `1..3`), a `d not=? 0` guard (or a failed `d =? 0`), a refined parameter, or a `$runtime_assert`; otherwise `cannot prove the divisor is nonzero` is reported with the divisor's known range.

@@ -15,6 +15,8 @@ Calling `loadCustomer` produces one of those three values. There is no `Result` 
 
 Public functions should normally state a stable set of errors in their return contract. A private helper may allow the compiler to infer them.
 
+> **Dewy never traps.** A running Dewy program has no hidden exits: it stops only where you wrote `return`, an explicit exit, or a `$runtime_assert` of your own. Whatever could fail is either proven safe at compile time (and compiles to nothing) or comes back to you as a value in the type — `rational | Overflow`, `T | undefined`, your own error types — for you to handle. There is no third option, in your code or in the library — and if you write a library yourself, the same courtesy applies: don't exit on your callers' behalf. Ask for the proof in a parameter's type, or hand the failure back in the result.
+
 ## Exception Values Forward
 
 Safe navigation is governed by a broader `exception` type family. Both `error` and `undefined` descend from `exception`, and programmers can define other exception types. Any alternative in this family forwards through navigation.

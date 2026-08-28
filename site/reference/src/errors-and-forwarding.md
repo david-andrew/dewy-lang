@@ -6,6 +6,8 @@ Automatic forwarding is defined by the broader nominal `exception` family. Error
 
 Implemented today: unit-like error types minted with `type of error`, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: errors carrying fields, forwarding through method calls, and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
 
+Errors are the second half of Dewy's no-trap rule (see [No Traps](refinements-and-effects.md#no-traps)): what cannot be proven safe at compile time is returned as a value, never raised, never aborted.
+
 ## The `exception` Family
 
 The built-in hierarchy contains:
