@@ -5,10 +5,6 @@
 # the kernel wants whole nanoseconds.
 let sleep = (duration:(rational * Time)):>void => {
     let seconds:Rational = duration transmute Rational
-    if seconds.denominator <=? 0 {
-        _trap("sleep: rational with a non-positive denominator\n")
-        return void
-    }
     let total_nanoseconds:uint64 = ((seconds.numerator * 1000000000) // seconds.denominator) transmute uint64
     let request:int64 = __alloca__(16)
     let request_nanoseconds:int64 = request + 8

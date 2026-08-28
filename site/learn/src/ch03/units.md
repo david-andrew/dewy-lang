@@ -34,11 +34,13 @@ Every dimension has a canonical unit — the SI base unit, and the whole turn fo
 <!-- dewy-example: compiler -->
 
 ```dewy
-let mass = 10kg
-let velocity = 30m/s
+const mass = 10kg
+const velocity = 30m/s
 let energy = 1/2 * mass * velocity^2       # 4500 J
 let joules:rational = energy / J            # dividing by a unit yields the count
 ```
+
+(`const` keeps the quantities compile-time so the arithmetic folds; runtime rational arithmetic on 64-bit parts yields `rational | Overflow` for the caller to handle — the abstract `rational` that picks big-integer parts where a fit cannot be proven is the planned default.)
 
 Angles use the turn so that degrees are exact (`45°` is `1/8 turn`) and trigonometry reduces exactly before computing. `cos`, `sin`, and `tan` accept an angle and return a [fixed-point](basic-data-types.md#rationals-and-fixed-point) value:
 

@@ -911,14 +911,16 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
             Pointer(span=target.value.loc, message=f'this has type `{type_to_dewy(target.value.type)}`, so `{target.field}` is not one definite place'),
             hint='narrow the receiver with `is?` (or propagate with `or_throw`) before assigning',
         )
+    declared: ty.ObjectField | None = None
     if isinstance(target, hir.MemberAccess) and isinstance(target.value.type, ty.ObjectType):
         # a store accepts the field's declared type; an `is?` narrowing of the
         # route is forgotten below, not enforced on the new value
         declared = target.value.type.field(target.name)
         if declared is not None:
             target = replace(target, type=declared.type)
-    value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
-    value = check_against(value, target.type, ctx=ctx)
+    store_expected = _field_expectation(declared) if isinstance(target, hir.MemberAccess) and declared is not None else target.type
+    value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=ty.strip_refinement(store_expected))
+    value = check_against(value, store_expected, ctx=ctx)
     if isinstance(target, hir.Index):
         return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
     if isinstance(target, hir.MemberAccess):
@@ -4464,7 +4466,7 @@ def _tcr_object_literal(
         if annotation_ast is not None:
             field_expected = ast_to_type(annotation_ast, ctx=ctx)
         elif expected_object is not None:
-            field_expected = expected_object.fields[index].type
+            field_expected = _field_expectation(expected_object.fields[index])
         prechecked = entries[index][2]
         if prechecked is not None:
             value = prechecked  # a field copied in by a spread
@@ -4506,12 +4508,12 @@ def _tcr_object_literal(
         if annotation_ast is not None:
             field_expected = ast_to_type(annotation_ast, ctx=ctx)
         elif expected_object is not None:
-            field_expected = expected_object.fields[index].type
+            field_expected = _field_expectation(expected_object.fields[index])
         value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
         require_valued(value.type, ctx.srcfile, value.loc, 'object field')
         if field_expected is not None:
             value = check_against(value, field_expected, ctx=ctx)
-            field_type = field_expected
+            field_type = ty.strip_refinement(field_expected)
         else:
             field_type = value.type
         binding = field_bindings[index]
@@ -4536,7 +4538,7 @@ def _tcr_object_literal(
         assert value is not None
         binding = field_bindings[index]
         fields.append(hir.ObjectField(loc, name, value, binding.id, mutable))
-        types.append(ty.ObjectField(name, binding.type or value.type, mutable))
+        types.append(ty.ObjectField(name, ty.strip_refinement(binding.type or value.type), mutable))  # a field invariant is not part of the literal's shape
     object_type = ty.ObjectType(tuple(types))
     if expected_object is not None:
         check_against(
@@ -5905,6 +5907,36 @@ def _with_dimension(number: ty.Type, dimension: ty.DimensionType) -> ty.Type:
     return number if not dimension.powers else ty.QuantityType(number, dimension)
 
 
+def _with_dimension_result(declared: ty.Type, number: ty.Type, dimension: ty.DimensionType) -> ty.Type:
+    """A prelude operation's result with the dimension: `Rational | Overflow` keeps its error member."""
+    if isinstance(declared, ty.TypeOr):
+        return ty.union(*[
+            _with_dimension(number, dimension) if ty.unfold(member) == number else member
+            for member in declared.items
+        ])
+    return _with_dimension(number, dimension)
+
+
+def _zero_test_on_field(fname: str, args: list[hir.AST], field: str, *, loc: Span, source_name: str, ctx: Context) -> hir.AST | None:
+    """`q =? 0` / `q not=? 0` on a rational (or fixed) is a test of its normalized numerator (raw part).
+
+    Spelling it as the field comparison lets the guard record a route fact,
+    which is what a division by `q` needs.
+    """
+    if fname not in ('__eq__', '__ne__') or len(args) != 2:
+        return None
+    for value, other in ((args[0], args[1]), (args[1], args[0])):
+        if _constant_rational(other, ctx=ctx) != 0:
+            continue
+        value_type = ty.unfold(_number_and_dimension(value.type)[0])
+        if not (isinstance(value_type, ty.ObjectType) and value_type.field(field) is not None):
+            continue
+        member = hir.MemberAccess(value.loc, 'int64', _strip_dimension(value), field, True)
+        zero = hir.Integer(other.loc, ty.IntegerLiteralType(0), '0d', 0)
+        return _dispatch_builtin(fname, [member, zero], loc=loc, op_loc=loc, source_name=source_name, ctx=ctx)
+    return None
+
+
 def _is_compile_time_rational(type_: ty.Type) -> bool:
     number, _ = _number_and_dimension(type_)
     return isinstance(number, ty.RationalLiteralType)
@@ -5989,12 +6021,12 @@ def _fixed_constant(value: Fraction, *, loc: Span, ctx: Context) -> hir.AST:
             'value is outside the fixed-point range',
             Pointer(span=loc, message=f'`{value}` does not fit Q32.32'),
         )
-    return _prelude_call(
-        '_fixed_from_raw',
-        [hir.Integer(loc, ty.IntegerLiteralType(raw), '0d', raw)],
-        loc=loc,
-        ctx=ctx,
-    )
+    # an object literal, not a `_fixed_from_raw` call: the constant `raw` is
+    # then a compile-time fact (a nonzero divisor proves itself)
+    fixed_type = ty.unfold(_fixed_type(ctx, loc))
+    assert isinstance(fixed_type, ty.ObjectType)
+    field = hir.ObjectField(loc, 'raw', hir.Integer(loc, ty.IntegerLiteralType(raw), '0d', raw))
+    return hir.ObjectLiteral(loc, fixed_type, [field])
 
 
 def _to_fixed(arg: hir.AST, *, ctx: Context) -> hir.AST:
@@ -6160,11 +6192,14 @@ def _dispatch_rational(
         call = _prelude_call('_rational_neg', [_to_rational(args[0], ctx=ctx)], loc=loc, ctx=ctx)
         return replace(call, type=_with_dimension(rational_type, result_dimension))
     helper = _RATIONAL_BINARY_FUNCTIONS[fname]
+    zero_test = _zero_test_on_field(fname, args, 'numerator', loc=loc, source_name=source_name, ctx=ctx)
+    if zero_test is not None:
+        return zero_test
     operands = [_to_rational(arg, ctx=ctx) for arg in args]
     call = _prelude_call(helper, operands, loc=loc, ctx=ctx)
     if fname in _COMPARISON_DUNDERS:
         return call
-    return replace(call, type=_with_dimension(rational_type, result_dimension))
+    return replace(call, type=_with_dimension_result(call.type, rational_type, result_dimension))
 
 
 def _dispatch_fixed(
@@ -6196,11 +6231,14 @@ def _dispatch_fixed(
             'division by zero',
             Pointer(span=args[1].loc, message='the divisor is the constant `0`'),
         )
+    zero_test = _zero_test_on_field(fname, args, 'raw', loc=loc, source_name=source_name, ctx=ctx)
+    if zero_test is not None:
+        return zero_test
     operands = [_to_fixed(arg, ctx=ctx) for arg in args]
     call = _prelude_call(helper, operands, loc=loc, ctx=ctx)
     if fname in _COMPARISON_DUNDERS:
         return call
-    return replace(call, type=_with_dimension(_fixed_type(ctx, loc), result_dimension))
+    return replace(call, type=_with_dimension_result(call.type, _fixed_type(ctx, loc), result_dimension))
 
 
 def _as_int64(arg: hir.AST, *, ctx: Context) -> hir.AST:
@@ -6330,8 +6368,9 @@ def _dispatch_pow(
     result_dimension = ty.power_dimension(dimension, exponent_value) if exponent_value is not None else dimension
     exponent64 = _as_int64(exponent, ctx=ctx)
     if base_rational or (exponent_value is not None and exponent_value < 0):
-        call = _prelude_call('_rational_pow', [_to_rational(base, ctx=ctx), exponent64], loc=loc, ctx=ctx)
-        return replace(call, type=_with_dimension(_rational_type(ctx, loc), result_dimension))
+        helper = '_rational_pow_negative' if exponent_value is not None and exponent_value < 0 else '_rational_pow'
+        call = _prelude_call(helper, [_to_rational(base, ctx=ctx), exponent64], loc=loc, ctx=ctx)
+        return replace(call, type=_with_dimension_result(call.type, _rational_type(ctx, loc), result_dimension))
     if exponent_value is None and not ctx.type_system.is_subtype(exponent.type, 'uint'):
         type_error(
             ctx.srcfile,
@@ -7852,7 +7891,8 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     inner_bindings = ctx.binding_scopes.new_child()
 
     def bind_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
-        binding = ctx.binding_registry.allocate_param(param.name, param.type, binop.loc)
+        # inside the body the binding has the base type; the refinement is a fact (bounds analysis)
+        binding = ctx.binding_registry.allocate_param(param.name, ty.strip_refinement(param.type), binop.loc)
         if isinstance(param.type, ty.RefinedType):
             _record_refinement_facts(binding.id, param.type, ctx=ctx)
         inner_bindings[param.name] = binding
@@ -7862,11 +7902,11 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     kw_only_args = [bind_param(param) for param in kw_only_args]
     rest_args = bind_param(rest_args) if rest_args is not None else None
     for param in pos_or_kw_args:
-        inner_scope[param.name] = param.type
+        inner_scope[param.name] = ty.strip_refinement(param.type)
     for param in kw_only_args:
-        inner_scope[param.name] = param.type
+        inner_scope[param.name] = ty.strip_refinement(param.type)
     if rest_args is not None:
-        inner_scope[rest_args.name] = rest_args.type
+        inner_scope[rest_args.name] = ty.strip_refinement(rest_args.type)
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
     catcher = Catcher(expected=annotated)
     function_boundary_labels = dict(ctx.function_boundary_labels)
@@ -8026,9 +8066,15 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
         and isinstance(item.left, p0.Atom)
         and isinstance(item.left.item, t1.Identifier)
     ):
+        declared_type = ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name))
+        if isinstance(declared_type, ty.RefinedType):
+            # an invariant of the field: kept beside the base type
+            if any(p.subject != 'self' for p in declared_type.propositions):
+                not_implemented(ctx.srcfile, item.right.loc, 'field invariants other than value comparisons')
+            return ty.ObjectField(item.left.item.name, declared_type.base, mutable, refinement=declared_type.propositions)
         return ty.ObjectField(
             item.left.item.name,
-            ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name)),
+            declared_type,
             mutable,
         )
     user_error(
@@ -9724,7 +9770,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         )
         for name, argument in kw_args.items()
     }
-    return_type = result.method.ret
+    return_type = ty.strip_refinement(result.method.ret)
     literal_path_type = _literal_path_call_result(
         left,
         pos_args,
@@ -10062,8 +10108,40 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     """Check a synthesized node against an expected type (bidirectional checking's checking mode).
 
     Subsumption passes the node through unchanged; a legal numeric promotion wraps it in a
-    ValueCast; anything else is a type error.
+    ValueCast; anything else is a type error. An object type's field invariants the value
+    does not already carry become obligations (proven from a literal, else by the analysis).
     """
+    checked = _check_against_shape(node, expected, ctx=ctx)
+    target = ty.unfold(ty.strip_refinement(expected))
+    if isinstance(target, ty.ObjectType):
+        missing = _missing_invariants(checked.type, target)
+        if missing:
+            checked = _prove_refinements(checked, ty.RefinedType(target, tuple(missing)), ctx=ctx)
+    return checked
+
+
+def _field_expectation(field: ty.ObjectField) -> ty.Type:
+    """A field's type with its invariant, for checking a value stored into it."""
+    return _refined(field.type, list(field.refinement)) if field.refinement else field.type
+
+
+def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Proposition]:
+    """The target's field invariants the source type does not already guarantee."""
+    unfolded = ty.unfold(ty.strip_refinement(source))
+    if unfolded is target:
+        return []
+    missing: list[ty.Proposition] = []
+    for field in target.fields:
+        if not field.refinement:
+            continue
+        carried = unfolded.field(field.name) if isinstance(unfolded, ty.ObjectType) else None
+        if carried is not None and carried.refinement == field.refinement:
+            continue
+        missing.extend(ty.Proposition(f'.{field.name}', p.op, p.value) for p in field.refinement)
+    return missing
+
+
+def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     if isinstance(expected, ty.RefinedType):
         checked = check_against(node, expected.base, ctx=ctx)
         return _prove_refinements(checked, expected, ctx=ctx)

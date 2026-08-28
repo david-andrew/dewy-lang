@@ -32,6 +32,7 @@ NOT_BEFORE = f"(?<![{CONT}])"  # not glued to a preceding identifier character
 NOT_AFTER = f"(?![{CONT}])"
 BASE_PREFIX = "0[bBtTqQsSoOdDzZxXuUrRgG]"
 NUMBER_PREFIX = "0[bBtTqQsSoOdDzZxX]"  # numerals stop at base 16; higher bases are packed strings only
+DECIMAL_START = "(?:(?<=\\.\\.)|(?<!\\.))"  # allow a range endpoint after `..`, but not a leading-dot decimal
 
 
 def rule(name: str, match: str, **extra: object) -> dict:
@@ -227,7 +228,7 @@ GRAMMAR = {
                     "match": f"{NOT_BEFORE}({NUMBER_PREFIX})([0-9A-Za-z_]+)",
                     "captures": {"1": {"name": f"storage.type.numeric.prefix.{D}"}, "2": {"name": f"constant.numeric.based.{D}"}},
                 },
-                rule("constant.numeric.decimal", f"{NOT_BEFORE}(?<!\\.)[0-9][0-9_]*(?:\\.[0-9][0-9_]*)?(?:[eE][+-]?[0-9][0-9_]*)?"),
+                rule("constant.numeric.decimal", f"{NOT_BEFORE}{DECIMAL_START}[0-9][0-9_]*(?:\\.[0-9][0-9_]*)?(?:[eE][+-]?[0-9][0-9_]*)?"),
             ]
         },
         "metatag": {

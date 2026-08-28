@@ -88,6 +88,44 @@ def _length_key(array_id: int) -> int:
     return -array_id - 1
 
 
+def _propositions_interval(propositions: tuple[ty.Proposition, ...] | list[ty.Proposition]) -> Interval | None:
+    """The bounds a set of value propositions guarantees (`>? 0` is `[1, ∞]`)."""
+    lower: int | None = None
+    upper: int | None = None
+    for proposition in propositions:
+        if proposition.subject != 'self':
+            continue
+        lower = _maximum_lower(lower, proposition.lower_bound())
+        upper = _minimum_upper(upper, proposition.upper_bound())
+    return None if lower is None and upper is None else Interval(lower, upper)
+
+
+def _excludes_zero(propositions: tuple[ty.Proposition, ...] | list[ty.Proposition]) -> bool:
+    return any(p.subject == 'self' and p.op == 'not=?' and p.value == 0 for p in propositions)
+
+
+def _call_result_refinement(node: hir.AST) -> ty.RefinedType | None:
+    """The refined return type of a call (`f():>int64<i => i >=? 1>`), if any."""
+    node = _strip_casts(node)
+    if isinstance(node, hir.FunctionCall):
+        function_type = node.func.type
+        if isinstance(function_type, ty.OverloadType) and node.selected_method_index is not None:
+            function_type = function_type.methods[node.selected_method_index]
+        if isinstance(function_type, ty.FunctionType) and isinstance(function_type.ret, ty.RefinedType):
+            return function_type.ret
+    return None
+
+
+def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
+    """The invariant declared on the field a member access reads."""
+    node = _strip_casts(node)
+    if not isinstance(node, hir.MemberAccess):
+        return ()
+    object_type = ty.unfold(ty.strip_refinement(node.value.type))
+    field = object_type.field(node.name) if isinstance(object_type, ty.ObjectType) else None
+    return field.refinement if field is not None else ()
+
+
 def _describe_proposition_text(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
@@ -350,6 +388,9 @@ class _BoundsValidator:
             interval = self._eval(node.expr, current, validate=validate)
             if node.binding_id is not None and node.binding_id not in self.assigned:
                 self._record_element_intervals(node.binding_id, _strip_casts(node.expr))
+            if node.binding_id is not None and self._nonzero_proven(node.expr, interval, current):
+                # `let d = -denominator`, `let g = gcd(…)`: the initializer's nonzero-ness is a fact on the binding
+                current[_nonzero_key(node.binding_id)] = Interval.exact(1)
             if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
                 interval = self._seed_refinements(node, current, interval)
             declared = ty.strip_refinement(node.annotation) if node.annotation is not None else None
@@ -433,14 +474,41 @@ class _BoundsValidator:
         return current
 
     def _nonzero_proven(self, node: hir.AST, interval: Interval | None, state: State) -> bool:
-        """The interval excludes zero, or a `not=? 0` guard covers the binding."""
+        """The interval excludes zero, a `not=? 0` guard covers the binding, or a declared invariant does."""
         if interval is not None and (
             (interval.lower is not None and interval.lower > 0)
             or (interval.upper is not None and interval.upper < 0)
         ):
             return True
         binding = self._binding_id(node)
-        return binding is not None and _nonzero_key(binding) in state
+        if binding is not None and _nonzero_key(binding) in state:
+            return True
+        if _excludes_zero(_member_invariant(node)):
+            return True
+        refined_result = _call_result_refinement(node)
+        if refined_result is not None and _excludes_zero(refined_result.propositions):
+            return True
+        stripped = _strip_casts(node)
+        if (
+            isinstance(stripped, hir.FunctionCall)
+            and isinstance(stripped.func, hir.ExpressedIdentifier)
+            and stripped.func.name == '__unary_sub__'
+            and len(stripped.pos_args) == 1
+        ):
+            # negation keeps a value nonzero (even at the wrapping minimum)
+            return self._nonzero_proven(stripped.pos_args[0], self._eval(stripped.pos_args[0], state, validate=False), state)
+        return False
+
+    def _tightened(self, node: hir.AST, interval: Interval | None, state: State) -> Interval | None:
+        """An interval whose bound sits on zero moves past it when the value is known nonzero."""
+        if interval is None:
+            return None
+        if interval.lower == 0 or interval.upper == 0:
+            if self._nonzero_proven(node, None, state):
+                lower = 1 if interval.lower == 0 else interval.lower
+                upper = -1 if interval.upper == 0 else interval.upper
+                return Interval(lower, upper)
+        return interval
 
     def _validate_divisor(self, divisor: hir.AST, interval: Interval | None, state: State) -> None:
         """`//` and `%` need a divisor proven nonzero (Python raises; Dewy proves)."""
@@ -507,6 +575,7 @@ class _BoundsValidator:
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
         subject_node, subject = self._subject_interval(proposition, value, interval, state)
+        subject = self._tightened(subject_node, subject, state)
         constant = Interval.exact(proposition.value)
         name = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}.get(proposition.op)
         if name is None:
@@ -1037,6 +1106,9 @@ class _BoundsValidator:
                 else None
             )
             if interval is not None:
+                # a `not=? 0` fact moves a bound that sits on zero past it
+                if node.binding_id is not None and _nonzero_key(node.binding_id) in state and (interval.lower == 0 or interval.upper == 0):
+                    return Interval(1 if interval.lower == 0 else interval.lower, -1 if interval.upper == 0 else interval.upper)
                 return interval
             return self._constant_binding(node.binding_id, set())
         if isinstance(node, hir.Place):
@@ -1280,6 +1352,11 @@ class _BoundsValidator:
                     arguments[1],
                     node.type,
                 )
+            refined_result = _call_result_refinement(node)
+            if refined_result is not None:
+                declared = _propositions_interval(refined_result.propositions)
+                if declared is not None:
+                    result = declared if result is None else result.intersect(declared)
             if validate and arithmetic and node.type in ('int', 'uint'):
                 # Abstract integer arithmetic lowers to 64-bit words, so its
                 # result must be proven to fit one.
@@ -1346,7 +1423,11 @@ class _BoundsValidator:
         if isinstance(node, hir.MemberAccess):
             self._eval(node.value, state, validate=validate)
             route_id = sb.array_route_id(node, self.registry)
-            return state.get(route_id) if route_id is not None else None
+            interval = state.get(route_id) if route_id is not None else None
+            declared = _propositions_interval(_member_invariant(node))
+            if declared is not None:
+                interval = declared if interval is None else interval.intersect(declared)
+            return interval
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             value = self._eval(node.value, state, validate=validate)

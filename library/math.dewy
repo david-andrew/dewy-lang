@@ -1,5 +1,10 @@
 # Portable integer math used by the compiler's operator routing.
 
+# Arithmetic that cannot be proven safe yields one of these instead of a wrong
+# value or a crash: the caller handles the branch (`is?`, `or_throw`).
+let Overflow:type = type of error          # int64 parts would wrap
+let DivisionByZero:type = type of error    # a divisor that is exactly zero at runtime
+
 # `base ^ exponent` for a non-negative integer exponent, by squaring.
 let _int_pow = (base:int64 exponent:int64):>int64 => {
     let result:int64 = 1

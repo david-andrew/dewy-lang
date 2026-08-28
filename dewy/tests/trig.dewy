@@ -7,7 +7,9 @@ let main = ():>int64 => {
     let quarter:fixed = cos(90°)
     let half:fixed = cos(60°)
     let unit:fixed = sin(90°)
-    let diag:fixed = tan(45°)
+    let diag_result = tan(45°)             # tan is undefined where cos is exactly zero
+    if diag_result is? DivisionByZero { return 1 }
+    let diag:fixed = diag_result
     let third:fixed = 1/3
     let sum:fixed = third + 2/3 + 1.25
     printl"{joules} {quarter} {half} {unit} {diag} {sum} {2 * third}"

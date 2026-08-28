@@ -79,6 +79,10 @@ def _erase_dimensions(root: object) -> None:
     def erase(type_: object) -> object:
         if isinstance(type_, ty.RefinedType):
             type_ = type_.base  # refinements were proven during checking
+        if isinstance(type_, ty.TypeOr):
+            # `rational * Length | Overflow`: the members lose their dimensions too
+            members = [erase(member) for member in type_.items]
+            return type_ if all(a is b for a, b in zip(members, type_.items)) else ty.TypeOr(members)
         return type_.number if isinstance(type_, ty.QuantityType) else type_
 
     def walk(value: object) -> None:
@@ -343,6 +347,9 @@ class _Lowerer(
 
     def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
         literal = function.literal
+        if isinstance(literal.rettype, ty.RefinedType):
+            # a refined result is proven at every return during checking; the target sees the base type
+            literal = replace(literal, rettype=literal.rettype.base)
         if literal.rest_args is not None:
             self._target_error(literal, 'rest parameters and argument spreading')
         result_payload = ty.optional_payload(literal.rettype)

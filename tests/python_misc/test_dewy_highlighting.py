@@ -123,10 +123,13 @@ def test_number_patterns_match_the_literal_forms() -> None:
         assert fullmatch(based, literal), literal
     for literal in ("42", "1_000_000", "9.8", "1.25e2", "5e-1", "0", "1e10"):
         assert fullmatch(decimal, literal), literal
-    # a range `1..5` is two numbers around `..`, never `1.` and `.5`
-    assert match(decimal, "1..5").group(0) == "1"
+    # A range `1..5` is two numbers around `..`, never `1.` and `.5`.
+    decimal_regex = compile_regex(decimal)
+    assert [found.group(0) for found in decimal_regex.finditer("1..5")] == ["1", "5"]
+    assert [found.group(0) for found in decimal_regex.finditer("0,2..100")] == ["0", "2", "100"]
+    assert [found.group(0) for found in decimal_regex.finditer("3...12")] == ["3", "12"]
     assert match(decimal, "2e") .group(0) == "2"
-    assert not match(decimal, ".5")
+    assert not list(decimal_regex.finditer(".5"))
 
 
 def test_based_strings_use_the_string_scope_for_their_quotes() -> None:

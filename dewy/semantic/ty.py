@@ -235,6 +235,10 @@ class ObjectField:
     type: TypeExpr
     mutable: bool = True
     default: object = field(default=None, compare=False, hash=False)
+    refinement: tuple['Proposition', ...] = field(default=(), compare=False, hash=False)
+    """An invariant on the field's value (`denominator:int64<denominator >? 0>`):
+    proven wherever a value of the object type is made or the field is stored,
+    assumed wherever it is read. Outside structural identity, like ``default``."""
 
 
 @dataclass
@@ -270,6 +274,14 @@ class ObjectType:
 
     def method(self, name: str) -> 'MethodSpec | None':
         return next((m for m in self.methods if m.name == name), None)
+
+    def invariants(self) -> list['Proposition']:
+        """The field refinements as field-subject propositions on the object."""
+        return [
+            Proposition(f'.{f.name}', p.op, p.value)
+            for f in self.fields
+            for p in f.refinement
+        ]
 
     def field(self, name: str) -> ObjectField | None:
         for object_field in self.fields:

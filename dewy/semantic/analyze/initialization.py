@@ -744,8 +744,13 @@ class _InitializationChecker:
                 return None
             targets: list[hir.FunctionLiteral] = []
             for producer in producers:
+                # a function whose result is a call to itself (`return f(…)`)
+                # must not be followed into its own results again
+                key = id(producer)
+                if key in seen:
+                    continue
                 for result in self._function_results(producer.body):
-                    resolved = self._callable_targets(result, parameters, seen)
+                    resolved = self._callable_targets(result, parameters, seen | {key})
                     if resolved is None:
                         return None
                     targets.extend(resolved)

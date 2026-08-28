@@ -1,0 +1,27 @@
+# Refined results and field invariants. A result refinement is proven at every
+# return and assumed at every call; a field invariant is proven wherever a value
+# is made or the field is stored, and assumed wherever it is read.
+let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
+
+let at_least_one = (n:int64):>int64<i => i >=? 1> => {
+    if n >=? 1 { return n }                       # proven by the guard
+    return 1
+}
+
+let make = (top:int64 bottom:int64):>Ratio => {
+    if bottom >? 0 { return Ratio(top bottom) }   # the invariant is proven by the guard
+    return Ratio(top 1)                           # and by the literal
+}
+
+let scale = (r:Ratio):>int64 => r.top // r.bottom   # the invariant proves the division
+
+let main = ():>int64 => {
+    let d:int64 = 4 transmute int64
+    let unit:int64 = 20 // at_least_one(d)            # a refined result is a proven divisor: 5
+    let g:int64 = at_least_one(0)                     # its fact survives on the binding: 1
+    let r:Ratio = make(84 d)
+    r.bottom = at_least_one(2)                        # a store proves the invariant from the result
+    let q = 1 / 3                                     # the prelude's Rational carries the same invariant
+    let thirds:int64 = 9 // q.denominator             # 3
+    return unit + g + scale(r) + r.top // r.bottom + thirds - 51   # 5 + 1 + 42 + 42 + 3 - 51 = 42
+}

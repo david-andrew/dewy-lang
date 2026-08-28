@@ -26,6 +26,10 @@ class Binding:
     function: hir.FunctionLiteral | None = None
     literal_path_parameter: str | None = None
     read_only_reason: str | None = None
+    syntax: object = None
+    """The syntax object this binding was allocated for. Held so the object
+    stays alive for the registry's lifetime: `by_syntax` is keyed by `id()`,
+    and a freed object's id could otherwise be reused by unrelated syntax."""
     """Why the binding cannot be written, when it is not a `const` declaration
     (a loop variable borrowing an array element)."""
     route_root: int | None = None
@@ -81,6 +85,7 @@ class BindingRegistry:
         loc: Span,
     ) -> Binding:
         binding = Binding(self.next_id, name, kind, loc)
+        binding.syntax = syntax
         self.next_id += 1
         self.by_id[binding.id] = binding
         self.by_syntax[id(syntax)] = binding

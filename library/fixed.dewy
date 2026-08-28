@@ -47,12 +47,8 @@ let _muldiv_shift32 = (n:int64 d:int64<i => i >? 0>):>int64 => {
     return raw
 }
 
-let _fixed_from_rational = (value:Rational):>Fixed => {
-    # a normalized rational's denominator is positive; the type does not say so yet
-    if value.denominator >? 0 { return [raw = _muldiv_shift32(value.numerator value.denominator)] }
-    _trap("fixed: rational with a non-positive denominator\n")
-    return [raw = 0]
-}
+let _fixed_from_rational = (value:Rational):>Fixed =>
+    [raw = _muldiv_shift32(value.numerator value.denominator)]   # the denominator's invariant is the proof
 
 let _fixed_add = (a:Fixed b:Fixed):>Fixed => [raw = a.raw + b.raw]
 let _fixed_sub = (a:Fixed b:Fixed):>Fixed => [raw = a.raw - b.raw]
@@ -76,7 +72,8 @@ let _fixed_mul = (a:Fixed b:Fixed):>Fixed => {
     return [raw = raw]
 }
 
-let _fixed_div = (a:Fixed b:Fixed):>Fixed => {
+# Dividing by a fixed value is the caller's proof that it is nonzero (`if f not=? 0`).
+let _fixed_div = (a:Fixed b:Fixed<raw not=? 0>):>Fixed => {
     let negative:bool = b.raw <? 0
     let divisor:int64 = _int_abs(b.raw)
     if divisor >? 0 {
@@ -84,8 +81,7 @@ let _fixed_div = (a:Fixed b:Fixed):>Fixed => {
         if negative { return [raw = -raw] }
         return [raw = raw]
     }
-    # TODO: a nonzero refinement on the fixed operand would make this the caller's proof
-    _trap("fixed-point division by zero\n")
+    # only the minimum value's magnitude wraps negative; |a / b| is then below the resolution
     return [raw = 0]
 }
 
@@ -128,4 +124,9 @@ let _cos_turns = (turns:Fixed):>Fixed => {
 
 let _sin_turns = (turns:Fixed):>Fixed => _cos_turns([raw = turns.raw - 1073741824])
 
-let _tan_turns = (turns:Fixed):>Fixed => _fixed_div(_sin_turns(turns) _cos_turns(turns))
+# tan is undefined where cos is exactly zero in this representation.
+let _tan_turns = (turns:Fixed):>Fixed|DivisionByZero => {
+    let cosine:Fixed = _cos_turns(turns)
+    if cosine not=? 0 { return _fixed_div(_sin_turns(turns) cosine) }
+    return DivisionByZero
+}

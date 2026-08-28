@@ -39,8 +39,9 @@ def test_decimal_literal_is_an_exact_rational() -> None:
 def test_integers_promote_in_mixed_arithmetic_and_comparisons() -> None:
     declared = _declared('let a = 1/3\nlet b = a + 2\nlet c = 2 * a\nlet d = a <? 1\nlet e = -a')
     rational = declared['a'].expr.type
-    assert declared['b'].expr.type == rational
-    assert declared['c'].expr.type == rational
+    # runtime arithmetic on int64 parts may overflow: the result carries the error member
+    assert declared['b'].expr.type == ty.union(rational, 'Overflow')
+    assert declared['c'].expr.type == ty.union(rational, 'Overflow')
     assert declared['d'].expr.type == 'bool'
     assert declared['e'].expr.type == rational
     assert declared['b'].expr.func.name.endswith('_rational_add')
@@ -143,9 +144,14 @@ def _fixed_type() -> ty.Type:
 
 def test_fixed_constants_round_to_nearest_raw() -> None:
     declared = _declared('let a:fixed = 1/3\nlet b:fixed = 1.25\nlet c:fixed = -7')
-    assert [arg.value for arg in declared['a'].expr.pos_args] == [1431655765]
-    assert [arg.value for arg in declared['b'].expr.pos_args] == [5368709120]
-    assert [arg.value for arg in declared['c'].expr.pos_args] == [-30064771072]
+
+    def raw(name: str) -> int:
+        literal = declared[name].expr  # a `[raw = …]` literal: the constant raw is a compile-time fact
+        return next(f.value.value for f in literal.fields if f.name == 'raw')
+
+    assert raw('a') == 1431655765
+    assert raw('b') == 5368709120
+    assert raw('c') == -30064771072
 
 
 def test_fixed_absorbs_integers_and_rationals() -> None:
