@@ -40,7 +40,7 @@ def test_field_invariants_are_proven_on_construction_and_stores() -> None:
 
 def test_field_invariants_are_assumed_on_reads() -> None:
     _compile(RATIO + 'let scale = (r:Ratio):>int64 => r.top // r.bottom\n')
-    _compile('let main = ():>int64 => { let q = 1 / 3  return 9 // q.denominator }\n')  # the prelude Rational's invariant
+    _compile('let main = ():>int64 => { let q:rational<int64> = 1 / 3  return 9 // q.denominator }\n')  # the word rational's invariant
     # a plain object is checked against the invariant when it flows into the type
     with pytest.raises(UserError, match='cannot prove refinement'):
         _compile(RATIO + 'let Plain:type = [top:int64 bottom:int64]\nlet scale = (r:Ratio):>int64 => r.top // r.bottom\nlet f = (p:Plain):>int64 => scale(p)\n')

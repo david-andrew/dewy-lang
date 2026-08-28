@@ -124,10 +124,9 @@ def test_fractional_unit_scales_make_rational_quantities() -> None:
     # `ms` is the exact rational 1/1000 s, so a runtime integer times it is a
     # runtime rational quantity; a literal folds to an exact constant.
     root = _check('let value:int64 = 2 transmute int64\nlet delay = value * ms\nconst pause = 300ms')
-    delay_result = _declarations(root)['delay'].expr.type
-    assert isinstance(delay_result, ty.TypeOr) and 'Overflow' in delay_result.items  # int64 parts may overflow
-    delay = next(item for item in delay_result.items if isinstance(item, ty.QuantityType))
-    assert isinstance(delay.number, ty.ObjectType)
+    delay = _declarations(root)['delay'].expr.type
+    assert isinstance(delay, ty.QuantityType)
+    assert isinstance(delay.number, ty.ObjectType)  # the abstract rational (big parts): no error member
     assert delay.dimension == ty.dimension(('Time', 1))
     assert _declarations(root)['pause'].expr.type == ty.QuantityType(
         ty.RationalLiteralType(3, 10),

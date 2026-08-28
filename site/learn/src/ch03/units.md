@@ -40,7 +40,7 @@ let energy = 1/2 * mass * velocity^2       # 4500 J
 let joules:rational = energy / J            # dividing by a unit yields the count
 ```
 
-(`const` keeps the quantities compile-time so the arithmetic folds; runtime rational arithmetic on 64-bit parts yields `rational | Overflow` for the caller to handle — the abstract `rational` that picks big-integer parts where a fit cannot be proven is the planned default.)
+(`const` keeps the quantities compile-time so the arithmetic folds exactly. A `rational` that survives to runtime has big-integer parts, so its arithmetic never overflows; `rational<int64>` is the explicit word-sized form, whose runtime arithmetic yields `rational<int64> | Overflow` for the caller to handle.)
 
 Angles use the turn so that degrees are exact (`45°` is `1/8 turn`) and trigonometry reduces exactly before computing. `cos`, `sin`, and `tan` accept an angle and return a [fixed-point](basic-data-types.md#rationals-and-fixed-point) value:
 

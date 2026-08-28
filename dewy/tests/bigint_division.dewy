@@ -1,0 +1,57 @@
+# Big-integer division is Knuth's Algorithm D (one trial limb per quotient
+# limb) and the gcd behind rational normalization is binary, with a short
+# division when one side is a single limb. `scale` is 1 at runtime so the
+# operands are not folded away.
+let main = (args:array<string>):>int64 => {
+    let scale:int64 = 1
+    if args.length >? 1000 { scale = 2 }     # runtime-dependent, so nothing folds
+    let checks:int64 = 0
+    # the input that makes Algorithm D's estimate one too big (the add-back step)
+    let a:bigint = 170141183420855150474555134919112130560 * scale
+    let b:bigint = 39614081257132168796771975169 * scale
+    if a // b =? 4294967294 and a % b =? 39614081257132168792477007874 { checks += 1 }
+    # multi-limb over multi-limb, floor semantics for negatives
+    let x:bigint = 1606938044258990275541962092341162602522215339461694069869266 * scale
+    let y:bigint = 2503155504993241601315571986085849 * scale
+    let q = x // y
+    let r = x % y
+    if q * y + r =? x and r <? y and q =? 641964928288915446533058609 and (-x) // y =? -641964928288915446533058610 and (-x) % y =? 1320644547078208492919821938740624 { checks += 2 }
+    # a one-limb divisor (short division) and a dividend smaller than the divisor
+    if x // 4000000000 =? 401734511064747568885490523085290650630553834865423 and x % 4000000000 =? 2069869266 and y // x =? 0 and y % x =? y { checks += 4 }
+    # normalization of rationals with big parts: a shared power of two (binary
+    # gcd), a small factor against a large one (the short-division path),
+    # coprime denominators, equal denominators
+    let two = (2 * scale) / scale
+    let three = (3 * scale) / scale
+    let big2 = two ^ 70
+    let big3 = three ^ 50
+    let shared_d = 5 * big2
+    let mixed_d = 11 * big3
+    let two40 = two ^ 40
+    let three25 = three ^ 25
+    let same = 5/(12 * scale) + 1/(12 * scale)
+    if shared_d not=? 0 and mixed_d not=? 0 and two40 not=? 0 and three25 not=? 0 {
+        let coprime = 1 / two40 + 1 / three25
+        if (3 * big2) / shared_d =? 3/5 and (7 * big3) / mixed_d =? 7/11
+            and coprime * two40 * three25 =? 1946800237219 and same =? 1/2 { checks += 8 }
+    }
+    # the harmonic sum reaches H_20 exactly
+    let acc = 0/1
+    let i:int64 = 1
+    loop i <=? 20 * scale {
+        acc = acc + 1/i
+        i += 1
+    }
+    if acc =? 55835135/15519504 { checks += 16 }
+    # cross-reduced products and quotients with big parts
+    let three40 = three ^ 40
+    let two81 = two ^ 81
+    if three40 not=? 0 and two81 not=? 0 {
+    let p = (two ^ 80) / three40
+    let q2 = (three ^ 41) / two81
+    if q2 not=? 0 {
+        if p * q2 =? 3/2 and (p / q2) * (three ^ 81) =? two ^ 161 and (p - p) =? 0 and (p * q2) ^ 3 =? 27/8 { checks += 32 }
+    }
+    }
+    return checks
+}

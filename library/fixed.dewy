@@ -50,6 +50,7 @@ let _muldiv_shift32 = (n:int64 d:int64<i => i >? 0>):>int64 => {
 let _fixed_from_rational = (value:Rational):>Fixed =>
     [raw = _muldiv_shift32(value.numerator value.denominator)]   # the denominator's invariant is the proof
 
+
 let _fixed_add = (a:Fixed b:Fixed):>Fixed => [raw = a.raw + b.raw]
 let _fixed_sub = (a:Fixed b:Fixed):>Fixed => [raw = a.raw - b.raw]
 let _fixed_neg = (a:Fixed):>Fixed => [raw = -a.raw]

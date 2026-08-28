@@ -2701,7 +2701,62 @@ class _Lowerer(
             self.loop_signal_kind,
             self.lower_loop_depth,
         ) = previous_state
-        return lowered
+        return self._hoist_loop_allocations(lowered)
+
+    def _hoist_loop_allocations(self, body: hir.AST) -> hir.AST:
+        """Frame storage requested inside a loop is allocated once, at function entry.
+
+        `__alloca__` grows the frame until the function returns, so a temporary
+        object, union cell, or exact array allocated in a loop body would grow
+        the stack every iteration (200 000 rational additions overflowed it).
+        Every `let name = __alloca__(constant)` under a loop arm moves to the
+        front of the body; the storage is then reused per iteration, which is
+        sound because values are copied out of temporaries (value semantics)
+        and nothing retains a frame address across iterations. Runtime-sized
+        allocations stay where they are, and so does string storage: strings
+        are immutable handles shared by reference (`pieces.push"{v}"` stores
+        the descriptor's address), so one descriptor per loop would alias
+        every iteration's string.
+        """
+        hoisted: list[hir.AST] = []
+
+        def is_frame_allocation(item: hir.AST) -> bool:
+            return (
+                isinstance(item, hir.Declare)
+                and isinstance(item.expr, hir.FunctionCall)
+                and isinstance(item.expr.func, hir.ExpressedIdentifier)
+                and item.expr.func.name in ('__alloca__', '__static_alloca__')
+                and len(item.expr.pos_args) == 1
+                and isinstance(item.expr.pos_args[0], hir.Integer)
+                and not item.name.startswith('__dewy_string_')
+            )
+
+        def walk(node: hir.AST, in_loop: bool) -> hir.AST:
+            if isinstance(node, hir.Block):
+                items: list[hir.AST] = []
+                for item in node.items:
+                    if in_loop and is_frame_allocation(item):
+                        hoisted.append(item)
+                        continue
+                    items.append(walk(item, in_loop))
+                return replace(node, items=items)
+            if isinstance(node, hir.Flow):
+                arms = [
+                    replace(arm, body=walk(arm.body, in_loop or isinstance(arm, hir.LoopArm)))
+                    for arm in node.arms
+                ]
+                default = walk(node.default, in_loop) if node.default is not None else None
+                return replace(node, arms=arms, default=default)
+            if isinstance(node, hir.Suppress):
+                return replace(node, item=walk(node.item, in_loop))
+            return node
+
+        rewritten = walk(body, False)
+        if not hoisted:
+            return body
+        if isinstance(rewritten, hir.Block) and rewritten.scoped:
+            return replace(rewritten, items=[*hoisted, *rewritten.items])
+        return hir.Block(rewritten.loc, rewritten.type, [*hoisted, rewritten], True)
 
     def _lower_function_body_inner(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
         """Make an implicit scalar function result explicit while lowering statements."""

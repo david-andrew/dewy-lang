@@ -111,47 +111,275 @@ let _mag_mul = (a:array<uint64> b:array<uint64>):>array<uint64> => {
     return result
 }
 
-let _mag_shift_left_one = (@limbs:array<uint64>):>void => {
+# --- shifts by whole bit counts ---
+let _mag_shift_left = (limbs:array<uint64> bits:int64<bits >=? 0>):>array<uint64> => {
+    if limbs.length =? 0 { return [] }
+    let limb_shift:int64 = bits // 32
+    let bit_shift:uint64 = (bits % 32) transmute uint64
+    let result:array<uint64> = []
+    let n:int64 = 0
+    loop n <? limb_shift { result.push(0)  n = n + 1 }
     let carry:uint64 = 0
     let i:int64 = 0
     loop i <? limbs.length {
-        let t:uint64 = (limbs[i] << 1) or carry
-        limbs[i] = t and _LIMB_MASK
+        let t:uint64 = (limbs[i] << bit_shift) or carry
+        result.push(t and _LIMB_MASK)
         carry = t >> 32
         i = i + 1
     }
-    if carry not =? 0 { limbs.push(carry) }
+    if carry not =? 0 { result.push(carry) }
+    return result
 }
 
-# quotient and remainder of magnitudes by binary long division (b non-zero)
+let _mag_shift_right = (limbs:array<uint64> bits:int64<bits >=? 0>):>array<uint64> => {
+    let limb_shift:int64 = bits // 32
+    let bit_shift:uint64 = (bits % 32) transmute uint64
+    let result:array<uint64> = []
+    let i:int64 = limb_shift
+    if i <? 0 { i = 0 }      # the analysis does not carry the sign through `//`
+    loop i <? limbs.length {
+        let value:uint64 = limbs[i] >> bit_shift
+        let next:int64 = i + 1
+        if next <? limbs.length {
+            if bit_shift not =? 0 { value = value or ((limbs[next] << (32 - bit_shift)) and _LIMB_MASK) }
+        }
+        result.push(value)
+        i = i + 1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+# the number of low zero bits (0 for zero)
+let _mag_trailing_zeros = (limbs:array<uint64>):>int64<i => i >=? 0> => {
+    let count:int64 = 0
+    let i:int64 = 0
+    loop i <? limbs.length {
+        let limb:uint64 = limbs[i]
+        if limb =? 0 {
+            count = count + 32
+        } else {
+            loop (limb and 1) =? 0 {
+                limb = limb >> 1
+                count = count + 1
+            }
+            if count >=? 0 { return count }   # a counter; the analysis widens it
+            return 0
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+# the shift that puts a limb's highest set bit at bit 31 (the limb is nonzero)
+let _limb_leading_zeros = (limb:uint64):>int64<i => i >=? 0> => {
+    let count:int64 = 0
+    loop (limb and 2147483648) =? 0 and count <? 32 {
+        limb = limb << 1
+        count = count + 1
+    }
+    if count >=? 0 { return count }   # a counter; the analysis widens it
+    return 0
+}
+
+# --- division ---
+# quotient and remainder of magnitudes (b nonzero)
 let _MagDivMod:type = [quotient:array<uint64> remainder:array<uint64>]
-let _mag_divmod = (a:array<uint64> b:array<uint64>):>_MagDivMod => {
+
+# short division by one limb, most significant limb first: each quotient limb
+# depends only on the limb it replaces and the running remainder
+let _mag_divmod_limb = (a:array<uint64> divisor:uint64 & ~0):>_MagDivMod => {
     let quotient:array<uint64> = []
     let n:int64 = 0
     loop n <? a.length { quotient.push(0)  n = n + 1 }
-    let remainder:array<uint64> = []
+    let remainder:uint64 = 0
     let i:int64 = a.length
     loop i >? 0 {
         i = i - 1
-        let bit:int64 = 32
-        loop bit >? 0 {
-            bit = bit - 1
-            _mag_shift_left_one(@remainder)
-            if i <? a.length {
-                let incoming:uint64 = (a[i] >> (bit transmute uint64)) and 1
-                if incoming not =? 0 {
-                    if remainder.length =? 0 { remainder.push(1) } else { remainder[0] = remainder[0] or 1 }
-                }
-            }
-            if _mag_compare(remainder b) >=? 0 {
-                remainder = _mag_sub(remainder b)
-                if i <? quotient.length { quotient[i] = quotient[i] or (1 << (bit transmute uint64)) }
+        if i <? a.length {
+            if i <? quotient.length {
+                let value:uint64 = (remainder << 32) or a[i]
+                quotient[i] = value // divisor
+                remainder = value % divisor
             }
         }
     }
     _bigint_trim(@quotient)
-    _bigint_trim(@remainder)
-    return [quotient = quotient remainder = remainder]
+    if remainder =? 0 { return [quotient = quotient remainder = []] }
+    return [quotient = quotient remainder = [remainder]]
+}
+
+let _mag_mod_limb = (a:array<uint64> divisor:uint64 & ~0):>uint64 => {
+    let remainder:uint64 = 0
+    let i:int64 = a.length
+    loop i >? 0 {
+        i = i - 1
+        if i <? a.length { remainder = ((remainder << 32) or a[i]) % divisor }
+    }
+    return remainder
+}
+
+# Knuth's Algorithm D (TAOCP 4.3.1): the divisor is shifted so its top limb
+# has bit 31 set, then each quotient limb is estimated from the top two limbs
+# of the running remainder and the top limb of the divisor, corrected at most
+# twice by the second limb, and confirmed by the multiply-and-subtract; a
+# rare final borrow means the estimate was one too big and the divisor is
+# added back. One trial limb per quotient limb, instead of one per bit.
+let _mag_divmod = (a:array<uint64> b:array<uint64>):>_MagDivMod => {
+    if _mag_compare(a b) <? 0 { return [quotient = [] remainder = a] }
+    if b.length =? 1 {
+        let divisor:uint64 = b[0]
+        if divisor not =? 0 { return _mag_divmod_limb(a divisor) }
+    }
+    let last:int64 = b.length - 1
+    let shift:int64 = 0
+    if last >=? 0 { if last <? b.length { shift = _limb_leading_zeros(b[last]) } }
+    let v:array<uint64> = _mag_shift_left(b shift)
+    let u:array<uint64> = _mag_shift_left(a shift)
+    loop u.length <? a.length + 1 { u.push(0) }
+    let n:int64 = v.length
+    let m:int64 = u.length - n - 1
+    let quotient:array<uint64> = []
+    let k:int64 = 0
+    loop k <=? m { quotient.push(0)  k = k + 1 }
+    let v_top:uint64 = 0
+    let v_next:uint64 = 0
+    let v_last:int64 = n - 1
+    let v_prev:int64 = n - 2
+    if v_last <? v.length { if v_last >=? 0 { v_top = v[v_last] } }
+    if v_prev <? v.length { if v_prev >=? 0 { v_next = v[v_prev] } }
+    # the top limb is nonzero (no leading zero limbs) and shifted to bit 31;
+    # the analysis does not know that, hence the (never taken) fallback
+    if v_top =? 0 { return [quotient = [] remainder = a] }
+    let j:int64 = m
+    loop j >=? 0 {
+        # estimate from the top two remainder limbs over the top divisor limb
+        let u_top:uint64 = 0
+        let u_next:uint64 = 0
+        let u_third:uint64 = 0
+        let top:int64 = j + n
+        let below:int64 = top - 1
+        let third:int64 = top - 2
+        if top <? u.length { if top >=? 0 { u_top = u[top] } }
+        if below <? u.length { if below >=? 0 { u_next = u[below] } }
+        if third <? u.length { if third >=? 0 { u_third = u[third] } }
+        let numerator:uint64 = (u_top << 32) or u_next
+        let qhat:uint64 = numerator // v_top
+        let rhat:uint64 = numerator % v_top
+        let adjusting:bool = true
+        loop adjusting {
+            adjusting = false
+            if qhat >=? _LIMB_BASE { adjusting = true }
+            else { if qhat * v_next >? ((rhat << 32) or u_third) { adjusting = true } }
+            if adjusting {
+                qhat = qhat - 1
+                rhat = rhat + v_top
+                if rhat >=? _LIMB_BASE { adjusting = false }
+            }
+        }
+        # multiply and subtract qhat * v from u[j .. j + n]
+        let borrow:uint64 = 0
+        let carry:uint64 = 0
+        let i:int64 = 0
+        loop i <? n {
+            let at:int64 = i + j
+            if i <? v.length {
+                if at >=? 0 {
+                    if at <? u.length {
+                        let product:uint64 = qhat * v[i] + carry
+                        carry = product >> 32
+                        let difference:uint64 = u[at] + _LIMB_BASE - (product and _LIMB_MASK) - borrow
+                        u[at] = difference and _LIMB_MASK
+                        borrow = 1 - (difference >> 32)
+                    }
+                }
+            }
+            i = i + 1
+        }
+        if top >=? 0 {
+            if top <? u.length {
+                let difference:uint64 = u[top] + _LIMB_BASE - carry - borrow
+                u[top] = difference and _LIMB_MASK
+                borrow = 1 - (difference >> 32)
+            }
+        }
+        if borrow not =? 0 {
+            # the estimate was one too big: add the divisor back
+            qhat = qhat - 1
+            let add_carry:uint64 = 0
+            i = 0
+            loop i <? n {
+                let at:int64 = i + j
+                if i <? v.length {
+                    if at >=? 0 {
+                        if at <? u.length {
+                            let t:uint64 = u[at] + v[i] + add_carry
+                            u[at] = t and _LIMB_MASK
+                            add_carry = t >> 32
+                        }
+                    }
+                }
+                i = i + 1
+            }
+            if top >=? 0 {
+                if top <? u.length { u[top] = (u[top] + add_carry) and _LIMB_MASK }
+            }
+        }
+        if j <? quotient.length { quotient[j] = qhat }   # j >= 0 is the loop condition
+        j = j - 1
+    }
+    _bigint_trim(@quotient)
+    let remainder:array<uint64> = []
+    let low:int64 = 0
+    loop low <? n {
+        if low <? u.length { remainder.push(u[low]) }
+        low = low + 1
+    }
+    return [quotient = quotient remainder = _mag_shift_right(remainder shift)]
+}
+
+# --- greatest common divisor ---
+# Binary (Stein's) gcd: shifts and subtractions in place of divisions. When
+# either operand is one limb, one short division reduces the problem to a
+# word gcd, which is the common case (a small factor against a large one).
+let _limb_gcd = (a:uint64 b:uint64):>uint64 => {
+    loop b not =? 0 {
+        let t:uint64 = a % b
+        a = b
+        b = t
+    }
+    return a
+}
+
+let _mag_gcd = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    if a.length =? 0 { return b }
+    if b.length =? 0 { return a }
+    if a.length =? 1 {
+        let limb:uint64 = a[0]
+        if limb not =? 0 { return [_limb_gcd(limb _mag_mod_limb(b limb))] }
+    }
+    if b.length =? 1 {
+        let limb:uint64 = b[0]
+        if limb not =? 0 { return [_limb_gcd(limb _mag_mod_limb(a limb))] }
+    }
+    let zeros_a:int64 = _mag_trailing_zeros(a)
+    let zeros_b:int64 = _mag_trailing_zeros(b)
+    let common:int64 = zeros_a
+    if zeros_b <? common { common = zeros_b }
+    let x:array<uint64> = _mag_shift_right(a zeros_a)
+    let y:array<uint64> = _mag_shift_right(b zeros_b)
+    loop y.length >? 0 {
+        # both odd: the difference of the larger and the smaller is even
+        if _mag_compare(x y) >? 0 {
+            x = _mag_sub(x y)
+            x = _mag_shift_right(x _mag_trailing_zeros(x))
+        } else {
+            y = _mag_sub(y x)
+            if y.length >? 0 { y = _mag_shift_right(y _mag_trailing_zeros(y)) }
+        }
+    }
+    if common >=? 0 { return _mag_shift_left(x common) }
+    return x
 }
 
 # --- signed operations ---

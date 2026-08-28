@@ -1,23 +1,15 @@
 # `a / b` on integers is an exact rational; decimal literals are exact too.
-# Runtime rational arithmetic on int64 parts can overflow, so its result is
-# `rational | Overflow` and the caller handles the branch; dividing by a
-# rational needs it proven nonzero (`if q not=? 0`), like integer division.
+# The abstract `rational` has big-integer parts, so its arithmetic is total;
+# dividing by a rational needs it proven nonzero (`if q not=? 0`), like
+# integer division. `rational<int64>` is the explicit word form.
 let third = 1/3
 let main = ():>int64 => {
     let half:rational = 2/4
-    let sum_result = third + half
-    if sum_result is? Overflow { return 1 }
-    let sum = sum_result               # 5/6
-    let scaled_result = sum * 12
-    if scaled_result is? Overflow { return 2 }
-    let scaled = scaled_result         # 10
-    let diff_result = half - 9.8
-    if diff_result is? Overflow { return 3 }
-    let diff = diff_result             # -93/10
+    let sum = third + half             # 5/6
+    let scaled = sum * 12              # 10
+    let diff = half - 9.8              # -93/10
     if half =? 0 { return 4 }
-    let quotient_result = third / half
-    if quotient_result is? Overflow { return 5 }
-    let quotient = quotient_result     # 2/3
+    let quotient = third / half        # 2/3
     let neg = -quotient                # -2/3
     printl"{sum} {scaled} {diff} {quotient} {neg}"
     let checks:int64 = 0
@@ -26,6 +18,8 @@ let main = ():>int64 => {
     if sum not =? 1 { checks += 4 }
     if scaled =? 10 { checks += 8 }
     if 1/3 >=? third { checks += 16 }
-    # -93/10 → numerator -93 denominator 10
-    return checks + diff.denominator + scaled.numerator
+    if diff.denominator =? 10 and scaled.numerator =? 10 { checks += 32 }   # the parts are big integers
+    let word:rational<int64> = 5/6
+    if word.numerator + word.denominator =? 11 { checks += 64 }             # the word form has int64 parts
+    return checks - 76                                                       # 127 - 76 = 51
 }

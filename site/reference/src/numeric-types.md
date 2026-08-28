@@ -45,7 +45,7 @@ Operands are evaluated once.
 
 ## Rationals
 
-`rational` is an exact fraction, kept normalized: a positive denominator and coprime parts. `a / b` on integers yields a rational (`//` is floor division and stays integral); a decimal literal such as `9.8` or `1.25e2` is an exact rational. `+`, `-`, `*`, `/`, negation, and the ordered comparisons apply, and an integer operand promotes to a rational. Constant rational expressions fold at compile time; a constant zero divisor is a compile error. Rationals print as `n/d`, or as an integer when the denominator is one.
+`rational` is an exact fraction, kept normalized: a positive denominator and coprime parts. `a / b` on integers yields a rational (`//` is floor division and stays integral); a decimal literal such as `9.8` or `1.25e2` is an exact rational. `+`, `-`, `*`, `/`, negation, and the ordered comparisons apply, and an integer operand promotes to a rational. Constant rational expressions fold at compile time; a constant zero divisor is a compile error. Rationals print as `n/d`, or as an integer when the denominator is one. A decimal literal is a rational unless `fixed` is requested explicitly — by an annotation (`let x:fixed = 0.1`) or a `fixed` operand — and that coercion is the one lossy step: the constant rounds to the nearest Q32.32 value there (a constant outside the fixed range is a compile error).
 
 The runtime representation is a pair of `int64` parts; overflow beyond that range is currently unchecked, and a runtime zero divisor is an open error-value question.
 

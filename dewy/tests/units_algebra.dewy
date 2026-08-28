@@ -11,16 +11,13 @@ let main = ():>int64 => {
     printl"{joules} {newtons}"
     let distance = 120m
     let elapsed = 10s
-    let speed_result = distance / elapsed    # 12 m/s, a runtime rational: `| Overflow`
-    if speed_result is? Overflow { return 2 }
-    let speed = speed_result
+    let speed = distance / elapsed           # 12 m/s, a runtime rational (big-integer parts)
     let checks:int64 = 0
     if speed =? 12m/s { checks += 1 }
     if 2km + 300m =? 2300m { checks += 2 }
     if 1km >? 999m { checks += 4 }
-    let travelled = speed * 5s
-    if travelled is? Overflow { return 3 }
-    if travelled =? 60m { checks += 8 }
+    if speed * 5s =? 60m { checks += 8 }
     if 1/2 * hour =? 30minute { checks += 16 }
-    return checks + joules.numerator // 1000 + newtons.numerator // 1000
+    if joules =? 4500 and newtons =? 9800 { checks += 32 }
+    return checks - 19                       # 63 - 19 = 44
 }

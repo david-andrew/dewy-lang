@@ -46,7 +46,7 @@ fi
 
 source_dir="${temp_dir}/source"
 runtime_stage="${temp_dir}/runtime"
-for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/io.dewy library/reporting.dewy library/units.dewy library/linux/io.dewy library/linux/system.dewy; do
+for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/linux/io.dewy library/linux/system.dewy; do
     if [ ! -f "${source_dir}/${required_path}" ]; then
         echo "Downloaded source archive is missing ${required_path}." >&2
         exit 1
@@ -89,6 +89,7 @@ copy_runtime_file "${source_dir}/library/math.dewy"
 copy_runtime_file "${source_dir}/library/rational.dewy"
 copy_runtime_file "${source_dir}/library/fixed.dewy"
 copy_runtime_file "${source_dir}/library/bigint.dewy"
+copy_runtime_file "${source_dir}/library/bigrational.dewy"
 copy_runtime_file "${source_dir}/library/io.dewy"
 copy_runtime_file "${source_dir}/library/reporting.dewy"
 copy_runtime_file "${source_dir}/library/units.dewy"

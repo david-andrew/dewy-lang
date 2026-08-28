@@ -1,0 +1,17 @@
+# Temporaries allocated inside a loop must not grow the frame per iteration:
+# 300 000 rational additions produce object results each time (frame storage
+# is allocated once at function entry and reused), so this runs in a small,
+# constant stack instead of overflowing it.
+let main = ():>int64 => {
+    let acc:rational<int64> = 0/1
+    let step:rational<int64> = 1/3
+    let i:int64 = 0
+    loop i <? 300000 {
+        let next = acc + step
+        if next is? Overflow { return 1 }
+        acc = next
+        i += 1
+    }
+    if acc =? 100000 { return 42 }
+    return 0
+}

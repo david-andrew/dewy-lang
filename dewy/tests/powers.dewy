@@ -9,5 +9,7 @@ let main = ():>int64 => {
     let e:uint8 = 4
     let dynamic = n^e                 # 81
     printl"{cube} {folded} {eighth} {ratio} {inverted} {dynamic}"
-    return cube + folded // 100 + eighth.denominator + ratio.numerator + inverted.numerator + dynamic // 10
+    let parts:int64 = 0
+    if eighth.denominator =? 8 and ratio.numerator =? 4 and inverted.numerator =? 9 { parts = 21 }   # big-integer parts
+    return cube + folded // 100 + parts + dynamic // 10                                          # 27 + 10 + 21 + 8 = 66
 }

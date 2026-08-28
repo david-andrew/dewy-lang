@@ -5644,7 +5644,8 @@ def _quantity_product_type(
     return number if not dimension.powers else ty.QuantityType(number, dimension)
 
 
-RATIONAL_TYPE_NAME = 'Rational'
+RATIONAL_TYPE_NAME = 'Rational'          # the explicit fixed-width `rational<int64>`
+BIG_RATIONAL_TYPE_NAME = 'BigRational'   # the runtime representation of the abstract `rational`
 _RATIONAL_BINARY_FUNCTIONS = {
     '__add__': '_rational_add',
     '__sub__': '_rational_sub',
@@ -5657,10 +5658,23 @@ _RATIONAL_BINARY_FUNCTIONS = {
     '__gt__': '_rational_gt',
     '__ge__': '_rational_ge',
 }
+_BIG_RATIONAL_BINARY_FUNCTIONS = {name: helper.replace('_rational_', '_bigrational_') for name, helper in _RATIONAL_BINARY_FUNCTIONS.items()}
 
 
 def _rational_type(ctx: Context, loc: Span) -> ty.Type:
-    """The prelude's `Rational` object type, which `rational` names."""
+    """The runtime type of the abstract `rational`: the prelude's `BigRational` (big-integer parts, total arithmetic)."""
+    binding = ctx.binding_scopes.get(BIG_RATIONAL_TYPE_NAME)
+    if binding is None or binding.type_value is None:
+        user_error(
+            ctx.srcfile,
+            'rationals need the prelude',
+            Pointer(span=loc, message='`BigRational` from `library/bigrational.dewy` is not in scope'),
+        )
+    return binding.type_value
+
+
+def _word_rational_type(ctx: Context, loc: Span) -> ty.Type:
+    """The explicit `rational<int64>`: the prelude's `Rational` with int64 parts (runtime arithmetic may `Overflow`)."""
     binding = ctx.binding_scopes.get(RATIONAL_TYPE_NAME)
     if binding is None or binding.type_value is None:
         user_error(
@@ -5669,6 +5683,16 @@ def _rational_type(ctx: Context, loc: Span) -> ty.Type:
             Pointer(span=loc, message='`Rational` from `library/rational.dewy` is not in scope'),
         )
     return binding.type_value
+
+
+def _is_word_rational(type_: ty.Type, *, ctx: Context) -> bool:
+    binding = ctx.binding_scopes.get(RATIONAL_TYPE_NAME)
+    return binding is not None and binding.type_value is not None and type_ == binding.type_value
+
+
+def _is_big_rational(type_: ty.Type, *, ctx: Context) -> bool:
+    binding = ctx.binding_scopes.get(BIG_RATIONAL_TYPE_NAME)
+    return binding is not None and binding.type_value is not None and type_ == binding.type_value
 
 
 BIGINT_TYPE_NAME = 'BigInt'
@@ -5858,12 +5882,8 @@ def _is_fixed(type_: ty.Type, *, ctx: Context) -> bool:
 
 
 def _is_rational(type_: ty.Type, *, ctx: Context) -> bool:
-    binding = ctx.binding_scopes.get(RATIONAL_TYPE_NAME)
-    return (
-        binding is not None
-        and binding.type_value is not None
-        and type_ == binding.type_value
-    )
+    """Either runtime rational representation."""
+    return _is_big_rational(type_, ctx=ctx) or _is_word_rational(type_, ctx=ctx)
 
 
 def _prelude_call(name: str, args: list[hir.AST], *, loc: Span, ctx: Context) -> hir.FunctionCall:
@@ -5974,17 +5994,34 @@ def _rational_literal(numerator: int, denominator: int, *, loc: Span, ctx: Conte
     return _rational_constant(Fraction(numerator, denominator), ty.dimension(), loc=loc)
 
 
-def _materialize_rational(node: hir.AST, *, ctx: Context) -> hir.AST:
-    """A compile-time rational (possibly dimensioned) as a runtime `Rational` value."""
+def _materialize_rational(node: hir.AST, *, ctx: Context, word: bool = False) -> hir.AST:
+    """A compile-time rational (possibly dimensioned) as a runtime rational value.
+
+    The abstract `rational` is a `BigRational` (exact limbs, any size); with
+    ``word`` it is the explicit `rational<int64>` (`Rational`), which the
+    constant must fit.
+    """
     value = _constant_rational(node, ctx=ctx)
     if value is None:
         raise ValueError('INTERNAL ERROR: compile-time rational without a value')
     _, dimension = _number_and_dimension(node.type)
-    parts = [
-        hir.Integer(node.loc, ty.IntegerLiteralType(part), '0d', part)
-        for part in (value.numerator, value.denominator)
-    ]
-    call = _prelude_call('_rational_make', parts, loc=node.loc, ctx=ctx)
+    if word:
+        for part in (value.numerator, value.denominator):
+            if not ty.integer_literal_fits(part, 'int64'):
+                type_error(
+                    ctx.srcfile,
+                    'rational constant does not fit `rational<int64>`',
+                    Pointer(span=node.loc, message=f'`{value}` has a part outside int64'),
+                    hint='use the abstract `rational` (big-integer parts) here',
+                )
+        parts = [
+            hir.Integer(node.loc, ty.IntegerLiteralType(part), '0d', part)
+            for part in (value.numerator, value.denominator)
+        ]
+        call = _prelude_call('_rational_make', parts, loc=node.loc, ctx=ctx)
+        return replace(call, type=_with_dimension(call.type, dimension))
+    parts = [_bigint_literal(part, loc=node.loc, ctx=ctx) for part in (value.numerator, value.denominator)]
+    call = _prelude_call('_bigrational_make', parts, loc=node.loc, ctx=ctx)
     return replace(call, type=_with_dimension(call.type, dimension))
 
 
@@ -5995,20 +6032,38 @@ def _strip_dimension(node: hir.AST) -> hir.AST:
     return node
 
 
-def _to_rational(arg: hir.AST, *, ctx: Context) -> hir.AST:
-    """An operand as a runtime `Rational` (dimension stripped); integers promote."""
+def _to_rational(arg: hir.AST, *, ctx: Context, word: bool = False) -> hir.AST:
+    """An operand as a runtime rational (dimension stripped); integers promote.
+
+    ``word`` selects the explicit `rational<int64>` representation; otherwise a
+    `Rational` operand widens to the abstract `BigRational`.
+    """
     if _is_compile_time_rational(arg.type):
-        return _strip_dimension(_materialize_rational(arg, ctx=ctx))
+        return _strip_dimension(_materialize_rational(arg, ctx=ctx, word=word))
     number, _ = _number_and_dimension(arg.type)
-    if _is_rational(number, ctx=ctx):
+    if _is_big_rational(number, ctx=ctx):
+        if word:
+            type_error(
+                ctx.srcfile,
+                'a `rational` operand in fixed-width rational arithmetic',
+                Pointer(span=arg.loc, message='this is an abstract rational (big-integer parts)'),
+                hint='the other operand is a `rational<int64>`; keep both abstract, or convert explicitly',
+            )
         return _strip_dimension(arg)
+    if _is_word_rational(number, ctx=ctx):
+        if word:
+            return _strip_dimension(arg)
+        return _prelude_call('_bigrational_from_rational', [_strip_dimension(arg)], loc=arg.loc, ctx=ctx)
+    if _is_bigint(number, ctx=ctx) and not word:
+        return _prelude_call('_bigrational_from_bigint', [_strip_dimension(arg)], loc=arg.loc, ctx=ctx)
     if not ctx.type_system.is_subtype(number, 'int'):
         type_error(
             ctx.srcfile,
             'no rational conversion for this operand',
             Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
         )
-    return _prelude_call('_rational_from_int', [_as_int64(_strip_dimension(arg), ctx=ctx)], loc=arg.loc, ctx=ctx)
+    helper = '_rational_from_int' if word else '_bigrational_from_int'
+    return _prelude_call(helper, [_as_int64(_strip_dimension(arg), ctx=ctx)], loc=arg.loc, ctx=ctx)
 
 
 def _fixed_constant(value: Fraction, *, loc: Span, ctx: Context) -> hir.AST:
@@ -6037,8 +6092,15 @@ def _to_fixed(arg: hir.AST, *, ctx: Context) -> hir.AST:
     constant = _constant_rational(arg, ctx=ctx)
     if constant is not None:
         return _fixed_constant(constant, loc=arg.loc, ctx=ctx)
-    if _is_rational(number, ctx=ctx):
+    if _is_word_rational(number, ctx=ctx):
         return _prelude_call('_fixed_from_rational', [_strip_dimension(arg)], loc=arg.loc, ctx=ctx)
+    if _is_big_rational(number, ctx=ctx):
+        type_error(
+            ctx.srcfile,
+            'a runtime `rational` in fixed-point arithmetic',
+            Pointer(span=arg.loc, message='its big-integer parts may not fit the fixed representation'),
+            hint='convert it first: `let f:fixed = q` yields `fixed | Overflow`, which you handle; or keep the arithmetic rational',
+        )
     if not ctx.type_system.is_subtype(number, 'int'):
         type_error(
             ctx.srcfile,
@@ -6182,20 +6244,27 @@ def _dispatch_rational(
         if fname in _COMPARISON_DUNDERS:
             return result
         return replace(result, type=_with_dimension(result.type, result_dimension))
-    rational_type = _rational_type(ctx, loc)
+    # the representation: the abstract `rational` (big-integer parts) unless the
+    # runtime operands are all the explicit `rational<int64>`
+    word = any(_is_word_rational(number, ctx=ctx) for number in numbers) and not any(_is_big_rational(number, ctx=ctx) for number in numbers)
+    rational_type = _word_rational_type(ctx, loc) if word else _rational_type(ctx, loc)
     if is_division and not involves_rational:
-        # integer / integer: build the fraction directly
+        # integer / integer: build the fraction directly (`b` proven nonzero)
         operands = [_as_int64(_strip_dimension(arg), ctx=ctx) for arg in args]
-        call = _prelude_call('_rational_make', operands, loc=loc, ctx=ctx)
+        if _is_bigint(numbers[0], ctx=ctx) or _is_bigint(numbers[1], ctx=ctx):
+            call = _prelude_call('_bigrational_make', [_to_bigint(arg, ctx=ctx) for arg in args], loc=loc, ctx=ctx)
+        else:
+            call = _prelude_call('_rational_make', operands, loc=loc, ctx=ctx)
+            call = _prelude_call('_bigrational_from_rational', [call], loc=loc, ctx=ctx)
         return replace(call, type=_with_dimension(rational_type, result_dimension))
     if fname == '__unary_sub__':
-        call = _prelude_call('_rational_neg', [_to_rational(args[0], ctx=ctx)], loc=loc, ctx=ctx)
+        call = _prelude_call('_rational_neg' if word else '_bigrational_neg', [_to_rational(args[0], ctx=ctx, word=word)], loc=loc, ctx=ctx)
         return replace(call, type=_with_dimension(rational_type, result_dimension))
-    helper = _RATIONAL_BINARY_FUNCTIONS[fname]
-    zero_test = _zero_test_on_field(fname, args, 'numerator', loc=loc, source_name=source_name, ctx=ctx)
+    helper = (_RATIONAL_BINARY_FUNCTIONS if word else _BIG_RATIONAL_BINARY_FUNCTIONS)[fname]
+    zero_test = _zero_test_on_field(fname, args, 'numerator' if word else 'sign', loc=loc, source_name=source_name, ctx=ctx)
     if zero_test is not None:
         return zero_test
-    operands = [_to_rational(arg, ctx=ctx) for arg in args]
+    operands = [_to_rational(arg, ctx=ctx, word=word) for arg in args]
     call = _prelude_call(helper, operands, loc=loc, ctx=ctx)
     if fname in _COMPARISON_DUNDERS:
         return call
@@ -6368,9 +6437,12 @@ def _dispatch_pow(
     result_dimension = ty.power_dimension(dimension, exponent_value) if exponent_value is not None else dimension
     exponent64 = _as_int64(exponent, ctx=ctx)
     if base_rational or (exponent_value is not None and exponent_value < 0):
-        helper = '_rational_pow_negative' if exponent_value is not None and exponent_value < 0 else '_rational_pow'
-        call = _prelude_call(helper, [_to_rational(base, ctx=ctx), exponent64], loc=loc, ctx=ctx)
-        return replace(call, type=_with_dimension_result(call.type, _rational_type(ctx, loc), result_dimension))
+        word = _is_word_rational(_number_and_dimension(base.type)[0], ctx=ctx)
+        prefix = '_rational' if word else '_bigrational'
+        helper = f'{prefix}_pow_negative' if exponent_value is not None and exponent_value < 0 else f'{prefix}_pow'
+        call = _prelude_call(helper, [_to_rational(base, ctx=ctx, word=word), exponent64], loc=loc, ctx=ctx)
+        result_type = _word_rational_type(ctx, loc) if word else _rational_type(ctx, loc)
+        return replace(call, type=_with_dimension_result(call.type, result_type, result_dimension))
     if exponent_value is None and not ctx.type_system.is_subtype(exponent.type, 'uint'):
         type_error(
             ctx.srcfile,
@@ -8696,6 +8768,23 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         ):
             return ty.dict_type(ast_to_type(key_ast, ctx=ctx), ast_to_type(value_ast, ctx=ctx))
 
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
+            left=p0.Atom(item=t1.Identifier(name='rational')),
+            right=p0.Block(kind='<>', inner=[part_ast]),
+        ) if 'rational' not in ctx.declarations:
+            # `rational<int64>`: word parts, arithmetic may `Overflow`; `rational<bigint>`: the abstract representation
+            part = ast_to_type(part_ast, ctx=ctx)
+            if part == 'int64':
+                return _word_rational_type(ctx, ast.loc)
+            if _is_bigint(part, ctx=ctx) or part == 'int':
+                return _rational_type(ctx, ast.loc)
+            user_error(
+                ctx.srcfile,
+                'rational parts must be `int64` or `bigint`',
+                Pointer(span=part_ast.loc, message=f'`{type_to_dewy(part)}` is not a supported part type'),
+            )
+
         case p0.Block(kind='<>'|'()', inner=[inner]):
             return ast_to_type(inner, ctx=ctx)
 
@@ -10166,7 +10255,7 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         expected_number, expected_dimension = _number_and_dimension(expected)
         if node_dimension == expected_dimension:
             if _is_rational(expected_number, ctx=ctx):
-                return _materialize_rational(node, ctx=ctx)
+                return _materialize_rational(node, ctx=ctx, word=_is_word_rational(expected_number, ctx=ctx))
             if _is_fixed(expected_number, ctx=ctx):
                 value = _constant_rational(node, ctx=ctx)
                 if value is not None:

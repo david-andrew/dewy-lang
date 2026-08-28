@@ -45,7 +45,7 @@ let main = ():>int64 => percent(1 4) + share(3 4)   # 25 + 75
 
 A result may be refined — `let positive = (n:int64):>int64<i => i >=? 1> => …` — in which case every `return` (and the body's value) is an obligation, and every call is a fact: `n // positive(n)` is proven, and `let g = positive(n)` carries the fact on `g`.
 
-A field may declare an invariant: `let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]`. It is proven wherever a `Ratio` is made — `Ratio(1 2)`, a literal, or a plain object flowing into the type — and wherever the field is stored (`r.bottom = z` needs `z >? 0`), and it is assumed wherever the field is read, so `r.top // r.bottom` is proven for any `Ratio`. The prelude's `Rational` declares `denominator:int64<denominator >? 0>` this way.
+A field may declare an invariant: `let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]`. It is proven wherever a `Ratio` is made — `Ratio(1 2)`, a literal, or a plain object flowing into the type — and wherever the field is stored (`r.bottom = z` needs `z >? 0`), and it is assumed wherever the field is read, so `r.top // r.bottom` is proven for any `Ratio`. The prelude's `rational<int64>` (`Rational`) declares `denominator:int64<denominator >? 0>` this way.
 
 <!-- dewy-example: compiler -->
 ```dewy
@@ -54,7 +54,7 @@ let scale = (r:Ratio):>int64 => r.top // r.bottom      # the invariant proves th
 
 let main = ():>int64 => {
     let r = Ratio(84 2)
-    let q = 1 / 3
+    let q:rational<int64> = 1 / 3                        # the word rational declares the same invariant
     return scale(r) // 42 * (9 // q.denominator)         # 3
 }
 ```

@@ -3,7 +3,9 @@
 
 # Durations are rational seconds at this boundary (the canonical Time scale);
 # the kernel wants whole nanoseconds.
-let sleep = (duration:(rational * Time)):>void => {
+# The duration is a fixed-width rational: constants fit, and a runtime big
+# rational must be narrowed by the caller.
+let sleep = (duration:(rational<int64> * Time)):>void => {
     let seconds:Rational = duration transmute Rational
     let total_nanoseconds:uint64 = ((seconds.numerator * 1000000000) // seconds.denominator) transmute uint64
     let request:int64 = __alloca__(16)

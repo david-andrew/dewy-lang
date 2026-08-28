@@ -1,10 +1,10 @@
 # Exact rationals. `rational` is this object type: a normalized fraction
 # (denominator positive, numerator and denominator coprime) over int64 parts.
-# `a / b` on integers, decimal literals such as `9.8`, and arithmetic or
-# comparisons involving a rational all route to these functions; integers
-# promote through `_rational_from_int`. Values overflow int64 silently for
-# now (no bigint tier yet), and a zero denominator is only rejected for
-# literal operands (runtime error values are pending).
+# `rational<int64>` arithmetic and comparisons route to these functions;
+# integers promote through `_rational_from_int`. A zero divisor is the
+# caller's proof, and a denominator that wraps int64 comes back as `Overflow`
+# (a wrapped numerator is not yet detected: the word form is the explicit
+# opt-in for speed over the abstract `rational`).
 # The invariant is part of the type: every Rational has a positive denominator.
 let Rational:type = [numerator:int64 denominator:int64<denominator >? 0>]
 
@@ -40,16 +40,42 @@ let _rational_make = (numerator:int64 denominator:int64 & ~0):>Rational => {
 
 let _rational_from_int = (value:int64):>Rational => [numerator = value denominator = 1]
 
-# The denominator product is nonzero unless it wraps int64; the analysis
-# cannot rule the wrap out, so an overflow traps instead of making a zero.
-let _rational_add = (a:Rational b:Rational):>Rational|Overflow =>
-    _rational_over(a.numerator * b.denominator + b.numerator * a.denominator  a.denominator * b.denominator)
+# Addition by Knuth's method (TAOCP 4.5.1): with g = gcd(d1 d2), the sum is
+# (n1 (d2/g) + n2 (d1/g)) / (d1 d2 / g); when g is 1 that is already in
+# lowest terms, otherwise only a gcd against g remains. The operands stay
+# smaller than the plain cross-products, which also narrows the overflow
+# window. Equal denominators (an accumulator's usual case) need one gcd.
+# A product that wrapped int64 is a value the caller handles, never a wrong
+# denominator: `d >=? 1` is both the invariant's proof and the wrap check.
+let _rational_add_signed = (a:Rational b:Rational subtract:bool):>Rational|Overflow => {
+    let b_numerator:int64 = b.numerator
+    if subtract { b_numerator = -b_numerator }
+    if a.denominator =? b.denominator {
+        return _rational_over(a.numerator + b_numerator  a.denominator)
+    }
+    let g:int64 = _gcd(a.denominator b.denominator)
+    if g =? 1 {
+        let d:int64 = a.denominator * b.denominator
+        if d >=? 1 {
+            return [numerator = a.numerator * b.denominator + b_numerator * a.denominator denominator = d]
+        }
+        return Overflow
+    }
+    let a_reduced:int64 = a.denominator // g
+    let b_reduced:int64 = b.denominator // g
+    let total:int64 = a.numerator * b_reduced + b_numerator * a_reduced
+    let g2:int64 = _gcd(total g)
+    let d:int64 = a_reduced * (b.denominator // g2)
+    if d >=? 1 { return [numerator = total // g2 denominator = d] }
+    return Overflow
+}
 
-let _rational_sub = (a:Rational b:Rational):>Rational|Overflow =>
-    _rational_over(a.numerator * b.denominator - b.numerator * a.denominator  a.denominator * b.denominator)
+let _rational_add = (a:Rational b:Rational):>Rational|Overflow => _rational_add_signed(a b false)
+let _rational_sub = (a:Rational b:Rational):>Rational|Overflow => _rational_add_signed(a b true)
 
-# Cross-reduction before multiplying keeps intermediate products small, so
-# unit scales such as 1/10^18 divide out without overflowing int64.
+# Cross-reduction before multiplying keeps intermediate products small (unit
+# scales such as 1/10^18 divide out without overflowing int64) and leaves
+# the parts coprime, so no gcd of the products is needed.
 let _rational_mul = (a:Rational b:Rational):>Rational|Overflow => {
     let g1:int64 = _gcd(a.numerator b.denominator)
     let g2:int64 = _gcd(b.numerator a.denominator)
@@ -58,7 +84,9 @@ let _rational_mul = (a:Rational b:Rational):>Rational|Overflow => {
     # the gcds divide the denominators, so both quotients are positive; the
     # analysis does not know divisibility, hence the (never taken) fallback
     if d1 >=? 1 and d2 >=? 1 {
-        return _rational_over((a.numerator // g1) * (b.numerator // g2)  d1 * d2)
+        let d:int64 = d1 * d2
+        if d >=? 1 { return [numerator = (a.numerator // g1) * (b.numerator // g2) denominator = d] }
+        return Overflow
     }
     return _rational_over(a.numerator * b.numerator  a.denominator * b.denominator)
 }
@@ -70,9 +98,14 @@ let _rational_over = (numerator:int64 denominator:int64):>Rational|Overflow => {
     return Overflow
 }
 
-# Dividing by a rational is the caller's proof that it is nonzero (`if q not=? 0`).
-let _rational_div = (a:Rational b:Rational<numerator not=? 0>):>Rational|Overflow =>
-    _rational_mul(a _rational_make(b.denominator b.numerator))   # the reciprocal, normalized (sign to the numerator)
+# Dividing by a rational is the caller's proof that it is nonzero (`if q not=? 0`);
+# the reciprocal of a normalized fraction is normalized once the sign moves up.
+let _rational_div = (a:Rational b:Rational<numerator not=? 0>):>Rational|Overflow => {
+    if b.numerator >=? 1 { return _rational_mul(a [numerator = b.denominator denominator = b.numerator]) }
+    let flipped:int64 = -b.numerator
+    if flipped >=? 1 { return _rational_mul(a [numerator = -b.denominator denominator = flipped]) }
+    return Overflow    # the minimum int64 has no negation
+}
 
 let _rational_neg = (a:Rational):>Rational => [numerator = -a.numerator denominator = a.denominator]
 

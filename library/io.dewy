@@ -61,6 +61,15 @@ let _print_rational = (value:Rational):>void => {
     return void
 }
 
+let _print_bigrational = (value:BigRational):>void => {
+    _print_bigint(value.numerator)
+    if not (value.denominator.limbs.length =? 1 and value.denominator.limbs[0] =? 1) {
+        _print_string("/")
+        _print_bigint(value.denominator)
+    }
+    return void
+}
+
 # Fixed-point values print in decimal with trailing zeros trimmed (up to
 # nine fractional digits; the representation holds about 9.6).
 let _print_fixed = (value:Fixed):>void => {
@@ -115,7 +124,7 @@ let _print_bigint = (value:BigInt):>void => {
     return void
 }
 
-let print = @_print_string & @_print_int64 & @_print_bool & @_print_rational & @_print_fixed & @_print_bigint
+let print = @_print_string & @_print_int64 & @_print_bool & @_print_rational & @_print_bigrational & @_print_fixed & @_print_bigint
 
 let printl = (s:string=''):>void => {
     print(s)

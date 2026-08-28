@@ -15,37 +15,61 @@ def _rational_type() -> ty.Type:
     return declared['r'].expr.type
 
 
+def _parts(node: hir.AST) -> tuple[int, int]:
+    """The (numerator, denominator) a materialized rational constant carries.
+
+    The abstract `rational` materializes as `_bigrational_make(<bigint literal> <bigint literal>)`;
+    the explicit `rational<int64>` as `_rational_make(n d)`.
+    """
+    assert isinstance(node, hir.FunctionCall)
+    if node.func.name.endswith('_rational_make'):
+        return tuple(arg.value for arg in node.pos_args)
+
+    def big(call: hir.AST) -> int:
+        assert isinstance(call, hir.FunctionCall) and call.func.name.endswith('_bigint_from_limbs')
+        negative, limbs = call.pos_args
+        value = sum(limb.value << (32 * i) for i, limb in enumerate(limbs.items))
+        return -value if negative.value else value
+
+    assert node.func.name.endswith('_bigrational_make'), node.func.name
+    return tuple(big(arg) for arg in node.pos_args)
+
+
 def test_integer_division_infers_a_rational() -> None:
-    declared = _declared('let a = 1/3\nlet b:rational = a')
+    declared = _declared('let a = 1/3\nlet b:rational = a\nlet w:rational<int64> = 1/3')
     assert isinstance(declared['a'].expr.type, ty.ObjectType)
-    assert [f.name for f in declared['a'].expr.type.fields] == ['numerator', 'denominator']
+    assert [f.name for f in declared['a'].expr.type.fields] == ['sign', 'numerator', 'denominator']  # the abstract rational: big parts
     assert declared['b'].expr.type == declared['a'].expr.type
+    assert [f.name for f in declared['w'].expr.type.fields] == ['numerator', 'denominator']  # the explicit word form
 
 
 def test_literal_division_normalizes_at_compile_time() -> None:
     declared = _declared('let a = 6/(-8)')
-    call = declared['a'].expr
-    assert isinstance(call, hir.FunctionCall)
-    assert [arg.value for arg in call.pos_args] == [-3, 4]
+    assert _parts(declared['a'].expr) == (-3, 4)
 
 
 def test_decimal_literal_is_an_exact_rational() -> None:
     declared = _declared('let a = 9.8\nlet b = 1.25e2\nlet c = 5e-1')
-    assert [arg.value for arg in declared['a'].expr.pos_args] == [49, 5]
-    assert [arg.value for arg in declared['b'].expr.pos_args] == [125, 1]
-    assert [arg.value for arg in declared['c'].expr.pos_args] == [1, 2]
+    assert _parts(declared['a'].expr) == (49, 5)
+    assert _parts(declared['b'].expr) == (125, 1)
+    assert _parts(declared['c'].expr) == (1, 2)
 
 
 def test_integers_promote_in_mixed_arithmetic_and_comparisons() -> None:
     declared = _declared('let a = 1/3\nlet b = a + 2\nlet c = 2 * a\nlet d = a <? 1\nlet e = -a')
     rational = declared['a'].expr.type
-    # runtime arithmetic on int64 parts may overflow: the result carries the error member
-    assert declared['b'].expr.type == ty.union(rational, 'Overflow')
-    assert declared['c'].expr.type == ty.union(rational, 'Overflow')
+    # the abstract rational's arithmetic is total (big-integer parts): no error member
+    assert declared['b'].expr.type == rational
+    assert declared['c'].expr.type == rational
     assert declared['d'].expr.type == 'bool'
     assert declared['e'].expr.type == rational
-    assert declared['b'].expr.func.name.endswith('_rational_add')
-    assert declared['e'].expr.func.name.endswith('_rational_neg')
+    assert declared['b'].expr.func.name.endswith('_bigrational_add')
+    assert declared['e'].expr.func.name.endswith('_bigrational_neg')
+    # the explicit `rational<int64>` keeps word parts and the `| Overflow` result
+    word = _declared('let a:rational<int64> = 1/3\nlet b = a + 2\nlet d = a <? 1')
+    assert word['b'].expr.func.name.endswith('_rational_add')
+    assert word['b'].expr.type == ty.union(word['a'].expr.type, 'Overflow')
+    assert word['d'].expr.type == 'bool'
 
 
 def test_literal_zero_divisor_is_rejected() -> None:
@@ -71,9 +95,9 @@ def test_constant_integer_powers_fold() -> None:
 
 def test_negative_constant_exponent_makes_a_rational() -> None:
     declared = _declared('let a = 2^(-3)\nlet b = (2/3)^(-2)')
-    assert [arg.value for arg in declared['a'].expr.pos_args] == [1, 8]
+    assert _parts(declared['a'].expr) == (1, 8)
     # constant rational bases fold too; the `let` materializes the result
-    assert [arg.value for arg in declared['b'].expr.pos_args] == [9, 4]
+    assert _parts(declared['b'].expr) == (9, 4)
     assert declared['b'].expr.type == _rational_type()
 
 
@@ -85,7 +109,7 @@ def test_constant_rational_expressions_fold_at_compile_time() -> None:
     assert (declared['b'].expr.numerator, declared['b'].expr.denominator) == (2, 1)
     assert declared['b'].expr.type == ty.RationalLiteralType(2, 1)
     # a `let` of a constant materializes the folded value, not a chain of calls
-    assert [arg.value for arg in declared['c'].expr.pos_args] == [2, 1]
+    assert _parts(declared['c'].expr) == (2, 1)
 
 
 def test_unit_scales_fold_into_dimensioned_constants() -> None:
