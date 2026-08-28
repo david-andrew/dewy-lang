@@ -14,6 +14,24 @@ text[4]
 
 The exact scalar sequence is preserved. Canonically equivalent spellings are not implicitly normalized, and exact equality compares the preserved spelling. Normalization-aware operations are a separate API design.
 
+## Indexing and Slicing
+
+`text[i]` is the grapheme at `i` and `text[a..b]` a slice; both are proven in bounds, never checked at runtime. A string with a known length (a literal, or a binding initialized from one and not reassigned) is checked against that length. A runtime-length string is indexed from facts, exactly like a runtime-length array: a guard `i <? text.length` (or a failed `i >=? text.length`) proves `text[i]` for that binding, a proven minimum length (`text.length >? 0`) proves constant indexes and `text[text.length - k]`, and a slice needs both endpoints proven the same way. Reassigning the binding drops its facts. Inside an index, `end` is the last index — `text.length - 1` — and may take part in any expression: `text[end]`, `text[end - 1]`, `text[2..end]` (each proven the same way, so `text[end]` needs `text.length >? 0`).
+
+<!-- dewy-example: compiler -->
+```dewy
+let first_word = (text:string):>string => {
+    let i:int64 = 0
+    loop i <? text.length {
+        if text[i] =? " " { return text[0..i) }
+        i += 1
+    }
+    return text
+}
+
+let main = ():>int64 => first_word("héllo world").length   # 5
+```
+
 ## Interpolation
 
 Braces inside a string literal evaluate an ordinary Dewy expression and convert its value to string:

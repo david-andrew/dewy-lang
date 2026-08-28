@@ -1,0 +1,49 @@
+# Runtime-length strings are indexed and sliced from facts, like arrays:
+# `i <? text.length` guards, proven minimum lengths, and `text.length - k`.
+let count_spaces = (text:string):>int64 => {
+    let count:int64 = 0
+    let i:int64 = 0
+    loop i <? text.length {
+        if text[i] =? " " { count += 1 }
+        i += 1
+    }
+    return count
+}
+
+let first_word = (text:string):>string => {
+    let i:int64 = 0
+    loop i <? text.length {
+        if text[i] =? " " { return text[0..i) }
+        i += 1
+    }
+    return text
+}
+
+let last_grapheme = (text:string):>string => {
+    if text.length >? 0 { return text[end] }             # `end` is `text.length - 1`
+    return ""
+}
+
+let last_two = (text:string):>string => {
+    if text.length >? 1 { return text[end - 1..end] }
+    return text
+}
+
+let between = (text:string a:int64 b:int64):>string => {
+    if a >=? 0 and a <? text.length and b <? text.length and a <=? b { return text[a..b] }
+    return ""
+}
+
+let main = ():>int64 => {
+    let text:string = "héllo big wörld"
+    let checks:int64 = 0
+    if count_spaces(text) =? 2 { checks += 1 }
+    if first_word(text) =? "héllo" { checks += 2 }
+    if last_grapheme(text) =? "d" and last_grapheme("") =? "" and last_two(text) =? "ld" { checks += 4 }
+    if between(text 6 8) =? "big" and between(text 8 6) =? "" { checks += 8 }
+    let word:string = "abc"
+    if word[2] =? "c" and word[0..1] =? "ab" { checks += 16 }      # exact length from the literal
+    word = text
+    if word.length >? 3 and word[3] =? "l" { checks += 32 }        # a guard after reassignment
+    return checks - 21                                             # 63 - 21 = 42
+}

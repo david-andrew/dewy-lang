@@ -3,6 +3,7 @@ semantic analysis pass 0:
 - type checking
 - ambiguity resolution
 """
+import copy
 from dataclasses import dataclass, replace, field, fields, is_dataclass
 from fractions import Fraction
 from collections import ChainMap
@@ -6770,6 +6771,46 @@ def _tcr_array_length(binop: p0.BinOp, *, ctx: Context) -> hir.ArrayLength:
     return hir.ArrayLength(binop.loc, result_type, array)
 
 
+def _substitute_end(index: hir.AST, end_id: int, sequence: hir.AST, *, ctx: Context) -> hir.AST:
+    """Replace the hidden `end` binding in an index expression by `sequence.length - 1`."""
+
+    def last_index(loc: Span) -> hir.AST:
+        measured = copy.deepcopy(sequence)  # its own node: lowering keys analyses by node identity
+        length: hir.AST = (
+            hir.StringLength(loc, 'int64', measured)
+            if _is_string_type(sequence.type)
+            else hir.ArrayLength(loc, 'int64', measured)
+        )
+        one = hir.Integer(loc, ty.IntegerLiteralType(1), '0d', 1)
+        return _dispatch_builtin('__sub__', [length, one], loc=loc, op_loc=loc, source_name='-', ctx=ctx)
+
+    def walk(value: object) -> object:
+        if isinstance(value, hir.ExpressedIdentifier):
+            return last_index(value.loc) if value.binding_id == end_id else value
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(walk(item) for item in value)
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        if isinstance(value, hir.AST):
+            changes = {}
+            for field_info in fields(value):
+                if field_info.name in ('type', 'annotation'):
+                    continue
+                current = getattr(value, field_info.name)
+                if isinstance(current, (hir.AST, list, tuple, dict)):
+                    updated = walk(current)
+                    if updated is not current:
+                        changes[field_info.name] = updated
+            return replace(value, **changes) if changes else value
+        return value
+
+    result = walk(index)
+    assert isinstance(result, hir.AST)
+    return result
+
+
 def _known_string_length(type_: ty.Type) -> int | None:
     if isinstance(type_, ty.StringLiteralType):
         return ty.string_literal_lengths(type_.value)[2]
@@ -6852,6 +6893,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         else _known_string_length(array.type)
     )
     index_ctx = ctx
+    end_binding: sb.Binding | None = None
     if length is not None:
         index_ctx = replace(
             ctx,
@@ -6860,12 +6902,24 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             ),
             binding_scopes=ctx.binding_scopes.new_child(),
         )
+    else:
+        # `end` in an index of a runtime-length sequence is `seq.length - 1`,
+        # usable in any expression (`s[end - 1]`, `s[2..end]`): it is bound
+        # here and substituted after checking
+        end_binding = ctx.binding_registry.allocate_param('end', 'int64', binop.right.loc)
+        index_ctx = replace(
+            ctx,
+            declarations=ctx.declarations.new_child({'end': 'int64'}),
+            binding_scopes=ctx.binding_scopes.new_child({'end': end_binding}),
+        )
     index_ast: p0.AST = (
         binop.right.inner[0]
         if binop.right.kind == '[]'
         else binop.right
     )
     index = typecheck_and_resolve_inner(index_ast, ctx=index_ctx)
+    if end_binding is not None:
+        index = _substitute_end(index, end_binding.id, array, ctx=ctx)
     if isinstance(index, hir.Range):
         if source_place is not None:
             user_error(
@@ -6876,7 +6930,12 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         if index.step_pair is not None:
             not_implemented(ctx.srcfile, index.loc, 'stepped sequence slicing')
         slice_length: int | None = None
-        if length is None and (index.left is not None or index.right is not None):
+        if (
+            length is None
+            and (index.left is not None or index.right is not None)
+            and not (_is_string_type(array.type) and sb.array_route_id(array, ctx.binding_registry) is not None)
+        ):
+            # a named runtime-length string defers to the bounds analysis
             user_error(
                 ctx.srcfile,
                 'sequence slice is not proven in bounds',
@@ -6973,7 +7032,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         )
     constant_index = _constant_integer(index, ctx=index_ctx)
     if length is None and not (
-        isinstance(array.type, ty.ArrayType)
+        (isinstance(array.type, ty.ArrayType) or _is_string_type(array.type))
         and sb.array_route_id(array, ctx.binding_registry) is not None
     ):
         user_error(

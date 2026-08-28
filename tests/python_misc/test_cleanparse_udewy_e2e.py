@@ -94,6 +94,7 @@ LOWERED_CASES = [
     ('object_array_growth.dewy', 42),
     ('type_constructors.dewy', 42),
     ('type_methods.dewy', 42),
+    ('string_index_facts.dewy', 42),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),

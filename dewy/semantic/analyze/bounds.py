@@ -126,11 +126,31 @@ def _decode_index_fact(key: int) -> tuple[int, int] | None:
     return raw >> _FACT_SHIFT, raw & ((1 << _FACT_SHIFT) - 1)
 
 
-def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None) -> int | None:
-    """The fact id of a runtime-length array expression (binding or member route)."""
+def _is_runtime_string(type_: ty.Type) -> bool:
+    """A string whose grapheme length is only known at runtime."""
+    return (isinstance(type_, ty.StringType) and type_.length is None) or type_ == 'string'
+
+
+def _strip_casts(node: hir.AST) -> hir.AST:
     while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
         node = node.expr
-    if not (isinstance(node.type, ty.ArrayType) and node.type.length is None):
+    return node
+
+
+def _sequence_of(node: hir.AST) -> hir.AST | None:
+    """The sequence a `.length` node measures (arrays and strings alike)."""
+    if isinstance(node, hir.ArrayLength):
+        return node.array
+    if isinstance(node, hir.StringLength):
+        return node.string
+    return None
+
+
+def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None) -> int | None:
+    """The fact id of a runtime-length array or string expression (binding or member route)."""
+    while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+        node = node.expr
+    if not ((isinstance(node.type, ty.ArrayType) and node.type.length is None) or _is_runtime_string(node.type)):
         return None
     if isinstance(node, hir.ExpressedIdentifier):
         return node.binding_id
@@ -311,6 +331,11 @@ class _BoundsValidator:
                 current[_length_key(node.binding_id)] = Interval.exact(node.expr.type.length)
             if node.binding_id is not None and isinstance(declared, ty.ObjectType):
                 self._seed_field_routes(node.binding_id, declared, node.expr, (), current)
+            if node.binding_id is not None and declared is not None and _is_runtime_string(declared):
+                # `let s:string = "abc"`: the literal's grapheme count is a fact until `s` is reassigned
+                known = self._string_length(_strip_casts(node.expr).type)
+                if known is not None:
+                    current[_length_key(node.binding_id)] = Interval.exact(known)
             if isinstance(node.expr, hir.FunctionLiteral):
                 self._analyze_function(node.expr, validate=validate, enclosing=current)
             elif isinstance(node.expr, hir.OverloadedFunction):
@@ -343,10 +368,13 @@ class _BoundsValidator:
                 value = None
             self._set_interval(current, binding_id, value)
             _drop_index_facts(current, index_id=binding_id)
-            if isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None:
-                # Whole-array replacement: nothing is known about the new length.
+            if (isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None) or _is_runtime_string(node.target.type):
+                # Whole-sequence replacement: nothing is known about the new length.
                 current.pop(_length_key(binding_id), None)
                 _drop_index_facts(current, array_id=binding_id)
+                known = self._string_length(_strip_casts(node.value).type) if _is_runtime_string(node.target.type) else None
+                if known is not None:
+                    current[_length_key(binding_id)] = Interval.exact(known)
             self._drop_route_facts(current, binding_id)
             return current
         if isinstance(node, hir.IndexAssign):
@@ -408,7 +436,7 @@ class _BoundsValidator:
                 return
             described.add(text)
             interval = self._eval(node, state, validate=False)
-            lines.append(f'`{text}` {self._describe_interval(interval, array=isinstance(node, hir.ArrayLength))}')
+            lines.append(f'`{text}` {self._describe_interval(interval, array=_sequence_of(node) is not None)}')
 
         def verdict(node: hir.AST) -> str:
             if self._refine(state, node, truth=True) is None:
@@ -899,7 +927,12 @@ class _BoundsValidator:
         if isinstance(node, hir.StringLength):
             self._eval(node.string, state, validate=validate)
             length = self._string_length(node.string.type)
-            return None if length is None else Interval.exact(length)
+            if length is not None:
+                return Interval.exact(length)
+            string_id = _runtime_array_id(node.string, self.registry)
+            if string_id is not None:
+                return state.get(_length_key(string_id), Interval(0, _MAX_LENGTH))
+            return Interval(0, _MAX_LENGTH)
         if isinstance(node, hir.Index):
             self._eval(node.array, state, validate=validate)
             interval = self._eval(node.index, state, validate=validate)
@@ -929,7 +962,7 @@ class _BoundsValidator:
             else:
                 right = self._eval(node.range.right, state, validate=validate)
             if validate:
-                self._validate_string_slice(node, left, right, length)
+                self._validate_string_slice(node, left, right, length, state)
             return None
         if isinstance(node, hir.StringEqual):
             self._eval(node.left, state, validate=validate)
@@ -1333,7 +1366,10 @@ class _BoundsValidator:
         return self._join_states(alternatives)
 
     def _length_offset_index(self, index: hir.AST, array_id: int) -> int | None:
-        """`k` when the index is `xs.length - k` for the same array with a constant `k >= 1`."""
+        """`k` when the index is `xs.length - k` for the same sequence with a constant `k >= 1`.
+
+        Subtraction chains fold: `xs.length - 1 - 1` (`end - 1`) is `k = 2`.
+        """
         while isinstance(index, (hir.ValueCast, hir.RepresentationCast)):
             index = index.expr
         if not (
@@ -1344,12 +1380,21 @@ class _BoundsValidator:
         ):
             return None
         left, right = index.pos_args
-        if not isinstance(left, hir.ArrayLength) or _runtime_array_id(left.array, self.registry) != array_id:
-            return None
         constant = self._constant_expr(right, set())
-        if constant is None or constant.lower is None or constant.lower != constant.upper or constant.lower < 1:
+        if constant is None or constant.lower is None or constant.lower != constant.upper or constant.lower < 0:
             return None
-        return constant.lower
+        measured = _sequence_of(left)
+        if measured is not None:
+            if _runtime_array_id(measured, self.registry) != array_id:
+                return None
+            inner = 0
+        else:
+            inner_offset = self._length_offset_index(left, array_id)
+            if inner_offset is None:
+                return None
+            inner = inner_offset
+        total = inner + constant.lower
+        return total if total >= 1 else None
 
     def _validate_method_index(
         self,
@@ -1418,11 +1463,11 @@ class _BoundsValidator:
             if interval.lower == interval.upper:
                 node.constant_index = interval.lower
             return
-        if isinstance(node, hir.Index) and length is None:
-            # Runtime-length array: prove `0 <= index` from the interval and
-            # `index < length` from either a proven minimum length or an
-            # `index <? xs.length` fact about this index binding.
-            array_id = _runtime_array_id(node.array, self.registry)
+        if length is None:
+            # Runtime-length array or string: prove `0 <= index` from the
+            # interval and `index < length` from either a proven minimum
+            # length or an `index <? xs.length` fact about this index binding.
+            array_id = _runtime_array_id(node.array if isinstance(node, hir.Index) else node.string, self.registry)
             nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
             if array_id is not None and nonnegative:
                 minimum_length = state.get(_length_key(array_id), Interval(0, _MAX_LENGTH)).lower or 0
@@ -1459,11 +1504,45 @@ class _BoundsValidator:
         left: Interval | None,
         right: Interval | None,
         length: int | None,
+        state: State | None = None,
     ) -> None:
-        """Require every possible dynamic endpoint to address a valid boundary."""
+        """Require every possible dynamic endpoint to address a valid boundary.
+
+        A runtime-length string uses its facts: a proven minimum length, or
+        `i <? s.length` facts about the endpoint bindings.
+        """
         if node.range.left is None and node.range.right is None:
             return
         bounds = node.range.bounds or '[]'
+        if length is None and state is not None:
+            string_id = _runtime_array_id(node.string, self.registry)
+            if string_id is not None:
+                minimum = state.get(_length_key(string_id), Interval(0, _MAX_LENGTH)).lower or 0
+
+                def endpoint_proven(endpoint: hir.AST | None, interval: Interval | None, delta: int, limit: int) -> bool:
+                    """`endpoint + delta` lies in `[-1 or 0, limit)` for every value, or an index fact bounds it."""
+                    if endpoint is None:
+                        return True
+                    if interval is None or interval.lower is None or interval.lower + delta < (0 if delta >= 0 else -1):
+                        return False
+                    if interval.upper is not None and interval.upper + delta < limit:
+                        return True
+                    binding = self._binding_id(endpoint)
+                    if binding is not None and _index_fact_key(binding, string_id) in state:
+                        return True
+                    # `s.length - k` (`end`, `end - 1`): below the length by construction,
+                    # nonnegative when the length is at least k (minus the shift)
+                    offset = self._length_offset_index(endpoint, string_id)
+                    if offset is None:
+                        return False
+                    effective = offset - delta  # the endpoint is `length - effective`
+                    lowest = -1 if limit == minimum else 0  # a last endpoint may be -1 (an empty slice)
+                    return effective >= 1 and minimum - effective >= lowest
+
+                first_ok = endpoint_proven(node.range.left, left, 1 if bounds[0] == '(' else 0, minimum + 1)
+                last_ok = endpoint_proven(node.range.right, right, -1 if bounds[1] == ')' else 0, minimum)
+                if first_ok and last_ok:
+                    return
 
         def shifted(interval: Interval | None, delta: int) -> Interval:
             if interval is None:
@@ -1566,20 +1645,14 @@ class _BoundsValidator:
             fact: tuple[int, int] | None = None
             if settled == '__lt__':
                 index_id = self._binding_id(left)
-                array_id = (
-                    _runtime_array_id(right.array, self.registry)
-                    if isinstance(right, hir.ArrayLength)
-                    else None
-                )
+                measured = _sequence_of(right)
+                array_id = _runtime_array_id(measured, self.registry) if measured is not None else None
                 if index_id is not None and array_id is not None:
                     fact = (index_id, array_id)
             else:
                 index_id = self._binding_id(right)
-                array_id = (
-                    _runtime_array_id(left.array, self.registry)
-                    if isinstance(left, hir.ArrayLength)
-                    else None
-                )
+                measured = _sequence_of(left)
+                array_id = _runtime_array_id(measured, self.registry) if measured is not None else None
                 if index_id is not None and array_id is not None:
                     fact = (index_id, array_id)
             if fact is not None:
@@ -1632,8 +1705,9 @@ class _BoundsValidator:
     def _binding_id(self, node: hir.AST) -> int | None:
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
-        if isinstance(node, hir.ArrayLength):
-            array_id = _runtime_array_id(node.array, self.registry)
+        measured = _sequence_of(node)
+        if measured is not None:
+            array_id = _runtime_array_id(measured, self.registry)
             return None if array_id is None else _length_key(array_id)
         return (
             node.binding_id

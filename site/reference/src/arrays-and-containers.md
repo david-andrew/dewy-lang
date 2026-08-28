@@ -9,7 +9,7 @@ let names:array<string> = ["Ada" "Grace"]
 let triple:array<int64 length=3> = [10 20 30]
 ```
 
-`array<T>` specifies the element type. Growable arrays hold word scalars, strings, and objects; an object element is stored as an independent copy, so the array never aliases the value pushed into it, and a popped element remains valid. Iterating an array of objects (`loop s in spans`) binds the loop variable as a read-only borrow of each element — assigning it, its fields, growing its arrays, or passing it as a place is rejected; copy it (`let mine:Span = s`) to change it. `array<T length=N>` additionally refines the length. Array values follow Dewy's value semantics: binding, assignment, argument passing, and return produce an independent value unless the program explicitly passes a place.
+`array<T>` specifies the element type. Growable arrays hold word scalars, strings, and objects; an object element is stored as an independent copy, so the array never aliases the value pushed into it, and a popped element remains valid. Inside an index, `end` is the last index (`xs.length - 1`) and composes freely: `xs[end]`, `xs[end - 1]`, `xs[2..end]`, proven from the same facts. Iterating an array of objects (`loop s in spans`) binds the loop variable as a read-only borrow of each element — assigning it, its fields, growing its arrays, or passing it as a place is rejected; copy it (`let mine:Span = s`) to change it. `array<T length=N>` additionally refines the length. Array values follow Dewy's value semantics: binding, assignment, argument passing, and return produce an independent value unless the program explicitly passes a place.
 
 ```dewy
 let original = [1 2 3]

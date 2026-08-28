@@ -73,6 +73,26 @@ loop letter in 'a'..'z'
 
 Natural-language collation and enumeration of arbitrary multi-scalar graphemes require explicit APIs rather than an invented universal ordering.
 
+## Indexing by Position
+
+Iterating covers most text handling, but a tokenizer wants to look at positions: `text[i]` for the grapheme at `i`, `text[a..b]` for a slice. Dewy proves those in bounds instead of checking at runtime, and for a string whose length is only known at runtime the proof comes from what your code already says — a loop or guard on `i <? text.length` is enough:
+
+<!-- dewy-example: compiler -->
+```dewy
+let first_word = (text:string):>string => {
+    let i:int64 = 0
+    loop i <? text.length {
+        if text[i] =? " " { return text[0..i) }
+        i += 1
+    }
+    return text
+}
+
+printl(first_word("héllo world"))   # héllo
+```
+
+Without such a guard, `text[i]` is a compile error ("string index is not proven in bounds") rather than a possible crash.
+
 ## Slicing
 
 Range indexes select immutable grapheme slices:
@@ -84,7 +104,7 @@ let middle = text[5..11]
 let suffix = text[13..]
 ```
 
-`end` refers to the final grapheme index. Open and closed range boundaries retain their ordinary meanings.
+`end` refers to the final grapheme index — it is `text.length - 1`, so `text[end - 1]` and `text[2..end]` work too, on strings of any length as long as the length is proven large enough. Open and closed range boundaries retain their ordinary meanings.
 
 ## Representation Views
 
