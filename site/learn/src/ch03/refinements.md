@@ -96,6 +96,8 @@ printl"{share(3 4)}%"   # 75%
 
 Without the guard, `percent(part whole)` is an error — "cannot prove refinement" — and so is dividing by `whole` directly, since Dewy proves every division's divisor nonzero instead of letting it crash.
 
-> **Provisional design:** Refined annotations on bindings and parameters, integer comparisons against constants, length facts, and interval reasoning are settled. Refined results and fields, richer propositions, checked proof values, and the `unsafe` syntax are not fully specified. Unsupported general Dewy expressions must not silently become refinement claims.
+The same contract works the other way round on results — `(n:int64):>int64<i => i >=? 1>` promises every caller a positive number, and every `return` inside has to prove it — and on fields: `let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]` is checked wherever a `Ratio` is built or `bottom` is stored, and assumed wherever `bottom` is read, so `r.top // r.bottom` never needs a guard. Dewy's own `Rational` is declared exactly like that.
+
+> **Provisional design:** Refined annotations on bindings, parameters, results, and fields, integer comparisons against constants, length facts, and interval reasoning are settled. Richer propositions, checked proof values, and the `unsafe` syntax are not fully specified. Unsupported general Dewy expressions must not silently become refinement claims.
 
 The design goal is inference-first: ordinary code should expose enough facts for routine safety without requiring programmers to write proofs throughout application code.

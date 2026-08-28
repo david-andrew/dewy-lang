@@ -10,10 +10,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from highlight_dewy import highlight_tree as highlight_dewy_tree
 from highlight_udewy import highlight_tree
-from udewy.cache import cache_artifact
 from udewy_showcase import DEMOS
 from udewy_spec_book import generate as generate_udewy_spec
+
+from udewy.cache import cache_artifact
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SITE_ROOT = REPO_ROOT / "site"
@@ -206,12 +208,14 @@ def write_sitemap() -> None:
 
 def main() -> None:
     mdbook = require_tool("mdbook")
+    node = require_tool("node")
     require_tool("wat2wasm")
     run([sys.executable, "site/scripts/check_dewy_examples.py"])
     copy_static_site()
     build_book(LEARN, DIST / "learn", mdbook)
     build_book(REFERENCE, DIST / "reference", mdbook)
     build_udewy_spec(mdbook)
+    highlight_dewy_tree(DIST, node=node)
     highlight_tree(DIST / "udewy")
     compile_showcase_demos()
     build_playground()

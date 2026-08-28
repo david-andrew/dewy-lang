@@ -6,8 +6,16 @@ The complete language website lives under `site/` and builds into the ignored
 ## Local prerequisites
 
 - Python 3.14 or newer
+- Node.js 20 or newer
 - [mdBook](https://rust-lang.github.io/mdBook/)
 - [WABT](https://github.com/WebAssembly/wabt), providing `wat2wasm`
+
+Install the build-time syntax highlighter once after cloning or updating the
+site dependencies:
+
+```sh
+npm ci --prefix site
+```
 
 Build and serve the site from the repository root:
 
@@ -37,6 +45,7 @@ python -m http.server --directory site/dist 8000
 - `playground/` documents the generated µDewy browser playground.
 - `scripts/` contains the build, a file watcher, local-link validation, and published Dewy-example checks.
 - The repo-root `install.sh` is copied to the site root; `udewy/install.sh` is copied to `/udewy/install.sh`.
+- Dewy code blocks are prerendered from the VS Code extension's TextMate grammar during the site build; the browser does not run a Dewy highlighter.
 - µDewy code blocks are prerendered from the tokenizer highlighter during the site build.
 
 The GitHub Pages workflow runs the same build command. Do not edit `dist/`

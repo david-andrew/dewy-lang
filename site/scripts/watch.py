@@ -25,6 +25,7 @@ WATCH = [
     build.UDEWY_REFERENCE / "book.toml",
     build.UDEWY_REFERENCE / "theme",
     build.UDEWY_README,
+    build.REPO_ROOT / "dewy" / "vscode-dewy" / "syntaxes" / "dewy.tmLanguage.json",
     *build.PLAYGROUND_PAGE_INPUTS,
     build.INSTALL_SCRIPT,
     build.UDEWY_INSTALL_SCRIPT,
@@ -73,6 +74,7 @@ def rebuild(changed: set[Path]) -> None:
     build.build_book(build.LEARN, build.DIST / "learn", mdbook)
     build.build_book(build.REFERENCE, build.DIST / "reference", mdbook)
     build.build_udewy_spec(mdbook)
+    build.highlight_dewy_tree(build.DIST)
     build.highlight_tree(build.DIST / "udewy")
     demo_slugs = {
         demo.slug

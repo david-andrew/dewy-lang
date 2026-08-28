@@ -30,50 +30,50 @@
     <header class="page-hero"><p class="eyebrow">Examples</p><h1>See the languages at work.</h1><p>These examples are selected from executable fixtures. Dewy and µDewy are related but distinct source languages, so every example is labeled.</p></header>
     <section class="section" style="padding-top:2rem">
       <div class="example-grid">
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Hello, World</h2><pre><code>printl"Hello, World!"</code></pre><p>Prelude imports and top-level execution in one line.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/hello.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Array sum</h2><pre><code>let values:array&lt;int64&gt; = [10 20 12]
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Hello, World</h2><pre><code class="language-dewy">printl"Hello, World!"</code></pre><p>Prelude imports and top-level execution in one line.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/hello.dewy">Source</a></div></article>
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Array sum</h2><pre><code class="language-dewy">let values:array&lt;int64&gt; = [10 20 12]
 let i:int64 = 0
 let total:int64 = 0
 loop i &lt;? values.length {
     total += values[i]
     i += 1
 }</code></pre><p>Flow-proven bounds make the indexed access valid.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/array_while_index.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Objects</h2><pre><code>let point = [
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Objects</h2><pre><code class="language-dewy">let point = [
     x = 3
     y = 4
     sum = () =&gt; x + y
 ]
 let value = point.sum</code></pre><p>Structural fields and methods with object-local lookup.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/object_methods.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Unicode strings</h2><pre><code>let text = "café 👨‍👩‍👧‍👦"
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Unicode strings</h2><pre><code class="language-dewy">let text = "café 👨‍👩‍👧‍👦"
 let family = text[5]
 let count = family.length</code></pre><p>Index and length operate on extended grapheme clusters.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/unicode_strings.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Stepped ranges</h2><pre><code>let total:int64 = 0
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Stepped ranges</h2><pre><code class="language-dewy">let total:int64 = 0
 loop i in 0,2..10 {
     total += i
 }
 loop i in 5,3..0 {
     total += i
 }</code></pre><p>A second anchor establishes either a positive or negative step without a separate range constructor.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/range_stepped.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Multiple iterators</h2><pre><code>let total:int64 = 0
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Multiple iterators</h2><pre><code class="language-dewy">let total:int64 = 0
 loop i in 0..2 and j in 10..20 {
     total += i
 }</code></pre><p>Iterator conditions compose directly with logical operators; <code>and</code> stops when either iterator is exhausted.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/multi_iterator_and.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Optional narrowing</h2><pre><code>let value:int64|undefined = choose(true)
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Optional narrowing</h2><pre><code class="language-dewy">let value:int64|undefined = choose(true)
 
 if value is? int64 {
     return value + 2
 }
 return 0</code></pre><p>A type test narrows the optional value for the successful branch without an assertion or forced unwrap.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/optional_values.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Overload sets</h2><pre><code>let choose = (():&gt;int64 =&gt; 20)
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Overload sets</h2><pre><code class="language-dewy">let choose = (():&gt;int64 =&gt; 20)
            &amp; ((x:int64):&gt;int64 =&gt; x)
 
 let answer = choose() + choose(22)</code></pre><p><code>&amp;</code> combines ordinary function values, and each call selects the implementation matching its arguments.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/overload_calls.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Defaults and keywords</h2><pre><code>let add = (x:int64 y:int64=2):&gt;int64 =&gt;
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Defaults and keywords</h2><pre><code class="language-dewy">let add = (x:int64 y:int64=2):&gt;int64 =&gt;
     x + y
 
 let answer = add(40)
 let same = add(39 y=3)</code></pre><p>Parameters can have lazy defaults, while named arguments make overrides and reordered calls explicit.</p><div class="button-row"><a class="button" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/tests/keyword_default_calls.dewy">Source</a></div></article>
-        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Modules and paths</h2><pre><code>from p"lib.dewy" import (answer add Number)
+        <article class="example-card"><span class="badge works">Dewy · runs</span><h2>Modules and paths</h2><pre><code class="language-dewy">from p"lib.dewy" import (answer add Number)
 import p"lib.dewy" as library
 
 let value:library.Number = answer

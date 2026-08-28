@@ -68,7 +68,7 @@
       <div class="hero-code" aria-label="Dewy source example">
         <div class="code-top"><span>example.dewy</span><span class="runs">runs today ✓</span></div>
         <div class="hero-code-body">
-          <pre class="hero-source"><code>text = <b class="s">"café 👨‍👩‍👧‍👦 🍀"</b>
+          <pre class="hero-source"><code class="language-dewy">text = <b class="s">"café 👨‍👩‍👧‍👦 🍀"</b>
 
 loop i in <b class="n">0</b>.. and c in text
     if c not =? <b class="s">' '</b> {
@@ -99,7 +99,7 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="showcase-row" aria-labelledby="units-heading">
         <div class="showcase-pane code-pane">
           <div class="pane-top"><span>units.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln">1</span><b class="c"># Units are values. Juxtaposition multiplies.</b>
+          <pre><code class="language-dewy lined"><span class="ln">1</span><b class="c"># Units are values. Juxtaposition multiplies.</b>
 <span class="ln">2</span>mass = <b class="n">10</b><b class="u">kg</b>
 <span class="ln">3</span>velocity = <b class="n">30</b><b class="u">m/s</b>
 <span class="ln">4</span>energy = <b class="n">1</b>/<b class="n">2</b> * mass * velocity^<b class="n">2</b>   <b class="c"># 4500 J</b>
@@ -117,7 +117,7 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="showcase-row" aria-labelledby="ranges-heading">
         <div class="showcase-pane code-pane">
           <div class="pane-top"><span>ranges.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln">1</span><b class="c"># Bounds are visible: [ ] includes, ( ) excludes.</b>
+          <pre><code class="language-dewy lined"><span class="ln">1</span><b class="c"># Bounds are visible: [ ] includes, ( ) excludes.</b>
 <span class="ln">2</span>window = [<b class="n">0</b>..<b class="n">10</b>)              <b class="c"># 0 1 ... 9</b>
 <span class="ln">3</span>evens = <b class="n">0</b>,<b class="n">2</b>..<b class="n">100</b>              <b class="c"># step inferred from the pair</b>
 <span class="ln">4</span>
@@ -135,7 +135,7 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="showcase-row" aria-labelledby="loop-heading">
         <div class="showcase-pane code-pane">
           <div class="pane-top"><span>loops.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln">1</span>ratings = [
+          <pre><code class="language-dewy lined"><span class="ln">1</span>ratings = [
 <span class="ln">2</span>    <b class="s">'star wars'</b> -&gt; <b class="n">73</b>
 <span class="ln">3</span>    <b class="s">'star trek'</b> -&gt; <b class="n">89</b>
 <span class="ln">4</span>    <b class="s">'legend of the galactic heroes'</b> -&gt; <b class="n">100</b>
@@ -158,7 +158,7 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="showcase-row" aria-labelledby="types-heading">
         <div class="showcase-pane code-pane">
           <div class="pane-top"><span>refinements.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln">1</span><b class="c"># Types can carry liquid refinement conditions.</b>
+          <pre><code class="language-dewy lined"><span class="ln">1</span><b class="c"># Types can carry liquid refinement conditions.</b>
 <span class="ln">2</span>Positive = int&lt; i=&gt;i&gt;?<b class="n">0</b> &gt;
 <span class="ln">3</span>NonEmptyArray = array&lt; length&gt;?<b class="n">0</b> &gt;
 <span class="ln">4</span>
@@ -178,7 +178,7 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="showcase-row" aria-labelledby="fn-heading">
         <div class="showcase-pane code-pane">
           <div class="pane-top"><span>functions.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln">1</span><b class="c"># `&amp;` combines implementations into one overload set.</b>
+          <pre><code class="language-dewy lined"><span class="ln">1</span><b class="c"># `&amp;` combines implementations into one overload set.</b>
 <span class="ln">2</span>format = ((value:int64):&gt;string =&gt; <b class="s">"integer: <span class="interp"><span class="interp-brace">{</span>value<span class="interp-brace">}</span></span>"</b>)
 <span class="ln">3</span>       &amp; ((value:string):&gt;string =&gt; <b class="s">"text: <span class="interp"><span class="interp-brace">{</span>value<span class="interp-brace">}</span></span>"</b>)
 <span class="ln">4</span>
@@ -195,7 +195,7 @@ loop i in <b class="n">0</b>.. and c in text
       <section class="showcase-row" aria-labelledby="obj-heading">
         <div class="showcase-pane code-pane">
           <div class="pane-top"><span>objects.dewy</span><span class="tag implemented">implemented ✓</span></div>
-          <pre><code><span class="ln"> 1</span>counter = (start=<b class="n">0</b>) =&gt; [
+          <pre><code class="language-dewy lined"><span class="ln"> 1</span>counter = (start=<b class="n">0</b>) =&gt; [
 <span class="ln"> 2</span>    value = start
 <span class="ln"> 3</span>    increment = () =&gt; (value += <b class="n">1</b>)
 <span class="ln"> 4</span>]
@@ -218,7 +218,7 @@ loop i in <b class="n">0</b>.. and c in text
 
       <section class="showcase-row next-row" aria-labelledby="next-heading">
         <div class="showcase-pane code-pane">
-          <pre><code><span class="ln">1</span><b class="c"># Dewy → typed HIR → µDewy → machine</b>
+          <pre><code class="language-dewy lined"><span class="ln">1</span><b class="c"># Dewy → typed HIR → µDewy → machine</b>
 <span class="ln">2</span><b class="c"># targets: native · WebAssembly · C</b>
 <span class="ln">3</span>
 <span class="ln">4</span><b class="c"># The µDewy compiler, written in µDewy,</b>
