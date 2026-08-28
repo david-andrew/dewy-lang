@@ -1,97 +1,73 @@
 # Rationals over big integers: the runtime representation of the abstract
 # `rational` (constants fold at compile time; `Rational` in `rational.dewy` is
 # the explicit fixed-width `rational<int64>`). Loaded after `bigint.dewy`.
-# `sign` is -1, 0, or 1 (an int64 field so `q not=? 0` is a fact the analysis
-# tracks); the numerator carries the sign as a BigInt too, the denominator is
-# positive, and the parts are coprime.
-let BigRational:type = [sign:int64 numerator:BigInt denominator:BigInt]
+# Zero is its own case; a nonzero rational is a nonzero numerator over a
+# positive denominator, the parts coprime (positivity and coprimality are
+# the constructors' conventions; nonzeroness is the type's). `if q =? 0`
+# narrows, and `rational & ~0` names the nonzero form a divisor must have.
+let BigRational:type = 0 | [numerator:BigInt & ~0 denominator:BigInt & ~0]
 
-let _bigint_is_zero = (value:BigInt):>bool => value.limbs.length =? 0
-let _bigint_abs = (value:BigInt):>BigInt => _bigint_from_limbs(false value.limbs)
-let _bigint_sign = (value:BigInt):>int64 => {
-    if value.limbs.length =? 0 { return 0 }
-    if value.negative { return -1 }
-    return 1
-}
-
-let _bigint_is_one = (value:BigInt):>bool => {
-    if value.negative { return false }
-    if value.limbs.length =? 1 { return value.limbs[0] =? 1 }
-    return false
-}
-
-# gcd(0 0) is taken as 1 so the result is always a usable divisor.
-let _bigint_gcd = (a:BigInt b:BigInt):>BigInt => {
-    let g:array<uint64> = _mag_gcd(a.limbs b.limbs)
-    if g.length =? 0 { return _bigint_from_int(1) }
-    return [negative = false limbs = g]
-}
-
-# The exact quotient of a multiple by a positive divisor (the sign follows the dividend).
-let _bigint_exact_div = (value:BigInt divisor:BigInt):>BigInt => {
-    if _bigint_is_one(divisor) { return value }
-    let parts = _mag_divmod(value.limbs divisor.limbs)
-    return _bigint_from_limbs(value.negative parts.quotient)
-}
-
-let _BIGRATIONAL_ZERO:BigRational = [sign = 0 numerator = [negative = false limbs = []] denominator = [negative = false limbs = [1]]]
+let _BIGINT_TWO:BigInt & ~0 = [sign = 1 limbs = [2]]
 
 # Parts already coprime, with a positive denominator: no gcd.
-let _bigrational_coprime = (numerator:BigInt denominator:BigInt):>BigRational => {
-    if numerator.limbs.length =? 0 { return _BIGRATIONAL_ZERO }
-    return [sign = _bigint_sign(numerator) numerator = numerator denominator = denominator]
+let _bigrational_coprime = (numerator:BigInt denominator:BigInt & ~0):>BigRational => {
+    if numerator =? 0 { return 0 }
+    return [numerator = numerator denominator = denominator]
 }
 
-# Normalize: positive denominator, coprime parts, zero as 0/1.
-let _bigrational_make = (numerator:BigInt denominator:BigInt):>BigRational => {
-    let n:BigInt = numerator
-    let d:BigInt = denominator
-    if d.negative {
-        n = _bigint_neg(n)
-        d = _bigint_neg(d)
+# Normalize: positive denominator, coprime parts.
+let _bigrational_make = (numerator:BigInt denominator:BigInt & ~0):>BigRational => {
+    if numerator =? 0 { return 0 }
+    let n:BigInt & ~0 = numerator
+    let d:BigInt & ~0 = denominator
+    if d.sign <? 0 {
+        n = _bigint_neg_nonzero(n)
+        d = _bigint_neg_nonzero(d)
     }
-    if n.limbs.length =? 0 { return _BIGRATIONAL_ZERO }
-    let g:BigInt = _bigint_gcd(n d)
-    return _bigrational_coprime(_bigint_exact_div(n g) _bigint_exact_div(d g))
+    let g:BigInt & ~0 = _bigint_gcd(n d)
+    return [numerator = _bigint_exact_div(n g) denominator = _bigint_exact_div(d g)]
 }
 
-let _bigrational_from_int = (value:int64):>BigRational => _bigrational_coprime(_bigint_from_int(value) _bigint_from_int(1))
-let _bigrational_from_bigint = (value:BigInt):>BigRational => _bigrational_coprime(value _bigint_from_int(1))
+let _bigrational_from_int = (value:int64):>BigRational => _bigrational_coprime(_bigint_from_int(value) _BIGINT_ONE)
+let _bigrational_from_bigint = (value:BigInt):>BigRational => _bigrational_coprime(value _BIGINT_ONE)
 let _bigrational_from_rational = (value:Rational):>BigRational =>
-    _bigrational_coprime(_bigint_from_int(value.numerator) _bigint_from_int(value.denominator))
+    _bigrational_coprime(_bigint_from_int(value.numerator) _bigint_from_int_nonzero(value.denominator))
 
-let _bigrational_neg = (a:BigRational):>BigRational =>
-    [sign = -a.sign numerator = _bigint_neg(a.numerator) denominator = a.denominator]
+let _bigrational_neg = (a:BigRational):>BigRational => {
+    if a =? 0 { return 0 }
+    return [numerator = _bigint_neg_nonzero(a.numerator) denominator = a.denominator]
+}
 
 # Addition by Knuth's method (TAOCP 4.5.1): with g = gcd(d1 d2), the sum is
 # (n1 (d2/g) + n2 (d1/g)) / (d1 d2 / g); when g is 1 that is already in
 # lowest terms, otherwise only a gcd against g remains. Equal denominators
 # (an accumulator's usual case) need one gcd of small operands.
 let _bigrational_add_signed = (a:BigRational b:BigRational subtract:bool):>BigRational => {
-    if b.sign =? 0 { return a }
-    let b_numerator:BigInt = b.numerator
-    if subtract { b_numerator = _bigint_neg(b.numerator) }
-    if a.sign =? 0 { return _bigrational_coprime(b_numerator b.denominator) }
+    if b =? 0 { return a }
+    let b_numerator:BigInt & ~0 = b.numerator
+    if subtract { b_numerator = _bigint_neg_nonzero(b.numerator) }
+    if a =? 0 { return [numerator = b_numerator denominator = b.denominator] }
     if _mag_compare(a.denominator.limbs b.denominator.limbs) =? 0 {
         let total:BigInt = _bigint_add(a.numerator b_numerator)
-        if total.limbs.length =? 0 { return _BIGRATIONAL_ZERO }
-        let g:BigInt = _bigint_gcd(total a.denominator)
-        return _bigrational_coprime(_bigint_exact_div(total g) _bigint_exact_div(a.denominator g))
+        if total =? 0 { return 0 }
+        let g:BigInt & ~0 = _bigint_gcd(total a.denominator)
+        return [numerator = _bigint_exact_div(total g) denominator = _bigint_exact_div(a.denominator g)]
     }
-    let g:BigInt = _bigint_gcd(a.denominator b.denominator)
+    let g:BigInt & ~0 = _bigint_gcd(a.denominator b.denominator)
     if _bigint_is_one(g) {
         return _bigrational_coprime(
             _bigint_add(_bigint_mul(a.numerator b.denominator) _bigint_mul(b_numerator a.denominator))
-            _bigint_mul(a.denominator b.denominator))
+            _bigint_mul_nonzero(a.denominator b.denominator))
     }
-    let a_reduced:BigInt = _bigint_exact_div(a.denominator g)
-    let b_reduced:BigInt = _bigint_exact_div(b.denominator g)
+    let a_reduced:BigInt & ~0 = _bigint_exact_div(a.denominator g)
+    let b_reduced:BigInt & ~0 = _bigint_exact_div(b.denominator g)
     let total:BigInt = _bigint_add(_bigint_mul(a.numerator b_reduced) _bigint_mul(b_numerator a_reduced))
-    if total.limbs.length =? 0 { return _BIGRATIONAL_ZERO }
-    let g2:BigInt = _bigint_gcd(total g)
-    return _bigrational_coprime(
-        _bigint_exact_div(total g2)
-        _bigint_mul(a_reduced _bigint_exact_div(b.denominator g2)))
+    if total =? 0 { return 0 }
+    let g2:BigInt & ~0 = _bigint_gcd(total g)
+    return [
+        numerator = _bigint_exact_div(total g2)
+        denominator = _bigint_mul_nonzero(a_reduced _bigint_exact_div(b.denominator g2))
+    ]
 }
 
 let _bigrational_add = (a:BigRational b:BigRational):>BigRational => _bigrational_add_signed(a b false)
@@ -100,44 +76,62 @@ let _bigrational_sub = (a:BigRational b:BigRational):>BigRational => _bigrationa
 # Cross-reduction (each numerator against the other denominator) leaves the
 # products coprime, so no gcd of the products is needed.
 let _bigrational_mul = (a:BigRational b:BigRational):>BigRational => {
-    if a.sign =? 0 or b.sign =? 0 { return _BIGRATIONAL_ZERO }
-    let g1:BigInt = _bigint_gcd(a.numerator b.denominator)
-    let g2:BigInt = _bigint_gcd(b.numerator a.denominator)
-    return _bigrational_coprime(
-        _bigint_mul(_bigint_exact_div(a.numerator g1) _bigint_exact_div(b.numerator g2))
-        _bigint_mul(_bigint_exact_div(a.denominator g2) _bigint_exact_div(b.denominator g1)))
+    if a =? 0 { return 0 }
+    if b =? 0 { return 0 }
+    let g1:BigInt & ~0 = _bigint_gcd(a.numerator b.denominator)
+    let g2:BigInt & ~0 = _bigint_gcd(b.numerator a.denominator)
+    return [
+        numerator = _bigint_mul_nonzero(_bigint_exact_div(a.numerator g1) _bigint_exact_div(b.numerator g2))
+        denominator = _bigint_mul_nonzero(_bigint_exact_div(a.denominator g2) _bigint_exact_div(b.denominator g1))
+    ]
 }
 
 # Dividing by a rational is the caller's proof that it is nonzero (`if q not=? 0`).
-let _bigrational_div = (a:BigRational b:BigRational<sign not=? 0>):>BigRational => {
-    if a.sign =? 0 { return _BIGRATIONAL_ZERO }
-    let g1:BigInt = _bigint_gcd(a.numerator b.numerator)
-    let g2:BigInt = _bigint_gcd(a.denominator b.denominator)
-    let numerator:BigInt = _bigint_mul(_bigint_exact_div(a.numerator g1) _bigint_exact_div(b.denominator g2))
-    if b.sign <? 0 { numerator = _bigint_neg(numerator) }
-    return _bigrational_coprime(
-        numerator
-        _bigint_mul(_bigint_exact_div(a.denominator g2) _bigint_exact_div(_bigint_abs(b.numerator) g1)))
+let _bigrational_div = (a:BigRational b:BigRational & ~0):>BigRational => {
+    if a =? 0 { return 0 }
+    let g1:BigInt & ~0 = _bigint_gcd(a.numerator b.numerator)
+    let g2:BigInt & ~0 = _bigint_gcd(a.denominator b.denominator)
+    let numerator:BigInt & ~0 = _bigint_mul_nonzero(_bigint_exact_div(a.numerator g1) _bigint_exact_div(b.denominator g2))
+    if b.numerator.sign <? 0 { numerator = _bigint_neg_nonzero(numerator) }
+    return [
+        numerator = numerator
+        denominator = _bigint_mul_nonzero(_bigint_exact_div(a.denominator g2) _bigint_exact_div(_bigint_abs_nonzero(b.numerator) g1))
+    ]
 }
 
 # Coprime parts stay coprime under powers.
-let _bigrational_pow = (a:BigRational exponent:int64<exponent >=? 0>):>BigRational =>
-    _bigrational_coprime(_bigint_pow(a.numerator exponent) _bigint_pow(a.denominator exponent))
+let _bigrational_pow = (a:BigRational exponent:int64<exponent >=? 0>):>BigRational => {
+    if a =? 0 {
+        if exponent =? 0 { return [numerator = _BIGINT_ONE denominator = _BIGINT_ONE] }
+        return 0
+    }
+    return [numerator = _bigint_pow_nonzero(a.numerator exponent) denominator = _bigint_pow_nonzero(a.denominator exponent)]
+}
 
-let _bigrational_pow_negative = (a:BigRational<sign not=? 0> exponent:int64<exponent <? 0>):>BigRational => {
-    let numerator:BigInt = _bigint_pow(a.denominator (-exponent))
-    let denominator:BigInt = _bigint_pow(a.numerator (-exponent))
-    if denominator.negative { return _bigrational_coprime(_bigint_neg(numerator) _bigint_neg(denominator)) }
-    return _bigrational_coprime(numerator denominator)
+let _bigrational_pow_negative = (a:BigRational & ~0 exponent:int64<exponent <? 0>):>BigRational => {
+    let numerator:BigInt & ~0 = _bigint_pow_nonzero(a.denominator (-exponent))
+    let denominator:BigInt & ~0 = _bigint_pow_nonzero(a.numerator (-exponent))
+    if denominator.sign <? 0 {
+        return [numerator = _bigint_neg_nonzero(numerator) denominator = _bigint_neg_nonzero(denominator)]
+    }
+    return [numerator = numerator denominator = denominator]
 }
 
 # a/b ? c/d  <=>  a*d ? c*b, since denominators are positive
-let _bigrational_compare = (a:BigRational b:BigRational):>int64 =>
-    _bigint_compare(_bigint_mul(a.numerator b.denominator) _bigint_mul(b.numerator a.denominator))
+let _bigrational_compare = (a:BigRational b:BigRational):>int64 => {
+    if a =? 0 {
+        if b =? 0 { return 0 }
+        return -b.numerator.sign
+    }
+    if b =? 0 { return a.numerator.sign }
+    return _bigint_compare(_bigint_mul(a.numerator b.denominator) _bigint_mul(b.numerator a.denominator))
+}
 # Normalized fractions are equal exactly when their parts are.
-let _bigrational_eq = (a:BigRational b:BigRational):>bool =>
-    a.sign =? b.sign and _mag_compare(a.numerator.limbs b.numerator.limbs) =? 0
-        and _mag_compare(a.denominator.limbs b.denominator.limbs) =? 0
+let _bigrational_eq = (a:BigRational b:BigRational):>bool => {
+    if a =? 0 { return b =? 0 }
+    if b =? 0 { return false }
+    return _bigint_eq(a.numerator b.numerator) and _bigint_eq(a.denominator b.denominator)
+}
 let _bigrational_ne = (a:BigRational b:BigRational):>bool => not _bigrational_eq(a b)
 let _bigrational_lt = (a:BigRational b:BigRational):>bool => _bigrational_compare(a b) <? 0
 let _bigrational_le = (a:BigRational b:BigRational):>bool => _bigrational_compare(a b) <=? 0
@@ -147,15 +141,16 @@ let _bigrational_ge = (a:BigRational b:BigRational):>bool => _bigrational_compar
 # A big-integer rational rounds to the nearest fixed value when that fits;
 # otherwise the conversion yields `Overflow` for the caller to handle.
 let _fixed_from_bigrational = (value:BigRational):>Fixed|Overflow => {
+    if value =? 0 { return [raw = 0] }
     let scaled:BigInt = _bigint_mul(value.numerator _bigint_from_int(4294967296))
-    let twice:BigInt = _bigint_add(_bigint_mul(scaled _bigint_from_int(2)) value.denominator)
-    let rounded:BigInt = _bigint_floordiv(twice _bigint_mul(value.denominator _bigint_from_int(2)))
+    let twice:BigInt = _bigint_add(_bigint_mul(scaled _BIGINT_TWO) value.denominator)
+    let rounded:BigInt = _bigint_floordiv(twice _bigint_mul_nonzero(value.denominator _BIGINT_TWO))
+    if rounded =? 0 { return [raw = 0] }
     if rounded.limbs.length >? 2 { return Overflow }
-    let magnitude:uint64 = 0
-    if rounded.limbs.length >=? 1 { magnitude = rounded.limbs[0] }
+    let magnitude:uint64 = rounded.limbs[0]
     if rounded.limbs.length =? 2 { magnitude = magnitude + rounded.limbs[1] * 4294967296 }
     if magnitude >? 9223372036854775807 { return Overflow }
     let raw:int64 = magnitude transmute int64
-    if rounded.negative { return [raw = -raw] }
+    if rounded.sign <? 0 { return [raw = -raw] }
     return [raw = raw]
 }

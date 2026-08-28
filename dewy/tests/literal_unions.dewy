@@ -1,0 +1,36 @@
+# A union of integer singletons such as `-1|1` is a word whose value set is
+# a compile-time fact, and a literal beside an object type (`0 | [...]`) is
+# a tagged union that `=? 0` / `not=? 0` narrow like `is?`; `T & ~0` names
+# the union without its literal member.
+let Signed:type = [sign:-1|1 magnitude:int64]
+let Value:type = 0 | [sign:-1|1 limbs:array<uint64 length >? 0>]
+
+let negate = (a:Signed):>Signed => [sign = -a.sign magnitude = a.magnitude]
+
+let value_of = (v:Value):>int64 => {
+    if v =? 0 { return 0 }
+    else { return v.sign * (v.limbs[0] transmute int64) }
+}
+
+let top_limb = (v:Value & ~0):>uint64 => {
+    let last:int64 = v.limbs.length - 1
+    if last >=? 0 { if last <? v.limbs.length { return v.limbs[last] } }
+    return 0
+}
+
+let main = ():>int64 => {
+    let a:Signed = [sign = 1 magnitude = 5]
+    let b = negate(a)
+    let checks:int64 = 0
+    if b.sign =? -1 and b.sign * b.sign =? 1 { checks += 1 }
+    let zero:Value = 0
+    let five:Value = [sign = 1 limbs = [5]]
+    let minus:Value = [sign = -1 limbs = [7 1]]
+    if zero =? 0 and five not=? 0 { checks += 2 }
+    if value_of(five) =? 5 and value_of(minus) =? -7 and value_of(zero) =? 0 { checks += 4 }
+    if minus not=? 0 { if top_limb(minus) =? 1 { checks += 8 } }
+    let w = zero
+    w = five
+    if w not=? 0 { if w.limbs.length =? 1 { checks += 16 } }
+    return checks
+}

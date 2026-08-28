@@ -1,0 +1,34 @@
+# `bigint` is `0 | [sign:-1|1 limbs]`: zero is its own case, so a divisor is
+# `bigint & ~0`, which `if d not=? 0` establishes; `a / b` on big integers
+# is a rational; and the abstract `rational` is `0 | [numerator denominator]`
+# the same way.
+let halve = (n:bigint):>bigint => n // 2                  # a constant divisor is nonzero
+let ratio = (n:bigint d:bigint & ~0):>rational => n / d
+
+let main = (args:array<string>):>int64 => {
+    let scale:int64 = 1
+    if args.length >? 1000 { scale = 2 }
+    let checks:int64 = 0
+    let big:bigint = 340282366920938463463374607431768211456 * scale   # 2^128
+    let zero:bigint = big - big
+    if zero =? 0 and big not=? 0 and halve(zero) =? 0 { checks += 1 }
+    if big not=? 0 {
+        if big // big =? 1 and big % big =? 0 and zero // big =? 0 { checks += 2 }
+        if ratio(big big) =? 1 and ratio(zero big) =? 0 { checks += 4 }
+        let q = big / big
+        let r = (big + 1) / big
+        if r not=? 0 {
+            if q / r =? 340282366920938463463374607431768211456/340282366920938463463374607431768211457 { checks += 8 }
+        }
+    }
+    let n:int64 = 7 * scale
+    if n not=? 0 {
+        if big % n =? 4 and (-big) // n =? -48611766702991209066196372490252601637 { checks += 16 }
+    }
+    let acc:rational = 0
+    let i:int64 = 1
+    loop i <=? 4 * scale { acc = acc + 1/i  i += 1 }
+    if acc =? 25/12 and acc - acc =? 0 { checks += 32 }
+    if big not=? 0 { printl"{zero} {halve(big)} {ratio(zero big)}" }
+    return checks
+}

@@ -1,12 +1,17 @@
-# Arbitrary-precision integers. `bigint` is this object type: a sign and a
-# little-endian array of base-2^32 limbs (each held in a uint64 word so limb
-# products fit in 64 bits), with no leading zero limbs; zero has no limbs and
-# is never negative. Operations are ordinary Dewy functions; the checker only
-# routes `+ - * // % ^` and comparisons here and promotes integer operands.
-let BigInt:type = [negative:bool limbs:array<uint64>]
+# Arbitrary-precision integers. `bigint` is this type: the literal `0`, or a
+# sign and a nonempty little-endian array of base-2^32 limbs (each held in a
+# uint64 word so limb products fit in 64 bits). Zero is its own case rather
+# than a sign value, so there is no negative zero and no zero with limbs;
+# `bigint & ~0` names the nonzero form, and `if x =? 0` narrows between the
+# two. The one convention the type cannot state is canonical form: no leading
+# zero limbs (`_bigint_from_limbs` is the only place limbs are packed).
+# Operations are ordinary Dewy functions; the checker only routes
+# `+ - * // % ^` and comparisons here and promotes integer operands.
+let BigInt:type = 0 | [sign:-1|1 limbs:array<uint64 length >? 0>]
 
 let _LIMB_BASE:uint64 = 4294967296
 let _LIMB_MASK:uint64 = 4294967295
+let _BIGINT_ONE:BigInt & ~0 = [sign = 1 limbs = [1]]
 
 let _bigint_trim = (@limbs:array<uint64>):>void => {
     loop limbs.length >? 0 and limbs[limbs.length - 1] =? 0 {
@@ -14,22 +19,38 @@ let _bigint_trim = (@limbs:array<uint64>):>void => {
     }
 }
 
+# Pack a magnitude: trimmed limbs with a sign, or zero when nothing is left.
 let _bigint_from_limbs = (negative:bool limbs:array<uint64>):>BigInt => {
     _bigint_trim(@limbs)
-    if limbs.length =? 0 { return [negative = false limbs = limbs] }
-    return [negative = negative limbs = limbs]
+    if limbs.length >? 0 {
+        if negative { return [sign = -1 limbs = limbs] }
+        return [sign = 1 limbs = limbs]
+    }
+    return 0
+}
+
+# A nonzero word has one or two limbs, so the literal shapes cover it.
+let _bigint_from_int_nonzero = (value:int64 & ~0):>BigInt & ~0 => {
+    let magnitude:uint64 = value transmute uint64
+    if value <? 0 { magnitude = (0 - value) transmute uint64 }   # wraps correctly for the minimum
+    let low:uint64 = magnitude and _LIMB_MASK
+    let high:uint64 = magnitude >> 32
+    if value <? 0 {
+        if high =? 0 { return [sign = -1 limbs = [low]] }
+        return [sign = -1 limbs = [low high]]
+    }
+    if high =? 0 { return [sign = 1 limbs = [low]] }
+    return [sign = 1 limbs = [low high]]
 }
 
 let _bigint_from_int = (value:int64):>BigInt => {
-    let negative:bool = value <? 0
-    let magnitude:uint64 = value transmute uint64
-    if negative { magnitude = (0 - value) transmute uint64 }   # wraps correctly for the minimum
-    let limbs:array<uint64> = []
-    loop magnitude not =? 0 {
-        limbs.push(magnitude and _LIMB_MASK)
-        magnitude = magnitude >> 32
-    }
-    return _bigint_from_limbs(negative limbs)
+    if value =? 0 { return 0 }
+    return _bigint_from_int_nonzero(value)
+}
+
+let _bigint_limbs = (value:BigInt):>array<uint64> => {
+    if value =? 0 { return [] }
+    return value.limbs
 }
 
 # --- magnitude helpers (limb arrays) ---
@@ -383,56 +404,97 @@ let _mag_gcd = (a:array<uint64> b:array<uint64>):>array<uint64> => {
 }
 
 # --- signed operations ---
-let _bigint_neg = (a:BigInt):>BigInt => _bigint_from_limbs(not a.negative a.limbs)
+let _bigint_neg = (a:BigInt):>BigInt => {
+    if a =? 0 { return 0 }
+    return [sign = -a.sign limbs = a.limbs]
+}
+let _bigint_neg_nonzero = (a:BigInt & ~0):>BigInt & ~0 => [sign = -a.sign limbs = a.limbs]
+let _bigint_abs = (a:BigInt):>BigInt => {
+    if a =? 0 { return 0 }
+    return [sign = 1 limbs = a.limbs]
+}
+let _bigint_abs_nonzero = (a:BigInt & ~0):>BigInt & ~0 => [sign = 1 limbs = a.limbs]
 
 let _bigint_add = (a:BigInt b:BigInt):>BigInt => {
-    if a.negative =? b.negative { return _bigint_from_limbs(a.negative _mag_add(a.limbs b.limbs)) }
+    if a =? 0 { return b }
+    if b =? 0 { return a }
+    if a.sign =? b.sign { return _bigint_from_limbs(a.sign <? 0 _mag_add(a.limbs b.limbs)) }
     let order:int64 = _mag_compare(a.limbs b.limbs)
-    if order =? 0 { return _bigint_from_limbs(false []) }
-    if order >? 0 { return _bigint_from_limbs(a.negative _mag_sub(a.limbs b.limbs)) }
-    return _bigint_from_limbs(b.negative _mag_sub(b.limbs a.limbs))
+    if order =? 0 { return 0 }
+    if order >? 0 { return _bigint_from_limbs(a.sign <? 0 _mag_sub(a.limbs b.limbs)) }
+    return _bigint_from_limbs(b.sign <? 0 _mag_sub(b.limbs a.limbs))
 }
 
 let _bigint_sub = (a:BigInt b:BigInt):>BigInt => _bigint_add(a _bigint_neg(b))
 
-let _bigint_mul = (a:BigInt b:BigInt):>BigInt =>
-    _bigint_from_limbs(a.negative xor b.negative _mag_mul(a.limbs b.limbs))
+let _bigint_mul = (a:BigInt b:BigInt):>BigInt => {
+    if a =? 0 { return 0 }
+    if b =? 0 { return 0 }
+    return _bigint_from_limbs(a.sign not =? b.sign _mag_mul(a.limbs b.limbs))
+}
 
-# floor division and modulo with Python's sign conventions (b non-zero)
-let _bigint_floordiv = (a:BigInt b:BigInt):>BigInt => {
+# The product of nonzero magnitudes is nonzero; the analysis does not know
+# that a schoolbook product has a limb, hence the (never taken) fallback.
+let _bigint_mul_nonzero = (a:BigInt & ~0 b:BigInt & ~0):>BigInt & ~0 => {
+    let product:array<uint64> = _mag_mul(a.limbs b.limbs)
+    if product.length >? 0 {
+        if a.sign =? b.sign { return [sign = 1 limbs = product] }
+        return [sign = -1 limbs = product]
+    }
+    return a
+}
+
+# floor division and modulo with Python's sign conventions; a nonzero
+# divisor is the caller's proof (`if d not=? 0`)
+let _bigint_floordiv = (a:BigInt b:BigInt & ~0):>BigInt => {
+    if a =? 0 { return 0 }
     let parts = _mag_divmod(a.limbs b.limbs)
-    let quotient:BigInt = _bigint_from_limbs(a.negative xor b.negative parts.quotient)
-    if a.negative xor b.negative and parts.remainder.length >? 0 {
-        quotient = _bigint_sub(quotient _bigint_from_int(1))
+    let negative:bool = a.sign not =? b.sign
+    let quotient:BigInt = _bigint_from_limbs(negative parts.quotient)
+    if negative and parts.remainder.length >? 0 {
+        quotient = _bigint_sub(quotient _BIGINT_ONE)
     }
     return quotient
 }
 
-let _bigint_mod = (a:BigInt b:BigInt):>BigInt => {
+let _bigint_mod = (a:BigInt b:BigInt & ~0):>BigInt => {
+    if a =? 0 { return 0 }
     let parts = _mag_divmod(a.limbs b.limbs)
-    let remainder:BigInt = _bigint_from_limbs(a.negative parts.remainder)
-    if a.negative xor b.negative and parts.remainder.length >? 0 {
+    let remainder:BigInt = _bigint_from_limbs(a.sign <? 0 parts.remainder)
+    if a.sign not =? b.sign and parts.remainder.length >? 0 {
         remainder = _bigint_add(remainder b)
     }
     return remainder
 }
 
-let _bigint_pow = (base:BigInt exponent:int64):>BigInt => {
-    let result:BigInt = _bigint_from_int(1)
-    let factor:BigInt = base
+let _bigint_pow_nonzero = (base:BigInt & ~0 exponent:int64):>BigInt & ~0 => {
+    let result:BigInt & ~0 = _BIGINT_ONE
+    let factor:BigInt & ~0 = base
     loop exponent >? 0 {
-        if exponent % 2 =? 1 { result = _bigint_mul(result factor) }
-        factor = _bigint_mul(factor factor)
+        if exponent % 2 =? 1 { result = _bigint_mul_nonzero(result factor) }
+        factor = _bigint_mul_nonzero(factor factor)
         exponent = exponent // 2
     }
     return result
 }
 
+let _bigint_pow = (base:BigInt exponent:int64):>BigInt => {
+    if base =? 0 {
+        if exponent =? 0 { return _BIGINT_ONE }
+        return 0
+    }
+    return _bigint_pow_nonzero(base exponent)
+}
+
 let _bigint_compare = (a:BigInt b:BigInt):>int64 => {
-    if a.negative and not b.negative { return -1 }
-    if b.negative and not a.negative { return 1 }
+    if a =? 0 {
+        if b =? 0 { return 0 }
+        return -b.sign
+    }
+    if b =? 0 { return a.sign }
+    if a.sign not =? b.sign { return a.sign }
     let order:int64 = _mag_compare(a.limbs b.limbs)
-    if a.negative { return 0 - order }
+    if a.sign <? 0 { return -order }
     return order
 }
 
@@ -442,6 +504,35 @@ let _bigint_lt = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) <? 0
 let _bigint_le = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) <=? 0
 let _bigint_gt = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) >? 0
 let _bigint_ge = (a:BigInt b:BigInt):>bool => _bigint_compare(a b) >=? 0
+
+let _bigint_sign = (value:BigInt):>int64 => {
+    if value =? 0 { return 0 }
+    return value.sign
+}
+
+let _bigint_is_one = (value:BigInt):>bool => {
+    if value =? 0 { return false }
+    if value.sign <? 0 { return false }
+    if value.limbs.length =? 1 { return value.limbs[0] =? 1 }
+    return false
+}
+
+# gcd(0 0) is taken as 1 so the result is always a usable divisor.
+let _bigint_gcd = (a:BigInt b:BigInt):>BigInt & ~0 => {
+    let g:array<uint64> = _mag_gcd(_bigint_limbs(a) _bigint_limbs(b))
+    if g.length >? 0 { return [sign = 1 limbs = g] }
+    return _BIGINT_ONE
+}
+
+# The exact quotient of a nonzero multiple by a positive divisor (the sign
+# follows the dividend). The divisor divides the value, so the quotient is
+# nonzero; the analysis does not know that, hence the (never taken) fallback.
+let _bigint_exact_div = (value:BigInt & ~0 divisor:BigInt & ~0):>BigInt & ~0 => {
+    if _bigint_is_one(divisor) { return value }
+    let parts = _mag_divmod(value.limbs divisor.limbs)
+    if parts.quotient.length >? 0 { return [sign = value.sign limbs = parts.quotient] }
+    return value
+}
 
 # decimal digits, most significant first, by repeated division by 10^9
 let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {

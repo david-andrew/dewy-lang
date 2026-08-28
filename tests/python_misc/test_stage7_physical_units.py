@@ -126,7 +126,7 @@ def test_fractional_unit_scales_make_rational_quantities() -> None:
     root = _check('let value:int64 = 2 transmute int64\nlet delay = value * ms\nconst pause = 300ms')
     delay = _declarations(root)['delay'].expr.type
     assert isinstance(delay, ty.QuantityType)
-    assert isinstance(delay.number, ty.ObjectType)  # the abstract rational (big parts): no error member
+    assert isinstance(delay.number, ty.TypeOr) and delay.number.items[0] == ty.IntegerLiteralType(0)  # the abstract rational `0 | [...]`: no error member
     assert delay.dimension == ty.dimension(('Time', 1))
     assert _declarations(root)['pause'].expr.type == ty.QuantityType(
         ty.RationalLiteralType(3, 10),

@@ -195,7 +195,8 @@ def _typecheck_module(
     for type_name, attribute in ((RATIONAL_TYPE_NAME, 'rational_object'), (FIXED_TYPE_NAME, 'fixed_object'), (BIGINT_TYPE_NAME, 'bigint_object')):
         prelude_type = prelude_bindings.get(type_name)
         if prelude_type is not None and prelude_type.type_value is not None:
-            setattr(type_system, attribute, prelude_type.type_value)
+            # `BigInt = 0 | [...]`: the object member is the representation constants materialize into
+            setattr(type_system, attribute, _union_object_member(prelude_type.type_value))
     declarations = ChainMap(prelude_declarations, builtins.builtin_types)
 
     if block is None:
@@ -1597,6 +1598,26 @@ def _unhandled_type_test_members(
     return residual
 
 
+def _in_declared_order(joined: ty.Type, binding_id: int, *, ctx: Context) -> ty.Type:
+    """A joined union in the binding's declared member order.
+
+    Union tags are physical (the declared union's numbering), so a join of
+    per-path narrowings — `[...]` on one path, `0` on the other — must spell
+    the declared `0 | [...]` again, not a reordered union of the same members.
+    """
+    if not isinstance(joined, ty.TypeOr):
+        return joined
+    binding = ctx.binding_registry.by_id.get(binding_id)
+    declared = ty.strip_refinement(binding.type) if binding is not None and binding.type is not None else None
+    declared = _number_and_dimension(declared)[0] if declared is not None else None
+    if not isinstance(declared, ty.TypeOr):
+        return joined
+    if all(item in declared.items for item in joined.items):
+        ordered = [item for item in declared.items if item in joined.items]
+        return declared if len(ordered) == len(declared.items) else ty.TypeOr(ordered)
+    return joined
+
+
 def _refine_type_test(
     current: ty.Type,
     test: ty.TypeExpr,
@@ -2627,7 +2648,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     elif None not in lengths:
                         length_minimums[binding_id] = min(cast(set[int], lengths))
                     continue
-                joined[binding_id] = ty.union(*types)
+                joined[binding_id] = _in_declared_order(ty.union(*types), binding_id, ctx=ctx)
             ctx.refinements.clear()
             ctx.refinements.update(joined)
             joined_bounds: dict[int, int] = {}
@@ -5125,6 +5146,8 @@ def _tcr_array_literal(
 ) -> hir.ArrayLiteral:
     """Check a one-dimensional homogeneous array with a supported element layout."""
 
+    if isinstance(expected, ty.RefinedType):
+        expected = expected.base   # `array<uint64 length >? 0>`: the literal is proven against the refinement afterwards
     expected_array = expected if isinstance(expected, ty.ArrayType) else None
     if expected_array is None and isinstance(expected, ty.TypeOr):
         # A literal checked against a union targets the union's unique
@@ -5690,9 +5713,35 @@ def _is_word_rational(type_: ty.Type, *, ctx: Context) -> bool:
     return binding is not None and binding.type_value is not None and type_ == binding.type_value
 
 
+def _union_object_member(type_: ty.Type) -> ty.Type:
+    """The object member of `0 | [...]`; any other type is itself."""
+    if isinstance(type_, ty.TypeOr):
+        objects = [item for item in type_.items if isinstance(item, ty.ObjectType)]
+        if len(objects) == 1:
+            return objects[0]
+    return type_
+
+
+def _is_prelude_number(type_: ty.Type, name: str, *, ctx: Context) -> bool:
+    """Whether ``type_`` is the prelude type ``name`` — the `0 | [...]` union or its nonzero object."""
+    binding = ctx.binding_scopes.get(name)
+    if binding is None or binding.type_value is None:
+        return False
+    declared = binding.type_value
+    return type_ == declared or type_ == _union_object_member(declared)
+
+
+def _is_nonzero_form(type_: ty.Type, name: str, *, ctx: Context) -> bool:
+    """Whether ``type_`` is the nonzero object of the prelude's `0 | [...]` type ``name``."""
+    binding = ctx.binding_scopes.get(name)
+    if binding is None or binding.type_value is None:
+        return False
+    member = _union_object_member(binding.type_value)
+    return member is not binding.type_value and type_ == member
+
+
 def _is_big_rational(type_: ty.Type, *, ctx: Context) -> bool:
-    binding = ctx.binding_scopes.get(BIG_RATIONAL_TYPE_NAME)
-    return binding is not None and binding.type_value is not None and type_ == binding.type_value
+    return _is_prelude_number(type_, BIG_RATIONAL_TYPE_NAME, ctx=ctx)
 
 
 BIGINT_TYPE_NAME = 'BigInt'
@@ -5724,32 +5773,50 @@ def _bigint_type(ctx: Context, loc: Span) -> ty.Type:
 
 
 def _is_bigint(type_: ty.Type, *, ctx: Context) -> bool:
-    binding = ctx.binding_scopes.get(BIGINT_TYPE_NAME)
-    return binding is not None and binding.type_value is not None and type_ == binding.type_value
+    return _is_prelude_number(type_, BIGINT_TYPE_NAME, ctx=ctx)
+
+
+def _require_nonzero_divisor(arg: hir.AST, name: str, *, ctx: Context) -> None:
+    """A `0 | [...]` divisor must have been narrowed to its nonzero form."""
+    number, _ = _number_and_dimension(arg.type)
+    if _is_prelude_number(number, name, ctx=ctx) and not _is_nonzero_form(number, name, ctx=ctx):
+        type_error(
+            ctx.srcfile,
+            'cannot prove the divisor is nonzero',
+            Pointer(span=arg.loc, message='this may be zero'),
+            hint='guard the division (`if d not=? 0 { … }`), or take the divisor as `d:bigint & ~0`',
+        )
 
 
 def _bigint_literal(value: int, *, loc: Span, ctx: Context) -> hir.AST:
-    """A big integer constant from its base-2^32 limbs."""
+    """A big integer constant: the literal `0`, or the nonzero object from its base-2^32 limbs."""
+    if value == 0:
+        return hir.Integer(loc, ty.IntegerLiteralType(0), '0d', 0)
     magnitude = abs(value)
     limbs: list[int] = []
     while magnitude:
         limbs.append(magnitude & 0xFFFFFFFF)
         magnitude >>= 32
     limb_nodes = [hir.Integer(loc, 'uint64', '0d', limb) for limb in limbs]
-    return _prelude_call(
-        '_bigint_from_limbs',
-        [
-            hir.Bool(loc, 'bool', value < 0),
-            hir.ArrayLiteral(loc, ty.ArrayType('uint64', len(limbs)), limb_nodes),
-        ],
-        loc=loc,
-        ctx=ctx,
-    )
+    nonzero = ty.unfold(_union_object_member(_bigint_type(ctx, loc)))
+    assert isinstance(nonzero, ty.ObjectType)
+    sign = -1 if value < 0 else 1
+    return hir.ObjectLiteral(loc, nonzero, [
+        hir.ObjectField(loc, 'sign', hir.Integer(loc, ty.IntegerLiteralType(sign), '0d', sign)),
+        hir.ObjectField(loc, 'limbs', hir.ArrayLiteral(loc, ty.ArrayType('uint64', len(limbs)), limb_nodes)),
+    ])
 
 
-def _to_bigint(arg: hir.AST, *, ctx: Context) -> hir.AST:
-    """An operand as a runtime `BigInt`; integers widen, constants fold."""
+def _to_bigint(arg: hir.AST, *, ctx: Context, nonzero: bool = False) -> hir.AST:
+    """An operand as a runtime `BigInt`; integers widen, constants fold.
+
+    With ``nonzero`` the result must be the nonzero form `bigint & ~0`: a big
+    operand must already be narrowed, and an integer operand's nonzeroness is
+    proven like any `int64 & ~0` argument.
+    """
     if _is_bigint(arg.type, ctx=ctx):
+        if nonzero:
+            _require_nonzero_divisor(arg, BIGINT_TYPE_NAME, ctx=ctx)
         return arg
     constant = _constant_integer(_unwrap_parens(arg), ctx=ctx)
     if constant is not None:
@@ -5760,6 +5827,8 @@ def _to_bigint(arg: hir.AST, *, ctx: Context) -> hir.AST:
             'no big-integer conversion for this operand',
             Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
         )
+    if nonzero:
+        return _prelude_call('_bigint_from_int_nonzero', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx)
     return _prelude_call('_bigint_from_int', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx)
 
 
@@ -5811,7 +5880,7 @@ def _dispatch_bigint(
             return _bigint_literal(negated, loc=loc, ctx=ctx)
         return _prelude_call('_bigint_neg', [_to_bigint(args[0], ctx=ctx)], loc=loc, ctx=ctx)
     if fname == '__truediv__':
-        not_implemented(ctx.srcfile, loc, 'exact division of big integers (rationals over big integers)')
+        return None   # `big / x` is a rational: the rational dispatch builds it
     helper = _BIGINT_BINARY_FUNCTIONS.get(fname)
     if helper is None or len(args) != 2:
         type_error(
@@ -5840,7 +5909,8 @@ def _dispatch_bigint(
             if ty.integer_literal_fits(folded, 'int64') and not (expected is not None and _is_bigint(expected, ctx=ctx)):
                 return hir.Integer(loc, ty.IntegerLiteralType(folded), '0d', folded)
             return _bigint_literal(folded, loc=loc, ctx=ctx)
-    operands = [_to_bigint(arg, ctx=ctx) for arg in args]
+    divides = fname in {'__floordiv__', '__mod__'}
+    operands = [_to_bigint(arg, ctx=ctx, nonzero=divides and index == 1) for index, arg in enumerate(args)]
     return _prelude_call(helper, operands, loc=loc, ctx=ctx)
 
 
@@ -5929,6 +5999,8 @@ def _with_dimension(number: ty.Type, dimension: ty.DimensionType) -> ty.Type:
 
 def _with_dimension_result(declared: ty.Type, number: ty.Type, dimension: ty.DimensionType) -> ty.Type:
     """A prelude operation's result with the dimension: `Rational | Overflow` keeps its error member."""
+    if declared == number:
+        return _with_dimension(number, dimension)   # the `0 | [...]` rational is one number type
     if isinstance(declared, ty.TypeOr):
         return ty.union(*[
             _with_dimension(number, dimension) if ty.unfold(member) == number else member
@@ -6020,8 +6092,12 @@ def _materialize_rational(node: hir.AST, *, ctx: Context, word: bool = False) ->
         ]
         call = _prelude_call('_rational_make', parts, loc=node.loc, ctx=ctx)
         return replace(call, type=_with_dimension(call.type, dimension))
+    if value == 0:
+        # the abstract rational is `0 | [...]`: zero is the union's own literal
+        # member, typed as the union so a `let` declares the union
+        return hir.Integer(node.loc, _with_dimension(_rational_type(ctx, node.loc), dimension), '0d', 0)
     parts = [_bigint_literal(part, loc=node.loc, ctx=ctx) for part in (value.numerator, value.denominator)]
-    call = _prelude_call('_bigrational_make', parts, loc=node.loc, ctx=ctx)
+    call = _prelude_call('_bigrational_coprime', parts, loc=node.loc, ctx=ctx)   # a Fraction is normalized
     return replace(call, type=_with_dimension(call.type, dimension))
 
 
@@ -6196,7 +6272,7 @@ def _dispatch_rational(
                 Pointer(span=loc, message='rationals support `+ - * / ^`, negation, and comparisons'),
             )
         return None
-    if not all(ctx.type_system.is_subtype(number, 'number') or _is_rational(number, ctx=ctx) or _is_fixed(number, ctx=ctx) for number in numbers):
+    if not all(ctx.type_system.is_subtype(number, 'number') or _is_rational(number, ctx=ctx) or _is_fixed(number, ctx=ctx) or _is_bigint(number, ctx=ctx) for number in numbers):
         type_error(
             ctx.srcfile,
             f'no matching overload for operator `{source_name}`',
@@ -6250,10 +6326,15 @@ def _dispatch_rational(
     rational_type = _word_rational_type(ctx, loc) if word else _rational_type(ctx, loc)
     if is_division and not involves_rational:
         # integer / integer: build the fraction directly (`b` proven nonzero)
-        operands = [_as_int64(_strip_dimension(arg), ctx=ctx) for arg in args]
         if _is_bigint(numbers[0], ctx=ctx) or _is_bigint(numbers[1], ctx=ctx):
-            call = _prelude_call('_bigrational_make', [_to_bigint(arg, ctx=ctx) for arg in args], loc=loc, ctx=ctx)
+            call = _prelude_call(
+                '_bigrational_make',
+                [_to_bigint(args[0], ctx=ctx), _to_bigint(args[1], ctx=ctx, nonzero=True)],
+                loc=loc,
+                ctx=ctx,
+            )
         else:
+            operands = [_as_int64(_strip_dimension(arg), ctx=ctx) for arg in args]
             call = _prelude_call('_rational_make', operands, loc=loc, ctx=ctx)
             call = _prelude_call('_bigrational_from_rational', [call], loc=loc, ctx=ctx)
         return replace(call, type=_with_dimension(rational_type, result_dimension))
@@ -6261,9 +6342,12 @@ def _dispatch_rational(
         call = _prelude_call('_rational_neg' if word else '_bigrational_neg', [_to_rational(args[0], ctx=ctx, word=word)], loc=loc, ctx=ctx)
         return replace(call, type=_with_dimension(rational_type, result_dimension))
     helper = (_RATIONAL_BINARY_FUNCTIONS if word else _BIG_RATIONAL_BINARY_FUNCTIONS)[fname]
-    zero_test = _zero_test_on_field(fname, args, 'numerator' if word else 'sign', loc=loc, source_name=source_name, ctx=ctx)
-    if zero_test is not None:
-        return zero_test
+    if word:
+        zero_test = _zero_test_on_field(fname, args, 'numerator', loc=loc, source_name=source_name, ctx=ctx)
+        if zero_test is not None:
+            return zero_test
+    elif is_division and constants[1] is None:
+        _require_nonzero_divisor(args[1], BIG_RATIONAL_TYPE_NAME, ctx=ctx)
     operands = [_to_rational(arg, ctx=ctx, word=word) for arg in args]
     call = _prelude_call(helper, operands, loc=loc, ctx=ctx)
     if fname in _COMPARISON_DUNDERS:
@@ -6482,6 +6566,30 @@ def _real_literal(real: t1.Real, *, loc: Span, ctx: Context) -> hir.AST:
     return _rational_literal(numerator, denominator, loc=loc, ctx=ctx)
 
 
+def _literal_member_test(args: list[hir.AST], *, negated: bool, loc: Span, ctx: Context) -> hir.AST | None:
+    """`value =? 0` where `value : 0 | [...]` tests the union's tag.
+
+    Equality against a literal that is one member of a mixed union (a literal
+    beside object or nominal members, as in `bigint = 0 | [sign limbs]`) is
+    `value is? 0`, so the condition narrows the binding like a type test.
+    """
+    for value, other in ((args[0], args[1]), (args[1], args[0])):
+        union = ty.strip_refinement(_number_and_dimension(value.type)[0])
+        if not isinstance(union, ty.TypeOr):
+            continue
+        constant = _constant_integer(_unwrap_parens(other), ctx=ctx)
+        if constant is None:
+            continue
+        literal = next(
+            (m for m in union.items if isinstance(m, ty.IntegerLiteralType) and m.value == constant),
+            None,
+        )
+        if literal is None or all(isinstance(m, ty.IntegerLiteralType) for m in union.items):
+            continue
+        return hir.TypeTest(loc, 'bool', value, literal, negated)
+    return None
+
+
 def _dispatch_builtin(
     fname: str,
     args: list[hir.AST],
@@ -6504,6 +6612,10 @@ def _dispatch_builtin(
     ]
     if fname == '__pow__':
         return _dispatch_pow(args, loc=loc, ctx=ctx)
+    if fname in ('__eq__', '__ne__') and len(args) == 2:
+        member_test = _literal_member_test(args, negated=fname == '__ne__', loc=loc, ctx=ctx)
+        if member_test is not None:
+            return member_test
     big = _dispatch_bigint(fname, args, loc=loc, source_name=source_name, ctx=ctx, expected=expected)
     if big is not None:
         return big
@@ -8139,10 +8251,17 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
         and isinstance(item.left.item, t1.Identifier)
     ):
         declared_type = ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name))
+        if isinstance(declared_type, ty.TypeOr):
+            # `sign:-1|1`: a field of integer singletons is a word whose value
+            # set is its invariant (elsewhere a singleton union stays a tagged cell)
+            literal_set = _integer_literal_set(declared_type, loc=item.right.loc, ctx=ctx)
+            if literal_set is not None:
+                declared_type = literal_set
         if isinstance(declared_type, ty.RefinedType):
-            # an invariant of the field: kept beside the base type
-            if any(p.subject != 'self' for p in declared_type.propositions):
-                not_implemented(ctx.srcfile, item.right.loc, 'field invariants other than value comparisons')
+            # an invariant of the field: kept beside the base type (value
+            # comparisons, or a length bound of an array or string field)
+            if any(p.subject not in ('self', 'length') for p in declared_type.propositions):
+                not_implemented(ctx.srcfile, item.right.loc, 'field invariants other than value and length comparisons')
             return ty.ObjectField(item.left.item.name, declared_type.base, mutable, refinement=declared_type.propositions)
         return ty.ObjectField(
             item.left.item.name,
@@ -8370,6 +8489,14 @@ def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition]
                     'refinement subject does not apply',
                     Pointer(span=loc, message=f'`{type_to_dewy(base)}` has no field `{field_name}`'),
                 )
+            if proposition.of == 'length':
+                if not (field.type == 'array' or field.type == 'string' or isinstance(field.type, (ty.ArrayType, ty.StringType))):
+                    type_error(
+                        ctx.srcfile,
+                        'refinement subject does not apply',
+                        Pointer(span=loc, message=f'field `{field_name}` has no `length`'),
+                    )
+                continue
             if not (isinstance(field.type, str) and ctx.type_system.is_subtype(field.type, 'int')):
                 not_implemented(ctx.srcfile, loc, f'refinements on a field of type `{type_to_dewy(field.type)}`')
             continue
@@ -8399,6 +8526,31 @@ def _excluded_literals(type_: ty.Type) -> list[int] | None:
     return values
 
 
+def _integer_literal_set(union: ty.TypeOr, *, loc: Span, ctx: Context) -> ty.Type | None:
+    """`-1|1` or `0|1|2`: a union of integer singletons is a refined word.
+
+    The value set becomes the closed interval plus the excluded gaps, so the
+    bounds analysis proves memberships (`sign = -a.sign`) and reads the facts
+    (`sign not=? 0`) exactly as for any other refined integer. None when the
+    union is not made of integer singletons alone.
+    """
+    values: list[int] = []
+    for member in union.items:
+        if not isinstance(member, ty.IntegerLiteralType):
+            return None
+        values.append(member.value)
+    values = sorted(set(values))
+    low, high = values[0], values[-1]
+    if not (ty.integer_literal_fits(low, 'int64') and ty.integer_literal_fits(high, 'int64')):
+        not_implemented(ctx.srcfile, loc, 'integer singleton unions outside the int64 range')
+    if high - low > 1024:
+        not_implemented(ctx.srcfile, loc, 'integer singleton unions spanning more than 1024 values')
+    present = set(values)
+    propositions = [ty.Proposition('self', '>=?', low), ty.Proposition('self', '<=?', high)]
+    propositions += [ty.Proposition('self', 'not=?', gap) for gap in range(low, high + 1) if gap not in present]
+    return _refined('int64', propositions)
+
+
 def _is_integer_base(type_: ty.Type, *, ctx: Context) -> bool:
     base = ty.strip_refinement(type_)
     return isinstance(base, str) and ctx.type_system.is_subtype(base, 'int')
@@ -8415,6 +8567,8 @@ def _refined(base: ty.Type, propositions: list[ty.Proposition]) -> ty.Type:
 def _describe_proposition(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
+    if proposition.field is not None and proposition.of == 'length':
+        subject = f'{proposition.field}.length'
     return f'{subject} {op} {proposition.value}'
 
 
@@ -8435,7 +8589,16 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
             while isinstance(literal, (hir.ValueCast, hir.RepresentationCast)):
                 literal = literal.expr
             field_value = next((f.value for f in literal.fields if f.name == field_name), None) if isinstance(literal, hir.ObjectLiteral) else None
-            fact = _constant_integer(field_value, ctx=ctx) if field_value is not None else None
+            if field_value is None:
+                fact = None
+            elif proposition.of == 'length':
+                fact = (
+                    field_value.type.length if isinstance(field_value.type, ty.ArrayType)
+                    else _known_string_length(field_value.type) if _is_string_type(field_value.type)
+                    else None
+                )
+            else:
+                fact = _constant_integer(field_value, ctx=ctx)
         elif proposition.subject == 'self':
             fact = _constant_integer(node, ctx=ctx)
         else:
@@ -8599,6 +8762,10 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             return ty.IntegerLiteralType(
                 t0.parse_integer(value.src, value.prefix)
             )
+
+        case p0.Prefix(op=t1.Operator(symbol='-'), item=p0.Atom(item=t1.Integer(value=value))):
+            # `-1` in `sign:-1|1`: a negative singleton
+            return ty.IntegerLiteralType(-t0.parse_integer(value.src, value.prefix))
 
         case p0.Atom(item=t1.String(content=content)):
             # a string literal in type position is its singleton type
@@ -8848,17 +9015,32 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             left = ast_to_type(ast.left, ctx=ctx)
             right = ast_to_type(ast.right, ctx=ctx)
             if isinstance(left, ty.TypeOr) and isinstance(right, ty.TypeOr):
-                return _canonical_union(ty.TypeOr(left.items + right.items), ctx=ctx)
+                union = ty.TypeOr(left.items + right.items)
             elif isinstance(left, ty.TypeOr):
-                return _canonical_union(ty.TypeOr(left.items + [right]), ctx=ctx)
+                union = ty.TypeOr(left.items + [right])
             elif isinstance(right, ty.TypeOr):
-                return _canonical_union(ty.TypeOr([left] + right.items), ctx=ctx)
-            return _canonical_union(ty.TypeOr([left, right]), ctx=ctx)
+                union = ty.TypeOr([left] + right.items)
+            else:
+                union = ty.TypeOr([left, right])
+            return _canonical_union(union, ctx=ctx)
         
         case p0.BinOp(op=t1.Operator(symbol='and'|'&')):
             left = ast_to_type(ast.left, ctx=ctx)
             right = ast_to_type(ast.right, ctx=ctx)
             excluded = _excluded_literals(right)
+            if excluded is not None and isinstance(left, ty.TypeOr):
+                # `bigint & ~0`: the union without its literal member
+                remaining = [
+                    member for member in left.items
+                    if not (isinstance(member, ty.IntegerLiteralType) and member.value in excluded)
+                ]
+                if len(remaining) == len(left.items):
+                    type_error(
+                        ctx.srcfile,
+                        'excluded value is not a member of the union',
+                        Pointer(span=ast.right.loc, message=f'`{type_to_dewy(left)}` has no such member'),
+                    )
+                return remaining[0] if len(remaining) == 1 else ty.TypeOr(remaining)
             if excluded is not None and _is_integer_base(left, ctx=ctx):
                 # `int64 & ~0`: the structural spelling of `int64<i => i not=? 0>`
                 return _refined(left, [ty.Proposition('self', 'not=?', value) for value in excluded])
@@ -10226,7 +10408,10 @@ def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Propo
         carried = unfolded.field(field.name) if isinstance(unfolded, ty.ObjectType) else None
         if carried is not None and carried.refinement == field.refinement:
             continue
-        missing.extend(ty.Proposition(f'.{field.name}', p.op, p.value) for p in field.refinement)
+        missing.extend(
+            ty.Proposition(f'.{field.name}', p.op, p.value, of='length' if p.subject == 'length' else 'value')
+            for p in field.refinement
+        )
     return missing
 
 
@@ -10243,16 +10428,25 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
     if _is_bigint(expected, ctx=ctx) and not _is_bigint(node.type, ctx=ctx):
+        nonzero = _is_nonzero_form(expected, BIGINT_TYPE_NAME, ctx=ctx)
         constant = _constant_integer(_unwrap_parens(node), ctx=ctx)
-        if constant is not None:
+        if constant is not None and not (nonzero and constant == 0):
             return _bigint_literal(constant, loc=node.loc, ctx=ctx)
-        if ctx.type_system.is_subtype(node.type, 'int'):
-            return _prelude_call('_bigint_from_int', [_as_int64(node, ctx=ctx)], loc=node.loc, ctx=ctx)
+        if constant is None and ctx.type_system.is_subtype(node.type, 'int'):
+            return _to_bigint(node, ctx=ctx, nonzero=nonzero)
     node_number, node_dimension = _number_and_dimension(node.type)
     if isinstance(node_number, (ty.RationalLiteralType, ty.IntegerLiteralType)):
         # Compile-time numbers materialize into runtime rational or fixed
         # targets of the same dimension.
         expected_number, expected_dimension = _number_and_dimension(expected)
+        if (
+            isinstance(expected_number, ty.TypeOr)
+            and node_dimension == expected_dimension
+            and _constant_rational(node, ctx=ctx) == 0
+            and any(isinstance(m, ty.IntegerLiteralType) and m.value == 0 for m in expected_number.items)
+        ):
+            # `0` meeting `0 | [...]`: the union's own literal member
+            return hir.Integer(node.loc, node.type if isinstance(node_number, ty.IntegerLiteralType) else _with_dimension(ty.IntegerLiteralType(0), node_dimension), '0d', 0)
         if node_dimension == expected_dimension:
             if _is_rational(expected_number, ctx=ctx):
                 return _materialize_rational(node, ctx=ctx, word=_is_word_rational(expected_number, ctx=ctx))

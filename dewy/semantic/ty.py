@@ -491,11 +491,17 @@ class Proposition:
     subject: str
     op: str
     value: int
+    of: str = 'value'   # for a field subject: the field's `'value'` or its `'length'`
 
     @property
     def field(self) -> str | None:
         """The field name of a field subject, else None."""
         return self.subject[1:] if self.subject.startswith('.') else None
+
+    @property
+    def is_length(self) -> bool:
+        """Whether the proposition constrains a length (the subject's or a field's)."""
+        return self.subject == 'length' or (self.field is not None and self.of == 'length')
 
     def holds(self, fact: int) -> bool:
         match self.op:
@@ -910,6 +916,7 @@ class TypeSystem:
                 isinstance(literal, (IntegerLiteralType, RationalLiteralType))
                 and isinstance(other, ObjectType)
                 and other in (self.rational_object, self.fixed_object, self.bigint_object)
+                and not (other == self.bigint_object and isinstance(literal, IntegerLiteralType) and literal.value == 0)
             ):
                 return literal  # the compile-time number materializes into that representation
             if (
@@ -1065,7 +1072,9 @@ class TypeSystem:
             if b == self.rational_object:
                 return True
             if b == self.bigint_object:
-                return isinstance(a, IntegerLiteralType)
+                # a nonzero constant materializes into the nonzero big integer;
+                # `0` is the union's own literal member
+                return isinstance(a, IntegerLiteralType) and a.value != 0
             return False
         if isinstance(a, str) and isinstance(b, ObjectType) and b == self.bigint_object and b is not None:
             # every integer widens into a big integer without loss

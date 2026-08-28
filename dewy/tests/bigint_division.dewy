@@ -9,15 +9,17 @@ let main = (args:array<string>):>int64 => {
     # the input that makes Algorithm D's estimate one too big (the add-back step)
     let a:bigint = 170141183420855150474555134919112130560 * scale
     let b:bigint = 39614081257132168796771975169 * scale
-    if a // b =? 4294967294 and a % b =? 39614081257132168792477007874 { checks += 1 }
+    if b not=? 0 { if a // b =? 4294967294 and a % b =? 39614081257132168792477007874 { checks += 1 } }
     # multi-limb over multi-limb, floor semantics for negatives
     let x:bigint = 1606938044258990275541962092341162602522215339461694069869266 * scale
     let y:bigint = 2503155504993241601315571986085849 * scale
+    if y not=? 0 and x not=? 0 {
     let q = x // y
     let r = x % y
     if q * y + r =? x and r <? y and q =? 641964928288915446533058609 and (-x) // y =? -641964928288915446533058610 and (-x) % y =? 1320644547078208492919821938740624 { checks += 2 }
     # a one-limb divisor (short division) and a dividend smaller than the divisor
     if x // 4000000000 =? 401734511064747568885490523085290650630553834865423 and x % 4000000000 =? 2069869266 and y // x =? 0 and y % x =? y { checks += 4 }
+    }
     # normalization of rationals with big parts: a shared power of two (binary
     # gcd), a small factor against a large one (the short-division path),
     # coprime denominators, equal denominators

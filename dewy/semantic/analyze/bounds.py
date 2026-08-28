@@ -100,6 +100,18 @@ def _propositions_interval(propositions: tuple[ty.Proposition, ...] | list[ty.Pr
     return None if lower is None and upper is None else Interval(lower, upper)
 
 
+def _length_propositions_interval(propositions: tuple[ty.Proposition, ...] | list[ty.Proposition]) -> Interval | None:
+    """The bounds a set of length propositions (`length >? 0` on a field) guarantees."""
+    lower: int | None = None
+    upper: int | None = None
+    for proposition in propositions:
+        if proposition.subject != 'length':
+            continue
+        lower = _maximum_lower(lower, proposition.lower_bound())
+        upper = _minimum_upper(upper, proposition.upper_bound())
+    return None if lower is None and upper is None else Interval(lower, upper)
+
+
 def _excludes_zero(propositions: tuple[ty.Proposition, ...] | list[ty.Proposition]) -> bool:
     return any(p.subject == 'self' and p.op == 'not=?' and p.value == 0 for p in propositions)
 
@@ -129,6 +141,8 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
 def _describe_proposition_text(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
+    if proposition.field is not None and proposition.of == 'length':
+        subject = f'{proposition.field}.length'
     return f'{subject} {op} {proposition.value}'
 
 
@@ -552,7 +566,10 @@ class _BoundsValidator:
         sequence_id = _runtime_array_id(node, self.registry)
         if sequence_id is None:
             return None
-        return state.get(_length_key(sequence_id), Interval(0, _MAX_LENGTH))
+        interval = state.get(_length_key(sequence_id), Interval(0, _MAX_LENGTH))
+        # `limbs:array<uint64 length >? 0>`: the field's declared length bound is a fact on every read
+        declared = _length_propositions_interval(_member_invariant(node))
+        return interval if declared is None else interval.intersect(declared)
 
     def _field_node(self, value: hir.AST, field: str) -> hir.AST:
         """`value.field` as a node: the literal's field, or a member access (tracked by route)."""
@@ -567,6 +584,8 @@ class _BoundsValidator:
         """The node and interval a proposition's subject denotes for ``value``."""
         if (field := proposition.field) is not None:
             node = self._field_node(value, field)
+            if proposition.of == 'length':
+                return node, self._length_interval(node, state)
             return node, self._eval(node, state, validate=False)
         if proposition.subject == 'self':
             return value, interval
@@ -601,6 +620,12 @@ class _BoundsValidator:
                     base = ty.unfold(param.type.base)
                     declared = base.field(field) if isinstance(base, ty.ObjectType) else None
                     route_id = self.registry.route_id(param.binding_id, (field,), declared.type if declared is not None else 'int64', param_loc)
+                    if proposition.of == 'length':
+                        minimum = proposition.lower_bound()
+                        if minimum is not None:
+                            key = _length_key(route_id)
+                            state[key] = state.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
+                        continue
                     field_lower, field_upper = proposition.lower_bound(), proposition.upper_bound()
                     if field_lower is not None or field_upper is not None:
                         current = state.get(route_id, UNKNOWN_INTERVAL)
@@ -1769,10 +1794,12 @@ class _BoundsValidator:
             # Runtime-length array or string: prove `0 <= index` from the
             # interval and `index < length` from either a proven minimum
             # length or an `index <? xs.length` fact about this index binding.
-            array_id = _runtime_array_id(node.array if isinstance(node, hir.Index) else node.string, self.registry)
+            sequence = node.array if isinstance(node, hir.Index) else node.string
+            array_id = _runtime_array_id(sequence, self.registry)
             nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
             if array_id is not None and nonnegative:
-                minimum_length = state.get(_length_key(array_id), Interval(0, _MAX_LENGTH)).lower or 0
+                # the proven minimum: the length fact, tightened by a field's declared length bound
+                minimum_length = (self._length_interval(sequence, state) or Interval(0, _MAX_LENGTH)).lower or 0
                 if interval.upper is not None and interval.upper < minimum_length:
                     if interval.lower == interval.upper:
                         node.constant_index = interval.lower

@@ -823,6 +823,9 @@ class _InitializationChecker:
                 {*seen, node.binding_id},
             )
         if isinstance(node, hir.FunctionCall):
+            if id(node) in seen:
+                return None   # a producer whose result field is itself a call being resolved
+            seen = {*seen, id(node)}
             producers = self._callable_targets(node.func, parameters, seen)
             if producers is None:
                 return None

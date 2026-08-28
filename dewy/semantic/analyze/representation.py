@@ -59,8 +59,11 @@ class _RepresentationPass:
         self.srcfile = srcfile
         self.prelude = prelude
         self.unfit = unfit
-        self.big_type = prelude['BigInt'].type_value
-        assert isinstance(self.big_type, ty.ObjectType)
+        self.big_type = prelude['BigInt'].type_value   # `0 | [sign limbs]`
+        assert isinstance(self.big_type, ty.TypeOr)
+        objects = [item for item in self.big_type.items if isinstance(item, ty.ObjectType)]
+        assert len(objects) == 1
+        self.big_nonzero: ty.ObjectType = objects[0]      # `bigint & ~0`
         self.big_bindings: set[int] = set()
         self.notes: list[RepresentationNote] = []
 
@@ -72,10 +75,15 @@ class _RepresentationPass:
         return hir.FunctionCall(loc, binding.type.ret, func, args, {})
 
     def _is_big(self, node: hir.AST) -> bool:
-        return node.type == self.big_type
+        return node.type == self.big_type or node.type == self.big_nonzero
 
-    def _to_big(self, node: hir.AST) -> hir.AST:
-        """A word-typed integer value as a big integer (constants become exact limbs)."""
+    def _to_big(self, node: hir.AST, *, nonzero: bool = False) -> hir.AST:
+        """A word-typed integer value as a big integer (constants become exact limbs).
+
+        A divisor (``nonzero``) takes the nonzero form: the checker already
+        proved the word nonzero, so the conversion that keeps that form is
+        the right one.
+        """
         if self._is_big(node):
             return node
         if isinstance(node, hir.Integer):
@@ -83,16 +91,23 @@ class _RepresentationPass:
         if isinstance(node.type, ty.IntegerLiteralType):
             return self._literal(node.type.value, node.loc)
         word = node if node.type == 'int64' else hir.ValueCast(node.loc, 'int64', node)
-        return self._prelude_call('_bigint_from_int', [word], node.loc)
+        return self._prelude_call('_bigint_from_int_nonzero' if nonzero else '_bigint_from_int', [word], node.loc)
 
     def _literal(self, value: int, loc: Span) -> hir.AST:
+        """The literal `0`, or the nonzero object from its base-2^32 limbs."""
+        if value == 0:
+            return hir.Integer(loc, ty.IntegerLiteralType(0), '0d', 0)
         magnitude = abs(value)
         limbs: list[int] = []
         while magnitude:
             limbs.append(magnitude & 0xFFFFFFFF)
             magnitude >>= 32
         array = hir.ArrayLiteral(loc, ty.ArrayType('uint64', len(limbs)), [hir.Integer(loc, 'uint64', '0d', limb) for limb in limbs])
-        return self._prelude_call('_bigint_from_limbs', [hir.Bool(loc, 'bool', value < 0), array], loc)
+        sign = -1 if value < 0 else 1
+        return hir.ObjectLiteral(loc, self.big_nonzero, [
+            hir.ObjectField(loc, 'sign', hir.Integer(loc, ty.IntegerLiteralType(sign), '0d', sign)),
+            hir.ObjectField(loc, 'limbs', array),
+        ])
 
     def _note(self, loc: Span, message: str) -> None:
         self.notes.append(RepresentationNote(self.srcfile, loc, message))
@@ -218,7 +233,9 @@ class _RepresentationPass:
                 if flagged:
                     _node, interval, word = self.unfit.pop(id(node))
                     self._note(node.loc, f'this `{node.func.name.strip("_")}` result is a big integer: {self._describe(interval)}, so it may not fit `{word}`')
-                left, right = (self._to_big(arg) for arg in node.pos_args)
+                divides = name in ('__floordiv__', '__mod__')
+                left = self._to_big(node.pos_args[0])
+                right = self._to_big(node.pos_args[1], nonzero=divides)
                 call = self._prelude_call(_BINARY[name], [left, right], node.loc)
                 return call
             if name == '__unary_sub__' and len(node.pos_args) == 1 and (flagged or big_operand):

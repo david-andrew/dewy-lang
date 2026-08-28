@@ -3297,9 +3297,20 @@ class _Lowerer(
                     (m for m in members if system.is_subtype(node.type, m)),
                     None,
                 )
+                if member is None and node.type == 'int64':
+                    # not a member: the lowering's own retyping (`replace(node,
+                    # type='int64')`) of a `0 | [...]` cell — the cell address
+                    return [], cell
                 if member is None or member == 'undefined':
                     self._target_error(node, 'a union payload read of this type')
-                return [], self._optional_load_payload(cell, member, node.loc)
+                loaded = self._optional_load_payload(cell, member, node.loc)
+                if self._union_member_kind(member) == 'word':
+                    return [], loaded
+                # An aggregate member's pointer is bound to a temporary so the
+                # copies that re-walk their source expression (an array field
+                # clone) see a plain word, not the cell again.
+                pointer = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('member'))
+                return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', loaded)], pointer
         if isinstance(node, hir.ObjectLiteral):
             return self._extract_object_literal(node)
         if isinstance(node, hir.MemberAccess):

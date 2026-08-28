@@ -29,7 +29,14 @@ let f = 2^100                      # constant, folded exactly
 
 A big value cannot silently cross a word-sized boundary. Returning it from a function whose result type is `int` or `int64`, passing it to a word-sized parameter, or storing it in a fixed-width binding is a compile error unless a comparison proves the range or the boundary is annotated `bigint`; `int` in a signature is a 64-bit word, so functions that carry big values say `bigint`.
 
-Arithmetic, comparisons, `//`, `%`, and `^` apply to big integers; `/` (exact rational division) over big integers is not yet available.
+Arithmetic, comparisons, `//`, `%`, `^`, and `/` (an exact `rational`) apply to big integers. A `bigint` is `0 | [sign:-1|1 limbs:array<uint64 length >? 0>]`: zero is its own case rather than a sign value, so no negative zero and no zero with limbs is representable (canonical limbs — no leading zeros — remain the constructors' convention). `if x =? 0` / `x not=? 0` narrow between the two cases like `is?`, `bigint & ~0` names the nonzero form, and a big divisor must have it: `a // b`, `a % b`, and `a / b` need `if b not=? 0 { … }` or a `b:bigint & ~0` parameter (`cannot prove the divisor is nonzero` otherwise); a word divisor is proven the way any `int64 & ~0` argument is.
+
+```dewy
+let ratio = (n:bigint d:bigint & ~0):>rational => n / d
+let half = (n:bigint):>bigint => n // 2          # a constant divisor proves itself
+let big:bigint = 2^128
+if big not=? 0 { let q = ratio(1 big) }          # `big` is `bigint & ~0` here
+```
 
 ## Shifts
 
@@ -45,7 +52,7 @@ Operands are evaluated once.
 
 ## Rationals
 
-`rational` is an exact fraction, kept normalized: a positive denominator and coprime parts. `a / b` on integers yields a rational (`//` is floor division and stays integral); a decimal literal such as `9.8` or `1.25e2` is an exact rational. `+`, `-`, `*`, `/`, negation, and the ordered comparisons apply, and an integer operand promotes to a rational. Constant rational expressions fold at compile time; a constant zero divisor is a compile error. Rationals print as `n/d`, or as an integer when the denominator is one. A decimal literal is a rational unless `fixed` is requested explicitly — by an annotation (`let x:fixed = 0.1`) or a `fixed` operand — and that coercion is the one lossy step: the constant rounds to the nearest Q32.32 value there (a constant outside the fixed range is a compile error).
+`rational` is an exact fraction, kept normalized: a positive denominator and coprime parts. Like `bigint` it is `0 | [numerator:bigint & ~0 denominator:bigint & ~0]` — zero has no parts, so `q.numerator` and `q.denominator` are read behind `if q not=? 0 { … }`, which is also what a rational divisor needs. `a / b` on integers yields a rational (`//` is floor division and stays integral); a decimal literal such as `9.8` or `1.25e2` is an exact rational. `+`, `-`, `*`, `/`, negation, and the ordered comparisons apply, and an integer operand promotes to a rational. Constant rational expressions fold at compile time; a constant zero divisor is a compile error. Rationals print as `n/d`, or as an integer when the denominator is one. A decimal literal is a rational unless `fixed` is requested explicitly — by an annotation (`let x:fixed = 0.1`) or a `fixed` operand — and that coercion is the one lossy step: the constant rounds to the nearest Q32.32 value there (a constant outside the fixed range is a compile error).
 
 The runtime representation is a pair of `int64` parts; overflow beyond that range is currently unchecked, and a runtime zero divisor is an open error-value question.
 

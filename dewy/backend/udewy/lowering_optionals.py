@@ -583,6 +583,11 @@ class _OptionalLowering:
         node: hir.AST,
     ) -> int:
         system = ty.TypeSystem()
+        if isinstance(node, hir.Integer) and isinstance(value_type, ty.TypeOr):
+            # a constant typed as the whole union (`0` as `0 | [...]`) is its own literal member
+            for index, member in enumerate(members):
+                if isinstance(member, ty.IntegerLiteralType) and member.value == node.value:
+                    return index
         for index, member in enumerate(members):
             if system.is_subtype(value_type, member):
                 return index
@@ -633,6 +638,9 @@ class _OptionalLowering:
                     value.loc,
                 ),
             ]
+        if isinstance(value, hir.Integer) and isinstance(value.type, ty.TypeOr):
+            # a constant typed as the whole union (`0` as `0 | [...]`): its literal member's word
+            return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         if self._field_union_members(value.type) == members:
             # Same-union copy: tag, payload word, and the active aggregate tree.
             prelude, source = self._extract_expression(value)

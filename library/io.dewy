@@ -62,8 +62,9 @@ let _print_rational = (value:Rational):>void => {
 }
 
 let _print_bigrational = (value:BigRational):>void => {
+    if value =? 0 { _print_string("0") return void }
     _print_bigint(value.numerator)
-    if not (value.denominator.limbs.length =? 1 and value.denominator.limbs[0] =? 1) {
+    if not _bigint_is_one(value.denominator) {
         _print_string("/")
         _print_bigint(value.denominator)
     }
@@ -99,8 +100,8 @@ let _print_fixed = (value:Fixed):>void => {
 
 # Big integers print in decimal from their base-10^9 chunks.
 let _print_bigint = (value:BigInt):>void => {
-    if value.negative { _print_string("-") }
-    if value.limbs.length =? 0 { _print_string("0") return void }
+    if value =? 0 { _print_string("0") return void }
+    if value.sign <? 0 { _print_string("-") }
     let chunks = _bigint_decimal_chunks(value.limbs)
     let i:int64 = chunks.length
     let first:bool = true

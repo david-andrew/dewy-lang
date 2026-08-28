@@ -15,30 +15,45 @@ def _rational_type() -> ty.Type:
     return declared['r'].expr.type
 
 
+def _big(node: hir.AST) -> int:
+    """The value a big-integer constant carries: the literal `0`, or the `[sign limbs]` object."""
+    if isinstance(node, hir.Integer):
+        assert node.value == 0
+        return 0
+    assert isinstance(node, hir.ObjectLiteral), node
+    fields = {field.name: field.value for field in node.fields}
+    value = sum(limb.value << (32 * i) for i, limb in enumerate(fields['limbs'].items))
+    return fields['sign'].value * value
+
+
 def _parts(node: hir.AST) -> tuple[int, int]:
     """The (numerator, denominator) a materialized rational constant carries.
 
-    The abstract `rational` materializes as `_bigrational_make(<bigint literal> <bigint literal>)`;
-    the explicit `rational<int64>` as `_rational_make(n d)`.
+    The abstract `rational` materializes as `_bigrational_coprime(<big> <big>)`
+    (or the literal `0`); the explicit `rational<int64>` as `_rational_make(n d)`.
     """
+    if isinstance(node, hir.Integer):
+        assert node.value == 0
+        return (0, 1)
     assert isinstance(node, hir.FunctionCall)
     if node.func.name.endswith('_rational_make'):
         return tuple(arg.value for arg in node.pos_args)
+    assert node.func.name.endswith('_bigrational_coprime'), node.func.name
+    return tuple(_big(arg) for arg in node.pos_args)
 
-    def big(call: hir.AST) -> int:
-        assert isinstance(call, hir.FunctionCall) and call.func.name.endswith('_bigint_from_limbs')
-        negative, limbs = call.pos_args
-        value = sum(limb.value << (32 * i) for i, limb in enumerate(limbs.items))
-        return -value if negative.value else value
 
-    assert node.func.name.endswith('_bigrational_make'), node.func.name
-    return tuple(big(arg) for arg in node.pos_args)
+def _nonzero_fields(type_: ty.Type) -> list[str]:
+    """The field names of a `0 | [...]` type's nonzero object."""
+    assert isinstance(type_, ty.TypeOr) and type_.items[0] == ty.IntegerLiteralType(0)
+    nonzero = type_.items[1]
+    assert isinstance(nonzero, ty.ObjectType)
+    return [f.name for f in nonzero.fields]
 
 
 def test_integer_division_infers_a_rational() -> None:
     declared = _declared('let a = 1/3\nlet b:rational = a\nlet w:rational<int64> = 1/3')
-    assert isinstance(declared['a'].expr.type, ty.ObjectType)
-    assert [f.name for f in declared['a'].expr.type.fields] == ['sign', 'numerator', 'denominator']  # the abstract rational: big parts
+    # the abstract rational is `0 | [numerator denominator]` over big parts
+    assert _nonzero_fields(declared['a'].expr.type) == ['numerator', 'denominator']
     assert declared['b'].expr.type == declared['a'].expr.type
     assert [f.name for f in declared['w'].expr.type.fields] == ['numerator', 'denominator']  # the explicit word form
 
@@ -83,7 +98,7 @@ def test_true_division_needs_numbers() -> None:
 
 
 def test_rationals_need_the_prelude() -> None:
-    with pytest.raises(UserError, match='rationals need the prelude'):
+    with pytest.raises(UserError, match='need the prelude'):
         check.typecheck_and_resolve(SrcFile(None, '$no_prelude = true\nlet a = 1/3'))
 
 
