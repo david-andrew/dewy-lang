@@ -28,7 +28,7 @@ def test_literal_unions_and_type_blocks() -> None:
 def test_literal_parameters_specialize_overloads() -> None:
     declared = _declared("""
 let DivZero:type = type of error
-let safe_div = ((n:int64 d:0):>DivZero => DivZero) & ((n:int64 d:int64<i => i not=? 0>):>int64 => n // d)
+let safe_div = ((n:int64 d:0):>DivZero => DivZero) & ((n:int64 d:int64 & ~0):>int64 => n // d)
 let main = ():>int64 => { let a = safe_div(6 0) let b = safe_div(6 3) return 0 }
 """)
     body = declared['main'].expr.body

@@ -52,6 +52,9 @@ class Context:
     loop_boundaries: tuple[LoopBoundary, ...] = ()
     function_boundary_labels: dict[str, Span] = field(default_factory=dict)
     refinements: dict[int, ty.Type] = field(default_factory=dict)
+    refinement_subject: str | None = None
+    """The name being annotated (`d:int64<d not=? 0>`): inside its type's
+    parameterize blocks a comparison on that name is a refinement of the value."""
     length_bounds: dict[int, int] = field(default_factory=dict)  # proven minimum lengths of runtime-length arrays
     key_facts: dict[tuple[int, tuple[str, object]], tuple[str | None, int | None]] = field(default_factory=dict)
     """Proven dictionary keys: (dictionary route id, key identity) -> (position local, literal entry index)."""
@@ -649,7 +652,7 @@ def _tcr_annotated_declaration(
 ) -> hir.AST:
     """`let name:T = value` (and the keyword-less `name:T = value`)."""
     # decl assign + type annotation: check the expression against the annotation
-    annotation = ast_to_type(typeexpr, ctx=ctx)
+    annotation = ast_to_type(typeexpr, ctx=replace(ctx, refinement_subject=name))
     refined_annotation = annotation if isinstance(annotation, ty.RefinedType) else None
     annotation = ty.strip_refinement(annotation)
     if annotation == ty.TYPE_TYPE:
@@ -4332,7 +4335,7 @@ def _tcr_object_literal(
     expected: ty.Type | None,
     ctx: Context,
 ) -> hir.ObjectLiteral:
-    expected = ty.unfold(expected) if expected is not None else None
+    expected = ty.unfold(ty.strip_refinement(expected)) if expected is not None else None
     expected_object = expected if isinstance(expected, ty.ObjectType) else None
     if expected_object is None and isinstance(expected, ty.TypeOr):
         # A literal checked against a union targets the union's unique
@@ -7953,7 +7956,7 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
             and isinstance(item.left, p0.Atom)
             and isinstance(item.left.item, t1.Identifier)
         ):
-            args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=ctx)))
+            args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name))))
         elif isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
             # Types and parameter names share the identifier syntax. A bare
             # identifier is therefore a parameter name with an unconstrained
@@ -8025,7 +8028,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
     ):
         return ty.ObjectField(
             item.left.item.name,
-            ast_to_type(item.right, ctx=ctx),
+            ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name)),
             mutable,
         )
     user_error(
@@ -8120,8 +8123,15 @@ def _literal_integer_ast(ast: p0.AST) -> int | None:
     return None
 
 
-def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx: Context) -> ty.Proposition | None:
-    """`<subject> <op> <int>` (or mirrored) as a proposition; None if not that shape."""
+def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx: Context, fields: bool = False) -> ty.Proposition | None:
+    """`<subject> <op> <int>` (or mirrored) as a proposition; None if not that shape.
+
+    The subject may be spelled as the name itself (`i`, `d`, `length`), as
+    `<name>.length`, or as `<name>.field` (a field of the value); with
+    ``fields``, a bare other identifier is a field of the value too
+    (`Ratio<bottom >? 0>`). Field subjects are validated against the base
+    type afterwards (`_check_refinement_subjects`).
+    """
     if not isinstance(ast, p0.BinOp):
         return None
     if isinstance(ast.op, t2.InvertedComparisonOp):
@@ -8133,28 +8143,74 @@ def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx
     else:
         return None
 
-    def names_subject(node: p0.AST) -> bool:
-        return isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier) and node.item.name == subject_name
+    def identifier(node: p0.AST) -> str | None:
+        return node.item.name if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier) else None
 
-    if names_subject(ast.left):
+    def subject_of(node: p0.AST) -> str | None:
+        """The proposition subject this side spells, or None."""
+        name = identifier(node)
+        if name is not None:
+            if name == subject_name:
+                return subject
+            if fields and name != 'length':
+                return f'.{name}'
+            return None
+        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == '.' and identifier(node.left) == subject_name:
+            member = identifier(node.right)
+            if member is None:
+                return None
+            return 'length' if member == 'length' else f'.{member}'
+        return None
+
+    left_subject = subject_of(ast.left)
+    if left_subject is not None:
         value = _literal_integer_ast(ast.right)
         if value is None:
             not_implemented(ctx.srcfile, ast.right.loc, 'refinement conditions beyond integer literals')
-        return ty.Proposition(subject, op, value)
-    if names_subject(ast.right):
+        return ty.Proposition(left_subject, op, value)
+    right_subject = subject_of(ast.right)
+    if right_subject is not None:
         value = _literal_integer_ast(ast.left)
         if value is None:
             not_implemented(ctx.srcfile, ast.left.loc, 'refinement conditions beyond integer literals')
         mirrored = {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op)
-        return ty.Proposition(subject, mirrored, value)
+        return ty.Proposition(right_subject, mirrored, value)
     return None
+
+
+def _refinement_conditions(item: p0.AST, *, ctx: Context) -> list[ty.Proposition] | None:
+    """All the propositions of one parameterize-block entry (`n >? 0 and n <? 10` is two), or None."""
+    if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == 'and':
+        left = _refinement_conditions(item.left, ctx=ctx)
+        right = _refinement_conditions(item.right, ctx=ctx)
+        if left is None or right is None:
+            return None
+        return [*left, *right]
+    if (
+        isinstance(item, p0.BinOp)
+        and _operator_symbol(item.op) == '=>'
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+        and isinstance(item.right, p0.BinOp)
+        and _operator_symbol(item.right.op) == 'and'
+    ):
+        # `i => i >? 0 and i <? 10`: the lambda body splits the same way
+        name = item.left.item.name
+        parts = _refinement_conditions(replace(item, right=item.right.left), ctx=ctx)
+        rest = _refinement_conditions(replace(item, right=item.right.right), ctx=ctx)
+        if parts is None or rest is None:
+            return None
+        return [*parts, *rest]
+    single = _refinement_condition(item, ctx=ctx)
+    return None if single is None else [single]
 
 
 def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | None:
     """Classify one parameterize-block entry as a refinement condition.
 
-    Conditions are a one-argument lambda (`i => i >? 0`, about the value) or
-    a `?`-comparison on `length`; anything else is a type parameter.
+    Conditions are a one-argument lambda (`i => i >? 0`, about the value), a
+    `?`-comparison on `length`, or a `?`-comparison on the declared name;
+    anything else is a type parameter.
     """
     if (
         isinstance(item, p0.BinOp)
@@ -8172,14 +8228,33 @@ def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | Non
         or (isinstance(item.op, t1.Operator) and item.op.symbol in _REFINEMENT_COMPARISONS)
     ):
         proposition = _comparison_proposition(item, 'length', 'length', ctx=ctx)
+        if proposition is None and ctx.refinement_subject is not None:
+            # `d:int64<d not=? 0>`, `xs:array<int64 xs.length >? 0>`,
+            # `r:Ratio<r.bottom >? 0>`: the declared name is the value
+            proposition = _comparison_proposition(item, ctx.refinement_subject, 'self', ctx=ctx)
         if proposition is None:
-            not_implemented(ctx.srcfile, item.loc, 'refinement conditions on measures other than `length`')
+            # `Ratio<bottom >? 0>`: a bare name is a field of the value
+            proposition = _comparison_proposition(item, '', 'self', ctx=ctx, fields=True)
+        if proposition is None:
+            not_implemented(ctx.srcfile, item.loc, 'this refinement condition')
         return proposition
     return None
 
 
 def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition], *, loc: Span, ctx: Context) -> None:
     for proposition in propositions:
+        if (field_name := proposition.field) is not None:
+            unfolded = ty.unfold(base)
+            field = unfolded.field(field_name) if isinstance(unfolded, ty.ObjectType) else None
+            if field is None:
+                type_error(
+                    ctx.srcfile,
+                    'refinement subject does not apply',
+                    Pointer(span=loc, message=f'`{type_to_dewy(base)}` has no field `{field_name}`'),
+                )
+            if not (isinstance(field.type, str) and ctx.type_system.is_subtype(field.type, 'int')):
+                not_implemented(ctx.srcfile, loc, f'refinements on a field of type `{type_to_dewy(field.type)}`')
+            continue
         if proposition.subject == 'length' and not (
             base == 'array' or base == 'string' or isinstance(base, (ty.ArrayType, ty.StringType))
         ):
@@ -8192,6 +8267,25 @@ def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition]
             not_implemented(ctx.srcfile, loc, f'value refinements on `{type_to_dewy(base)}`')
 
 
+def _excluded_literals(type_: ty.Type) -> list[int] | None:
+    """The integers `~0` or `~(0 | 1)` exclude; None when the type is not such a negation."""
+    if not isinstance(type_, ty.TypeNot):
+        return None
+    inner = type_.type
+    members = list(inner.items) if isinstance(inner, ty.TypeOr) else [inner]
+    values: list[int] = []
+    for member in members:
+        if not isinstance(member, ty.IntegerLiteralType):
+            return None
+        values.append(member.value)
+    return values
+
+
+def _is_integer_base(type_: ty.Type, *, ctx: Context) -> bool:
+    base = ty.strip_refinement(type_)
+    return isinstance(base, str) and ctx.type_system.is_subtype(base, 'int')
+
+
 def _refined(base: ty.Type, propositions: list[ty.Proposition]) -> ty.Type:
     if not propositions:
         return base
@@ -8202,7 +8296,8 @@ def _refined(base: ty.Type, propositions: list[ty.Proposition]) -> ty.Type:
 
 def _describe_proposition(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
-    return f'{"value" if proposition.subject == "self" else "length"} {op} {proposition.value}'
+    subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
+    return f'{subject} {op} {proposition.value}'
 
 
 def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) -> hir.AST:
@@ -8212,10 +8307,18 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
     `hir.Obligation` for the bounds analysis, which proves it from intervals,
     guards, and length facts — or reports it, like `$assert`.
     """
+    if isinstance(node, hir.Obligation) and node.refined == refined:
+        return node  # already deferred once (arguments are checked at parsing and again at dispatch)
     pending: list[ty.Proposition] = []
     for proposition in refined.propositions:
         fact: int | None
-        if proposition.subject == 'self':
+        if (field_name := proposition.field) is not None:
+            literal = node
+            while isinstance(literal, (hir.ValueCast, hir.RepresentationCast)):
+                literal = literal.expr
+            field_value = next((f.value for f in literal.fields if f.name == field_name), None) if isinstance(literal, hir.ObjectLiteral) else None
+            fact = _constant_integer(field_value, ctx=ctx) if field_value is not None else None
+        elif proposition.subject == 'self':
             fact = _constant_integer(node, ctx=ctx)
         else:
             fact = (
@@ -8233,7 +8336,7 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
                 'refinement refuted',
                 Pointer(
                     span=node.loc,
-                    message=f'the {"value" if proposition.subject == "self" else "length"} is {fact}, but `{requirement}` is required',
+                    message=f'the {proposition.field or ("value" if proposition.subject == "self" else "length")} is {fact}, but `{requirement}` is required',
                 ),
             )
     if not pending:
@@ -8280,9 +8383,9 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             conditions = [
                 proposition
                 for item in ast.right.inner
-                if (proposition := _refinement_condition(item, ctx=ctx)) is not None
+                for proposition in (_refinement_conditions(item, ctx=ctx) or [])
             ]
-            parameters = [item for item in ast.right.inner if _refinement_condition(item, ctx=ctx) is None]
+            parameters = [item for item in ast.right.inner if _refinement_conditions(item, ctx=ctx) is None]
             if len(parameters) != 1:
                 type_error(
                     ctx.srcfile,
@@ -8294,6 +8397,12 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 element = 'int64' if element == 'int' else 'uint64'
             return _refined(ty.ArrayType(element, None), [*alias_value.propositions, *conditions])
         if not isinstance(alias_value, ty.GenericTypeAlias):
+            entries = [_refinement_conditions(item, ctx=ctx) for item in ast.right.inner]
+            if entries and all(entry is not None for entry in entries):
+                # `Ratio<bottom >? 0>`, `Positive<i => i <? 10>`: a refinement of the alias's type
+                propositions = [proposition for entry in entries for proposition in (entry or [])]
+                _check_refinement_subjects(ty.strip_refinement(alias_value), propositions, loc=ast.loc, ctx=ctx)
+                return _refined(alias_value, propositions)
             type_error(
                 ctx.srcfile,
                 'type alias is not generic',
@@ -8424,11 +8533,12 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             length: int | None = None
             conditions: list[ty.Proposition] = []
             for item in items:
-                condition = _refinement_condition(item, ctx=ctx)
-                if condition is not None:
-                    if condition.subject != 'length':
-                        not_implemented(ctx.srcfile, item.loc, 'value refinements on arrays')
-                    conditions.append(condition)
+                entry_conditions = _refinement_conditions(item, ctx=ctx)
+                if entry_conditions is not None:
+                    for condition in entry_conditions:
+                        if condition.subject != 'length':
+                            not_implemented(ctx.srcfile, item.loc, 'value refinements on arrays')
+                        conditions.append(condition)
                     continue
                 if (
                     isinstance(item, p0.BinOp)
@@ -8505,10 +8615,14 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             op=t2.TypeParamJuxtapose(),
             left=p0.AST() as base_ast,
             right=p0.Block(kind='<>', inner=items),
-        ) if items and all(_refinement_condition(item, ctx=ctx) is not None for item in items):
+        ) if items and all(_refinement_conditions(item, ctx=ctx) is not None for item in items):
             # `int< i => i >? 0 >`: a parameterize block holding only conditions
             base = ast_to_type(base_ast, ctx=ctx)
-            propositions = [_refinement_condition(item, ctx=ctx) for item in items]
+            propositions = [
+                proposition
+                for item in items
+                for proposition in (_refinement_conditions(item, ctx=ctx) or [])
+            ]
             _check_refinement_subjects(ty.strip_refinement(base), propositions, loc=ast.loc, ctx=ctx)
             return _refined(base, propositions)
 
@@ -8609,6 +8723,13 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         case p0.BinOp(op=t1.Operator(symbol='and'|'&')):
             left = ast_to_type(ast.left, ctx=ctx)
             right = ast_to_type(ast.right, ctx=ctx)
+            excluded = _excluded_literals(right)
+            if excluded is not None and _is_integer_base(left, ctx=ctx):
+                # `int64 & ~0`: the structural spelling of `int64<i => i not=? 0>`
+                return _refined(left, [ty.Proposition('self', 'not=?', value) for value in excluded])
+            excluded = _excluded_literals(left)
+            if excluded is not None and _is_integer_base(right, ctx=ctx):
+                return _refined(right, [ty.Proposition('self', 'not=?', value) for value in excluded])
             if isinstance(left, ty.TypeAnd) and isinstance(right, ty.TypeAnd):
                 return ty.TypeAnd(left.items + right.items)
             elif isinstance(left, ty.TypeAnd):
@@ -8715,7 +8836,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name))):
                 return hir.Param(
                     name,
-                    type=ast_to_type(item.right, ctx=ctx),
+                    type=ast_to_type(item.right, ctx=replace(ctx, refinement_subject=name)),
                     position_only=position_only,
                 )
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
@@ -8813,10 +8934,11 @@ def parse_call_arguments(
                 if param is None and method is not None:
                     param = next((p for p in method.kw_only if p.name == name), None)
                 expected_arg = param.type if param is not None else None
+                literal_expected = ty.strip_refinement(expected_arg) if expected_arg is not None else None
                 arg = typecheck_and_resolve_inner(
                     value,
                     ctx=argument_ctx,
-                    expected=expected_arg,
+                    expected=literal_expected,
                 )
                 if _contains_place(arg) and not isinstance(arg, hir.Place):
                     user_error(
@@ -8849,10 +8971,11 @@ def parse_call_arguments(
                     None,
                 ) if method is not None else None
                 expected_arg = method.pos_or_kw[index].type if method is not None and index is not None else None
+                literal_expected = ty.strip_refinement(expected_arg) if expected_arg is not None else None
                 arg = typecheck_and_resolve_inner(
                     item,
                     ctx=argument_ctx,
-                    expected=expected_arg,
+                    expected=literal_expected,
                 )
                 if _contains_place(arg) and not isinstance(arg, hir.Place):
                     user_error(

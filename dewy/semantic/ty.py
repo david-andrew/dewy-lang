@@ -471,12 +471,19 @@ class Proposition:
     """One liquid refinement condition, `<subject> <op> <value>`.
 
     ``subject`` is ``'self'`` (the value itself, written with a one-argument
-    lambda such as `i => i >? 0`) or ``'length'`` (a container length).
+    lambda such as `i => i >? 0` or with the declared name), ``'length'`` (a
+    container length), or ``'.name'`` (an integer field of an object value:
+    `r:Ratio<bottom >? 0>`).
     """
 
     subject: str
     op: str
     value: int
+
+    @property
+    def field(self) -> str | None:
+        """The field name of a field subject, else None."""
+        return self.subject[1:] if self.subject.startswith('.') else None
 
     def holds(self, fact: int) -> bool:
         match self.op:

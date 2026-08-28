@@ -4,11 +4,14 @@
 # divisor proven nonzero the same way.
 let DivZero:type = type of error
 let safe_div = ((n:int64 d:0):>DivZero => DivZero)
-             & ((n:int64 d:int64<i => i not=? 0>):>int64 => n // d)   # `n // d` is proven by the refinement
+             & ((n:int64 d:int64 & ~0):>int64 => n // d)             # `int64 & ~0` is `int64<d not=? 0>`: the methods partition int64
 
-let percent = (part:int64 whole:int64<i => i >? 0>):>int64 => part * 100 // whole
+let percent = (part:int64 whole:int64<whole >? 0>):>int64 => part * 100 // whole   # the declared name is the value
 
-let first = (xs:array<int64 length>?0>):>int64 => xs[0]              # the length fact proves the index
+let first = (xs:array<int64 xs.length >? 0>):>int64 => xs[0]         # the length fact proves the index
+
+let Ratio:type = [top:int64 bottom:int64]
+let value = (r:Ratio<bottom >? 0>):>int64 => r.top // r.bottom        # a field of the value; the fact proves the division
 
 let main = ():>int64 => {
     let checks:int64 = 0
@@ -25,5 +28,10 @@ let main = ():>int64 => {
     if total =? 22 { checks += 16 }
     let m:int64 = 5 transmute int64
     if m >? 2 { if 10 % m =? 0 { checks += 32 } }                     # an interval excluding zero
-    return checks - 21                                                # 63 - 21 = 42
+    let half:Ratio = [top=1 bottom=2]
+    let r:Ratio = [top=100 bottom=d]
+    let ratios:int64 = value([top=20 bottom=2]) + value(half)         # literals prove the field
+    if r.bottom >? 0 { ratios += value(r) }                            # a guard on the field's route proves it
+    if ratios =? 35 { checks += 64 }
+    return checks - 85                                                # 127 - 85 = 42
 }

@@ -9,7 +9,7 @@ let describe = (m:Mode):>int64 =>
     if m is? 1 10 else if m is? 2 20 else if m is? "fast" 30 else 40
 
 let safe_div = ((n:int64 d:0):>DivZero => DivZero)
-             & ((n:int64 d:int64<i => i not=? 0>):>int64 => n // d)
+             & ((n:int64 d:int64 & ~0):>int64 => n // d)
 
 let main = ():>int64 => {
     let checks:int64 = 0

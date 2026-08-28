@@ -100,8 +100,8 @@ def array_route_id(node: hir.AST, registry: BindingRegistry) -> int | None:
     named binding (`bag.items`) is a hidden route id. Anything else has no
     stable identity for length facts.
     """
-    while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
-        node = node.expr
+    while isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
+        node = node.expr if not isinstance(node, hir.Obligation) else node.value
     if isinstance(node, hir.ExpressedIdentifier):
         return node.binding_id
     path: list[str] = []

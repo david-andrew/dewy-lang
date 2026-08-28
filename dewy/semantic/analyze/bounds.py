@@ -90,7 +90,8 @@ def _length_key(array_id: int) -> int:
 
 def _describe_proposition_text(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
-    return f'{"value" if proposition.subject == "self" else "length"} {op} {proposition.value}'
+    subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
+    return f'{subject} {op} {proposition.value}'
 
 
 def _is_inequality(name: str, truth: bool) -> bool:
@@ -146,8 +147,9 @@ def _is_runtime_string(type_: ty.Type) -> bool:
 
 
 def _strip_casts(node: hir.AST) -> hir.AST:
-    while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
-        node = node.expr
+    """Through value/representation casts and obligation wrappers to the value itself."""
+    while isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
+        node = node.expr if not isinstance(node, hir.Obligation) else node.value
     return node
 
 
@@ -162,8 +164,7 @@ def _sequence_of(node: hir.AST) -> hir.AST | None:
 
 def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None) -> int | None:
     """The fact id of a runtime-length array or string expression (binding or member route)."""
-    while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
-        node = node.expr
+    node = _strip_casts(node)
     if not ((isinstance(node.type, ty.ArrayType) and node.type.length is None) or _is_runtime_string(node.type)):
         return None
     if isinstance(node, hir.ExpressedIdentifier):
@@ -462,7 +463,9 @@ class _BoundsValidator:
                 continue
             requirement = _describe_proposition_text(proposition)
             source = ' '.join(self.srcfile.body[node.value.loc.start:node.value.loc.stop].split())
-            subject_interval = interval if proposition.subject == 'self' else self._length_interval(node.value, state)
+            if proposition.field is not None:
+                source = f'{source}.{proposition.field}'
+            _node, subject_interval = self._subject_interval(proposition, node.value, interval, state)
             user_error(
                 self.srcfile,
                 'refinement refuted' if verdict is False else 'cannot prove refinement',
@@ -483,9 +486,27 @@ class _BoundsValidator:
             return None
         return state.get(_length_key(sequence_id), Interval(0, _MAX_LENGTH))
 
+    def _field_node(self, value: hir.AST, field: str) -> hir.AST:
+        """`value.field` as a node: the literal's field, or a member access (tracked by route)."""
+        literal = _strip_casts(value)
+        if isinstance(literal, hir.ObjectLiteral):
+            for item in literal.fields:
+                if item.name == field:
+                    return item.value
+        return hir.MemberAccess(value.loc, 'int64', literal, field, True)
+
+    def _subject_interval(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> tuple[hir.AST, Interval | None]:
+        """The node and interval a proposition's subject denotes for ``value``."""
+        if (field := proposition.field) is not None:
+            node = self._field_node(value, field)
+            return node, self._eval(node, state, validate=False)
+        if proposition.subject == 'self':
+            return value, interval
+        return value, self._length_interval(value, state)
+
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
-        subject = interval if proposition.subject == 'self' else self._length_interval(value, state)
+        subject_node, subject = self._subject_interval(proposition, value, interval, state)
         constant = Interval.exact(proposition.value)
         name = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}.get(proposition.op)
         if name is None:
@@ -493,18 +514,31 @@ class _BoundsValidator:
         decided = self._decide_comparison(name, subject, constant)
         if decided is not None:
             return decided
-        if name == '__ne__' and proposition.value == 0 and proposition.subject == 'self':
-            return True if self._nonzero_proven(value, interval, state) else None
+        if name == '__ne__' and proposition.value == 0 and proposition.subject != 'length':
+            return True if self._nonzero_proven(subject_node, subject, state) else None
         return None
 
     def _seed_parameter_refinements(self, function: hir.FunctionLiteral, state: State) -> None:
         """Inside the body a refined parameter's propositions are facts."""
+        param_loc = function.loc
         for param in [*function.pos_or_kw_args, *function.kw_only_args]:
             if not isinstance(param.type, ty.RefinedType) or param.binding_id is None:
                 continue
             lower: int | None = None
             upper: int | None = None
             for proposition in param.type.propositions:
+                if (field := proposition.field) is not None:
+                    # `r:Ratio<bottom >? 0>`: a fact on the field's member route
+                    base = ty.unfold(param.type.base)
+                    declared = base.field(field) if isinstance(base, ty.ObjectType) else None
+                    route_id = self.registry.route_id(param.binding_id, (field,), declared.type if declared is not None else 'int64', param_loc)
+                    field_lower, field_upper = proposition.lower_bound(), proposition.upper_bound()
+                    if field_lower is not None or field_upper is not None:
+                        current = state.get(route_id, UNKNOWN_INTERVAL)
+                        state[route_id] = current.intersect(Interval(field_lower, field_upper))
+                    if proposition.op == 'not=?' and proposition.value == 0:
+                        state[_nonzero_key(route_id)] = Interval.exact(1)
+                    continue
                 if proposition.subject == 'self':
                     lower = _maximum_lower(lower, proposition.lower_bound())
                     upper = _minimum_upper(upper, proposition.upper_bound())
@@ -1467,6 +1501,12 @@ class _BoundsValidator:
                 state[_length_key(route_id)] = Interval.exact(field_value.value.type.length)
             elif isinstance(field.type, ty.ObjectType):
                 self._seed_field_routes(root_id, field.type, field_value.value, field_path, state)
+            elif isinstance(field.type, str) and ty.fixed_integer_layout(field.type) is not None:
+                # an integer field starts with its initializer's interval (`bottom=2`, `bottom=d`)
+                interval = self._eval(field_value.value, state, validate=False)
+                if interval is not None and interval != UNKNOWN_INTERVAL:
+                    route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
+                    state[route_id] = interval
 
     def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
         """Member routes under a reassigned binding or field lose their length and index facts."""

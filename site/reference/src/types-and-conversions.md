@@ -151,7 +151,7 @@ A literal-typed parameter specializes an overload — dispatch picks the most sp
 ```dewy
 let DivZero:type = type of error
 let safe_div = ((n:int64 d:0):>DivZero => DivZero)
-             & ((n:int64 d:int64<i => i not=? 0>):>int64 => n // d)
+             & ((n:int64 d:int64 & ~0):>int64 => n // d)
 
 let main = ():>int64 => {
     let q = safe_div(6 3)             # int64
@@ -161,11 +161,11 @@ let main = ():>int64 => {
 }
 ```
 
-The literal method wins exactly when the divisor is the literal `0`; the general method's refined divisor excludes zero, so its `n // d` is proven and a call with a runtime divisor must establish `d not=? 0` first (a guard, or a `$runtime_assert`). Boolean literal types (`true`, `false`) are not implemented; use `bool`.
+The literal method wins exactly when the divisor is the literal `0`; `int64 & ~0` — the intersection of `int64` with the negation of the literal type `0` — is the structural spelling of the refinement `int64<d not=? 0>`, so the two methods partition `int64`, the general method's `n // d` is proven, and a call with a runtime divisor must establish `d not=? 0` first (a guard, or a `$runtime_assert`). Boolean literal types (`true`, `false`) are not implemented; use `bool`.
 
 ## Refined Types
 
-Refinements attach facts that values must satisfy: `int64<i => i not=? 0>`, `array<int64 length>?0>`. On a binding they are proven at the declaration; on a parameter at every call site and assumed inside the body (see [Refined Parameters](refinements-and-effects.md#refined-parameters)). The exact general refinement proposition language and proof interfaces remain provisional; value comparisons against constants and length facts use this model today.
+Refinements attach facts that values must satisfy. On a named declaration the declared name is the value — `d:int64<d not=? 0>`, `xs:array<int64 xs.length >? 0>` — while the lambda form names it where there is no name (`Positive = int64<i => i >? 0>`), and `length>?0` alone still means the sequence's length. An object value can be refined by an integer field (`r:Ratio<bottom >? 0>`), and `length` on an array is the same idea for the one measure arrays expose today. Excluding literals has a structural spelling: `int64 & ~0` and `int64 & ~(0 | 1)` are `int64<d not=? 0>` and `int64<d not=? 0 and d not=? 1>`. On a binding they are proven at the declaration; on a parameter at every call site and assumed inside the body (see [Refined Parameters](refinements-and-effects.md#refined-parameters)). The exact general refinement proposition language and proof interfaces remain provisional; value comparisons against constants and length facts use this model today.
 
 ## `as`
 

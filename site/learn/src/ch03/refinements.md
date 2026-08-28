@@ -80,11 +80,11 @@ The intended model distinguishes several outcomes:
 - a checked proof can discharge an obligation outside automatic inference;
 - `unsafe` can assert an unproved obligation while making that trust boundary visible for review.
 
-A refinement on a *parameter* is a contract: every call has to prove it, and the body gets to assume it. Guards are the usual proof:
+A refinement on a *parameter* is a contract: every call has to prove it, and the body gets to assume it. Since the parameter has a name, the condition just uses it (`whole >? 0`); the `i => …` lambda form is for type aliases, where there is no name yet. Guards are the usual proof:
 
 <!-- dewy-example: compiler -->
 ```dewy
-let percent = (part:int64 whole:int64<i => i >? 0>):>int64 => part * 100 // whole
+let percent = (part:int64 whole:int64<whole >? 0>):>int64 => part * 100 // whole
 
 let share = (part:int64 whole:int64):>int64 => {
     if whole >? 0 { return percent(part whole) }

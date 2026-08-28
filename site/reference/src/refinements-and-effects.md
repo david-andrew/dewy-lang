@@ -27,11 +27,11 @@ The general proposition language must be a deliberately bounded, decidable fragm
 
 ### Refined Parameters
 
-A parameter may carry a refinement: `(n:int64 d:int64<i => i not=? 0>)`, `(xs:array<int64 length>?0>)`. Dispatch applies on the base type; the refinement is an obligation at every call site, proven the way `$assert` is — from constants at check time, otherwise by the bounds analysis from guards (`if d not=? 0 { f(n d) }`, `$runtime_assert d >? 0`), intervals (a loop variable over `1..3`), and length facts (`xs.length >? 0`). A refuted obligation and an unprovable one are both errors (`refinement refuted`, `cannot prove refinement`), with a note on what the analysis knew. Inside the body the refinement is a fact: `n // d` is proven with `d:int64<i => i not=? 0>`, `xs[0]` with `length>?0`.
+A parameter may carry a refinement: `(n:int64 d:int64<d not=? 0>)`, `(xs:array<int64 xs.length >? 0>)` — inside the annotation the parameter's own name is the value, so no lambda is needed (the lambda form `int64<i => i not=? 0>` remains for aliases). `int64 & ~0` spells the same exclusion structurally. An object value may be refined by an integer field: `r:Ratio<bottom >? 0>` (also `r:Ratio<r.bottom >? 0>` or `q => q.bottom >? 0`) — proven from a literal's field, from a guard on the field (`if r.bottom >? 0 { value(r) }`), and assumed for `r.bottom` inside the body. Dispatch applies on the base type; the refinement is an obligation at every call site, proven the way `$assert` is — from constants at check time, otherwise by the bounds analysis from guards (`if d not=? 0 { f(n d) }`, `$runtime_assert d >? 0`), intervals (a loop variable over `1..3`), and length facts (`xs.length >? 0`). A refuted obligation and an unprovable one are both errors (`refinement refuted`, `cannot prove refinement`), with a note on what the analysis knew. Inside the body the refinement is a fact: `n // d` is proven with `d:int64<i => i not=? 0>`, `xs[0]` with `length>?0`.
 
 <!-- dewy-example: compiler -->
 ```dewy
-let percent = (part:int64 whole:int64<i => i >? 0>):>int64 => part * 100 // whole
+let percent = (part:int64 whole:int64<whole >? 0>):>int64 => part * 100 // whole
 
 let share = (part:int64 whole:int64):>int64 => {
     if whole >? 0 { return percent(part whole) }   # the guard proves the obligation
