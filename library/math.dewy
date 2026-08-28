@@ -10,3 +10,13 @@ let _int_pow = (base:int64 exponent:int64):>int64 => {
     }
     return result
 }
+
+# A checked failure inside the core library, before `io.dewy` and
+# `reporting.dewy` are available: the message goes to stderr and the process
+# exits with status 101 (the same status as a failed `$runtime_assert`).
+let _trap = (message:string):>void => {
+    let bytes:array<uint8> = message as array<uint8>
+    let written:int64 = __syscall3__(1 2 __load_i64__(bytes) bytes.length)
+    let exited:int64 = __syscall1__(231 101)
+    return void
+}

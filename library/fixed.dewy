@@ -24,7 +24,7 @@ let _int_abs = (value:int64):>int64 => {
 # round(|n| · 2^32 / d) with the sign of n, for d >? 0 and |n| // d <? 2^31.
 # The fraction is produced by 32 shift-subtract steps so `n << 32` never has
 # to fit in 64 bits.
-let _muldiv_shift32 = (n:int64 d:int64):>int64 => {
+let _muldiv_shift32 = (n:int64 d:int64<i => i >? 0>):>int64 => {
     let negative:bool = n <? 0
     let magnitude:int64 = _int_abs(n)
     let quotient:int64 = magnitude // d
@@ -47,8 +47,12 @@ let _muldiv_shift32 = (n:int64 d:int64):>int64 => {
     return raw
 }
 
-let _fixed_from_rational = (value:Rational):>Fixed =>
-    [raw = _muldiv_shift32(value.numerator value.denominator)]
+let _fixed_from_rational = (value:Rational):>Fixed => {
+    # a normalized rational's denominator is positive; the type does not say so yet
+    if value.denominator >? 0 { return [raw = _muldiv_shift32(value.numerator value.denominator)] }
+    _trap("fixed: rational with a non-positive denominator\n")
+    return [raw = 0]
+}
 
 let _fixed_add = (a:Fixed b:Fixed):>Fixed => [raw = a.raw + b.raw]
 let _fixed_sub = (a:Fixed b:Fixed):>Fixed => [raw = a.raw - b.raw]
@@ -75,13 +79,18 @@ let _fixed_mul = (a:Fixed b:Fixed):>Fixed => {
 let _fixed_div = (a:Fixed b:Fixed):>Fixed => {
     let negative:bool = b.raw <? 0
     let divisor:int64 = _int_abs(b.raw)
-    let raw:int64 = _muldiv_shift32(a.raw divisor)
-    if negative { return [raw = -raw] }
-    return [raw = raw]
+    if divisor >? 0 {
+        let raw:int64 = _muldiv_shift32(a.raw divisor)
+        if negative { return [raw = -raw] }
+        return [raw = raw]
+    }
+    # TODO: a nonzero refinement on the fixed operand would make this the caller's proof
+    _trap("fixed-point division by zero\n")
+    return [raw = 0]
 }
 
 # Division by a small positive integer, exact in the raw scale.
-let _fixed_div_int = (a:Fixed d:int64):>Fixed => [raw = a.raw // d]
+let _fixed_div_int = (a:Fixed d:int64<i => i >? 0>):>Fixed => [raw = a.raw // d]
 
 let _fixed_eq = (a:Fixed b:Fixed):>bool => a.raw =? b.raw
 let _fixed_ne = (a:Fixed b:Fixed):>bool => a.raw not =? b.raw

@@ -25,9 +25,27 @@ Inside the body, the index relationship is available to prove the access valid. 
 
 The general proposition language must be a deliberately bounded, decidable fragment. Unsupported Dewy expressions produce an unknown proof result or a diagnostic; they do not silently enter refinement checking as trusted predicates.
 
+### Refined Parameters
+
+A parameter may carry a refinement: `(n:int64 d:int64<i => i not=? 0>)`, `(xs:array<int64 length>?0>)`. Dispatch applies on the base type; the refinement is an obligation at every call site, proven the way `$assert` is — from constants at check time, otherwise by the bounds analysis from guards (`if d not=? 0 { f(n d) }`, `$runtime_assert d >? 0`), intervals (a loop variable over `1..3`), and length facts (`xs.length >? 0`). A refuted obligation and an unprovable one are both errors (`refinement refuted`, `cannot prove refinement`), with a note on what the analysis knew. Inside the body the refinement is a fact: `n // d` is proven with `d:int64<i => i not=? 0>`, `xs[0]` with `length>?0`.
+
+<!-- dewy-example: compiler -->
+```dewy
+let percent = (part:int64 whole:int64<i => i >? 0>):>int64 => part * 100 // whole
+
+let share = (part:int64 whole:int64):>int64 => {
+    if whole >? 0 { return percent(part whole) }   # the guard proves the obligation
+    return 0
+}
+
+let main = ():>int64 => percent(1 4) + share(3 4)   # 25 + 75
+```
+
+Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`) are tracked by member route, like array lengths, until the field or its object is reassigned; and a loop over an array or dictionary literal of constants that is never mutated bounds the loop variable by those constants.
+
 ## Operation Preconditions
 
-An ordinary partial operation is valid when its precondition is proven. Examples include indexing within bounds, dividing by a nonzero value, narrowing a number into a smaller representation, and satisfying a function's refined input contract.
+An ordinary partial operation is valid when its precondition is proven. Examples include indexing within bounds, dividing by a nonzero value, narrowing a number into a smaller representation, and satisfying a function's refined input contract. Integer `//` and `%` require the divisor proven nonzero: an interval that excludes zero (`d >? 0`, a loop variable over `1..3`), a `d not=? 0` guard (or a failed `d =? 0`), a refined parameter, or a `$runtime_assert`; otherwise `cannot prove the divisor is nonzero` is reported with the divisor's known range.
 
 When a fact cannot be proven statically, the program chooses an explicit checked operation, establishes the fact with control flow, supplies a checked proof, or crosses an explicit `unsafe` boundary. The compiler must not insert a hidden semantic fallback that changes the operation's type.
 

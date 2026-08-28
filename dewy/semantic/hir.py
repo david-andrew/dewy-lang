@@ -160,6 +160,17 @@ class ScopeMetatag(AST):
 
 
 @dataclass
+class Obligation(AST):
+    """``value`` must satisfy ``refined``'s propositions: proven by the bounds analysis
+    from facts (intervals, nonzero guards, length facts), reported like an assertion
+    otherwise. Transparent to lowering (it lowers ``value``)."""
+
+    value: AST
+    refined: ty.RefinedType
+    description: str
+
+
+@dataclass
 class Assert(AST):
     """A compile-time `$assert`: the analyses must prove ``condition``; nothing is lowered."""
 

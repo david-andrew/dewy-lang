@@ -88,6 +88,11 @@ def _length_key(array_id: int) -> int:
     return -array_id - 1
 
 
+def _describe_proposition_text(proposition: ty.Proposition) -> str:
+    op = proposition.op.replace('not=?', 'not =?')
+    return f'{"value" if proposition.subject == "self" else "length"} {op} {proposition.value}'
+
+
 def _is_inequality(name: str, truth: bool) -> bool:
     """Whether a comparison outcome says the operands differ."""
     return (name == '__eq__' and not truth) or (name == '__ne__' and truth)
@@ -117,6 +122,15 @@ def _known_interval(state: State, key: int) -> Interval:
 
 def _index_fact_key(index_id: int, array_id: int) -> int:
     return -(_FACT_BASE + (index_id << _FACT_SHIFT) + array_id)
+
+
+# `x not=? 0` facts are index facts against this pseudo-array: they join,
+# widen, and drop on assignment exactly like `i <? xs.length` facts.
+_NONZERO_MARK = (1 << _FACT_SHIFT) - 1
+
+
+def _nonzero_key(binding_id: int) -> int:
+    return _index_fact_key(binding_id, _NONZERO_MARK)
 
 
 def _decode_index_fact(key: int) -> tuple[int, int] | None:
@@ -238,6 +252,18 @@ def _assigned_binding_ids(root: hir.AST) -> set[int]:
             binding_id = root_binding(value.func.array)
             if binding_id is not None:
                 found.add(binding_id)
+        elif isinstance(value, hir.MemberAssign):
+            binding_id = root_binding(value.target)
+            if binding_id is not None:
+                found.add(binding_id)
+        elif isinstance(value, (hir.DictStore, hir.DictRemove)):
+            binding_id = root_binding(value.keys)
+            if binding_id is not None:
+                found.add(binding_id)
+        elif isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.DictMethod):
+            binding_id = root_binding(value.func.dictionary)
+            if binding_id is not None:
+                found.add(binding_id)
         for field_name in getattr(value, '__dataclass_fields__', {}):
             walk(getattr(value, field_name))
 
@@ -279,6 +305,11 @@ class _BoundsValidator:
         self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
         assigned = _assigned_binding_ids(root)
+        self.assigned = assigned
+        # Element intervals of arrays and dictionaries initialized from a
+        # literal of constants and never mutated: iterating them bounds the
+        # loop variable (`loop [k v] in [3 -> 'Fizz' 5 -> 'Buzz']` gives k in [3, 5]).
+        self.element_intervals: dict[tuple[int, str | None], Interval] = {}
         # Module-level `let` bindings that are never reassigned keep their
         # proven intervals inside function bodies; assigned ones are unknown
         # there because any call may change them.
@@ -316,6 +347,8 @@ class _BoundsValidator:
             return current
         if isinstance(node, hir.Declare):
             interval = self._eval(node.expr, current, validate=validate)
+            if node.binding_id is not None and node.binding_id not in self.assigned:
+                self._record_element_intervals(node.binding_id, _strip_casts(node.expr))
             if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
                 interval = self._seed_refinements(node, current, interval)
             declared = ty.strip_refinement(node.annotation) if node.annotation is not None else None
@@ -397,6 +430,93 @@ class _BoundsValidator:
             return current
         self._eval(node, current, validate=validate)
         return current
+
+    def _nonzero_proven(self, node: hir.AST, interval: Interval | None, state: State) -> bool:
+        """The interval excludes zero, or a `not=? 0` guard covers the binding."""
+        if interval is not None and (
+            (interval.lower is not None and interval.lower > 0)
+            or (interval.upper is not None and interval.upper < 0)
+        ):
+            return True
+        binding = self._binding_id(node)
+        return binding is not None and _nonzero_key(binding) in state
+
+    def _validate_divisor(self, divisor: hir.AST, interval: Interval | None, state: State) -> None:
+        """`//` and `%` need a divisor proven nonzero (Python raises; Dewy proves)."""
+        if self._nonzero_proven(divisor, interval, state):
+            return
+        source = ' '.join(self.srcfile.body[divisor.loc.start:divisor.loc.stop].split())
+        user_error(
+            self.srcfile,
+            'cannot prove the divisor is nonzero',
+            Pointer(span=divisor.loc, message='this may be zero'),
+            notes=[f'`{source}` {self._describe_interval(interval, array=False)}'],
+            hint='guard the division (`if d not=? 0 { … }`), refine the parameter (`d:int64<i => i not=? 0>`), or check it with `$runtime_assert d not=? 0`',
+        )
+
+    def _validate_obligation(self, node: hir.Obligation, interval: Interval | None, state: State) -> None:
+        """A refinement the checker could not decide: prove each proposition from facts."""
+        for proposition in node.refined.propositions:
+            verdict = self._proposition_verdict(proposition, node.value, interval, state)
+            if verdict is True:
+                continue
+            requirement = _describe_proposition_text(proposition)
+            source = ' '.join(self.srcfile.body[node.value.loc.start:node.value.loc.stop].split())
+            subject_interval = interval if proposition.subject == 'self' else self._length_interval(node.value, state)
+            user_error(
+                self.srcfile,
+                'refinement refuted' if verdict is False else 'cannot prove refinement',
+                Pointer(
+                    span=node.value.loc,
+                    message=f'`{requirement}` is required here' if verdict is False else f'no fact establishes `{requirement}` (neither proven nor refuted)',
+                ),
+                notes=[f'`{source}` {self._describe_interval(subject_interval, array=proposition.subject == "length")}'],
+                hint=None if verdict is False else 'establish it with a guard (`if … { }`), or check it with `$runtime_assert`',
+            )
+
+    def _length_interval(self, node: hir.AST, state: State) -> Interval | None:
+        known = self._string_length(node.type) if not isinstance(node.type, ty.ArrayType) else node.type.length
+        if known is not None:
+            return Interval.exact(known)
+        sequence_id = _runtime_array_id(node, self.registry)
+        if sequence_id is None:
+            return None
+        return state.get(_length_key(sequence_id), Interval(0, _MAX_LENGTH))
+
+    def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
+        """True when the facts prove the proposition, False when they refute it, None otherwise."""
+        subject = interval if proposition.subject == 'self' else self._length_interval(value, state)
+        constant = Interval.exact(proposition.value)
+        name = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}.get(proposition.op)
+        if name is None:
+            return None
+        decided = self._decide_comparison(name, subject, constant)
+        if decided is not None:
+            return decided
+        if name == '__ne__' and proposition.value == 0 and proposition.subject == 'self':
+            return True if self._nonzero_proven(value, interval, state) else None
+        return None
+
+    def _seed_parameter_refinements(self, function: hir.FunctionLiteral, state: State) -> None:
+        """Inside the body a refined parameter's propositions are facts."""
+        for param in [*function.pos_or_kw_args, *function.kw_only_args]:
+            if not isinstance(param.type, ty.RefinedType) or param.binding_id is None:
+                continue
+            lower: int | None = None
+            upper: int | None = None
+            for proposition in param.type.propositions:
+                if proposition.subject == 'self':
+                    lower = _maximum_lower(lower, proposition.lower_bound())
+                    upper = _minimum_upper(upper, proposition.upper_bound())
+                    if proposition.op == 'not=?' and proposition.value == 0:
+                        state[_nonzero_key(param.binding_id)] = Interval.exact(1)
+                elif proposition.subject == 'length':
+                    minimum = proposition.lower_bound()
+                    if minimum is not None:
+                        key = _length_key(param.binding_id)
+                        state[key] = state.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
+            if lower is not None or upper is not None:
+                self._set_interval(state, param.binding_id, Interval(lower, upper))
 
     def _validate_assert(self, node: hir.Assert, state: State) -> None:
         """`$assert` is proven when its false path is impossible, refuted when its true path is."""
@@ -509,6 +629,7 @@ class _BoundsValidator:
         ]:
             if isinstance(param, hir.BoundParam):
                 self._eval(param.value, state, validate=validate)
+        self._seed_parameter_refinements(function, state)
         self._analyze(function.body, state, validate=validate)
 
     def _analyze_flow(
@@ -687,8 +808,7 @@ class _BoundsValidator:
 
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
 
-    @staticmethod
-    def _iterator_interval(iterator: hir.IteratorExpression) -> Interval:
+    def _iterator_interval(self, iterator: hir.IteratorExpression) -> Interval:
         if isinstance(iterator.iterable.type, ty.ArrayType):
             target_type = ty.optional_payload(iterator.target.type)
             if target_type is None:
@@ -697,11 +817,13 @@ class _BoundsValidator:
             if layout is None:
                 return UNKNOWN_INTERVAL
             width, signed = layout
-            return (
+            type_range = (
                 Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1)
                 if signed
                 else Interval(0, (1 << width) - 1)
             )
+            elements = self._iterable_element_interval(iterator.iterable)
+            return type_range if elements is None else type_range.intersect(elements)
         if iterator.count is None:
             return (
                 Interval(iterator.first, None)
@@ -714,6 +836,48 @@ class _BoundsValidator:
             min(iterator.first, iterator.last),
             max(iterator.first, iterator.last),
         )
+
+    def _literal_element_interval(self, literal: hir.AST) -> Interval | None:
+        """The union of an array literal's constant elements, when every element is one."""
+        literal = _strip_casts(literal)
+        if not isinstance(literal, hir.ArrayLiteral) or not literal.items:
+            return None
+        result: Interval | None = None
+        for item in literal.items:
+            if isinstance(item, hir.Spread):
+                return None
+            constant = self._constant_expr(_strip_casts(item), set())
+            if constant is None or constant.lower is None or constant.upper is None:
+                return None
+            result = constant if result is None else result.union(constant)
+        return result
+
+    def _record_element_intervals(self, binding_id: int, expr: hir.AST) -> None:
+        """Remember the constant elements a never-mutated array or dictionary was built from."""
+        elements = self._literal_element_interval(expr)
+        if elements is not None:
+            self.element_intervals[(binding_id, None)] = elements
+            return
+        if isinstance(expr, hir.ObjectLiteral) and isinstance(expr.type, ty.ObjectType) and expr.type.brand == 'dict':
+            for field in expr.fields:
+                if field.name in ('keys', 'values'):
+                    part = self._literal_element_interval(field.value)
+                    if part is not None:
+                        self.element_intervals[(binding_id, field.name)] = part
+
+    def _iterable_element_interval(self, iterable: hir.AST) -> Interval | None:
+        """Bounds on the elements an iteration yields, from a literal or a never-mutated binding."""
+        iterable = _strip_casts(iterable)
+        direct = self._literal_element_interval(iterable)
+        if direct is not None:
+            return direct
+        if isinstance(iterable, hir.ExpressedIdentifier) and iterable.binding_id is not None:
+            return self.element_intervals.get((iterable.binding_id, None))
+        if isinstance(iterable, hir.DictEntries):
+            dictionary = _strip_casts(iterable.dictionary)
+            if isinstance(dictionary, hir.ExpressedIdentifier) and dictionary.binding_id is not None:
+                return self.element_intervals.get((dictionary.binding_id, iterable.name))
+        return None
 
     def _loop_transfer(
         self,
@@ -823,6 +987,8 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> Interval | None:
+        if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            return self._eval(node.items[0], state, validate=validate)  # parentheses
         if isinstance(node, hir.Suppress):
             self._eval(node.item, state, validate=validate)
             return None
@@ -924,6 +1090,11 @@ class _BoundsValidator:
                     state.pop(_length_key(array_id), None)
                     _drop_index_facts(state, array_id=array_id)
             return None
+        if isinstance(node, hir.Obligation):
+            interval = self._eval(node.value, state, validate=validate)
+            if validate:
+                self._validate_obligation(node, interval, state)
+            return interval
         if isinstance(node, hir.StringLength):
             self._eval(node.string, state, validate=validate)
             length = self._string_length(node.string.type)
@@ -1067,6 +1238,8 @@ class _BoundsValidator:
                     )
             elif len(arguments) == 2 and name in _WORD_ARITHMETIC:
                 arithmetic = True
+                if validate and name in ('__floordiv__', '__mod__'):
+                    self._validate_divisor(node.pos_args[1], arguments[1], state)
                 result = self._binary_interval(
                     name,
                     arguments[0],
@@ -1138,14 +1311,18 @@ class _BoundsValidator:
             return None
         if isinstance(node, hir.MemberAccess):
             self._eval(node.value, state, validate=validate)
-            return None
+            route_id = sb.array_route_id(node, self.registry)
+            return state.get(route_id) if route_id is not None else None
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
-            self._eval(node.value, state, validate=validate)
+            value = self._eval(node.value, state, validate=validate)
             assigned = sb.member_path(node.target)
             if assigned is not None:
                 root_id, path = assigned
                 self._drop_route_facts(state, root_id, path)
+                route_id = sb.array_route_id(node.target, self.registry)
+                if route_id is not None:
+                    self._set_interval(state, route_id, value)  # the field now holds the assigned value
             return None
         if isinstance(node, hir.TypeValue):
             return None
@@ -1184,6 +1361,8 @@ class _BoundsValidator:
             return None if length is None else Interval.exact(length)
         if isinstance(node, hir.ExpressedIdentifier):
             return self._constant_binding(node.binding_id, seen)
+        if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            return self._constant_expr(node.items[0], seen)  # parentheses
         if not isinstance(node, hir.FunctionCall):
             return None
         name = (
@@ -1292,8 +1471,10 @@ class _BoundsValidator:
     def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
         """Member routes under a reassigned binding or field lose their length and index facts."""
         for route_id in self.registry.routes_under(root_id, prefix):
+            state.pop(route_id, None)
             state.pop(_length_key(route_id), None)
             _drop_index_facts(state, array_id=route_id)
+            _drop_index_facts(state, index_id=route_id)
 
     def _report_unfit(self, node: hir.AST, interval: Interval | None, word: str) -> None:
         if self.unfit is not None:
@@ -1659,6 +1840,13 @@ class _BoundsValidator:
                 refined[_index_fact_key(*fact)] = Interval.exact(1)
         left_binding = self._binding_id(left)
         right_interval = self._eval(right, refined, validate=False)
+        if _is_inequality(name, truth):
+            # `x not=? 0` (or a failed `x =? 0`): a nonzero fact on the binding
+            for side, other in ((left, right), (right, left)):
+                side_binding = self._binding_id(side)
+                other_interval = self._eval(other, refined, validate=False)
+                if side_binding is not None and other_interval is not None and other_interval.lower == 0 and other_interval.upper == 0:
+                    refined[_nonzero_key(side_binding)] = Interval.exact(1)
         if left_binding is not None and right_interval is not None:
             constraint = self._comparison_constraint(name, right_interval, truth)
             if constraint is not None:
@@ -1709,11 +1897,13 @@ class _BoundsValidator:
         if measured is not None:
             array_id = _runtime_array_id(measured, self.registry)
             return None if array_id is None else _length_key(array_id)
-        return (
-            node.binding_id
-            if isinstance(node, hir.ExpressedIdentifier)
-            else None
-        )
+        if isinstance(node, hir.ExpressedIdentifier):
+            return node.binding_id
+        if isinstance(node, hir.MemberAccess):
+            # a field of a named object (`value.denominator`) is a route:
+            # guards refine it until the field or its root is assigned
+            return sb.array_route_id(node, self.registry)
+        return None
 
     @staticmethod
     def _decide_comparison(name: str, left: Interval | None, right: Interval | None) -> bool | None:

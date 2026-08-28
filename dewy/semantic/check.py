@@ -7850,6 +7850,8 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
 
     def bind_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
         binding = ctx.binding_registry.allocate_param(param.name, param.type, binop.loc)
+        if isinstance(param.type, ty.RefinedType):
+            _record_refinement_facts(binding.id, param.type, ctx=ctx)
         inner_bindings[param.name] = binding
         return replace(param, binding_id=binding.id)
 
@@ -8203,8 +8205,14 @@ def _describe_proposition(proposition: ty.Proposition) -> str:
     return f'{"value" if proposition.subject == "self" else "length"} {op} {proposition.value}'
 
 
-def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) -> None:
-    """Prove each proposition from compile-time facts, or report refuted/unknown."""
+def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) -> hir.AST:
+    """Prove each proposition from compile-time facts, or report a refuted one.
+
+    A proposition the checker cannot decide (a runtime value) becomes an
+    `hir.Obligation` for the bounds analysis, which proves it from intervals,
+    guards, and length facts — or reports it, like `$assert`.
+    """
+    pending: list[ty.Proposition] = []
     for proposition in refined.propositions:
         fact: int | None
         if proposition.subject == 'self':
@@ -8217,15 +8225,8 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
             )
         requirement = _describe_proposition(proposition)
         if fact is None:
-            type_error(
-                ctx.srcfile,
-                'cannot prove refinement',
-                Pointer(
-                    span=node.loc,
-                    message=f'no compile-time fact establishes `{requirement}` (neither proven nor refuted)',
-                ),
-                hint='initialize from a literal, or (later) refine through a runtime check or an explicit `unsafe` claim',
-            )
+            pending.append(proposition)
+            continue
         if not proposition.holds(fact):
             type_error(
                 ctx.srcfile,
@@ -8235,6 +8236,11 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
                     message=f'the {"value" if proposition.subject == "self" else "length"} is {fact}, but `{requirement}` is required',
                 ),
             )
+    if not pending:
+        return node
+    deferred = ty.RefinedType(refined.base, tuple(pending))
+    description = ' and '.join(_describe_proposition(p) for p in pending)
+    return hir.Obligation(node.loc, node.type, node, deferred, description)
 
 
 def _canonical_union(type_: ty.TypeOr, *, ctx: Context) -> ty.TypeOr:
@@ -9937,8 +9943,7 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     """
     if isinstance(expected, ty.RefinedType):
         checked = check_against(node, expected.base, ctx=ctx)
-        _prove_refinements(checked, expected, ctx=ctx)
-        return checked
+        return _prove_refinements(checked, expected, ctx=ctx)
     if node.type == expected:
         return node
     if node.type == ty.BOTTOM_TYPE:

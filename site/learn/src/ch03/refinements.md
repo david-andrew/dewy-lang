@@ -80,6 +80,22 @@ The intended model distinguishes several outcomes:
 - a checked proof can discharge an obligation outside automatic inference;
 - `unsafe` can assert an unproved obligation while making that trust boundary visible for review.
 
-> **Provisional design:** Refined annotations on bindings, integer-literal comparisons, length facts, and interval reasoning are settled. Refined parameters and results, proofs of annotations from control flow, richer propositions, checked proof values, and the `unsafe` syntax are not fully specified. Unsupported general Dewy expressions must not silently become refinement claims.
+A refinement on a *parameter* is a contract: every call has to prove it, and the body gets to assume it. Guards are the usual proof:
+
+<!-- dewy-example: compiler -->
+```dewy
+let percent = (part:int64 whole:int64<i => i >? 0>):>int64 => part * 100 // whole
+
+let share = (part:int64 whole:int64):>int64 => {
+    if whole >? 0 { return percent(part whole) }
+    return 0
+}
+
+printl"{share(3 4)}%"   # 75%
+```
+
+Without the guard, `percent(part whole)` is an error — "cannot prove refinement" — and so is dividing by `whole` directly, since Dewy proves every division's divisor nonzero instead of letting it crash.
+
+> **Provisional design:** Refined annotations on bindings and parameters, integer comparisons against constants, length facts, and interval reasoning are settled. Refined results and fields, richer propositions, checked proof values, and the `unsafe` syntax are not fully specified. Unsupported general Dewy expressions must not silently become refinement claims.
 
 The design goal is inference-first: ordinary code should expose enough facts for routine safety without requiring programmers to write proofs throughout application code.

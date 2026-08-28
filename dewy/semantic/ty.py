@@ -1035,7 +1035,9 @@ class TypeSystem:
         if isinstance(a, RefinedType):
             return a == b or self.is_subtype(a.base, b)
         if isinstance(b, RefinedType):
-            return False  # refinements are proven at the checking boundary, never assumed
+            # applicable on the base type; the refinement is an obligation
+            # proven at the checking boundary (`check_against`), never assumed
+            return self.is_subtype(a, b.base)
         if isinstance(a, (IntegerLiteralType, RationalLiteralType)) and isinstance(b, ObjectType):
             # Compile-time numbers materialize into the runtime rational,
             # fixed, or big-integer representation at the checking boundary.

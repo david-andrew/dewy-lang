@@ -44,7 +44,13 @@ let _rational_sub = (a:Rational b:Rational):>Rational =>
 let _rational_mul = (a:Rational b:Rational):>Rational => {
     let g1:int64 = _gcd(a.numerator b.denominator)
     let g2:int64 = _gcd(b.numerator a.denominator)
-    return _rational_make((a.numerator // g1) * (b.numerator // g2)  (a.denominator // g2) * (b.denominator // g1))
+    # a normalized denominator is positive, so both gcds are at least 1; the
+    # type does not say so yet (refined fields), hence the guard
+    if g1 >? 0 and g2 >? 0 {
+        return _rational_make((a.numerator // g1) * (b.numerator // g2)  (a.denominator // g2) * (b.denominator // g1))
+    }
+    _trap("rational: zero denominator\n")
+    return [numerator = 0 denominator = 1]
 }
 
 let _rational_div = (a:Rational b:Rational):>Rational =>

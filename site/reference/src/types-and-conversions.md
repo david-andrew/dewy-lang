@@ -151,7 +151,7 @@ A literal-typed parameter specializes an overload — dispatch picks the most sp
 ```dewy
 let DivZero:type = type of error
 let safe_div = ((n:int64 d:0):>DivZero => DivZero)
-             & ((n:int64 d:int64):>int64 => n // d)
+             & ((n:int64 d:int64<i => i not=? 0>):>int64 => n // d)
 
 let main = ():>int64 => {
     let q = safe_div(6 3)             # int64
@@ -161,11 +161,11 @@ let main = ():>int64 => {
 }
 ```
 
-The literal method wins exactly when the divisor is the literal `0`; the general method still admits a runtime zero, which a refinement on its divisor (`d:int64<i => i not=? 0>`) is meant to exclude once refined parameters are supported. Boolean literal types (`true`, `false`) are not implemented; use `bool`.
+The literal method wins exactly when the divisor is the literal `0`; the general method's refined divisor excludes zero, so its `n // d` is proven and a call with a runtime divisor must establish `d not=? 0` first (a guard, or a `$runtime_assert`). Boolean literal types (`true`, `false`) are not implemented; use `bool`.
 
 ## Refined Types
 
-Refinements attach facts that values must satisfy. The exact general refinement proposition language and proof interfaces remain provisional; length and supported range facts already use this model.
+Refinements attach facts that values must satisfy: `int64<i => i not=? 0>`, `array<int64 length>?0>`. On a binding they are proven at the declaration; on a parameter at every call site and assumed inside the body (see [Refined Parameters](refinements-and-effects.md#refined-parameters)). The exact general refinement proposition language and proof interfaces remain provisional; value comparisons against constants and length facts use this model today.
 
 ## `as`
 

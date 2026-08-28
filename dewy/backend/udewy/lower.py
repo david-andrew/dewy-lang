@@ -1412,6 +1412,9 @@ class _Lowerer(
             return
         if isinstance(node, hir.Assert):
             return  # proven during checking; nothing of it is lowered
+        if isinstance(node, hir.Obligation):
+            self._discover_node(node.value, scope, current_function, array_use=array_use)
+            return
         if isinstance(node, hir.ExpressedIdentifier):
             binding = (
                 self.binding_by_semantic_id.get(node.binding_id)
@@ -2198,6 +2201,9 @@ class _Lowerer(
                 node,
                 item=self._require_node(self._transform_node(node.item)),
             )
+        if isinstance(node, hir.Obligation):
+            # proven by the bounds analysis before lowering: only the value remains
+            return self._transform_node(node.value)
         if isinstance(node, hir.RationalConstant):
             self._target_error(node, 'a compile-time rational in this position')
         if isinstance(node, hir.ExpressedIdentifier):

@@ -44,8 +44,16 @@ def test_refuted_refinement_is_an_error() -> None:
 
 
 def test_unprovable_refinement_is_reported_as_unknown() -> None:
-    with pytest.raises(TypeCheckError, match='cannot prove refinement'):
-        _check('Positive = int< i=>i>?0 >\nlet n:int64 = 5 transmute int64\nlet score:Positive = n')
+    # the checker defers a runtime value to the bounds analysis, which reports
+    # it as unproven (neither proven nor refuted) with what it knows
+    from dewy.backend.udewy import codegen
+    from dewy.semantic.errors import UserError
+
+    with pytest.raises(UserError, match='cannot prove refinement') as info:
+        codegen(SrcFile(None, 'Positive = int< i=>i>?0 >\nlet n:int64 = 5 transmute int64\nlet score:Positive = n\n'))
+    assert 'neither proven nor refuted' in str(info.value)
+    # a guard establishes the fact
+    codegen(SrcFile(None, 'Positive = int64< i=>i>?0 >\nlet n:int64 = 5 transmute int64\nlet main = ():>int64 => { if n >? 0 { let score:Positive = n  return score }  return 0 }\n'))
 
 
 def test_refinement_conditions_and_parameters_are_distinguished() -> None:

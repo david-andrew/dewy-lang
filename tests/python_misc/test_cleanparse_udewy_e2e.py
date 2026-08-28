@@ -95,6 +95,7 @@ LOWERED_CASES = [
     ('type_constructors.dewy', 42),
     ('type_methods.dewy', 42),
     ('string_index_facts.dewy', 42),
+    ('refined_params.dewy', 42),
     ('file_roundtrip.dewy', 42),
     ('recursive_returns.dewy', 42),
     ('array_iteration.dewy', 42),
@@ -589,14 +590,14 @@ def test_fixed_width_rollover_and_unsigned_operations_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = '''
-let unsigned_divide = (value:uint64 divisor:uint64):>uint64 => value // divisor
-let unsigned_modulo = (value:uint64 divisor:uint64):>uint64 => value % divisor
+let unsigned_divide = (value:uint64 divisor:uint64<i => i >? 0>):>uint64 => value // divisor
+let unsigned_modulo = (value:uint64 divisor:uint64<i => i >? 0>):>uint64 => value % divisor
 let add_byte = (value:uint8 amount:uint8):>uint8 => value + amount
 let subtract_byte = (value:uint8 amount:uint8):>uint8 => value - amount
 let add_signed_byte = (value:int8 amount:int8):>int8 => value + amount
 let multiply_signed_byte = (value:int8 amount:int8):>int8 => value * amount
-let divide_signed_byte = (value:int8 divisor:int8):>int8 => value // divisor
-let modulo_signed_byte = (value:int8 divisor:int8):>int8 => value % divisor
+let divide_signed_byte = (value:int8 divisor:int8<i => i not=? 0>):>int8 => value // divisor
+let modulo_signed_byte = (value:int8 divisor:int8<i => i not=? 0>):>int8 => value % divisor
 let nand_byte = (value:uint8 mask:uint8):>uint8 => value nand mask
 let negate_signed_byte = (value:int8):>int8 => -value
 let invert_byte = (value:uint8):>uint8 => not value

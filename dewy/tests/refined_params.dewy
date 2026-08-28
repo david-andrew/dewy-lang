@@ -1,0 +1,29 @@
+# Refined parameters: the refinement is an obligation at every call site —
+# proven from constants, guards, `$runtime_assert`, intervals, and length
+# facts — and a fact inside the body. Division by a runtime value needs the
+# divisor proven nonzero the same way.
+let DivZero:type = type of error
+let safe_div = ((n:int64 d:0):>DivZero => DivZero)
+             & ((n:int64 d:int64<i => i not=? 0>):>int64 => n // d)   # `n // d` is proven by the refinement
+
+let percent = (part:int64 whole:int64<i => i >? 0>):>int64 => part * 100 // whole
+
+let first = (xs:array<int64 length>?0>):>int64 => xs[0]              # the length fact proves the index
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    if percent(1 4) =? 25 { checks += 1 }                             # constants
+    let d:int64 = 4 transmute int64                                   # a runtime value
+    if d not=? 0 { if safe_div(20 d) =? 5 { checks += 2 } }          # a guard
+    $runtime_assert d >? 0
+    if percent(3 d) =? 75 { checks += 4 }                             # the assertion's fact
+    let xs:array<int64> = []
+    xs.push(7)
+    if xs.length >? 0 { if first(xs) =? 7 { checks += 8 } }          # a length fact
+    let total:int64 = 0
+    loop k in 1..3 { total += 12 // k }                               # the loop variable's interval
+    if total =? 22 { checks += 16 }
+    let m:int64 = 5 transmute int64
+    if m >? 2 { if 10 % m =? 0 { checks += 32 } }                     # an interval excluding zero
+    return checks - 21                                                # 63 - 21 = 42
+}
