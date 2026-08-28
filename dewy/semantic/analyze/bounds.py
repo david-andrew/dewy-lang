@@ -128,14 +128,39 @@ def _call_result_refinement(node: hir.AST) -> ty.RefinedType | None:
     return None
 
 
+def _object_of(type_: ty.Type) -> ty.ObjectType | None:
+    """The object type a value's type denotes, looking through `0 | [...]`."""
+    unfolded = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(unfolded, ty.TypeOr):
+        objects = [item for item in unfolded.items if isinstance(item, ty.ObjectType)]
+        unfolded = objects[0] if len(objects) == 1 else None
+    return unfolded if isinstance(unfolded, ty.ObjectType) else None
+
+
 def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
-    """The invariant declared on the field a member access reads."""
+    """The invariant declared on the field a member access reads: the
+    field's own, plus what enclosing fields declare about it
+    (`denominator:bigint<sign =? 1>` speaks about `q.denominator.sign`)."""
     node = _strip_casts(node)
     if not isinstance(node, hir.MemberAccess):
         return ()
-    object_type = ty.unfold(ty.strip_refinement(node.value.type))
-    field = object_type.field(node.name) if isinstance(object_type, ty.ObjectType) else None
-    return field.refinement if field is not None else ()
+    object_type = _object_of(node.value.type)
+    field = object_type.field(node.name) if object_type is not None else None
+    propositions: list[ty.Proposition] = list(field.refinement) if field is not None else []
+    suffix = node.name
+    parent = _strip_casts(node.value)
+    while isinstance(parent, hir.MemberAccess):
+        parent_type = _object_of(parent.value.type)
+        parent_field = parent_type.field(parent.name) if parent_type is not None else None
+        if parent_field is not None:
+            propositions.extend(
+                ty.Proposition('length' if p.of == 'length' else 'self', p.op, p.value)
+                for p in parent_field.refinement
+                if p.field == suffix
+            )
+        suffix = f'{parent.name}.{suffix}'
+        parent = _strip_casts(parent.value)
+    return tuple(propositions)
 
 
 def _describe_proposition_text(proposition: ty.Proposition) -> str:
@@ -354,6 +379,9 @@ class _BoundsValidator:
         root: hir.Block,
     ) -> None:
         self.registry = registry
+        # bindings declared with a refinement (`let d:bigint<sign =? 1>`, refined
+        # parameters): their facts are re-established after every assignment
+        self.declared_refinements: dict[int, ty.RefinedType] = {}
         self.srcfile = srcfile
         self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
@@ -465,6 +493,24 @@ class _BoundsValidator:
                 if known is not None:
                     current[_length_key(binding_id)] = Interval.exact(known)
             self._drop_route_facts(current, binding_id)
+            declared = self.declared_refinements.get(binding_id)
+            if declared is not None:
+                # `result = f(…)` on `result:bigint<sign =? 1>`: the assigned value
+                # was checked against the refinement, so its facts hold again
+                for proposition in declared.propositions:
+                    if proposition.field is not None:
+                        self._seed_field_proposition(binding_id, proposition, declared.base, current, node.loc)
+                    elif proposition.subject == 'self':
+                        bounded = Interval(proposition.lower_bound(), proposition.upper_bound())
+                        existing = current.get(binding_id)
+                        current[binding_id] = bounded if existing is None else existing.intersect(bounded)
+                        if proposition.op == 'not=?' and proposition.value == 0:
+                            current[_nonzero_key(binding_id)] = Interval.exact(1)
+                    elif proposition.subject == 'length':
+                        minimum = proposition.lower_bound()
+                        if minimum is not None:
+                            key = _length_key(binding_id)
+                            current[key] = current.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
             return current
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
@@ -572,13 +618,20 @@ class _BoundsValidator:
         return interval if declared is None else interval.intersect(declared)
 
     def _field_node(self, value: hir.AST, field: str) -> hir.AST:
-        """`value.field` as a node: the literal's field, or a member access (tracked by route)."""
-        literal = _strip_casts(value)
-        if isinstance(literal, hir.ObjectLiteral):
-            for item in literal.fields:
-                if item.name == field:
-                    return item.value
-        return hir.MemberAccess(value.loc, 'int64', literal, field, True)
+        """`value.field` (a path) as a node: the literal's field, or a member access (tracked by route)."""
+        node = value
+        for part in field.split('.'):
+            literal = _strip_casts(node)
+            found = None
+            if isinstance(literal, hir.ObjectLiteral):
+                found = next((item.value for item in literal.fields if item.name == part), None)
+            if found is not None:
+                node = found
+                continue
+            object_type = _object_of(literal.type)
+            declared = object_type.field(part) if object_type is not None else None
+            node = hir.MemberAccess(value.loc, declared.type if declared is not None else 'int64', literal, part, True)
+        return node
 
     def _subject_interval(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> tuple[hir.AST, Interval | None]:
         """The node and interval a proposition's subject denotes for ``value``."""
@@ -593,6 +646,22 @@ class _BoundsValidator:
 
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
+        refined_result = _call_result_refinement(value)
+        if refined_result is not None and proposition in refined_result.propositions:
+            return True   # `f():>bigint<sign =? 1>` proves `sign =? 1` of its result
+        stripped = _strip_casts(value)
+        if isinstance(stripped, hir.ExpressedIdentifier) and stripped.binding_id is not None and stripped.binding_id not in self.assigned:
+            # `_BIGINT_ONE:bigint<sign =? 1> = […]`: a never-reassigned binding's
+            # declared refinement holds wherever it is read (facts seeded at
+            # its declaration do not reach other function bodies)
+            binding = self.registry.by_id.get(stripped.binding_id)
+            declaration = binding.declaration if binding is not None else None
+            if (
+                declaration is not None
+                and isinstance(declaration.annotation, ty.RefinedType)
+                and proposition in declaration.annotation.propositions
+            ):
+                return True
         subject_node, subject = self._subject_interval(proposition, value, interval, state)
         subject = self._tightened(subject_node, subject, state)
         constant = Interval.exact(proposition.value)
@@ -606,32 +675,44 @@ class _BoundsValidator:
             return True if self._nonzero_proven(subject_node, subject, state) else None
         return None
 
+    def _seed_field_proposition(self, root_id: int, proposition: ty.Proposition, base: ty.Type, state: State, loc: Span) -> None:
+        """A field-subject proposition (`.sign =? 1`, `.denominator.sign =? 1`) as facts on the member route."""
+        assert proposition.field is not None
+        path = tuple(proposition.field.split('.'))
+        current: ty.Type = base
+        leaf: ty.Type = 'int64'
+        for part in path:
+            object_type = _object_of(current)
+            declared = object_type.field(part) if object_type is not None else None
+            leaf = declared.type if declared is not None else 'int64'
+            current = leaf
+        route_id = self.registry.route_id(root_id, path, leaf, loc)
+        if proposition.of == 'length':
+            minimum = proposition.lower_bound()
+            if minimum is not None:
+                key = _length_key(route_id)
+                state[key] = state.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
+            return
+        lower, upper = proposition.lower_bound(), proposition.upper_bound()
+        if lower is not None or upper is not None:
+            current_interval = state.get(route_id, UNKNOWN_INTERVAL)
+            state[route_id] = current_interval.intersect(Interval(lower, upper))
+        if proposition.op == 'not=?' and proposition.value == 0:
+            state[_nonzero_key(route_id)] = Interval.exact(1)
+
     def _seed_parameter_refinements(self, function: hir.FunctionLiteral, state: State) -> None:
         """Inside the body a refined parameter's propositions are facts."""
         param_loc = function.loc
         for param in [*function.pos_or_kw_args, *function.kw_only_args]:
             if not isinstance(param.type, ty.RefinedType) or param.binding_id is None:
                 continue
+            self.declared_refinements[param.binding_id] = param.type
             lower: int | None = None
             upper: int | None = None
             for proposition in param.type.propositions:
-                if (field := proposition.field) is not None:
+                if proposition.field is not None:
                     # `r:Ratio<bottom >? 0>`: a fact on the field's member route
-                    base = ty.unfold(param.type.base)
-                    declared = base.field(field) if isinstance(base, ty.ObjectType) else None
-                    route_id = self.registry.route_id(param.binding_id, (field,), declared.type if declared is not None else 'int64', param_loc)
-                    if proposition.of == 'length':
-                        minimum = proposition.lower_bound()
-                        if minimum is not None:
-                            key = _length_key(route_id)
-                            state[key] = state.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
-                        continue
-                    field_lower, field_upper = proposition.lower_bound(), proposition.upper_bound()
-                    if field_lower is not None or field_upper is not None:
-                        current = state.get(route_id, UNKNOWN_INTERVAL)
-                        state[route_id] = current.intersect(Interval(field_lower, field_upper))
-                    if proposition.op == 'not=?' and proposition.value == 0:
-                        state[_nonzero_key(route_id)] = Interval.exact(1)
+                    self._seed_field_proposition(param.binding_id, proposition, param.type.base, state, param_loc)
                     continue
                 if proposition.subject == 'self':
                     lower = _maximum_lower(lower, proposition.lower_bound())
@@ -2139,11 +2220,15 @@ class _BoundsValidator:
     ) -> Interval | None:
         """Facts a refined annotation proved at the declaration boundary."""
         assert isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None
+        self.declared_refinements[node.binding_id] = node.annotation
         lower: int | None = None
         upper: int | None = None
         length_lower: int | None = None
         for proposition in node.annotation.propositions:
-            if proposition.subject == 'self':
+            if proposition.field is not None:
+                # `let d:bigint<sign =? 1> = …`: facts on the field's route
+                self._seed_field_proposition(node.binding_id, proposition, node.annotation.base, state, node.loc)
+            elif proposition.subject == 'self':
                 lower = _maximum_lower(lower, proposition.lower_bound())
                 upper = _minimum_upper(upper, proposition.upper_bound())
             elif proposition.subject == 'length':

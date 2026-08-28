@@ -83,6 +83,7 @@ LOWERED_CASES = [
     ('bigint_division.dewy', 63),
     ('literal_unions.dewy', 31),
     ('bigint_zero_or_nonzero.dewy', 63),
+    ('refined_nested_fields.dewy', 15),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

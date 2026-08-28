@@ -1336,13 +1336,14 @@ class _Lowerer(
             definition_scope,
             overload_member,
         )
+        rettype = ty.strip_refinement(literal.rettype)   # `:>bigint<sign =? 1>` is an object result
         if (
-            ty.optional_payload(literal.rettype) is not None
-            or ty.runtime_union_members(literal.rettype) is not None
-            or isinstance(literal.rettype, ty.ObjectType)
+            ty.optional_payload(rettype) is not None
+            or ty.runtime_union_members(rettype) is not None
+            or isinstance(rettype, ty.ObjectType)
             or (
-                isinstance(literal.rettype, ty.ArrayType)
-                and literal.rettype.length is not None
+                isinstance(rettype, ty.ArrayType)
+                and rettype.length is not None
             )
         ):
             function.result_name = self._new_result_name()

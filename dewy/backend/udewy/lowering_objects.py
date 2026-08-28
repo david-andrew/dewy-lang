@@ -953,12 +953,30 @@ class _ObjectLowering:
             return self._extract_expression(node)
         return self._clone_dynamic_array_value(node, array_type, arena=True)
 
+    def _move_object_into_result_storage(
+        self,
+        dest: hir.AST,
+        src: hir.AST,
+        object_type: ty.ObjectType,
+        loc: Span,
+    ) -> list[hir.AST]:
+        """Move an object into prepared storage: the structure is copied,
+        runtime-length arrays are taken over by handle instead of cloned.
+
+        Sound only when ``src`` is dead afterwards — a call's result
+        temporary — and nothing later writes into the taken arrays in place
+        (a result write allocates fresh arrays).
+        """
+        return self._copy_object_into_result_storage(dest, src, object_type, loc, move=True)
+
     def _copy_object_into_result_storage(
         self,
         dest: hir.AST,
         src: hir.AST,
         object_type: ty.ObjectType,
         loc: Span,
+        *,
+        move: bool = False,
     ) -> list[hir.AST]:
         """Recursively copy an object into already-prepared mutable storage."""
 
@@ -975,6 +993,10 @@ class _ObjectLowering:
                 statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False))
             elif isinstance(field.type, ty.ArrayType) and field.type.length is None:
                 source_array = self._value_load(source_address, field.type, loc)
+                if move:
+                    # the dead source's array changes owner: its handle word moves
+                    statements.extend(self._value_store(source_array, dest_address, field.type, loc))
+                    continue
                 prelude, copied = self._clone_dynamic_array_value(
                     replace(source_array, type='int64'), field.type, arena=True,
                 )
@@ -999,6 +1021,7 @@ class _ObjectLowering:
                         source_address,
                         field.type,
                         loc,
+                        move=move,
                     )
                 )
             else:

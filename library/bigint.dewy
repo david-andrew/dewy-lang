@@ -11,7 +11,7 @@ let BigInt:type = 0 | [sign:-1|1 limbs:array<uint64 length >? 0>]
 
 let _LIMB_BASE:uint64 = 4294967296
 let _LIMB_MASK:uint64 = 4294967295
-let _BIGINT_ONE:BigInt & ~0 = [sign = 1 limbs = [1]]
+let _BIGINT_ONE:BigInt<sign =? 1> = [sign = 1 limbs = [1]]
 
 let _bigint_trim = (@limbs:array<uint64>):>void => {
     loop limbs.length >? 0 and limbs[limbs.length - 1] =? 0 {
@@ -413,7 +413,16 @@ let _bigint_abs = (a:BigInt):>BigInt => {
     if a =? 0 { return 0 }
     return [sign = 1 limbs = a.limbs]
 }
-let _bigint_abs_nonzero = (a:BigInt & ~0):>BigInt & ~0 => [sign = 1 limbs = a.limbs]
+let _bigint_abs_nonzero = (a:BigInt & ~0):>BigInt<sign =? 1> => [sign = 1 limbs = a.limbs]
+
+# A positive word: one or two limbs, as for any nonzero word.
+let _bigint_from_int_positive = (value:int64<value >? 0>):>BigInt<sign =? 1> => {
+    let magnitude:uint64 = value transmute uint64
+    let low:uint64 = magnitude and _LIMB_MASK
+    let high:uint64 = magnitude >> 32
+    if high =? 0 { return [sign = 1 limbs = [low]] }
+    return [sign = 1 limbs = [low high]]
+}
 
 let _bigint_add = (a:BigInt b:BigInt):>BigInt => {
     if a =? 0 { return b }
@@ -442,6 +451,25 @@ let _bigint_mul_nonzero = (a:BigInt & ~0 b:BigInt & ~0):>BigInt & ~0 => {
         return [sign = -1 limbs = product]
     }
     return a
+}
+
+# Positive operands keep the sign a fact: the product, power, and exact
+# quotient of positives are positive (the fallbacks are never taken, as above).
+let _bigint_mul_positive = (a:BigInt<sign =? 1> b:BigInt<sign =? 1>):>BigInt<sign =? 1> => {
+    let product:array<uint64> = _mag_mul(a.limbs b.limbs)
+    if product.length >? 0 { return [sign = 1 limbs = product] }
+    return a
+}
+
+let _bigint_pow_positive = (base:BigInt<sign =? 1> exponent:int64):>BigInt<sign =? 1> => {
+    let result:BigInt<sign =? 1> = _BIGINT_ONE
+    let factor:BigInt<sign =? 1> = base
+    loop exponent >? 0 {
+        if exponent % 2 =? 1 { result = _bigint_mul_positive(result factor) }
+        factor = _bigint_mul_positive(factor factor)
+        exponent = exponent // 2
+    }
+    return result
 }
 
 # floor division and modulo with Python's sign conventions; a nonzero
@@ -531,6 +559,13 @@ let _bigint_exact_div = (value:BigInt & ~0 divisor:BigInt & ~0):>BigInt & ~0 => 
     if _bigint_is_one(divisor) { return value }
     let parts = _mag_divmod(value.limbs divisor.limbs)
     if parts.quotient.length >? 0 { return [sign = value.sign limbs = parts.quotient] }
+    return value
+}
+
+let _bigint_exact_div_positive = (value:BigInt<sign =? 1> divisor:BigInt & ~0):>BigInt<sign =? 1> => {
+    if _bigint_is_one(divisor) { return value }
+    let parts = _mag_divmod(value.limbs divisor.limbs)
+    if parts.quotient.length >? 0 { return [sign = 1 limbs = parts.quotient] }
     return value
 }
 

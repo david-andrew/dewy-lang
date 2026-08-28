@@ -489,8 +489,14 @@ class _OptionalLowering:
         loc: Span,
         *,
         prepared: bool = True,
+        move: bool = False,
     ) -> list[hir.AST]:
-        """Copy a whole union cell, deep-copying an active aggregate member."""
+        """Copy a whole union cell, deep-copying an active aggregate member.
+
+        With ``move`` the source is a dead temporary (a call's result cell):
+        an active object member is moved — structure copied, runtime arrays
+        taken by handle — instead of cloned. Array members still copy.
+        """
         slots = self._union_tree_slots(members, prepared=prepared)
         aggregate_indexes = [
             index for index, member in enumerate(members)
@@ -520,7 +526,10 @@ class _OptionalLowering:
         arms: list[hir.IfArm | hir.LoopArm] = []
         for index in aggregate_indexes:
             member = members[index]
-            body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, slots.get(index), loc)
+            body = self._union_aggregate_copy_into(
+                dest, self._union_source_pointer(source, loc), member, slots.get(index), loc,
+                move=move and isinstance(member, ty.ObjectType),
+            )
             arms.append(
                 hir.IfArm(
                     loc,
@@ -541,6 +550,8 @@ class _OptionalLowering:
         member: ty.TypeExpr,
         slot: int | None,
         loc: Span,
+        *,
+        move: bool = False,
     ) -> list[hir.AST]:
         """Copy the aggregate at ``source_pointer`` into ``dest``'s member storage
         (its prepared tree at ``slot``, else a fresh handle) and point the payload at it."""
@@ -550,7 +561,7 @@ class _OptionalLowering:
             source_prelude = [hir.Declare(loc, ty.VOID_TYPE, 'let', source_root.name, 'int64', source_pointer)]
             if isinstance(member, ty.ObjectType):
                 copy = self._copy_object_into_result_storage(
-                    replace(dest_root, type='int64'), source_root, member, loc,
+                    replace(dest_root, type='int64'), source_root, member, loc, move=move,
                 )
             else:
                 assert isinstance(member, ty.ArrayType)
@@ -662,14 +673,17 @@ class _OptionalLowering:
             # a constant typed as the whole union (`0` as `0 | [...]`): its literal member's word
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         if self._field_union_members(value.type) == members:
-            # Same-union copy: tag, payload word, and the active aggregate tree.
+            # Same-union copy: tag, payload word, and the active aggregate
+            # tree — moved rather than cloned when the source is a call's
+            # result temporary (`acc = acc + step`), which is dead afterwards.
             prelude, source = self._extract_expression(value)
             source_word = (
                 replace(source, type='int64')
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
-            return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared)]
+            dead_temporary = isinstance(value, hir.FunctionCall) and prepared
+            return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared, move=dead_temporary)]
         source_members = self._field_union_members(value.type)
         if source_members is not None:
             if not all(member in members for member in source_members):

@@ -8260,7 +8260,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
         if isinstance(declared_type, ty.RefinedType):
             # an invariant of the field: kept beside the base type (value
             # comparisons, or a length bound of an array or string field)
-            if any(p.subject not in ('self', 'length') for p in declared_type.propositions):
+            if any(p.subject not in ('self', 'length') and p.field is None for p in declared_type.propositions):
                 not_implemented(ctx.srcfile, item.right.loc, 'field invariants other than value and length comparisons')
             return ty.ObjectField(item.left.item.name, declared_type.base, mutable, refinement=declared_type.propositions)
         return ty.ObjectField(
@@ -8481,14 +8481,19 @@ def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | Non
 def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition], *, loc: Span, ctx: Context) -> None:
     for proposition in propositions:
         if (field_name := proposition.field) is not None:
-            unfolded = ty.unfold(base)
-            field = unfolded.field(field_name) if isinstance(unfolded, ty.ObjectType) else None
-            if field is None:
-                type_error(
-                    ctx.srcfile,
-                    'refinement subject does not apply',
-                    Pointer(span=loc, message=f'`{type_to_dewy(base)}` has no field `{field_name}`'),
-                )
+            current: ty.Type = base
+            field: ty.ObjectField | None = None
+            for part in field_name.split('.'):
+                unfolded = ty.unfold(_union_object_member(ty.strip_refinement(current)))
+                field = unfolded.field(part) if isinstance(unfolded, ty.ObjectType) else None
+                if field is None:
+                    type_error(
+                        ctx.srcfile,
+                        'refinement subject does not apply',
+                        Pointer(span=loc, message=f'`{type_to_dewy(base)}` has no field `{field_name}`'),
+                    )
+                current = field.type
+            assert field is not None
             if proposition.of == 'length':
                 if not (field.type == 'array' or field.type == 'string' or isinstance(field.type, (ty.ArrayType, ty.StringType))):
                     type_error(
@@ -8586,9 +8591,14 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
         fact: int | None
         if (field_name := proposition.field) is not None:
             literal = node
-            while isinstance(literal, (hir.ValueCast, hir.RepresentationCast)):
-                literal = literal.expr
-            field_value = next((f.value for f in literal.fields if f.name == field_name), None) if isinstance(literal, hir.ObjectLiteral) else None
+            field_value: hir.AST | None = None
+            for part in field_name.split('.'):
+                while isinstance(literal, (hir.ValueCast, hir.RepresentationCast)):
+                    literal = literal.expr
+                field_value = next((f.value for f in literal.fields if f.name == part), None) if isinstance(literal, hir.ObjectLiteral) else None
+                if field_value is None:
+                    break
+                literal = field_value
             if field_value is None:
                 fact = None
             elif proposition.of == 'length':
@@ -8682,7 +8692,15 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             if entries and all(entry is not None for entry in entries):
                 # `Ratio<bottom >? 0>`, `Positive<i => i <? 10>`: a refinement of the alias's type
                 propositions = [proposition for entry in entries for proposition in (entry or [])]
-                _check_refinement_subjects(ty.strip_refinement(alias_value), propositions, loc=ast.loc, ctx=ctx)
+                base = ty.strip_refinement(alias_value)
+                if isinstance(base, ty.TypeOr) and propositions and all(p.field is not None for p in propositions):
+                    # `bigint<sign =? 1>`: a field of the union's object member
+                    # refines that member — the literal member has no fields
+                    member = _union_object_member(base)
+                    if member is not base:
+                        _check_refinement_subjects(member, propositions, loc=ast.loc, ctx=ctx)
+                        return _refined(member, propositions)
+                _check_refinement_subjects(base, propositions, loc=ast.loc, ctx=ctx)
                 return _refined(alias_value, propositions)
             type_error(
                 ctx.srcfile,
@@ -10409,7 +10427,12 @@ def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Propo
         if carried is not None and carried.refinement == field.refinement:
             continue
         missing.extend(
-            ty.Proposition(f'.{field.name}', p.op, p.value, of='length' if p.subject == 'length' else 'value')
+            ty.Proposition(
+                f'.{field.name}{p.subject}' if p.field is not None else f'.{field.name}',
+                p.op,
+                p.value,
+                of='length' if p.subject == 'length' or (p.field is not None and p.of == 'length') else 'value',
+            )
             for p in field.refinement
         )
     return missing

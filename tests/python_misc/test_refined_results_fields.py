@@ -45,3 +45,16 @@ def test_field_invariants_are_assumed_on_reads() -> None:
     with pytest.raises(UserError, match='cannot prove refinement'):
         _compile(RATIO + 'let Plain:type = [top:int64 bottom:int64]\nlet scale = (r:Ratio):>int64 => r.top // r.bottom\nlet f = (p:Plain):>int64 => scale(p)\n')
     _compile(RATIO + 'let Plain:type = [top:int64 bottom:int64]\nlet scale = (r:Ratio):>int64 => r.top // r.bottom\nlet f = (p:Plain):>int64 => { if p.bottom >? 0 { return scale(p) }  return 0 }\n')
+
+
+def test_nested_field_invariants_are_proven_and_refuted() -> None:
+    # `start:Point<x >=? 0>`: a field refined by a field of its own type
+    source = 'let Point:type = [x:int64 y:int64]\nlet Segment:type = [start:Point<x >=? 0> stop:Point]\n'
+    _compile(source + 'let s:Segment = [start = [x = 2 y = 5] stop = [x = 7 y = 1]]\nlet main = ():>int64 => s.start.x\n')
+    with pytest.raises(REFUTED, match='refuted'):
+        _compile(source + 'let s:Segment = [start = [x = -1 y = 5] stop = [x = 7 y = 1]]\nlet main = ():>int64 => s.start.x\n')
+    # on a `0 | [...]` type the spelling refines the object member: positive implies nonzero
+    big = 'let Big:type = 0 | [sign:-1|1 magnitude:int64]\nlet f = (b:Big<sign =? 1>):>int64 => b.magnitude\n'
+    _compile(big + 'let g = (b:Big):>int64 => { if b not=? 0 { if b.sign =? 1 { return f(b) } }  return 0 }\nlet main = ():>int64 => g(0)\n')
+    with pytest.raises(REFUTED, match='cannot prove refinement'):
+        _compile(big + 'let g = (b:Big):>int64 => { if b not=? 0 { return f(b) }  return 0 }\nlet main = ():>int64 => g(0)\n')
