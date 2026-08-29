@@ -1,0 +1,44 @@
+# `match` is a member of the flow chain: `else if` and `else` attach outside
+# the arms, a guarded arm's refinement is its guard, guards over a finite
+# type can be total on their own, and the scrutinee stays narrowed after a
+# match whose arms all diverge but one.
+let Shape:type = [kind:-1|0|1 size:int64]
+
+let sign_word = (s:-1|0|1):>int64 => match s {
+    neg:int64<neg <? 0> => 1
+    zero:int64<zero =? 0> => 2
+    pos:int64<pos >? 0> => 3         # the three guards cover `-1|0|1` exactly
+}
+
+let area = (v:int64|string|Shape flag:bool):>int64 => match v {
+    n:int64 => n * 2
+    [kind:1 size] => size
+} else if flag { 100 } else { 0 }
+
+let first_or = (v:int64|undefined fallback:int64):>int64 => {
+    match v { <undefined> => return fallback } else {}    # a chain with a match is total: the empty `else` says so
+    return v + 1                     # `v` is an `int64` here: the only continuing path is the else
+}
+
+let main = (args:array<string>):>int64 => {
+    let scale:int64 = 1
+    if args.length >? 1000 { scale = 2 }
+    let checks:int64 = 0
+    if sign_word(-1) =? 1 and sign_word(0) =? 2 and sign_word(1) =? 3 { checks += 1 }
+    let big:Shape = [kind = 1 size = 9 * scale]
+    let small:Shape = [kind = -1 size = 4 * scale]
+    if area(3 * scale true) =? 6 and area(big false) =? 9 and area(small true) =? 100 and area("s" false) =? 0 { checks += 2 }
+    if first_or(4 * scale 0) =? 5 and first_or(undefined 7) =? 7 { checks += 4 }
+    let words = match 2 * scale {
+        <1> => "one"
+        <2> => "two"
+    } else "many"
+    if words =? "two" { checks += 8 }
+    let total = match (2 * scale 3 * scale) {
+        (<0> b:int64) => b
+        (a:int64 b:int64) => a * 10 + b
+    }
+    if total =? 23 { checks += 16 }
+    if checks =? 31 { return 42 }
+    return checks
+}

@@ -1,0 +1,22 @@
+# An enum is a union of string singletons. Values of such a type are tagged
+# cells; `=?` / `is?` against a member is a tag test; a flow whose arms are
+# string singletons keeps the union (`'A' | 'C'`), which converts to a wider
+# enum by retagging; `match` over an enum is total when every member has an
+# arm. Integer-singleton flows are `int64` words instead.
+let Mode:type = 'A' | 'B' | 'C'
+let code = (m:Mode):>int64 => match m {
+    <'A'> => 1
+    <'B'> => 2
+    <'C'> => 3
+}
+let main = (args:array<string>):>int64 => {
+    let scale:int64 = 1
+    if args.length >? 1000 { scale = 2 }
+    let m:Mode = 'B'
+    let picked = if code(m) =? 2 * scale 'A' else 'C'     # `'A' | 'C'`
+    let q:Mode = picked
+    let bonus = if q =? 'A' 100 else 0                       # an `int64`
+    let n = code(m) * 10 + code(picked) + bonus + (bonus // 50)
+    if picked is? 'A' and q isnt? 'B' and n =? 123 { return 42 }
+    return n
+}

@@ -196,11 +196,20 @@ class _FlowLowering:
         for index, arm in enumerate(node.arms):
             condition_prelude, condition = self._prepare_condition(arm.condition)
             if condition_prelude:
-                if isinstance(arm, hir.LoopArm) or index > 0:
+                if isinstance(arm, hir.LoopArm):
                     self._target_error(
                         arm.condition,
                         'condition requiring extracted statements in this flow position',
                     )
+                if index > 0:
+                    # A later arm whose condition needs statements (a match
+                    # arm reading a field of the narrowed scrutinee): the rest
+                    # of the chain becomes a nested flow in the `else`, where
+                    # those statements can run after the earlier tests failed.
+                    rest = replace(node, arms=list(node.arms[index:]))
+                    nested_prelude, nested = self._lower_flow(rest, target=target)
+                    default = hir.Block(node.loc, ty.VOID_TYPE, [*nested_prelude, nested], True)
+                    return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
                 prelude.extend(condition_prelude)
             if isinstance(arm, hir.LoopArm):
                 self.lower_loop_depth += 1
@@ -852,6 +861,8 @@ class _FlowLowering:
 
     def _placeholder(self, node: hir.AST) -> hir.AST:
         """Return an udewy-representable initializer for a flow temporary."""
+        if isinstance(node.type, ty.RefinedType):
+            node = replace(node, type=node.type.base)   # `int64<0..100>` is an int64 word
         if node.type == 'bool':
             return hir.Bool(node.loc, 'bool', False)
         if isinstance(node.type, str) and node.type in {

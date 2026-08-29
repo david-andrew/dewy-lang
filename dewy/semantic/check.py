@@ -8,11 +8,11 @@ from dataclasses import dataclass, replace, field, fields, is_dataclass
 from fractions import Fraction
 from collections import ChainMap
 from itertools import count
-from typing import Literal, NoReturn, cast
+from typing import Callable, Literal, NoReturn, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
 from . import builtins, hir, ty
-from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, not_implemented, require_valued
+from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span
 
@@ -1515,6 +1515,570 @@ def tcr_loop_exit(ast: p0.KeywordExpr, *, ctx: Context) -> hir.Break | hir.Conti
     return hir.Continue(ast.loc, ty.BOTTOM_TYPE, label, loop_levels)
 
 
+@dataclass
+class _FlowArmSpec:
+    """One arm of a flow chain: how to check its condition and body in the arm's context."""
+
+    loc: Span
+    condition: Callable[[Context], hir.AST]
+    body: Callable[[Context, ty.Type | None], hir.AST]
+    body_ast: p0.AST | None = None   # the `if` arm's syntax (target-gated arms splice it)
+
+
+def _if_arm_spec(loc: Span, condition_ast: p0.AST, body_ast: p0.AST) -> _FlowArmSpec:
+    return _FlowArmSpec(
+        loc,
+        lambda arm_ctx: _check_flow_condition(condition_ast, ctx=arm_ctx),
+        lambda body_ctx, branch_expected: typecheck_and_resolve_inner(body_ast, ctx=body_ctx, expected=branch_expected),
+        body_ast,
+    )
+
+
+# --- match ------------------------------------------------------------------
+# See `dewy/semantic/match.md`. An arm's left side is a parameter signature;
+# the arm matches when the scrutinee satisfies it.
+
+@dataclass
+class _Pattern:
+    kind: str                                   # 'type' | 'any' | 'object' | 'sequence'
+    loc: Span
+    name: str | None = None                     # the binding a `name:T` / `name` / field introduces
+    type_ast: p0.AST | None = None              # `T` of `name:T` / `<T>`
+    fields: list[tuple[str, '_Pattern | None']] = field(default_factory=list)   # object shape
+    items: list['_Pattern'] = field(default_factory=list)                         # sequence
+
+
+def _parse_pattern(ast: p0.AST, *, ctx: Context) -> _Pattern:
+    """The left side of a match arm as a pattern."""
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier):
+        # a bare name is the catch-all and binds the whole value, shadowing
+        # whatever the name meant (as a parameter would); `_` is the idiom
+        # and any other name warns, saying what it shadows
+        name = ast.item.name
+        if name != '_':
+            existing = ctx.binding_scopes.get(name)
+            if existing is not None and existing.type_value is not None:
+                what = f'`{name}` names a type here; this arm matches everything and binds the value as `{name}`'
+                hint = f'write `<{name}>` to match the type, `value:{name}` to bind it, or `_` for the catch-all'
+            elif existing is not None:
+                what = f'`{name}` shadows the enclosing `{name}`; this arm matches everything'
+                hint = f'write `{name}:T` to bind with a type, or `_` for the catch-all'
+            else:
+                what = f'`{name}` matches everything'
+                hint = f'the idiomatic catch-all is `_`; write `{name}:T` to bind with a type, or `<{name}>` to match a type'
+            user_warning(ctx.srcfile, 'bare name in a match arm binds the whole value', Pointer(span=ast.loc, message=what), hint=hint)
+        return _Pattern('any', ast.loc, name=name)
+    if isinstance(ast, p0.Block) and ast.kind == '<>':
+        if len(ast.inner) != 1:
+            user_error(ctx.srcfile, 'match arm type block holds one type', Pointer(span=ast.loc, message='write `<T>`'))
+        return _Pattern('type', ast.loc, type_ast=ast.inner[0])
+    if (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, t1.Operator)
+        and ast.op.symbol == ':'
+        and isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Identifier)
+    ):
+        return _Pattern('type', ast.loc, name=ast.left.item.name, type_ast=ast.right)
+    if isinstance(ast, p0.Block) and ast.kind == '[]':
+        fields: list[tuple[str, _Pattern | None]] = []
+        for item in ast.inner:
+            if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
+                fields.append((item.item.name, None))
+                continue
+            if (
+                isinstance(item, p0.BinOp)
+                and isinstance(item.op, t1.Operator)
+                and item.op.symbol == ':'
+                and isinstance(item.left, p0.Atom)
+                and isinstance(item.left.item, t1.Identifier)
+            ):
+                fields.append((item.left.item.name, _Pattern('type', item.loc, name=item.left.item.name, type_ast=item.right)))
+                continue
+            user_error(ctx.srcfile, 'object pattern fields are `name` or `name:type`', Pointer(span=item.loc, message='not a field pattern'))
+        return _Pattern('object', ast.loc, fields=fields)
+    if isinstance(ast, p0.Block) and ast.kind == '()':
+        return _Pattern('sequence', ast.loc, items=[_parse_pattern(item, ctx=ctx) for item in ast.inner])
+    user_error(
+        ctx.srcfile,
+        'unsupported match pattern',
+        Pointer(span=ast.loc, message='patterns are `name:T`, `<T>`, `name`, `[fields]`, or `(patterns)`'),
+        hint='see `dewy/semantic/match.md`',
+    )
+
+
+def _identifier_atom(loc: Span, name: str) -> p0.Atom:
+    return p0.Atom(loc, t1.Identifier(loc, name))
+
+
+def _member_ast(loc: Span, base: p0.AST, name: str) -> p0.BinOp:
+    return p0.BinOp(loc, t1.Operator(loc, '.'), base, _identifier_atom(loc, name))
+
+
+def _let_ast(loc: Span, name: str, value: p0.AST) -> p0.KeywordExpr:
+    return p0.KeywordExpr(loc, [t1.Keyword(loc, 'let'), p0.BinOp(loc, t1.Operator(loc, '='), _identifier_atom(loc, name), value)])
+
+
+_PROPOSITION_DUNDERS = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}
+
+
+def _proposition_condition(subject_ast: p0.AST, proposition: ty.Proposition, *, ctx: Context, loc: Span) -> hir.AST:
+    """A refinement proposition as a runtime test of the subject (a match guard)."""
+    target: p0.AST = subject_ast
+    if proposition.field is not None:
+        for part in proposition.field.split('.'):
+            target = _member_ast(loc, target, part)
+    if proposition.is_length:
+        target = _member_ast(loc, target, 'length')
+    value = typecheck_and_resolve_inner(target, ctx=ctx)
+    constant = hir.Integer(loc, ty.IntegerLiteralType(proposition.value), '0d', proposition.value)
+    return _dispatch_builtin(_PROPOSITION_DUNDERS[proposition.op], [value, constant], loc=loc, op_loc=loc, source_name=proposition.op, ctx=ctx)
+
+
+def _conjoin(conditions: list[hir.AST], loc: Span) -> hir.AST | None:
+    combined: hir.AST | None = None
+    for condition in conditions:
+        combined = condition if combined is None else hir.ShortCircuit(loc, 'bool', 'and', combined, condition)
+    return combined
+
+
+def _pattern_condition(subject_ast: p0.AST, pattern: _Pattern, *, ctx: Context) -> tuple[list[hir.AST], Context]:
+    """The tests that make ``subject`` satisfy ``pattern``, and the context they establish.
+
+    Each test is checked in the context narrowed by the previous ones (a
+    guard reads the value narrowed by its type test).
+    """
+    loc = pattern.loc
+    if pattern.kind == 'any':
+        return [], ctx
+    if pattern.kind == 'type':
+        assert pattern.type_ast is not None
+        declared = ast_to_type(pattern.type_ast, ctx=replace(ctx, refinement_subject=pattern.name))
+        base = ty.strip_refinement(declared)
+        value = typecheck_and_resolve_inner(subject_ast, ctx=ctx)
+        require_valued(value.type, ctx.srcfile, value.loc, 'match scrutinee')
+        conditions: list[hir.AST] = []
+        current = ctx
+        value_number = ty.strip_refinement(_number_and_dimension(value.type)[0])
+        if not ctx.type_system.is_subtype(value_number, base):
+            test = _integer_singleton_test(value, base, negated=False, loc=loc, op_loc=loc, ctx=ctx)
+            if test is None:
+                test = hir.TypeTest(loc, 'bool', value, base, False)
+            conditions.append(test)
+            current = _refine_condition_context(ctx, test, truth=True)
+        if isinstance(declared, ty.RefinedType):
+            for proposition in declared.propositions:
+                guard = _proposition_condition(subject_ast, proposition, ctx=current, loc=loc)
+                conditions.append(guard)
+                current = _refine_condition_context(current, guard, truth=True)
+        return conditions, current
+    if pattern.kind == 'object':
+        value = typecheck_and_resolve_inner(subject_ast, ctx=ctx)
+        names = [name for name, _ in pattern.fields]
+        member = _object_member_with_fields(value.type, names, loc=loc, ctx=ctx)
+        conditions = []
+        current = ctx
+        value_number = ty.strip_refinement(_number_and_dimension(value.type)[0])
+        if not ctx.type_system.is_subtype(value_number, member):
+            test = hir.TypeTest(loc, 'bool', value, member, False)
+            conditions.append(test)
+            current = _refine_condition_context(ctx, test, truth=True)
+        for name, sub in pattern.fields:
+            if sub is None:
+                continue
+            sub_conditions, current = _pattern_condition(_member_ast(loc, subject_ast, name), sub, ctx=current)
+            conditions.extend(sub_conditions)
+        return conditions, current
+    user_error(ctx.srcfile, 'a sequence pattern needs a sequence scrutinee', Pointer(span=loc, message='the scrutinee is one value'))
+
+
+def _object_member_with_fields(type_: ty.Type, names: list[str], *, loc: Span, ctx: Context) -> ty.ObjectType:
+    """The object type an object pattern tests for: the scrutinee's object, or the union member with those fields."""
+    number = ty.strip_refinement(_number_and_dimension(type_)[0])
+    candidates = list(number.items) if isinstance(number, ty.TypeOr) else [number]
+    objects = [
+        ty.unfold(member) for member in candidates
+        if isinstance(ty.unfold(member), ty.ObjectType) and all(ty.unfold(member).field(name) is not None for name in names)
+    ]
+    if len(objects) != 1:
+        user_error(
+            ctx.srcfile,
+            'object pattern does not select one member',
+            Pointer(span=loc, message=f'`{type_to_dewy(type_)}` has {len(objects)} object members with fields {", ".join(names)}'),
+        )
+    return objects[0]
+
+
+def _pattern_bindings(subject_ast: p0.AST, pattern: _Pattern, loc: Span) -> list[p0.AST]:
+    """The `let` declarations a matched pattern introduces, reading the (narrowed) subject."""
+    if pattern.kind in ('any', 'type'):
+        return [_let_ast(loc, pattern.name, subject_ast)] if pattern.name is not None else []
+    if pattern.kind == 'object':
+        declarations: list[p0.AST] = []
+        for name, sub in pattern.fields:
+            member = _member_ast(loc, subject_ast, name)
+            if sub is None:
+                declarations.append(_let_ast(loc, name, member))
+            else:
+                declarations.extend(_pattern_bindings(member, sub, loc))
+        return declarations
+    return []
+
+
+class _ValueSet:
+    """A set of integers as sorted disjoint inclusive intervals (None = unbounded)."""
+
+    def __init__(self, intervals: list[tuple[int | None, int | None]] | None = None) -> None:
+        self.intervals: list[tuple[int | None, int | None]] = []
+        for interval in intervals or []:
+            self.add(interval)
+
+    def add(self, interval: tuple[int | None, int | None]) -> None:
+        lower, upper = interval
+        if lower is not None and upper is not None and lower > upper:
+            return
+        merged: list[tuple[int | None, int | None]] = []
+        for e_lower, e_upper in self.intervals:
+            disjoint_left = e_upper is not None and lower is not None and e_upper + 1 < lower
+            disjoint_right = upper is not None and e_lower is not None and upper + 1 < e_lower
+            if disjoint_left or disjoint_right:
+                merged.append((e_lower, e_upper))
+                continue
+            lower = None if lower is None or e_lower is None else min(lower, e_lower)
+            upper = None if upper is None or e_upper is None else max(upper, e_upper)
+        merged.append((lower, upper))
+        merged.sort(key=lambda item: (item[0] is not None, item[0] if item[0] is not None else 0))
+        self.intervals = merged
+
+    def union(self, other: '_ValueSet') -> '_ValueSet':
+        result = _ValueSet(self.intervals)
+        for interval in other.intervals:
+            result.add(interval)
+        return result
+
+    def intersect(self, other: '_ValueSet') -> '_ValueSet':
+        result = _ValueSet()
+        for a_lower, a_upper in self.intervals:
+            for b_lower, b_upper in other.intervals:
+                lower = a_lower if b_lower is None else (b_lower if a_lower is None else max(a_lower, b_lower))
+                upper = a_upper if b_upper is None else (b_upper if a_upper is None else min(a_upper, b_upper))
+                result.add((lower, upper))
+        return result
+
+    def contains_interval(self, lower: int | None, upper: int | None) -> bool:
+        return any(
+            (e_lower is None or (lower is not None and e_lower <= lower))
+            and (e_upper is None or (upper is not None and upper <= e_upper))
+            for e_lower, e_upper in self.intervals
+        )
+
+    def covers(self, other: '_ValueSet') -> bool:
+        """Whether every interval of ``other`` lies inside one of ours."""
+        return all(self.contains_interval(lower, upper) for lower, upper in other.intervals)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _ValueSet) and self.intervals == other.intervals
+
+    def first_uncovered(self, domain: '_ValueSet') -> int | None:
+        """The least value of ``domain`` not in this set (finite domains and lower-bounded ones)."""
+        for lower, upper in domain.intervals:
+            probe = lower if lower is not None else (0 if upper is None else min(0, upper))
+            while upper is None or probe <= upper:
+                if not self.contains_interval(probe, probe):
+                    return probe
+                # jump past the covering interval
+                jump = next(e_upper for e_lower, e_upper in self.intervals if (e_lower is None or e_lower <= probe) and (e_upper is None or probe <= e_upper))
+                if jump is None:
+                    break
+                probe = jump + 1
+        return None
+
+
+def _propositions_value_set(propositions: tuple[ty.Proposition, ...] | list[ty.Proposition], domain: _ValueSet) -> _ValueSet:
+    """The values of ``domain`` a set of `self` propositions admits."""
+    lower: int | None = None
+    upper: int | None = None
+    holes: list[int] = []
+    for proposition in propositions:
+        if proposition.subject != 'self':
+            continue
+        p_lower, p_upper = proposition.lower_bound(), proposition.upper_bound()
+        if p_lower is not None:
+            lower = p_lower if lower is None else max(lower, p_lower)
+        if p_upper is not None:
+            upper = p_upper if upper is None else min(upper, p_upper)
+        if proposition.op == 'not=?':
+            holes.append(proposition.value)
+    result = _ValueSet()
+    for d_lower, d_upper in domain.intervals:
+        r_lower = d_lower if lower is None else (lower if d_lower is None else max(lower, d_lower))
+        r_upper = d_upper if upper is None else (upper if d_upper is None else min(upper, d_upper))
+        pieces = [(r_lower, r_upper)]
+        for hole in sorted(holes):
+            next_pieces = []
+            for piece_lower, piece_upper in pieces:
+                inside = (piece_lower is None or piece_lower <= hole) and (piece_upper is None or hole <= piece_upper)
+                if not inside:
+                    next_pieces.append((piece_lower, piece_upper))
+                    continue
+                next_pieces.append((piece_lower, hole - 1))
+                next_pieces.append((hole + 1, piece_upper))
+            pieces = next_pieces
+        for piece in pieces:
+            result.add(piece)
+    return result
+
+
+def _integer_domain(type_: ty.Type) -> _ValueSet | None:
+    """The value set of an integer-like type, or None for a non-integer type."""
+    stripped = ty.strip_refinement(type_)
+    if isinstance(stripped, ty.IntegerLiteralType):
+        return _ValueSet([(stripped.value, stripped.value)])
+    if stripped == 'bool':
+        return _ValueSet([(0, 1)])
+    if isinstance(stripped, str):
+        layout = ty.fixed_integer_layout(stripped)
+        if layout is not None:
+            width, signed = layout
+            domain = _ValueSet([(-(1 << (width - 1)), (1 << (width - 1)) - 1)] if signed else [(0, (1 << width) - 1)])
+        elif stripped == 'int':
+            domain = _ValueSet([(None, None)])
+        elif stripped == 'uint':
+            domain = _ValueSet([(0, None)])
+        else:
+            return None
+        if isinstance(type_, ty.RefinedType):
+            domain = _propositions_value_set(type_.propositions, domain)
+        return domain
+    return None
+
+
+@dataclass
+class _MemberCoverage:
+    """What the arms so far cover of one member of the scrutinee's type."""
+
+    member: ty.TypeExpr
+    domain: _ValueSet | None                       # integer members: their values; else None (atomic)
+    covered: _ValueSet = field(default_factory=_ValueSet)
+    full: bool = False
+    fields: dict[str, tuple[_ValueSet, _ValueSet]] = field(default_factory=dict)   # object members: field -> (domain, covered)
+
+    def is_full(self) -> bool:
+        if self.full:
+            return True
+        if self.domain is not None:
+            return self.covered.covers(self.domain)
+        return any(covered.covers(domain) for domain, covered in self.fields.values())
+
+    def uncovered(self) -> str:
+        if self.domain is not None and self.covered.intervals:
+            probe = self.covered.first_uncovered(self.domain)
+            if probe is not None:
+                return f'value `{probe}` of `{type_to_dewy(self.member)}`'
+        return f'`{type_to_dewy(self.member)}`'
+
+
+def _pattern_coverage(pattern: _Pattern, coverage: list[_MemberCoverage], *, ctx: Context) -> bool:
+    """Add a pattern's coverage; True when it covered something new (else the arm is unreachable)."""
+    progressed = False
+    if pattern.kind == 'any':
+        for member in coverage:
+            if not member.is_full():
+                progressed = True
+            member.full = True
+        return progressed
+    if pattern.kind == 'type':
+        assert pattern.type_ast is not None
+        declared = ast_to_type(pattern.type_ast, ctx=replace(ctx, refinement_subject=pattern.name))
+        base = ty.strip_refinement(declared)
+        propositions = declared.propositions if isinstance(declared, ty.RefinedType) else ()
+        pattern_domain = _integer_domain(declared)
+        for member in coverage:
+            if member.is_full():
+                continue
+            member_base = ty.strip_refinement(member.member)
+            related = ctx.type_system.is_subtype(member_base, base) or ctx.type_system.is_subtype(base, member_base)
+            if member.domain is not None and pattern_domain is not None:
+                # integer-like on both sides: the arm admits the values its
+                # type denotes (a singleton, a guarded range, a whole width)
+                if not related and not isinstance(base, ty.IntegerLiteralType):
+                    continue
+                admitted = member.domain.intersect(pattern_domain)
+                new = member.covered.union(admitted)
+                if new != member.covered:
+                    member.covered = new
+                    progressed = True
+                continue
+            if not ctx.type_system.is_subtype(member_base, base):
+                continue
+            if propositions:
+                continue   # a guard on a non-integer member covers nothing for totality
+            member.full = True
+            progressed = True
+        return progressed
+    if pattern.kind == 'object':
+        names = [name for name, _ in pattern.fields]
+        for member in coverage:
+            unfolded = ty.unfold(member.member)
+            if not isinstance(unfolded, ty.ObjectType) or not all(unfolded.field(name) is not None for name in names):
+                continue
+            if member.is_full():
+                continue
+            constrained = [(name, sub) for name, sub in pattern.fields if sub is not None and sub.type_ast is not None]
+            if not constrained:
+                member.full = True
+                progressed = True
+                continue
+            if len(constrained) != 1:
+                continue   # several constrained fields: conservative (covers nothing)
+            name, sub = constrained[0]
+            field_declared = unfolded.field(name)
+            assert field_declared is not None
+            field_type = _refined(field_declared.type, list(field_declared.refinement)) if field_declared.refinement else field_declared.type
+            domain = _integer_domain(field_type)
+            if domain is None:
+                continue
+            assert sub.type_ast is not None
+            sub_domain = _integer_domain(ast_to_type(sub.type_ast, ctx=replace(ctx, refinement_subject=sub.name)))
+            if sub_domain is None:
+                continue
+            existing_domain, existing_covered = member.fields.get(name, (domain, _ValueSet()))
+            new = existing_covered.union(sub_domain)
+            if new != existing_covered:
+                member.fields[name] = (existing_domain, new)
+                progressed = True
+        return progressed
+    return False
+
+
+def _match_arm_specs(
+    arm: p0.KeywordExpr,
+    scrutinee_ast: p0.AST,
+    clause_ast: p0.AST,
+    *,
+    ctx: Context,
+) -> tuple[list[_FlowArmSpec], list[hir.AST], bool, str | None]:
+    """Expand one `match` arm into flow arm specs.
+
+    Returns the specs, the scrutinee prelude (a hidden local for a
+    non-identifier scrutinee), whether the arms cover the scrutinee's type,
+    and a description of the first uncovered member or value.
+    """
+    loc = arm.loc
+    # --- the scrutinee(s): identifiers are matched in place, other expressions bound once
+    prelude: list[hir.AST] = []
+    element_asts = (
+        list(scrutinee_ast.inner)
+        if isinstance(scrutinee_ast, p0.Block) and scrutinee_ast.kind == '()' and len(scrutinee_ast.inner) != 1
+        else [scrutinee_ast]
+    )
+    subjects: list[p0.AST] = []
+    subject_types: list[ty.Type] = []
+    for element in element_asts:
+        if isinstance(element, p0.Atom) and isinstance(element.item, t1.Identifier) and ctx.binding_scopes.get(element.item.name) is not None:
+            value = typecheck_and_resolve_inner(element, ctx=ctx)
+            subjects.append(element)
+            subject_types.append(value.type)
+            continue
+        value = typecheck_and_resolve_inner(element, ctx=ctx)
+        require_valued(value.type, ctx.srcfile, value.loc, 'match scrutinee')
+        value = _widen_inferred_let_value(value, ctx=ctx)
+        local = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_match_{ctx.binding_registry.next_id}', 'value', element.loc)
+        local.type = value.type
+        declaration = hir.Declare(element.loc, ty.VOID_TYPE, 'let', local.name, value.type, value, binding_id=local.id)
+        local.declaration = declaration
+        ctx.binding_scopes[local.name] = local
+        ctx.declarations[local.name] = value.type   # resolution consults the declaration map first
+        prelude.append(declaration)
+        subjects.append(_identifier_atom(element.loc, local.name))
+        subject_types.append(value.type)
+    sequence = len(subjects) > 1
+    # --- the arms
+    arm_asts = list(clause_ast.inner) if isinstance(clause_ast, p0.Block) and clause_ast.kind == '{}' else [clause_ast]
+    if not arm_asts:
+        user_error(ctx.srcfile, 'match needs at least one arm', Pointer(span=clause_ast.loc, message='empty arm group'))
+    coverage_sets: list[list[_MemberCoverage]] = []
+    for subject_type in subject_types:
+        number = ty.strip_refinement(_number_and_dimension(subject_type)[0])
+        members = list(number.items) if isinstance(number, ty.TypeOr) else [number]
+        coverage_sets.append([
+            _MemberCoverage(member, _integer_domain(subject_type if len(members) == 1 and isinstance(subject_type, ty.RefinedType) else member))
+            for member in members
+        ])
+    specs: list[_FlowArmSpec] = []
+    total = False
+    for arm_ast in arm_asts:
+        if not (isinstance(arm_ast, p0.BinOp) and isinstance(arm_ast.op, t1.Operator) and arm_ast.op.symbol == '=>'):
+            user_error(ctx.srcfile, 'match arm must be `pattern => body`', Pointer(span=arm_ast.loc, message='not an arm'))
+        pattern = _parse_pattern(arm_ast.left, ctx=ctx)
+        body_ast = arm_ast.right
+        if sequence:
+            if pattern.kind != 'sequence' or len(pattern.items) != len(subjects):
+                user_error(ctx.srcfile, 'sequence match arm arity', Pointer(span=pattern.loc, message=f'the scrutinee has {len(subjects)} values'))
+            element_patterns = pattern.items
+        else:
+            if pattern.kind == 'sequence':
+                if len(pattern.items) != 1:
+                    user_error(ctx.srcfile, 'a sequence pattern needs a sequence scrutinee', Pointer(span=pattern.loc, message='the scrutinee is one value'))
+                pattern = pattern.items[0]
+            element_patterns = [pattern]
+        # coverage and reachability, on the pattern types alone
+        if total:
+            user_error(ctx.srcfile, 'unreachable match arm', Pointer(span=pattern.loc, message='earlier arms already cover every value'))
+        progressed = [
+            _pattern_coverage(element_pattern, coverage, ctx=ctx)
+            for element_pattern, coverage in zip(element_patterns, coverage_sets)
+        ]
+        if not any(progressed):
+            user_error(ctx.srcfile, 'unreachable match arm', Pointer(span=pattern.loc, message='earlier arms already cover these values'))
+        if sequence:
+            # a sequence is total only when one arm covers every element on its own
+            whole = all(
+                element_pattern.kind == 'any'
+                or (element_pattern.kind == 'type' and element_pattern.type_ast is not None
+                    and not isinstance(ast_to_type(element_pattern.type_ast, ctx=replace(ctx, refinement_subject=element_pattern.name)), ty.RefinedType))
+                or (element_pattern.kind == 'object' and all(sub is None for _, sub in element_pattern.fields))
+                for element_pattern in element_patterns
+            )
+            total = whole and all(all(member.is_full() for member in coverage) for coverage in coverage_sets)
+        else:
+            total = all(member.is_full() for member in coverage_sets[0])
+
+        def make_condition(element_patterns: list[_Pattern] = element_patterns) -> Callable[[Context], hir.AST]:
+            def condition(arm_ctx: Context) -> hir.AST:
+                conditions: list[hir.AST] = []
+                current = arm_ctx
+                for subject, element_pattern in zip(subjects, element_patterns):
+                    element_conditions, current = _pattern_condition(subject, element_pattern, ctx=current)
+                    conditions.extend(element_conditions)
+                combined = _conjoin(conditions, loc)
+                return combined if combined is not None else hir.Bool(loc, 'bool', True)
+            return condition
+
+        def make_body(element_patterns: list[_Pattern] = element_patterns, body_ast: p0.AST = body_ast) -> Callable[[Context, ty.Type | None], hir.AST]:
+            def body(body_ctx: Context, branch_expected: ty.Type | None) -> hir.AST:
+                declarations: list[p0.AST] = []
+                for subject, element_pattern in zip(subjects, element_patterns):
+                    declarations.extend(_pattern_bindings(subject, element_pattern, element_pattern.loc))
+                if not declarations:
+                    return typecheck_and_resolve_inner(body_ast, ctx=body_ctx, expected=branch_expected)
+                block = p0.Block(body_ast.loc, [*declarations, body_ast], '{}', None)
+                return typecheck_and_resolve_inner(block, ctx=body_ctx, expected=branch_expected)
+            return body
+
+        specs.append(_FlowArmSpec(arm_ast.loc, make_condition(), make_body()))
+    uncovered: str | None = None
+    if not total:
+        for coverage in coverage_sets:
+            for member in coverage:
+                if not member.is_full():
+                    uncovered = member.uncovered()
+                    break
+            if uncovered is not None:
+                break
+    return specs, prelude, total, uncovered
+
+
 def _flow_expected(expected: ty.Type | None) -> ty.Type | None:
     """Expected scalar branch type, excluding statement/inference sentinels."""
     if expected in (None, ty.VOID_TYPE, ty.INFERRED_TYPE):
@@ -1560,6 +2124,11 @@ def _flow_value_type(
             continuing,
         )
     ]
+    if any(value != values[0] for value in values) and all(isinstance(value, ty.IntegerLiteralType) for value in values):
+        # integer singleton branches are an `int64` word (`if flag 100 else
+        # 0`), as singleton unions are at every value boundary; string
+        # singletons keep their union — `'A' | 'B'` is an enum value
+        return 'int64'
     return ty.union(*values)
 
 
@@ -2502,16 +3071,48 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         keywords.append(arm.parts[0].name)
 
     unsupported = next(
-        (keyword for keyword in keywords if keyword not in {'if', 'loop'}),
+        (keyword for keyword in keywords if keyword not in {'if', 'loop', 'match'}),
         None,
     )
     if unsupported is not None:
         not_implemented(ctx.srcfile, ast.loc, f'`{unsupported}` flow')
 
-    if all(keyword == 'if' for keyword in keywords):
+    if all(keyword in ('if', 'match') for keyword in keywords):
         branch_expected = _flow_expected(expected)
         if isinstance(branch_expected, ty.SequenceType):
             not_implemented(ctx.srcfile, ast.loc, 'multi-value conditional result')
+        # Every arm is a spec: an `if` arm checks its condition and body
+        # syntax; a `match` arm expands to one spec per pattern (see
+        # `match.md`), with its scrutinee declared before the flow.
+        specs: list[_FlowArmSpec] = []
+        match_prelude: list[hir.AST] = []
+        match_total = False
+        match_present = False
+        match_uncovered: str | None = None
+        for arm in ast.arms:
+            if len(arm.parts) != 3:
+                raise ValueError(f'INTERNAL ERROR: malformed flow arm: {arm.parts!r}')
+            keyword, condition_ast, body_ast = arm.parts
+            assert isinstance(keyword, t1.Keyword)
+            assert isinstance(condition_ast, p0.AST)
+            assert isinstance(body_ast, p0.AST)
+            if keyword.name == 'match':
+                match_present = True
+                arm_specs, prelude, total, uncovered = _match_arm_specs(arm, condition_ast, body_ast, ctx=ctx)
+                specs.extend(arm_specs)
+                match_prelude.extend(prelude)
+                match_total = match_total or total
+                if uncovered is not None and match_uncovered is None:
+                    match_uncovered = uncovered
+                continue
+            specs.append(_if_arm_spec(arm.loc, condition_ast, body_ast))
+        if match_present and ast.default is None and not match_total:
+            user_error(
+                ctx.srcfile,
+                'match is not exhaustive',
+                Pointer(span=ast.loc, message=f'{match_uncovered} is not handled by any arm' if match_uncovered else 'the arms do not cover the scrutinee'),
+                hint='add an arm for it, a catch-all arm (`value => …`), or an `else` branch',
+            )
         arms: list[hir.IfArm | hir.LoopArm] = []
         bodies: list[hir.AST] = []
         # Refinement state at the end of every path that can reach the code
@@ -2521,13 +3122,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         continuing_keys: list[dict] = []
         arm_ctx = ctx
         constant_true = False
-        for arm in ast.arms:
-            if len(arm.parts) != 3:
-                raise ValueError(f'INTERNAL ERROR: malformed if arm: {arm.parts!r}')
-            _, condition_ast, body_ast = arm.parts
-            assert isinstance(condition_ast, p0.AST)
-            assert isinstance(body_ast, p0.AST)
-            condition = _check_flow_condition(condition_ast, ctx=arm_ctx)
+        for arm in specs:
+            body_ast = arm.body_ast
+            condition = arm.condition(arm_ctx)
             if isinstance(condition, hir.DictContains):
                 condition.hoisted = True  # its search runs right before the flow: the position is in scope
             if isinstance(condition, hir.TargetBool):
@@ -2552,11 +3149,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     # ``scoped=False`` lets the enclosing block flatten it.
                     return hir.Block(body_ast.loc, ty.VOID_TYPE, spliced, False)
                 else:
-                    body = typecheck_and_resolve_inner(
-                        body_ast,
-                        ctx=arm_ctx,
-                        expected=branch_expected,
-                    )
+                    body = arm.body(arm_ctx, branch_expected)
                     if branch_expected is not None:
                         body = check_against(body, branch_expected, ctx=ctx)
                 arms.append(hir.IfArm(arm.loc, body.type, condition, body))
@@ -2571,11 +3164,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 condition,
                 truth=True,
             )
-            body = typecheck_and_resolve_inner(
-                body_ast,
-                ctx=body_ctx,
-                expected=branch_expected,
-            )
+            body = arm.body(body_ctx, branch_expected)
             if branch_expected is not None:
                 body = check_against(body, branch_expected, ctx=ctx)
             arms.append(hir.IfArm(arm.loc, body.type, condition, body))
@@ -2595,7 +3184,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # exhaustive: the last arm becomes the default (its condition can only
         # be true on that path), so downstream passes see an ordinary if/else.
         unhandled = _unhandled_type_test_members(arms, arm_ctx, ctx=ctx) if ast.default is None and not constant_true else None
-        chain_exhaustive = unhandled is not None and unhandled == ty.BOTTOM_TYPE
+        chain_exhaustive = (unhandled is not None and unhandled == ty.BOTTOM_TYPE) or (match_total and ast.default is None and not constant_true)
         if constant_true:
             pass  # later arms and the default are dead
         elif chain_exhaustive:
@@ -2622,7 +3211,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             continuing_keys.append(dict(arm_ctx.key_facts))
         if chain_exhaustive and not arms and default is not None:
             # a single-arm chain covering the whole union is just its body
-            arms.append(hir.IfArm(ast.arms[0].loc, default.type, hir.Bool(ast.loc, 'bool', True), default))
+            arms.append(hir.IfArm(specs[0].loc, default.type, hir.Bool(ast.loc, 'bool', True), default))
             default = None
         if constant_true and not arms:
             raise ValueError('INTERNAL ERROR: constant-true flow without arms')
@@ -2694,7 +3283,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
 
         result_type = _flow_value_type(
             bodies,
-            exhaustive=default is not None,
+            exhaustive=default is not None or chain_exhaustive,   # a single covering arm has no default left
             ctx=ctx,
             loc=ast.loc,
         )
@@ -2703,7 +3292,13 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             and result_type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
         ):
             result_type = branch_expected
-        return hir.Flow(ast.loc, result_type, arms, default)
+        flow = hir.Flow(ast.loc, result_type, arms, default)
+        if match_prelude:
+            # the scrutinee's hidden local precedes the flow; ``scoped=False``
+            # lets the enclosing block flatten it so narrowing after the
+            # match still reaches the enclosing scope
+            return hir.Block(ast.loc, result_type, [*match_prelude, flow], False)
+        return flow
 
     if len(ast.arms) == 1 and keywords == ['loop'] and ast.default is None:
         arm = ast.arms[0]
@@ -6601,16 +7196,21 @@ def _literal_member_test(args: list[hir.AST], *, negated: bool, loc: Span, ctx: 
         union = ty.strip_refinement(_number_and_dimension(value.type)[0])
         if not isinstance(union, ty.TypeOr):
             continue
-        constant = _constant_integer(_unwrap_parens(other), ctx=ctx)
-        if constant is None:
-            continue
-        literal = next(
-            (m for m in union.items if isinstance(m, ty.IntegerLiteralType) and m.value == constant),
-            None,
-        )
-        if literal is None or all(isinstance(m, ty.IntegerLiteralType) for m in union.items):
-            continue
-        return hir.TypeTest(loc, 'bool', value, literal, negated)
+        other_node = _unwrap_parens(other)
+        constant = _constant_integer(other_node, ctx=ctx)
+        if constant is not None:
+            literal = next(
+                (m for m in union.items if isinstance(m, ty.IntegerLiteralType) and m.value == constant),
+                None,
+            )
+            if literal is None or all(isinstance(m, ty.IntegerLiteralType) for m in union.items):
+                continue
+            return hir.TypeTest(loc, 'bool', value, literal, negated)
+        if isinstance(other_node.type, ty.StringLiteralType):
+            # `mode =? 'A'` on an enum `'A' | 'B' | 'C'`: the member's tag
+            literal = next((m for m in union.items if m == other_node.type), None)
+            if literal is not None:
+                return hir.TypeTest(loc, 'bool', value, literal, negated)
     return None
 
 

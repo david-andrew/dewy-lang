@@ -3441,6 +3441,17 @@ class _Lowerer(
         if isinstance(node, hir.Flow):
             if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
                 self._target_error(node, 'statement-only flow used where a value is required')
+            union_members = ty.runtime_union_members(node.type)
+            if union_members is not None:
+                # a union-valued flow (`if c 'A' else 'C'`, a match over an
+                # enum of string singletons): the arms tag a fresh cell
+                cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('flow_union'))
+                prelude: list[hir.AST] = [
+                    hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._union_cell_allocation(union_members, node.loc)),
+                    *self._union_prepare_trees(cell, union_members, node.loc),
+                ]
+                flow_prelude, flow = self._lower_union_flow(node, cell, union_members)
+                return [*prelude, *flow_prelude, flow], replace(cell, type=node.type)
             target = self._new_flow_temp(node)
             declaration = hir.Declare(
                 node.loc,
@@ -3793,6 +3804,15 @@ class _Lowerer(
         if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
             prelude, item = self._extract_expression(node.items[0])
             return prelude, replace(node, items=[item])
+        if isinstance(node, hir.Block) and not node.scoped and len(node.items) > 1:
+            # statements followed by a value (a match's hidden scrutinee
+            # before its flow): the statements run first, the value is the
+            # last item
+            prelude: list[hir.AST] = []
+            for item in node.items[:-1]:
+                prelude.extend(self._lower_statement(item))
+            value_prelude, value = self._extract_expression(node.items[-1])
+            return [*prelude, *value_prelude], value
         return [], node
 
 

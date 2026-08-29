@@ -19,6 +19,30 @@ Facts established by a condition narrow values inside the corresponding body and
 
 A chain whose arms are all `is?` tests on one union binding is exhaustive when the alternatives excluded by every arm leave no member; such a chain needs no `else` for return coverage or for producing a value, and a value-producing chain that misses a member reports which member is unhandled. Statement-form chains may remain partial.
 
+## `match`
+
+`match <scrutinee> <arm | { arms }>` is a member of the flow chain, so `else` (and `else if`, `else match`) attaches outside the arms. An arm is `<signature> => <body>`, and it matches when the scrutinee satisfies the signature, exactly as a call satisfies a parameter list:
+
+```dewy
+let describe = (v:bool|int64|string):>string => match v {
+    <bool>              => "a flag"          # a type: narrows, binds nothing
+    answer:42           => "the answer"      # a singleton
+    small:int64<small <? 100> => "small"     # the refinement is the arm's guard, and a fact in the body
+    n:int64             => "large"           # binds `n` at `int64`
+    s:string            => s
+}
+let sign_of = (b:bigint):>int64 => match b {
+    <0>                 => 0
+    [sign:1 limbs]      => limbs.length      # an object shape: the member with those fields, fields bound
+    [sign:-1 limbs]     => -limbs.length
+}
+let sum = match (x y) (a:int64 b:int64) => a + b   # a sequence scrutinee; `(<T1> b:T2)` mixes anonymous and named
+```
+
+The scrutinee is evaluated once; a bare identifier is matched in place, so the arms narrow it. Arms are tried top to bottom and the first that matches wins. A bare name matches everything and binds the value, shadowing what the name meant, as a parameter would; `_` is the idiomatic catch-all, and any other bare name warns (saying whether it shadows a type or a value) — write `name:T` to bind with a type or `<T>` to match one. An anonymous refined type, `<int64<i => i <? 100>>`, is a guard without a binding.
+
+A chain that contains a `match` must be **total**: the arms must cover every member of the scrutinee's type, or the chain must end in `else`. Coverage is computed on value sets, so guards count where the type is known: `a:int64<a <? 0>` and `b:int64<b >=? 0>` cover `int64`; over `-1|0|1`, guards `<? 0` and `>? 0` leave `0` unhandled and the error says so. An arm that cannot match anything the earlier arms left (`unreachable match arm`) is an error. Value-producing arms combine like conditional branches: the result is the union of the arm types, so a match whose arms are `'A'` and `'B'` produces the enum `'A' | 'B'`.
+
 ## Loops
 
 `loop condition body` reevaluates its condition and executes its body according to the condition's Boolean or iterator behavior.
@@ -45,4 +69,4 @@ Postfix `or_throw` propagates an [exception value](errors-and-forwarding.md) fro
 
 ## Related Provisional Control Flow
 
-General `match`, cleanup/finally behavior, and transformed error-propagation forms are provisional designs. Their eventual forms must compose with expression results and flow-sensitive narrowing rather than creating separate statement-only semantics.
+Cleanup/finally behavior and transformed error-propagation forms are provisional designs (`match` is settled; see above and `dewy/semantic/match.md`). Their eventual forms must compose with expression results and flow-sensitive narrowing rather than creating separate statement-only semantics.

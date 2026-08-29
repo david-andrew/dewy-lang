@@ -72,6 +72,22 @@ let describe = (v:int64 | string):>int64 => {
 
 When a value-producing chain misses an alternative, the error names it: `` `undefined` is not handled by any `is?` arm``.
 
+## `match`
+
+When a value has several shapes, `match` writes the cases as *signatures*: an arm `pattern => body` matches when the value would satisfy that parameter list.
+
+```dewy
+let describe = (v:bool|int64|string):>string => match v {
+    <bool>                    => "a flag"        # a type narrows and binds nothing
+    answer:42                 => "the answer"    # a singleton
+    small:int64<small <? 100> => "small"         # a refinement is the arm's guard
+    n:int64                   => "large"         # `n` is the value at `int64`
+    s:string                  => s
+}
+```
+
+Object shapes bind fields (`[sign:1 limbs] => limbs.length` on a `bigint`), sequences match element-wise (`match (x y) (a:int64 b:int64) => a + b`), and a bare name is the catch-all that binds the whole value — `_` idiomatically; another name warns, since it shadows whatever it meant (write `n:T` to bind with a type). `else` attaches outside the arms and chains with `if` as usual. A chain with a `match` must be total — the arms cover the type, guards included when the type lets them (`<? 0` and `>=? 0` cover `int64`; over `-1|0|1`, `<? 0` and `>? 0` miss `0`, and the error says so) — or end in `else`; an arm nothing can reach is an error too.
+
 ## Short-Circuit Conditions
 
 `and` evaluates its right side only if the left side succeeds. `or` evaluates its right side only if the left side fails. `nand`, `nor`, `xor`, and `xnor` follow their Boolean definitions.

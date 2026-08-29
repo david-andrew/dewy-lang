@@ -54,7 +54,7 @@ def test_nested_field_invariants_are_proven_and_refuted() -> None:
     with pytest.raises(REFUTED, match='refuted'):
         _compile(source + 'let s:Segment = [start = [x = -1 y = 5] stop = [x = 7 y = 1]]\nlet main = ():>int64 => s.start.x\n')
     # on a `0 | [...]` type the spelling refines the object member: positive implies nonzero
-    big = 'let Big:type = 0 | [sign:-1|1 magnitude:int64]\nlet f = (b:Big<sign =? 1>):>int64 => b.magnitude\n'
-    _compile(big + 'let g = (b:Big):>int64 => { if b not=? 0 { if b.sign =? 1 { return f(b) } }  return 0 }\nlet main = ():>int64 => g(0)\n')
+    big = 'let Big:type = 0 | [sign:-1|1 magnitude:uint64]\nlet f = (b:Big<sign =? 1>):>uint64 => b.magnitude\n'
+    _compile(big + 'let g = (b:Big):>uint64 => { if b not=? 0 { if b.sign =? 1 { return f(b) } }  return 0 }\nlet main = ():>int64 => g(0) transmute int64\n')
     with pytest.raises(REFUTED, match='cannot prove refinement'):
-        _compile(big + 'let g = (b:Big):>int64 => { if b not=? 0 { return f(b) }  return 0 }\nlet main = ():>int64 => g(0)\n')
+        _compile(big + 'let g = (b:Big):>uint64 => { if b not=? 0 { return f(b) }  return 0 }\nlet main = ():>int64 => g(0) transmute int64\n')

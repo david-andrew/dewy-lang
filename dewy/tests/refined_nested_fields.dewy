@@ -4,17 +4,17 @@
 # object member — `Big<sign =? 1>` is a positive Big, nonzero by construction.
 let Point:type = [x:int64 y:int64]
 let Segment:type = [start:Point<x >=? 0> stop:Point]
-let Big:type = 0 | [sign:-1|1 magnitude:int64]
+let Big:type = 0 | [sign:-1|1 magnitude:uint64]     # the magnitude cannot carry a sign of its own
 
 let first_cell = (s:Segment cells:array<int64 length >? 0>):>int64 => {
     if s.start.x <? cells.length { return cells[s.start.x] }   # `s.start.x >=? 0` is the field's fact
     return 0
 }
 let width = (s:Segment):>int64 => s.stop.x - s.start.x
-let scaled = (b:Big<sign =? 1> k:int64):>Big<sign =? 1> => [sign = 1 magnitude = b.magnitude * k]
+let scaled = (b:Big<sign =? 1> k:uint64):>Big<sign =? 1> => [sign = 1 magnitude = b.magnitude * k]
 let value_of = (b:Big):>int64 => {
     if b =? 0 { return 0 }
-    return b.sign * b.magnitude
+    return b.sign * (b.magnitude transmute int64)
 }
 
 let main = (args:array<string>):>int64 => {
@@ -29,11 +29,11 @@ let main = (args:array<string>):>int64 => {
         let t:Segment = [start = p stop = [x = 9 y = 9]]
         if first_cell(t cells) =? 40 { checks += 2 }
     }
-    let b:Big = [sign = 1 magnitude = 6 * scale]
+    let b:Big = [sign = 1 magnitude = (6 * scale) transmute uint64]
     if b not=? 0 {
         if b.sign =? 1 {                                                   # narrowed, then the sign proven
             let twice = scaled(b 2)
-            if value_of(twice) =? 12 and twice.sign * twice.magnitude =? 12 { checks += 4 }
+            if value_of(twice) =? 12 and twice.sign * (twice.magnitude transmute int64) =? 12 { checks += 4 }
         }
     }
     let q = 1/(3 * scale) - 2/(3 * scale)                                  # -1/3: the denominator stays positive by type

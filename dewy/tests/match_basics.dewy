@@ -1,0 +1,50 @@
+# `match <scrutinee> <arm | { arms }>`: an arm's left side is a parameter
+# signature, and the arm matches when the scrutinee satisfies it — a type
+# (narrowing), a singleton, a refinement (the guard), an object shape, a
+# sequence, or a bare name (the catch-all). The chain must be total, or end
+# in `else`; see `dewy/semantic/match.md`.
+let Overflow:type = type of error
+let Big:type = 0 | [sign:-1|1 magnitude:uint64]     # the magnitude cannot carry a sign of its own
+
+let describe = (v:int64):>int64 => match v {
+    answer:42 => 1
+    i:int64<i <? 100> => 2 + (i - i)
+    big:int64 => 3
+}
+
+let classify = (v:bool|int64|string):>int64 => match v {
+    <bool> => 10
+    n:int64 => 20 + n
+    s:string => 30 + s.length
+}
+
+let sign_of = (b:Big):>int64 => match b {
+    <0> => 0
+    [sign:1 magnitude] => magnitude transmute int64
+    [sign:-1 magnitude] => -(magnitude transmute int64)
+}
+
+let widen = (r:int64|Overflow):>int64 => match r {
+    value:int64 => value
+} else 0
+
+let main = (args:array<string>):>int64 => {
+    let scale:int64 = 1
+    if args.length >? 1000 { scale = 2 }
+    let checks:int64 = 0
+    if describe(42 * scale) =? 1 and describe(7 * scale) =? 2 and describe(500 * scale) =? 3 { checks += 1 }
+    if classify(true) =? 10 and classify(5 * scale) =? 25 and classify("abc") =? 33 { checks += 2 }
+    let seven:Big = [sign = 1 magnitude = (7 * scale) transmute uint64]
+    let minus:Big = [sign = -1 magnitude = (3 * scale) transmute uint64]
+    let none:Big = 0
+    if sign_of(seven) =? 7 and sign_of(minus) =? -3 and sign_of(none) =? 0 { checks += 4 }
+    if widen(9 * scale) =? 9 and widen(Overflow) =? 0 { checks += 8 }
+    let sum = match (3 * scale 4 * scale) (a:int64 b:int64) => a + b
+    if sum =? 7 { checks += 16 }
+    let label = match 5 * scale {
+        <5> => "five"
+        _ => "other"                     # `_` is the catch-all; another bare name binds the value (and warns)
+    }
+    if label =? "five" { checks += 32 }
+    return checks
+}

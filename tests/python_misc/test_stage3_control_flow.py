@@ -89,10 +89,6 @@ def test_loop_exits_require_an_enclosing_loop(keyword: str) -> None:
     ('source', 'message'),
     [
         (
-            'let main = ():>int64 => { match true { return 42 } }',
-            '`match` flow',
-        ),
-        (
             'let main = ():>int64 => { if true { return 42 } else loop true { break } }',
             'mixed or advanced flow chain',
         ),
@@ -440,3 +436,9 @@ let main = ():>void => {
     emitted = codegen(SrcFile(None, source))
     assert '__dewy_loop_levels_1 = 1' in emitted
     assert '$outer' not in emitted
+
+
+def test_match_arms_must_be_signatures() -> None:
+    # `match` is implemented (see test_match.py); an arm that is not `pattern => body` is a focused error
+    with pytest.raises(UserError, match='match arm must be `pattern => body`'):
+        _check('let main = ():>int64 => { match true { return 42 } }')

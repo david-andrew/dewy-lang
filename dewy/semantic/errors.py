@@ -50,3 +50,10 @@ def require_valued(t: ty.Type, srcfile: SrcFile, loc: Span, what: str) -> ty.Typ
             Pointer(span=loc, message=f'this has type `{t}`, but a value is required here'),
         )
     return t
+
+
+def user_warning(srcfile: SrcFile, title: str, *pointers: Pointer, hint: str | None = None) -> None:
+    """Render a non-fatal warning to stderr; checking continues."""
+    import sys
+    from dewy.reporting import Warning as _Warning
+    print(str(_Warning(srcfile=srcfile, title=title, pointer_messages=list(pointers), hint=hint)), file=sys.stderr)
