@@ -1,0 +1,35 @@
+# File access is a value in every outcome: `read_text` is the text or one of
+# `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists`, `FileError`,
+# `InvalidUtf8`; `write_text` is the byte count or an error. `match` handles
+# the cases; nothing exits on the program's behalf.
+let path:string = "/tmp/dewy_file_io_fixture.txt"
+
+let describe = (r:string|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8):>int64 => match r {
+    s:string => s.length
+    <FileNotFound> => -1
+    <IsDirectory> => -2
+    <InvalidUtf8> => -3
+    _ => -4
+}
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let written = write_text(path "héllo\nworld")
+    match written {
+        n:int64 => if n =? 12 { checks += 1 }        # 6 bytes for `héllo`, 5 for `world`, the newline
+        _ => {}
+    }
+    if file_exists(path) and describe(read_text(path)) =? 11 { checks += 2 }
+    let bytes = read_bytes(path)
+    match bytes {
+        data:array<uint8> => if data.length =? 12 and data[0] =? 104 { checks += 4 }
+        _ => {}
+    }
+    if describe(read_text("/tmp/dewy_no_such_file_anywhere")) =? -1 { checks += 8 }
+    if describe(read_text("/tmp")) =? -2 { checks += 16 }
+    let bad = write_bytes(path [0xff 0xfe])
+    match bad { n:int64 => if describe(read_text(path)) =? -3 { checks += 32 }  _ => {} }
+    let denied = write_text("/tmp/dewy_no_such_dir/x.txt" "x")
+    match denied { <FileNotFound> => { checks += 64 }  _ => {} }
+    return checks - 85                                # 127 - 85 = 42
+}

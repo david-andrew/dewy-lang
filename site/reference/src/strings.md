@@ -66,9 +66,11 @@ let render = (values:array<int64>):>string => {
 `bytes as string` requires a proof that the bytes are valid UTF-8, which the compiler cannot make for runtime data. The checked form is `bytes as string | undefined`: it validates the bytes (RFC 3629 — no overlong forms, no surrogates, nothing above U+10FFFF, no truncated sequences) and yields the decoded string, or `undefined` for invalid input, so the program decides what to do at that point:
 
 ```dewy
-let text = read_bytes(path) as string | undefined
-if text is? string { printl(text) } else { printl"not UTF-8" }
+let text = read_text(path)          # `string`, or a file error, or `InvalidUtf8`
+if text is? string { printl(text) } else { printl"not readable text" }
 ```
+
+`read_text` is `read_bytes` followed by this decode, with `undefined` reported as the `InvalidUtf8` error alongside the file errors (`FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileError`); a decode of bytes you already hold is `bytes as string | undefined`.
 
 ## Representation Views
 

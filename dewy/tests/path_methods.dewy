@@ -1,0 +1,29 @@
+# `Path` (pathlib-style, minus join — `p"{dir}/{name}"` is the join): the
+# lexical methods read the text; the file-system methods are values in every
+# outcome. `p"…"` literals and `p(text)` values share the methods.
+let main = (args:array<string>):>int64 => {
+    let checks:int64 = 0
+    let file = p"dir/sub/file.tar.gz"
+    if file.name =? "file.tar.gz" and file.stem =? "file.tar" and file.suffix =? ".gz" { checks += 1 }
+    if file.parent.path =? "dir/sub" and file.parent.parent.name =? "dir" and not file.is_absolute { checks += 2 }
+    let parts = file.parts
+    if parts.length =? 3 and parts[0] =? "dir" and parts[2] =? "file.tar.gz" { checks += 4 }
+    let root = p"/etc/hosts"
+    let root_parts = root.parts
+    if root_parts.length =? 3 {
+        if root.is_absolute and root.parent.path =? "/etc" and root_parts[0] =? "/" and root_parts[1] =? "etc" and p"/etc".parent.path =? "/" { checks += 8 }
+    }
+    if p"notes".parent.path =? "." and p".bashrc".suffix =? "" and p".bashrc".stem =? ".bashrc" { checks += 16 }
+    if file.with_name("other.txt").path =? "dir/sub/other.txt" and file.with_suffix(".zip").path =? "dir/sub/file.tar.zip" and file.with_stem("data").path =? "dir/sub/data.gz" { checks += 32 }
+    let dir = p"/tmp/dewy_path_fixture"
+    match dir.mkdir { <FileExists> => {}  ok:bool => {}  _ => return checks }
+    let note = p"{dir}/note.txt"                    # interpolation joins
+    let sub = p(note.path)                          # a runtime path shares the methods
+    match note.write_text("héllo") { n:int64 => if n =? 6 { checks += 64 }  _ => {} }
+    if dir.is_dir and note.is_file and not note.is_dir and sub.exists { checks += 128 }
+    match sub.read_text { s:string => if s.length =? 5 { checks += 256 }  _ => {} }
+    match note.unlink { ok:bool => if not note.exists { checks += 512 }  _ => {} }
+    match dir.rmdir { ok:bool => if not dir.exists { checks += 1024 }  _ => {} }
+    if checks =? 2047 { return 42 }
+    return checks % 256
+}

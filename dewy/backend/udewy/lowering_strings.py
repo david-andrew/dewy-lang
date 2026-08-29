@@ -3696,6 +3696,16 @@ class _StringLowering:
         address = self._int64_binary('__add__', boundaries, offset, loc)
         return self._intrinsic_call('__load_u32__', [address], 'uint32', loc)
 
+    def _view_allocation(self, loc: Span) -> hir.AST:
+        """Storage for one view descriptor: the arena when the prelude provides
+        one, else a fresh frame allocation per evaluation (a prelude-less
+        program has no growable arrays for a view to escape into)."""
+        has_arena = any(candidate.logical_name.endswith('_arena_alloc') for candidate in self.functions)
+        size = self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)
+        if has_arena:
+            return self._arena_allocation(size, loc)
+        return self._intrinsic_call('__static_alloca__' if self.lowering_module_startup else '__alloca__', [size], 'int64', loc)
+
     def _string_view(
         self,
         string: hir.AST,
@@ -3704,7 +3714,10 @@ class _StringLowering:
         type_: ty.Type,
         loc: Span,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        allocator = '__static_alloca__'
+        # A view's descriptor lives in the arena: a slice or indexed grapheme
+        # can escape (pushed into an array, returned, stored in a field), and
+        # a static cell would be shared by every evaluation in a loop — each
+        # push of `text[start..stop]` would alias the last.
         target = self._new_string_temp(loc, type_, 'view')
         boundaries = self._load_i64_field(
             string,
@@ -3733,12 +3746,7 @@ class _StringLowering:
                 'let',
                 target.name,
                 'int64',
-                self._intrinsic_call(
-                    allocator,
-                    [self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)],
-                    'int64',
-                    loc,
-                ),
+                self._view_allocation(loc),
             ),
             self._store_i64_field(
                 descriptor,

@@ -1,0 +1,140 @@
+# The file system over Linux syscalls: open(2)=2, read=0, write=1, close=3,
+# access=21, stat=4, mkdir=83, rmdir=84, unlink=87. Loaded before `path.dewy`
+# so `Path`'s methods can call these. Paths are copied into a NUL-terminated buffer for the kernel.
+# Failures are values the caller handles (no traps): the kernel's errno
+# becomes one of the error types below, so `read_text(path)` is a string,
+# `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `InvalidUtf8`, or the
+# catch-all `FileError`; `match` or `is?` selects the case.
+let FileNotFound:type = type of error      # ENOENT
+let FileAccessDenied:type = type of error  # EACCES, EPERM
+let IsDirectory:type = type of error       # EISDIR
+let FileError:type = type of error         # any other failure (interrupted, short write, …)
+let InvalidUtf8:type = type of error       # the bytes are not UTF-8
+
+let FileExists:type = type of error        # EEXIST
+
+let _file_error = (status:int64):>FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let code:int64 = -status
+    if code =? 2 { return FileNotFound }
+    if code =? 13 or code =? 1 { return FileAccessDenied }
+    if code =? 21 { return IsDirectory }
+    if code =? 17 { return FileExists }
+    return FileError
+}
+
+let _c_path = (path:string):>array<uint8> => {
+    let bytes:array<uint8> = path as array<uint8>
+    let buffer:array<uint8> = []
+    loop b in bytes buffer.push(b)
+    buffer.push(0)
+    return buffer
+}
+
+let file_exists = (path:string):>bool => {
+    let c_path = _c_path(path)
+    return __syscall2__(21 __load_i64__(c_path) 0) =? 0
+}
+
+let _read_bytes_at = (path:string):>array<uint8>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let contents:array<uint8> = []
+    let c_path = _c_path(path)
+    let fd:int64 = __syscall3__(2 __load_i64__(c_path) 0 0)
+    if fd <? 0 { return _file_error(fd) }
+    let chunk:int64 = __alloca__(4096)
+    let count:int64 = __syscall3__(0 fd chunk 4096)
+    loop count >? 0 {
+        let i:int64 = 0
+        loop i <? count {
+            let address:int64 = chunk + i
+            let byte:uint8 = __load_u8__(address)
+            contents.push(byte)
+            i += 1
+        }
+        count = __syscall3__(0 fd chunk 4096)
+    }
+    let closed:int64 = __syscall1__(3 fd)
+    if count <? 0 { return _file_error(count) }    # a read failed midway (a directory reads as EISDIR)
+    return contents
+}
+
+# The file's text: its bytes decoded as UTF-8.
+let _read_text_at = (path:string):>string|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8 => {
+    let bytes = _read_bytes_at(path)
+    match bytes {
+        <FileNotFound> => return FileNotFound
+        <FileAccessDenied> => return FileAccessDenied
+        <IsDirectory> => return IsDirectory
+        <FileExists> => return FileExists
+        <FileError> => return FileError
+        data:array<uint8> => {
+            let text = data as string|undefined
+            match text {
+                <undefined> => return InvalidUtf8
+                s:string => return s
+            }
+        }
+    }
+}
+
+# Writing replaces the file (O_WRONLY|O_CREAT|O_TRUNC = 1|64|512 = 577,
+# mode 0o644 = 420) and yields the byte count; a short write is a `FileError`.
+let _write_bytes_at = (path:string bytes:array<uint8>):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let c_path = _c_path(path)
+    let fd:int64 = __syscall3__(2 __load_i64__(c_path) 577 420)
+    if fd <? 0 { return _file_error(fd) }
+    let data:int64 = __load_i64__(bytes)
+    let written:int64 = __syscall3__(1 fd data bytes.length)
+    let closed:int64 = __syscall1__(3 fd)
+    if written <? 0 { return _file_error(written) }
+    if written not=? bytes.length { return FileError }
+    return written
+}
+
+let _write_text_at = (path:string text:string):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let bytes:array<uint8> = text as array<uint8>
+    return _write_bytes_at(path bytes)
+}
+
+# stat(2): st_mode is the u32 at offset 24 of `struct stat` on x86_64 Linux;
+# the type bits are 0o170000 — 0o100000 a regular file, 0o040000 a directory.
+let _file_mode = (path:string):>int64 => {
+    let c_path = _c_path(path)
+    let buffer:int64 = __alloca__(144)
+    let status:int64 = __syscall2__(4 __load_i64__(c_path) buffer)
+    if status <? 0 { return -1 }
+    let mode_address:int64 = buffer + 24
+    let mode:uint32 = __load_u32__(mode_address)
+    return (mode and 61440) transmute int64
+}
+
+let is_file = (path:string):>bool => _file_mode(path) =? 32768
+let is_directory = (path:string):>bool => _file_mode(path) =? 16384
+
+# Directory creation (mode 0o755 = 493) and removal, and file removal: `true`
+# or the error (`FileExists` for a directory that is already there).
+let make_directory = (path:string):>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let c_path = _c_path(path)
+    let status:int64 = __syscall2__(83 __load_i64__(c_path) 493)
+    if status <? 0 { return _file_error(status) }
+    return true
+}
+
+let remove_directory = (path:string):>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let c_path = _c_path(path)
+    let status:int64 = __syscall1__(84 __load_i64__(c_path))
+    if status <? 0 { return _file_error(status) }
+    return true
+}
+
+let remove_file = (path:string):>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let c_path = _c_path(path)
+    let status:int64 = __syscall1__(87 __load_i64__(c_path))
+    if status <? 0 { return _file_error(status) }
+    return true
+}
+
+# The same operations as free functions on a path's text.
+let read_bytes = (path:string):>array<uint8>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _read_bytes_at(path)
+let read_text = (path:string):>string|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8 => _read_text_at(path)
+let write_bytes = (path:string bytes:array<uint8>):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_bytes_at(path bytes)
+let write_text = (path:string text:string):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_text_at(path text)

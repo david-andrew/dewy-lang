@@ -87,6 +87,8 @@ LOWERED_CASES = [
     ('match_basics.dewy', 63),
     ('match_chains.dewy', 42),
     ('string_enums.dewy', 42),
+    ('file_io.dewy', 42),
+    ('path_methods.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

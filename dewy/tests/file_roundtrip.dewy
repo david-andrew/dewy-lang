@@ -1,15 +1,24 @@
-# Bytes written to a file read back identically; missing files read empty.
+# Bytes written to a file read back identically; a missing file is the
+# `FileNotFound` value, not an empty result.
 let main = ():>int64 => {
     let path = "__dewycache__/roundtrip.txt"
-    let ok = write_text(path "héllo file")
-    if not ok { return 1 }
+    match write_text(path "héllo file") {
+        n:int64 => if n not=? 11 { return 1 }
+        _ => return 1
+    }
     if not file_exists(path) { return 2 }
-    let bytes = read_bytes(path)
     let total:int64 = 0
-    loop b in bytes total += 1
-    if bytes.length not =? 11 { return 3 }       # "héllo file" is 11 UTF-8 bytes
-    let missing = read_bytes("__dewycache__/does-not-exist.txt")
-    if missing.length not =? 0 { return 4 }
+    match read_bytes(path) {
+        bytes:array<uint8> => {
+            loop b in bytes total += 1
+            if bytes.length not =? 11 { return 3 }       # "héllo file" is 11 UTF-8 bytes
+        }
+        _ => return 3
+    }
+    match read_bytes("__dewycache__/does-not-exist.txt") {
+        <FileNotFound> => {}
+        _ => return 4
+    }
     if file_exists("__dewycache__/does-not-exist.txt") { return 5 }
     return total + 31                              # 42
 }

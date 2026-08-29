@@ -1,2 +1,134 @@
-let Path:type = [path:string]
+# Paths. `p"dir/file.txt"` is a path literal (`p` is the constructor, so
+# `p(text)` builds one at runtime), and a path in a `p` string interpolates
+# as its text: `p"{root}/{name}"` is the join. The lexical methods read the
+# text only; the file-system methods are the functions of `linux/files.dewy`
+# (loaded before this file), so every outcome is a value — a string, a byte
+# array, a count, `true`, or one of `FileNotFound`, `FileAccessDenied`,
+# `IsDirectory`, `FileExists`, `FileError`, `InvalidUtf8`.
+
+# The index of the last `/`, or -1.
+let _last_separator = (text:string):>int64 => {
+    let sep:int64 = -1
+    let i:int64 = 0
+    loop i <? text.length {
+        if text[i] =? "/" { sep = i }
+        i += 1
+    }
+    return sep
+}
+
+# The index of the last `.` of a name that is not its first grapheme, or -1
+# (a dotfile has no suffix).
+let _last_dot = (name:string):>int64 => {
+    let dot:int64 = -1
+    let i:int64 = 1
+    loop i <? name.length {
+        if name[i] =? "." { dot = i }
+        i += 1
+    }
+    return dot
+}
+
+let _path_name = (text:string):>string => {
+    let sep:int64 = _last_separator(text)
+    if sep <? 0 { return text }
+    let start:int64 = sep + 1
+    if start >=? 1 and start <? text.length { return text[start..end] }
+    return ""
+}
+
+let _path_parent = (text:string):>string => {
+    let sep:int64 = _last_separator(text)
+    if sep <? 0 { return "." }
+    if sep =? 0 { return "/" }
+    let before:int64 = sep - 1
+    if before >=? 0 and before <? text.length { return text[0..before] }
+    return "."
+}
+
+let _path_suffix = (text:string):>string => {
+    let name:string = _path_name(text)
+    let dot:int64 = _last_dot(name)
+    if dot >=? 1 and dot <? name.length { return name[dot..end] }
+    return ""
+}
+
+let _path_stem = (text:string):>string => {
+    let name:string = _path_name(text)
+    let dot:int64 = _last_dot(name)
+    if dot >=? 1 {
+        let before:int64 = dot - 1
+        if before >=? 0 and before <? name.length { return name[0..before] }
+    }
+    return name
+}
+
+# The path with its last component replaced. (Built with `join`: a returned
+# string that is an interpolation needs a size bound the callee cannot give
+# for arbitrary input, while a joined string is an arena value.)
+let _path_with_name = (text:string name:string):>string => {
+    let sep:int64 = _last_separator(text)
+    if sep <? 0 { return name }
+    if sep =? 0 {
+        let rooted:array<string> = ["/" name]
+        return rooted.join
+    }
+    let pieces:array<string> = [_path_parent(text) "/" name]
+    return pieces.join
+}
+
+let _path_with_stem = (text:string stem:string):>string => {
+    let pieces:array<string> = [stem _path_suffix(text)]
+    return _path_with_name(text pieces.join)
+}
+
+let _path_with_suffix = (text:string suffix:string):>string => {
+    let pieces:array<string> = [_path_stem(text) suffix]
+    return _path_with_name(text pieces.join)
+}
+
+# The components: a leading `/` is the root part, as in pathlib.
+let _path_parts = (text:string):>array<string> => {
+    let parts:array<string> = []
+    let start:int64 = 0
+    let i:int64 = 0
+    loop i <? text.length {
+        if text[i] =? "/" {
+            if i =? 0 { parts.push("/") }
+            else {
+                let before:int64 = i - 1
+                if start <? text.length and before <? text.length and start <=? before { parts.push(text[start..before]) }
+            }
+            start = i + 1
+        }
+        i += 1
+    }
+    if start <? text.length { parts.push(text[start..end]) }
+    return parts
+}
+
+let Path:type = [
+    path:string
+    # lexical
+    name = ():>string => _path_name(path)
+    stem = ():>string => _path_stem(path)
+    suffix = ():>string => _path_suffix(path)
+    parent = ():>Path => [path = _path_parent(path)]
+    parts = ():>array<string> => _path_parts(path)
+    is_absolute = ():>bool => path.length >? 0 and path[0] =? "/"
+    with_name = (name:string):>Path => [path = _path_with_name(path name)]
+    with_stem = (stem:string):>Path => [path = _path_with_stem(path stem)]
+    with_suffix = (suffix:string):>Path => [path = _path_with_suffix(path suffix)]
+    # the file system
+    exists = ():>bool => file_exists(path)
+    is_file = ():>bool => _file_mode(path) =? 32768
+    is_dir = ():>bool => _file_mode(path) =? 16384
+    read_text = ():>string|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8 => _read_text_at(path)
+    read_bytes = ():>array<uint8>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _read_bytes_at(path)
+    write_text = (text:string):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_text_at(path text)
+    write_bytes = (bytes:array<uint8>):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_bytes_at(path bytes)
+    mkdir = ():>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => make_directory(path)
+    rmdir = ():>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => remove_directory(path)
+    unlink = ():>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => remove_file(path)
+]
 let p = (path:string):>Path => [path = path]

@@ -35,10 +35,20 @@ TARGET_SERVICES: dict[str, tuple[Path, ...]] = {
     'c': _LINUX_SERVICES,
     'wasm32': (),
 }
+# Services the portable libraries build on (the file system: `Path`'s
+# methods call it), loaded first.
+_LINUX_FOUNDATIONS = (library / 'linux' / 'files.dewy',)
+TARGET_FOUNDATIONS: dict[str, tuple[Path, ...]] = {
+    'x86_64': _LINUX_FOUNDATIONS,
+    'arm': _LINUX_FOUNDATIONS,
+    'riscv': _LINUX_FOUNDATIONS,
+    'c': _LINUX_FOUNDATIONS,
+    'wasm32': (),
+}
 
 
 def prelude_files(target: str = 'x86_64') -> tuple[Path, ...]:
-    return (*PORTABLE_LIBRARIES, *TARGET_SERVICES[target])
+    return (*TARGET_FOUNDATIONS[target], *PORTABLE_LIBRARIES, *TARGET_SERVICES[target])
 
 
 PRELUDE_FILES = prelude_files()

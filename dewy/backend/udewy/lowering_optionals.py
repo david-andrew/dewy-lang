@@ -292,6 +292,10 @@ class _OptionalLowering:
     def _union_member_kind(member: ty.TypeExpr, *, prepared: bool = True) -> str:
         if isinstance(member, ty.NamedType):
             return 'handle'
+        if isinstance(member, ty.ArrayType) and member.length is None:
+            # a runtime-length array has no compile-time layout to prepare:
+            # the member is an arena-backed handle (`array<uint8> | FileError`)
+            return 'handle'
         if isinstance(member, (ty.ObjectType, ty.ArrayType)):
             return 'tree' if prepared else 'handle'
         return 'word'

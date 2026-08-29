@@ -504,8 +504,24 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
             value.loc,
             'string interpolation field',
         )
+        if _is_path_value(value.type):
+            # a path interpolates as its text: `p"{root}/{name}"` is the join
+            value = hir.MemberAccess(value.loc, ty.StringType(), value, 'path', True)
         parts.append(value)
     return hir.InterpolatedString(ast.loc, ty.StringType(), parts)
+
+
+def _is_path_value(type_: ty.Type) -> bool:
+    """Whether a type is the prelude's `Path` (or a path literal): one string field `path`."""
+    unfolded = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(unfolded, ty.PathType):
+        return True
+    return (
+        isinstance(unfolded, ty.ObjectType)
+        and len(unfolded.fields) == 1
+        and unfolded.fields[0].name == 'path'
+        and (unfolded.fields[0].type == ty.StringType() or isinstance(unfolded.fields[0].type, ty.StringLiteralType))
+    )
 
 
 def _pack_based_string(
@@ -2062,7 +2078,10 @@ def _match_arm_specs(
                     declarations.extend(_pattern_bindings(subject, element_pattern, element_pattern.loc))
                 if not declarations:
                     return typecheck_and_resolve_inner(body_ast, ctx=body_ctx, expected=branch_expected)
-                block = p0.Block(body_ast.loc, [*declarations, body_ast], '{}', None)
+                # the bindings open the arm's scope; a braced body's items
+                # join that scope rather than nesting a block statement
+                body_items = list(body_ast.inner) if isinstance(body_ast, p0.Block) and body_ast.kind == '{}' else [body_ast]
+                block = p0.Block(body_ast.loc, [*declarations, *body_items], '{}', None)
                 return typecheck_and_resolve_inner(block, ctx=body_ctx, expected=branch_expected)
             return body
 
@@ -3740,6 +3759,21 @@ def _rewrite_members_to_self(node: p0.AST, members: set[str]) -> p0.AST:
             return value
         if isinstance(value, p0.BinOp) and _operator_symbol(value.op) == '.':
             return replace(value, left=rewrite(value.left))  # the member name on the right stays
+        if isinstance(value, p0.Block) and value.kind == '[]':
+            # an object literal's keys are field names, not member reads:
+            # `[path = _path_parent(path)]` rewrites only the value
+            items = []
+            for item in value.inner:
+                if (
+                    isinstance(item, p0.BinOp)
+                    and _operator_symbol(item.op) == '='
+                    and isinstance(item.left, p0.Atom)
+                    and isinstance(item.left.item, t1.Identifier)
+                ):
+                    items.append(replace(item, right=rewrite(item.right)))
+                else:
+                    items.append(rewrite(item))
+            return replace(value, inner=items)
         if isinstance(value, p0.AST):
             changes = {}
             for field_info in fields(value):
@@ -3788,6 +3822,20 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
                     return
         if isinstance(value, p0.Prefix) and _operator_symbol(value.op) == '@' and root_name(value.item) in members:
             found = True
+            return
+        if isinstance(value, p0.Block) and value.kind == '[]':
+            # an object literal's keys are field names, not member writes:
+            # `[path = _path_parent(path)]` builds a new value
+            for item in value.inner:
+                if (
+                    isinstance(item, p0.BinOp)
+                    and _operator_symbol(item.op) == '='
+                    and isinstance(item.left, p0.Atom)
+                    and isinstance(item.left.item, t1.Identifier)
+                ):
+                    walk(item.right)
+                else:
+                    walk(item)
             return
         if isinstance(value, p0.AST):
             for field_info in fields(value):
@@ -10256,7 +10304,9 @@ def _literal_path_call_result(
     argument = _unwrap_literal_value(argument)
     if not isinstance(argument.type, ty.StringLiteralType):
         return None
-    return ty.PathLiteralType(argument.type.value)
+    declared = ty.unfold(left.type.ret)
+    methods = declared.methods if isinstance(declared, ty.ObjectType) else ()
+    return ty.PathLiteralType(argument.type.value, methods=methods)   # `p"…"` has `Path`'s methods
 
 
 def _checked_single_argument_call(

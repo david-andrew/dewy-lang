@@ -46,3 +46,22 @@ Before checking an ordinary module, the compiler supplies a source prelude of sh
 ## Provisional Package Facilities
 
 Installed package lookup, directory or glob imports, non-source artifacts, project-wide freestanding policy, and domain-library naming remain provisional. They must extend rather than contradict file-relative module identity and one-time initialization.
+
+## Paths
+
+`p"…"` is a path literal and `p(text)` builds a path at runtime; both are the prelude's `Path`, a value holding its text (`.path`). A path interpolates as its text, so `p"{root}/{name}"` is how paths are joined — there is no `join` method, since interpolation is strictly more flexible. The methods follow Python's `pathlib`:
+
+- lexical: `name`, `stem`, `suffix` (with its dot; a dotfile has none), `parent`, `parts` (a leading `/` is the root part), `is_absolute`, `with_name(name)`, `with_stem(stem)`, `with_suffix(suffix)`;
+- the file system, every outcome a value: `exists`, `is_file`, `is_dir`, `read_text` (`string | FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError | InvalidUtf8`), `read_bytes`, `write_text(text)` and `write_bytes(bytes)` (the byte count or an error), `mkdir`, `rmdir`, `unlink` (`true` or an error). Zero-argument methods are read like fields: `source.parent.name`.
+
+```dewy
+let source = p"{project}/src/main.dewy"
+match source.read_text {
+    text:string     => compile(text)
+    <FileNotFound>  => report"no such file: {source}"
+    _               => report"cannot read {source}"
+}
+let out = source.with_suffix(".udewy")
+```
+
+The same operations exist as free functions on a path's text (`read_text(path:string)`, `write_text`, `file_exists`, `is_file`, `is_directory`, `make_directory`, `remove_directory`, `remove_file`), provided by the target's file-system module (`library/linux/files.dewy`).

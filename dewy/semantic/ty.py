@@ -360,13 +360,16 @@ class PathLiteralType(PathType):
 
     value: str
 
-    def __init__(self, value: str):
+    def __init__(self, value: str, methods: tuple['MethodSpec', ...] = ()):
         object.__setattr__(
             self,
             'fields',
             (ObjectField('path', StringLiteralType(value)),),
         )
         object.__setattr__(self, 'value', value)
+        object.__setattr__(self, 'methods', methods)   # the prelude `Path`'s methods
+        object.__setattr__(self, 'brand', None)
+        object.__setattr__(self, 'constructors', [])
 
 
 PATH_TYPE = PathType((ObjectField('path', StringType()),))
