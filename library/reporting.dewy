@@ -65,6 +65,7 @@ let _digit_count = (value:int64):>int64 => {
 
 let _write_byte = (byte:uint8):>void => {
     let one:array<uint8> = [byte]
+    if _capture_output { _captured.push(byte)  return void }
     let written:int64 = _write_stderr(one)
     return void
 }
@@ -469,15 +470,18 @@ let Report:type = [
     }
 ]
 
-# ---- the report of a failed `$runtime_assert` (the compiler emits the calls) ----
+# ---- the report of a failed `$runtime_assert` or `$expect` (the compiler emits the calls) ----
 # The condition is the pointer, its message the pointer text, and the
 # `, message` tail of the source (up to `dim_stop`) is greyed out.
-let _assertion_report = (start:int64 stop:int64 dim_stop:int64 message:string):>Report => {
-    let report = Report("error" "assertion failed")
+let _condition_report = (title:string start:int64 stop:int64 dim_stop:int64 message:string):>Report => {
+    let report = Report("error" title)
     report.point(start stop message)
     if dim_stop >? stop { report.dim(stop dim_stop) }
     return report
 }
+
+let _assertion_report = (start:int64 stop:int64 dim_stop:int64 message:string):>Report => _condition_report("assertion failed" start stop dim_stop message)
+let _expectation_report = (start:int64 stop:int64 dim_stop:int64 message:string):>Report => _condition_report("expectation failed" start stop dim_stop message)
 
 let _assertion_note = (@report:Report text:string):>void => {
     report.note(text)

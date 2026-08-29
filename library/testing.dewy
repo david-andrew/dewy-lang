@@ -1,0 +1,99 @@
+# Test support: the state a failed `$expect` records and the reporting the
+# generated test runner uses. `dewy test file.dewy` (and `dewy test dir`)
+# compiles a module's `$test` functions with a generated entry that calls
+# each of them (once per case) between `_test_begin` and `_test_end`, then
+# exits with `_test_summary`'s failure count. The compiler emits the calls;
+# nothing here is meant to be called by hand.
+#
+# Output is pytest-shaped: one green `.` or red `F` per test, then, once all
+# have run, each failed test's captured output (its expectation report and
+# whatever it printed) under a `--- FAIL name` header, then the summary.
+# A passing test's output is discarded.
+let _test_failed:bool = false      # the running test (or a helper it called) failed an expectation
+let _test_passes:int64 = 0
+let _test_failures:int64 = 0
+let _test_failure_output:array<uint8> = []   # every failed test's captured output, each under its header
+let _test_color:bool = false
+
+let _test_paint = (code:string):>void => {
+    if _test_color { print(code) }
+    return void
+}
+
+# The failure path of `$expect`, after its report: the report switched
+# printing to stderr; test output continues on stdout.
+let _expect_failed = ():>void => {
+    _test_failed = true
+    _set_output_stderr(false)
+    return void
+}
+
+let _test_begin = (json:bool):>void => {
+    _test_failed = false
+    if not json {
+        _captured.truncate(0)
+        _set_capture(true)
+    }
+    return void
+}
+
+let _test_append_failure = (label:string):>void => {
+    let header:array<uint8> = "\n--- FAIL {label}\n" as array<uint8>
+    loop b in header { _test_failure_output.push(b) }
+    loop b in _captured { _test_failure_output.push(b) }
+    return void
+}
+
+# One mark per test (`.` / `F`), or a JSON object per line.
+let _test_end = (name:string case:int64 json:bool):>void => {
+    _set_capture(false)
+    let label:string = name
+    if case >=? 0 { label = "{name}[{case}]" }
+    if _test_failed { _test_failures += 1 } else { _test_passes += 1 }
+    if json {
+        if _test_failed { printl'\{"test": "{label}", "status": "fail"\}' }
+        else { printl'\{"test": "{label}", "status": "pass"\}' }
+        return void
+    }
+    if _test_failed {
+        _test_paint("\u001b[31m")
+        print"F"
+        _test_append_failure(label)
+    } else {
+        _test_paint("\u001b[32m")
+        print"."
+    }
+    _test_paint("\u001b[0m")
+    return void
+}
+
+# The failure details and the summary line (omitted with `brief`: `dewy test
+# dir` prints its own). The process exit status is the failure count,
+# capped at 100 so 101 (a `$runtime_assert` abort), 102 (did not build) and
+# 128+n (a signal) stay distinct.
+let _test_summary = (json:bool brief:bool):>int64 => {
+    if json {
+        printl'\{"passed": {_test_passes}, "failed": {_test_failures}\}'
+    } else {
+        print"\n"
+        _print_bytes(_test_failure_output)
+        if not brief {
+            if _test_failures >? 0 {
+                if _test_failure_output.length >? 0 { print"\n" }
+                _test_paint("\u001b[31m")
+                printl"{_test_failures} failed, {_test_passes} passed"
+            } else {
+                _test_paint("\u001b[32m")
+                printl"{_test_passes} passed"
+            }
+            _test_paint("\u001b[0m")
+        }
+    }
+    if _test_failures >? 100 { return 100 }
+    return _test_failures
+}
+
+let _test_init = (json:bool):>void => {
+    if not json { _test_color = _output_is_terminal() }
+    return void
+}

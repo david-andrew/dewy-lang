@@ -4,8 +4,11 @@
 # matching layer is imported. The native backends and the C backend all run
 # on the Linux syscall layer for now.
 if $target in? ["x86_64" "riscv" "arm" "c"] {
-    from p"linux/io.dewy" import (_write_stdout _write_stderr)
+    from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal)
 }
+
+# Whether ordinary output goes to a terminal (colors are painted only then).
+let _output_is_terminal = ():>bool => _stdout_is_terminal()
 
 # Diagnostics (a failed `$runtime_assert`) switch all printing to stderr.
 let _stderr_output:bool = false
@@ -14,13 +17,30 @@ let _set_output_stderr = (enabled:bool):>void => {
     return void
 }
 
-let _print_string = (s:string):>void => {
-    let bytes:array<uint8> = s as array<uint8>
-    if _stderr_output {
+# Output capture (the test runner): while enabled, everything printed —
+# stdout and stderr alike — is appended to `_captured` instead of written,
+# so a test's output is shown only if it fails.
+let _capture_output:bool = false
+let _captured:array<uint8> = []
+let _set_capture = (enabled:bool):>void => {
+    _capture_output = enabled
+    return void
+}
+
+let _print_bytes = (bytes:array<uint8>):>void => {
+    if _capture_output {
+        loop b in bytes { _captured.push(b) }
+    } else if _stderr_output {
         let written:int64 = _write_stderr(bytes)
     } else {
         let written:int64 = _write_stdout(bytes)
     }
+    return void
+}
+
+let _print_string = (s:string):>void => {
+    let bytes:array<uint8> = s as array<uint8>
+    _print_bytes(bytes)
     return void
 }
 

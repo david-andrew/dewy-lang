@@ -170,6 +170,10 @@ class Obligation(AST):
     description: str
 
 
+TEST_ENTRY_NAME = '__dewy_test_main'
+"""The generated test runner (`dewy --test`): the program's entry instead of `main`."""
+
+
 @dataclass
 class Assert(AST):
     """A compile-time `$assert`: the analyses must prove ``condition``; nothing is lowered."""
@@ -179,6 +183,7 @@ class Assert(AST):
     message: str | None = None
     runtime: bool = False  # a `$runtime_assert`: only a refuted condition is a compile-time error
     dimmed: Span | None = None  # the `, message` tail, greyed out in reports
+    expect: bool = False  # a `$expect`: a refuted condition is a warning (the test fails when it runs)
 
 
 @dataclass

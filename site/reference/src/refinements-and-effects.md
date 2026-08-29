@@ -105,7 +105,9 @@ let main = ():>int64 => {
 }
 ```
 
-The comma binds tighter than comparisons, so `x <? 3, "message"` is read as the condition `x <? 3` with the message split off the end of the expression. A compile-time message must be a string literal.
+`$expect condition, message` is the assertion form for tests: a failure is recorded and returns from the enclosing function instead of exiting, a refuted condition is a warning rather than an error, and the code after it holds the condition's facts like the code after an assertion. See [Testing](testing.md).
+
+The assertion directives are *forms* with their own argument grammar, like `if cond body` or `return expr`, not operators: `$assert expr [, expr]`. The directive owns the top-level comma of its argument — it separates the condition from the message — so the comma's operator precedence (tighter than the comparisons) never applies there, and `x <? 3, "message"` is the condition `x <? 3` with the message `"message"`. A condition that is itself a tuple comparison is parenthesized, `$assert pair =? (1, 2)`, as a form's argument would be anywhere. A compile-time message must be a string literal.
 
 ## Effects
 

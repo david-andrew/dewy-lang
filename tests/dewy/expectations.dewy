@@ -1,0 +1,50 @@
+# The test system's own behaviour, as `$test` functions: expectations that
+# hold, cases by position and by name, helpers with expectations, and the
+# early return after a failed expectation is checked from the outside in
+# `tests/python_misc/test_dewy_test.py` (a failing test cannot live here).
+let identity = (x:int64):>int64 => x
+
+$test
+let expectations_hold = () => {
+    $expect identity(42) =? 42, "forty-two isn't itself"
+    $expect "ab" =? "ab"
+    let xs:array<int64> = [1 2 3]
+    $expect xs.length =? 3 and xs[0] =? 1
+}
+
+$test(cases=(1 2 3 4))
+let identity_holds = (x:int64) => $expect identity(x) =? x, "identity of {x} is not {x}. got {identity(x)}"
+
+$test(cases=[
+    [a=1 b=2]
+    [a=5 b=7]
+    [a=(-3) b=4]
+])
+let addition_commutes = (a:int64 b:int64) => {
+    $expect a + b =? b + a
+}
+
+# expectations in a helper: the helper returns on failure, the test goes on
+let check_positive = (x:int64):>void => {
+    $expect x >? 0, "{x} is not positive"
+}
+
+$test(cases=(3 1 2))
+let helpers_check = (x:int64) => {
+    check_positive(x)
+    check_positive(x * 2)
+}
+
+# an expectation narrows the code after it, like an assertion
+$test(cases=(1 2))
+let narrowing = (n:int64) => {
+    let v:int64|string = if n =? 1 41 else 41
+    $expect v is? int64
+    $expect v + 1 =? 42
+}
+
+# a computed cases array is looped over
+let squares:array<int64> = [1 4 9 16]
+
+$test(cases=squares)
+let computed_cases = (s:int64) => $expect s >? 0

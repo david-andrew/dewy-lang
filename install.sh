@@ -46,7 +46,7 @@ fi
 
 source_dir="${temp_dir}/source"
 runtime_stage="${temp_dir}/runtime"
-for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/linux/io.dewy library/linux/files.dewy library/linux/system.dewy; do
+for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/linux/io.dewy library/linux/files.dewy library/linux/process.dewy library/linux/system.dewy; do
     if [ ! -f "${source_dir}/${required_path}" ]; then
         echo "Downloaded source archive is missing ${required_path}." >&2
         exit 1
@@ -92,9 +92,11 @@ copy_runtime_file "${source_dir}/library/bigint.dewy"
 copy_runtime_file "${source_dir}/library/bigrational.dewy"
 copy_runtime_file "${source_dir}/library/io.dewy"
 copy_runtime_file "${source_dir}/library/reporting.dewy"
+copy_runtime_file "${source_dir}/library/testing.dewy"
 copy_runtime_file "${source_dir}/library/units.dewy"
 copy_runtime_file "${source_dir}/library/linux/io.dewy"
 copy_runtime_file "${source_dir}/library/linux/files.dewy"
+copy_runtime_file "${source_dir}/library/linux/process.dewy"
 copy_runtime_file "${source_dir}/library/linux/system.dewy"
 if [ -f "${source_dir}/assets/udewy_logo_128x128.png" ]; then
     copy_runtime_file "${source_dir}/assets/udewy_logo_128x128.png"

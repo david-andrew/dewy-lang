@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from ...reporting import Pointer, SrcFile
 from .. import bindings as sb
 from .. import hir, ty
-from ..errors import user_error
+from ..errors import user_error, user_warning
 
 
 @dataclass(frozen=True)
@@ -733,6 +733,16 @@ class _BoundsValidator:
             return
         refuted = self._refine(state, node.condition, truth=True) is None
         if node.runtime and not refuted:
+            return
+        if node.expect:
+            # a refuted expectation is a test failure, not a compile error: the
+            # test still builds and reports it when it runs
+            user_warning(
+                self.srcfile,
+                'expectation refuted at compile time',
+                Pointer(span=node.condition.loc, message=node.message or 'this condition is false for every value the analysis admits'),
+                hint='the test will fail when it runs',
+            )
             return
         if node.message is not None:
             detail = node.message

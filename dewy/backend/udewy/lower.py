@@ -123,7 +123,7 @@ class _Lowerer(
 ):
     """Discover callable units, validate captures, and rewrite them for udewy."""
 
-    def __init__(self, root: hir.Block, srcfile: SrcFile):
+    def __init__(self, root: hir.Block, srcfile: SrcFile, entry_name: str = 'main'):
         """Initialize per-program identity maps and deterministic counters."""
         _erase_dimensions(root)
         self.root = root
@@ -233,6 +233,8 @@ class _Lowerer(
         self.needs_startup = False
         self.startup_symbol = '__dewy_top_level'
         self.user_main_base = '__dewy_user_main'
+        # the source function the entry wrapper calls: `main`, or the generated test runner
+        self.entry_name = entry_name
         self.program_effects: ProgramEffects = analyze_effects(root)
 
     def lower(self) -> LoweredProgram:
@@ -249,12 +251,12 @@ class _Lowerer(
         self._check_captures()
         self.user_main_takes_argv = any(
             isinstance(item, hir.Declare)
-            and item.name == 'main'
+            and item.name == self.entry_name
             and isinstance(item.expr, hir.FunctionLiteral)
             and bool(item.expr.pos_or_kw_args)
             for item in self.root.items
         )
-        self.needs_startup = self.user_main_takes_argv or any(
+        self.needs_startup = self.user_main_takes_argv or self.entry_name != 'main' or any(
             not (
                 isinstance(item, hir.Declare)
                 and (
@@ -333,7 +335,7 @@ class _Lowerer(
             if not isinstance(startup, hir.Block):
                 raise TypeError('INTERNAL ERROR: top-level startup did not lower to a block')
             startup_items = startup.items
-        main = self.module_scope.bindings.get('main')
+        main = self.module_scope.bindings.get(self.entry_name)
         argv_prologue: list[hir.AST] | None = None
         argv_value: hir.AST | None = None
         if self.user_main_takes_argv:
@@ -2813,7 +2815,16 @@ class _Lowerer(
 
     def _lower_function_body_inner(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
         """Make an implicit scalar function result explicit while lowering statements."""
-        if rettype == ty.VOID_TYPE or self._contains_return(node):
+        if rettype == ty.VOID_TYPE:
+            # a `void` body may simply end: µDewy wants the return spelled out
+            # (and a brace-less body such as `=> $expect …` is its statements, not a value)
+            if isinstance(node, hir.Block) and not node.scoped:
+                node = replace(node, scoped=True)
+            lowered = self._lower_statement_body(node)
+            if isinstance(lowered, hir.Block) and not (lowered.items and isinstance(lowered.items[-1], hir.Return)):
+                return replace(lowered, items=[*lowered.items, hir.Return(node.loc, ty.BOTTOM_TYPE, None)])
+            return lowered
+        if self._contains_return(node):
             return self._lower_statement_body(node)
         if isinstance(node, hir.Block) and node.scoped:
             value_indices = [
@@ -4333,8 +4344,8 @@ class _Lowerer(
         return node
 
 
-def lower_for_udewy(root: hir.AST, srcfile: SrcFile) -> LoweredProgram:
+def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main') -> LoweredProgram:
     """Legalize checked HIR function constructs for udewy source emission."""
     if not isinstance(root, hir.Block):
         raise TypeError(f'expected Block, got {type(root).__name__}')
-    return _Lowerer(root, srcfile).lower()
+    return _Lowerer(root, srcfile, entry_name).lower()

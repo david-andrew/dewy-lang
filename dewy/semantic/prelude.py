@@ -22,6 +22,7 @@ PORTABLE_LIBRARIES = (
     library / 'bigrational.dewy',
     library / 'io.dewy',
     library / 'reporting.dewy',
+    library / 'testing.dewy',
     library / 'units.dewy',
 )
 
@@ -37,7 +38,7 @@ TARGET_SERVICES: dict[str, tuple[Path, ...]] = {
 }
 # Services the portable libraries build on (the file system: `Path`'s
 # methods call it), loaded first.
-_LINUX_FOUNDATIONS = (library / 'linux' / 'files.dewy',)
+_LINUX_FOUNDATIONS = (library / 'linux' / 'files.dewy', library / 'linux' / 'process.dewy')
 TARGET_FOUNDATIONS: dict[str, tuple[Path, ...]] = {
     'x86_64': _LINUX_FOUNDATIONS,
     'arm': _LINUX_FOUNDATIONS,

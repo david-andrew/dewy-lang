@@ -1,0 +1,176 @@
+# Processes and directories over Linux syscalls: fork=57, execve=59,
+# wait4=61, getdents64=217. Loaded before `path.dewy` with `files.dewy`, so
+# `Path` can list itself. Every outcome is a value: a child's exit status,
+# or `SpawnError` when it could not be started.
+let SpawnError:type = type of error       # fork or exec failed
+
+# A NUL-terminated copy of a string, as the kernel wants it.
+let _c_string = (text:string):>array<uint8> => {
+    let bytes:array<uint8> = text as array<uint8>
+    let buffer:array<uint8> = []
+    loop b in bytes buffer.push(b)
+    buffer.push(0)
+    return buffer
+}
+
+# This process's environment as the kernel handed it over: `NAME=value`
+# entries, each NUL-terminated (Linux exposes it as /proc/self/environ).
+let _environment_bytes = ():>array<uint8> => {
+    match _read_bytes_at("/proc/self/environ") {
+        bytes:array<uint8> => return bytes
+        _ => return []
+    }
+}
+
+# `environ[start..stop)` is one `NAME=value` entry: its value when the name is `wanted`.
+let _environment_value = (environ:array<uint8> start:int64 stop:int64 wanted:array<uint8>):>string|undefined => {
+    let equals:int64 = start + wanted.length
+    if equals >=? stop { return undefined }
+    if equals >=? environ.length { return undefined }
+    if equals <? 0 { return undefined }
+    let k:int64 = 0
+    loop k <? wanted.length {
+        let index:int64 = start + k
+        if index <? 0 { return undefined }
+        if index >=? environ.length { return undefined }
+        if environ[index] not=? wanted[k] { return undefined }
+        k += 1
+    }
+    if environ[equals] not=? 61 { return undefined }   # `=`
+    let value_bytes:array<uint8> = []
+    let j:int64 = equals + 1
+    loop j <? stop {
+        if j >=? 0 and j <? environ.length { value_bytes.push(environ[j]) }
+        j += 1
+    }
+    let text = value_bytes as string|undefined
+    match text {
+        s:string => return s
+        <undefined> => return undefined
+    }
+}
+
+# The value of an environment variable, or `undefined` when it is not set.
+let environment = (name:string):>string|undefined => {
+    let wanted:array<uint8> = name as array<uint8>
+    let environ:array<uint8> = _environment_bytes()
+    let start:int64 = 0
+    let i:int64 = 0
+    loop i <? environ.length {
+        if environ[i] =? 0 {
+            let value = _environment_value(environ start i wanted)
+            match value {
+                s:string => return s
+                <undefined> => {}
+            }
+            start = i + 1
+        }
+        i += 1
+    }
+    return undefined
+}
+
+# Run a program with arguments (argv[0] is the program) and wait for it:
+# its exit status, 128 + the signal number when a signal ended it, or
+# `SpawnError`. The child inherits the standard streams and this process's
+# environment; a failed exec in the child reports 127 like a shell would.
+# `program` is a path: the kernel does no PATH search (`run("/usr/bin/env"
+# ["python3" …])` does one). `run_silent` sends the child's stdout and
+# stderr to /dev/null instead (capturing them is still ahead).
+let run = (program:string args:array<string>):>int64|SpawnError => _run(program args false)
+let run_silent = (program:string args:array<string>):>int64|SpawnError => _run(program args true)
+
+let _run = (program:string args:array<string> silent:bool):>int64|SpawnError => {
+    # one pool holds every NUL-terminated string; argv and envp are built
+    # from its offsets once the pool has stopped growing (growth may move it)
+    let pool:array<uint8> = []
+    let starts:array<int64> = []
+    starts.push(pool.length)
+    loop b in (program as array<uint8>) pool.push(b)
+    pool.push(0)
+    loop arg in args {
+        starts.push(pool.length)
+        loop b in (arg as array<uint8>) pool.push(b)
+        pool.push(0)
+    }
+    let environ:array<uint8> = _environment_bytes()
+    let env_starts:array<int64> = []
+    let at_entry_start:bool = true
+    loop b in environ {
+        if at_entry_start { env_starts.push(pool.length)  at_entry_start = false }
+        pool.push(b)
+        if b =? 0 { at_entry_start = true }
+    }
+    if not at_entry_start { pool.push(0) }
+    let base:int64 = __load_i64__(pool)
+    let argv:array<int64> = []
+    loop start in starts argv.push(base + start)
+    argv.push(0)
+    let envp:array<int64> = []
+    loop start in env_starts envp.push(base + start)
+    envp.push(0)
+    let c_program:int64 = base + 0
+    let pid:int64 = __syscall0__(57)
+    if pid <? 0 { return SpawnError }
+    if pid =? 0 {
+        if silent {
+            # open("/dev/null" O_WRONLY) and dup2 (33) it onto stdout and stderr
+            let dev_null:array<uint8> = _c_string("/dev/null")
+            let fd:int64 = __syscall3__(2 __load_i64__(dev_null) 1 0)
+            if fd >=? 0 {
+                let out:int64 = __syscall2__(33 fd 1)
+                let err:int64 = __syscall2__(33 fd 2)
+            }
+        }
+        let failed:int64 = __syscall3__(59 c_program __load_i64__(argv) __load_i64__(envp))
+        let ended:int64 = __syscall1__(231 127)    # exit_group: the exec failed
+        return SpawnError                         # unreachable: the child has exited
+    }
+    let status_cell:int64 = __alloca__(8)
+    __store_i64__(0 status_cell)
+    let waited:int64 = __syscall4__(61 pid status_cell 0 0)
+    if waited <? 0 { return SpawnError }
+    let status:int64 = __load_i64__(status_cell) and 65535
+    let signal:int64 = status and 127
+    if signal =? 0 { return (status >> 8) and 255 }
+    return 128 + signal
+}
+
+# The entries of a directory (excluding `.` and `..`), in the order the
+# kernel returns them. Names that are not UTF-8 are skipped.
+let list_directory = (path:string):>array<string>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => {
+    let names:array<string> = []
+    let c_path = _c_string(path)
+    # O_RDONLY|O_DIRECTORY = 65536
+    let fd:int64 = __syscall3__(2 __load_i64__(c_path) 65536 0)
+    if fd <? 0 { return _file_error(fd) }
+    let buffer:int64 = __alloca__(8192)
+    let count:int64 = __syscall3__(217 fd buffer 8192)
+    loop count >? 0 {
+        let offset:int64 = 0
+        loop offset <? count {
+            # struct linux_dirent64: d_ino u64, d_off u64, d_reclen u16 @16, d_type u8 @18, d_name @19
+            let record:int64 = buffer + offset
+            let reclen_address:int64 = record + 16
+            let reclen:int64 = __load_u16__(reclen_address) transmute int64
+            let name_bytes:array<uint8> = []
+            let cursor:int64 = record + 19
+            let byte:uint8 = __load_u8__(cursor)
+            loop byte not=? 0 {
+                name_bytes.push(byte)
+                cursor = cursor + 1
+                byte = __load_u8__(cursor)
+            }
+            let name = name_bytes as string|undefined
+            match name {
+                text:string => if text not=? "." and text not=? ".." { names.push(text) }
+                <undefined> => {}
+            }
+            if reclen <=? 0 { offset = count } else { offset = offset + reclen }
+        }
+        count = __syscall3__(217 fd buffer 8192)
+    }
+    let closed:int64 = __syscall1__(3 fd)
+    if count <? 0 { return _file_error(count) }
+    return names
+}

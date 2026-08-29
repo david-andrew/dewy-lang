@@ -83,7 +83,9 @@ def typecheck_and_resolve(
     *,
     include_prelude: bool | None = None,
     target: str = 'x86_64',
+    test: bool = False,
 ) -> hir.AST:
+    """Check a program; with ``test``, the entry module's `$test` functions get a generated runner as its entry."""
     from .modules import typecheck_program
 
     return typecheck_program(
@@ -94,6 +96,7 @@ def typecheck_and_resolve(
             else include_prelude
         ),
         target=target,
+        test=test,
     )
 
 
@@ -227,6 +230,7 @@ def _typecheck_module(
     module_loader: object | None = None,
     prelude_bindings: dict[str, sb.Binding] | None = None,
     target: str = 'x86_64',
+    test: bool = False,
 ) -> tuple[hir.Block, Context]:
 
     # set up the base type system/builtins
@@ -248,6 +252,10 @@ def _typecheck_module(
 
     if block is None:
         block, _ = _parse_module(srcfile)
+    block, tests = _extract_tests(block, srcfile=srcfile)
+    if test:
+        runner, srcfile = _synthesize_test_runner(tests, block, srcfile=srcfile)
+        block = replace(block, inner=[*block.inner, *runner])
     declared_names = {
         declaration[0]
         for item in block.inner
@@ -267,6 +275,14 @@ def _typecheck_module(
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
         raise TypeError('INTERNAL ERROR: source module did not produce a block')
+    # A module-level array the module grows is a runtime-length array to
+    # every other module too (its binding otherwise exports the initializer's
+    # exact type, and `loop b in buffer` elsewhere would iterate zero times).
+    for item in checked.items:
+        if isinstance(item, hir.Declare) and item.name in ctx.grown_array_names and item.binding_id is not None:
+            binding = ctx.binding_registry.by_id[item.binding_id]
+            if isinstance(binding.type, ty.ArrayType) and binding.type.length is not None:
+                binding.type = replace(binding.type, length=None)
     _declare_pending_methods(ctx=ctx.module if ctx.module is not None else ctx)  # methods never called still get checked
     if ctx.generic_instances:
         # instantiations of generic functions, methods, and constructor
@@ -274,6 +290,228 @@ def _typecheck_module(
         # so they are declared first and module-level code may call them
         checked = replace(checked, items=[*ctx.generic_instances, *checked.items])
     return checked, ctx
+
+# ---------------------------------------------------------------- `$test`
+TEST_ENTRY_NAME = hir.TEST_ENTRY_NAME
+
+_TEST_PARAMETERS = ('cases',)
+
+
+@dataclass
+class _TestSpec:
+    """One `$test` annotation and the function declaration it marks."""
+
+    loc: Span                     # the annotation, where problems with the test's setup are reported
+    name: str                     # the declared function
+    cases: p0.AST | None          # `cases=` — an array (or tuple) of arguments, one call per element
+    takes_parameters: bool        # the function's parameter list is not `()`
+
+
+def _test_annotation(item: p0.AST) -> tuple[Span, p0.Block | None] | None:
+    """`$test` or `$test(parameters)` as a statement: its span and its parameter block."""
+    if isinstance(item, p0.Atom) and isinstance(item.item, t1.Metatag) and item.item.name == 'test':
+        return item.loc, None
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, (t2.QJuxtapose, t2.CallJuxtapose))
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Metatag)
+        and item.left.item.name == 'test'
+        and isinstance(item.right, p0.Block)
+    ):
+        return item.loc, item.right
+    return None
+
+
+def _extract_tests(block: p0.Block, *, srcfile: SrcFile) -> tuple[p0.Block, list[_TestSpec]]:
+    """Take the `$test` annotations out of a module and pair each with the declaration after it.
+
+    The annotation is a statement of its own (like a scope metatag), so this
+    is adjacency: `$test` (or `$test(cases=…)`) marks the next item, which
+    must declare a function. Tests are ordinary functions otherwise — they
+    are checked and callable like any other — and the annotation only feeds
+    the generated runner (see `_synthesize_test_runner`).
+    """
+    items: list[p0.AST] = []
+    tests: list[_TestSpec] = []
+    index = 0
+    while index < len(block.inner):
+        item = block.inner[index]
+        annotation = _test_annotation(item)
+        if annotation is None:
+            items.append(item)
+            index += 1
+            continue
+        loc, parameters = annotation
+        following = block.inner[index + 1] if index + 1 < len(block.inner) else None
+        declaration = _declaration_parts(following) if following is not None else None
+        if (
+            following is None
+            or declaration is None
+            or not (
+                isinstance(declaration[1], p0.BinOp)
+                and isinstance(declaration[1].op, t1.Operator)
+                and declaration[1].op.symbol == '=>'
+            )
+        ):
+            user_error(
+                srcfile,
+                '`$test` must mark a function declaration',
+                Pointer(span=loc, message='expected `let name = (…) => …` after the annotation'),
+                hint='`$test` (or `$test(cases=…)`) goes on the line before the test function',
+            )
+        name, function = declaration
+        assert isinstance(function, p0.BinOp)
+        params = function.left
+        takes_parameters = not (isinstance(params, p0.Block) and params.kind == '()' and not params.inner)
+        cases: p0.AST | None = None
+        if parameters is not None:
+            seen: set[str] = set()
+            for parameter in parameters.inner:
+                if not (
+                    isinstance(parameter, p0.BinOp)
+                    and isinstance(parameter.op, t1.Operator)
+                    and parameter.op.symbol == '='
+                    and isinstance(parameter.left, p0.Atom)
+                    and isinstance(parameter.left.item, t1.Identifier)
+                ):
+                    user_error(
+                        srcfile,
+                        '`$test` parameters are `name=value` pairs',
+                        Pointer(span=parameter.loc, message='this is not a named parameter'),
+                        hint=f'the parameters are: {", ".join(f"`{p}`" for p in _TEST_PARAMETERS)}',
+                    )
+                key = parameter.left.item.name
+                if key not in _TEST_PARAMETERS:
+                    user_error(
+                        srcfile,
+                        f'unknown `$test` parameter `{key}`',
+                        Pointer(span=parameter.left.loc, message='not a test parameter'),
+                        hint=f'the parameters are: {", ".join(f"`{p}`" for p in _TEST_PARAMETERS)}',
+                    )
+                if key in seen:
+                    user_error(srcfile, f'`$test` parameter `{key}` is given twice', Pointer(span=parameter.left.loc, message='second occurrence'))
+                seen.add(key)
+                cases = parameter.right
+        if takes_parameters and cases is None:
+            user_error(
+                srcfile,
+                'this test takes parameters but `$test` gives no cases',
+                Pointer(span=params.loc, message='the runner would not know what to pass here'),
+                hint='`$test(cases=(1 2 3))` calls the test once per element; `$test(cases=[[a=1 b=2] [a=3 b=4]])` passes each object\'s fields by name',
+            )
+        if not takes_parameters and cases is not None:
+            user_error(
+                srcfile,
+                'this test takes no parameters, but `$test` gives cases',
+                Pointer(span=cases.loc, message='nothing to pass these to'),
+                hint='give the test a parameter for each case value, or drop `cases=`',
+            )
+        tests.append(_TestSpec(loc, name, cases, takes_parameters))
+        items.append(following)
+        index += 2
+    return replace(block, inner=items), tests
+
+
+def _case_arguments(cases: p0.AST, block: p0.Block, *, srcfile: SrcFile) -> list[str] | None:
+    """The argument text of each call when the cases are written out: `[[a=1 b=2] …]` or `(1 2 3)`.
+
+    An object literal passes its fields by name (`a=1 b=2`), any other
+    element is the single argument, both spliced from the source as the
+    user wrote them. A module constant bound to a literal counts as written
+    out; anything else (a computed array) is `None` and is looped over.
+    """
+    if isinstance(cases, p0.Atom) and isinstance(cases.item, t1.Identifier):
+        for item in block.inner:
+            declaration = _declaration_parts(item)
+            if declaration is not None and declaration[0] == cases.item.name:
+                return _case_arguments(declaration[1], block, srcfile=srcfile)
+        return None
+    if not isinstance(cases, p0.Block) or cases.kind not in ('[]', '()') or not cases.inner:
+        return None
+    text = srcfile.body
+    calls: list[str] = []
+    for case in cases.inner:
+        if (
+            isinstance(case, p0.Block)
+            and case.kind == '[]'
+            and case.inner
+            and all(
+                isinstance(field, p0.BinOp)
+                and isinstance(field.op, t1.Operator)
+                and field.op.symbol == '='
+                and isinstance(field.left, p0.Atom)
+                and isinstance(field.left.item, t1.Identifier)
+                for field in case.inner
+            )
+        ):
+            calls.append(' '.join(
+                f'{field.left.item.name}={text[field.right.loc.start:field.right.loc.stop]}'
+                for field in case.inner
+            ))
+        else:
+            calls.append(text[case.loc.start:case.loc.stop])
+    return calls
+
+
+def _synthesize_test_runner(tests: list[_TestSpec], block: p0.Block, *, srcfile: SrcFile) -> tuple[list[p0.AST], SrcFile]:
+    """The module's test entry, as parsed Dewy appended to the module.
+
+    `__dewy_test_main(args)` calls every `$test` function — once per case,
+    passing an object case's fields by name and any other case as the single
+    argument — between `_test_begin`/`_test_end` (`library/testing.dewy`),
+    and returns the failure count. `--json` selects one JSON object per
+    line; `--brief` (from `dewy test dir`) leaves out the summary line. Cases written out as a literal are spliced into the calls as the
+    user wrote them; a computed cases array is looped over. The runner's text
+    is appended to the module's source (the returned `SrcFile`), so a problem
+    in it — a call that does not fit the test's signature — is reported on
+    the generated line that makes the call.
+    """
+    lines: list[str] = [
+        '',
+        f'# ---- generated by `dewy --test`: the runner for the `$test` functions above',
+        f'let {TEST_ENTRY_NAME} = (__dewy_test_args:array<string>):>int64 => {{',
+        '    let __dewy_test_json:bool = false',
+        '    let __dewy_test_brief:bool = false',
+        '    loop __dewy_test_arg in __dewy_test_args {',
+        '        if __dewy_test_arg =? "--json" { __dewy_test_json = true }',
+        '        if __dewy_test_arg =? "--brief" { __dewy_test_brief = true }',
+        '    }',
+        '    _test_init(__dewy_test_json)',
+    ]
+    for number, spec in enumerate(tests, start=1):
+        if spec.cases is None:
+            lines += [
+                '    _test_begin(__dewy_test_json)',
+                f'    {spec.name}()',
+                f'    _test_end("{spec.name}" (-1) __dewy_test_json)',
+            ]
+            continue
+        arguments = _case_arguments(spec.cases, block, srcfile=srcfile)
+        if arguments is not None:
+            for index, argument in enumerate(arguments):
+                lines += [
+                    '    _test_begin(__dewy_test_json)',
+                    f'    {spec.name}({argument})',
+                    f'    _test_end("{spec.name}" {index} __dewy_test_json)',
+                ]
+            continue
+        cases_text = srcfile.body[spec.cases.loc.start:spec.cases.loc.stop]
+        lines += [
+            f'    let __dewy_test_index_{number}:int64 = 0',
+            f'    loop __dewy_test_case in ({cases_text}) {{',
+            '        _test_begin(__dewy_test_json)',
+            f'        {spec.name}(__dewy_test_case)',
+            f'        _test_end("{spec.name}" __dewy_test_index_{number} __dewy_test_json)',
+            f'        __dewy_test_index_{number} += 1',
+            '    }',
+        ]
+    lines += ['    return _test_summary(__dewy_test_json __dewy_test_brief)', '}']
+    text = '\n'.join(lines) + '\n'
+    # parsed with its offsets already in place after the module's own text
+    runner = p0.parse(SrcFile(None, ' ' * len(srcfile.body) + text))
+    return list(runner.inner), SrcFile(srcfile.path, srcfile.body + text)
+
 
 def _sink_ambiguity(ast: p0.AST) -> p0.AST:
     """Push a statement-level parse ambiguity below the operators its readings share.
@@ -304,42 +542,8 @@ def _sink_ambiguity(ast: p0.AST) -> p0.AST:
     return ast
 
 
-_ASSERT_DIRECTIVES = {'assert', 'runtime_assert'}
 _ASSERT_LOGICAL_OPERATORS = {'and', 'or', 'nand', 'nor', 'xor', 'xnor'}
 _ASSERT_COMPARISON_OPERATORS = {'=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?'}
-
-
-@dataclass
-class _AssertDirective(p0.AST):
-    """`$assert expr` / `$runtime_assert expr`: the metatag paired with the statement after it."""
-
-    name: str
-    expr: p0.AST
-
-
-def _pair_assert_directives(items: list[p0.AST], *, ctx: Context) -> list[p0.AST]:
-    """Pair each assertion metatag with the expression that follows it."""
-    paired: list[p0.AST] = []
-    index = 0
-    while index < len(items):
-        item = items[index]
-        metatag = _direct_scope_metatag(item)
-        if metatag is None or metatag.name not in _ASSERT_DIRECTIVES:
-            paired.append(item)
-            index += 1
-            continue
-        following = items[index + 1] if index + 1 < len(items) else None
-        if following is None or _direct_scope_metatag(following) is not None or isinstance(following, p0.KeywordExpr):
-            user_error(
-                ctx.srcfile,
-                f'`${metatag.name}` needs a condition',
-                Pointer(span=item.loc, message='expected a boolean expression after the metatag'),
-                hint=f'`${metatag.name} condition` or `${metatag.name} condition, message`',
-            )
-        paired.append(_AssertDirective(Span(item.loc.start, following.loc.stop), metatag.name, following))
-        index += 2
-    ctx.synthesized.append(paired)
-    return paired
 
 
 def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
@@ -465,7 +669,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Atom(item=t1.Integer(value=value)):
             parsed = t0.parse_integer(value.src, value.prefix)
             return hir.Integer(ast.item.loc, ty.IntegerLiteralType(parsed), value.prefix, parsed)
-        case _AssertDirective():
+        case p0.AssertDirective():
             return tcr_assert(ast, ctx=ctx)
         case p0.Atom(item=t1.Metatag(name='target')):
             # Compile-time string (udewy's `$target`); comparisons against
@@ -3441,7 +3645,7 @@ def _collect_label_scope(block: p0.Block, *, ctx: Context) -> LabelScope:
     labels: dict[str, Span] = {}
     for item in block.inner:
         metatag = _direct_scope_metatag(item)
-        if metatag is None or metatag.name in _ASSERT_DIRECTIVES:
+        if metatag is None or metatag.name == 'test':
             continue
         previous = labels.get(metatag.name)
         duplicate = previous is not None
@@ -3484,34 +3688,6 @@ def _is_literal_atom(node: p0.AST) -> bool:
     )
 
 
-def _split_assert_message(node: p0.AST, *, ctx: Context) -> tuple[p0.AST, p0.AST | None]:
-    """Separate `condition, message`.
-
-    The comma binds tighter than comparisons and logical operators, so
-    `x <? 3, "m"` parses as `x <? (3, "m")`: the message is the last item of
-    the comma group at the end of the expression's right spine.
-    """
-    if isinstance(node, p0.Flat) and _operator_symbol(node.op) == ',':
-        if len(node.items) != 2:
-            user_error(
-                ctx.srcfile,
-                'an assertion takes a condition and at most one message',
-                Pointer(span=node.loc, message=f'{len(node.items)} comma-separated items'),
-            )
-        return node.items[0], node.items[1]
-    if isinstance(node, p0.BinOp):
-        right, message = _split_assert_message(node.right, ctx=ctx)
-        if message is None:
-            return node, None
-        return replace(node, loc=Span(node.loc.start, right.loc.stop), right=right), message
-    if isinstance(node, p0.Prefix):
-        item, message = _split_assert_message(node.item, ctx=ctx)
-        if message is None:
-            return node, None
-        return replace(node, loc=Span(node.loc.start, item.loc.stop), item=item), message
-    return node, None
-
-
 def _assert_operands(node: p0.AST) -> list[p0.AST]:
     """The non-literal operands of the comparisons inside a condition, for the failure report."""
     node = _sink_ambiguity(node)
@@ -3543,7 +3719,7 @@ def _report_refuted_assertion(loc: Span, source: str, message: str | None, *, di
     )
 
 
-def tcr_assert(ast: _AssertDirective, *, ctx: Context) -> hir.AST:
+def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     """`$assert` is a compile-time obligation; `$runtime_assert` checks at runtime and diverges on failure.
 
     Both take `condition` or `condition, message`. A condition the checker
@@ -3553,7 +3729,7 @@ def tcr_assert(ast: _AssertDirective, *, ctx: Context) -> hir.AST:
     diverges, so the code after it keeps the condition's facts exactly as
     code after an early-return guard does.
     """
-    condition_ast, message_ast = _split_assert_message(_sink_ambiguity(ast.expr), ctx=ctx)
+    condition_ast, message_ast = _sink_ambiguity(ast.condition), ast.message
     condition = _check_flow_condition(condition_ast, ctx=ctx)
     if isinstance(condition, hir.DictContains):
         condition.hoisted = True
@@ -3577,6 +3753,9 @@ def tcr_assert(ast: _AssertDirective, *, ctx: Context) -> hir.AST:
                 _report_refuted_assertion(condition_ast.loc, source, message, dimmed=dimmed, ctx=ctx)
             return hir.Void(ast.loc, ty.VOID_TYPE)
         return hir.Assert(ast.loc, ty.VOID_TYPE, condition, source, message, dimmed=dimmed)
+
+    if ast.name == 'expect':
+        return _tcr_expect(ast, condition_ast, message_ast, condition, source, dimmed=dimmed, ctx=ctx)
 
     if isinstance(condition, hir.Bool):
         if not condition.value:
@@ -3612,6 +3791,85 @@ def tcr_assert(ast: _AssertDirective, *, ctx: Context) -> hir.AST:
     return hir.Block(ast.loc, ty.VOID_TYPE, [obligation, flow], False)
 
 
+def _tcr_expect(
+    ast: p0.AssertDirective,
+    condition_ast: p0.AST,
+    message_ast: p0.AST | None,
+    condition: hir.AST,
+    source: str,
+    *,
+    dimmed: Span | None,
+    ctx: Context,
+) -> hir.AST:
+    """`$expect condition, message`: a test expectation.
+
+    Like `$runtime_assert`, the failure path reports the condition, its
+    message and the operands' values; unlike it, failing is not fatal — the
+    failure is recorded (`_expect_failed`) and the enclosing function
+    *returns*, so the code after an expectation may assume it exactly as the
+    code after an assertion does, and a test stops at its first failure. A
+    condition the compiler refutes is a warning, not an error: the test still
+    builds and fails when it runs (a literal `false` is the deliberate
+    "fail here" and is not warned about).
+    """
+    if ctx.catcher is None:
+        user_error(
+            ctx.srcfile,
+            '`$expect` outside a function',
+            Pointer(span=ast.loc, message='a failed expectation returns from the enclosing function, and nothing here catches that'),
+            hint='put the expectation in a `$test` function (or a helper it calls); module-level facts are `$assert`',
+        )
+    if ctx.catcher.expected is not None and ctx.catcher.expected != ty.VOID_TYPE:
+        user_error(
+            ctx.srcfile,
+            '`$expect` in a function that returns a value',
+            Pointer(span=ast.loc, message=f'a failed expectation returns from this function without a value, but it returns `{type_to_dewy(ctx.catcher.expected)}`'),
+            hint='expectations belong in `void` functions; a helper that computes a value can return it to the test that checks it',
+        )
+    ctx.catcher.returns.append((ast.loc, ty.VOID_TYPE))
+    if isinstance(condition, hir.Bool):
+        if condition.value:
+            if message_ast is not None:
+                typecheck_and_resolve_inner(message_ast, ctx=ctx)
+            return hir.Void(ast.loc, ty.VOID_TYPE)
+        if not (isinstance(condition_ast, p0.Atom) and isinstance(condition_ast.item, t1.Bool)):
+            user_warning(
+                ctx.srcfile,
+                'expectation refuted at compile time',
+                Pointer(span=condition_ast.loc, message='this condition is false'),
+                hint='the test will fail when it runs',
+            )
+        return hir.Block(
+            ast.loc,
+            ty.BOTTOM_TYPE,
+            _assert_failure_report(ast, condition_ast, message_ast, source, ctx=ctx, expect=True),
+            True,
+        )
+    failure_ctx = _refine_condition_context(ctx, condition, truth=False)
+    failure = hir.Block(
+        ast.loc,
+        ty.BOTTOM_TYPE,
+        _assert_failure_report(ast, condition_ast, message_ast, source, ctx=failure_ctx, expect=True),
+        True,
+    )
+    flow = hir.Flow(
+        ast.loc,
+        ty.VOID_TYPE,
+        [hir.IfArm(ast.loc, ty.VOID_TYPE, condition, hir.Void(ast.loc, ty.VOID_TYPE))],
+        failure,
+    )
+    obligation = hir.Assert(ast.loc, ty.VOID_TYPE, condition, source, None, runtime=True, dimmed=dimmed, expect=True)
+    held = _refine_condition_context(ctx, condition, truth=True)
+    refinements, bounds, keys = dict(held.refinements), dict(held.length_bounds), dict(held.key_facts)
+    ctx.refinements.clear()
+    ctx.refinements.update(refinements)
+    ctx.length_bounds.clear()
+    ctx.length_bounds.update(bounds)
+    ctx.key_facts.clear()
+    ctx.key_facts.update(keys)
+    return hir.Block(ast.loc, ty.VOID_TYPE, [obligation, flow], False)
+
+
 def _checked_call(func: hir.AST, arguments: list[hir.AST], *, loc: Span, ctx: Context) -> hir.FunctionCall:
     """A positional call to a single-method function with already-checked arguments."""
     if not isinstance(func.type, ty.FunctionType):
@@ -3627,19 +3885,20 @@ def _checked_call(func: hir.AST, arguments: list[hir.AST], *, loc: Span, ctx: Co
 
 
 def _assert_failure_report(
-    ast: _AssertDirective,
+    ast: p0.AssertDirective,
     condition_ast: p0.AST,
     message_ast: p0.AST | None,
     source: str,
     *,
     ctx: Context,
+    expect: bool = False,
 ) -> list[hir.AST]:
-    """The failure path of a `$runtime_assert`.
+    """The failure path of a `$runtime_assert` (or, with ``expect``, a `$expect`).
 
     Fills the report model of `library/reporting.dewy` — the condition as the
     pointer with the message as its text, the `, message` tail dimmed, the
     operands' values as notes — renders it over the condition's source line,
-    then `_exit(101)`.
+    then `_exit(101)`; an expectation records the failure and returns instead.
     """
     loc = ast.loc
 
@@ -3671,14 +3930,10 @@ def _assert_failure_report(
         message = typecheck_and_resolve_inner(message_ast, ctx=ctx)
     else:
         message = text('this condition was false')
-    if message_ast is not None:
-        message = typecheck_and_resolve_inner(message_ast, ctx=ctx)
-    else:
-        message = text('this condition was false')
     dim_stop = byte_offset(message_ast.loc.stop) if message_ast is not None else condition_stop
     report_alias = ctx.binding_scopes.get('Report')
     if report_alias is None or report_alias.type_value is None:
-        not_implemented(ctx.srcfile, loc, '`$runtime_assert` without the prelude (`Report` is not available)')
+        not_implemented(ctx.srcfile, loc, f'`${ast.name}` without the prelude (`Report` is not available)')
     report_type = ty.unfold(report_alias.type_value)
     assert isinstance(report_type, ty.ObjectType)
     # the report lives in a hidden local of the failure block
@@ -3687,7 +3942,7 @@ def _assert_failure_report(
     report = hir.ExpressedIdentifier(loc, report_type, local.name, binding_id=local.id)
     declaration = hir.Declare(
         loc, ty.VOID_TYPE, 'let', local.name, report_type,
-        call('_assertion_report', integer(condition_start), integer(condition_stop), integer(dim_stop), message),
+        call('_expectation_report' if expect else '_assertion_report', integer(condition_start), integer(condition_stop), integer(dim_stop), message),
         binding_id=local.id,
     )
     local.declaration = declaration
@@ -3707,7 +3962,11 @@ def _assert_failure_report(
         note = hir.InterpolatedString(loc, ty.StringType(), [text(f'`{operand_source}` is '), value])
         statements.append(call('_assertion_note', hir.Place(loc, report_type, report), note))
     statements.append(call('_assertion_render', report, text(path), integer(row), text(line)))
-    statements.append(call('_exit', integer(101)))
+    if expect:
+        statements.append(call('_expect_failed'))
+        statements.append(hir.Return(loc, ty.BOTTOM_TYPE, None))
+    else:
+        statements.append(call('_exit', integer(101)))
     return statements
 
 
@@ -6199,9 +6458,16 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     # block (skipping void/never items like declarations), and when expected is a
     # SequenceType distribute it pointwise across those slots. Can't forward expected to
     # every item blindly: `{ let x = 1; x }` must not shove the outer expected into the decl.
-    items = _pair_assert_directives(block.inner, ctx=ctx)
+    items = block.inner
     results: list[hir.AST | None] = [None] * len(items)
     for index, item in enumerate(items):
+        if _test_annotation(item) is not None:
+            user_error(
+                ctx.srcfile,
+                '`$test` inside a block',
+                Pointer(span=item.loc, message='tests are module-level function declarations'),
+                hint='move the test to the top level of the module',
+            )
         if id(item) in deferred_functions:
             continue
         item_expected = (

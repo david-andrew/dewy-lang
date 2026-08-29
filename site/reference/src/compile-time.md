@@ -41,6 +41,8 @@ $no_prelude = true
 
 `$no_prelude` affects only its containing module.
 
+Directive metatags are forms with their own argument grammar rather than scope metadata: `$assert cond [, message]`, `$runtime_assert cond [, message]`, and `$expect cond [, message]` take a condition and an optional message (see [Assertions](refinements-and-effects.md#assertions)); `$include_bytes(p"…")` reads a file at compile time; `$target` is the compile-time target name. `$test` (or `$test(cases=…)`) on its own line marks the function declaration after it as a test (see [Testing](testing.md)).
+
 ## General Compile-Time Evaluation
 
 The direction is for compile-time execution to reuse Dewy semantics while enforcing termination, purity, reproducibility, capability, and diagnostic requirements appropriate to compilation.

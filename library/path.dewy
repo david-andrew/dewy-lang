@@ -127,6 +127,7 @@ let Path:type = [
     read_bytes = ():>array<uint8>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _read_bytes_at(path)
     write_text = (text:string):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_text_at(path text)
     write_bytes = (bytes:array<uint8>):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_bytes_at(path bytes)
+    list = ():>array<string>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => list_directory(path)
     mkdir = ():>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => make_directory(path)
     rmdir = ():>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => remove_directory(path)
     unlink = ():>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => remove_file(path)

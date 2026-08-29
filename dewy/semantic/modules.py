@@ -65,9 +65,10 @@ def _has_runtime_array_field(object_type: ty.ObjectType) -> bool:
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
-    def __init__(self, entry: SrcFile, target: str = 'x86_64'):
+    def __init__(self, entry: SrcFile, target: str = 'x86_64', *, test: bool = False):
         self.entry = entry
         self.target = target
+        self.test = test   # the entry module's `$test` functions get the generated runner as the program's entry
         self.type_system = ty.TypeSystem()
         builtins.apply_builtin_promote_rules(self.type_system)
         self.registry = sb.BindingRegistry()
@@ -152,13 +153,15 @@ class ModuleCompiler:
                 if prelude or not no_prelude
                 else None
             ),
+            test=self.test and entry,
         )
         # Bounds are validated per module so diagnostics point into the right
         # file (the merged program mixes prelude and user nodes). Prelude files
         # are validated once per process: their checked form never changes.
         validation_key = (path, path.stat().st_mtime_ns, self.target) if prelude else None
         if validation_key is None or validation_key not in _validated_prelude_modules:
-            self._validate_and_select(root, srcfile, prelude_module=prelude, no_prelude=no_prelude)
+            # `ctx.srcfile`: in test mode the entry's source has the generated runner appended
+            self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude)
             if validation_key is not None:
                 _validated_prelude_modules.add(validation_key)
         exports: dict[str, sb.Binding] = {}
@@ -351,7 +354,7 @@ class ModuleCompiler:
                 return
             if (
                 isinstance(value, hir.Declare)
-                and value.name == 'main'
+                and value.name in ('main', hir.TEST_ENTRY_NAME)
                 and isinstance(value.expr, hir.FunctionLiteral)
                 and value.expr.pos_or_kw_args
             ):
@@ -474,9 +477,10 @@ def typecheck_program(
     *,
     include_prelude: bool = True,
     target: str = 'x86_64',
+    test: bool = False,
 ) -> hir.Block:
     representation.last_notes.clear()
-    compiler = ModuleCompiler(srcfile, target)
+    compiler = ModuleCompiler(srcfile, target, test=test)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)
         merged = compiler.finish(entry)
@@ -495,8 +499,9 @@ def typecheck_program(
         module_loader=compiler,
         target=target,
         prelude_bindings=compiler.prelude_bindings if not no_prelude else None,
+        test=test,
     )
-    compiler._validate_and_select(root, srcfile, prelude_module=False, no_prelude=no_prelude)
+    compiler._validate_and_select(root, ctx.srcfile, prelude_module=False, no_prelude=no_prelude)
     exports = {
         item.name: compiler.registry.by_id[item.binding_id]
         for item in root.items

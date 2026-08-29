@@ -1,0 +1,120 @@
+# The `dewy test` runner, in Dewy.
+#
+#   dewy_test [--json] [<directory>]
+#
+# Finds every `.dewy` file under the directory (default `.`; hidden entries,
+# `__dewycache__` and `node_modules` are skipped) that has a line starting
+# with `$test`, runs `dewy test <file>` on each (through `$DEWY_PYTHON`, or
+# `python3` from the PATH), and adds up the failures. `dewy test <file>`
+# exits with the module's failure count (at most 100), 101 when a
+# `$runtime_assert` aborted the test binary, 102 when the module did not
+# build, or 128+n for a signal. This runner exits with the total number of
+# failures (capped at 200).
+
+# A line beginning with `$test` (followed by `(`, whitespace, or the end).
+let has_tests = (text:string):>bool => {
+    let bytes:array<uint8> = text as array<uint8>
+    let at_line_start:bool = true
+    let matched:int64 = 0          # how much of `$test` the current line has matched
+    loop b in bytes {
+        if b =? 10 {
+            if matched =? 5 { return true }
+            at_line_start = true
+            matched = 0
+        } else {
+            if matched =? 5 {
+                if b =? 40 or b =? 32 or b =? 9 or b =? 13 { return true }
+                matched = 0
+            } else if at_line_start and b =? 36 { matched = 1 }
+            else if matched =? 1 and b =? 116 { matched = 2 }
+            else if matched =? 2 and b =? 101 { matched = 3 }
+            else if matched =? 3 and b =? 115 { matched = 4 }
+            else if matched =? 4 and b =? 116 { matched = 5 }
+            else { matched = 0 }
+            at_line_start = false
+        }
+    }
+    return matched =? 5
+}
+
+# The `.dewy` files with tests under `dir`, in directory order.
+let collect = (dir:string):>array<string> => {
+    let found:array<string> = []
+    match list_directory(dir) {
+        names:array<string> => loop name in names {
+            if name.length =? 0 { continue }
+            if name[0] =? "." { continue }
+            if name =? "__dewycache__" or name =? "node_modules" { continue }
+            # `join` builds the path in the arena: it outlives this call (an
+            # interpolation would be a frame-local string, dangling once returned)
+            let path:string = [dir "/" name].join
+            if dir =? "." { path = name }
+            if is_directory(path) {
+                let inner = collect(path)
+                loop f in inner { found.push(f) }
+            } else if p(path).suffix =? ".dewy" {
+                match read_text(path) {
+                    text:string => if has_tests(text) { found.push(path) }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    return found
+}
+
+let main = (args:array<string>):>int64 => {
+    let json:bool = false
+    let directory:string = "."
+    let i:int64 = 1
+    loop i <? args.length {
+        if args[i] =? "--json" { json = true } else { directory = args[i] }
+        i += 1
+    }
+    let python:string = "python3"
+    match environment("DEWY_PYTHON") {
+        s:string => { python = s }
+        <undefined> => {}
+    }
+    let files = collect(directory)
+    let total_failures:int64 = 0
+    let failed_files:int64 = 0
+    let color:bool = false
+    if not json { color = _output_is_terminal() }
+    loop file in files {
+        # the module prints its marks after the name: `tests/x.dewy ...F.`
+        if not json { print"{file} " }
+        # `env` does the PATH search (or execs `$DEWY_PYTHON` directly)
+        let test_args:array<string> = [python "-m" "dewy" "test"]
+        if json { test_args.push("--json") } else { test_args.push("--brief") }
+        test_args.push(file)
+        let failures:int64 = 0
+        match run("/usr/bin/env" test_args) {
+            exit:int64 => {
+                if exit =? 101 { printl"FAIL {file}: aborted by a runtime assertion"  failures = 1 }
+                else if exit =? 102 { printl"FAIL {file}: did not build"  failures = 1 }
+                else if exit >=? 128 { printl"FAIL {file}: killed by signal {exit - 128}"  failures = 1 }
+                else { failures = exit }
+            }
+            <SpawnError> => { printl"FAIL {file}: could not start the compiler"  failures = 1 }
+        }
+        if failures >? 0 { failed_files += 1 }
+        total_failures += failures
+        if json { printl'\{"file": "{file}", "failed": {failures}\}' }
+    }
+    if json { printl'\{"files": {files.length}, "failed_files": {failed_files}, "failed": {total_failures}\}' }
+    else {
+        print"\n"
+        if total_failures >? 0 {
+            if color { print"\u001b[31m" }
+            printl"{total_failures} failed in {failed_files} of {files.length} files"
+        } else {
+            if color { print"\u001b[32m" }
+            printl"all tests passed in {files.length} files"
+        }
+        if color { print"\u001b[0m" }
+    }
+    if total_failures >? 200 { return 200 }
+    return total_failures
+}

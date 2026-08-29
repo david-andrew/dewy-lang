@@ -97,12 +97,16 @@ class EmitContext:
     local_names: set[str]
     include_directives: dict[str, str] | None = None   # included file path -> bound name (prelude directives)
 
-def codegen(srcfile:SrcFile, *, target: str = 'x86_64') -> str:
-    """Type-check Dewy source and emit equivalent udewy source."""
-    ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target)
-    return codegen_inner(ast, srcfile)
+def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False) -> str:
+    """Type-check Dewy source and emit equivalent udewy source.
 
-def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
+    With ``test``, the module's `$test` functions are compiled with the
+    generated test runner as the program's entry (`dewy --test`).
+    """
+    ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test)
+    return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main')
+
+def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: str = 'main') -> str:
     """Emit checked HIR after legalizing Dewy callable constructs.
 
     ``lower_for_udewy`` supplies concrete module-level function units, global
@@ -113,7 +117,7 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
 
     if srcfile is None:
         srcfile = SrcFile(None, ' ' * ast.loc.stop)
-    program = lower.lower_for_udewy(ast, srcfile)
+    program = lower.lower_for_udewy(ast, srcfile, entry_name=entry_name)
     functions: dict[str, hir.FunctionLiteral] = {}
     for function in program.functions:
         functions[function.symbol] = function.literal

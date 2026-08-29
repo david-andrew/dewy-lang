@@ -175,6 +175,30 @@ class Chain(t1.InedibleToken):
     items: list[t1.Token]
 
 
+# Assertion directives are forms with their own argument grammar (like
+# `if cond body` or `return expr`), not operators: `$assert expr [, expr]`.
+# The directive owns the top-level comma of its argument — it separates the
+# condition from the message — so the comma's operator precedence (tighter
+# than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
+# needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
+assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect'}
+
+@dataclass
+class Directive(t1.InedibleToken):
+    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`."""
+    metatag: t1.Metatag
+    condition: Chain
+    message: Chain | None = None
+
+    @property
+    def name(self) -> str:
+        return self.metatag.name
+
+
+def is_assertion_directive(token: t1.Token) -> bool:
+    return isinstance(token, t1.Metatag) and token.name in assertion_directives
+
+
 @dataclass
 class Context:
     srcfile: SrcFile
@@ -197,6 +221,7 @@ atom_tokens: set[type[t1.Token]] = {
     Placeholder,
     KeywordExpr,
     Flow,
+    Directive,
 }
 
 
@@ -446,6 +471,10 @@ def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> Non
             recurse_into(arm, func)
         if token.default is not None:
             recurse_into(token.default, func)
+    elif isinstance(token, Directive):
+        recurse_into(token.condition, func)
+        if token.message is not None:
+            recurse_into(token.message, func)
     elif isinstance(token, Chain):
         # skip applying the function to the chain layer itself, and just do it's inner items
         # this is because the only step using recurse_into after any chains would be present is make_chains,
@@ -602,6 +631,7 @@ def _token_summary(token: t1.Token) -> str:
     if isinstance(token, t1.Real): return "real literal"
     if isinstance(token, t1.Block): return f"block {token.kind!r}"
     if isinstance(token, t1.Metatag): return f"metatag {token.name!r}"
+    if isinstance(token, Directive): return f"`${token.name}` directive"
     if isinstance(token, (Juxtapose, BroadcastOp, CombinedAssignmentOp, InvertedComparisonOp)): return type(token).__name__
     if isinstance(token, (OpFn, KeywordExpr, Flow, Chain)): return type(token).__name__
     return type(token).__name__
@@ -744,6 +774,11 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
             i += 1
         return out, i
 
+    if is_assertion_directive(token):
+        directive, i = collect_directive(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
+        out.append(directive)
+        return out, i
+
     if type(token) not in atom_tokens or isinstance(token, t1.Semicolon):
         _throw_expected_expr_error(ctx=ctx, tokens=tokens, start=i, token=token)
     out.append(token)
@@ -752,6 +787,62 @@ def collect_chunk(tokens: list[t1.Token], start: int, *, stop_keywords: set[str]
         out.append(tokens[i])
         i += 1
     return out, i
+
+
+def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[Directive, int]:
+    """
+    Collect `$assert expr [, expr]` (and `$runtime_assert`, `$expect`) into one atom.
+
+    The argument is collected like any expression, then split at its top-level
+    comma: the directive form owns that comma (see `Directive`).
+    """
+    metatag = tokens[start]
+    if not isinstance(metatag, t1.Metatag):
+        raise ValueError(f"INTERNAL ERROR: expected an assertion metatag, got {metatag=}")
+    i = start + 1
+    if (
+        i >= len(tokens)
+        or is_stop_keyword(tokens[i], stop_keywords)
+        or isinstance(tokens[i], (t1.Semicolon, KeywordExpr))
+        or isinstance(tokens[i], t1.Keyword) and tokens[i].name not in {"if", "loop", "match"}
+    ):
+        Error(
+            srcfile=ctx.srcfile,
+            title=f"`${metatag.name}` needs a condition",
+            message="",
+            pointer_messages=[Pointer(span=metatag.loc, message="expected a boolean expression after the metatag")],
+            hint=f"`${metatag.name} condition` or `${metatag.name} condition, message`",
+        ).throw()
+    argument, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
+    commas = [index for index, item in enumerate(argument.items) if is_comma(item)]
+    if len(commas) > 1:
+        Error(
+            srcfile=ctx.srcfile,
+            title="an assertion takes a condition and at most one message",
+            message="",
+            pointer_messages=[Pointer(span=argument.items[commas[1]].loc, message="this second comma has no meaning here")],
+            hint="parenthesize a tuple that is part of the condition or the message",
+        ).throw()
+    if not commas:
+        return Directive(Span(metatag.loc.start, argument.loc.stop), metatag, argument), i
+    split = commas[0]
+    condition_items = argument.items[:split]
+    message_items = argument.items[split + 1:]
+    if not condition_items or not message_items or all(_is_comma_void(item) for item in message_items):
+        Error(
+            srcfile=ctx.srcfile,
+            title=f"`${metatag.name}` takes `condition, message`",
+            message="",
+            pointer_messages=[Pointer(span=argument.items[split].loc, message="nothing on one side of this comma")],
+        ).throw()
+    condition = Chain(Span(condition_items[0].loc.start, condition_items[-1].loc.stop), condition_items)
+    message = Chain(Span(message_items[0].loc.start, message_items[-1].loc.stop), message_items)
+    return Directive(Span(metatag.loc.start, message.loc.stop), metatag, condition, message), i
+
+
+def _is_comma_void(token: t1.Token) -> bool:
+    """The `void` `insert_comma_voids` puts after a trailing comma."""
+    return isinstance(token, t1.Identifier) and token.name == 'void' and token.loc.start == token.loc.stop
 
 
 def collect_expr(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[Chain, int]:
@@ -945,6 +1036,12 @@ def bundle_keyword_exprs(tokens: list[t1.Token], *, ctx: Context) -> None:
         if isinstance(token, t1.Keyword) and token.name not in {"else"}:
             atom, j = collect_keyword_atom(tokens, i, stop_keywords={"else"}, ctx=ctx)
             tokens[i:j] = [atom]
+            i += 1
+            continue
+
+        if is_assertion_directive(token):
+            directive, j = collect_directive(tokens, i, stop_keywords={"else"}, ctx=ctx)
+            tokens[i:j] = [directive]
             i += 1
             continue
 

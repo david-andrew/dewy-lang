@@ -21,6 +21,7 @@
 - [Errors, Exceptions, and Forwarding](errors-and-forwarding.md)
 - [Ranges and Iteration](ranges-and-iteration.md)
 - [Refinements, Effects, and Safety](refinements-and-effects.md)
+- [Testing](testing.md)
 
 ## Data Types
 

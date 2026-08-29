@@ -21,9 +21,11 @@ def _make_source_archive(path: Path) -> None:
         REPO_ROOT / "library" / "bigrational.dewy",
         REPO_ROOT / "library" / "io.dewy",
         REPO_ROOT / "library" / "reporting.dewy",
+        REPO_ROOT / "library" / "testing.dewy",
         REPO_ROOT / "library" / "units.dewy",
         REPO_ROOT / "library" / "linux" / "io.dewy",
         REPO_ROOT / "library" / "linux" / "files.dewy",
+        REPO_ROOT / "library" / "linux" / "process.dewy",
         REPO_ROOT / "library" / "linux" / "system.dewy",
         REPO_ROOT / "assets" / "udewy_logo_128x128.png",
         *(REPO_ROOT / "dewy").rglob("*.py"),
@@ -123,6 +125,7 @@ exec "$REAL_PYTHON" "$@"
     assert (runtime / "library" / "units.dewy").is_file()
     assert (runtime / "library" / "linux" / "io.dewy").is_file()
     assert (runtime / "library" / "linux" / "files.dewy").is_file()
+    assert (runtime / "library" / "linux" / "process.dewy").is_file()
     assert (runtime / "library" / "linux" / "system.dewy").is_file()
     assert not (runtime / "README.md").exists()
     assert not (runtime / "dewy" / "tests").exists()

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from dewy.backend.udewy import codegen
-from dewy.reporting import SrcFile
+from dewy.reporting import ReportException, SrcFile
 from dewy.semantic import check, hir
 from dewy.semantic.errors import UserError, TypeCheckError
 from udewy.frontend import entry_point
@@ -76,12 +76,15 @@ def test_refuted_assertions_are_errors() -> None:
 
 
 def test_assertion_forms_are_validated() -> None:
-    with pytest.raises(UserError, match='needs a condition'):
+    # the directive form (`$assert cond [, message]`) is the parser's: it owns the top-level comma
+    with pytest.raises(ReportException, match='needs a condition'):
         _compile('$assert\nlet main = ():>int64 => 0\n')
     with pytest.raises(UserError, match='must be a string literal'):
         _compile('let x:int64 = 3\n$assert x =? 3, "x is {x}"\n')
-    with pytest.raises(UserError, match='at most one message'):
+    with pytest.raises(ReportException, match='at most one message'):
         _compile('let x:int64 = 3\n$assert x =? 3, "a", "b"\n')
+    with pytest.raises(ReportException, match='takes `condition, message`'):
+        _compile('let x:int64 = 3\n$assert x =? 3,\n')
     with pytest.raises(TypeCheckError, match='type mismatch'):
         _compile('let main = ():>int64 => { $runtime_assert 5  return 0 }\n')
 

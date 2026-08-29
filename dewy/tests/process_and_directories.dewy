@@ -1,0 +1,27 @@
+# `run(program args)` spawns a process and yields its exit status (or
+# `SpawnError`); `list_directory(path)` / `dir.list` are the entries of a
+# directory. Every outcome is a value.
+let main = ():>int64 => {
+    let checks:int64 = 0
+    match run("/bin/sh" ["-c" "exit 7"]) { code:int64 => if code =? 7 { checks += 1 }  _ => {} }
+    match run("/bin/true" []) { code:int64 => if code =? 0 { checks += 2 }  _ => {} }
+    match run("/nonexistent/program" []) { code:int64 => if code =? 127 { checks += 4 }  _ => {} }
+    let dir = p"/tmp/dewy_process_fixture"
+    match dir.mkdir { <FileExists> => {}  ok:bool => {}  _ => return checks }
+    match p"{dir}/one.txt".write_text("1") { n:int64 => {}  _ => return checks }
+    match p"{dir}/two.txt".write_text("22") { n:int64 => {}  _ => return checks }
+    match dir.list {
+        names:array<string> => {
+            let seen:int64 = 0
+            loop name in names { if name =? "one.txt" or name =? "two.txt" { seen += 1 } }
+            if names.length =? 2 and seen =? 2 { checks += 8 }
+        }
+        _ => {}
+    }
+    match list_directory("/tmp/dewy_no_such_directory") { <FileNotFound> => { checks += 16 }  _ => {} }
+    match p"{dir}/one.txt".unlink { ok:bool => {}  _ => {} }
+    match p"{dir}/two.txt".unlink { ok:bool => {}  _ => {} }
+    match dir.rmdir { ok:bool => if not dir.exists { checks += 32 }  _ => {} }
+    if checks =? 63 { return 42 }
+    return checks
+}
