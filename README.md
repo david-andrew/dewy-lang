@@ -4,6 +4,8 @@
 
 # The Dewy Programming Language
 
+[![Tests](https://github.com/david-andrew/dewy-lang/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/david-andrew/dewy-lang/actions/workflows/tests.yml)
+
 Dewy is a general purpose programming language with a focus on engineering.
 
 > **NOTE: Still very work in progress, and the docs (including this README) are frequently out of date!**
