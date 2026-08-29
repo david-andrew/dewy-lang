@@ -139,10 +139,18 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.flat,  [',']),
     (Associativity.flat, [t2.RangeJuxtapose]),  # jux-range 1..2 ok. 1..2..3 not ok
     (Associativity.fail, ['in']),    # A in B
-    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'has?', 'of?', 'isnt?', 'in?', '@?']),
-    (Associativity.left, ['and', 'nand', '&']),
+    # `&` and `|` are the same operations as `and` and `or` (both dispatch to
+    # the same builtins) at a tighter level, like `*` and multiplication
+    # juxtaposition: the symbolic spellings compose types, overload sets, sets,
+    # and masks (`x is? A|B`, `d:int64 & ~0`, `flags & MASK =? 0`), so they
+    # bind above the comparisons; the word spellings are boolean logic and
+    # bind below them (`x >? 0 and y >? 0`).
+    (Associativity.left, ['&']),
+    (Associativity.left, ['|']),
+    (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?']),  # tests sit with the comparisons: `a is? T and b in? s`
+    (Associativity.left, ['and', 'nand']),
     (Associativity.left, ['xor', 'xnor']),
-    (Associativity.left, ['or', 'nor', '|']),
+    (Associativity.left, ['or', 'nor']),
     (Associativity.left,  ['as', 'transmute']),  # A as B as C as D
     (Associativity.fail, ['of', 'has']), # T of SomeType. T has SomeTrait. no `is` since not really a coherent operation on types
     (Associativity.fail, [':']),    # A:B:C

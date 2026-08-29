@@ -259,7 +259,7 @@ def _sink_ambiguity(ast: p0.AST) -> p0.AST:
 
 _ASSERT_DIRECTIVES = {'assert', 'runtime_assert'}
 _ASSERT_LOGICAL_OPERATORS = {'and', 'or', 'nand', 'nor', 'xor', 'xnor'}
-_ASSERT_COMPARISON_OPERATORS = {'=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?', 'has?', 'of?', '@?'}
+_ASSERT_COMPARISON_OPERATORS = {'=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?'}
 
 
 @dataclass
@@ -653,7 +653,7 @@ def _tcr_annotated_declaration(
 ) -> hir.AST:
     """`let name:T = value` (and the keyword-less `name:T = value`)."""
     # decl assign + type annotation: check the expression against the annotation
-    annotation = ast_to_type(typeexpr, ctx=replace(ctx, refinement_subject=name))
+    annotation = _value_type(ast_to_type(typeexpr, ctx=replace(ctx, refinement_subject=name)), loc=typeexpr.loc, ctx=ctx)
     refined_annotation = annotation if isinstance(annotation, ty.RefinedType) else None
     annotation = ty.strip_refinement(annotation)
     if annotation == ty.TYPE_TYPE:
@@ -6566,6 +6566,30 @@ def _real_literal(real: t1.Real, *, loc: Span, ctx: Context) -> hir.AST:
     return _rational_literal(numerator, denominator, loc=loc, ctx=ctx)
 
 
+def _integer_singleton_test(value: hir.AST, test_type: ty.Type, *, negated: bool, loc: Span, op_loc: Span, ctx: Context) -> hir.AST | None:
+    """`picked is? 3` on an integer word (`picked:1|2|3`) is `picked =? 3`;
+    against `1|2` it is `picked =? 1 or picked =? 2`. None for other operands."""
+    number, _ = _number_and_dimension(value.type)
+    base = ty.strip_refinement(number)
+    if not (isinstance(base, str) and ctx.type_system.is_subtype(base, 'int')):
+        return None
+    members = list(test_type.items) if isinstance(test_type, ty.TypeOr) else [test_type]
+    if not members or not all(isinstance(m, ty.IntegerLiteralType) for m in members):
+        return None
+    tests = [
+        _dispatch_builtin(
+            '__ne__' if negated else '__eq__',
+            [value, hir.Integer(loc, ty.IntegerLiteralType(m.value), '0d', m.value)],
+            loc=loc, op_loc=op_loc, source_name='not=?' if negated else '=?', ctx=ctx,
+        )
+        for m in members
+    ]
+    combined = tests[0]
+    for test in tests[1:]:
+        combined = hir.ShortCircuit(loc, 'bool', 'and' if negated else 'or', combined, test)
+    return combined
+
+
 def _literal_member_test(args: list[hir.AST], *, negated: bool, loc: Span, ctx: Context) -> hir.AST | None:
     """`value =? 0` where `value : 0 | [...]` tests the union's tag.
 
@@ -7465,6 +7489,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         require_valued(value.type, ctx.srcfile, value.loc, 'type-test operand')
         test_type = ast_to_type(binop.right, ctx=ctx)
+        equality = _integer_singleton_test(value, test_type, negated=symbol == 'isnt?', loc=binop.loc, op_loc=binop.op.loc, ctx=ctx)
+        if equality is not None:
+            return equality
         return hir.TypeTest(
             binop.loc,
             'bool',
@@ -7481,6 +7508,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
             require_valued(value.type, ctx.srcfile, value.loc, 'type-test operand')
             test_type = ast_to_type(binop.right, ctx=ctx)
+            equality = _integer_singleton_test(value, test_type, negated=binop.op.op == 'is?', loc=binop.loc, op_loc=binop.op.loc, ctx=ctx)
+            if equality is not None:
+                return equality
             return hir.TypeTest(
                 binop.loc,
                 'bool',
@@ -8013,7 +8043,7 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     signature = fn_ast.left
     if not (isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>'):
         return None
-    rettype = ast_to_type(signature.right, ctx=ctx)
+    rettype = _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature.left, ctx=ctx)
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
@@ -8062,7 +8092,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     
     # if the return type was annotated, capture it
     if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
-        rettype = ast_to_type(signature.right, ctx=ctx)
+        rettype = _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
         rettype_loc = signature.right.loc
         signature = signature.left
     
@@ -8529,6 +8559,20 @@ def _excluded_literals(type_: ty.Type) -> list[int] | None:
             return None
         values.append(member.value)
     return values
+
+
+def _value_type(type_: ty.Type, *, loc: Span, ctx: Context) -> ty.Type:
+    """A type at a value boundary (a binding, parameter, or result annotation).
+
+    A union of integer singletons (`x:1|2|3`, `sign:-1|1`) is a word whose
+    value set is its invariant, as for object fields; every other type is
+    itself (a mixed union such as `1|2|"fast"` stays a tagged union).
+    """
+    if isinstance(type_, ty.TypeOr):
+        literal_set = _integer_literal_set(type_, loc=loc, ctx=ctx)
+        if literal_set is not None:
+            return literal_set
+    return type_
 
 
 def _integer_literal_set(union: ty.TypeOr, *, loc: Span, ctx: Context) -> ty.Type | None:
@@ -9171,7 +9215,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name))):
                 return hir.Param(
                     name,
-                    type=ast_to_type(item.right, ctx=replace(ctx, refinement_subject=name)),
+                    type=_value_type(ast_to_type(item.right, ctx=replace(ctx, refinement_subject=name)), loc=item.right.loc, ctx=ctx),
                     position_only=position_only,
                 )
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as right):
@@ -9188,7 +9232,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
                     position_only=position_only,
                 )
             case p0.BinOp(op=t1.Operator(symbol='='), left=p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Atom(item=t1.Identifier(name=name)), right=p0.AST() as typeexpr), right=p0.AST() as right):
-                param_type = ast_to_type(typeexpr, ctx=ctx)
+                param_type = _value_type(ast_to_type(typeexpr, ctx=ctx), loc=typeexpr.loc, ctx=ctx)
                 value = check_against(
                     typecheck_and_resolve_inner(right, ctx=ctx, expected=param_type),
                     param_type,

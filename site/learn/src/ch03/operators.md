@@ -36,7 +36,7 @@ value isnt? undefined
 
 The English operators `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor` express Boolean composition and short-circuit where their truth rule permits it.
 
-`&`, `|`, and `~` participate in type-directed bitwise, type-combination, and overload-set operations.
+`&`, `|`, and `~` are the same operations as `and`, `or`, and `not` at a tighter precedence — above the comparisons, where the words sit below them. Use the symbols to compose things that are then compared or tested as a whole: types (`x is? int64|string`, `d:int64 & ~0`), overload sets (`@f & @g`), sets, and masks (`flags & MASK =? 0`). Use the words for logic over comparisons (`x >? 0 and y <? n`); `x >? 0 & y >? 0` would parse as `x >? (0 & y) >? 0`.
 
 ## Juxtaposition
 
@@ -85,7 +85,7 @@ A leading `@` selects the place at the end of a complete field-and-index route, 
 @items[index]
 ```
 
-`@?` is intended to test whether two place expressions identify the same place; it does not expose hidden storage sharing between independent values.
+There is no operator asking whether two places are the same place: places are borrows, not values, and independent values never share observable storage (the once-reserved `@?` was retired for that reason).
 
 For functions, an ungrouped `@` chain selects and partially evaluates without calling. Grouping ends that chain, so `(@worker.callback)(5)` calls the selected function. [Function Values and Composition](functional-programming.md) develops the complete rule after introducing places and objects.
 

@@ -54,7 +54,7 @@ A `const` binding does not provide a mutable place.
 
 Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.
 
-The intended `@?` operation asks whether two place expressions designate the same semantic place. It does not expose unobservable storage sharing used to optimize independent values.
+There is no place-identity test: places are borrows rather than first-class values, and the ownership model never exposes storage sharing between independent values, so the once-reserved `@?` was retired (see [Operators and Precedence](operators-and-precedence.md#retired-operators)).
 
 Function handles build on the same root-and-route interpretation of `@`; see [Functions and Calls](functions-and-calls.md#function-handles).
 

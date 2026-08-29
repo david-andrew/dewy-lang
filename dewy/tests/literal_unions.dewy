@@ -7,6 +7,12 @@ let Value:type = 0 | [sign:-1|1 limbs:array<uint64 length >? 0>]
 
 let negate = (a:Signed):>Signed => [sign = -a.sign magnitude = a.magnitude]
 
+# At a value boundary a union of integer singletons is a word too: `s:-1|1`
+# is an int64 whose value set is proven at every store, and `is?` against
+# singletons is a comparison.
+let flip = (s:-1|1):>-1|1 => -s
+let describe = (s:-1|0|1):>int64 => if s is? -1|1 (if s is? 1 10 else 20) else 30
+
 let value_of = (v:Value):>int64 => {
     if v =? 0 { return 0 }
     else { return v.sign * (v.limbs[0] transmute int64) }
@@ -32,5 +38,7 @@ let main = ():>int64 => {
     let w = zero
     w = five
     if w not=? 0 { if w.limbs.length =? 1 { checks += 16 } }
+    let s:-1|1 = flip(1)
+    if s =? -1 and flip(s) * 7 =? 7 and describe(s) =? 20 and describe(0) =? 30 and describe(flip(-1)) =? 10 { checks += 32 }
     return checks
 }

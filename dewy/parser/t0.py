@@ -135,7 +135,6 @@ symbols = sorted([
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
     '=', '::', ':=', # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators, e.g. docs)
-    '@?',
     '|>', '<|', '=>',
     '->', '<->',
     '.', '..', '...', ',', ':', ':>',

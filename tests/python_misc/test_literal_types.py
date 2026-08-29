@@ -3,7 +3,7 @@ import pytest
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import NotImplementedYet, TypeCheckError
+from dewy.semantic.errors import NotImplementedYet, TypeCheckError, UserError
 
 
 def _declared(source: str) -> dict[str, hir.Declare]:
@@ -22,7 +22,8 @@ def test_literal_unions_and_type_blocks() -> None:
     declared = _declared('let Mode:type = <1 | 2 | "fast">\nlet f = (m:Mode):>int64 => if m is? "fast" 1 else 0\nlet g = (v:1|2):>int64 => 0\n')
     mode = declared['Mode'].expr.value
     assert isinstance(mode, ty.TypeOr) and ty.StringLiteralType('fast') in mode.items and ty.IntegerLiteralType(1) in mode.items
-    assert declared['g'].expr.type.pos_or_kw[0].type == ty.TypeOr([ty.IntegerLiteralType(1), ty.IntegerLiteralType(2)])
+    # a union of integer singletons at a value boundary is a word with its value set as invariant
+    assert declared['g'].expr.type.pos_or_kw[0].type == ty.RefinedType('int64', (ty.Proposition('self', '>=?', 1), ty.Proposition('self', '<=?', 2)))
 
 
 def test_literal_parameters_specialize_overloads() -> None:
@@ -45,3 +46,11 @@ def test_literal_mismatches_and_unsupported_forms() -> None:
         _declared('let n:5 = 6\n')
     with pytest.raises(NotImplementedYet, match='boolean literal type'):
         _declared('let t:true = true\n')
+
+
+def test_singleton_union_words_reject_other_values() -> None:
+    _declared('let s:-1|1 = 1\nlet t:-1|1 = -1\n')
+    with pytest.raises((TypeCheckError, UserError), match='refuted'):
+        _declared('let s:-1|1 = 0\n')
+    with pytest.raises((TypeCheckError, UserError), match='refuted'):
+        _declared('let f = (s:-1|1):>-1|1 => 2\n')

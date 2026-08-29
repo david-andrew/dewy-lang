@@ -41,7 +41,7 @@ class TypeParamJuxtapose(Juxtapose): ...
 @dataclass
 class SemicolonJuxtapose(Juxtapose): ...
 
-ComparisonOp: TypeAlias = Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', 'istype?', '@?']
+ComparisonOp: TypeAlias = Literal['=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?']
 INVERTABLE_COMPARISON_OPS: set[ComparisonOp] = set(get_args(ComparisonOp))
 @dataclass
 class InvertedComparisonOp(t1.InedibleToken):
@@ -222,7 +222,6 @@ binary_ops: set[str] = {
     '=?', '>?', '<?', '>=?', '<=?', 'in?', 'is?', 'isnt?', '<=>',
     '|', '&', '??',
     '=', '::', ':=',
-    '@?',
     '|>', '<|', '=>',
     '->', '<->',
     '.', ',', ':', ':>',

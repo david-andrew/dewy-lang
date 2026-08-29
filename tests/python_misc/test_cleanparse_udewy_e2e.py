@@ -81,7 +81,7 @@ LOWERED_CASES = [
     ('bigint.dewy', 15),
     ('bigint_auto.dewy', 7),
     ('bigint_division.dewy', 63),
-    ('literal_unions.dewy', 31),
+    ('literal_unions.dewy', 63),
     ('bigint_zero_or_nonzero.dewy', 63),
     ('refined_nested_fields.dewy', 15),
     ('union_recursive.dewy', 42),
