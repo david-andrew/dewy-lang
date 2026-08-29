@@ -116,6 +116,7 @@ GRAMMAR = {
         {"include": "#constant"},
         {"include": "#generic-parameters"},
         {"include": "#type-block"},
+        {"include": "#anonymous-type-block"},
         {"include": "#type-annotation"},
         {"include": "#function-definition"},
         {"include": "#keyword"},
@@ -292,11 +293,33 @@ GRAMMAR = {
             # `= <1 | 2 | "fast">`: an explicit type block on the right of a
             # type alias (or anywhere after `=`); its contents are a type
             "name": f"meta.type-block.{D}",
-            "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|-])",
+            "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|]|->)",
             "beginCaptures": {
                 "1": {"name": f"keyword.operator.assignment.{D}"},
                 "3": {"name": f"punctuation.section.angle.begin.{D}"},
             },
+            "end": "(?<![:-])>(?!\\?|=\\?)",
+            "endCaptures": {"0": {"name": f"punctuation.section.angle.end.{D}"}},
+            "patterns": [
+                {"include": "#comment"},
+                rule("keyword.other.word-operator", "\\bof\\b"),
+                {"include": "#type-parameter"},
+                {"include": "#bracketed-type"},
+                {"include": "#string"},
+                {"include": "#number"},
+                {"include": "#builtin-type"},
+                rule("keyword.operator.type", "[|&]"),
+                rule("entity.name.type", f"{NOT_BEFORE}{IDENT}{NOT_AFTER}"),
+                {"include": "#punctuation"},
+            ],
+        },
+        "anonymous-type-block": {
+            # A standalone `<…>`: `<T> => …` in a match arm, `(<A> b:B)` in a
+            # signature, `x is? <A|B>`. Not `array<…>` (a `<` after a name is a
+            # type parameter), not `<?`, `<<`, `<=`, `<|`, `<->`.
+            "name": f"meta.type-block.anonymous.{D}",
+            "begin": f"(?<![{START}{CONT}<\\]\\)])<(?![?=<|]|->)",
+            "beginCaptures": {"0": {"name": f"punctuation.section.angle.begin.{D}"}},
             "end": "(?<![:-])>(?!\\?|=\\?)",
             "endCaptures": {"0": {"name": f"punctuation.section.angle.end.{D}"}},
             "patterns": [
@@ -335,7 +358,7 @@ GRAMMAR = {
             # are ordinary identifiers, and the right-hand side of `=` is an
             # ordinary expression
             "name": f"meta.type-parameter.{D}",
-            "begin": "<(?![?=<|-])",
+            "begin": "<(?![?=<|]|->)",
             "beginCaptures": {"0": {"name": f"punctuation.section.angle.begin.{D}"}},
             "end": "(?<![:-])>(?!\\?|=\\?)",
             "endCaptures": {"0": {"name": f"punctuation.section.angle.end.{D}"}},

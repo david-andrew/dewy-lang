@@ -162,6 +162,9 @@ class _Lowerer(
         self.lowering_module_startup = False
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
+        # Unicode property tables referenced by lowered code: one hidden
+        # global per table, declared once and stored at module startup
+        self.unicode_table_globals: dict[str, hir.BasedString] = {}
         # bindings whose value is an enum (a union of singletons): a word
         # holding the member index (`ty.enum_members`), no cell
         self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}
@@ -342,6 +345,9 @@ class _Lowerer(
         )
         # module startup may have requested more copy functions
         lowered_functions.extend(self._synthesize_named_copies())
+        for name, data in self.unicode_table_globals.items():
+            # a packed byte literal is a constant initializer: no startup needed
+            globals_.append(hir.Declare(self.root.loc, ty.VOID_TYPE, 'let', name, 'int64', data))
         return LoweredProgram(
             lowered_functions,
             globals_,

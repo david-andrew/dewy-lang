@@ -4,6 +4,8 @@ semantic analysis pass 0:
 - ambiguity resolution
 """
 import copy
+import os
+from pathlib import Path
 from dataclasses import dataclass, replace, field, fields, is_dataclass
 from fractions import Fraction
 from collections import ChainMap
@@ -105,11 +107,56 @@ are not cached: each is parsed once per compilation anyway.
 """
 
 
+def _parse_cache_path(srcfile: SrcFile) -> Path | None:
+    """Where a module's parsed AST is cached on disk, keyed by its text and the parser's source.
+
+    Parsing the prelude dominates every compile (the tokenizer's class
+    dispatch is slow in Python); the pickled AST loads ~30× faster. The key
+    covers the module text and the parser modules' own text, so a grammar
+    change invalidates every entry.
+    """
+    if srcfile.path is None or os.environ.get('DEWY_NO_PARSE_CACHE'):
+        return None
+    import hashlib
+    digest = hashlib.sha256()
+    digest.update(_PARSER_SOURCE_DIGEST)
+    digest.update(srcfile.body.encode('utf-8'))
+    return Path('__dewycache__') / 'parse' / f'{Path(str(srcfile.path)).stem}-{digest.hexdigest()[:24]}.pickle'
+
+
+def _parser_source_digest() -> bytes:
+    import hashlib
+    from ..parser import t0, t2
+    digest = hashlib.sha256()
+    for module in (t0, t1, t2, p0):
+        digest.update(Path(module.__file__).read_bytes())
+    return digest.digest()
+
+
+_PARSER_SOURCE_DIGEST = _parser_source_digest()
+
+
 def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block, bool]:
     key = (str(srcfile.path), srcfile.body) if srcfile.path is not None else None
     block = _parsed_modules.get(key) if key is not None else None
     if block is None:
-        block = p0.parse(srcfile)
+        import pickle
+        cache_path = _parse_cache_path(srcfile)
+        if cache_path is not None and cache_path.is_file():
+            try:
+                block = pickle.loads(cache_path.read_bytes())
+            except Exception:
+                block = None   # a stale or corrupt entry: parse and rewrite it
+        if block is None:
+            block = p0.parse(srcfile)
+            if cache_path is not None:
+                try:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = cache_path.with_suffix('.tmp')
+                    tmp.write_bytes(pickle.dumps(block, protocol=pickle.HIGHEST_PROTOCOL))
+                    tmp.replace(cache_path)
+                except OSError:
+                    pass   # an unwritable cache only costs the parse
         if key is not None:
             _parsed_modules[key] = block
     no_prelude: bool | None = None

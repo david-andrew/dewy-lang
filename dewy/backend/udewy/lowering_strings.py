@@ -444,6 +444,22 @@ class _StringLowering:
             return ''.join(parts)
         return None
 
+    def _unicode_table(self, table: str, role: str, loc: Span) -> hir.AST:
+        """A Unicode property table as one module-level global.
+
+        The tables are large (the grapheme-break table alone is ~50 KB) and
+        every string that is segmented needs them, so each is emitted once
+        as a packed byte literal stored into a hidden global at startup,
+        and every lookup reads that global. (Inlining the text literal at
+        each use made the generated program ~700 KB, 4 hex characters per
+        byte, duplicated per lookup.)
+        """
+        name = f'__dewy_unicode_{role}'
+        if name not in self.unicode_table_globals:
+            data = table.encode('ascii')   # records are printable ASCII (`TABLE_BYTE_OFFSET` + 6-bit fields)
+            self.unicode_table_globals[name] = hir.BasedString(loc, 'int64', t0.base16, data.hex(), data)
+        return hir.ExpressedIdentifier(loc, 'int64', name)
+
     def _runtime_unicode_property(
         self,
         scalar: hir.AST,
@@ -463,7 +479,7 @@ class _StringLowering:
         result = hir.ExpressedIdentifier(loc, 'int64', result_name)
         record = self._int64_binary(
             '__add__',
-            hir.String(loc, 'int64', table),
+            self._unicode_table(table, role, loc),
             self._int64_binary(
                 '__mul__',
                 middle,
