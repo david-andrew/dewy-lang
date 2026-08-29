@@ -399,11 +399,11 @@ class _FlowLowering:
                 if index != value_index:
                     items.extend(self._lower_statement(item))
                     continue
-                prelude, value = self._extract_expression(item)
+                prelude, value = self._enum_aware_extract(item, target)
                 items.extend(prelude)
                 items.append(self._flow_assignment(target, value))
             return replace(body, type=ty.VOID_TYPE, items=items)
-        prelude, value = self._extract_expression(body)
+        prelude, value = self._enum_aware_extract(body, target)
         statements = [*prelude, self._flow_assignment(target, value)]
         return hir.Block(body.loc, ty.VOID_TYPE, statements, True)
 
@@ -859,10 +859,19 @@ class _FlowLowering:
             and all(param.type == 'bool' for param in node.func.type.pos_or_kw)
         )
 
+    def _enum_aware_extract(self, item: hir.AST, target: hir.ExpressedIdentifier) -> tuple[list[hir.AST], hir.AST]:
+        """A flow branch value for its temporary: an enum-typed temporary takes the member's tag word."""
+        members = ty.enum_members(target.type)
+        if members is not None:
+            return self._enum_word_of(item, members)
+        return self._extract_expression(item)
+
     def _placeholder(self, node: hir.AST) -> hir.AST:
         """Return an udewy-representable initializer for a flow temporary."""
         if isinstance(node.type, ty.RefinedType):
             node = replace(node, type=node.type.base)   # `int64<0..100>` is an int64 word
+        if ty.enum_members(node.type) is not None:
+            return hir.Integer(node.loc, 'int64', t0.base10, 0)   # an enum is its tag word
         if node.type == 'bool':
             return hir.Bool(node.loc, 'bool', False)
         if isinstance(node.type, str) and node.type in {

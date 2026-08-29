@@ -11125,6 +11125,17 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         target = _refine_binary_materialization_target(node.type, expected)
         if ctx.type_system.is_subtype(node.type, target):
             return hir.RepresentationCast(node.loc, target, node)
+    expected_enum = ty.enum_members(expected)
+    node_enum = ty.enum_members(node.type)
+    if expected_enum is not None and ctx.type_system.is_subtype(node.type, expected) and (
+        isinstance(node.type, (ty.StringLiteralType, ty.IntegerLiteralType)) or (node_enum is not None and node_enum != expected_enum)
+    ):
+        # a singleton (or a narrower enum) meeting an enum: the value is the
+        # member's tag word — the lowering converts
+        return hir.RepresentationCast(node.loc, expected, node)
+    if node_enum is not None and _is_string_type(expected) and ctx.type_system.is_subtype(node.type, expected):
+        # an enum meeting a string: the member's text
+        return hir.RepresentationCast(node.loc, expected, node)
     if isinstance(node.type, ty.StringLiteralType) and ctx.type_system.is_subtype(
         node.type,
         expected,

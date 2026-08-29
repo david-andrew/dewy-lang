@@ -162,6 +162,9 @@ class _Lowerer(
         self.lowering_module_startup = False
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
+        # bindings whose value is an enum (a union of singletons): a word
+        # holding the member index (`ty.enum_members`), no cell
+        self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}
         self.named_copy_symbols: dict[int, str] = {}  # recursive alias id -> deep-copy function symbol
         self.pending_named_copies: list[ty.NamedType] = []
         self.optional_globals_initialized: set[int] = set()
@@ -976,6 +979,8 @@ class _Lowerer(
             return 'int64'  # a unit-like error is a word (its union tag carries the identity)
         if ty.runtime_union_members(type_) is not None:
             return 'int64'
+        if ty.enum_members(type_) is not None:
+            return 'int64'   # an enum is its member index
         if isinstance(type_, ty.QuantityType):
             return self._lower_runtime_value_type(type_.number)
         if isinstance(type_, ty.IntegerLiteralType):
@@ -1005,6 +1010,8 @@ class _Lowerer(
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
         if ty.is_user_nominal(type_):
             return 'int64'
+        if ty.enum_members(type_) is not None:
+            return 'int64'   # an enum result is its tag word
         if ty.runtime_union_members(type_) is not None:
             self._target_error(
                 node,
@@ -1241,6 +1248,9 @@ class _Lowerer(
                 )
                 if members is not None and item.binding_id is not None:
                     self.union_cells[item.binding_id] = members
+                enum = ty.enum_members(item.annotation or item.expr.type)
+                if enum is not None and item.binding_id is not None:
+                    self.enum_words[item.binding_id] = enum   # a word: the member index
 
         for item in block.items:
             if isinstance(item, hir.Declare):
@@ -1386,6 +1396,9 @@ class _Lowerer(
             members = ty.runtime_union_members(param.type)
             if members is not None and param.binding_id is not None:
                 self.union_cells[param.binding_id] = members
+            enum = ty.enum_members(param.type)
+            if enum is not None and param.binding_id is not None:
+                self.enum_words[param.binding_id] = enum
         for param in literal.kw_only_args:
             self._new_binding(
                 function_scope,
@@ -1403,6 +1416,9 @@ class _Lowerer(
             members = ty.runtime_union_members(param.type)
             if members is not None and param.binding_id is not None:
                 self.union_cells[param.binding_id] = members
+            enum = ty.enum_members(param.type)
+            if enum is not None and param.binding_id is not None:
+                self.enum_words[param.binding_id] = enum
         if literal.rest_args is not None:
             self._new_binding(
                 function_scope,
@@ -3041,6 +3057,8 @@ class _Lowerer(
                 )
                 else self._lower_runtime_value_type(node.annotation)
                 if node.annotation is not None
+                else 'int64'
+                if ty.enum_members(node.expr.type) is not None   # an inferred enum binding is its tag word
                 else None
             )
             return [
@@ -3290,6 +3308,108 @@ class _Lowerer(
             return prelude
         return [*prelude, value]
 
+    # --- enums: unions of singletons as words -----------------------------
+
+    def _enum_of(self, node: hir.AST) -> tuple[ty.TypeExpr, ...] | None:
+        """The enum whose numbering a value's word uses.
+
+        A binding's word carries its *declared* enum's tags even where the
+        static type has been narrowed to fewer members (`'B' | 'C'` after an
+        arm ruled out `'A'`), so the registered enum wins over the static type.
+        """
+        if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+            registered = self.enum_words.get(node.binding_id)
+            if registered is not None:
+                return registered
+        return ty.enum_members(node.type)
+
+    @staticmethod
+    def _enum_literal_of(type_: ty.Type, members: tuple[ty.TypeExpr, ...]) -> hir.AST | None:
+        """A singleton type as its literal node, when it is one member of the enum."""
+        stripped = ty.strip_refinement(type_)
+        if isinstance(stripped, ty.StringLiteralType) and stripped in members:
+            return hir.String(Span(0, 0), stripped, stripped.value)
+        if isinstance(stripped, ty.IntegerLiteralType) and stripped in members:
+            return hir.Integer(Span(0, 0), stripped, '0d', stripped.value)
+        return None
+
+    def _enum_word_of(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> tuple[list[hir.AST], hir.AST]:
+        """``value`` as the tag word of the enum ``members``.
+
+        A singleton is its member's index; a value of the same enum is the
+        word itself; a narrower enum's word is remapped member by member.
+        """
+        while isinstance(value, (hir.RepresentationCast, hir.ValueCast)) and ty.enum_members(value.type) is not None:
+            value = value.expr
+        loc = value.loc
+        stripped = ty.strip_refinement(value.type)
+        index = ty.enum_member_index(members, stripped) if isinstance(stripped, (ty.StringLiteralType, ty.IntegerLiteralType)) else None
+        if index is not None:
+            return [], self._int64_literal(loc, index)
+        source = self._enum_of(value)
+        if source is None:
+            self._target_error(value, 'a value that is not a member of the enum it is stored into')
+        if isinstance(value, hir.ExpressedIdentifier) and value.binding_id in self.enum_words:
+            prelude, word = [], replace(value, type='int64')
+        else:
+            prelude, word = self._extract_expression(value)
+        if source == members:
+            return prelude, word
+        # remap: a narrower enum's tag `i` is the wider enum's tag of the same member
+        held = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('enum'))
+        prelude = [*prelude, hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', word)]
+        mapping = [(i, ty.enum_member_index(members, member)) for i, member in enumerate(source)]
+        if any(target is None for _, target in mapping):
+            self._target_error(value, 'a value that is not a member of the enum it is stored into')
+        arms = [
+            hir.IfArm(loc, 'int64', self._typed_equality(held, self._int64_literal(loc, i), 'int64', loc), self._int64_literal(loc, target))
+            for i, target in mapping[:-1]
+        ]
+        flow = hir.Flow(loc, 'int64', arms, self._int64_literal(loc, mapping[-1][1]))
+        flow_prelude, result = self._extract_expression(flow)
+        return [*prelude, *flow_prelude], result
+
+    def _enum_text_of(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> tuple[list[hir.AST], hir.AST]:
+        """An enum word as the text of its member (a select over the literals)."""
+        loc = value.loc
+        literal = self._enum_literal_of(value.type, members)
+        if literal is not None:
+            return self._extract_expression(literal)
+        prelude, word = self._enum_word_of(value, members)
+        held = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('enum'))
+        prelude = [*prelude, hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', word)]
+        def text(member: ty.TypeExpr) -> hir.AST:
+            if isinstance(member, ty.StringLiteralType):
+                return hir.String(loc, member, member.value)
+            assert isinstance(member, ty.IntegerLiteralType)
+            return hir.String(loc, ty.StringLiteralType(str(member.value)), str(member.value))
+        arms = [
+            hir.IfArm(loc, ty.StringType(), self._typed_equality(held, self._int64_literal(loc, i), 'int64', loc), text(member))
+            for i, member in enumerate(members[:-1])
+        ]
+        flow = hir.Flow(loc, ty.StringType(), arms, text(members[-1]))
+        flow_prelude, result = self._extract_expression(flow)
+        return [*prelude, *flow_prelude], result
+
+    def _extract_enum_type_test(self, node: hir.TypeTest) -> tuple[list[hir.AST], hir.AST] | None:
+        """`c is? 'A'` on an enum word: a comparison of the word with the member's tag."""
+        members = self._enum_of(node.value)
+        if members is None:
+            return None
+        system = ty.TypeSystem()
+        matching = [index for index, member in enumerate(members) if system.is_subtype(member, node.test_type) != node.negated]
+        if len(matching) == len(members):
+            return [], hir.Bool(node.loc, 'bool', True)
+        if not matching:
+            return [], hir.Bool(node.loc, 'bool', False)
+        prelude, word = self._enum_word_of(node.value, members)
+        test: hir.AST | None = None
+        for index in matching:
+            comparison = self._typed_equality(word, self._int64_literal(node.loc, index), 'int64', node.loc)
+            test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
+        assert test is not None
+        return prelude, test
+
     def _extract_expression(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         """Extract statement-valued subexpressions and return a scalar expression."""
         if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
@@ -3308,6 +3428,14 @@ class _Lowerer(
         ):
             return self._extract_object_field_identifier(node)
         if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+            enum = self.enum_words.get(node.binding_id)
+            if enum is not None:
+                word = replace(node, type='int64')
+                literal = self._enum_literal_of(node.type, enum)
+                if literal is not None:
+                    # narrowed to one member: the value is that literal
+                    return self._extract_expression(literal)
+                return [], word
             payload = self.optional_payloads.get(node.binding_id)
             if payload is not None:
                 cell = replace(node, type='int64')
@@ -3356,6 +3484,9 @@ class _Lowerer(
         if isinstance(node, hir.ForwardingAccess):
             return self._extract_forwarding_access(node)
         if isinstance(node, hir.TypeTest):
+            enum_test = self._extract_enum_type_test(node)
+            if enum_test is not None:
+                return enum_test
             # Union operands test tags at runtime; fully narrowed operands
             # fold statically below. A union-typed identifier uses its
             # storage members, whose indexes stay physical even when the
@@ -3458,7 +3589,7 @@ class _Lowerer(
                 ty.VOID_TYPE,
                 'let',
                 target.name,
-                'int64' if isinstance(node.type, ty.ArrayType) else node.type,
+                'int64' if isinstance(node.type, ty.ArrayType) or ty.enum_members(node.type) is not None else node.type,
                 self._placeholder(node),
             )
             flow_prelude, flow = self._lower_flow(node, target=target)

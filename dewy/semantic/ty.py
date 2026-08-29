@@ -680,16 +680,44 @@ def optional(type_: TypeExpr) -> TypeExpr:
     return union(type_, 'undefined')
 
 
+def enum_members(type_: Type) -> tuple[TypeExpr, ...] | None:
+    """The canonical member order of an *enum*: a union of string and/or
+    integer singletons (`'A' | 'B' | 'C'`, `1 | 2 | "fast"`).
+
+    An enum value is represented by its member index alone — a word, no
+    payload — since a singleton member carries no information beyond its
+    identity. None for any other type.
+    """
+    stripped = strip_refinement(type_)
+    if not isinstance(stripped, TypeOr) or len(stripped.items) < 2:
+        return None
+    if not all(isinstance(member, (StringLiteralType, IntegerLiteralType)) for member in stripped.items):
+        return None
+    return tuple(sorted(stripped.items, key=lambda member: (0 if isinstance(member, IntegerLiteralType) else 1, repr(member))))
+
+
+def enum_member_index(members: tuple[TypeExpr, ...], value: TypeExpr) -> int | None:
+    """The tag of a singleton member of an enum, or None."""
+    for index, member in enumerate(members):
+        if member == value:
+            return index
+    return None
+
+
 def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     """Canonical member order for a general runtime tagged union.
 
     Returns None for non-unions and for single-payload optionals, which keep
-    their dedicated two-state cells. ``undefined`` is always member 0 when
-    present, so the general tag numbering coincides with optional tags.
+    their dedicated two-state cells, and for enums (unions of singletons),
+    which are plain words (see `enum_members`). ``undefined`` is always
+    member 0 when present, so the general tag numbering coincides with
+    optional tags.
     """
     if not isinstance(type_, TypeOr):
         return None
     if optional_payload(type_) is not None:
+        return None
+    if enum_members(type_) is not None:
         return None
     # Canonical order: `undefined` first, then a deterministic sort, so every
     # spelling of the same member set (declared, narrowed, joined) numbers

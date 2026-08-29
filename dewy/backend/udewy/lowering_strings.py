@@ -189,6 +189,14 @@ class _StringLowering:
     ) -> tuple[list[hir.AST], hir.AST]:
         target = node.type
         source = node.expr
+        target_enum = ty.enum_members(target)
+        if target_enum is not None:
+            # a singleton or a narrower enum stored as this enum: the tag word
+            return self._enum_word_of(source, target_enum)
+        source_enum = self._enum_of(source)
+        if source_enum is not None and ty.enum_members(source.type) is not None:
+            # an enum meeting a string: its member's text
+            return self._enum_text_of(source, source_enum)
         if (
             isinstance(source.type, ty.ArrayType)
             and source.type.element == 'uint8'
