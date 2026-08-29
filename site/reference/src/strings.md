@@ -72,6 +72,16 @@ if text is? string { printl(text) } else { printl"not readable text" }
 
 `read_text` is `read_bytes` followed by this decode, with `undefined` reported as the `InvalidUtf8` error alongside the file errors (`FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileError`); a decode of bytes you already hold is `bytes as string | undefined`.
 
+## Including Files
+
+`$include_bytes(p"path")` embeds a file's bytes at compile time. The path must be known when compiling — a path literal today, resolved against the source file — and the result is a binary literal (`array<uint8>` of a known length), usable like `0x"…"`: `.length`, indexing, `as string | undefined`. `$include_bytes(p"path") as name` is the statement form, declaring `name`. The generated program does not spell the bytes out; the target embeds the file itself, which is how the compiler's Unicode tables travel.
+
+```dewy
+let table = $include_bytes(p"data/table.bin")
+$include_bytes(p"data/notes.bin") as notes
+let text = $include_bytes(p"data/notes.txt") as string | undefined
+```
+
 ## Representation Views
 
 Explicit array views expose lower-level representations:

@@ -95,8 +95,7 @@ class EmitContext:
 
     direct_function_names: set[str]
     local_names: set[str]
-
-
+    include_directives: dict[str, str] | None = None   # included file path -> bound name (prelude directives)
 
 def codegen(srcfile:SrcFile, *, target: str = 'x86_64') -> str:
     """Type-check Dewy source and emit equivalent udewy source."""
@@ -164,12 +163,14 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None) -> str:
         set(functions) | set(builtins.builtin_types),
         global_names,
     )
+    ctx.include_directives = {}
     for declaration in program.globals:
         code.append(emit_declare(declaration, ctx))
     for name, func in functions.items():
         code.append(emit_function_decl(name, func, ctx))
-
-    return '\n'.join(code) + '\n'
+    # included files are prelude directives: they precede everything else
+    directives = [f'$include_bytes(p"{path}") as {name}' for path, name in ctx.include_directives.items()]
+    return '\n'.join([*directives, *code]) + '\n'
 
 
 def _entrypoint_wrapper(
@@ -280,7 +281,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     local_names.update(arg.name for arg in func.kw_only_args)
     if func.rest_args is not None:
         local_names.add(func.rest_args.name)
-    func_ctx = EmitContext(ctx.direct_function_names, local_names)
+    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives)
     body = func.body
     if _contains_return(body):
         code.append(emit_ast(body, func_ctx))
@@ -303,7 +304,7 @@ def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
         case hir.ShortCircuit(): return emit_short_circuit(ast, ctx)
         case hir.Integer(): return emit_integer(ast)
         case hir.String(): return emit_string(ast)
-        case hir.BasedString(): return emit_based_string(ast)
+        case hir.BasedString(): return emit_based_string(ast, ctx)
         case hir.Bool(): return 'true' if ast.value else 'false'
         case hir.Void(): return 'void'
         case hir.Declare(): return emit_declare(ast, ctx)
@@ -334,9 +335,20 @@ def emit_string(string: hir.String) -> str:
     return f'"{content}"'
 
 
-def emit_based_string(string: hir.BasedString) -> str:
-    """Emit packed binary data in one canonical udewy spelling."""
+def emit_based_string(string: hir.BasedString, ctx: 'EmitContext | None' = None) -> str:
+    """Emit packed binary data in one canonical udewy spelling.
 
+    Bytes that came from a file are embedded by a `$include_bytes(p"…") as
+    name` prelude directive (the path is absolute) and referenced by name,
+    so the program text stays small.
+    """
+
+    if string.include_path is not None and ctx is not None and ctx.include_directives is not None:
+        name = ctx.include_directives.get(string.include_path)
+        if name is None:
+            name = f'__dewy_include_{len(ctx.include_directives) + 1}'
+            ctx.include_directives[string.include_path] = name
+        return name
     return f'0x"{string.content.hex()}"'
 
 
@@ -556,7 +568,7 @@ def emit_integer(i: hir.Integer) -> str:
 def emit_block(block: hir.Block, ctx: EmitContext) -> str:
     if not block.scoped and len(block.items) == 1:
         return f'({emit_ast(block.items[0], ctx)})'
-    block_ctx = EmitContext(ctx.direct_function_names, set(ctx.local_names)) if block.scoped else ctx
+    block_ctx = EmitContext(ctx.direct_function_names, set(ctx.local_names), ctx.include_directives) if block.scoped else ctx
     items: list[str] = []
     for item in block.items:
         items.append(emit_ast(item, block_ctx))

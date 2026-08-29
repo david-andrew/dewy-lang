@@ -457,8 +457,27 @@ class _StringLowering:
         name = f'__dewy_unicode_{role}'
         if name not in self.unicode_table_globals:
             data = table.encode('ascii')   # records are printable ASCII (`TABLE_BYTE_OFFSET` + 6-bit fields)
-            self.unicode_table_globals[name] = hir.BasedString(loc, 'int64', t0.base16, data.hex(), data)
+            self.unicode_table_globals[name] = hir.BasedString(loc, 'int64', t0.base16, data.hex(), data, include_path=self._table_artifact(role, data))
         return hir.ExpressedIdentifier(loc, 'int64', name)
+
+    @staticmethod
+    def _table_artifact(role: str, data: bytes) -> str | None:
+        """Write a table once as a binary artifact under the cache; the
+        program then embeds it with `__include_bytes__` instead of spelling
+        it out. None (an inline literal) when the cache is unwritable."""
+        import hashlib
+        from pathlib import Path
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        path = Path('__dewycache__') / 'include' / f'unicode_{role}-{digest}.bin'
+        try:
+            if not path.is_file():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix('.tmp')
+                tmp.write_bytes(data)
+                tmp.replace(path)
+            return str(path.resolve())
+        except OSError:
+            return None
 
     def _runtime_unicode_property(
         self,

@@ -238,6 +238,49 @@ def _skip_preprocessor_block(src: str, idx: int) -> int:
     error(src, len(src), "Unterminated preprocessor if block")
 
 
+def _parse_include_bytes(src: str, idx: int, source_dir: Path) -> tuple[str, str, int] | None:
+    """`$include_bytes(p"path") as name`: a prelude directive binding `name`
+    to the address of the file's bytes, embedded as read-only static data.
+
+    Only this exact form is accepted (one path literal, then `as`, then an
+    identifier); a relative path is resolved against the including file's
+    directory. Returns (name, udewy declaration text, next index).
+    """
+    if not _starts_with_name(src, idx, "$include_bytes"):
+        return None
+    where = idx
+    idx += len("$include_bytes")
+    idx = skip_horizontal_whitespace(src, idx)
+    if idx >= len(src) or src[idx] != "(":
+        error(src, where, '$include_bytes takes exactly one path literal: $include_bytes(p"…") as name')
+    idx = skip_horizontal_whitespace(src, idx + 1)
+    if idx + 1 >= len(src) or src[idx] != "p" or src[idx + 1] != '"':
+        error(src, where, '$include_bytes takes exactly one path literal: $include_bytes(p"…") as name')
+    end = string_end(src, idx + 1)
+    path_text = src[idx + 2 : end - 1]
+    idx = skip_horizontal_whitespace(src, end)
+    if idx >= len(src) or src[idx] != ")":
+        error(src, where, "Expected ')' after the path literal of $include_bytes")
+    idx = skip_horizontal_whitespace(src, idx + 1)
+    if not _starts_with_name(src, idx, "as"):
+        error(src, where, '$include_bytes needs a name: $include_bytes(p"…") as name')
+    idx = skip_horizontal_whitespace(src, idx + 2)
+    name_start = idx
+    if idx >= len(src) or not is_ident_start(src[idx]):
+        error(src, idx, "Expected a name after `as` in $include_bytes")
+    while idx < len(src) and is_ident(src[idx]):
+        idx += 1
+    name = src[name_start:idx]
+    next_idx = _consume_directive_line_end(src, idx, "$include_bytes")
+    included = Path(path_text)
+    if not included.is_absolute():
+        included = (source_dir / included).resolve()
+    if not included.is_file():
+        error(src, where, f"$include_bytes: no such file: {included}")
+    data = included.read_bytes()
+    return name, f'let {name}:int64 = 0x"{data.hex()}"', next_idx
+
+
 def _parse_meta_diagnostic(src: str, idx: int) -> tuple[str, str, int, int] | None:
     start = idx
     if _starts_with_name(src, idx, "$warning"):
@@ -317,6 +360,13 @@ def _process_prelude_item(ctx: _PreludeContext, idx: int) -> int | None:
         else:
             block_end = _skip_preprocessor_block(src, block_start)
         return _consume_directive_line_end(src, block_end, "preprocessor if")
+
+    parsed_include = _parse_include_bytes(src, idx, ctx.source_dir)
+    if parsed_include is not None:
+        _name, declaration, next_idx = parsed_include
+        # the binding is a global of this file: it precedes the body, after imports
+        ctx.imported_source_parts.append(declaration)
+        return next_idx
 
     parsed_diagnostic = _parse_meta_diagnostic(src, idx)
     if parsed_diagnostic is not None:
@@ -400,6 +450,8 @@ def _load_program(source_path: Path, target_backend: str, state: _LoadState) -> 
     body_parts.append(source[body_cursor:])
     combined_source = "\n".join([*imported_source_parts, "".join(body_parts)])
     return LoadedProgram(combined_source, link_artifacts, imported_source_paths)
+
+
 
 
 def load_program(

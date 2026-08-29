@@ -547,6 +547,9 @@ class BasedString(AST):
     prefix: t0.BasePrefix
     digits: str
     content: bytes
+    include_path: str | None = None
+    """When set, the bytes come from this file (`__include_bytes__(p"…")`):
+    the target embeds the file instead of the spelled-out literal."""
 
 
 @dataclass

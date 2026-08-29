@@ -1,0 +1,17 @@
+# `$include_bytes(p"…")` embeds a file's bytes at compile time: the path
+# is a literal resolved against this source file, the value is a binary
+# literal (its length is part of the type), and the target embeds the file
+# rather than a spelled-out literal. `$include_bytes(p"…") as name` is the
+# statement form.
+$include_bytes(p"data/greeting.txt") as again
+let greeting = $include_bytes(p"data/greeting.txt")
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    if greeting.length =? 13 { checks += 1 }               # "héllo bytes\n": é is two bytes
+    if greeting[0] =? 104 and greeting[12] =? 10 { checks += 2 }
+    let text = greeting as string|undefined
+    if text is? string { if text.length =? 12 { checks += 4 } }
+    if again.length =? greeting.length { checks += 8 }
+    return checks * 2 + 12                                  # 15 * 2 + 12 = 42
+}

@@ -555,6 +555,14 @@ They may appear only in the leading prelude at the top of a file or inside
 active preprocessor target blocks in that prelude. They are removed before the
 normal udewy parser sees the source.
 
+#### Include Bytes
+
+```udewy
+$include_bytes(p"tables/gcb.bin") as gcb_table
+```
+
+`$include_bytes(p"path") as name` embeds a file's contents as read-only static data and binds `name` (a module-level `int64`) to its address — exactly as `let name:int64 = 0x"…"` of the same bytes would. It is a prelude directive: it may appear only in the leading prelude alongside `import` and `$supported_targets`, the argument must be a single path literal (nothing else is accepted), and a relative path is resolved against the directory of the file containing the directive. The file is read by the preprocessor, so its bytes never appear in the program text; a missing file is a compile-time error. Generated programs use it for large tables (the Dewy compiler's Unicode data).
+
 #### Import Directives
 
 Import directives bring definitions from other udewy files into scope:

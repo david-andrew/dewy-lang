@@ -426,6 +426,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected)
         case p0.Prefix(): return tcr_prefix(ast, ctx=ctx, expected=expected)
         case p0.Postfix(op=t1.Operator(symbol='or_throw')): return tcr_or_throw(ast, ctx=ctx)
+        case p0.BinOp() if _include_bytes_call(ast) is not None:
+            return _tcr_include_bytes(ast.loc, _include_bytes_call(ast), ctx=ctx)   # `$include_bytes(p"…")`
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected, call_target=call_target)
         case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
         case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
@@ -8175,6 +8177,18 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         return hir.Transmute(binop.loc, target, item)
 
     if symbol == 'as':
+        included_args = _include_bytes_call(binop.left)
+        if included_args is not None and isinstance(binop.right, p0.Atom) and isinstance(binop.right.item, t1.Identifier):
+            # `$include_bytes(p"…") as name`: a declaration of `name`
+            value = _tcr_include_bytes(binop.loc, included_args, ctx=ctx)
+            name = binop.right.item.name
+            declaration = _complete_binding(
+                binop,
+                hir.Declare(binop.loc, ty.VOID_TYPE, 'let', name, value.type, value),
+                ctx=ctx,
+            )
+            ctx.declarations[name] = value.type   # resolution consults the declaration map, as `let` does
+            return declaration
         item = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         require_valued(item.type, ctx.srcfile, item.loc, 'conversion operand')
         target = ast_to_type(binop.right, ctx=ctx)
@@ -10551,6 +10565,56 @@ def _tcr_type_constructor_call(
     literal = p0.Block(right.loc, literal_items, '[]', None)
     ctx.synthesized.append(literal)
     return typecheck_and_resolve_inner(literal, ctx=ctx, expected=left.value)
+
+
+def _include_bytes_call(ast: p0.AST) -> p0.AST | None:
+    """The argument block of `$include_bytes(…)` when ``ast`` is that expression."""
+    if (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, (t2.QJuxtapose, t2.CallJuxtapose))
+        and isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Metatag)
+        and ast.left.item.name == 'include_bytes'
+    ):
+        return ast.right
+    return None
+
+
+def _tcr_include_bytes(loc: Span, right: p0.AST, *, ctx: Context) -> hir.AST:
+    """`$include_bytes(p"…")`: a file's bytes as a compile-time binary literal.
+
+    The path must be known at compile time — today a path literal (`p"…"`
+    or `p(text)` with a literal argument); a relative path is resolved
+    against the source file. The bytes are read now (their length is part of
+    the type, `BinaryLiteralType`), and the target embeds the file itself
+    rather than a spelled-out literal.
+    """
+    pos_args, kw_args, _ = parse_call_arguments(right, ctx=ctx)
+    if kw_args or len(pos_args) != 1:
+        user_error(ctx.srcfile, '`$include_bytes` takes one path', Pointer(span=right.loc, message='write `$include_bytes(p"…")`'))
+    argument = _unwrap_literal_value(pos_args[0])
+    path_text: str | None = None
+    if isinstance(argument.type, ty.PathLiteralType):
+        path_text = argument.type.value
+    elif isinstance(argument.type, ty.ObjectType):
+        path_field = argument.type.field('path')
+        if path_field is not None and isinstance(path_field.type, ty.StringLiteralType):
+            path_text = path_field.type.value
+    if path_text is None:
+        user_error(
+            ctx.srcfile,
+            '`$include_bytes` needs a compile-time path',
+            Pointer(span=pos_args[0].loc, message=f'this has type `{type_to_dewy(pos_args[0].type)}`'),
+            hint='a path literal such as `p"data/table.bin"` (relative to this source file)',
+        )
+    included = Path(path_text)
+    if not included.is_absolute():
+        base = Path(str(ctx.srcfile.path)).resolve().parent if ctx.srcfile.path is not None else Path.cwd()
+        included = (base / included).resolve()
+    if not included.is_file():
+        user_error(ctx.srcfile, 'included file not found', Pointer(span=pos_args[0].loc, message=f'no such file: {included}'))
+    content = included.read_bytes()
+    return hir.BasedString(loc, ty.BinaryLiteralType(content), t0.base16, content.hex(), content, include_path=str(included))
 
 
 def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
