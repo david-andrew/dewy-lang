@@ -43,6 +43,9 @@
       "include": "#type-block"
     },
     {
+      "include": "#anonymous-type-block"
+    },
+    {
       "include": "#type-annotation"
     },
     {
@@ -918,7 +921,7 @@
     },
     "type-block": {
       "name": "meta.type-block.dewy",
-      "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|-])",
+      "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|]|->)",
       "beginCaptures": {
         "1": {
           "name": "keyword.operator.assignment.dewy"
@@ -1008,7 +1011,7 @@
     },
     "type-parameter": {
       "name": "meta.type-parameter.dewy",
-      "begin": "<(?![?=<|-])",
+      "begin": "<(?![?=<|]|->)",
       "beginCaptures": {
         "0": {
           "name": "punctuation.section.angle.begin.dewy"
@@ -1237,6 +1240,57 @@
         {
           "name": "punctuation.separator.angle.dewy",
           "match": "[<>]"
+        }
+      ]
+    },
+    "anonymous-type-block": {
+      "name": "meta.type-block.anonymous.dewy",
+      "comment": "A standalone type block: `<T> => …` in a match arm, `(<A> b:B)` in a signature, `x is? <A|B>`. Not `array<…>` (preceded by a name), not `<?`, `<<`, `<=`, `<|`, `<-`.",
+      "begin": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋<\\]\\)])<(?![?=<|]|->)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.angle.begin.dewy"
+        }
+      },
+      "end": "(?<![:-])>(?!\\?|=\\?)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.angle.end.dewy"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "name": "keyword.other.word-operator.dewy",
+          "match": "\\bof\\b"
+        },
+        {
+          "include": "#type-parameter"
+        },
+        {
+          "include": "#bracketed-type"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#builtin-type"
+        },
+        {
+          "name": "keyword.operator.type.dewy",
+          "match": "[|&]"
+        },
+        {
+          "name": "entity.name.type.dewy",
+          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
+        },
+        {
+          "include": "#punctuation"
         }
       ]
     }
