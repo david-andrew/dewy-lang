@@ -329,6 +329,8 @@ class _StringLowering:
             isinstance(target, (ty.StringType, ty.StringLiteralType))
             or isinstance(target, str)
             and target in {'string', 'grapheme', 'char'}
+            or isinstance(target, ty.TypeOr)
+            and ty.string_valued(target)
         ):
             if (
                 isinstance(source.type, ty.ArrayType)
@@ -1040,6 +1042,8 @@ class _StringLowering:
 
     @staticmethod
     def _is_string_valued(type_: object) -> bool:
+        if isinstance(type_, ty.TypeOr):
+            return ty.string_valued(type_)   # a union of string literals: one string handle
         return isinstance(type_, (ty.StringType, ty.StringLiteralType)) or type_ in (
             'string',
             'grapheme',
@@ -3257,10 +3261,7 @@ class _StringLowering:
                         str(part_type.value),
                     )
                 )
-            elif isinstance(part_type, (ty.StringLiteralType, ty.StringType)) or (
-                isinstance(part_type, str)
-                and part_type in {'string', 'grapheme', 'char'}
-            ):
+            elif self._is_string_valued(part_type):
                 string_piece(part)
             elif part_type == 'bool':
                 bool_piece(part)

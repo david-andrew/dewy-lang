@@ -105,7 +105,8 @@ class _DictLowering:
         return hir.Integer(loc, 'uint64', '0d', value)
 
     def _declare(self, name: hir.ExpressedIdentifier, value: hir.AST, loc: Span, type_: ty.Type = 'int64') -> hir.Declare:
-        return hir.Declare(loc, ty.VOID_TYPE, 'let', name.name, type_, value)
+        # the emitted annotation is the runtime shape (a union-typed value is its cell pointer)
+        return hir.Declare(loc, ty.VOID_TYPE, 'let', name.name, self._lower_runtime_value_type(type_), value)
 
     def _assign(self, name: hir.ExpressedIdentifier, value: hir.AST, loc: Span) -> hir.Assign:
         return hir.Assign(loc, ty.VOID_TYPE, name, '=', value)
@@ -376,7 +377,11 @@ class _DictLowering:
         probe, found, position, _slot = self._dict_probe(parts, key, loc)
         search.extend(probe)
         if node.default is not None:
-            default_prelude, default = self._extract_expression(node.default)
+            if self._is_optional_element(parts.value_type) if parts.value_type is not None else False:
+                # the default becomes a cell too (`undefined`, or a payload)
+                default_prelude, default = self._array_storage_value(node.default, parts.value_type)
+            else:
+                default_prelude, default = self._extract_expression(node.default)
             result = self._name('dict_value', loc, parts.value_type)
             return [
                 *prelude, *key_prelude, *default_prelude, *search,
@@ -410,7 +415,13 @@ class _DictLowering:
         loc = node.loc
         prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
-        value_prelude, value = self._extract_expression(node.value) if node.value is not None else ([], None)
+        if node.value is not None and parts.value_type is not None:
+            # the stored value is the dictionary's own (an escape copy of a
+            # string, a fresh cell for an optional) — the compaction copies in
+            # `_dict_rebuild` move elements that already went through this
+            value_prelude, value = self._array_storage_value(node.value, parts.value_type)
+        else:
+            value_prelude, value = self._extract_expression(node.value) if node.value is not None else ([], None)
         values = self._dict_descriptor(parts, 'values', loc) if parts.value_type is not None else None
         keys = self._dict_descriptor(parts, 'keys', loc)
         indices = self._dict_descriptor(parts, 'indices', loc)
@@ -429,7 +440,8 @@ class _DictLowering:
         append = [
             self._declare(new_position, self._dict_length_of(keys, loc), loc),
             *self._dict_push(parts, 'keys', parts.key_type, key, loc),
-            *(self._dict_push(parts, 'values', parts.value_type, value, loc) if value is not None and parts.value_type is not None else []),
+            # the value went through `_array_storage_value` above: push the word raw
+            *(self._dict_push(parts, 'values', 'int64', value, loc) if value is not None and parts.value_type is not None else []),
             *hash_prelude,
             *self._dict_push(parts, 'hashes', 'int64', key_hash, loc),
             self._dict_store_element(indices, slot, new_position, 'int64', loc),

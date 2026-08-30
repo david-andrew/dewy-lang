@@ -360,7 +360,24 @@ class _IteratorLowering:
             else:
                 value = self._iterator_value(iterator, offset_value)
                 value_updates = []
-            if payload is not None:
+            if payload is not None and self._is_optional_element(element_type if array_value is not None else None):
+                # the element word is a cell pointer: copy its tag and payload
+                # into the target cell directly (the value is not re-wrapped)
+                loc = iterator.loc
+                pointer = hir.ExpressedIdentifier(loc, 'int64', self._new_iterator_name('cell'))
+                defined_body = [
+                    *value_updates,
+                    hir.Declare(loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', replace(value, type='int64') if isinstance(value, hir.ExpressedIdentifier) else value),
+                    self._intrinsic_call('__store_u8__', [self._intrinsic_call('__load_u8__', [pointer], 'uint8', loc), target], ty.VOID_TYPE, loc),
+                    self._intrinsic_call('__store_i64__', [self._intrinsic_call('__load_i64__', [self._int64_binary('__add__', pointer, self._int64_literal(loc, 8), loc)], 'int64', loc), self._optional_payload_address(target, loc)], ty.VOID_TYPE, loc),
+                    hir.Assign(loc, ty.VOID_TYPE, offset_value, '+=', self._int64_literal(loc, 1)),
+                ]
+                exhausted_body = self._optional_write(
+                    target,
+                    hir.Undefined(iterator.loc, 'undefined'),
+                    payload,
+                )
+            elif payload is not None:
                 defined_body = [
                     *value_updates,
                     *self._optional_write(target, value, payload),

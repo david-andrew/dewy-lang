@@ -1,0 +1,24 @@
+# Containers with union-typed members: a union of string literals is one
+# string handle (keys, elements, sets); `T | undefined` elements are cells
+# the container owns. Lookups, stores, loops, and printing all apply.
+const Prefix:type = '0b' | '0t' | '0x'
+let Info:type = [scale:int64 extra:dict<string int64|undefined>]
+let main = ():>int64 => {
+    let specs:dict<Prefix Info> = [
+        '0b' -> [scale=2 extra=[]]
+        '0t' -> [scale=3 extra=['T'->(-1)]]
+        '0x' -> [scale=16 extra=['x'->undefined]]
+    ]
+    let total:int64 = 0
+    loop [prefix info] in specs {
+        if prefix is? '0b' | '0t' { total += info.scale }          # 2 + 3
+    }
+    total += specs['0x'].scale                                      # 16
+    match specs['0t'].extra.get('T' default=undefined) { n:int64 => { total += 10 + n }  <undefined> => {} }   # 9
+    let opts:array<int64|undefined> = [1 undefined 3]
+    loop o in opts { match o { n:int64 => { total += n }  <undefined> => { total += 5 } } }   # 9
+    let keys:array<Prefix> = ['0x' '0b']
+    loop k in keys { if k in? specs { total += 1 } }                # 2
+    if '{opts}' =? "[1 undefined 3]" { total += 1 }                 # 1
+    return total                                                    # 42
+}

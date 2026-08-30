@@ -1015,6 +1015,8 @@ class _Lowerer(
         return statements, result
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
+        if isinstance(type_, ty.TypeOr) and ty.string_valued(type_):
+            return 'int64'   # a union of string literals is one string handle
         if ty.optional_payload(type_) is not None:
             return 'int64'
         if ty.is_user_nominal(type_):
@@ -1050,6 +1052,8 @@ class _Lowerer(
 
 
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
+        if isinstance(type_, ty.TypeOr) and ty.string_valued(type_):
+            return 'int64'   # a union of string literals is one string handle
         if ty.is_user_nominal(type_):
             return 'int64'
         if ty.enum_members(type_) is not None:
@@ -3283,6 +3287,8 @@ class _Lowerer(
             return statements
         if isinstance(node, hir.Declare):
             declared_type = node.annotation or node.expr.type
+            if isinstance(declared_type, ty.TypeOr) and ty.string_valued(declared_type):
+                node = replace(node, annotation='int64')   # one string handle
             members = ty.runtime_union_members(declared_type)
             if members is not None:
                 if self.lowering_module_startup:
@@ -3945,7 +3951,11 @@ class _Lowerer(
                 ty.VOID_TYPE,
                 'let',
                 target.name,
-                'int64' if isinstance(node.type, ty.ArrayType) or ty.enum_members(node.type) is not None else node.type,
+                'int64'
+                if isinstance(node.type, ty.ArrayType)
+                or ty.enum_members(node.type) is not None
+                or isinstance(node.type, ty.TypeOr) and (ty.string_valued(node.type) or self._is_optional_element(node.type))
+                else node.type,
                 self._placeholder(node),
             )
             flow_prelude, flow = self._lower_flow(node, target=target)

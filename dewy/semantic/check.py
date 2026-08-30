@@ -727,6 +727,26 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
 }
 
 
+def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
+    """An optional-typed interpolation field as a two-arm flow: the text
+    `undefined`, or the payload (a name only, so the value is read once)."""
+    if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
+        return None   # (a name or a field: reading it twice is free of effects)
+    plain = ty.strip_refinement(value.type)
+    if not _optional_container_element(plain):
+        return None
+    payload = ty.optional_payload(plain)
+    assert payload is not None
+    loc = value.loc
+    condition = hir.TypeTest(loc, 'bool', value, 'undefined', False)
+    absent = hir.String(loc, ty.StringLiteralType('undefined'), 'undefined')
+    payload_part = _prepared_single_argument(replace(value, type=payload), ctx=ctx)
+    # both arms are strings: the payload arm is a one-part interpolation, which
+    # materializes the payload's text (digits, a copied string, …)
+    present = hir.InterpolatedString(loc, ty.StringType(), [payload_part])
+    return hir.Flow(loc, ty.StringType(), [hir.IfArm(loc, absent.type, condition, absent)], present)
+
+
 def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
     """Typecheck interpolation fields while retaining literal chunks."""
 
@@ -774,6 +794,10 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         spelled = _spelling_string(value, ctx=ctx)
         if spelled is not None:
             parts.append(spelled)   # a type or a function: its spelling
+            continue
+        optional_flow = _optional_field_flow(value, ctx=ctx)
+        if optional_flow is not None:
+            parts.append(optional_flow)   # `undefined`, or the payload's text
             continue
         require_valued(
             value.type,
@@ -3129,6 +3153,8 @@ def _tcr_range_iterator(
                 )
                 or isinstance(element_type, str)
                 and element_type in {'string', 'grapheme', 'char'}
+                or ty.string_valued(element_type)
+                or _optional_container_element(element_type)
             ):
                 not_implemented(
                     ctx.srcfile,
@@ -6737,6 +6763,23 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
             type_ in ty.FIXED_INTEGER_TYPES
             or type_ in {'bool', 'string', 'grapheme', 'char'}
         )
+        or ty.string_valued(type_)   # a union of string literals: string handles
+        or _optional_container_element(type_)
+    )
+
+
+def _optional_container_element(type_: ty.Type) -> bool:
+    """`T | undefined` with a word or string payload: containers hold such
+    elements as one-word cells."""
+    if isinstance(type_, str):
+        return False
+    payload = ty.optional_payload(ty.strip_refinement(type_))
+    if payload is None:
+        return False
+    return (
+        payload == 'bool'
+        or ty.fixed_integer_layout(payload) is not None
+        or ty.string_valued(payload)
     )
 
 
@@ -8047,7 +8090,7 @@ def _dispatch_builtin(
     if (
         fname in {'__eq__', '__ne__'}
         and len(args) == 2
-        and all(_is_string_type(arg.type) for arg in args)
+        and all(_is_string_type(arg.type) or ty.string_valued(ty.strip_refinement(arg.type)) for arg in args)
         and not all(isinstance(arg.type, ty.StringLiteralType) for arg in args)
     ):
         # runtime string equality, whatever the operands' spellings (`string`, a
@@ -11196,7 +11239,7 @@ def _plain_object_type(type_: ty.TypeExpr) -> ty.ObjectType | None:
 
 def _quoted_member(type_: ty.TypeExpr) -> bool:
     """String members print quoted inside a structure (`["a" "b"]`, `[name="x"]`)."""
-    return _is_string_type(ty.strip_refinement(type_))
+    return ty.string_valued(ty.strip_refinement(type_))
 
 
 def _number_object(type_: ty.TypeExpr, *, ctx: Context) -> str | None:
@@ -11215,8 +11258,10 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
     """The type — a member, a field, or `type_` itself — that keeps a value of
     `type_` from converting to string as a structure, else None."""
     plain = ty.strip_refinement(type_)
-    if _is_string_type(plain) or plain == 'bool' or isinstance(plain, ty.IntegerLiteralType) or (isinstance(plain, str) and plain in _MATERIALIZED_INTEGERS):
+    if _is_string_type(plain) or ty.string_valued(plain) or plain == 'bool' or isinstance(plain, ty.IntegerLiteralType) or (isinstance(plain, str) and plain in _MATERIALIZED_INTEGERS):
         return None
+    if _optional_container_element(plain):
+        return None   # an optional member: `undefined` or its payload's text
     if _number_object(plain, ctx=ctx) is not None:
         return plain
     members = _structure_members(plain)
@@ -12036,7 +12081,7 @@ def _explicit_value_conversion(
             # the checked decode: `undefined` when the bytes are not valid UTF-8
             return hir.RepresentationCast(loc, ty.optional(ty.StringType()), node)
         if target in {'string', 'grapheme', 'char'}:
-            if source.element in {'uint8', 'uint32'}:
+            if isinstance(source.element, str) and source.element in {'uint8', 'uint32'}:
                 type_error(
                     ctx.srcfile,
                     'string conversion requires a validity proof',
@@ -12054,7 +12099,7 @@ def _explicit_value_conversion(
                     ),
                 )
             if (
-                source.element in {'grapheme', 'char'}
+                isinstance(source.element, str) and source.element in {'grapheme', 'char'}
                 or isinstance(source.element, ty.StringType)
                 and source.element.length == 1
             ) and target == 'string':

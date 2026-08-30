@@ -444,6 +444,8 @@ class _FlowLowering:
                 temp_type = node.type
                 if isinstance(temp_type, ty.IntegerLiteralType) or temp_type in ('int', 'uint'):
                     temp_type = 'int64'  # abstract and literal integers are words by now
+                elif isinstance(temp_type, ty.TypeOr) and (ty.string_valued(temp_type) or self._is_optional_element(temp_type)):
+                    temp_type = 'int64'  # one-word handles
                 return hir.ExpressedIdentifier(node.loc, temp_type, name)
 
     def _is_fixed_width_shift(self, node: hir.FunctionCall) -> bool:
@@ -921,7 +923,8 @@ class _FlowLowering:
         ) or (
             isinstance(node.type, str)
             and node.type in {'string', 'grapheme', 'char'}
-        ):
+        ) or ty.string_valued(node.type) or self._is_optional_element(node.type):
+            # one-word handles: string-literal unions and optional cells
             return hir.Integer(node.loc, 'int64', t0.base10, 0)
         self._target_error(
             node,

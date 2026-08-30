@@ -80,15 +80,18 @@ def test_nesting_is_arbitrary() -> None:
 
 
 def test_values_that_cannot_convert_are_reported_on_the_value() -> None:
-    with pytest.raises(TypeCheckError, match='no `print` method takes|does not convert to string'):
-        _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => {\n    let slots = [Slot(1)]\n    printl"{slots}"\n    return 0\n}\n')
     with pytest.raises(TypeCheckError, match='containers, which a loop cannot visit yet'):
         _main('    printl"{[[1 2] [3 4]]}"')
     with pytest.raises(TypeCheckError, match='`Rational` prints, but has no string form yet'):
         _main('    let r:Rational = 1/2\n    let s:string = r as string')
-    # the failure inside the library generic is reported at the call, with its reason
-    with pytest.raises(UserError, match='in `printl` for `T` = `int64 \\| undefined`: cannot convert'):
-        _main('    let opt:int64|undefined = 1\n    printl(opt)')
+    with pytest.raises(TypeCheckError, match='does not convert to string|no `print` method takes'):
+        _compile('let Holder:type = [f:(n:int64):>int64]\nlet main = ():>int64 => {\n    let h = Holder((n:int64):>int64 => n)\n    printl"{h}"\n    return 0\n}\n')
+
+
+def test_optionals_print() -> None:
+    # `int64 | undefined` prints — alone, in containers, and as a field
+    _main('    let opt:int64|undefined = 1\n    printl(opt)\n    let xs:array<int64|undefined> = [opt undefined]\n    printl(xs)\n    printl"{opt}"')
+    _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => {\n    let slots = [Slot(1)]\n    printl"{slots}"\n    return 0\n}\n')
 
 
 # ------------------------------------------------------------ decided type tests
@@ -130,8 +133,8 @@ def test_one_substantive_reading_reports_its_own_error() -> None:
     with pytest.raises(TypeCheckError, match='unsupported value conversion'):
         _main('    let opt:int64|undefined = 1\n    let t:string = opt as string')
     with pytest.raises(UserError) as caught:   # the readings' verdict is definite, with the one reading's own message
-        _main('    let opt:int64|undefined = 1\n    printl(opt)')
-    assert 'no valid interpretation' not in str(caught.value) and 'unsupported value conversion' in str(caught.value)
+        _main('    printl([[1 2] [3 4]])')
+    assert 'no valid interpretation' not in str(caught.value) and 'containers, which a loop cannot visit' in str(caught.value)
 
 
 # ------------------------------------------------------------ the output

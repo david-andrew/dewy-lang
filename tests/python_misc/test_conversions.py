@@ -36,12 +36,8 @@ def test_objects_without_a_conversion_print_their_fields() -> None:
 
 
 def test_unprintable_members_are_rejected_on_the_value() -> None:
-    with pytest.raises(TypeCheckError, match='its member of type `int64 \\| undefined` does not convert to string'):
-        _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => { let s = Slot(1)  printl"{s}"  return 0 }\n')
     with pytest.raises(TypeCheckError, match='no string conversion for this value'):
-        _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => { let s = Slot(1)  let t:string = s as string  return 0 }\n')
-
-
+        _compile('let Holder:type = [f:(n:int64):>int64]\nlet main = ():>int64 => { let h = Holder((n:int64):>int64 => n)  let t:string = h as string  return 0 }\n')
 def test_conversion_methods_take_no_arguments() -> None:
     with pytest.raises(UserError, match='`__as__` takes no arguments'):
         _compile('let Wrap:type = [v:int64 __as__ = (n:int64):>string => "x"]\nlet main = ():>int64 => { let w = Wrap(1)  return "{w}".length }\n')

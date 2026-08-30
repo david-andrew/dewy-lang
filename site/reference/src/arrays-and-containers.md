@@ -63,7 +63,7 @@ loop [name score] in scores
     printl"{name}: {score}"
 ```
 
-`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
+`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. `K` may be a union of string literals (`'0b' | '0t'`, an enumeration of allowed keys — such a union is a string at runtime), and `V` may be an object type or an optional (`int64 | undefined`); arrays likewise hold string-literal unions and optionals as elements. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
 
 ### Lookup
 

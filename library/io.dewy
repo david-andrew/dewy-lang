@@ -160,6 +160,7 @@ let print = <T>(value:T):>void => {
     else if value is? BigRational { _print_bigrational(value) }
     else if value is? Fixed { _print_fixed(value) }
     else if value is? BigInt { _print_bigint(value) }
+    else if value is? undefined { _print_string("undefined") }
     else {
         let text:string = value as string
         _print_string(text)

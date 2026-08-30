@@ -417,6 +417,46 @@ class _OptionalLowering:
             synthesized.append(LoweredFunction(symbol, literal))
         return synthesized
 
+    def _is_optional_element(self, element: ty.Type) -> bool:
+        """Container elements of optional type: `T | undefined` with a word or
+        string payload. Stored as one word — a pointer to an arena cell the
+        container owns (tag at 0, payload at 8)."""
+        payload = ty.optional_payload(ty.strip_refinement(element)) if not isinstance(element, str) else None
+        if payload is None:
+            return False
+        return (
+            payload == 'bool'
+            or ty.fixed_integer_layout(payload) is not None
+            or self._is_string_valued(payload)
+        )
+
+    def _optional_element_value(self, node: hir.AST, element_type: ty.Type) -> tuple[list[hir.AST], hir.AST]:
+        """A value stored into an optional-element container: a fresh arena cell."""
+        loc = node.loc
+        payload = ty.optional_payload(ty.strip_refinement(element_type))
+        assert payload is not None
+        name = self._new_array_name('optional_cell')
+        cell = hir.ExpressedIdentifier(loc, 'int64', name)
+        statements: list[hir.AST] = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', self._arena_allocation(self._int64_literal(loc, 16), loc)),
+        ]
+        statements.extend(self._optional_write(cell, node, payload))
+        return statements, cell
+
+    def _copy_optional_element(self, source_value: hir.AST, target_address: hir.AST, loc: Span) -> list[hir.AST]:
+        """A copy of a container's optional element: its own arena cell (tag and payload words copied)."""
+        name = self._new_array_name('optional_copy')
+        cell = hir.ExpressedIdentifier(loc, 'int64', name)
+        source_name = self._new_array_name('optional_source')
+        source = hir.ExpressedIdentifier(loc, 'int64', source_name)
+        return [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', source_name, 'int64', replace(source_value, type='int64') if isinstance(source_value, hir.ExpressedIdentifier) else source_value),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', self._arena_allocation(self._int64_literal(loc, 16), loc)),
+            self._intrinsic_call('__store_i64__', [self._intrinsic_call('__load_i64__', [source], 'int64', loc), cell], ty.VOID_TYPE, loc),
+            self._intrinsic_call('__store_i64__', [self._intrinsic_call('__load_i64__', [self._int64_binary('__add__', source, self._int64_literal(loc, 8), loc)], 'int64', loc), self._int64_binary('__add__', cell, self._int64_literal(loc, 8), loc)], ty.VOID_TYPE, loc),
+            self._intrinsic_call('__store_i64__', [cell, target_address], ty.VOID_TYPE, loc),
+        ]
+
     def _union_cell_allocation(
         self,
         members: tuple[ty.TypeExpr, ...],

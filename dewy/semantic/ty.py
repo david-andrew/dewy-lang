@@ -617,6 +617,17 @@ def dict_key_value(type_: TypeExpr) -> tuple[TypeExpr, TypeExpr] | None:
     return None
 
 
+def string_valued(type_: TypeExpr) -> bool:
+    """Whether every value of ``type_`` is a string (a string type, a string
+    literal, or a union of them): such values are one-word string handles,
+    so containers hold them the way they hold `string`."""
+    if isinstance(type_, TypeOr):
+        return all(string_valued(member) for member in type_.items)
+    if isinstance(type_, RefinedType):
+        return string_valued(type_.base)
+    return isinstance(type_, (StringType, StringLiteralType)) or type_ in ('string', 'grapheme', 'char')
+
+
 def strip_refinement(type_: TypeExpr) -> TypeExpr:
     return type_.base if isinstance(type_, RefinedType) else type_
 
@@ -696,6 +707,11 @@ def enum_members(type_: Type) -> tuple[TypeExpr, ...] | None:
         return None
     if not all(isinstance(member, (StringLiteralType, IntegerLiteralType)) for member in stripped.items):
         return None
+    if all(isinstance(member, StringLiteralType) for member in stripped.items):
+        # a union of string literals is a plain string handle (the value is the
+        # string), not a tag word: it lives in containers, prints, folds, and
+        # compares the way strings do
+        return None
     return tuple(sorted(stripped.items, key=lambda member: (0 if isinstance(member, IntegerLiteralType) else 1, repr(member))))
 
 
@@ -722,6 +738,8 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
         return None
     if enum_members(type_) is not None:
         return None
+    if string_valued(type_):
+        return None   # a union of string literals: one string handle, no tags
     # Canonical order: `undefined` first, then a deterministic sort, so every
     # spelling of the same member set (declared, narrowed, joined) numbers
     # its tags identically.
