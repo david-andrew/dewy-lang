@@ -137,3 +137,15 @@ Conversions from arbitrary integers to string representations require proof that
 ## Character Ranges
 
 A range whose unannotated anchors are one-grapheme strings advances in Unicode scalar order when each anchor contains exactly one scalar. Iteration skips the surrogate interval. Enumerating multi-scalar graphemes or natural-language collation order is unspecified.
+
+`chr(scalar)` is the one-scalar string of a Unicode scalar value (`chr(0x1F600)` is `"😀"`). The scalar's range, `0` to `0x10FFFF`, is a proof obligation at the call — a loop over `[0x41..0x5B)` proves it — and a surrogate code point, which no string can hold, yields the replacement character U+FFFD.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let letters:array<string> = []
+    loop i in [0x41..0x44) { letters.push(chr(i)) }
+    return letters.join.length      # "ABC": 3
+}
+```

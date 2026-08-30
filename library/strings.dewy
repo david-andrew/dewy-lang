@@ -143,3 +143,50 @@ let _string_replace = (text:string old:string new:string):>string => {
     let pieces = _string_split(text old)
     return pieces.join(new)
 }
+
+
+# ---- scalars
+
+# The one-scalar string of a Unicode scalar value. The range is a proof
+# obligation at the call (a loop over `[0..0x20)` proves it). A surrogate
+# code point (0xD800–0xDFFF) is not a scalar and cannot be in a string, so it
+# yields U+FFFD, the replacement character (a refinement cannot exclude a
+# range in the middle yet).
+let chr = (scalar:int64<scalar >=? 0 and scalar <? 0x110000>):>string => {
+    let code:int64 = scalar
+    if code >=? 0xD800 and code <=? 0xDFFF { code = 0xFFFD }
+    let bytes:array<uint8> = []
+    if code <? 0x80 {
+        bytes.push(code transmute uint8)
+    } else if code <? 0x800 {
+        bytes.push((0xC0 + (code >> 6)) transmute uint8)
+        bytes.push((0x80 + (code and 0x3F)) transmute uint8)
+    } else if code <? 0x10000 {
+        bytes.push((0xE0 + (code >> 12)) transmute uint8)
+        bytes.push((0x80 + ((code >> 6) and 0x3F)) transmute uint8)
+        bytes.push((0x80 + (code and 0x3F)) transmute uint8)
+    } else {
+        bytes.push((0xF0 + (code >> 18)) transmute uint8)
+        bytes.push((0x80 + ((code >> 12) and 0x3F)) transmute uint8)
+        bytes.push((0x80 + ((code >> 6) and 0x3F)) transmute uint8)
+        bytes.push((0x80 + (code and 0x3F)) transmute uint8)
+    }
+    match bytes as string|undefined {
+        text:string => return text
+        <undefined> => return ""   # unreachable: the bytes above are valid UTF-8
+    }
+}
+
+# ---- sets from other values: `set"0123"` (the graphemes), `set(values)` (the elements)
+
+let _set_of_graphemes = (text:string):>set<string> => {
+    let members:set<string> = set[]
+    loop g in text { members.add(g) }
+    return members
+}
+
+let _set_of_array = <T>(values:array<T>):>set<T> => {
+    let members:set<T> = set[]
+    loop v in values { members.add(v) }
+    return members
+}

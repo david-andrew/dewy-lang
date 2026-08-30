@@ -385,6 +385,9 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Non-exhaustive conditionals are statement-valued `void`.
 - [x] A type test the static types settle (`v is? string` on a concrete type — in a generic instance, on the type parameter) is decided during checking; only the live arm is checked, and a flow whose arms are all dead is its `else`. Generic declarations are checked in order (module-level calls to a generic work).
 - [x] Ambiguous readings: when exactly one reading of `f(x)` fails past its shape, its own error is the report (not the readings summary).
+- [x] Compile-time-only values materialize as their spelling where a value is needed: a type alias used as a value (`printl(BasePrefix)`, `"{T}"`, `T as string`), a function or an overload set (`"{@f}"` is `<(a:int64):>int64>`), and either passed to a generic's value parameter. Builtin type *expressions* (`int64 | string`) are still not values.
+- [x] `s is? '0b' | '0x'` on a runtime string is a membership test (equality with each member, the value read once) and narrows to the union; a test the static types refute (a three-grapheme string against two-grapheme members) is decided.
+- [x] `chr(scalar)` (`library/strings.dewy`): the range is a refinement obligation; surrogates yield U+FFFD because a refinement cannot yet exclude a range in the middle (`or` in conditions). `set"…"` / `set(values)` build a set from a string's graphemes or an array's elements.
 - [x] Generic instances record their provenance (`Binding.generic_instance`); the representation pass re-instantiates a generic for `BigInt` when an argument bound to a bare type parameter turns out big (`print__int64(cube)` → `print__BigInt(cube)`), as it re-picks the overload for an overload set.
 - [ ] Multi-value conditional results.
 

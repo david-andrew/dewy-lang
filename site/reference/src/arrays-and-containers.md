@@ -100,7 +100,7 @@ let present = "read" in? permissions
 let taken = permissions.pop("read")
 ```
 
-`s.add(x)` inserts a member. `x in? s` tests membership. `s.pop(x)` removes a proven member and yields it; `s.pop(x default=v)` removes `x` if present and yields it, else `v` (`default=undefined` makes the result `T | undefined`). `s.clear` empties the set; `s.length` counts members. Sets are not indexable and have no `keys`.
+`set"0123"` is the set of a string's graphemes and `set(values)` the set of an array's elements (`set(xs)` also drops duplicates). `s.add(x)` inserts a member. `x in? s` tests membership. `s.pop(x)` removes a proven member and yields it; `s.pop(x default=v)` removes `x` if present and yields it, else `v` (`default=undefined` makes the result `T | undefined`). `s.clear` empties the set; `s.length` counts members. Sets are not indexable and have no `keys`.
 
 Set operators produce new sets: `|`/`or` union, `&`/`and` intersection, `-` difference, `xor` symmetric difference. Operands must have the same element type. Literal members must currently be constants (duplicates collapse at compile time), and a set must not be mutated by a loop that iterates it.
 

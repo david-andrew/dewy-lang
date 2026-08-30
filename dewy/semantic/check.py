@@ -768,6 +768,10 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
                 ),
             )
         value = typecheck_and_resolve_inner(part.inner[0], ctx=ctx)
+        spelled = _spelling_string(value, ctx=ctx)
+        if spelled is not None:
+            parts.append(spelled)   # a type or a function: its spelling
+            continue
         require_valued(
             value.type,
             ctx.srcfile,
@@ -1108,6 +1112,11 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 ctx.declarations[name] = signature
                 return _complete_binding(ast, hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr), ctx=ctx)
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
+            if isinstance(expr, hir.TypeValue) and isinstance(right, p0.Atom):
+                # a type read by name is a value only where it converts to its
+                # spelling; a binding holding one would need types at runtime
+                # (`const Index = <int64>` declares an alias)
+                not_implemented(ctx.srcfile, right.loc, 'runtime type values')
             require_valued(expr.type, ctx.srcfile, expr.loc, 'declaration initializer')
             if keyword == 'let':
                 expr = _widen_inferred_let_value(expr, ctx=ctx)
@@ -2529,11 +2538,30 @@ def _decided_type_test(value_type: ty.Type, test: ty.TypeExpr, *, ctx: Context) 
     variants = list(value_type.items) if isinstance(value_type, ty.TypeOr) else [value_type]
     if any(ty.strip_refinement(variant) in (ty.TOP_TYPE, ty.INFERRED_TYPE) for variant in variants):
         return None
-    if _refine_type_test(value_type, test, matches=False, ctx=ctx) == ty.BOTTOM_TYPE:
+    if all(ctx.type_system.is_subtype(variant, test) for variant in variants):
         return True
-    if _refine_type_test(value_type, test, matches=True, ctx=ctx) == ty.BOTTOM_TYPE:
+    if all(_disjoint_types(variant, test, ctx=ctx) for variant in variants):
         return False
     return None
+
+
+def _disjoint_types(a: ty.TypeExpr, b: ty.TypeExpr, *, ctx: Context) -> bool:
+    """Whether no value has both types (`int64` and `string`; not `string` and
+    `'0x'`). Objects are exact — a value has one field list — so two object
+    types are disjoint unless one is the other's subtype."""
+    def members(type_: ty.TypeExpr) -> list[ty.TypeExpr]:
+        plain = ty.strip_refinement(type_)
+        return list(plain.items) if isinstance(plain, ty.TypeOr) else [plain]
+
+    def disjoint(x: ty.TypeExpr, y: ty.TypeExpr) -> bool:
+        x, y = ty.unfold(ty.strip_refinement(x)), ty.unfold(ty.strip_refinement(y))
+        if isinstance(x, ty.ObjectType) and isinstance(y, ty.ObjectType):
+            return not (ctx.type_system.is_subtype(x, y) or ctx.type_system.is_subtype(y, x))
+        if isinstance(x, ty.ObjectType) or isinstance(y, ty.ObjectType):
+            return True
+        return ctx.type_system.is_empty(ty.intersect(x, y))
+
+    return all(disjoint(x, y) for x in members(a) for y in members(b))
 
 
 def _refine_type_test(
@@ -2548,11 +2576,20 @@ def _refine_type_test(
         if isinstance(current, ty.TypeOr)
         else [cast(ty.TypeExpr, current)]
     )
-    selected = [
-        variant
-        for variant in variants
-        if ctx.type_system.is_subtype(variant, test) == matches
-    ]
+    selected: list[ty.TypeExpr] = []
+    for variant in variants:
+        if ctx.type_system.is_subtype(variant, test):
+            if matches:
+                selected.append(variant)
+        elif ctx.type_system.is_subtype(test, ty.strip_refinement(variant)):
+            # a runtime membership test (`s is? '0b' | '0x'` on a string):
+            # the value is one of the members when it passes, and stays a
+            # string when it fails
+            selected.append(test if matches else variant)
+        elif not _disjoint_types(variant, test, ctx=ctx):
+            selected.append(variant)   # overlapping: the test decides nothing statically
+        elif not matches:
+            selected.append(variant)
     return ty.union(*selected)
 
 
@@ -5062,6 +5099,24 @@ def _tcr_dict_literal(
             hir.ObjectField(block.loc, 'indices', hir.ArrayLiteral(block.loc, ty.ArrayType('int64', 0), [])),
             hir.ObjectField(block.loc, 'live', hir.Integer(block.loc, ty.IntegerLiteralType(count), '0d', count)),
         ],
+    )
+
+
+def _tcr_set_from(operand_ast: p0.AST, loc: Span, *, ctx: Context) -> hir.AST:
+    """`set"0123"` / `set(values)`: the set of a string's graphemes or an array's elements (`library/strings.dewy`)."""
+    if isinstance(operand_ast, p0.Block) and operand_ast.kind == '()' and len(operand_ast.inner) == 1:
+        operand_ast = operand_ast.inner[0]
+    operand = typecheck_and_resolve_inner(operand_ast, ctx=ctx)
+    require_valued(operand.type, ctx.srcfile, operand.loc, '`set` operand')
+    if _is_string_type(operand.type):
+        return _library_call('_set_of_graphemes', [operand], loc, ctx=ctx)
+    if isinstance(ty.unfold(ty.strip_refinement(operand.type)), ty.ArrayType):
+        return _library_call('_set_of_array', [operand], loc, ctx=ctx)
+    type_error(
+        ctx.srcfile,
+        '`set` takes a string or an array',
+        Pointer(span=operand.loc, message=f'this has type `{type_to_dewy(operand.type)}`'),
+        hint='`set[a b c]` lists members; `set"abc"` takes a string\'s graphemes and `set(values)` an array\'s elements',
     )
 
 
@@ -8559,6 +8614,14 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         if spread is not None:
             not_implemented(ctx.srcfile, spread.loc, 'spreading into a set literal (members need a runtime add)')
         return _tcr_set_literal(binop.right, binop.loc, expected=expected, ctx=ctx)
+    if (
+        isinstance(binop.op, (t2.QJuxtapose, t2.IndexJuxtapose, t2.CallJuxtapose))
+        and isinstance(binop.left, p0.Atom)
+        and isinstance(binop.left.item, t1.Identifier)
+        and binop.left.item.name == 'set'
+        and 'set' not in ctx.declarations
+    ):
+        return _tcr_set_from(binop.right, binop.loc, ctx=ctx)
     if isinstance(binop.op, t2.QJuxtapose):
         constructor = _type_constructor_target(binop.left, ctx=ctx)
         if constructor is not None:
@@ -11299,6 +11362,11 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         name is None and any(previous is not None for previous in argument_order[:index])
         for index, name in enumerate(argument_order)
     )
+    if isinstance(left.type, ty.FunctionType) and left.type.type_params:
+        # a generic's value parameter receives a compile-time-only argument
+        # (a type, a function) as its spelling
+        pos_args = [_spelling_string(arg, ctx=ctx) or arg for arg in pos_args]
+        kw_args = {name: _spelling_string(arg, ctx=ctx) or arg for name, arg in kw_args.items()}
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:
@@ -11661,6 +11729,24 @@ def _refine_binary_materialization_target(
     return target
 
 
+def _spelling_string(node: hir.AST, *, ctx: Context) -> hir.String | None:
+    """A compile-time-only value — a type, a function, an overload set — as
+    the string it is spelled as: `int64 | string`, `<(a:int64):>int64>`.
+    These have no runtime representation, so where a value is needed (an
+    interpolation field, `as string`, a generic's value parameter) this
+    spelling is the value."""
+    if isinstance(node, hir.Place):
+        node = node.target
+    if isinstance(node, hir.TypeValue):
+        value = node.value
+        text = node.name if isinstance(value, ty.GenericTypeAlias) and node.name is not None else type_to_dewy(value)
+    elif isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
+        text = type_to_dewy(node.type)
+    else:
+        return None
+    return hir.String(node.loc, ty.StringLiteralType(text), text)
+
+
 def _explicit_value_conversion(
     node: hir.AST,
     target: ty.Type,
@@ -11668,6 +11754,10 @@ def _explicit_value_conversion(
     *,
     ctx: Context,
 ) -> hir.AST:
+    if _is_string_type(target):
+        spelled = _spelling_string(node, ctx=ctx)
+        if spelled is not None:
+            return spelled
     source = node.type
     target = _refine_binary_materialization_target(source, target)
     target = _refine_string_materialization_target(source, target)
@@ -11990,7 +12080,14 @@ def tcr_identifier(
         if declared_type == ty.TYPE_TYPE or (
             binding is not None and binding.type_value is not None
         ):
-            not_implemented(ctx.srcfile, id.loc, 'runtime type values')
+            # a type as a value: it has no runtime representation, but it
+            # converts to its spelling (`'{T}'`, `T as string`, `print(T)`)
+            value = binding.type_value if binding is not None else None
+            if value is None and binding is not None and binding.id in ctx.type_alias_asts:
+                value = _resolve_type_alias(binding, ctx=ctx)
+            if value is None:
+                not_implemented(ctx.srcfile, id.loc, 'runtime type values')
+            return hir.TypeValue(id.loc, ty.TYPE_TYPE, value, id.name)
         resolved_type = ty.unfold(ty.strip_refinement(
             ctx.refinements.get(binding.id, declared_type)
             if refined and binding is not None

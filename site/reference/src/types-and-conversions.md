@@ -75,6 +75,24 @@ General runtime unions are tag-and-payload cells; `undefined`, when present, is 
 
 Narrowing applies to member routes as well as bindings: after `if node.next is? Node`, `node.next` reads as `Node` until the field or its object is assigned. A store into a union field always accepts the field's declared type, and forgets any narrowing of that route.
 
+A type test against a union of string literals is a membership test when the value is a runtime string: `head is? BasePrefix` with `BasePrefix:type = '0b' | '0t' | '0x'` compares `head` with each member, and narrows it to the union where the test passes. A test the static types settle is decided while checking (a three-grapheme string is never a two-grapheme member; see [Generic Functions](#generic-functions)).
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let BasePrefix:type = '0b' | '0t' | '0x'
+
+let classify = (text:string):>string => {
+    if text.length >=? 2 {
+        let head = text[..2)
+        if head is? BasePrefix { return head }
+    }
+    return "none"
+}
+
+let main = ():>int64 => classify("0x1f").length     # 2
+```
+
 ### Recursive Types
 
 A type alias may refer to itself, but only as a union member of one of its fields:
@@ -207,7 +225,7 @@ let main = ():>int64 => {
 }
 ```
 
-A container, or an object whose type declares no `__as__` to `string`, converts to `string` as its literal syntax (`[1 2 3]`, `[x=1 y=2]`; see [Printing](strings.md#printing)). Any other value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this value`). A type converts to several targets by adding conversions with `&=` — `__as__ &= ():>int64 => x * 100 + y` after the first — and `x as T` picks the one whose result fits `T`.
+A type, a function, or an overload set has no runtime representation; where a value is needed — `T as string`, an interpolation field `"{T}"`, `printl(T)`, a generic's value parameter — it is its spelling (`'0b' | '0t'`, `<(a:int64):>int64>`), which makes such things printable while debugging. A container, or an object whose type declares no `__as__` to `string`, converts to `string` as its literal syntax (`[1 2 3]`, `[x=1 y=2]`; see [Printing](strings.md#printing)). Any other value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this value`). A type converts to several targets by adding conversions with `&=` — `__as__ &= ():>int64 => x * 100 + y` after the first — and `x as T` picks the one whose result fits `T`.
 
 ## `transmute`
 

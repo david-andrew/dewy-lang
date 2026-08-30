@@ -3704,6 +3704,29 @@ class _Lowerer(
         flow_prelude, result = self._extract_expression(flow)
         return [*prelude, *flow_prelude], result
 
+    def _extract_string_membership_test(self, node: hir.TypeTest) -> tuple[list[hir.AST], hir.AST] | None:
+        """`s is? '0b' | '0x'` on a runtime string: equality with each member, the value read once."""
+        test = node.test_type
+        members = list(test.items) if isinstance(test, ty.TypeOr) else [test]
+        if not members or not all(isinstance(member, ty.StringLiteralType) for member in members):
+            return None
+        value_type = node.value.type
+        if isinstance(value_type, ty.StringLiteralType) or not self._is_string_valued(value_type):
+            return None   # a literal folds statically; other values are not strings
+        loc = node.loc
+        prelude, word = self._extract_expression(node.value)
+        name = self._new_string_temp(loc, 'int64', 'tested').name
+        prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(word, type='int64') if isinstance(word, hir.ExpressedIdentifier) else word))
+        subject = hir.ExpressedIdentifier(loc, ty.StringType(), name)
+        chain: hir.AST | None = None
+        for member in members:
+            assert isinstance(member, ty.StringLiteralType)
+            comparison = hir.StringEqual(loc, 'bool', subject, hir.String(loc, member, member.value), node.negated)
+            chain = comparison if chain is None else hir.ShortCircuit(loc, 'bool', 'and' if node.negated else 'or', chain, comparison)
+        assert chain is not None
+        chain_prelude, expression = self._extract_expression(chain)
+        return [*prelude, *chain_prelude], expression
+
     def _extract_enum_type_test(self, node: hir.TypeTest) -> tuple[list[hir.AST], hir.AST] | None:
         """`c is? 'A'` on an enum word: a comparison of the word with the member's tag."""
         members = self._enum_of(node.value)
@@ -3800,6 +3823,9 @@ class _Lowerer(
             enum_test = self._extract_enum_type_test(node)
             if enum_test is not None:
                 return enum_test
+            membership = self._extract_string_membership_test(node)
+            if membership is not None:
+                return membership
             # Union operands test tags at runtime; fully narrowed operands
             # fold statically below. A union-typed identifier uses its
             # storage members, whose indexes stay physical even when the
