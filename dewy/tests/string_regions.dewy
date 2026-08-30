@@ -1,0 +1,34 @@
+# Frame regions: a function's slices, decoded bytes, and joins that no
+# `return` reaches live in a region released at every exit, so string work
+# in a loop runs in constant memory; what is returned or stored stays in
+# the arena (stores copy), and views of parameters return their data intact.
+let describe = (line:string):>int64 => {
+    let parts = line.trim.split", "
+    let joined:string = parts.join"-"
+    let n:int64 = 0
+    loop part in parts { n += part.length }
+    match joined.find"-" { i:int64 => { n += i }  <undefined> => {} }
+    return n + joined.length                       # 14 + 5 + 16 = 35
+}
+let first_word = (text:string):>string => {
+    match text.find" " { i:int64 => { if i >=? 1 and i <? text.length { return text[0..i) } }  <undefined> => {} }
+    return text
+}
+let decoded_upper = (bytes:array<uint8>):>string => {
+    match bytes as string|undefined {
+        s:string => return s.replace("a" "A")     # a join built for the return: arena
+        <undefined> => return ""
+    }
+}
+let main = ():>int64 => {
+    let rounds:int64 = 0
+    let total:int64 = 0
+    loop rounds <? 2000 { total = describe("  alpha, beta, gamma  ")  rounds += 1 }
+    let kept:array<string> = []
+    kept.push(first_word("hello world"))          # a returned view, then stored: copied into the arena
+    kept.push(decoded_upper([97 98 97]))
+    let extra:int64 = 0
+    loop k in kept { extra += k.length }          # 5 + 3
+    if kept[0] =? "hello" and kept[1] =? "AbA" { extra += 1 }
+    return total + extra - 2                       # 35 + 9 - 2 = 42
+}

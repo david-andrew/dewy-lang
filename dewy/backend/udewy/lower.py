@@ -236,6 +236,9 @@ class _Lowerer(
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
+        self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
+        self.returned_string_nodes: set[int] = set()   # string expressions a `return` may hand out (`_returned_string_node_ids`)
+        self.array_element_targets: set[int] = set()   # iterator targets over arrays of strings
         self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
         self.borrowed_fields: dict[str, set[str]] = {}          # object local name -> fields that borrow (never adopted on `return`)
         self.object_literal_contexts: list[
@@ -791,9 +794,14 @@ class _Lowerer(
             binding_id: name for binding_id, name in literal.object_fields
         }
         previous_literal = self.current_literal
-        self.current_literal = literal
-        self.moved_uses = self._compute_moves(literal)
         transformed_body = self._require_node(self._transform_node(literal.body))
+        # the analyses look at the nodes the lowering will see: the transformed body
+        analysis_literal = replace(literal, body=transformed_body)
+        self.current_literal = analysis_literal
+        self.moved_uses = self._compute_moves(analysis_literal)
+        self.returned_string_nodes = self._returned_string_node_ids(analysis_literal)
+        self.array_element_targets = self._array_element_string_targets(analysis_literal)
+        self.frame_region = None
         if default_prologue:
             if isinstance(transformed_body, hir.Block):
                 transformed_body = replace(
@@ -2782,7 +2790,14 @@ class _Lowerer(
             self.loop_signal_kind = None
         self.lower_loop_depth = 0
 
-        lowered = self._insert_releases(self._lower_function_body_inner(node, rettype))
+        lowered = self._lower_function_body_inner(node, rettype)
+        region = self.frame_region
+        exit_statements = [self._region_call('_region_release', [region], node.loc, ty.VOID_TYPE)] if region is not None else []
+        lowered = self._insert_releases(lowered, exit_statements)
+        if region is not None and isinstance(lowered, hir.Block):
+            # the region is created on entry (a header from the free list; chunks on first use)
+            lowered = replace(lowered, items=[hir.Declare(node.loc, ty.VOID_TYPE, 'let', region.name, 'int64', self._region_call('_region_new', [], node.loc, 'int64')), *lowered.items])
+        self.frame_region = None
         if uses_nonlocal_exit:
             declarations = self._loop_signal_declarations(node.loc)
             if isinstance(lowered, hir.Block) and lowered.scoped:
@@ -3013,7 +3028,7 @@ class _Lowerer(
         walk(literal.body)
         return found
 
-    def _insert_releases(self, body: hir.AST) -> hir.AST:
+    def _insert_releases(self, body: hir.AST, exit_statements: list[hir.AST] = ()) -> hir.AST:
         """Drop-at-scope-exit for owned array locals, over a lowered function body.
 
         Every exit of a scope releases the arrays its locals own (when the
@@ -3023,9 +3038,10 @@ class _Lowerer(
         ends every scope inside the loop it leaves. Names are unique within
         a function, so the lowered tree's blocks are the scopes.
         """
-        if not self.owned_array_names or not isinstance(body, hir.Block):
+        if (not self.owned_array_names and not exit_statements) or not isinstance(body, hir.Block):
             return body
         owned_names = self.owned_array_names
+        exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]]) -> list[hir.AST]:
             return [self._release_owned_array(local, local.loc) for scope in scopes for local in reversed(scope)]
@@ -3049,6 +3065,7 @@ class _Lowerer(
                         items.append(hir.Declare(item.loc, ty.VOID_TYPE, 'let', temp.name, temp.type, value))
                         value = temp
                     items.extend(releases(live))
+                    items.extend(exit_statements)
                     items.append(replace(item, item=value))
                 elif isinstance(item, (hir.Break, hir.Continue)):
                     inner = loop_marks[-1] if loop_marks else len(scopes)
@@ -3062,6 +3079,8 @@ class _Lowerer(
                     items.append(item)
             if here and not (items and diverges(items[-1])):
                 items.extend(releases([here]))
+            if not scopes and exit_statements and not (items and diverges(items[-1])):
+                items.extend(exit_statements)   # the function body's fall-through exit
             return replace(block, items=items)
 
         def walk_body(node: hir.AST, scopes: list[list[hir.ExpressedIdentifier]], loop_marks: list[int]) -> hir.AST:

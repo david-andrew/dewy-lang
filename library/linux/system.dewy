@@ -81,6 +81,75 @@ let _arena_release = (block:int64 size:int64):>void => {
     return void
 }
 
+# Regions — the scoped-arena tier. A region is a bump allocator over 64 KB
+# chunks (an oversized allocation gets a chunk of its own) that is released
+# as a whole: its chunks go back to a free list for the next region. The
+# compiler gives a function a *frame region* for the string storage that
+# provably never leaves the frame — slices, decoded bytes, joins — and
+# releases it at every exit. A header is three words: cursor, end, first
+# chunk; a chunk starts with two words: next chunk, size.
+let _region_headers:int64 = 0     # free list of headers
+let _region_chunks:int64 = 0      # free list of 65536-byte chunks
+
+let _region_new = ():>int64 => {
+    let header:int64 = _region_headers
+    if header =? 0 { header = _arena_alloc(24) } else { _region_headers = __load_i64__(header) }
+    __store_i64__(0 header)
+    let end_address:int64 = header + 8
+    __store_i64__(0 end_address)
+    let first_address:int64 = header + 16
+    __store_i64__(0 first_address)
+    return header
+}
+
+let _region_alloc = (region:int64 size:int64):>int64 => {
+    let aligned:int64 = ((size + 7) // 8) * 8
+    let end_address:int64 = region + 8
+    let cursor:int64 = __load_i64__(region)
+    let limit:int64 = __load_i64__(end_address)
+    if cursor + aligned >? limit {
+        let chunk_size:int64 = 65536
+        if aligned + 16 >? chunk_size { chunk_size = aligned + 16 }
+        let chunk:int64 = 0
+        if chunk_size =? 65536 and _region_chunks not=? 0 {
+            chunk = _region_chunks
+            _region_chunks = __load_i64__(chunk)
+        } else {
+            chunk = _arena_alloc(chunk_size)
+        }
+        let first_address:int64 = region + 16
+        __store_i64__(__load_i64__(first_address) chunk)
+        let size_address:int64 = chunk + 8
+        __store_i64__(chunk_size size_address)
+        __store_i64__(chunk first_address)
+        cursor = chunk + 16
+        limit = chunk + chunk_size
+        __store_i64__(limit end_address)
+    }
+    __store_i64__(cursor + aligned region)
+    return cursor
+}
+
+let _region_release = (region:int64):>void => {
+    let first_address:int64 = region + 16
+    let chunk:int64 = __load_i64__(first_address)
+    loop chunk not=? 0 {
+        let next:int64 = __load_i64__(chunk)
+        let size_address:int64 = chunk + 8
+        let size:int64 = __load_i64__(size_address)
+        if size =? 65536 {
+            __store_i64__(_region_chunks chunk)
+            _region_chunks = chunk
+        } else {
+            _arena_release(chunk size)
+        }
+        chunk = next
+    }
+    __store_i64__(_region_headers region)
+    _region_headers = region
+    return void
+}
+
 # Process exit: exit_group(2) is syscall 231. The checker has no
 # never-returning functions yet, so the signature says `void`; callers that
 # need divergence (the `$runtime_assert` failure path) mark it themselves.

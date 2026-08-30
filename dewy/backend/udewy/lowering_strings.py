@@ -2319,6 +2319,7 @@ class _StringLowering:
         returned or stored), re-segmented so clusters may span the joins."""
         loc = node.loc
         statements: list[hir.AST] = []
+        frame = self._stays_in_frame(node)
 
         def declare(suffix: str, value: hir.AST) -> hir.ExpressedIdentifier:
             name = self._new_string_temp(loc, 'int64', suffix).name
@@ -2371,7 +2372,7 @@ class _StringLowering:
                     '__mul__', separator_length, self._int64_binary('__sub__', count, self._int64_literal(loc, 1), loc), loc,
                 )))], True),
             )], None))
-        out = declare('join_out', self._arena_allocation(add(total, self._int64_literal(loc, 1)), loc))
+        out = declare('join_out', self._string_allocation(add(total, self._int64_literal(loc, 1)), loc, frame=frame))
         cursor = declare('join_cursor', self._int64_literal(loc, 0))
         statements.append(assign(index, self._int64_literal(loc, 0)))
         piece = declare('join_piece', self._int64_literal(loc, 0))
@@ -2396,15 +2397,15 @@ class _StringLowering:
         statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
             loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, count, loc), hir.Block(loc, ty.VOID_TYPE, copy_body, True),
         )], None))
-        boundaries = declare('join_boundaries', self._arena_allocation(
-            self._int64_binary('__mul__', add(total, self._int64_literal(loc, 1)), self._int64_literal(loc, 4), loc), loc,
+        boundaries = declare('join_boundaries', self._string_allocation(
+            self._int64_binary('__mul__', add(total, self._int64_literal(loc, 1)), self._int64_literal(loc, 4), loc), loc, frame=frame,
         ))
         segmentation, grapheme_count = self._utf8_segmentation(loc, out, total, boundaries)
         statements.extend(segmentation)
         descriptor = self._new_string_temp(loc, ty.StringType(), 'joined')
         descriptor_word = replace(descriptor, type='int64')
         statements.extend([
-            hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', self._arena_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc)),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame)),
             self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, out, loc),
             self._store_i64_field(descriptor_word, STRING_BYTE_LENGTH_OFFSET, total, loc),
             self._store_i64_field(descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
@@ -2487,7 +2488,7 @@ class _StringLowering:
             hir.Block(loc, ty.VOID_TYPE, [hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, [assign(valid, hir.Bool(loc, 'bool', False))], True))], True),
         )], None))
         cell = declare('decoded', 'int64', self._optional_allocation(loc))
-        build, descriptor = self._string_from_bytes(data, length, loc)
+        build, descriptor = self._string_from_bytes(data, length, loc, frame=self._stays_in_frame(node))
         statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
             loc, ty.VOID_TYPE, valid,
             hir.Block(loc, ty.VOID_TYPE, [
@@ -2503,6 +2504,133 @@ class _StringLowering:
 
     def _has_arena(self) -> bool:
         return any(candidate.logical_name.endswith('_arena_alloc') for candidate in self.functions)
+
+    # ---- frame regions ----
+    # String storage that provably never leaves the frame — a view, decoded
+    # bytes, a join that no `return` reaches (`_returned_string_nodes`; stores
+    # copy frame strings into the arena already) — comes from the function's
+    # frame region, released whole at every exit. Everything a return may
+    # reach stays in the process arena, as before.
+    def _string_allocation(self, size: hir.AST, loc: Span, *, frame: bool) -> hir.AST:
+        if frame and not self.lowering_module_startup and self.current_literal is not None and self._has_arena():
+            region = self._frame_region(loc)
+            function = next(candidate for candidate in self.functions if candidate.logical_name.endswith('_region_alloc'))
+            function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+            return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, function_type, function.symbol), [region, size], {})
+        if not self._has_arena():
+            return self._intrinsic_call('__static_alloca__' if self.lowering_module_startup else '__alloca__', [size], 'int64', loc)
+        return self._arena_allocation(size, loc)
+
+    def _frame_region(self, loc: Span) -> hir.ExpressedIdentifier:
+        """The current function's region (declared at entry, released at every exit, on first use)."""
+        if self.frame_region is None:
+            self.frame_region = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'region').name)
+        return replace(self.frame_region, loc=loc)
+
+    def _region_call(self, name: str, arguments: list[hir.AST], loc: Span, result: ty.Type) -> hir.FunctionCall:
+        function = next(candidate for candidate in self.functions if candidate.logical_name.endswith(name))
+        function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64') for _ in arguments], [], None, result)
+        return hir.FunctionCall(loc, result, hir.ExpressedIdentifier(loc, function_type, function.symbol), arguments, {})
+
+    def _stays_in_frame(self, node: hir.AST) -> bool:
+        """Whether a string built by ``node`` may live in the frame region (no `return` reaches it)."""
+        return id(node) not in self.returned_string_nodes
+
+    def _returned_string_node_ids(self, literal: hir.FunctionLiteral) -> set[int]:
+        """Every string expression a `return` may hand to the caller: the returned expressions, the
+        initializers of returned locals, the sources of returned views, the string arguments of
+        returned calls (a callee may return an argument's descriptor)."""
+        reached: set[int] = set()
+        candidates = self._local_initializers(literal)
+        params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
+
+        def mark(expr: hir.AST) -> None:
+            expr = self._unwrap_transparent(expr)
+            if id(expr) in reached:
+                return
+            reached.add(id(expr))
+            if isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
+                mark(expr.expr)
+            elif isinstance(expr, (hir.StringSlice, hir.StringIndex)):
+                mark(expr.string)
+            elif isinstance(expr, hir.ExpressedIdentifier):
+                if expr.binding_id is not None and expr.binding_id not in params:
+                    for candidate in candidates.get(expr.binding_id, []):
+                        mark(candidate)
+            elif isinstance(expr, hir.FunctionCall):
+                for argument in [*expr.pos_args, *expr.kw_args.values()]:
+                    if self._is_string_valued(argument.type):
+                        mark(argument)
+                if isinstance(expr.func, hir.ArrayMethod):
+                    mark(expr.func.array)
+            elif isinstance(expr, hir.Flow):
+                for arm in expr.arms:
+                    mark(arm.body)
+                if expr.default is not None:
+                    mark(expr.default)
+            elif isinstance(expr, hir.Block) and expr.items:
+                mark(expr.items[-1])
+            elif isinstance(expr, hir.InterpolatedString):
+                for part in expr.parts:
+                    mark(part)
+            else:
+                # a payload read of a `match` temporary, a member access, …: whatever it reads may be handed out
+                for field_ in dataclasses.fields(expr):
+                    value = getattr(expr, field_.name)
+                    for child in (value if isinstance(value, (list, tuple)) else [value]):
+                        if isinstance(child, hir.AST) and not isinstance(child, hir.FunctionLiteral):
+                            mark(child)
+
+        for expr in self._returned_string_expressions(literal):
+            mark(expr)
+        return reached
+
+    def _local_initializers(self, literal: hir.FunctionLiteral) -> dict[int, list[hir.AST]]:
+        """Every local's initializers and assigned values, by binding (any type: a `match` temporary is an optional)."""
+        found: dict[int, list[hir.AST]] = {}
+
+        def walk(node: object) -> None:
+            if isinstance(node, hir.FunctionLiteral) and node is not literal:
+                return
+            if isinstance(node, hir.Declare) and node.binding_id is not None:
+                found.setdefault(node.binding_id, []).append(node.expr)
+            if isinstance(node, hir.Assign) and node.target.binding_id is not None:
+                found.setdefault(node.target.binding_id, []).append(node.value)
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (value if isinstance(value, (list, tuple)) else [value]):
+                        if isinstance(child, hir.AST):
+                            walk(child)
+                        elif isinstance(child, hir.ObjectField):
+                            walk(child.value)
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                walk(item)
+
+        walk(literal.body)
+        return found
+
+    def _array_element_string_targets(self, literal: hir.FunctionLiteral) -> set[int]:
+        """Iterator targets over arrays of strings: their values are the elements (arena or static), not frame strings."""
+        targets: set[int] = set()
+
+        def walk(node: object) -> None:
+            if isinstance(node, hir.FunctionLiteral) and node is not literal:
+                return
+            if isinstance(node, hir.IteratorExpression) and isinstance(node.iterable.type, ty.ArrayType) and node.target.binding_id is not None:
+                targets.add(node.target.binding_id)
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (value if isinstance(value, (list, tuple)) else [value]):
+                        if isinstance(child, hir.AST):
+                            walk(child)
+                        elif isinstance(child, hir.ObjectField):
+                            walk(child.value)
+
+        walk(literal.body)
+        return targets
 
     def _string_storage(self, node: hir.AST, *, visiting: set[int] | None = None) -> str:
         """Where a string value's bytes live: `static`, `arena`, `frame`, or `caller` (a parameter's, unknown here).
@@ -2521,7 +2649,8 @@ class _StringLowering:
             return self._string_storage(node.expr, visiting=visiting)
         if isinstance(node, hir.RepresentationCast):
             if isinstance(node.expr.type, ty.ArrayType):
-                return 'arena'   # `bytes as string | undefined`: built in the arena
+                # `bytes as string | undefined`: built in the frame region unless a return reaches it
+                return 'frame' if self._stays_in_frame(node) else 'arena'
             return self._string_storage(node.expr, visiting=visiting)
         if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):
             return 'static'
@@ -2532,10 +2661,10 @@ class _StringLowering:
         if isinstance(node, (hir.Index, hir.MemberAccess)):
             return 'arena'   # elements and fields are copied into the arena when stored
         if isinstance(node, hir.ArrayMethod):
-            return 'arena' if node.name == 'join' else 'frame'
+            return 'frame'
         if isinstance(node, hir.FunctionCall):
             if isinstance(node.func, hir.ArrayMethod) and node.func.name == 'join':
-                return 'arena'   # `xs.join` / `xs.join(sep)` build in the arena
+                return 'frame' if self._stays_in_frame(node) else 'arena'   # `xs.join` builds in the frame region unless returned
             return 'frame'   # copied into this frame, or a callee's view of a caller's string
         if isinstance(node, hir.ExpressedIdentifier):
             literal = self.current_literal
@@ -2549,7 +2678,12 @@ class _StringLowering:
                 return 'frame'
             candidates = self._string_local_candidates(literal).get(node.binding_id)
             if not candidates:
-                return 'static'   # a global: static storage
+                if node.binding_id in self.array_element_targets:
+                    return 'arena'    # `loop name in names`: the element, copied into the arena when it was stored
+                binding = self.identifier_bindings.get(id(node))
+                if binding is not None and binding.owner_function is None:
+                    return 'static'   # a global: static storage
+                return 'frame'        # a string iterator target or another hidden local: frame storage
             visiting.add(node.binding_id)
             storages = {self._string_storage(candidate, visiting=visiting) for candidate in candidates}
             visiting.discard(node.binding_id)
@@ -2598,8 +2732,10 @@ class _StringLowering:
         data_pointer: hir.AST,
         byte_length: hir.ExpressedIdentifier,
         loc: Span,
+        *,
+        frame: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Copy ``byte_length`` bytes into the arena and build a segmented string."""
+        """Copy ``byte_length`` bytes into the arena (or the frame region) and build a segmented string."""
         statements: list[hir.AST] = []
 
         def declare(suffix: str, value: hir.AST) -> hir.ExpressedIdentifier:
@@ -2609,8 +2745,8 @@ class _StringLowering:
 
         data = declare(
             'data',
-            self._arena_allocation(
-                self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc), loc
+            self._string_allocation(
+                self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc), loc, frame=frame
             ),
         )
         index = declare('copy_index', self._int64_literal(loc, 0))
@@ -2658,14 +2794,14 @@ class _StringLowering:
         )
         boundaries = declare(
             'boundaries',
-            self._arena_allocation(
+            self._string_allocation(
                 self._int64_binary(
                     '__mul__',
                     self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc),
                     self._int64_literal(loc, 4),
                     loc,
                 ),
-                loc,
+                loc, frame=frame,
             ),
         )
         segmentation, grapheme_count = self._utf8_segmentation(loc, data, byte_length, boundaries)
@@ -2675,7 +2811,7 @@ class _StringLowering:
         statements.extend([
             hir.Declare(
                 loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64',
-                self._arena_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+                self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame),
             ),
             self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, data, loc),
             self._store_i64_field(descriptor_word, STRING_BYTE_LENGTH_OFFSET, byte_length, loc),
@@ -3824,15 +3960,11 @@ class _StringLowering:
         address = self._int64_binary('__add__', boundaries, offset, loc)
         return self._intrinsic_call('__load_u32__', [address], 'uint32', loc)
 
-    def _view_allocation(self, loc: Span) -> hir.AST:
-        """Storage for one view descriptor: the arena when the prelude provides
-        one, else a fresh frame allocation per evaluation (a prelude-less
-        program has no growable arrays for a view to escape into)."""
-        has_arena = any(candidate.logical_name.endswith('_arena_alloc') for candidate in self.functions)
-        size = self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)
-        if has_arena:
-            return self._arena_allocation(size, loc)
-        return self._intrinsic_call('__static_alloca__' if self.lowering_module_startup else '__alloca__', [size], 'int64', loc)
+    def _view_allocation(self, loc: Span, *, frame: bool = False) -> hir.AST:
+        """Storage for one view descriptor: the frame region when no return
+        reaches the view, else the arena; a prelude-less program has no
+        arena and uses a fresh frame allocation per evaluation."""
+        return self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame)
 
     def _string_view(
         self,
@@ -3841,6 +3973,8 @@ class _StringLowering:
         count: hir.AST,
         type_: ty.Type,
         loc: Span,
+        *,
+        frame: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         # A view's descriptor lives in the arena: a slice or indexed grapheme
         # can escape (pushed into an array, returned, stored in a field), and
@@ -3874,7 +4008,7 @@ class _StringLowering:
                 'let',
                 target.name,
                 'int64',
-                self._view_allocation(loc),
+                self._view_allocation(loc, frame=frame),
             ),
             self._store_i64_field(
                 descriptor,
@@ -4022,6 +4156,7 @@ class _StringLowering:
             count,
             node.type,
             node.loc,
+            frame=self._stays_in_frame(node),
         )
         return [*prelude, *view_prelude], view
 
