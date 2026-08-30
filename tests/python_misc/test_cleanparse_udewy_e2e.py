@@ -474,13 +474,13 @@ def test_source_suffix_does_not_affect_typing(tmp_path: Path) -> None:
 def test_top_level_codegen_preserves_startup_before_main() -> None:
     emitted = codegen(SrcFile.from_path(fixtures / 'top_level_then_main.dewy'))
 
-    assert 'let value:int64 = 0' in emitted
-    assert 'let result:int64 = 0' in emitted
+    assert 'let value:int64 = 1' in emitted    # a literal-initialized scalar global carries its value
+    assert 'let result:int64 = 0' in emitted   # a computed one is stored at startup
     assert 'let __dewy_user_main = ():>int64' in emitted
     assert 'let __dewy_top_level = ():>void' in emitted
     assert 'let main = ():>int64' in emitted
     startup = emitted.index('let __dewy_top_level')
-    assert emitted.index('value = 1', startup) < emitted.index('value = value + 1', startup)
+    assert 'value = 1\n' not in emitted[startup:]
     assert emitted.index('value = value + 1', startup) < emitted.index(
         'result = value + 40',
         startup,

@@ -271,7 +271,7 @@ let main = ():>int64 => bare()
     emitted = codegen(SrcFile.from_path(entry))
 
     assert emitted.count('let __dewy_module_prelude_path_p') == 1
-    assert emitted.count('let __dewy_module_1_shared_shared:int64 = 0') == 1
+    assert emitted.count('let __dewy_module_1_shared_shared:int64 = 40') == 1
 
 
 @pytest.mark.parametrize(
@@ -371,8 +371,9 @@ let main = ():>int64 => left() + right()
     assert emitted.count('let __dewy_module_prelude_path_p') == 1
     assert '__dewy_module_2_left_private' in emitted
     assert '__dewy_module_3_right_private' in emitted
-    assert emitted.index('__dewy_module_1_common_shared = 20') < emitted.index(
-        '__dewy_module_2_left_private = 1'
+    # literal globals carry their values; dependency order shows in the declarations
+    assert emitted.index('let __dewy_module_1_common_shared:int64 = 20') < emitted.index(
+        'let __dewy_module_2_left_private:int64 = 1'
     )
 
 

@@ -279,14 +279,15 @@ let value = 42
 let main = () => value
 """)
 
-    assert 'let value:int = 0' in emitted
-    assert 'let __dewy_user_main = ():>int' in emitted
+    assert 'let value:int = 42' in emitted   # abstract `int` storage, carrying its literal
     assert 'let main = ():>int' in emitted
+    assert '__dewy_user_main' not in emitted  # nothing needs startup
 
 
 def test_void_main_wrapper_runs_startup_then_returns_void() -> None:
     emitted = _codegen("""
-let value:int64 = 7   # a zero initializer needs no startup; a nonzero one does
+let value:int64 = 7
+value = value + 1     # top-level work: the module needs startup
 let main = ():>void => {
     value = 1
 }
@@ -300,14 +301,18 @@ let main = ():>void => {
     assert 'return void' in emitted[wrapper:]
 
 
-def test_top_level_const_uses_private_mutable_startup_storage() -> None:
+def test_top_level_literal_scalars_carry_their_value() -> None:
+    """A literal-initialized scalar global is emitted with its value: no startup store, and no startup at all here."""
     emitted = _codegen("""
 const value:int64 = 42
+let flag:bool = true
 let main = ():>int64 => value
 """)
 
-    assert 'let value:int64 = 0' in emitted
-    assert 'value = 42' in emitted
+    assert 'let value:int64 = 42' in emitted
+    assert 'let flag:bool = true' in emitted
+    assert 'value = 42' not in emitted.replace('let value:int64 = 42', '')
+    assert '__dewy_top_level' not in emitted
 
 
 def test_global_string_storage_is_initialized_during_startup() -> None:
@@ -323,10 +328,11 @@ let main = ():>int64 => 0
 def test_generated_startup_symbol_avoids_source_bindings() -> None:
     source = """
 let __dewy_top_level:int64 = 42
+__dewy_top_level = __dewy_top_level + 1
 let main = ():>int64 => __dewy_top_level
 """
     emitted = _codegen(source)
-    assert 'let __dewy_top_level:int64 = 0' in emitted
+    assert 'let __dewy_top_level:int64 = 42' in emitted
     assert 'let __dewy_top_level_2 = ():>void' in emitted
     assert '__dewy_top_level_2()' in emitted
 

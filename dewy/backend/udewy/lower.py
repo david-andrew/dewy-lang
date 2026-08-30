@@ -266,7 +266,7 @@ class _Lowerer(
                         and binding.kind in {'function', 'overload'}
                     )
                     or isinstance(item.expr, (hir.TypeValue, hir.GenericFunction))
-                    or self._zero_initialized_scalar_global(item)
+                    or self._literal_scalar_global(item) is not None
                     or self._is_range_valued(item.annotation or item.expr.type)
                     or self._is_compile_time_rational(item.annotation or item.expr.type)
                     or self._array_representation(item) in {
@@ -306,9 +306,12 @@ class _Lowerer(
                     )
                     continue
                 storage = self._global_storage(transformed)
+                literal = self._literal_scalar_global(transformed)
+                if literal is not None:
+                    # `const value:int64 = 42`: the global carries its value; no startup store
+                    globals_.append(replace(storage, expr=replace(literal, type=storage.annotation or storage.expr.type)))
+                    continue
                 globals_.append(storage)
-                if self._zero_initialized_scalar_global(transformed):
-                    continue   # `let cursor:int64 = 0`: inert storage already holds the value
                 assignment = hir.Assign(
                     transformed.loc,
                     ty.VOID_TYPE,
@@ -1074,27 +1077,25 @@ class _Lowerer(
         return f'{base}_{ordinal}'
 
     @staticmethod
-    def _zero_initialized_scalar_global(item: hir.AST) -> bool:
-        """A top-level scalar `let` whose literal initializer is zero (`let cursor:int64 = 0`, `let flag:bool = false`).
+    def _literal_scalar_global(item: hir.AST) -> hir.AST | None:
+        """The literal initializer of a top-level scalar `let`/`const` (`const value:int64 = 42`, `let flag:bool = false`).
 
-        Inert global storage is already zero, so no startup store is needed
-        and the declaration does not by itself require module startup — the
-        prelude's arena globals are of this kind, and without this every
-        program would carry the startup wrapper just to store their zeros.
+        Such a global is emitted carrying its value, so it needs no startup
+        store and does not by itself require module startup: a program whose
+        top level is functions and literal scalars has no startup wrapper at
+        all (the prelude's arena globals are of this kind).
         """
         if not isinstance(item, hir.Declare):
-            return False
+            return None
         annotation = ty.strip_refinement(item.annotation or item.expr.type)
         if isinstance(item.expr, hir.Bool) and annotation == 'bool':
-            return item.expr.value is False
-        return (
-            isinstance(item.expr, hir.Integer)
-            and item.expr.value == 0
-            and (
-                (isinstance(annotation, str) and annotation in FIXED_INTEGER_WIDTHS)
-                or isinstance(annotation, ty.IntegerLiteralType)
-            )
-        )
+            return item.expr
+        if isinstance(item.expr, hir.Integer) and ty.integer_literal_fits(item.expr.value, 'int64') and (
+            (isinstance(annotation, str) and (annotation in FIXED_INTEGER_WIDTHS or annotation in ('int', 'uint')))
+            or isinstance(annotation, ty.IntegerLiteralType)
+        ):
+            return item.expr
+        return None
 
     def _global_storage(self, declaration: hir.Declare) -> hir.Declare:
         """Create inert udewy storage initialized later by module startup."""
