@@ -72,6 +72,30 @@ let make_pair = (left:int64 right:int64):>Pair =>
     [left=left right=right]
 ```
 
+### Positional Literals
+
+Where an object type is expected — an annotation, an element of `array<Point>`, a dictionary's value — an object literal may give its fields *positionally*, in declaration order, exactly as a constructor call would; a field left out takes its default:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Point:type = [x:int64 y:int64 = 0]
+let Spec:type = [digits:set<string> case_insensitive:bool]
+
+const specs:dict<string Spec> = [
+    'b' -> [set'01' false]
+    't' -> [set'012' false]
+]
+
+let main = ():>int64 => {
+    let p:Point = [3]                        # [x=3 y=0]
+    let corners:array<Point> = [[1 2] [5 6]]
+    return p.x + corners[1].y + specs['t'].digits.length   # 3 + 6 + 3
+}
+```
+
+Mixing named and positional items is not allowed; too many items, or a missing field without a default, is an error naming the field.
+
 ## Methods
 
 An object type may declare methods: `name = (params) => body` rows among the fields. Inside a method, bare names of the type's fields and methods refer to the instance (`stop - start`, `width`); a method that assigns or grows a field takes its receiver as a place, so it must be called on a binding or a field, not on a temporary. Calls are `value.method(args)`, and a zero-argument method is called by `value.method` alone.

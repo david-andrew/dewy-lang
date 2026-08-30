@@ -1,0 +1,19 @@
+# An object literal whose items are unnamed fills the expected type's fields
+# in declaration order, like a constructor call; a field left out takes its
+# default. Used for tables of records: `'0b' -> [set'01' false []]`.
+let Point:type = [x:int64 y:int64 = 0]
+let Spec:type = [digits:set<string> case_insensitive:bool extra:dict<string int64|undefined>]
+const SPECS:dict<string Spec> = [
+    'b' -> [set'01' false []]
+    't' -> [set'012' false ['T'->(-1)]]
+]
+let main = ():>int64 => {
+    let p:Point = [3]                    # y defaults to 0
+    let q:Point = [3 4]
+    let points:array<Point> = [[1 2] [5 6]]
+    let total:int64 = p.x + p.y + q.y    # 3 + 0 + 4
+    loop pt in points { total += pt.x }  # 1 + 5
+    total += SPECS['t'].digits.length     # 3
+    match SPECS['t'].extra.get('T' default=undefined) { n:int64 => { total += 27 + n }  <undefined> => {} }   # 26
+    return total                          # 42
+}

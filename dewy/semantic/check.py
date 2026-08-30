@@ -1040,7 +1040,7 @@ def _tcr_annotated_declaration(
         and right.kind == '[]'
         and (not right.inner or _dict_literal_block(right) is not None)
     ):
-        return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=annotation)
+        return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=annotation, keyword=keyword)
     optional_payload = ty.optional_payload(annotation)
     expression_expected = (
         optional_payload
@@ -1131,7 +1131,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             ]:
             dict_block = _dict_literal_block(right)
             if dict_block is not None:
-                return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)
+                return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx, keyword=keyword)
             generic = _generic_signature(right, ctx=ctx) if isinstance(right, p0.BinOp) else None
             if generic is not None:
                 signature, params = generic
@@ -1247,7 +1247,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         name = ast.left.item.name
         dict_block = _dict_literal_block(ast.right)
         if dict_block is not None:
-            return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)
+            return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx)   # an implicit declaration is a `let`
         value = typecheck_and_resolve_inner(ast.right, ctx=ctx)
         require_valued(value.type, ctx.srcfile, value.loc, 'declaration initializer')
         value = _widen_inferred_let_value(value, ctx=ctx)
@@ -1407,6 +1407,20 @@ def _key_identity(key: hir.AST, *, ctx: Context) -> tuple[str, object] | None:
 
 def _dictionary_fact_id(dictionary: hir.AST, *, ctx: Context) -> int | None:
     return sb.array_route_id(dictionary, ctx.binding_registry)
+
+
+def _const_key_facts(ctx: Context) -> dict:
+    """The proven keys of `const` dictionaries, which a function body inherits:
+    a `const` is never stored into, so its literal's entries stay where they are."""
+    inherited: dict = {}
+    for fact_key, fact in ctx.key_facts.items():
+        dictionary_id = fact_key[0]
+        binding = ctx.binding_registry.by_id.get(dictionary_id)
+        if binding is None and dictionary_id in ctx.binding_registry.route_paths:
+            continue   # a member route: its root may be reassigned
+        if binding is not None and binding.declaration is not None and binding.declaration.decltype == 'const':
+            inherited[fact_key] = fact
+    return inherited
 
 
 def _record_key_fact(
@@ -5389,6 +5403,7 @@ def _tcr_dict_declare(
     *,
     ctx: Context,
     annotation: ty.ObjectType | None = None,
+    keyword: str = 'let',
 ) -> hir.AST:
     """Declare a dictionary: the runtime object `[keys values]` (insertion order).
 
@@ -5401,7 +5416,7 @@ def _tcr_dict_declare(
     assert isinstance(dict_object, ty.ObjectType)
     binding = ctx.binding_registry.allocate(block, name, 'value', loc)
     binding.type = dict_object
-    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, dict_object, literal, binding_id=binding.id)
+    declaration = hir.Declare(loc, ty.VOID_TYPE, keyword, name, dict_object, literal, binding_id=binding.id)   # a `const` keeps its literal's keys proven everywhere
     binding.declaration = declaration
     ctx.declarations[name] = dict_object
     ctx.binding_scopes[name] = binding
@@ -5746,6 +5761,43 @@ def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
     return node
 
 
+def _positional_object_literal(block: p0.Block, object_type: ty.ObjectType, *, ctx: Context) -> p0.Block | None:
+    """`[set'01' false []]` where a plain object type is expected: the items
+    fill the fields in declaration order (a field left out takes its
+    default), as a constructor call does; None when any item is named."""
+    if object_type.brand is not None or not block.inner:
+        return None
+    for item in block.inner:
+        if isinstance(item, p0.BinOp) and _operator_symbol(item.op) in ('=', '->', '<->'):
+            return None
+        if _spread_operand(item) is not None:
+            return None
+    if len(block.inner) > len(object_type.fields):
+        user_error(
+            ctx.srcfile,
+            'too many values for this object',
+            Pointer(span=block.inner[len(object_type.fields)].loc, message=f'the expected type has {len(object_type.fields)} fields'),
+        )
+    items: list[p0.AST] = []
+    for index, field_ in enumerate(object_type.fields):
+        if index < len(block.inner):
+            value: p0.AST = block.inner[index]
+        elif field_.default is not None:
+            value = cast(p0.AST, field_.default)
+        else:
+            user_error(
+                ctx.srcfile,
+                f'missing value for field `{field_.name}`',
+                Pointer(span=block.loc, message=f'the expected type needs `{field_.name}:{type_to_dewy(field_.type)}`'),
+                hint='give the fields in order, or name them (`[name=value …]`)',
+            )
+        loc = value.loc
+        items.append(p0.BinOp(loc, t1.Operator(loc, '='), p0.Atom(loc, t1.Identifier(loc, field_.name)), value))
+    literal = p0.Block(block.loc, items, '[]', None)
+    ctx.synthesized.append(literal)
+    return literal
+
+
 def _tcr_object_literal(
     block: p0.Block,
     *,
@@ -5754,6 +5806,10 @@ def _tcr_object_literal(
 ) -> hir.ObjectLiteral:
     expected = ty.unfold(ty.strip_refinement(expected)) if expected is not None else None
     expected_object = expected if isinstance(expected, ty.ObjectType) else None
+    if expected_object is not None:
+        positional = _positional_object_literal(block, expected_object, ctx=ctx)
+        if positional is not None:
+            block = positional
     if expected_object is None and isinstance(expected, ty.TypeOr):
         # A literal checked against a union targets the union's unique
         # object member, if there is exactly one.
@@ -9620,7 +9676,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         function_boundary_labels=function_boundary_labels,
         refinements={},
         length_bounds={},
-        key_facts={},
+        key_facts=_const_key_facts(ctx),
     )
     body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
 

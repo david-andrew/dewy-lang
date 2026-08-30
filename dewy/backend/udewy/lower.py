@@ -3800,7 +3800,14 @@ class _Lowerer(
                 cell = replace(node, type='int64')
                 if ty.optional_payload(node.type) is not None:
                     return [], cell
-                return [], self._optional_load_payload(cell, payload, node.loc)
+                loaded = self._optional_load_payload(cell, payload, node.loc)
+                if isinstance(ty.unfold(payload), (ty.ObjectType, ty.ArrayType)):
+                    # an aggregate payload: bind the handle to a temporary so the
+                    # copies that re-walk their source (an array field clone) see
+                    # a plain word, not the cell again (as the union path does)
+                    pointer = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('payload'))
+                    return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', replace(loaded, type='int64'))], replace(pointer, type=node.type)
+                return [], loaded
             members = self.union_cells.get(node.binding_id)
             if members is not None:
                 cell = replace(node, type='int64')

@@ -104,6 +104,8 @@ LOWERED_CASES = [
     ('printing.dewy', 42),
     ('array_elements.dewy', 42),
     ('union_containers.dewy', 42),
+    ('module_containers.dewy', 42),
+    ('positional_objects.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

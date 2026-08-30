@@ -393,11 +393,22 @@ class _DictLowering:
             raise TypeError('INTERNAL ERROR: dictionary lookup is not optional')
         cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('dict_value'))
         cell_word = replace(cell, type='int64')
+        if isinstance(ty.unfold(payload), ty.ObjectType):
+            # an object value: bind the element's handle to a name typed as the
+            # object, then let the optional write copy it into the cell's prepared
+            # tree (a raw object-typed load would be re-extracted as a call)
+            element = self._name('dict_element', loc)
+            found_body = [
+                self._declare(element, replace(value_at(position), type='int64'), loc),
+                *self._optional_write(cell_word, replace(element, type=payload), payload),
+            ]
+        else:
+            found_body = self._optional_write(cell_word, value_at(position), payload)
         return [
             *prelude, *key_prelude, *search,
             hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
             *self._optional_write(cell_word, hir.Undefined(loc, 'undefined'), payload),
-            self._if(found, self._optional_write(cell_word, value_at(position), payload), loc),
+            self._if(found, found_body, loc),
         ], cell
 
     def _extract_dict_contains(self, node: hir.DictContains) -> tuple[list[hir.AST], hir.AST]:

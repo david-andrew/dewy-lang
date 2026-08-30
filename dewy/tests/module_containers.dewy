@@ -1,0 +1,23 @@
+# Module-level containers with runtime values (objects holding sets and
+# optional-valued dictionaries) initialize at startup; a `const` dictionary's
+# literal keys stay proven inside functions; `d.get` on object values yields
+# a copy of the object (its array fields included).
+const Prefix:type = '0b' | '0t' | '0x'
+let Info:type = [scale:int64 digits:set<string> extra:dict<string int64|undefined>]
+const SPECS:dict<Prefix Info> = [
+    '0b' -> [scale=2 digits=set'01' extra=[]]
+    '0t' -> [scale=3 digits=set'012' extra=['T'->(-1)]]
+    '0x' -> [scale=16 digits=set'0123456789abcdef' extra=['x'->undefined]]
+]
+let describe = (prefix:Prefix):>int64 => {
+    match SPECS.get(prefix) {
+        info:Info => return info.scale + info.digits.length       # copies the object, sets included
+        <undefined> => return 0
+    }
+}
+let main = ():>int64 => {
+    let total:int64 = SPECS['0t'].scale + SPECS['0b'].digits.length   # proven keys: 3 + 2
+    total += describe('0x')                                          # 16 + 16
+    match SPECS['0t'].extra.get('T' default=undefined) { n:int64 => { total += 6 + n }  <undefined> => {} }   # 5
+    return total                                                     # 42
+}

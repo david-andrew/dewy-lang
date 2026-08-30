@@ -1887,14 +1887,6 @@ class _ArrayLowering:
             return self._extract_spread_array_literal(node)
         if not isinstance(node.type, ty.ArrayType) or node.type.length is None:
             self._target_error(node, 'array literal does not have an exact layout')
-        if self.lowering_module_startup and not all(
-            self._module_array_item_is_stable(item, set())
-            for item in node.items
-        ):
-            self._target_error(
-                node,
-                'top-level arrays currently require compile-time-stable elements',
-            )
         statements, target = self._allocate_array_value(node.type, node.loc)
         for index, item in enumerate(node.items):
             item_prelude, value = self._array_storage_value(
