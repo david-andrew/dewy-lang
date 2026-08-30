@@ -1,0 +1,32 @@
+# Growable arrays release their storage: the old buffer after growth, and a
+# local's array at every exit of its scope (block end, `return`, `break`,
+# `continue`), when the arena owns the data. Returned arrays are copied out
+# first, so releasing the local is safe; values stay independent.
+let build = (n:int64):>array<int64> => {
+    let out:array<int64> = []
+    let i:int64 = 0
+    loop i <? n { out.push(i * i)  i += 1 }
+    return out
+}
+let sum_early = (xs:array<int64>):>int64 => {
+    let acc:array<int64> = []
+    loop x in xs {
+        if x >? 20 { break }
+        acc.push(x)
+        if x =? 4 { continue }
+        acc.push(x)
+    }
+    let total:int64 = 0
+    loop a in acc { total += a }
+    if total >? 1000 { return total }
+    return total + acc.length * 100
+}
+let main = ():>int64 => {
+    let squares = build(8)          # 0 1 4 9 16 25 36 49
+    let s:int64 = sum_early(squares)   # pushes 0 0 1 1 4 9 9 16 16 → total 56, length 9 → 956
+    let keep:array<int64> = [1 2 3]
+    keep.push(4)
+    let total:int64 = 0
+    loop k in keep { total += k }   # 10
+    return s + total + squares.length - 932   # 956 + 10 + 8 - 932 = 42
+}

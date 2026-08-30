@@ -231,6 +231,7 @@ class _Lowerer(
         self.current_object_field_names: dict[int, str] = {}
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
+        self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.object_literal_contexts: list[
             tuple[hir.AST, ty.ObjectType, dict[int, str]]
         ] = []
@@ -2760,6 +2761,7 @@ class _Lowerer(
 
     def _lower_function_body(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
+        self.owned_array_names = set()
         previous_state = (
             self.loop_signal_levels,
             self.loop_signal_kind,
@@ -2773,7 +2775,7 @@ class _Lowerer(
             self.loop_signal_kind = None
         self.lower_loop_depth = 0
 
-        lowered = self._lower_function_body_inner(node, rettype)
+        lowered = self._insert_releases(self._lower_function_body_inner(node, rettype))
         if uses_nonlocal_exit:
             declarations = self._loop_signal_declarations(node.loc)
             if isinstance(lowered, hir.Block) and lowered.scoped:
@@ -2847,6 +2849,84 @@ class _Lowerer(
         if isinstance(rewritten, hir.Block) and rewritten.scoped:
             return replace(rewritten, items=[*hoisted, *rewritten.items])
         return hir.Block(rewritten.loc, rewritten.type, [*hoisted, rewritten], True)
+
+    def _note_owned_array(self, node: hir.Declare, declared_type: ty.Type) -> None:
+        """A local that owns a runtime-length array's storage: released when its scope ends (`_insert_releases`)."""
+        if (
+            isinstance(declared_type, ty.ArrayType)
+            and declared_type.length is None
+            and not self.lowering_module_startup
+            and self._array_representation(node) == 'descriptor'
+        ):
+            self.owned_array_names.add(node.name)
+
+    def _insert_releases(self, body: hir.AST) -> hir.AST:
+        """Drop-at-scope-exit for owned array locals, over a lowered function body.
+
+        Every exit of a scope releases the arrays its locals own (when the
+        `owner` word says the data is the arena's): the end of the block,
+        a `return` (after the returned value is computed — results are
+        copied out or arena-backed by then), and a `break`/`continue`, which
+        ends every scope inside the loop it leaves. Names are unique within
+        a function, so the lowered tree's blocks are the scopes.
+        """
+        if not self.owned_array_names or not isinstance(body, hir.Block):
+            return body
+        owned_names = self.owned_array_names
+
+        def releases(scopes: list[list[hir.ExpressedIdentifier]]) -> list[hir.AST]:
+            return [self._release_owned_array(local, local.loc) for scope in scopes for local in reversed(scope)]
+
+        def diverges(item: hir.AST) -> bool:
+            return isinstance(item, (hir.Return, hir.Break, hir.Continue))
+
+        def walk_block(block: hir.Block, scopes: list[list[hir.ExpressedIdentifier]], loop_marks: list[int]) -> hir.Block:
+            here: list[hir.ExpressedIdentifier] = []
+            items: list[hir.AST] = []
+            for item in block.items:
+                if isinstance(item, hir.Declare) and item.name in owned_names:
+                    here.append(hir.ExpressedIdentifier(item.loc, 'int64', item.name, binding_id=item.binding_id))
+                    items.append(item)
+                elif isinstance(item, hir.Return):
+                    live = [*scopes, here]
+                    value = item.item
+                    if value is not None and not isinstance(value, (hir.ExpressedIdentifier, hir.Integer, hir.Bool, hir.Void)):
+                        # the value may read an owned array: compute it first
+                        temp = hir.ExpressedIdentifier(item.loc, value.type if isinstance(value.type, str) else 'int64', self._new_result_name())
+                        items.append(hir.Declare(item.loc, ty.VOID_TYPE, 'let', temp.name, temp.type, value))
+                        value = temp
+                    items.extend(releases(live))
+                    items.append(replace(item, item=value))
+                elif isinstance(item, (hir.Break, hir.Continue)):
+                    inner = loop_marks[-1] if loop_marks else len(scopes)
+                    items.extend(releases([*scopes[inner:], here]))
+                    items.append(item)
+                elif isinstance(item, hir.Flow):
+                    items.append(walk_flow(item, [*scopes, here], loop_marks))
+                elif isinstance(item, hir.Block) and item.scoped:
+                    items.append(walk_block(item, [*scopes, here], loop_marks))
+                else:
+                    items.append(item)
+            if here and not (items and diverges(items[-1])):
+                items.extend(releases([here]))
+            return replace(block, items=items)
+
+        def walk_body(node: hir.AST, scopes: list[list[hir.ExpressedIdentifier]], loop_marks: list[int]) -> hir.AST:
+            if isinstance(node, hir.Block):
+                return walk_block(node, scopes, loop_marks)
+            if isinstance(node, hir.Flow):
+                return walk_flow(node, scopes, loop_marks)
+            return node
+
+        def walk_flow(flow: hir.Flow, scopes: list[list[hir.ExpressedIdentifier]], loop_marks: list[int]) -> hir.Flow:
+            arms = []
+            for arm in flow.arms:
+                marks = [*loop_marks, len(scopes)] if isinstance(arm, hir.LoopArm) else loop_marks
+                arms.append(replace(arm, body=walk_body(arm.body, scopes, marks)))
+            default = walk_body(flow.default, scopes, loop_marks) if flow.default is not None else None
+            return replace(flow, arms=arms, default=default)
+
+        return walk_block(body, [], [])
 
     def _lower_function_body_inner(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
         """Make an implicit scalar function result explicit while lowering statements."""
@@ -3084,6 +3164,7 @@ class _Lowerer(
                     node.expr,
                     copy_type,
                 )
+                self._note_owned_array(node, declared_type)
                 return [
                     *copy_prelude,
                     replace(
@@ -3093,6 +3174,10 @@ class _Lowerer(
                         expr=copied,
                     ),
                 ]
+            if isinstance(declared_type, ty.ArrayType) and isinstance(self._copy_source_expression(node.expr), (hir.ArrayLiteral, hir.FunctionCall)):
+                # a literal or a call result: storage this local owns (a
+                # `bytes as …` view over a string's data is not: it borrows)
+                self._note_owned_array(node, declared_type)
             prelude, expr = self._extract_expression(node.expr)
             annotation = (
                 'int64'

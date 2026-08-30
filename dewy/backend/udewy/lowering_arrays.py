@@ -1016,6 +1016,29 @@ class _ArrayLowering:
             ))
         return statements, target
 
+    def _arena_release_call(self, block: hir.AST, size: hir.AST, loc) -> hir.FunctionCall:
+        """Give ``size`` bytes at ``block`` back to the prelude's arena (`_arena_release`)."""
+        function = next((candidate for candidate in self.functions if candidate.logical_name.endswith('_arena_release')), None)
+        if function is None:
+            self._target_error(hir.Void(loc, ty.VOID_TYPE), 'arena release without the prelude arena')
+        function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+        return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, function.symbol), [block, size], {})
+
+    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc) -> hir.AST:
+        """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
+
+        The `owner` word is 1 for arena-owned data (set by growth and by
+        arena clones) and 0 for frame, static, or borrowed data.
+        """
+        word = replace(descriptor, type='int64')
+        owned = self._typed_equality(self._load_i64_field(word, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), 'int64', loc)
+        size = self._int64_binary('__mul__', self._load_i64_field(word, ARRAY_CAPACITY_OFFSET, loc), self._load_i64_field(word, ARRAY_STRIDE_OFFSET, loc), loc)
+        body = hir.Block(loc, ty.VOID_TYPE, [
+            self._arena_release_call(self._load_i64_field(word, ARRAY_DATA_OFFSET, loc), size, loc),
+            self._store_i64_field(word, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
+        ], True)
+        return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, body)], None)
+
     def _arena_allocation(self, size: hir.AST, loc) -> hir.FunctionCall:
         """Allocate ``size`` bytes from the prelude's process arena."""
         function = next(
@@ -1152,9 +1175,18 @@ class _ArrayLowering:
                     [hir.LoopArm(loc, ty.VOID_TYPE, lt(index, length), hir.Block(loc, ty.VOID_TYPE, copy_body, True))],
                     None,
                 ),
+                # the old buffer is dead once copied: give it back when the arena owned it
+                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                    loc, ty.VOID_TYPE,
+                    self._typed_equality(self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), 'int64', loc),
+                    hir.Block(loc, ty.VOID_TYPE, [self._arena_release_call(
+                        old_data, self._int64_binary('__mul__', capacity, self._int64_literal(loc, element_bytes), loc), loc,
+                    )], True),
+                )], None),
                 self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, new_data, loc),
                 self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, new_capacity, loc),
                 self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE), loc),
+                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),
             ],
             True,
         )
@@ -1699,7 +1731,7 @@ class _ArrayLowering:
             self._store_i64_field(
                 descriptor,
                 ARRAY_OWNER_OFFSET,
-                self._int64_literal(node.loc, 0),
+                self._int64_literal(node.loc, 1 if arena else 0),   # arena data is releasable
                 node.loc,
             ),
             hir.Declare(
@@ -1803,7 +1835,7 @@ class _ArrayLowering:
                 self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, length, loc),
                 self._store_i64_field(descriptor, ARRAY_STRIDE_OFFSET, self._int64_literal(loc, element_bytes), loc),
                 self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE), loc),
-                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
+                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),   # arena data: releasable
             ])
         data_pointer = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
         cursor = declare('spread_cursor', self._int64_literal(loc, 0))

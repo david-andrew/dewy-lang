@@ -97,6 +97,7 @@ LOWERED_CASES = [
     ('string_methods.dewy', 42),
     ('nested_blocks.dewy', 42),
     ('loop_conditions.dewy', 42),
+    ('array_release.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

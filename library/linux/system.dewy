@@ -16,13 +16,33 @@ let sleep = (duration:(rational<int64> * Time)):>void => {
     return void
 }
 
-# Arena allocation: bump allocation over anonymous mmap chunks. This is the
-# first dynamic storage tier of the ownership model; storage lives for the
-# whole process until scoped arenas land. Sizes round up to 8 bytes.
+# Arena allocation — the first dynamic storage tier of the ownership model.
+# Blocks come in power-of-two size classes (8 bytes … 2^47): `_arena_alloc`
+# takes a released block of the class from its free list, or bumps the
+# current mmap chunk; `_arena_release` puts a block back for reuse. A reused
+# block is zeroed, like a fresh one. The compiler releases what it can prove
+# dead (a growable array's old buffer after growth, the array of a local at
+# the end of its scope); everything else lives for the process, until
+# scoped arenas land.
 let _arena_cursor:int64 = 0
 let _arena_end:int64 = 0
+let _arena_free_lists:int64 = 0     # 48 list heads, one per size class, allocated on first use
 
-let _arena_alloc = (size:int64):>int64 => {
+let _arena_class = (size:int64):>int64 => {
+    let class:int64 = 0
+    let width:int64 = 8
+    loop width <? size { width = width * 2  class += 1 }
+    return class
+}
+
+let _arena_width = (class:int64):>int64 => {
+    let width:int64 = 8
+    let c:int64 = 0
+    loop c <? class { width = width * 2  c += 1 }
+    return width
+}
+
+let _arena_bump = (size:int64):>int64 => {
     let aligned:int64 = ((size + 7) // 8) * 8
     if _arena_cursor + aligned >? _arena_end {
         let chunk:int64 = 1048576
@@ -35,6 +55,30 @@ let _arena_alloc = (size:int64):>int64 => {
     let result:int64 = _arena_cursor
     _arena_cursor = _arena_cursor + aligned
     return result
+}
+
+let _arena_alloc = (size:int64):>int64 => {
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    let class:int64 = _arena_class(size)
+    let head_address:int64 = _arena_free_lists + class * 8
+    let block:int64 = __load_i64__(head_address)
+    let width:int64 = _arena_width(class)
+    if block =? 0 { return _arena_bump(width) }
+    __store_i64__(__load_i64__(block) head_address)     # pop: the block's first word is the next free block
+    let cursor:int64 = block
+    let stop:int64 = block + width
+    loop cursor <? stop { __store_i64__(0 cursor)  cursor = cursor + 8 }
+    return block
+}
+
+let _arena_release = (block:int64 size:int64):>void => {
+    if block =? 0 { return void }
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    let class:int64 = _arena_class(size)
+    let head_address:int64 = _arena_free_lists + class * 8
+    __store_i64__(__load_i64__(head_address) block)
+    __store_i64__(block head_address)
+    return void
 }
 
 # Process exit: exit_group(2) is syscall 231. The checker has no
