@@ -780,25 +780,31 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
     unfolded = ty.unfold(ty.strip_refinement(value.type))
     if not isinstance(unfolded, ty.ObjectType):
         return None
-    method = unfolded.method('__as__')
-    if method is None:
+    conversions = [method for method in unfolded.methods if method.name == '__as__']
+    if not conversions:
         return None
-    if method.binding_id is None:
+    if any(method.binding_id is None for method in conversions):
         _declare_pending_methods(ctx=ctx, for_type=unfolded)
-    if method.binding_id is None:
+    function_binding = None
+    for method in conversions:
+        if method.binding_id is None:
+            continue
+        candidate = ctx.binding_registry.by_id[method.binding_id]
+        candidate_type = candidate.type
+        if not isinstance(candidate_type, ty.FunctionType) or len(candidate_type.pos_or_kw) != 1 or candidate_type.kw_only:
+            user_error(
+                ctx.srcfile,
+                '`__as__` takes no arguments',
+                Pointer(span=loc, message='the conversion of this value is declared with parameters'),
+                hint='a conversion is `__as__ = ():>T => …`; the target type is its result type (`__as__ &= …` adds one for another target)',
+            )
+        if ctx.type_system.is_subtype(candidate_type.ret, target) or (_is_string_type(candidate_type.ret) and _is_string_type(target)):
+            function_binding = candidate
+            break
+    if function_binding is None:
         return None
-    function_binding = ctx.binding_registry.by_id[method.binding_id]
     function_type = function_binding.type
-    if not isinstance(function_type, ty.FunctionType) or len(function_type.pos_or_kw) != 1 or function_type.kw_only:
-        user_error(
-            ctx.srcfile,
-            '`__as__` takes no arguments',
-            Pointer(span=loc, message='the conversion of this value is declared with parameters'),
-            hint='a conversion is `__as__ = ():>T => …`; the target type is its result type',
-        )
-    fits = ctx.type_system.is_subtype(function_type.ret, target) or (_is_string_type(function_type.ret) and _is_string_type(target))
-    if not fits:
-        return None
+    assert isinstance(function_type, ty.FunctionType)
     receiver = replace(value, type=unfolded) if isinstance(value.type, ty.NamedType) else value
     function = hir.ExpressedIdentifier(loc, function_type, function_binding.name, binding_id=function_binding.id)
     bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:]), function, receiver)
@@ -995,11 +1001,14 @@ def _tcr_annotated_declaration(
     optional_annotation_payload = ty.optional_payload(annotation)
     growable = (
         keyword == 'let'
-        and name in ctx.grown_array_names
         and isinstance(annotation, ty.ArrayType)
         and annotation.length is None
         and isinstance(expr.type, ty.ArrayType)
         and expr.type.length is not None
+        # grown somewhere in this module, or declared runtime-length and
+        # started empty (`let buffer:array<uint8> = []`): an empty exact array
+        # is useless unless grown, often by a callee through `@buffer`
+        and (name in ctx.grown_array_names or expr.type.length == 0)
     )
     ctx.declarations[name] = (
         annotation
@@ -3757,6 +3766,9 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     diverges, so the code after it keeps the condition's facts exactly as
     code after an early-return guard does.
     """
+    if ast.name == 'fail':
+        return _tcr_fail(ast, ctx=ctx)
+    assert ast.condition is not None
     condition_ast, message_ast = _sink_ambiguity(ast.condition), ast.message
     condition = _check_flow_condition(condition_ast, ctx=ctx)
     if isinstance(condition, hir.DictContains):
@@ -3819,6 +3831,36 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     return hir.Block(ast.loc, ty.VOID_TYPE, [obligation, flow], False)
 
 
+def _tcr_fail(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
+    """`$fail message` / `$fail`: an expectation that always fails — the deliberate "fail here" of a test."""
+    _require_expectation_site(ast, ctx=ctx)
+    ctx.catcher.returns.append((ast.loc, ty.VOID_TYPE))
+    return hir.Block(
+        ast.loc,
+        ty.BOTTOM_TYPE,
+        _assert_failure_report(ast, ast, ast.message, 'fail', ctx=ctx, expect=True),
+        True,
+    )
+
+
+def _require_expectation_site(ast: p0.AssertDirective, *, ctx: Context) -> None:
+    """`$expect`/`$fail` return from the enclosing function on failure: it must exist and return `void`."""
+    if ctx.catcher is None:
+        user_error(
+            ctx.srcfile,
+            f'`${ast.name}` outside a function',
+            Pointer(span=ast.loc, message='a failed expectation returns from the enclosing function, and nothing here catches that'),
+            hint='put the expectation in a `$test` function (or a helper it calls); module-level facts are `$assert`',
+        )
+    if ctx.catcher.expected is not None and ctx.catcher.expected != ty.VOID_TYPE:
+        user_error(
+            ctx.srcfile,
+            f'`${ast.name}` in a function that returns a value',
+            Pointer(span=ast.loc, message=f'a failed expectation returns from this function without a value, but it returns `{type_to_dewy(ctx.catcher.expected)}`'),
+            hint='expectations belong in `void` functions; a helper that computes a value can return it to the test that checks it',
+        )
+
+
 def _tcr_expect(
     ast: p0.AssertDirective,
     condition_ast: p0.AST,
@@ -3840,20 +3882,7 @@ def _tcr_expect(
     builds and fails when it runs (a literal `false` is the deliberate
     "fail here" and is not warned about).
     """
-    if ctx.catcher is None:
-        user_error(
-            ctx.srcfile,
-            '`$expect` outside a function',
-            Pointer(span=ast.loc, message='a failed expectation returns from the enclosing function, and nothing here catches that'),
-            hint='put the expectation in a `$test` function (or a helper it calls); module-level facts are `$assert`',
-        )
-    if ctx.catcher.expected is not None and ctx.catcher.expected != ty.VOID_TYPE:
-        user_error(
-            ctx.srcfile,
-            '`$expect` in a function that returns a value',
-            Pointer(span=ast.loc, message=f'a failed expectation returns from this function without a value, but it returns `{type_to_dewy(ctx.catcher.expected)}`'),
-            hint='expectations belong in `void` functions; a helper that computes a value can return it to the test that checks it',
-        )
+    _require_expectation_site(ast, ctx=ctx)
     ctx.catcher.returns.append((ast.loc, ty.VOID_TYPE))
     if isinstance(condition, hir.Bool):
         if condition.value:
@@ -3956,6 +3985,8 @@ def _assert_failure_report(
     path = 'input' if ctx.srcfile.path is None else str(ctx.srcfile.path)
     if message_ast is not None:
         message = typecheck_and_resolve_inner(message_ast, ctx=ctx)
+    elif ast.name == 'fail':
+        message = text('the test reached `$fail`')
     else:
         message = text('this condition was false')
     dim_stop = byte_offset(message_ast.loc.stop) if message_ast is not None else condition_stop
@@ -4008,11 +4039,16 @@ def _assert_note_value_supported(type_: ty.Type, *, ctx: Context) -> bool:
 _MUTATING_METHODS = {'push', 'pop', 'insert', 'clear', 'truncate', 'reserve', 'sort', 'add'}
 
 
-def _method_row(item: p0.AST) -> tuple[str, p0.AST] | None:
-    """`name = (params) => body` inside an object type: a method."""
+def _method_row(item: p0.AST, *, symbol: str = '=') -> tuple[str, p0.AST] | None:
+    """`name = (params) => body` inside an object type: a method (`&=`: one more of the same name)."""
+    if symbol == '&=':
+        # a compound assignment token wraps its base operator
+        matches = isinstance(item, p0.BinOp) and isinstance(item.op, t2.CombinedAssignmentOp) and _operator_symbol(item.op.op) == '&'
+    else:
+        matches = isinstance(item, p0.BinOp) and _operator_symbol(item.op) == symbol
     if (
-        isinstance(item, p0.BinOp)
-        and _operator_symbol(item.op) == '='
+        matches
+        and isinstance(item, p0.BinOp)
         and isinstance(item.left, p0.Atom)
         and isinstance(item.left.item, t1.Identifier)
         and isinstance(item.right, p0.BinOp)
@@ -4241,7 +4277,9 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         rewritten = _rewrite_members_to_self(body, visible)
         new_literal = replace(literal, left=signature, right=rewritten)
         ctx.synthesized.append(new_literal)
-        method.binding_id = _hoist_hidden_function(f'{alias.name}__{method.name}', new_literal, ctx=ctx).id
+        ordinal = sum(1 for earlier in object_type.methods[:object_type.methods.index(method)] if earlier.name == method.name)
+        hidden_name = f'{alias.name}__{method.name}' + (f'_{ordinal + 1}' if ordinal else '')
+        method.binding_id = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx).id
 
 
 def _declare_constructor_overload(constructor: hir.TypeValue, literal: p0.AST, *, ctx: Context) -> hir.AST:
@@ -5299,6 +5337,27 @@ def _auto_call_function_value(node: hir.AST, *, ctx: Context, expected: ty.Type 
     )
 
 
+# `text.contains(x)`, `text.trim`, …: methods of `string`, implemented in
+# `library/strings.dewy` as `_string_<name>(text …)` and bound like a type's methods.
+_STRING_METHODS = frozenset({
+    'contains', 'starts_with', 'ends_with', 'find', 'rfind', 'split', 'lines',
+    'trim', 'trim_start', 'trim_end', 'replace',
+})
+
+
+def _string_method(receiver: hir.AST, name: str, binop: p0.BinOp, *, ctx: Context) -> hir.BoundMethod:
+    binding = ctx.binding_scopes.get(f'_string_{name}')
+    if binding is None or not isinstance(binding.type, ty.FunctionType):
+        user_error(
+            ctx.srcfile,
+            f'`.{name}` needs the prelude',
+            Pointer(span=binop.right.loc, message='string methods are implemented in the prelude\'s `strings.dewy`'),
+        )
+    function = hir.ExpressedIdentifier(binop.right.loc, binding.type, binding.name, binding_id=binding.id)
+    bound_type = replace(binding.type, pos_or_kw=binding.type.pos_or_kw[1:])
+    return hir.BoundMethod(binop.loc, bound_type, function, receiver)
+
+
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
     if isinstance(node, hir.BoundMethod):
         if ty.is_zero_arg_function(node.type):
@@ -6001,6 +6060,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         forwarding = _forwarding_member_access(value, name, binop, ctx=ctx)
         if forwarding is not None:
             return forwarding
+    if _is_string_type(value.type) and name in _STRING_METHODS:
+        return _string_method(value, name, binop, ctx=ctx)
     if not isinstance(value.type, ty.ObjectType):
         if name == 'length':
             type_error(
@@ -7641,6 +7702,15 @@ def _dispatch_builtin(
     if rational is not None:
         return rational
     if (
+        fname in {'__eq__', '__ne__'}
+        and len(args) == 2
+        and all(_is_string_type(arg.type) for arg in args)
+        and not all(isinstance(arg.type, ty.StringLiteralType) for arg in args)
+    ):
+        # runtime string equality, whatever the operands' spellings (`string`, a
+        # view `StringType`, a literal): the generic `(T T)` overload would not unify them
+        return hir.StringEqual(loc, 'bool', args[0], args[1], fname == '__ne__')
+    if (
         fname in {'__lshift__', '__rshift__'}
         and len(args) == 2
         and not ctx.type_system.is_subtype(arg_types[1], 'uint')
@@ -7720,7 +7790,7 @@ def _dispatch_builtin(
     )
     methods = ftype.methods if isinstance(ftype, ty.OverloadType) else [ftype]
     try:
-        expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
+        expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE, ty.TOP_TYPE) else None
         if isinstance(expected_return, ty.TypeOr):
             # `return id * 2` into `int64 | NotFound`: the union does not
             # choose the operator; the result converts to the union afterwards
@@ -7866,6 +7936,13 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
                     ),
                     *_declaration_pointers(binding),
                 )
+            # the callee may change the value: forget what was known about it
+            # (an exact length after `= []`, a refinement) for the code after the call
+            ctx.refinements.pop(binding.id, None)
+            ctx.length_bounds.pop(binding.id, None)
+            _invalidate_routes(binding.id, ctx=ctx)
+            _drop_key_facts(ctx, dictionary_id=binding.id)
+            _drop_key_facts(ctx, key_id=binding.id)
         return hir.Place(prefix.loc, target.type, target)
     if prefix.op.symbol not in builtins.UNARY_PREFIX_DUNDER_MAP:
         not_implemented(ctx.srcfile, prefix.op.loc, f'prefix operator `{prefix.op.symbol}`')
@@ -9855,6 +9932,13 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             fields: list[ty.ObjectField] = []
             methods: list[ty.MethodSpec] = []
             for item in items:
+                overload_row = _method_row(item, symbol='&=')
+                if overload_row is not None:
+                    # `__as__ &= ():>int64 => …`: another method of the same name
+                    # (a conversion to another target); no duplicate check
+                    member_name, literal = overload_row
+                    methods.append(ty.MethodSpec(member_name, literal))
+                    continue
                 method_row = _method_row(item)
                 if method_row is not None:
                     member_name, literal = method_row
@@ -10316,7 +10400,8 @@ def parse_call_arguments(
                 if param is None and method is not None:
                     param = next((p for p in method.kw_only if p.name == name), None)
                 expected_arg = param.type if param is not None else None
-                literal_expected = ty.strip_refinement(expected_arg) if expected_arg is not None else None
+                # `top` (an intrinsic's untyped address parameter) says nothing about the argument
+                literal_expected = ty.strip_refinement(expected_arg) if expected_arg is not None and expected_arg != ty.TOP_TYPE else None
                 arg = typecheck_and_resolve_inner(
                     value,
                     ctx=argument_ctx,
@@ -10975,7 +11060,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:
-        expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE) else None
+        expected_return = expected if expected not in (None, ty.VOID_TYPE, ty.INFERRED_TYPE, ty.TOP_TYPE) else None
         if not interleaved:
             result = ctx.type_system.match_best_function(
                 methods,

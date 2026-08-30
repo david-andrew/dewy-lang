@@ -98,6 +98,14 @@ def test_refuted_expectation_warns_but_still_compiles(capsys: pytest.CaptureFixt
     assert 'refuted' not in capsys.readouterr().err
 
 
+def test_fail_is_an_expectation_that_always_fails() -> None:
+    emitted = _compile('let t = () => { $fail "not implemented yet" }\nlet u = () => $fail\n')
+    reached = ''.join(f'\\x{byte:02x}' for byte in b'the test reached')   # string literals are emitted as byte escapes
+    assert emitted.count('_expect_failed()') == 2 and reached in emitted
+    with pytest.raises(UserError, match='`\\$fail` outside a function'):
+        _compile('$fail "no"\n')
+
+
 # ------------------------------------------------------------ `$test`
 
 def test_test_annotation_forms_are_validated() -> None:

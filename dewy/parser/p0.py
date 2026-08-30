@@ -297,9 +297,9 @@ class Atom(AST):
 
 @dataclass
 class AssertDirective(AST):
-    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message` (see `t2.Directive`)."""
+    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]` (see `t2.Directive`)."""
     name: str
-    condition: AST
+    condition: AST | None       # `None` only for `$fail`
     message: AST | None = None
 
 
@@ -464,7 +464,7 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
             ast = AssertDirective(
                 t.loc,
                 t.name,
-                parse_chain(t.condition, ctx),
+                parse_chain(t.condition, ctx) if t.condition is not None else None,
                 parse_chain(t.message, ctx) if t.message is not None else None,
             )
         elif isinstance(t, (t1.Real, t1.String, t1.BasedString, t1.Identifier, t1.Semicolon, t1.Metatag, t1.Bool, t1.Integer, t2.OpFn, t2.Placeholder)):

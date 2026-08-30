@@ -198,6 +198,13 @@ def _known_interval(state: State, key: int) -> Interval:
     return state.get(key, default)
 
 
+def _conjuncts(condition: hir.AST) -> list[hir.AST]:
+    """The operands of a chain of `and`s, left to right (`nand` is not flattened)."""
+    if isinstance(condition, hir.ShortCircuit) and condition.op == 'and':
+        return [*_conjuncts(condition.left), *_conjuncts(condition.right)]
+    return [condition]
+
+
 def _index_fact_key(index_id: int, array_id: int) -> int:
     return -(_FACT_BASE + (index_id << _FACT_SHIFT) + array_id)
 
@@ -2022,10 +2029,18 @@ class _BoundsValidator:
             if condition.op in {'and', 'nand'}:
                 effective_truth = truth if condition.op == 'and' else not truth
                 if effective_truth:
-                    left = self._refine(refined, condition.left, truth=True)
-                    if left is None:
-                        return None
-                    return self._refine(left, condition.right, truth=True)
+                    # the whole chain, flattened: each conjunct refines in
+                    # order, then one more pass so a fact a later conjunct
+                    # established lets an earlier one say more
+                    # (`start <=? last and last <? text.length`)
+                    conjuncts = [*_conjuncts(condition.left), *_conjuncts(condition.right)]   # the root may be `nand`
+                    current: State | None = refined
+                    for _pass in range(2):
+                        for conjunct in conjuncts:
+                            current = self._refine(current, conjunct, truth=True)
+                            if current is None:
+                                return None
+                    return current
                 # `a and b` false: either `a` was false, or `a` held and `b` was false
                 return self._join_alternatives(
                     self._refine(refined, condition.left, truth=False),
@@ -2077,6 +2092,18 @@ class _BoundsValidator:
                     fact = (index_id, array_id)
             if fact is not None:
                 refined[_index_fact_key(*fact)] = Interval.exact(1)
+        # `a <=? b` (or `a <? b`) between two bindings: whatever `b` is proven
+        # below (`b <? xs.length`), `a` is too — the index facts chain
+        ordered = {'__lt__': (left, right), '__le__': (left, right), '__gt__': (right, left), '__ge__': (right, left)}
+        effective = name if truth else {'__gt__': '__le__', '__ge__': '__lt__', '__lt__': '__ge__', '__le__': '__gt__'}.get(name)
+        if effective in ordered:
+            smaller, larger = ordered[effective]
+            smaller_id, larger_id = self._binding_id(smaller), self._binding_id(larger)
+            if smaller_id is not None and larger_id is not None and smaller_id != larger_id:
+                for key in list(refined):
+                    decoded = _decode_index_fact(key)
+                    if decoded is not None and decoded[0] == larger_id and decoded[1] != _NONZERO_MARK:
+                        refined[_index_fact_key(smaller_id, decoded[1])] = Interval.exact(1)
         left_binding = self._binding_id(left)
         right_interval = self._eval(right, refined, validate=False)
         if _is_inequality(name, truth):

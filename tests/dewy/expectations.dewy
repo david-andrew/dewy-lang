@@ -48,3 +48,10 @@ let squares:array<int64> = [1 4 9 16]
 
 $test(cases=squares)
 let computed_cases = (s:int64) => $expect s >? 0
+
+$test
+let min_max = () => {
+    $expect min(3 4) =? 3 and max(3 4) =? 4
+    $expect min((-1) 1) =? -1 and max((-1) 1) =? 1
+    $expect "  x ".trim =? "x" and "a-b".split"-".length =? 2
+}

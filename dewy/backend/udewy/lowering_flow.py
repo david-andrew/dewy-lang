@@ -195,12 +195,30 @@ class _FlowLowering:
         arms: list[hir.IfArm | hir.LoopArm] = []
         for index, arm in enumerate(node.arms):
             condition_prelude, condition = self._prepare_condition(arm.condition)
+            if condition_prelude and isinstance(arm, hir.LoopArm):
+                # A loop condition that needs statements (`loop … and f(text[i])`):
+                # they must run before every test, so the loop becomes
+                # `loop true { statements; if not cond { break }; body }`
+                # (`continue` returns to the top and re-tests, as it should).
+                self.lower_loop_depth += 1
+                body = self._lower_statement_body(arm.body)
+                self.lower_loop_depth -= 1
+                loc = arm.condition.loc
+                unary_type = ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', [])
+                negated = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, unary_type, '__not__'), [condition], {})
+                exit_test = hir.Flow(
+                    loc, ty.VOID_TYPE,
+                    [hir.IfArm(loc, ty.VOID_TYPE, negated, hir.Block(loc, ty.VOID_TYPE, [hir.Break(loc, ty.BOTTOM_TYPE)], True))],
+                    None,
+                )
+                body_items = body.items if isinstance(body, hir.Block) else [body]
+                arms.append(replace(
+                    arm,
+                    condition=hir.Bool(loc, 'bool', True),
+                    body=hir.Block(arm.body.loc, ty.VOID_TYPE, [*condition_prelude, exit_test, *body_items], True),
+                ))
+                continue
             if condition_prelude:
-                if isinstance(arm, hir.LoopArm):
-                    self._target_error(
-                        arm.condition,
-                        'condition requiring extracted statements in this flow position',
-                    )
                 if index > 0:
                     # A later arm whose condition needs statements (a match
                     # arm reading a field of the narrowed scrutinee): the rest

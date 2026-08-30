@@ -14,6 +14,7 @@ project_root = Path(__file__).parents[2]
 library = project_root / 'library'
 
 PORTABLE_LIBRARIES = (
+    library / 'strings.dewy',
     library / 'path.dewy',
     library / 'math.dewy',
     library / 'rational.dewy',

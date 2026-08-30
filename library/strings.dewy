@@ -1,0 +1,145 @@
+# String methods, written in Dewy over grapheme indexing and slicing. The
+# checker turns `text.contains(x)` into `_string_contains(text x)` (and the
+# zero-argument ones, `text.trim`, into calls), so these read as methods.
+# Positions and lengths are in graphemes, like indexing.
+
+let _string_starts_with = (text:string prefix:string):>bool => {
+    let m:int64 = prefix.length
+    if m =? 0 { return true }
+    if m >? text.length { return false }
+    let last:int64 = m - 1
+    if last <? text.length and last >=? 0 { return text[0..last] =? prefix }
+    return false
+}
+
+let _string_ends_with = (text:string suffix:string):>bool => {
+    let m:int64 = suffix.length
+    if m =? 0 { return true }
+    if m >? text.length { return false }
+    let start:int64 = text.length - m
+    let last:int64 = text.length - 1
+    if start >=? 0 and start <=? last and last <? text.length { return text[start..last] =? suffix }
+    return false
+}
+
+# The first position where `needle` occurs, or `undefined`.
+let _string_find = (text:string needle:string):>int64|undefined => {
+    let m:int64 = needle.length
+    if m =? 0 { return 0 }
+    let i:int64 = 0
+    loop i + m <=? text.length {
+        let last:int64 = i + m - 1
+        if i >=? 0 and last >=? i and last <? text.length {
+            if text[i..last] =? needle { return i }
+        }
+        i += 1
+    }
+    return undefined
+}
+
+# The last position where `needle` occurs, or `undefined`.
+let _string_rfind = (text:string needle:string):>int64|undefined => {
+    let m:int64 = needle.length
+    if m =? 0 { return text.length }
+    if m >? text.length { return undefined }
+    let i:int64 = text.length - m
+    loop i >=? 0 {
+        let last:int64 = i + m - 1
+        if i <? text.length and last >=? i and last <? text.length {
+            if text[i..last] =? needle { return i }
+        }
+        i -= 1
+    }
+    return undefined
+}
+
+let _string_contains = (text:string needle:string):>bool => {
+    match _string_find(text needle) {
+        <int64> => return true
+        <undefined> => return false
+    }
+}
+
+# The pieces between occurrences of `separator` (an empty separator splits
+# into graphemes); adjacent separators give empty pieces, like Python.
+let _string_split = (text:string separator:string):>array<string> => {
+    let pieces:array<string> = []
+    let m:int64 = separator.length
+    if m =? 0 {
+        let k:int64 = 0
+        loop k <? text.length { pieces.push(text[k])  k += 1 }
+        return pieces
+    }
+    let start:int64 = 0
+    let i:int64 = 0
+    loop i + m <=? text.length {
+        let last:int64 = i + m - 1
+        let matched:bool = false
+        if i >=? 0 and i <? text.length and last >=? i and last <? text.length { matched = text[i..last] =? separator }
+        if matched {
+            _push_piece(@pieces text start i)
+            i += m
+            start = i
+        } else {
+            i += 1
+        }
+    }
+    _push_piece(@pieces text start text.length)
+    return pieces
+}
+
+# `text[start..stop)` as a piece (empty when `start` is `stop`).
+let _push_piece = (@pieces:array<string> text:string start:int64 stop:int64):>void => {
+    if start >=? stop { pieces.push("")  return void }
+    let last:int64 = stop - 1
+    if start >=? 0 and start <? text.length and last >=? start and last <? text.length { pieces.push(text[start..last]) }
+    return void
+}
+
+# The lines of `text`, without their line breaks; a final line break does
+# not add an empty last line.
+let _string_lines = (text:string):>array<string> => {
+    let lines:array<string> = _string_split(text "\n")
+    if lines.length >? 0 {
+        let last:int64 = lines.length - 1
+        if last >=? 0 and last <? lines.length {
+            if lines[last].length =? 0 { let dropped:string = lines.pop() }
+        }
+    }
+    return lines
+}
+
+let _is_space = (g:string):>bool => g =? " " or g =? "\t" or g =? "\n" or g =? "\r"
+
+let _string_trim_start = (text:string):>string => {
+    let i:int64 = 0
+    loop i <? text.length {
+        if not _is_space(text[i]) { break }
+        i += 1
+    }
+    if i =? 0 { return text }
+    let last:int64 = text.length - 1
+    if i <? text.length and i <=? last and last <? text.length { return text[i..last] }
+    return ""
+}
+
+let _string_trim_end = (text:string):>string => {
+    let last:int64 = text.length - 1
+    loop last >=? 0 and last <? text.length {
+        if not _is_space(text[last]) { break }
+        last -= 1
+    }
+    if last <? 0 { return "" }
+    if last =? text.length - 1 { return text }
+    if last <? text.length { return text[0..last] }
+    return ""
+}
+
+let _string_trim = (text:string):>string => _string_trim_end(_string_trim_start(text))
+
+# Every occurrence of `old` replaced by `new` (an empty `old` leaves the text alone).
+let _string_replace = (text:string old:string new:string):>string => {
+    if old.length =? 0 { return text }
+    let pieces = _string_split(text old)
+    return pieces.join(new)
+}

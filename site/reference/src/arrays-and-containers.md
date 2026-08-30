@@ -29,6 +29,8 @@ Each partial operation carries a proof obligation: `pop` requires a proven posit
 
 Container mutation is reached only through the container value; free functions are reserved for genuinely global operations.
 
+A `let` with a runtime-length annotation and an empty initializer, `let buffer:array<uint8> = []`, is a growable array from the start (an empty exact array would be useless), and a callee may grow it through a place parameter: `fill(@buffer 5)`. Passing `@name` makes the compiler forget what it knew about the binding — an exact length, a refinement — since the callee may have changed it.
+
 A loop inside `[]` is loop capture: the collector receives each non-`void` value the loop expresses and produces an array.
 
 A trailing `...` after a sequence inserts its elements into a surrounding array literal. Fixed elements and spreads may mix: `[heads... tails...]`, `[0 xs... 1]`.

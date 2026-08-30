@@ -45,6 +45,24 @@ A field's value converts the way `value as string` does: numbers, booleans, and 
 
 An implementation may stream the literal chunks and converted fields directly to a consumer such as `printl`, or materialize a string value when the surrounding context needs one. That representation choice is not observable.
 
+## Searching, Splitting, and Trimming
+
+Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.starts_with(x)`, `text.ends_with(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `undefined`; `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let line:string = "  key: value  ".trim
+    match line.find": " {
+        i:int64 => printl"key ends at {i}"
+        <undefined> => printl"no separator"
+    }
+    let parts = line.split": "
+    return parts.length                    # 2
+}
+```
+
 ## Joining and Building
 
 `xs.join` concatenates the elements of a string array (`array<string>`, `array<grapheme>`) into a new string; `xs.join(sep)` — or, juxtaposed, `xs.join", "` — places the separator between neighbours. The result is re-segmented, so clusters may span the joins. `join` reads its receiver: it applies to any array value, of any length, and is not a mutation.

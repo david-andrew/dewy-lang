@@ -1,0 +1,24 @@
+# The string methods of `library/strings.dewy`: positions are graphemes.
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let text:string = "  héllo, wörld  "
+    let t:string = text.trim
+    if t =? "héllo, wörld" and t.length =? 12 { checks += 1 }
+    if text.trim_start =? "héllo, wörld  " and text.trim_end =? "  héllo, wörld" { checks += 2 }
+    if t.contains"wör" and not t.contains"world" and t.starts_with"hé" and t.ends_with"ld" { checks += 4 }
+    if t.starts_with"" and t.ends_with"" and not t.starts_with"héllo, wörld!" { checks += 8 }
+    match t.find", " { i:int64 => if i =? 5 { checks += 16 }  <undefined> => {} }
+    match t.find"zz" { <int64> => {}  <undefined> => { checks += 32 } }
+    match t.rfind"l" { i:int64 => if i =? 10 { checks += 64 }  <undefined> => {} }
+    let parts = t.split", "
+    if parts.length =? 2 and parts[0] =? "héllo" and parts[1] =? "wörld" { checks += 128 }
+    let empties = "a,,b,".split","
+    if empties.length =? 4 and empties[1] =? "" and empties[3] =? "" { checks += 256 }
+    let graphemes = "xöz".split""
+    if graphemes.length =? 3 and graphemes[1] =? "ö" { checks += 512 }
+    let lines = "a\nb\n\nc\n".lines
+    if lines.length =? 4 and lines[2] =? "" and lines[3] =? "c" { checks += 1024 }
+    if t.replace("l" "L") =? "héLLo, wörLd" and t.replace("" "x") =? t { checks += 2048 }
+    if checks =? 4095 { return 42 }
+    return checks
+}

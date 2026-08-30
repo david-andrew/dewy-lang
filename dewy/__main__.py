@@ -84,18 +84,38 @@ def run(argv: list[str]) -> int:
 # ---------------------------------------------------------- dewy analyze <file>
 def analyze(argv: list[str]) -> int:
     """Compile a program and report the compiler's analysis decisions."""
-    parser = ArgumentParser(prog='dewy analyze', description='report the analysis decisions made while compiling a program (currently: which integers became big integers, and why)')
+    parser = ArgumentParser(prog='dewy analyze', description='report the analysis decisions made while compiling a program: the escape copies of strings, and which integers became big integers, and why')
     parser.add_argument('file', help='.dewy file to analyze')
     _add_target_option(parser)
     args = parser.parse_args(argv)
 
-    from .semantic import check
+    from .backend.udewy import lower
     from .semantic.analyze import representation
 
     srcfile = SrcFile.from_path(Path(args.file))
-    check.typecheck_and_resolve(srcfile, include_prelude=True, target=_resolve_target(args.target))
+    codegen(srcfile, target=_resolve_target(args.target))   # checks and lowers: both reports come from that
 
     use_color = color_enabled(sys.stdout)
+    for note in lower.last_copy_notes:
+        print(Info(
+            srcfile=note.srcfile,
+            title='escape copy',
+            pointer_messages=[Pointer(span=note.loc, message=note.message)],
+            use_color=use_color,
+        ))
+        print()
+    copies = len(lower.last_copy_notes)
+    print(Info(
+        srcfile=srcfile,
+        title='copy report',
+        message=(
+            f'{copies} escape cop{"ies" if copies != 1 else "y"}: the strings above are copied into the arena where they are stored; every other stored string is static or already arena-backed'
+            if copies
+            else 'no escape copies: every stored string is static or already arena-backed'
+        ),
+        use_color=use_color,
+    ))
+    print()
     notes = representation.last_notes
     for note in notes:
         print(Info(

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from ...reporting import Span, SrcFile
 from ...semantic import hir
 
 ARRAY_DATA_OFFSET = 0
@@ -183,6 +184,15 @@ class ArrayCallBoundaryAnalysis:
     source_binding_id: int | None
     source_alias_group: frozenset[int]
     safe: bool
+
+
+@dataclass(frozen=True)
+class CopyNote:
+    """One escape copy the lowering made — a string copied into the arena where it is stored — and why."""
+
+    srcfile: SrcFile
+    loc: Span
+    message: str
 
 
 @dataclass(frozen=True)

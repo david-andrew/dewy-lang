@@ -14,7 +14,7 @@ let compile_program = (source:string):>void => {
             match result.stderr_text { text:string => { report = text }  <undefined> => {} }
             $expect result.status =? 0, "compiling {source} failed ({result.status}):\n{report}"
         }
-        <SpawnError> => $expect false, "could not start the compiler"
+        <SpawnError> => $fail "could not start the compiler"
     }
 }
 
@@ -85,6 +85,9 @@ $test(cases=[
     [name="string_escapes.dewy" expected=42]
     [name="conversions.dewy" expected=42]
     [name="process_capture.dewy" expected=42]
+    [name="string_methods.dewy" expected=42]
+    [name="nested_blocks.dewy" expected=42]
+    [name="loop_conditions.dewy" expected=42]
     [name="union_recursive.dewy" expected=42]
     [name="string_join_decode.dewy" expected=42]
     [name="error_values.dewy" expected=42]
@@ -156,7 +159,7 @@ let program_exit_status = (name:string expected:int64) => {
     if not binary.exists { compile_program(source.path) }
     match run_silent(binary.path []) {
         status:int64 => $expect status =? expected, "{name} exited with {status}"
-        <SpawnError> => $expect false, "could not run {binary.path}"
+        <SpawnError> => $fail "could not run {binary.path}"
     }
 }
 
@@ -173,9 +176,9 @@ let program_output = (name:string expected:string) => {
             $expect result.status =? 0, "{name} exited with {result.status}"
             match result.stdout_text {
                 text:string => $expect text =? expected, "{name} printed {text}"
-                <undefined> => $expect false, "{name} printed bytes that are not UTF-8"
+                <undefined> => $fail "{name} printed bytes that are not UTF-8"
             }
         }
-        <SpawnError> => $expect false, "could not run {binary.path}"
+        <SpawnError> => $fail "could not run {binary.path}"
     }
 }

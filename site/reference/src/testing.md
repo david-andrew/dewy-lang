@@ -21,8 +21,10 @@ let identity_is_itself = () => {
 
 - A failed expectation is recorded and **returns from the enclosing function**. The test stops at its first failure and the runner reports it; other tests still run. Because execution never continues past a false expectation, the code after one may assume it — `$expect v is? int64` narrows `v` exactly as an assertion does.
 - The report is the assertion report (the condition underlined in its source line, the message, a `note:` with each operand's value), written to stderr as `expectation failed`; the test's stdout continues afterwards.
-- An expectation the compiler *refutes* is a warning, not an error: the module still builds and the test fails when it runs. `$expect false, "not reached"` is the deliberate "fail here" and is not warned about. An expectation the compiler proves costs nothing.
+- An expectation the compiler *refutes* is a warning, not an error: the module still builds and the test fails when it runs. `$fail "not reached"` is the deliberate "fail here" (a literal `false` condition is not warned about either). An expectation the compiler proves costs nothing.
 - Expectations live in `void` functions: the test itself, or a helper it calls (the helper returns on failure; the test goes on). A function that returns a value cannot contain one — it returns the value to the test that checks it.
+
+`$fail message` (or a bare `$fail`) is an expectation that always fails — the deliberate "this must not be reached" of a test, and the honest placeholder for a test not written yet.
 
 `$assert` and `$runtime_assert` keep their meaning inside tests. A `$assert` that fails is a compile error before any test runs; a failed `$runtime_assert` exits the test binary (the runner reports the file as aborted), so it is for invariants a test cannot sensibly continue past.
 
@@ -77,12 +79,12 @@ let program_exit_status = (name:string expected:int64) => {
     if not binary.exists {
         match run_silent("/usr/bin/env" ["python3" "-m" "dewy" "--compile" source.path]) {
             status:int64 => $expect status =? 0, "compiling {name} failed ({status})"
-            <SpawnError> => $expect false, "could not start the compiler"
+            <SpawnError> => $fail "could not start the compiler"
         }
     }
     match run_silent(binary.path []) {
         status:int64 => $expect status =? expected, "{name} exited with {status}"
-        <SpawnError> => $expect false, "could not run {binary.path}"
+        <SpawnError> => $fail "could not run {binary.path}"
     }
 }
 ```

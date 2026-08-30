@@ -50,6 +50,7 @@ from .lowering_objects import _ObjectLowering
 from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
 from .lowering_shared import (
+    CopyNote,
     ARRAY_LENGTH_OFFSET,
     STRING_GRAPHEME_LENGTH_OFFSET,
     ArrayCallBoundaryAnalysis,
@@ -228,6 +229,8 @@ class _Lowerer(
         self.current_object_type: ty.ObjectType | None = None
         self.current_object_field_ids: set[int] = set()
         self.current_object_field_names: dict[int, str] = {}
+        self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
+        self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.object_literal_contexts: list[
             tuple[hir.AST, ty.ObjectType, dict[int, str]]
         ] = []
@@ -780,6 +783,8 @@ class _Lowerer(
         self.current_object_field_names = {
             binding_id: name for binding_id, name in literal.object_fields
         }
+        previous_literal = self.current_literal
+        self.current_literal = literal
         transformed_body = self._require_node(self._transform_node(literal.body))
         if default_prologue:
             if isinstance(transformed_body, hir.Block):
@@ -806,6 +811,7 @@ class _Lowerer(
         self.current_object_type = previous_object_type
         self.current_object_field_ids = previous_field_ids
         self.current_object_field_names = previous_field_names
+        self.current_literal = previous_literal
         if parameter_prologue:
             if isinstance(body, hir.Block):
                 body = replace(body, items=[*parameter_prologue, *body.items])
@@ -2981,7 +2987,11 @@ class _Lowerer(
                 for item in node.items:
                     statements.extend(self._lower_statement(item))
                 return statements
-            return [self._lower_statement_body(node)]
+            # µDewy has no bare block statement: a scoped block in statement
+            # position (`{ let x = 1  … }`, the report of `$fail`) becomes the
+            # body of an `if true`, which is a block with its own scope
+            always = hir.Bool(node.loc, 'bool', True)
+            return [hir.Flow(node.loc, ty.VOID_TYPE, [hir.IfArm(node.loc, ty.VOID_TYPE, always, self._lower_statement_body(node))], None)]
         if isinstance(node, hir.Flow):
             is_loop = any(isinstance(arm, hir.LoopArm) for arm in node.arms)
             if (
@@ -4373,8 +4383,15 @@ class _Lowerer(
         return node
 
 
+last_copy_notes: list[CopyNote] = []
+"""The escape copies of the most recent lowering, for `dewy analyze`."""
+
+
 def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main') -> LoweredProgram:
     """Legalize checked HIR function constructs for udewy source emission."""
     if not isinstance(root, hir.Block):
         raise TypeError(f'expected Block, got {type(root).__name__}')
-    return _Lowerer(root, srcfile, entry_name).lower()
+    lowerer = _Lowerer(root, srcfile, entry_name)
+    program = lowerer.lower()
+    last_copy_notes[:] = lowerer.copy_notes
+    return program

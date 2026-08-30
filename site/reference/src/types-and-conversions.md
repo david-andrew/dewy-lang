@@ -197,7 +197,7 @@ let main = ():>int64 => {
 }
 ```
 
-A value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this interpolation field`); one conversion method per type for now, so a type converts to one target.
+A value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this interpolation field`). A type converts to several targets by adding conversions with `&=` — `__as__ &= ():>int64 => x * 100 + y` after the first — and `x as T` picks the one whose result fits `T`.
 
 ## `transmute`
 

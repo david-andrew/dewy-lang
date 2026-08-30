@@ -84,6 +84,7 @@ for source_file in \
 done
 
 copy_runtime_file "${source_dir}/VERSION"
+copy_runtime_file "${source_dir}/library/strings.dewy"
 copy_runtime_file "${source_dir}/library/path.dewy"
 copy_runtime_file "${source_dir}/library/math.dewy"
 copy_runtime_file "${source_dir}/library/rational.dewy"

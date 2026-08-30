@@ -1,0 +1,11 @@
+# A scoped block in statement position opens a scope of its own: the two
+# `x`s are different locals. (µDewy has no bare block statement, so the
+# lowering emits each as the body of an `if true`.)
+let f = ():>int64 => {
+    let total:int64 = 0
+    { let x:int64 = 1  total += x }
+    { let x:int64 = 2  total += x }
+    if total =? 3 { let x:int64 = 39  total += x }
+    return total
+}
+let main = ():>int64 => f()

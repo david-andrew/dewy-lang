@@ -14,6 +14,7 @@ from ...reporting import Span
 from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
+    CopyNote,
     ARGC_NAME,
     ARGV_NAME,
     ARRAY_BORROWED_STATIC,
@@ -2503,6 +2504,60 @@ class _StringLowering:
     def _has_arena(self) -> bool:
         return any(candidate.logical_name.endswith('_arena_alloc') for candidate in self.functions)
 
+    def _string_storage(self, node: hir.AST, *, visiting: set[int] | None = None) -> str:
+        """Where a string value's bytes live: `static`, `arena`, `frame`, or `caller` (a parameter's, unknown here).
+
+        The placement step: a string stored where it outlives the current
+        evaluation is copied into the arena only when this says it may be
+        frame-backed or the caller's. Literals are static; decoded bytes,
+        joins, and anything loaded from an array element or an object field
+        (copied there when stored) are arena-backed; a view lives where its
+        source does; a local is traced to its initializers; an interpolation
+        or a call result (copied into this frame) is frame-backed.
+        """
+        visiting = set() if visiting is None else visiting
+        node = self._unwrap_transparent(node)
+        if isinstance(node, hir.ValueCast):
+            return self._string_storage(node.expr, visiting=visiting)
+        if isinstance(node, hir.RepresentationCast):
+            if isinstance(node.expr.type, ty.ArrayType):
+                return 'arena'   # `bytes as string | undefined`: built in the arena
+            return self._string_storage(node.expr, visiting=visiting)
+        if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):
+            return 'static'
+        if isinstance(node, hir.InterpolatedString):
+            return 'frame'
+        if isinstance(node, (hir.StringSlice, hir.StringIndex)):
+            return self._string_storage(node.string, visiting=visiting)
+        if isinstance(node, (hir.Index, hir.MemberAccess)):
+            return 'arena'   # elements and fields are copied into the arena when stored
+        if isinstance(node, hir.ArrayMethod):
+            return 'arena' if node.name == 'join' else 'frame'
+        if isinstance(node, hir.FunctionCall):
+            if isinstance(node.func, hir.ArrayMethod) and node.func.name == 'join':
+                return 'arena'   # `xs.join` / `xs.join(sep)` build in the arena
+            return 'frame'   # copied into this frame, or a callee's view of a caller's string
+        if isinstance(node, hir.ExpressedIdentifier):
+            literal = self.current_literal
+            if literal is None:
+                return 'static'   # module level: startup values live in static storage
+            if node.binding_id is None:
+                return 'frame'
+            if any(param.binding_id == node.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]):
+                return 'caller'
+            if node.binding_id in visiting:
+                return 'frame'
+            candidates = self._string_local_candidates(literal).get(node.binding_id)
+            if not candidates:
+                return 'static'   # a global: static storage
+            visiting.add(node.binding_id)
+            storages = {self._string_storage(candidate, visiting=visiting) for candidate in candidates}
+            visiting.discard(node.binding_id)
+            if storages <= {'static', 'arena'}:
+                return 'arena' if 'arena' in storages else 'static'
+            return 'caller' if storages <= {'static', 'arena', 'caller'} else 'frame'
+        return 'frame'
+
     def _escaping_string_value(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         """A string stored where it outlives the evaluation that made it (a growable array's element).
 
@@ -2510,16 +2565,20 @@ class _StringLowering:
         this frame — lives in the frame (or, at module level, in one static
         cell per site that a loop reuses), and a view may point into one, so
         storing its descriptor would dangle once the frame is gone: the bytes
-        are copied into the arena as a fresh string. Literals are static and
-        stored as they are. (The placement step of the ownership model is
-        where proofs will remove copies that are not needed.)
+        are copied into the arena as a fresh string. Static and arena-backed
+        strings (`_string_storage`) are stored as they are; a parameter's is
+        copied too, since its storage belongs to the caller. Each copy made is
+        a `CopyNote` for `dewy analyze`.
         """
         prelude, value = self._extract_expression(node)
-        source = self._unwrap_transparent(node)
-        while isinstance(source, (hir.ValueCast, hir.RepresentationCast)):   # `"a"` typed as `string`
-            source = self._unwrap_transparent(source.expr)
-        if isinstance(source, hir.String) or isinstance(source.type, ty.StringLiteralType) or not self._has_arena():
+        storage = self._string_storage(node)
+        if storage in ('static', 'arena') or not self._has_arena():
             return prelude, value
+        reasons = {
+            'frame': 'this string is built in the current frame (an interpolation or a call result), so storing it copies it into the arena',
+            'caller': 'this string is a parameter, whose storage belongs to the caller, so storing it copies it into the arena',
+        }
+        self.copy_notes.append(CopyNote(self.srcfile, node.loc, reasons[storage]))
         loc = node.loc
         statements = list(prelude)
         if isinstance(value, hir.ExpressedIdentifier):

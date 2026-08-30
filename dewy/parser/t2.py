@@ -181,13 +181,13 @@ class Chain(t1.InedibleToken):
 # condition from the message — so the comma's operator precedence (tighter
 # than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
 # needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
-assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect'}
+assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect', 'fail'}   # `$fail [message]` takes no condition
 
 @dataclass
 class Directive(t1.InedibleToken):
-    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`."""
+    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]`."""
     metatag: t1.Metatag
-    condition: Chain
+    condition: Chain | None      # `None` only for `$fail`
     message: Chain | None = None
 
     @property
@@ -800,12 +800,19 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
     if not isinstance(metatag, t1.Metatag):
         raise ValueError(f"INTERNAL ERROR: expected an assertion metatag, got {metatag=}")
     i = start + 1
-    if (
+    ends_here = (
         i >= len(tokens)
         or is_stop_keyword(tokens[i], stop_keywords)
         or isinstance(tokens[i], (t1.Semicolon, KeywordExpr))
         or isinstance(tokens[i], t1.Keyword) and tokens[i].name not in {"if", "loop", "match"}
-    ):
+    )
+    if metatag.name == "fail":
+        # `$fail` or `$fail message`: the whole argument is the message
+        if ends_here:
+            return Directive(metatag.loc, metatag, None), i
+        message, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
+        return Directive(Span(metatag.loc.start, message.loc.stop), metatag, None, message), i
+    if ends_here:
         Error(
             srcfile=ctx.srcfile,
             title=f"`${metatag.name}` needs a condition",

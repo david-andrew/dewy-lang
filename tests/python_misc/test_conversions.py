@@ -37,3 +37,11 @@ def test_objects_without_a_conversion_are_rejected() -> None:
 def test_conversion_methods_take_no_arguments() -> None:
     with pytest.raises(UserError, match='`__as__` takes no arguments'):
         _compile('let Wrap:type = [v:int64 __as__ = (n:int64):>string => "x"]\nlet main = ():>int64 => { let w = Wrap(1)  return "{w}".length }\n')
+
+
+def test_a_type_may_convert_to_several_targets() -> None:
+    emitted = _compile(
+        'let Point:type = [x:int64 y:int64 __as__ = ():>string => "({x}, {y})" __as__ &= ():>int64 => x * 100 + y]\n'
+        'let main = ():>int64 => { let pt = Point(3 4)  let n:int64 = pt as int64  printl"{pt}"  return n }\n'
+    )
+    assert 'Point____as__' in emitted and 'Point____as___2' in emitted
