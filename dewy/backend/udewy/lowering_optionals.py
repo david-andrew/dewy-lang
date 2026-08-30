@@ -457,6 +457,48 @@ class _OptionalLowering:
             self._intrinsic_call('__store_i64__', [cell, target_address], ty.VOID_TYPE, loc),
         ]
 
+    def _is_union_element(self, element: ty.Type) -> bool:
+        """Container elements of a general union type (`Number | Name | Punct`,
+        `int64 | string | undefined`): one word — a pointer to an arena cell
+        the container owns, with no prepared trees (object members are handles)."""
+        if isinstance(element, str):
+            return False
+        members = ty.runtime_union_members(ty.strip_refinement(element))
+        if members is None:
+            return False
+        return all(
+            self._union_member_supported(member) and self._union_member_kind(member, prepared=False) in ('word', 'handle')
+            for member in members
+        )
+
+    def _union_element_value(self, node: hir.AST, element_type: ty.Type) -> tuple[list[hir.AST], hir.AST]:
+        """A value stored into a union-element container: a fresh 16-byte arena cell."""
+        loc = node.loc
+        members = ty.runtime_union_members(ty.strip_refinement(element_type))
+        assert members is not None
+        name = self._new_array_name('union_cell')
+        cell = hir.ExpressedIdentifier(loc, 'int64', name)
+        statements: list[hir.AST] = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', self._arena_allocation(self._int64_literal(loc, 16), loc)),
+        ]
+        statements.extend(self._union_write(cell, node, members, prepared=False))
+        return statements, cell
+
+    def _copy_union_element(self, source_value: hir.AST, target_address: hir.AST, element_type: ty.Type, loc: Span) -> list[hir.AST]:
+        """A copy of a container's union element: its own arena cell, the active member copied."""
+        members = ty.runtime_union_members(ty.strip_refinement(element_type))
+        assert members is not None
+        name = self._new_array_name('union_copy')
+        cell = hir.ExpressedIdentifier(loc, 'int64', name)
+        source_name = self._new_array_name('union_source')
+        source = hir.ExpressedIdentifier(loc, 'int64', source_name)
+        return [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', source_name, 'int64', replace(source_value, type='int64') if isinstance(source_value, hir.ExpressedIdentifier) else source_value),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', self._arena_allocation(self._int64_literal(loc, 16), loc)),
+            *self._union_copy_cell(cell, source, members, loc, prepared=False),
+            self._intrinsic_call('__store_i64__', [cell, target_address], ty.VOID_TYPE, loc),
+        ]
+
     def _union_cell_allocation(
         self,
         members: tuple[ty.TypeExpr, ...],

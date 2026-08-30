@@ -1,0 +1,35 @@
+# Containers whose elements are a union of objects (a token stream): each
+# element is a tagged cell the array owns; `match` dispatches on the member,
+# copies are independent, dictionaries hold them as values, and the whole
+# array prints as its literal syntax.
+let Number:type = [text:string value:int64]
+let Name:type = [text:string]
+let Punct:type = [text:string level:int64]
+let Token:type = Number | Name | Punct
+let tokenize = (parts:array<string>):>array<Token> => {
+    let tokens:array<Token> = []
+    loop part in parts {
+        if part =? "+" or part =? "*" { tokens.push(Punct(part 1)) }
+        else if part.length >? 0 and part[0] in? set'0123456789' { tokens.push(Number(part part.length)) }
+        else { tokens.push(Name(part)) }
+    }
+    return tokens
+}
+let main = ():>int64 => {
+    let tokens = tokenize(["12" "+" "x" "*" "345"])
+    let total:int64 = 0
+    loop t in tokens {
+        match t {
+            n:Number => { total += n.value }            # 2 + 3
+            m:Name => { total += m.text.length * 10 }    # 10
+            p:Punct => { total += 5 * p.level }          # 5 + 5
+        }
+    }
+    let copy:array<Token> = tokens
+    tokens.push(Name("extra"))
+    total += tokens.length - copy.length                 # 1
+    let named:dict<string Token> = ['first' -> tokens[0]]
+    match named['first'] { n:Number => { total += n.value * 4 }  <Name> => {}  <Punct> => {} }   # 8
+    if copy.length >? 1 { let second:Token = copy[1]  if '{second}' =? '[text="+" level=1]' { total += 8 } }   # 8
+    return total                                         # 42
+}

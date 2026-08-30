@@ -728,23 +728,41 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
 
 
 def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
-    """An optional-typed interpolation field as a two-arm flow: the text
-    `undefined`, or the payload (a name only, so the value is read once)."""
+    """A union-typed value (an optional, or a container union of words,
+    strings, `undefined`, and objects) as a string: a flow with one arm per
+    member — the text `undefined`, a member's one-part interpolation, or an
+    object member's literal syntax. The value must be a name or a field, so
+    reading it once per arm is free of effects."""
     if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
-        return None   # (a name or a field: reading it twice is free of effects)
-    plain = ty.strip_refinement(value.type)
-    if not _optional_container_element(plain):
         return None
-    payload = ty.optional_payload(plain)
-    assert payload is not None
+    plain = ty.strip_refinement(value.type)
+    if _optional_container_element(plain):
+        payload = ty.optional_payload(plain)
+        assert payload is not None
+        members: tuple[ty.TypeExpr, ...] = ('undefined', payload)
+    elif _union_container_element(plain):
+        found = ty.runtime_union_members(plain)
+        assert found is not None
+        members = found
+    else:
+        return None
     loc = value.loc
-    condition = hir.TypeTest(loc, 'bool', value, 'undefined', False)
-    absent = hir.String(loc, ty.StringLiteralType('undefined'), 'undefined')
-    payload_part = _prepared_single_argument(replace(value, type=payload), ctx=ctx)
-    # both arms are strings: the payload arm is a one-part interpolation, which
-    # materializes the payload's text (digits, a copied string, …)
-    present = hir.InterpolatedString(loc, ty.StringType(), [payload_part])
-    return hir.Flow(loc, ty.StringType(), [hir.IfArm(loc, absent.type, condition, absent)], present)
+
+    def member_text(member: ty.TypeExpr) -> hir.AST:
+        if member == 'undefined':
+            return hir.String(loc, ty.StringLiteralType('undefined'), 'undefined')
+        narrowed = replace(value, type=member)
+        structural = _structure_string(narrowed, loc, ctx=ctx)   # an object member: its literal syntax
+        if structural is not None:
+            return structural
+        # a word or string member: a one-part interpolation materializes its text
+        return hir.InterpolatedString(loc, ty.StringType(), [_prepared_single_argument(narrowed, ctx=ctx)])
+
+    arms = [
+        hir.IfArm(loc, ty.StringType(), hir.TypeTest(loc, 'bool', value, member, False), member_text(member))
+        for member in members[:-1]
+    ]
+    return hir.Flow(loc, ty.StringType(), arms, member_text(members[-1]))
 
 
 def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
@@ -799,6 +817,13 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         if optional_flow is not None:
             parts.append(optional_flow)   # `undefined`, or the payload's text
             continue
+        if _optional_container_element(ty.strip_refinement(value.type)) or _union_container_element(ty.strip_refinement(value.type)):
+            user_error(
+                ctx.srcfile,
+                'a union value in an interpolation must be a name',
+                Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`; its member is tested and read separately, so it must be readable twice'),
+                hint='bind it first: `let item = xs[i]` then `"{item}"`',
+            )
         require_valued(
             value.type,
             ctx.srcfile,
@@ -3169,6 +3194,7 @@ def _tcr_range_iterator(
                 and element_type in {'string', 'grapheme', 'char'}
                 or ty.string_valued(element_type)
                 or _optional_container_element(element_type)
+                or _union_container_element(element_type)
             ):
                 not_implemented(
                     ctx.srcfile,
@@ -6821,7 +6847,27 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
         )
         or ty.string_valued(type_)   # a union of string literals: string handles
         or _optional_container_element(type_)
+        or _union_container_element(type_)
     )
+
+
+def _union_container_element(type_: ty.Type) -> bool:
+    """A general union of words, strings, `undefined`, and plain objects
+    (`Number | Name | Punct`): containers hold such elements as one-word
+    pointers to tagged cells they own."""
+    if isinstance(type_, str):
+        return False
+    members = ty.runtime_union_members(ty.strip_refinement(type_))
+    if members is None:
+        return False
+    for member in members:
+        unfolded = ty.unfold(member)
+        if member == 'undefined' or member == 'bool' or ty.fixed_integer_layout(member) is not None or ty.string_valued(member):
+            continue
+        if isinstance(unfolded, ty.ObjectType) and unfolded.brand is None:
+            continue
+        return False
+    return True
 
 
 def _optional_container_element(type_: ty.Type) -> bool:
@@ -11318,6 +11364,16 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
         return None
     if _optional_container_element(plain):
         return None   # an optional member: `undefined` or its payload's text
+    if _union_container_element(plain):
+        found = ty.runtime_union_members(plain)
+        assert found is not None
+        for member in found:
+            if member == 'undefined':
+                continue
+            bad = _unconvertible_part(member, ctx=ctx, seen=seen)
+            if bad is not None:
+                return bad
+        return None
     if _number_object(plain, ctx=ctx) is not None:
         return plain
     members = _structure_members(plain)
@@ -12183,6 +12239,9 @@ def _explicit_value_conversion(
         return hir.ValueCast(loc, target, node)
     converted = _conversion_method_call(node, target, loc, ctx=ctx)
     if converted is None and _is_string_type(target):
+        union_flow = _optional_field_flow(node, ctx=ctx)
+        if union_flow is not None:
+            return union_flow
         number = _number_object(source, ctx=ctx)
         if number is not None:
             type_error(

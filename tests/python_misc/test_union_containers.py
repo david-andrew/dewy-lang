@@ -41,3 +41,20 @@ def test_optional_elements_are_arena_cells() -> None:
 def test_aggregate_union_members_stay_unsupported() -> None:
     with pytest.raises(TypeCheckError, match='unsupported array element type'):
         _compile('let main = ():>int64 => {\n    let xs:array<array<int64>|undefined> = []\n    return 0\n}\n')
+
+
+TOKENS = (
+    'let Number:type = [text:string value:int64]\n'
+    'let Name:type = [text:string]\n'
+    'let Token:type = Number | Name\n'
+)
+
+
+def test_object_unions_are_owned_tagged_cells() -> None:
+    emitted = _compile(TOKENS + 'let main = ():>int64 => {\n    let ts:array<Token> = [Number("1" 1)]\n    ts.push(Name("x"))\n    let copy:array<Token> = ts\n    return copy.length\n}\n')
+    assert 'union_cell' in emitted and 'union_copy' in emitted   # stores allocate cells; copies clone them
+
+
+def test_object_unions_print_member_by_member() -> None:
+    emitted = _compile(TOKENS + 'let main = ():>int64 => {\n    let ts:array<Token> = [Number("1" 1)]\n    printl(ts)\n    let t:Token = ts[0]\n    printl"{t}"\n    return 0\n}\n')
+    assert '__dewy_object_string_' in emitted   # each object member has its literal-syntax conversion

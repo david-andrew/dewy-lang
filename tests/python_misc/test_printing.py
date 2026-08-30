@@ -130,8 +130,8 @@ def test_doc_strings_are_accepted() -> None:
 
 
 def test_one_substantive_reading_reports_its_own_error() -> None:
-    with pytest.raises(TypeCheckError, match='unsupported value conversion'):
-        _main('    let opt:int64|undefined = 1\n    let t:string = opt as string')
+    with pytest.raises(TypeCheckError, match='no string conversion for this value'):
+        _compile('let Holder:type = [f:(n:int64):>int64]\nlet main = ():>int64 => { let h = Holder((n:int64):>int64 => n)  let t:string = h as string  return 0 }\n')
     with pytest.raises(UserError) as caught:   # the readings' verdict is definite, with the one reading's own message
         _main('    printl([[1 2] [3 4]])')
     assert 'no valid interpretation' not in str(caught.value) and 'containers, which a loop cannot visit' in str(caught.value)

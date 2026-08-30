@@ -444,7 +444,7 @@ class _FlowLowering:
                 temp_type = node.type
                 if isinstance(temp_type, ty.IntegerLiteralType) or temp_type in ('int', 'uint'):
                     temp_type = 'int64'  # abstract and literal integers are words by now
-                elif isinstance(temp_type, ty.TypeOr) and (ty.string_valued(temp_type) or self._is_optional_element(temp_type)):
+                elif isinstance(temp_type, ty.TypeOr) and (ty.string_valued(temp_type) or self._is_optional_element(temp_type) or self._is_union_element(temp_type)):
                     temp_type = 'int64'  # one-word handles
                 return hir.ExpressedIdentifier(node.loc, temp_type, name)
 

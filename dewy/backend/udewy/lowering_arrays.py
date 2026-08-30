@@ -1151,7 +1151,7 @@ class _ArrayLowering:
 
     def _is_growable_element(self, element: ty.Type) -> bool:
         """Elements a growable (arena-backed) array may hold: words, string handles, objects and optional cells (as handles)."""
-        return self._is_word_element(element) or isinstance(element, ty.ObjectType) or self._is_optional_element(element)
+        return self._is_word_element(element) or isinstance(element, ty.ObjectType) or self._is_optional_element(element) or self._is_union_element(element)
 
     def _growable_element_value(
         self,
@@ -1163,6 +1163,8 @@ class _ArrayLowering:
             return self._clone_object_value(node, element_type, arena=True)
         if self._is_optional_element(element_type):
             return self._optional_element_value(node, element_type)
+        if self._is_union_element(element_type):
+            return self._union_element_value(node, element_type)
         if self._is_string_valued(element_type):
             return self._escaping_string_value(node)
         return self._extract_expression(node)
@@ -2116,6 +2118,8 @@ class _ArrayLowering:
         if self._is_optional_element(element_type):
             # before the literal shortcut: `1` stored into `array<int64|undefined>` is a cell
             return self._optional_element_value(node, element_type)
+        if self._is_union_element(element_type):
+            return self._union_element_value(node, element_type)
         if isinstance(node.type, ty.IntegerLiteralType):
             return [], hir.Integer(
                 node.loc,
@@ -2162,6 +2166,8 @@ class _ArrayLowering:
             )
         elif self._is_optional_element(element_type) and self._has_arena() and not move:
             return self._copy_optional_element(source_value, target_address, loc)
+        elif self._is_union_element(element_type) and self._has_arena() and not move:
+            return self._copy_union_element(source_value, target_address, element_type, loc)
         elif self._is_string_valued(element_type) and self._has_arena() and not move:
             # an array owns its element strings, so a lasting copy of the array
             # (stored, returned, kept in a dictionary) gets its own copies
@@ -2274,8 +2280,8 @@ class _ArrayLowering:
         ) or (
             isinstance(element_type, str)
             and element_type in {'string', 'grapheme', 'char'}
-        ) or ty.string_valued(element_type) or self._is_optional_element(element_type):
-            return 8, True   # one-word handles (a string-literal union is a string; an optional element is a cell pointer)
+        ) or ty.string_valued(element_type) or self._is_optional_element(element_type) or self._is_union_element(element_type):
+            return 8, True   # one-word handles (a string-literal union is a string; optional and union elements are cell pointers)
         self._target_error(
             node,
             f'array element layout `{type_to_dewy(element_type)}`',
@@ -2781,6 +2787,10 @@ class _ArrayLowering:
         if self._is_optional_element(array_type.element) and iterator.target.binding_id is not None:
             # the target holds the element's cell pointer; narrowed reads load the payload
             self.optional_payloads[iterator.target.binding_id] = ty.optional_payload(ty.strip_refinement(array_type.element))
+        elif self._is_union_element(array_type.element) and iterator.target.binding_id is not None:
+            members = ty.runtime_union_members(ty.strip_refinement(array_type.element))
+            assert members is not None
+            self.union_cells[iterator.target.binding_id] = members   # the target holds the cell pointer
         raw_representation = self._array_use_representation(iterator.iterable)
         prelude, array = self._extract_expression(iterator.iterable)
         offset = self._new_iterator_temp(iterator)
