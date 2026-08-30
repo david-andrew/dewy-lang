@@ -10259,7 +10259,24 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return _fixed_type(ctx, ast.loc)
             if name == 'bigint' and BIGINT_TYPE_NAME in ctx.binding_scopes:
                 return _bigint_type(ctx, ast.loc)
-            return name
+            if name in ctx.type_system._named_types or name in (ty.VOID_TYPE, ty.INFERRED_TYPE):
+                return name
+            # an unknown name is an error here, not a fresh nominal type: the
+            # annotation `dict<BasePrefix …>` with a misspelled alias would
+            # otherwise fail far away, on the representation the name cannot have
+            import difflib
+            known = {
+                *ctx.type_system._named_types,
+                *builtins.builtin_type_aliases,
+                *(candidate for candidate, binding in ctx.binding_scopes.items() if getattr(binding, 'type_value', None) is not None or binding.id in ctx.type_alias_asts),
+            }
+            suggestions = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+            user_error(
+                ctx.srcfile,
+                f'undefined type `{name}`',
+                Pointer(span=ast.loc, message='no type of this name is in scope'),
+                hint=f'did you mean `{suggestions[0]}`?' if suggestions else None,
+            )
 
         case p0.Atom(item=t1.Integer(value=value)):
             return ty.IntegerLiteralType(
