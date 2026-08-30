@@ -54,6 +54,8 @@ class ModuleCompiler:
     def _ensure_prelude(self) -> None:
         if self.prelude_loaded:
             return
+        if self._restore_checked_prelude():
+            return
         self.prelude_loaded = True
         for path in prelude_files(self.target):
             resolved = path.resolve()
@@ -66,6 +68,70 @@ class ModuleCompiler:
                         f'prelude binding `{name}` is defined by more than one file'
                     )
                 self.prelude_bindings[name] = binding
+        self._store_checked_prelude()
+
+    # ---- the checked-prelude cache ----
+    # Checking the prelude's modules costs ~0.85 s of a ~1 s warm compile,
+    # and their checked form only changes when the library or the compiler
+    # does. The compiler's state right after the prelude is loaded — the
+    # type system, the binding registry, the module records (parse trees,
+    # checked HIR, exports) — is pickled once under `__dewycache__/prelude/`,
+    # keyed by the target and a digest of the library and compiler sources,
+    # and later compiles start from it. `DEWY_NO_PRELUDE_CACHE=1` disables it.
+    _PRELUDE_STATE_FIELDS = (
+        'type_system', 'registry', 'records', 'order', 'prelude_bindings',
+        'prelude_loaded', 'prelude_paths', 'representation_notes', 'finished_roots',
+    )
+
+    def _checked_prelude_path(self) -> Path | None:
+        import hashlib
+        import os
+        if os.environ.get('DEWY_NO_PRELUDE_CACHE'):
+            return None
+        digest = hashlib.sha256()
+        for path in prelude_files(self.target):
+            digest.update(path.read_bytes())
+        root = Path(__file__).resolve().parents[1]
+        for path in sorted(root.rglob('*.py')):
+            if '__pycache__' not in path.parts:
+                digest.update(path.read_bytes())
+        return Path('__dewycache__') / 'prelude' / f'{self.target}-{digest.hexdigest()[:24]}.pickle'
+
+    def _restore_checked_prelude(self) -> bool:
+        import pickle
+        if self.records or self.registry.by_id:
+            # a `$no_prelude` module was checked first and lives in this
+            # registry: the prelude must be checked into it, not swapped in
+            return False
+        cache_path = self._checked_prelude_path()
+        if cache_path is None or not cache_path.is_file():
+            return False
+        try:
+            state, nominal_types, validated = pickle.loads(cache_path.read_bytes())
+        except Exception:
+            return False   # a stale or corrupt entry: check the prelude and rewrite it
+        for name in self._PRELUDE_STATE_FIELDS:
+            setattr(self, name, state[name])
+        ty.USER_NOMINAL_TYPES.update(nominal_types)
+        _validated_prelude_modules.update(validated)
+        return True
+
+    def _store_checked_prelude(self) -> None:
+        import pickle
+        if not all(record.prelude for record in self.records.values()):
+            return   # a user module is already in this compiler's state
+        cache_path = self._checked_prelude_path()
+        if cache_path is None:
+            return
+        state = {name: getattr(self, name) for name in self._PRELUDE_STATE_FIELDS}
+        validated = {key for key in _validated_prelude_modules if key[2] == self.target}
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_path.with_name(f'{cache_path.name}.{id(self)}.tmp')
+            tmp.write_bytes(pickle.dumps((state, dict(ty.USER_NOMINAL_TYPES), validated), protocol=pickle.HIGHEST_PROTOCOL))
+            tmp.replace(cache_path)
+        except (OSError, pickle.PicklingError, TypeError, AttributeError):
+            pass   # the cache is an optimization; a state that cannot be pickled is checked every time
 
     def load(
         self,
