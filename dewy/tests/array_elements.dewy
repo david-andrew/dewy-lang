@@ -1,0 +1,36 @@
+# Arrays own their element strings: a string stored into one is a copy the
+# array releases with its buffer (static literals are shared, never freed);
+# an element read out and stored elsewhere or returned is copied again; a
+# lasting copy of the array copies the elements too. Building and dropping
+# string arrays in a loop runs in constant memory.
+let pieces = (n:int64):>array<string> => {
+    let out:array<string> = []
+    loop i in [0..4) { out.push'p{i}-{n}' }
+    if n =? 0 { return out }              # an early return: the array moves out (or is cloned) intact
+    out.push"tail"
+    return out
+}
+let first = (xs:array<string>):>string => {
+    if xs.length >? 0 { return xs[0] }    # an element of the caller's array: the caller gets a copy
+    return ""
+}
+let main = ():>int64 => {
+    let total:int64 = 0
+    let rounds:int64 = 0
+    loop rounds <? 300 {
+        let ps = pieces(rounds)
+        let kept:array<string> = []
+        loop p in ps { if p.length >? 4 { kept.push(p) } }   # elements copied into `kept`
+        let joined:string = kept.join","
+        let head:string = first(ps)
+        total = kept.length + joined.length + head.length
+        rounds += 1
+    }
+    let zero = pieces(0)                       # the early return
+    let copy:array<string> = zero              # a lasting copy: its own element strings
+    zero = pieces(1)                           # the old array and its elements are released
+    if copy.length =? 4 and copy[0] =? "p0-0" { total += 1 }
+    let words = "a,bb,ccc".split","
+    let sizes = [loop w in words w.length]
+    return total + 7 - sizes.length            # (4 + 27 + 6) + 1 + 7 - 3 = 42
+}

@@ -23,7 +23,8 @@ def test_static_and_arena_strings_are_stored_without_copies() -> None:
         'let main = ():>int64 => collect(["p"] [104]).length\n'
     )
     # the join and the decoded string live in the frame region (no return reaches them): stored, they are copied
-    assert len(copies) == 2 and all('current frame' in message for message in copies)
+    assert len(copies) == 3   # the join, the decoded string, and the element of `names`
+    assert sum('current frame' in message for message in copies) == 2 and sum('owned by the container' in message for message in copies) == 1
 
 
 def test_frame_and_caller_strings_are_copied_and_reported() -> None:

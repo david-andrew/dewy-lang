@@ -102,6 +102,7 @@ LOWERED_CASES = [
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),
     ('printing.dewy', 42),
+    ('array_elements.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

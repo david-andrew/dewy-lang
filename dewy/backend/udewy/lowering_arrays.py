@@ -15,6 +15,7 @@ from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
     MoveNote,
+    ARRAY_ARENA_DESCRIPTOR,
     ARRAY_BORROWED_STATIC,
     ARRAY_CAPACITY_OFFSET,
     ARRAY_DATA_OFFSET,
@@ -24,6 +25,11 @@ from .lowering_shared import (
     ARRAY_MUTABLE,
     ARRAY_OWNER_OFFSET,
     ARRAY_STRIDE_OFFSET,
+    STRING_BOUNDARIES_OFFSET,
+    STRING_BYTE_LENGTH_OFFSET,
+    STRING_DATA_OFFSET,
+    STRING_DESCRIPTOR_SIZE,
+    STRING_OWNER_OFFSET,
     ArrayCallBoundaryAnalysis,
     ArrayParameterAnalysis,
     ArrayRepresentation,
@@ -894,7 +900,7 @@ class _ArrayLowering:
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('rebound'))
                 statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied))
                 assignment = replace(node, value=fresh)
-            statements.append(self._release_owned_array(replace(node.target, type='int64'), node.loc))
+            statements.append(self._release_owned_array(replace(node.target, type='int64'), node.loc, string_elements=node.target.name in self.owned_string_arrays))
             return [*statements, assignment]
         return [*prelude, assignment]
 
@@ -985,6 +991,11 @@ class _ArrayLowering:
         """Materialize a fresh array descriptor and recursively copied buffer."""
 
         if array_type.length is None:
+            if self._is_string_valued(array_type.element) and self._has_arena():
+                # a copy of a string array owns its own element strings, so it is
+                # an arena array (owner 1) that its scope releases; a frame copy
+                # sharing the elements would dangle once the source is rebound
+                arena = True
             return self._clone_dynamic_array_value(node, array_type, arena=arena)
         if arena:
             self._target_error(node, 'an arena-backed copy of an exact-length array (inside an element of a growable array)')
@@ -1035,20 +1046,79 @@ class _ArrayLowering:
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, function.symbol), [block, size], {})
 
-    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc) -> hir.AST:
+    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False) -> hir.AST:
         """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
 
         The `owner` word is 1 for arena-owned data (set by growth and by
-        arena clones) and 0 for frame, static, or borrowed data.
+        arena clones) and 0 for frame, static, or borrowed data. An array of
+        strings owns its elements — every string stored in one is a static
+        literal, an arena copy made at the store, or a fresh arena string
+        the container took over — so their storage goes back first, by each
+        element's own owner word (`STRING_OWNER_OFFSET`).
         """
         word = replace(descriptor, type='int64')
         owned = self._typed_equality(self._load_i64_field(word, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), 'int64', loc)
         size = self._int64_binary('__mul__', self._load_i64_field(word, ARRAY_CAPACITY_OFFSET, loc), self._load_i64_field(word, ARRAY_STRIDE_OFFSET, loc), loc)
-        body = hir.Block(loc, ty.VOID_TYPE, [
+        statements: list[hir.AST] = []
+        if string_elements:
+            statements.extend(self._release_string_elements(word, loc))
+        statements.extend([
             self._arena_release_call(self._load_i64_field(word, ARRAY_DATA_OFFSET, loc), size, loc),
             self._store_i64_field(word, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
+        ])
+        # the descriptor block itself, when the arena handed it out (a returned or cloned array): last, nothing reads it after
+        # (the bit is tested arithmetically: udewy's `and` in a condition is the short-circuit logical form)
+        arena_descriptor = self._typed_equality(
+            self._int64_binary(
+                '__mod__',
+                self._int64_binary('__floordiv__', self._load_i64_field(word, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc),
+                self._int64_literal(loc, 2), loc,
+            ),
+            self._int64_literal(loc, 1), 'int64', loc,
+        )
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, arena_descriptor, hir.Block(loc, ty.VOID_TYPE, [
+            self._arena_release_call(word, self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc),
+        ], True))], None))
+        return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, hir.Block(loc, ty.VOID_TYPE, statements, True))], None)
+
+    def _release_string_elements(self, word: hir.ExpressedIdentifier, loc) -> list[hir.AST]:
+        """Give back each element string an owned string array stores, by the element's owner word."""
+        def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
+            name = self._new_string_temp(loc, 'int64', suffix).name
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
+
+        one = self._int64_literal(loc, 1)
+        index_declare, index = local('release_index', self._int64_literal(loc, 0))
+        length_declare, length = local('release_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        data_declare, data = local('release_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
+        address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
+        element_declare, element = local('release_element', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
+        owner_declare, owner = local('release_owner', self._load_i64_field(element, STRING_OWNER_OFFSET, loc))
+        bytes_plus_one = self._int64_binary('__add__', self._load_i64_field(element, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
+        release_all = hir.Block(loc, ty.VOID_TYPE, [
+            self._arena_release_call(self._load_i64_field(element, STRING_DATA_OFFSET, loc), bytes_plus_one, loc),
+            self._arena_release_call(
+                self._load_i64_field(element, STRING_BOUNDARIES_OFFSET, loc),
+                self._int64_binary('__mul__', bytes_plus_one, self._int64_literal(loc, 4), loc),
+                loc,
+            ),
+            self._arena_release_call(element, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
         ], True)
-        return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, body)], None)
+        release_descriptor = hir.Block(loc, ty.VOID_TYPE, [
+            self._arena_release_call(element, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+        ], True)
+        by_owner = hir.Flow(loc, ty.VOID_TYPE, [
+            hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
+            hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
+        ], None)
+        body = hir.Block(loc, ty.VOID_TYPE, [
+            element_declare,
+            owner_declare,
+            by_owner,
+            hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)),
+        ], True)
+        loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), body)], None)
+        return [index_declare, length_declare, data_declare, loop]
 
     def _arena_allocation(self, size: hir.AST, loc) -> hir.FunctionCall:
         """Allocate ``size`` bytes from the prelude's process arena."""
@@ -1149,6 +1219,7 @@ class _ArrayLowering:
             element_type,
             loc,
             arena=True,
+            move=True,   # growth relocates the buffer; the array keeps its elements
         )
         copy_body.append(
             assign(index, self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc))
@@ -1196,7 +1267,11 @@ class _ArrayLowering:
                 )], None),
                 self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, new_data, loc),
                 self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, new_capacity, loc),
-                self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE), loc),
+                self._store_i64_field(   # mutable now; the descriptor's own placement bit stays
+                    descriptor, ARRAY_FLAGS_OFFSET,
+                    self._int64_binary('__or__', self._load_i64_field(descriptor, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_MUTABLE), loc),
+                    loc,
+                ),
                 self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),
             ],
             True,
@@ -1594,6 +1669,11 @@ class _ArrayLowering:
             adopt = hir.Block(loc, ty.VOID_TYPE, [
                 hir.Declare(loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', self._arena_allocation(self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc)),
                 *copy_words,
+                self._store_i64_field(
+                    fresh, ARRAY_FLAGS_OFFSET,
+                    self._int64_binary('__or__', self._load_i64_field(fresh, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc),
+                    loc,
+                ),
                 self._store_i64_field(local, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),   # the local no longer owns it
                 hir.Assign(loc, ty.VOID_TYPE, moved, '=', fresh),
             ], True)
@@ -1774,7 +1854,7 @@ class _ArrayLowering:
             self._store_i64_field(
                 descriptor,
                 ARRAY_FLAGS_OFFSET,
-                self._int64_literal(node.loc, ARRAY_MUTABLE),
+                self._int64_binary('__or__', self._int64_literal(node.loc, ARRAY_MUTABLE), self._int64_literal(node.loc, ARRAY_ARENA_DESCRIPTOR), node.loc) if arena else self._int64_literal(node.loc, ARRAY_MUTABLE),
                 node.loc,
             ),
             self._store_i64_field(
@@ -1883,7 +1963,7 @@ class _ArrayLowering:
                 self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, length, loc),
                 self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, length, loc),
                 self._store_i64_field(descriptor, ARRAY_STRIDE_OFFSET, self._int64_literal(loc, element_bytes), loc),
-                self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE), loc),
+                self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE | ARRAY_ARENA_DESCRIPTOR), loc),   # an arena block: released with the data
                 self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),   # arena data: releasable
             ])
         data_pointer = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
@@ -2062,8 +2142,13 @@ class _ArrayLowering:
         loc: Span,
         *,
         arena: bool = False,
+        move: bool = False,
     ) -> list[hir.AST]:
-        """Copy one stored element, recursively materializing mutable values."""
+        """Copy one stored element, recursively materializing mutable values.
+
+        With ``move`` the element changes buffers but not owner (growth
+        relocating an array): it is carried over as it is.
+        """
 
         source_value = self._array_load(source_address, element_type, loc)
         if isinstance(element_type, ty.ArrayType):
@@ -2078,11 +2163,32 @@ class _ArrayLowering:
                 element_type,
                 arena=arena,
             )
+        elif self._is_string_valued(element_type) and self._has_arena() and not move:
+            # an array owns its element strings, so a lasting copy of the array
+            # (stored, returned, kept in a dictionary) gets its own copies
+            # (`_string_clone`); a static literal (owner 0) is shared. A frame
+            # copy (made for an iteration or a call, gone with the frame) keeps
+            # sharing: it owns nothing and outlives nothing.
+            return self._copy_string_element(source_value, target_address, element_type, loc)
         else:
             prelude, copied = [], source_value
         return [
             *prelude,
             self._array_store(copied, target_address, element_type, loc),
+        ]
+
+    def _copy_string_element(self, source_value: hir.AST, target_address: hir.AST, element_type: ty.Type, loc: Span) -> list[hir.AST]:
+        name = self._new_string_temp(loc, 'int64', 'element_copy').name
+        element = hir.ExpressedIdentifier(loc, 'int64', name)
+        self.string_clone_needed = True   # `__dewy_string_clone` is synthesized once per program
+        clone_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+        cloned = hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, clone_type, self.STRING_CLONE_SYMBOL), [element], {})
+        owned = self._typed_equality(self._load_i64_field(element, STRING_OWNER_OFFSET, loc), self._int64_literal(loc, 0), 'int64', loc)
+        return [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(source_value, type='int64') if isinstance(source_value, hir.ExpressedIdentifier) else source_value),
+            hir.Flow(loc, ty.VOID_TYPE, [
+                hir.IfArm(loc, ty.VOID_TYPE, owned, hir.Block(loc, ty.VOID_TYPE, [self._array_store(element, target_address, element_type, loc)], True)),
+            ], hir.Block(loc, ty.VOID_TYPE, [self._array_store(cloned, target_address, element_type, loc)], True)),
         ]
 
     def _module_array_item_is_stable(

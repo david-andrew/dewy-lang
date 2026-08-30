@@ -28,6 +28,8 @@ ARRAY_DESCRIPTOR_SIZE = 48
 ARRAY_MUTABLE = 1
 
 ARRAY_BORROWED_STATIC = 2
+# the descriptor block itself came from the arena: an owned local releases it with its data
+ARRAY_ARENA_DESCRIPTOR = 4
 
 type ArrayRepresentation = Literal[
     'descriptor',
@@ -57,8 +59,12 @@ STRING_BOUNDARIES_OFFSET = 16
 STRING_GRAPHEME_LENGTH_OFFSET = 24
 
 STRING_START_OFFSET = 32
+# ownership metadata: 0 = static, frame, or borrowed; 1 = an arena copy that owns its data and
+# boundaries; 2 = an arena view (owns only this descriptor). Set where descriptors are made,
+# read when a container releases its elements.
+STRING_OWNER_OFFSET = 40
 
-STRING_DESCRIPTOR_SIZE = 40
+STRING_DESCRIPTOR_SIZE = 48
 
 FIXED_INTEGER_WIDTHS = {
     'int8': 8,

@@ -31,6 +31,7 @@ from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
     STRING_DATA_OFFSET,
     STRING_DESCRIPTOR_SIZE,
+    STRING_OWNER_OFFSET,
     STRING_GRAPHEME_LENGTH_OFFSET,
     STRING_START_OFFSET,
     StringResultBound,
@@ -2411,6 +2412,8 @@ class _StringLowering:
             self._store_i64_field(descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
             self._store_i64_field(descriptor_word, STRING_GRAPHEME_LENGTH_OFFSET, grapheme_count, loc),
             self._store_i64_field(descriptor_word, STRING_START_OFFSET, self._int64_literal(loc, 0), loc),
+            # an arena string owns its data and boundaries (released with the container that stores it)
+            self._store_i64_field(descriptor_word, STRING_OWNER_OFFSET, self._int64_literal(loc, 0 if frame or not self._has_arena() else 1), loc),
         ])
         return statements, descriptor
 
@@ -2659,7 +2662,7 @@ class _StringLowering:
         if isinstance(node, (hir.StringSlice, hir.StringIndex)):
             return self._string_storage(node.string, visiting=visiting)
         if isinstance(node, (hir.Index, hir.MemberAccess)):
-            return 'arena'   # elements and fields are copied into the arena when stored
+            return 'element'   # a container's element or a field: the container owns it
         if isinstance(node, hir.ArrayMethod):
             return 'frame'
         if isinstance(node, hir.FunctionCall):
@@ -2679,7 +2682,7 @@ class _StringLowering:
             candidates = self._string_local_candidates(literal).get(node.binding_id)
             if not candidates:
                 if node.binding_id in self.array_element_targets:
-                    return 'arena'    # `loop name in names`: the element, copied into the arena when it was stored
+                    return 'element'   # `loop name in names`: the element, owned by the array
                 binding = self.identifier_bindings.get(id(node))
                 if binding is not None and binding.owner_function is None:
                     return 'static'   # a global: static storage
@@ -2689,6 +2692,8 @@ class _StringLowering:
             visiting.discard(node.binding_id)
             if storages <= {'static', 'arena'}:
                 return 'arena' if 'arena' in storages else 'static'
+            if storages <= {'static', 'arena', 'element'}:
+                return 'element'
             return 'caller' if storages <= {'static', 'arena', 'caller'} else 'frame'
         return 'frame'
 
@@ -2706,11 +2711,16 @@ class _StringLowering:
         """
         prelude, value = self._extract_expression(node)
         storage = self._string_storage(node)
-        if storage in ('static', 'arena') or not self._has_arena():
+        if storage == 'static' or not self._has_arena():
             return prelude, value
+        fresh = isinstance(self._unwrap_transparent(node), (hir.FunctionCall, hir.RepresentationCast))
+        if storage == 'arena' and fresh:
+            return prelude, value   # a join or a decode nobody else holds: the container takes it over
         reasons = {
             'frame': 'this string is built in the current frame (an interpolation or a call result), so storing it copies it into the arena',
             'caller': 'this string is a parameter, whose storage belongs to the caller, so storing it copies it into the arena',
+            'element': 'this string is owned by the container or object it was read from, so storing it elsewhere copies it into the arena',
+            'arena': 'this string may be held elsewhere (a local a return reaches), so storing it copies it into the arena',
         }
         self.copy_notes.append(CopyNote(self.srcfile, node.loc, reasons[storage]))
         loc = node.loc
@@ -2726,6 +2736,33 @@ class _StringLowering:
         )
         copy, result = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc)
         return [*statements, *copy], result
+
+    STRING_CLONE_SYMBOL = '__dewy_string_clone'
+
+    def _synthesize_string_clone(self) -> list:
+        """`__dewy_string_clone(src)`: an independent arena copy of a string's
+        bytes (owner 1), emitted once when a lasting copy of a string array is
+        made — each array owns its own elements."""
+        from .lowering_shared import LoweredFunction
+        if not self.string_clone_needed:
+            return []
+        loc = self.root.loc
+        source = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src')
+        saved_literal, saved_region, saved_startup = self.current_literal, self.frame_region, self.lowering_module_startup
+        self.current_literal, self.frame_region, self.lowering_module_startup = None, None, False
+        length = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src_length')
+        try:
+            copy, result = self._string_from_bytes(self._string_data_start(source, loc), length, loc, frame=False)
+        finally:
+            self.current_literal, self.frame_region, self.lowering_module_startup = saved_literal, saved_region, saved_startup
+        body = hir.Block(loc, ty.VOID_TYPE, [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(source, STRING_BYTE_LENGTH_OFFSET, loc)),
+            *copy,
+            hir.Return(loc, ty.BOTTOM_TYPE, replace(result, type='int64')),
+        ], True)
+        function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+        literal = hir.FunctionLiteral(loc, function_type, [hir.Param('__dewy_src', 'int64')], [], None, 'int64', body)
+        return [LoweredFunction(self.STRING_CLONE_SYMBOL, literal)]
 
     def _string_from_bytes(
         self,
@@ -2818,6 +2855,8 @@ class _StringLowering:
             self._store_i64_field(descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
             self._store_i64_field(descriptor_word, STRING_GRAPHEME_LENGTH_OFFSET, grapheme_count, loc),
             self._store_i64_field(descriptor_word, STRING_START_OFFSET, self._int64_literal(loc, 0), loc),
+            # an arena string owns its data and boundaries (released with the container that stores it)
+            self._store_i64_field(descriptor_word, STRING_OWNER_OFFSET, self._int64_literal(loc, 0 if frame or not self._has_arena() else 1), loc),
         ])
         return statements, descriptor
 
@@ -4039,6 +4078,13 @@ class _StringLowering:
                 descriptor,
                 STRING_START_OFFSET,
                 first_offset,
+                loc,
+            ),
+            # an arena view owns its descriptor only; its data is another string's
+            self._store_i64_field(
+                descriptor,
+                STRING_OWNER_OFFSET,
+                self._int64_literal(loc, 0 if frame or not self._has_arena() else 2),
                 loc,
             ),
         ], target

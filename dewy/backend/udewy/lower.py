@@ -174,6 +174,7 @@ class _Lowerer(
         self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}
         self.named_copy_symbols: dict[int, str] = {}  # recursive alias id -> deep-copy function symbol
         self.pending_named_copies: list[ty.NamedType] = []
+        self.string_clone_needed = False   # a string array was copied: emit `__dewy_string_clone` once
         self.optional_globals_initialized: set[int] = set()
         self.union_globals_initialized: set[int] = set()
         self.object_globals_initialized: set[int] = set()
@@ -234,6 +235,7 @@ class _Lowerer(
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
+        self.owned_string_arrays: set[str] = set()   # those whose elements are strings the array owns (released with it)
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
@@ -301,6 +303,7 @@ class _Lowerer(
             for function in sorted(self.functions, key=lambda item: item.order)
         ]
         lowered_functions.extend(self._synthesize_named_copies())
+        lowered_functions.extend(self._synthesize_string_clone())
 
         globals_: list[hir.Declare] = []
         startup_sources: list[hir.AST] = []
@@ -368,6 +371,7 @@ class _Lowerer(
         )
         # module startup may have requested more copy functions
         lowered_functions.extend(self._synthesize_named_copies())
+        lowered_functions.extend(self._synthesize_string_clone())
         for name, data in self.unicode_table_globals.items():
             # a packed byte literal is a constant initializer: no startup needed
             globals_.append(hir.Declare(self.root.loc, ty.VOID_TYPE, 'let', name, 'int64', data))
@@ -2777,6 +2781,7 @@ class _Lowerer(
     def _lower_function_body(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set()
+        self.owned_string_arrays = set()
         previous_state = (
             self.loop_signal_levels,
             self.loop_signal_kind,
@@ -2881,6 +2886,8 @@ class _Lowerer(
             and self._array_representation(node) == 'descriptor'
         ):
             self.owned_array_names.add(node.name)
+            if self._is_string_valued(declared_type.element):
+                self.owned_string_arrays.add(node.name)
 
     def _owned_array_declaration(self, node: hir.AST) -> hir.Declare | None:
         """The declaration of a local that will own a runtime-length array's storage (the HIR-level twin of `_note_owned_array`)."""
@@ -3044,7 +3051,7 @@ class _Lowerer(
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]]) -> list[hir.AST]:
-            return [self._release_owned_array(local, local.loc) for scope in scopes for local in reversed(scope)]
+            return [self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays) for scope in scopes for local in reversed(scope)]
 
         def diverges(item: hir.AST) -> bool:
             return isinstance(item, (hir.Return, hir.Break, hir.Continue))
@@ -3160,6 +3167,12 @@ class _Lowerer(
                     continue
                 if self.current_dynamic_array_result is not None:
                     items.extend(self._dynamic_array_result_write(item))
+                    continue
+                if self._is_string_valued(item.type) and self._has_arena() and self._string_storage(item) == 'element':
+                    # an element of a local container, released with it at exit: the caller gets its own copy
+                    prelude, value = self._escaping_string_value(item)
+                    items.extend(prelude)
+                    items.append(hir.Return(item.loc, ty.BOTTOM_TYPE, value))
                     continue
                 prelude, value = self._extract_expression(item)
                 items.extend(prelude)
@@ -3595,6 +3608,10 @@ class _Lowerer(
                 ]
             if node.item is None:
                 return [node]
+            if self._is_string_valued(node.item.type) and self._has_arena() and self._string_storage(node.item) == 'element':
+                # an element of a container, released with it: the caller gets its own copy
+                prelude, item = self._escaping_string_value(node.item)
+                return [*prelude, replace(node, item=item)]
             prelude, item = self._extract_expression(node.item)
             return [*prelude, replace(node, item=item)]
         if isinstance(node, (hir.Break, hir.Continue)):
