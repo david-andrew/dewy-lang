@@ -14,6 +14,7 @@ from ...reporting import Span
 from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
+    MoveNote,
     ARRAY_BORROWED_STATIC,
     ARRAY_CAPACITY_OFFSET,
     ARRAY_DATA_OFFSET,
@@ -885,6 +886,16 @@ class _ArrayLowering:
                 array_type,
             )
         assignment = replace(node, value=copied)
+        if node.target.name in self.owned_array_names and array_type.length is None:
+            # the old value is dead once the new one is computed — compute it
+            # first (`x = shift(x 2)` reads the old `x`), then release, then rebind
+            statements = list(prelude)
+            if not isinstance(copied, hir.ExpressedIdentifier):
+                fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('rebound'))
+                statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied))
+                assignment = replace(node, value=fresh)
+            statements.append(self._release_owned_array(replace(node.target, type='int64'), node.loc))
+            return [*statements, assignment]
         return [*prelude, assignment]
 
     def _independent_array_value(
@@ -1558,12 +1569,50 @@ class _ArrayLowering:
             # Runtime-length call results are already arena-backed.
             prelude, value = self._extract_expression(source)
             return [*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, replace(value, type='int64'))]
-        prelude, copied = self._clone_dynamic_array_value(
-            item,
-            array_type,
-            arena=True,
-        )
+        prelude, copied = self._transfer_array_value(item, source, array_type, site='returned')
         return [*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, replace(copied, type='int64'))]
+
+    def _transfer_array_value(self, node: hir.AST, source: hir.AST, array_type: ty.ArrayType, *, site: str, frame_copy: bool = False, adopt: bool = False) -> tuple[list[hir.AST], hir.AST]:
+        """An arena-backed value for an array leaving this frame: moved from an owned local at its last use, else cloned.
+
+        The move rule (`_compute_moves`) marks the identifier; the storage
+        is adopted at runtime only when the descriptor owns arena data
+        (`owner` = 1 — frame or static data still has to be cloned), and the
+        local is marked released so its scope exit leaves the data alone.
+        """
+        loc = node.loc
+        if isinstance(source, hir.ExpressedIdentifier) and (adopt or id(source) in self.moved_uses):
+            if not adopt:
+                self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is moved when {site}: this is its last use, so its storage is adopted rather than copied', True))
+            local = replace(source, type='int64')
+            moved = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('moved'))
+            fresh = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('adopted'))
+            copy_words = [
+                self._store_i64_field(fresh, offset, self._load_i64_field(local, offset, loc), loc)
+                for offset in (ARRAY_DATA_OFFSET, ARRAY_LENGTH_OFFSET, ARRAY_CAPACITY_OFFSET, ARRAY_STRIDE_OFFSET, ARRAY_FLAGS_OFFSET, ARRAY_OWNER_OFFSET)
+            ]
+            adopt = hir.Block(loc, ty.VOID_TYPE, [
+                hir.Declare(loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', self._arena_allocation(self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc)),
+                *copy_words,
+                self._store_i64_field(local, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),   # the local no longer owns it
+                hir.Assign(loc, ty.VOID_TYPE, moved, '=', fresh),
+            ], True)
+            clone_prelude, cloned = (
+                self._independent_array_value(node, array_type) if frame_copy
+                else self._clone_dynamic_array_value(node, array_type, arena=True)
+            )
+            clone = hir.Block(loc, ty.VOID_TYPE, [*clone_prelude, hir.Assign(loc, ty.VOID_TYPE, moved, '=', replace(cloned, type='int64') if isinstance(cloned, hir.ExpressedIdentifier) else cloned)], True)
+            owned = self._typed_equality(self._load_i64_field(local, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), 'int64', loc)
+            return [
+                hir.Declare(loc, ty.VOID_TYPE, 'let', moved.name, 'int64', self._int64_literal(loc, 0)),
+                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, adopt)], clone),
+            ], moved
+        if isinstance(source, hir.ExpressedIdentifier):
+            reason = 'it is used again later, or is not a local that owns its storage' if source.binding_id is not None else 'it is not a local'
+            self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is copied when {site}: {reason}', False))
+        if frame_copy:
+            return self._independent_array_value(node, array_type)
+        return self._clone_dynamic_array_value(node, array_type, arena=True)
 
     def _clone_dynamic_array_value(
         self,

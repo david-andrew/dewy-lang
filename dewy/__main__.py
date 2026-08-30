@@ -104,14 +104,27 @@ def analyze(argv: list[str]) -> int:
             use_color=use_color,
         ))
         print()
+    for note in lower.last_move_notes:
+        print(Info(
+            srcfile=note.srcfile,
+            title='move' if note.moved else 'copy',
+            pointer_messages=[Pointer(span=note.loc, message=note.message)],
+            use_color=use_color,
+        ))
+        print()
+    moves = sum(note.moved for note in lower.last_move_notes)
+    array_copies = sum(not note.moved for note in lower.last_move_notes)
     copies = len(lower.last_copy_notes)
     print(Info(
         srcfile=srcfile,
         title='copy report',
         message=(
-            f'{copies} escape cop{"ies" if copies != 1 else "y"}: the strings above are copied into the arena where they are stored; every other stored string is static or already arena-backed'
-            if copies
-            else 'no escape copies: every stored string is static or already arena-backed'
+            f'{moves} move{"s" if moves != 1 else ""} and {array_copies} cop{"ies" if array_copies != 1 else "y"} of owned arrays; '
+            + (
+                f'{copies} escape cop{"ies" if copies != 1 else "y"} of strings: the strings above are copied into the arena where they are stored; every other stored string is static or already arena-backed'
+                if copies
+                else 'no escape copies of strings: every stored string is static or already arena-backed'
+            )
         ),
         use_color=use_color,
     ))

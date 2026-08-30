@@ -187,6 +187,16 @@ class ArrayCallBoundaryAnalysis:
 
 
 @dataclass(frozen=True)
+class MoveNote:
+    """One transfer of an owned array the lowering decided: moved (adopted) at a last use, or copied and why."""
+
+    srcfile: SrcFile
+    loc: Span
+    message: str
+    moved: bool
+
+
+@dataclass(frozen=True)
 class CopyNote:
     """One escape copy the lowering made — a string copied into the arena where it is stored — and why."""
 

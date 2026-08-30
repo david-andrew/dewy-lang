@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+import dataclasses
 from dataclasses import fields, is_dataclass, replace
 from typing import Literal, NoReturn
 
@@ -51,6 +52,7 @@ from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
 from .lowering_shared import (
     CopyNote,
+    MoveNote,
     ARRAY_LENGTH_OFFSET,
     STRING_GRAPHEME_LENGTH_OFFSET,
     ArrayCallBoundaryAnalysis,
@@ -232,6 +234,10 @@ class _Lowerer(
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
+        self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
+        self.move_notes: list[MoveNote] = []
+        self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
+        self.borrowed_fields: dict[str, set[str]] = {}          # object local name -> fields that borrow (never adopted on `return`)
         self.object_literal_contexts: list[
             tuple[hir.AST, ty.ObjectType, dict[int, str]]
         ] = []
@@ -786,6 +792,7 @@ class _Lowerer(
         }
         previous_literal = self.current_literal
         self.current_literal = literal
+        self.moved_uses = self._compute_moves(literal)
         transformed_body = self._require_node(self._transform_node(literal.body))
         if default_prologue:
             if isinstance(transformed_body, hir.Block):
@@ -2860,6 +2867,152 @@ class _Lowerer(
         ):
             self.owned_array_names.add(node.name)
 
+    def _owned_array_declaration(self, node: hir.AST) -> hir.Declare | None:
+        """The declaration of a local that will own a runtime-length array's storage (the HIR-level twin of `_note_owned_array`)."""
+        if not isinstance(node, hir.Declare):
+            return None
+        declared = node.annotation or node.expr.type
+        if not (isinstance(declared, ty.ArrayType) and declared.length is None):
+            return None
+        source = self._copy_source_expression(node.expr)
+        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.ExpressedIdentifier)):
+            return None
+        return node if self._array_representation(node) == 'descriptor' else None
+
+    def _array_value_is_owned(self, value: hir.AST) -> bool:
+        """Whether an array value stored into a field is the field's own storage (moved in, fresh, or cloned from a local) rather than a borrow of a parameter's or another object's."""
+        source = self._copy_source_expression(value)
+        if isinstance(source, hir.ExpressedIdentifier):
+            if id(source) in self.moved_uses:
+                return True
+            literal = self.current_literal
+            params = [*literal.pos_or_kw_args, *literal.kw_only_args] if literal is not None else []
+            return source.binding_id is not None and not any(param.binding_id == source.binding_id for param in params)
+        return self._array_expression_owns_fresh_storage(value)
+
+    def _fresh_object_declaration(self, node: hir.AST) -> bool:
+        """A local object built here (a literal or a call result): its runtime-length array fields may be adopted when it is returned at its last use."""
+        if not isinstance(node, hir.Declare):
+            return False
+        declared = ty.strip_refinement(node.annotation or node.expr.type)
+        return isinstance(declared, ty.ObjectType) and isinstance(self._copy_source_expression(node.expr), (hir.ObjectLiteral, hir.FunctionCall))
+
+    def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
+        """The move rule: the last use of an owned array local at a transfer site is a move.
+
+        Transfer sites are `return xs` and `xs` stored into a runtime-length
+        array field (an object literal's field, a member assignment). A use is
+        the last one when no reference to the binding follows it in the
+        function's traversal order (branches count conservatively: a later
+        sibling branch's use is "after"), it is not inside a loop the
+        declaration is outside of (the next iteration would use it again —
+        a `return` is exempt, it leaves the loop), and no nested function
+        literal captures the binding. The lowering then adopts the arena
+        storage instead of cloning it (`_adopt_or_clone`).
+        """
+        owned: dict[int, tuple[int, int]] = {}   # binding id -> (sequence, loop depth) of its declaration
+        uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
+        counter = 0
+
+        def note_use(binding_id: int, depth: int, nested: bool, transfer: int | None) -> None:
+            nonlocal counter
+            counter += 1
+            uses.setdefault(binding_id, []).append((counter, depth, nested, transfer))
+
+        def walk(node: object, depth: int, nested: bool, transfer_of: dict[int, int]) -> None:
+            nonlocal counter
+            if isinstance(node, hir.FunctionLiteral):
+                walk(node.body, depth, True, {})
+                return
+            if isinstance(node, hir.Declare):
+                movable = self._owned_array_declaration(node) is not None or self._fresh_object_declaration(node)
+                walk(node.expr, depth, nested, {})
+                if movable and node.binding_id is not None and not nested:
+                    counter += 1
+                    owned[node.binding_id] = (counter, depth)
+                return
+            if isinstance(node, hir.ExpressedIdentifier):
+                if node.binding_id is not None:
+                    note_use(node.binding_id, depth, nested, transfer_of.get(id(node)))
+                return
+            if isinstance(node, hir.Return) and node.item is not None:
+                source = self._copy_source_expression(node.item)
+                walk(node.item, depth, nested, {id(source): id(source)} if isinstance(source, hir.ExpressedIdentifier) else {})
+                return
+            if isinstance(node, hir.ObjectLiteral):
+                for field_ in node.fields:
+                    expected = node.type.field(field_.name) if isinstance(node.type, ty.ObjectType) else None
+                    field_type = expected.type if expected is not None else field_.value.type
+                    source = self._copy_source_expression(field_.value)
+                    transfer = {id(source): id(source)} if isinstance(field_type, ty.ArrayType) and field_type.length is None and isinstance(source, hir.ExpressedIdentifier) else {}
+                    walk(field_.value, depth, nested, transfer)
+                return
+            if isinstance(node, hir.MemberAssign):
+                walk(node.target, depth, nested, {})
+                source = self._copy_source_expression(node.value)
+                field_type = node.target.type
+                transfer = {id(source): id(source)} if isinstance(field_type, ty.ArrayType) and field_type.length is None and isinstance(source, hir.ExpressedIdentifier) else {}
+                walk(node.value, depth, nested, transfer)
+                return
+            if isinstance(node, hir.Flow):
+                for arm in node.arms:
+                    arm_depth = depth + 1 if isinstance(arm, hir.LoopArm) else depth
+                    walk(arm.condition, arm_depth, nested, {})
+                    walk(arm.body, arm_depth, nested, {})
+                if node.default is not None:
+                    walk(node.default, depth, nested, {})
+                return
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (value if isinstance(value, (list, tuple)) else [value]):
+                        if isinstance(child, hir.AST):
+                            walk(child, depth, nested, transfer_of)
+                        elif isinstance(child, hir.ObjectField):
+                            walk(child.value, depth, nested, {})
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                if isinstance(item, hir.AST):
+                                    walk(item, depth, nested, {})
+
+        walk(literal.body, 0, False, {})
+        moves: set[int] = set()
+        for binding_id, (_declared_at, declared_depth) in owned.items():
+            references = uses.get(binding_id, [])
+            if not references or any(nested for _seq, _depth, nested, _transfer in references):
+                continue
+            last = max(references, key=lambda use: use[0])
+            _sequence, depth, _nested, transfer = last
+            if transfer is None:
+                continue
+            site_in_loop = depth > declared_depth
+            if site_in_loop and not self._transfer_is_return(transfer, literal):
+                continue
+            moves.add(transfer)
+        return moves
+
+    def _transfer_is_return(self, transfer_id: int, literal: hir.FunctionLiteral) -> bool:
+        """Whether the identifier with this id is the item of a `return` (a return leaves any loop)."""
+        found = False
+
+        def walk(node: object) -> None:
+            nonlocal found
+            if found or not isinstance(node, hir.AST):
+                return
+            if isinstance(node, hir.Return) and node.item is not None and id(self._copy_source_expression(node.item)) == transfer_id:
+                found = True
+                return
+            for field_ in dataclasses.fields(node):
+                value = getattr(node, field_.name)
+                for child in (value if isinstance(value, (list, tuple)) else [value]):
+                    if isinstance(child, hir.AST):
+                        walk(child)
+                    elif isinstance(child, hir.ObjectField):
+                        walk(child.value)
+
+        walk(literal.body)
+        return found
+
     def _insert_releases(self, body: hir.AST) -> hir.AST:
         """Drop-at-scope-exit for owned array locals, over a lowered function body.
 
@@ -4471,6 +4624,9 @@ class _Lowerer(
 last_copy_notes: list[CopyNote] = []
 """The escape copies of the most recent lowering, for `dewy analyze`."""
 
+last_move_notes: list[MoveNote] = []
+"""The transfers of owned arrays (moved or copied) of the most recent lowering, for `dewy analyze`."""
+
 
 def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main') -> LoweredProgram:
     """Legalize checked HIR function constructs for udewy source emission."""
@@ -4479,4 +4635,5 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     lowerer = _Lowerer(root, srcfile, entry_name)
     program = lowerer.lower()
     last_copy_notes[:] = lowerer.copy_notes
+    last_move_notes[:] = lowerer.move_notes
     return program

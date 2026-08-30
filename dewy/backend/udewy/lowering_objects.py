@@ -9,6 +9,7 @@ from dataclasses import replace
 
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
+from .lowering_shared import MoveNote
 from ...semantic.hir_display import type_to_dewy
 
 
@@ -396,7 +397,12 @@ class _ObjectLowering:
                     )
                     statements.extend(nested_prelude)
                     continue
-                if isinstance(field_type, ty.ArrayType):
+                if isinstance(field_type, ty.ArrayType) and field_type.length is None:
+                    # a runtime-length array: moved from an owned local at its last use
+                    if not self._array_value_is_owned(field.value):
+                        self.literal_borrowed_fields.setdefault(id(node), set()).add(field.name)
+                    prelude, value = self._transfer_array_value(field.value, self._copy_source_expression(field.value), field_type, site='stored in a field', frame_copy=True)
+                elif isinstance(field_type, ty.ArrayType):
                     prelude, value = self._independent_array_value(
                         field.value,
                         field_type,
@@ -683,6 +689,7 @@ class _ObjectLowering:
     ) -> list[hir.AST]:
         if isinstance(node.expr, (hir.ObjectLiteral, hir.FunctionCall)):
             prelude, ptr = self._extract_expression(node.expr)
+            self.borrowed_fields[node.name] = set(self.literal_borrowed_fields.get(id(node.expr), set()))
             return [
                 *prelude,
                 replace(
@@ -817,7 +824,12 @@ class _ObjectLowering:
                 *value_prelude,
                 *self._object_copy(address, src, field_type, node.loc),
             ]
-        if isinstance(field_type, ty.ArrayType):
+        if isinstance(field_type, ty.ArrayType) and field_type.length is None:
+            if isinstance(node.target.value, hir.ExpressedIdentifier):
+                fields = self.borrowed_fields.setdefault(node.target.value.name, set())
+                (fields.discard if self._array_value_is_owned(node.value) else fields.add)(node.target.name)
+            value_prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field', frame_copy=True)
+        elif isinstance(field_type, ty.ArrayType):
             value_prelude, value = self._independent_array_value(
                 node.value,
                 field_type,
@@ -872,6 +884,10 @@ class _ObjectLowering:
             return [*destination_prelude, *prelude]
         if isinstance(item, hir.ObjectLiteral):
             return self._write_object_literal_result(dest, item, object_type)
+        returned = self._copy_source_expression(item)
+        moved = isinstance(returned, hir.ExpressedIdentifier) and id(returned) in self.moved_uses
+        if moved:
+            self.move_notes.append(MoveNote(self.srcfile, returned.loc, f'`{returned.name}` is moved when returned: this is its last use, so its arrays are adopted rather than copied', True))
         prelude, source = self._extract_object_pointer(item)
         return [
             *prelude,
@@ -880,6 +896,8 @@ class _ObjectLowering:
                 source,
                 object_type,
                 item.loc,
+                move='adopt' if moved else False,
+                borrowed=self.borrowed_fields.get(returned.name, set()) if moved else frozenset(),
             ),
         ]
 
@@ -960,7 +978,7 @@ class _ObjectLowering:
         ):
             # a runtime-length call result is already arena-backed
             return self._extract_expression(node)
-        return self._clone_dynamic_array_value(node, array_type, arena=True)
+        return self._transfer_array_value(node, source, array_type, site='stored in a field')
 
     def _move_object_into_result_storage(
         self,
@@ -985,9 +1003,10 @@ class _ObjectLowering:
         object_type: ty.ObjectType,
         loc: Span,
         *,
-        move: bool = False,
+        move: bool | str = False,
+        borrowed: set[str] = frozenset(),
     ) -> list[hir.AST]:
-        """Recursively copy an object into already-prepared mutable storage."""
+        """Recursively copy an object into already-prepared mutable storage (``move='adopt'``: take the arrays of fields not in ``borrowed``)."""
 
         _size, offsets = self._object_layout(
             object_type,
@@ -1002,9 +1021,18 @@ class _ObjectLowering:
                 statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False))
             elif isinstance(field.type, ty.ArrayType) and field.type.length is None:
                 source_array = self._value_load(source_address, field.type, loc)
-                if move:
+                if move is True:
                     # the dead source's array changes owner: its handle word moves
                     statements.extend(self._value_store(source_array, dest_address, field.type, loc))
+                    continue
+                if move == 'adopt' and field.name not in borrowed:
+                    # a local object at its last use (`return box`): arena-owned
+                    # fields are adopted, frame-backed ones still cloned
+                    handle = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('field_handle'))
+                    statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', handle.name, 'int64', replace(source_array, type='int64')))
+                    prelude, moved = self._transfer_array_value(handle, handle, field.type, site='returned in an object', adopt=True)
+                    statements.extend(prelude)
+                    statements.extend(self._value_store(moved, dest_address, field.type, loc))
                     continue
                 prelude, copied = self._clone_dynamic_array_value(
                     replace(source_array, type='int64'), field.type, arena=True,

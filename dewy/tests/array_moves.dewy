@@ -1,0 +1,43 @@
+# The move rule: an owned array local at its last use is moved — its
+# arena storage adopted rather than copied — when it is returned or stored
+# into a field, and a local object returned at its last use hands over its
+# arrays the same way; a value used again is copied. Reassigning an owned
+# local releases its old storage first.
+let build = (n:int64):>array<int64> => {
+    let out:array<int64> = []
+    let i:int64 = 0
+    loop i <? n { out.push(i)  i += 1 }
+    return out                        # moved: last use
+}
+let Box:type = [items:array<int64>]
+let boxed = (n:int64):>Box => {
+    let items:array<int64> = []
+    items.push(n)
+    items.push(n + 1)
+    let box:Box = [items = items]     # moved into the field
+    return box
+}
+let twice = (n:int64):>int64 => {
+    let xs:array<int64> = []
+    xs.push(n)
+    let box:Box = [items = xs]        # copied: xs is used again
+    xs.push(7)
+    return box.items.length + xs.length    # 1 + 2 = 3
+}
+let churn = (depth:int64):>int64 => {
+    let junk:array<int64> = [depth depth depth depth]
+    junk.push(depth)
+    if depth >? 0 { return churn(depth - 1) + junk.length }
+    return junk.length
+}
+let main = ():>int64 => {
+    let xs = build(5)
+    let b = boxed(3)
+    let rounds:int64 = 0
+    loop rounds <? 3 { xs = build(rounds + 10)  rounds += 1 }   # reassignment releases the old storage
+    let noise:int64 = churn(20)
+    let total:int64 = 0
+    loop x in xs { total += x }          # 12 + 11 + ... = 12*13/2 = 78
+    loop y in b.items { total += y }     # 3 + 4 = 7
+    return total + twice(1) - 34         # 66 + 7 + 3 - 34 = 42
+}

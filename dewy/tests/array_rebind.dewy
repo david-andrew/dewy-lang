@@ -1,0 +1,18 @@
+# Rebinding an owned array local releases its old storage — after the new
+# value is computed, since `x = shift(x 2)` reads the old one.
+let shift = (xs:array<int64> k:int64):>array<int64> => {
+    let result:array<int64> = []
+    loop x in xs { result.push(x - k) }
+    return result
+}
+let main = ():>int64 => {
+    let x:array<int64> = shift([50 60 70] 1)      # 49 59 69
+    let rounds:int64 = 0
+    loop rounds <? 3 {
+        x = shift(x 2)                            # 43 53 63 after 3 rounds
+        rounds += 1
+    }
+    let total:int64 = 0
+    loop v in x { total += v }                    # 159
+    return total - 117                            # 42
+}
