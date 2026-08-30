@@ -1,0 +1,29 @@
+# `capture(program args)` runs a child to completion with its stdout and
+# stderr collected; `spawn(program args)` starts one and `child.wait` yields
+# its status. Every outcome is a value.
+let main = ():>int64 => {
+    let checks:int64 = 0
+    match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {
+        result:Output => {
+            if result.status =? 3 { checks += 1 }
+            match result.stdout_text { s:string => if s =? "out\n" { checks += 2 }  <undefined> => {} }
+            match result.stderr_text { s:string => if s =? "err\n" { checks += 4 }  <undefined> => {} }
+        }
+        <SpawnError> => {}
+    }
+    # more than a pipe buffer on both streams: the pipes are drained as they fill
+    match capture("/bin/sh" ["-c" "yes | head -c 200000; yes no | head -c 150000 1>&2"]) {
+        result:Output => if result.stdout.length =? 200000 and result.stderr.length =? 150000 and result.status =? 0 { checks += 8 }
+        <SpawnError> => {}
+    }
+    match capture("/nonexistent/program" []) {
+        result:Output => if result.status =? 127 and result.stdout.length =? 0 { checks += 16 }
+        <SpawnError> => {}
+    }
+    match spawn("/bin/sh" ["-c" "exit 5"]) {
+        child:Child => if child.wait =? 5 { checks += 32 }
+        <SpawnError> => {}
+    }
+    if checks =? 63 { return 42 }
+    return checks
+}

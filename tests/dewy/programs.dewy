@@ -6,9 +6,17 @@
 # The list mirrors `CASES` in `tests/python_misc/test_cleanparse_udewy_e2e.py`
 # (`test_dewy_test.py` keeps them in sync). Run from the repository root.
 
-# the children's output is not part of the test: only their exit statuses are
-let compile_program = (source:string):>int64|SpawnError =>
-    run_silent("/usr/bin/env" ["python3" "-m" "dewy" "--compile" source])
+# the compiler's report is the failure message when a fixture does not build
+let compile_program = (source:string):>void => {
+    match capture("/usr/bin/env" ["python3" "-m" "dewy" "--compile" source]) {
+        result:Output => {
+            let report:string = ""
+            match result.stderr_text { text:string => { report = text }  <undefined> => {} }
+            $expect result.status =? 0, "compiling {source} failed ({result.status}):\n{report}"
+        }
+        <SpawnError> => $expect false, "could not start the compiler"
+    }
+}
 
 $test(cases=[
     [name="overload_calls.dewy" expected=42]
@@ -76,6 +84,7 @@ $test(cases=[
     [name="process_and_directories.dewy" expected=42]
     [name="string_escapes.dewy" expected=42]
     [name="conversions.dewy" expected=42]
+    [name="process_capture.dewy" expected=42]
     [name="union_recursive.dewy" expected=42]
     [name="string_join_decode.dewy" expected=42]
     [name="error_values.dewy" expected=42]
@@ -144,14 +153,29 @@ $test(cases=[
 let program_exit_status = (name:string expected:int64) => {
     let source = p"dewy/tests/{name}"
     let binary = p"__dewycache__/dewy/tests/{p(name).stem}"
-    if not binary.exists {
-        match compile_program(source.path) {
-            status:int64 => $expect status =? 0, "compiling {name} failed ({status})"
-            <SpawnError> => $expect false, "could not start the compiler"
-        }
-    }
+    if not binary.exists { compile_program(source.path) }
     match run_silent(binary.path []) {
         status:int64 => $expect status =? expected, "{name} exited with {status}"
+        <SpawnError> => $expect false, "could not run {binary.path}"
+    }
+}
+
+# a program's output, captured
+$test(cases=[
+    [name="hello.dewy" expected="Hello, World!\n"]
+    [name="hello_world_syscall.dewy" expected="Hello, World!\n"]
+])
+let program_output = (name:string expected:string) => {
+    let binary = p"__dewycache__/dewy/tests/{p(name).stem}"
+    if not binary.exists { compile_program(p"dewy/tests/{name}".path) }
+    match capture(binary.path []) {
+        result:Output => {
+            $expect result.status =? 0, "{name} exited with {result.status}"
+            match result.stdout_text {
+                text:string => $expect text =? expected, "{name} printed {text}"
+                <undefined> => $expect false, "{name} printed bytes that are not UTF-8"
+            }
+        }
         <SpawnError> => $expect false, "could not run {binary.path}"
     }
 }

@@ -93,6 +93,7 @@ LOWERED_CASES = [
     ('process_and_directories.dewy', 42),
     ('string_escapes.dewy', 42),
     ('conversions.dewy', 42),
+    ('process_capture.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

@@ -70,17 +70,149 @@ let environment = (name:string):>string|undefined => {
     return undefined
 }
 
-# Run a program with arguments (argv[0] is the program) and wait for it:
-# its exit status, 128 + the signal number when a signal ended it, or
-# `SpawnError`. The child inherits the standard streams and this process's
-# environment; a failed exec in the child reports 127 like a shell would.
-# `program` is a path: the kernel does no PATH search (`run("/usr/bin/env"
-# ["python3" …])` does one). `run_silent` sends the child's stdout and
-# stderr to /dev/null instead (capturing them is still ahead).
-let run = (program:string args:array<string>):>int64|SpawnError => _run(program args false)
-let run_silent = (program:string args:array<string>):>int64|SpawnError => _run(program args true)
+# ---- processes ----
+# `run` waits for the exit status; `run_silent` sends the child's output to
+# /dev/null; `spawn` starts a child and returns it (`child.wait`); `capture`
+# waits and collects the child's stdout and stderr. The status is the exit
+# code, 128 + the signal number when a signal ended the child, or
+# `SpawnError` when it could not be started (fork or pipe failed). The
+# child inherits this process's environment; a failed exec reports 127 like
+# a shell would. `program` is a path: the kernel does no PATH search
+# (`run("/usr/bin/env" ["python3" …])` does one).
+let Child:type = [
+    pid:int64
+    wait = ():>int64 => _wait_status(pid)
+]
 
-let _run = (program:string args:array<string> silent:bool):>int64|SpawnError => {
+let Output:type = [
+    status:int64
+    stdout:array<uint8>
+    stderr:array<uint8>
+    stdout_text = ():>string|undefined => stdout as string|undefined
+    stderr_text = ():>string|undefined => stderr as string|undefined
+]
+
+let run = (program:string args:array<string>):>int64|SpawnError => {
+    match _spawn_with(program args (-1) (-1)) {
+        pid:int64 => return _wait_status(pid)
+        <SpawnError> => return SpawnError
+    }
+}
+
+let run_silent = (program:string args:array<string>):>int64|SpawnError => {
+    let dev_null:array<uint8> = _c_string("/dev/null")
+    let fd:int64 = __syscall3__(2 __load_i64__(dev_null) 1 0)     # open(O_WRONLY)
+    if fd <? 0 { return SpawnError }
+    let spawned = _spawn_with(program args fd fd)
+    let closed:int64 = __syscall1__(3 fd)
+    match spawned {
+        pid:int64 => return _wait_status(pid)
+        <SpawnError> => return SpawnError
+    }
+}
+
+let spawn = (program:string args:array<string>):>Child|SpawnError => {
+    match _spawn_with(program args (-1) (-1)) {
+        pid:int64 => return [pid = pid]
+        <SpawnError> => return SpawnError
+    }
+}
+
+# Run to completion with the child's stdout and stderr collected. Both
+# pipes are drained as they fill (poll), so a child that writes a lot to
+# either stream cannot block on a full pipe.
+let capture = (program:string args:array<string>):>Output|SpawnError => {
+    let out_pipe:int64 = __alloca__(8)
+    let err_pipe:int64 = __alloca__(8)
+    if __syscall2__(293 out_pipe 0) <? 0 { return SpawnError }       # pipe2
+    if __syscall2__(293 err_pipe 0) <? 0 { return SpawnError }
+    let out_read:int64 = _pipe_end(out_pipe 0)
+    let out_write:int64 = _pipe_end(out_pipe 4)
+    let err_read:int64 = _pipe_end(err_pipe 0)
+    let err_write:int64 = _pipe_end(err_pipe 4)
+    let spawned = _spawn_with(program args out_write err_write)
+    let closed_out:int64 = __syscall1__(3 out_write)
+    let closed_err:int64 = __syscall1__(3 err_write)
+    match spawned {
+        pid:int64 => {
+            let streams = _drain_pipes(out_read err_read)
+            let status:int64 = _wait_status(pid)
+            return [status = status stdout = streams.stdout stderr = streams.stderr]
+        }
+        <SpawnError> => {
+            let closed_out_read:int64 = __syscall1__(3 out_read)
+            let closed_err_read:int64 = __syscall1__(3 err_read)
+            return SpawnError
+        }
+    }
+}
+
+# One end of a `pipe2` result (two 32-bit descriptors).
+let _pipe_end = (pipe:int64 offset:int64):>int64 => {
+    let address:int64 = pipe + offset
+    let word:uint32 = __load_u32__(address)
+    return word transmute int64
+}
+
+# Fill one `struct pollfd { int fd; short events; short revents }` (POLLIN = 1);
+# a closed stream is polled as fd -1, which the kernel ignores.
+let _poll_slot = (slot:int64 fd:int64 open:bool):>void => {
+    let wanted:int64 = -1
+    if open { wanted = fd }
+    let fd_word:uint32 = wanted transmute uint32
+    __store_u32__(fd_word slot)
+    let events_address:int64 = slot + 4
+    __store_u16__(1 events_address)
+    let revents_address:int64 = slot + 6
+    __store_u16__(0 revents_address)
+    return void
+}
+
+let _poll_ready = (slot:int64):>bool => {
+    let revents_address:int64 = slot + 6
+    let revents:uint16 = __load_u16__(revents_address)
+    return revents not=? 0
+}
+
+let _Streams:type = [stdout:array<uint8> stderr:array<uint8>]
+
+# Read both pipes to EOF, whichever has data first (poll = syscall 7).
+let _drain_pipes = (out_fd:int64 err_fd:int64):>_Streams => {
+    let stdout:array<uint8> = []
+    let stderr:array<uint8> = []
+    let fds:int64 = __alloca__(16)
+    let err_slot:int64 = fds + 8
+    let chunk:int64 = __alloca__(4096)
+    let out_open:bool = true
+    let err_open:bool = true
+    loop out_open or err_open {
+        _poll_slot(fds out_fd out_open)
+        _poll_slot(err_slot err_fd err_open)
+        let ready:int64 = __syscall3__(7 fds 2 (-1))
+        if ready <? 0 { out_open = false  err_open = false }
+        if out_open and _poll_ready(fds) {
+            let count:int64 = __syscall3__(0 out_fd chunk 4096)
+            if count <=? 0 { out_open = false  let closed:int64 = __syscall1__(3 out_fd) }
+            else {
+                let i:int64 = 0
+                loop i <? count { let address:int64 = chunk + i  stdout.push(__load_u8__(address))  i += 1 }
+            }
+        }
+        if err_open and _poll_ready(err_slot) {
+            let count:int64 = __syscall3__(0 err_fd chunk 4096)
+            if count <=? 0 { err_open = false  let closed:int64 = __syscall1__(3 err_fd) }
+            else {
+                let i:int64 = 0
+                loop i <? count { let address:int64 = chunk + i  stderr.push(__load_u8__(address))  i += 1 }
+            }
+        }
+    }
+    return [stdout = stdout stderr = stderr]
+}
+
+# fork/execve; the child's stdout/stderr are `out_fd`/`err_fd` when they
+# are not -1. Yields the pid.
+let _spawn_with = (program:string args:array<string> out_fd:int64 err_fd:int64):>int64|SpawnError => {
     # one pool holds every NUL-terminated string; argv and envp are built
     # from its offsets once the pool has stopped growing (growth may move it)
     let pool:array<uint8> = []
@@ -113,23 +245,21 @@ let _run = (program:string args:array<string> silent:bool):>int64|SpawnError => 
     let pid:int64 = __syscall0__(57)
     if pid <? 0 { return SpawnError }
     if pid =? 0 {
-        if silent {
-            # open("/dev/null" O_WRONLY) and dup2 (33) it onto stdout and stderr
-            let dev_null:array<uint8> = _c_string("/dev/null")
-            let fd:int64 = __syscall3__(2 __load_i64__(dev_null) 1 0)
-            if fd >=? 0 {
-                let out:int64 = __syscall2__(33 fd 1)
-                let err:int64 = __syscall2__(33 fd 2)
-            }
-        }
+        if out_fd >=? 0 { let out:int64 = __syscall2__(33 out_fd 1) }   # dup2
+        if err_fd >=? 0 { let err:int64 = __syscall2__(33 err_fd 2) }
         let failed:int64 = __syscall3__(59 c_program __load_i64__(argv) __load_i64__(envp))
         let ended:int64 = __syscall1__(231 127)    # exit_group: the exec failed
         return SpawnError                         # unreachable: the child has exited
     }
+    return pid
+}
+
+# wait4 for one child: its exit status, or 128 + the signal that ended it.
+let _wait_status = (pid:int64):>int64 => {
     let status_cell:int64 = __alloca__(8)
     __store_i64__(0 status_cell)
     let waited:int64 = __syscall4__(61 pid status_cell 0 0)
-    if waited <? 0 { return SpawnError }
+    if waited <? 0 { return -1 }
     let status:int64 = __load_i64__(status_cell) and 65535
     let signal:int64 = status and 127
     if signal =? 0 { return (status >> 8) and 255 }

@@ -65,3 +65,28 @@ let out = source.with_suffix(".udewy")
 ```
 
 The same operations exist as free functions on a path's text (`read_text(path:string)`, `write_text`, `file_exists`, `is_file`, `is_directory`, `make_directory`, `remove_directory`, `remove_file`), provided by the target's file-system module (`library/linux/files.dewy`).
+
+## Processes
+
+The prelude runs programs as child processes (`library/linux/process.dewy`); every outcome is a value. `program` is a path — the kernel does no `PATH` search, so `run("/usr/bin/env" ["python3" …])` is how to get one — and `args` are the arguments after it. A child inherits the environment, and a failed exec reports `127` like a shell would. A status is the exit code, or `128 + n` when signal `n` ended the child; `SpawnError` means the child could not be started.
+
+- `run(program args):>int64 | SpawnError` waits for the status; the child shares the standard streams. `run_silent` sends its stdout and stderr to `/dev/null`.
+- `spawn(program args):>Child | SpawnError` starts the child and returns it; `child.wait` yields the status. Several children may run at once.
+- `capture(program args):>Output | SpawnError` waits with the child's output collected: `status`, `stdout` and `stderr` (bytes, drained as the pipes fill, so a large output cannot block the child), and `stdout_text` / `stderr_text` (`string | undefined`: the bytes decoded, `undefined` when they are not UTF-8).
+- `environment(name):>string | undefined` reads one of this process's own environment variables.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {
+        result:Output => {
+            match result.stdout_text { text:string => printl"{text}"  <undefined> => {} }
+            return result.status                       # 3
+        }
+        <SpawnError> => return 1
+    }
+}
+```
+
+Still ahead: a working directory and a custom environment for the child, and reading a child's output as it runs.
