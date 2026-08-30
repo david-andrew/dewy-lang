@@ -41,9 +41,30 @@ let message = "item {index}: {value}"
 let combined = "{left}{right}"
 ```
 
-A field's value converts the way `value as string` does: numbers, booleans, and strings directly, and a declared type through its conversion method `__as__ = ():>string => …` (see [`as`](types-and-conversions.md#as)) — user-defined formatting participates in the general conversion protocol rather than a string-only hook. A field whose type has no conversion is an error.
+A field's value converts the way `value as string` does: numbers, booleans, and strings directly, a declared type through its conversion method `__as__ = ():>string => …` (see [`as`](types-and-conversions.md#as)) — user-defined formatting participates in the general conversion protocol rather than a string-only hook — and a container or an object without one as its literal syntax (see [Printing](#printing)). A field whose type cannot convert is an error.
 
 An implementation may stream the literal chunks and converted fields directly to a consumer such as `printl`, or materialize a string value when the surrounding context needs one. That representation choice is not observable.
+
+## Printing
+
+`print` writes a value; `printl` writes it and a newline. Both take anything that prints: strings, numbers, and booleans directly, and every other value as its literal syntax — an array as `[1 2 3]`, a set as `set["a" "b"]`, a dictionary as `["a" -> 1]`, and an object as `[x=1 name="q"]`, or as its `__as__ = ():>string` conversion when its type declares one. Members print the same way, so nesting is arbitrary. A string inside a structure prints quoted, with the escapes of its literal syntax (`"a\tb"`); a string printed on its own prints bare.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Point:type = [x:int64 y:int64]
+
+let main = ():>int64 => {
+    printl([1 2 3])                  # [1 2 3]
+    printl(set["a" "b"])             # set["a" "b"]
+    printl(["k" -> Point(1 2)])      # ["k" -> [x=1 y=2]]
+    printl'{[true false]} and {[name="q"]}'
+    let text:string = [1 2 3] as string
+    return text.length               # 7
+}
+```
+
+`value as string` and an interpolation field build the same text; a printed interpolation streams its fields instead of building it. A value that cannot print — a member of an optional type, a container whose members are containers, or, when the text must be built, a number object such as `Rational` (which prints but has no string form yet) — is an error where it is printed. Printing a structure is for looking at values: its exact text is not a stable format.
 
 ## Searching, Splitting, and Trimming
 

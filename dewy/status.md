@@ -373,8 +373,9 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Runtime re-segmentation uses current grapheme-array values, including mutations that cause adjacent clusters to merge.
 - [x] Interpolated strings preserve alternating literal chunks and typechecked expression fields in HIR.
 - [x] `print`/`printl` specialize interpolated strings into streamed writes, avoiding a materialized interpolation container; this includes integer and grapheme fields used by the hero program.
-- [ ] Materializing an interpolated string as a first-class runtime string value. Only the streamed `print`/`printl` consumer is currently lowered.
-- [ ] A general conversion protocol such as overloadable `__as__`/`__string__` for formatting arbitrary interpolation fields.
+- [x] Materializing an interpolated string as a runtime string value (`let s = '{x}'`), for strings, integers, booleans, and structures; the number objects (`Rational`, `Fixed`, `BigInt`, …) stream to `print` but have no string form yet (a checker error, not a lowering one).
+- [x] The conversion protocol `__as__ = ():>string => …` for `x as string` and interpolation fields (`__as__ &=` adds targets).
+- [x] `print`/`printl` take anything that prints (`printl(5)`), and values print as their literal syntax: containers through the generic printers in `library/io.dewy` (`_print_array`/`_print_set`/`_print_dict` and the `_as_string` shapes, string members quoted with their escapes), objects through `__as__` or field by field through a hidden printer synthesized per object type (`__dewy_print_object_N`). Members print the same way, so nesting is arbitrary; a printed interpolation streams its structure fields. Unprintable members (optionals, containers of containers) are errors on the value. `doc"…"` is a prelude no-op.
 - [ ] `array<uint8>` or `array<uint32>` to string. These conversions require future refinement proofs for valid UTF-8 or Unicode scalar contents.
 - [ ] Normalization APIs and normalization-aware comparisons. String equality currently preserves and compares the exact scalar spelling.
 
@@ -382,6 +383,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 
 - [x] Exhaustive conditionals can produce one scalar value and lower through a typed temporary.
 - [x] Non-exhaustive conditionals are statement-valued `void`.
+- [x] A type test the static types settle (`v is? string` on a concrete type — in a generic instance, on the type parameter) is decided during checking; only the live arm is checked, and a flow whose arms are all dead is its `else`. Generic declarations are checked in order (module-level calls to a generic work).
 - [ ] Multi-value conditional results.
 
 ## Array, object, and other compile-time versus runtime representations

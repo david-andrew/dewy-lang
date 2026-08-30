@@ -43,6 +43,14 @@ Newlines normally behave as whitespace. A construct may assign additional struct
 
 Comment markers inside strings are string contents.
 
+A documentation string is an ordinary call of the prelude's `doc` with a string — usually a `"""` block — at the top of a module, a function body, or a type. The compiler keeps nothing from it yet, so the call is a no-op:
+
+```dewy
+doc"""
+Tokenizer framework.
+"""
+```
+
 ## Tokens and Ambiguity
 
 Tokenization chooses the longest valid token subject to explicit lexical rules. Parsing may preserve several structurally valid interpretations—most notably call, indexing, and multiplication juxtaposition—until types and context resolve them.

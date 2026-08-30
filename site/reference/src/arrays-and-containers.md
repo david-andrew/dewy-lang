@@ -106,6 +106,8 @@ Set operators produce new sets: `|`/`or` union, `&`/`and` intersection, `-` diff
 
 Set equality, ordering, and compound operator forms remain provisional.
 
+Arrays, sets, and dictionaries print — and convert to `string` — as their literal syntax; see [Printing](strings.md#printing).
+
 ## Literal Classification
 
 At the top level of `[]`:

@@ -70,6 +70,12 @@ class Context:
     """Syntax the checker synthesizes (assert directives, constructor literals,
     method bodies) is kept alive for the whole compile: bindings are keyed by
     `id(node)`, and a freed node's id could otherwise be reused."""
+    object_printers: dict[tuple[str, str], sb.Binding] = field(default_factory=dict)
+    """The hidden field-by-field printers, by (flavor, object type) (shared list)."""
+    structure_string_callees: set[int] = field(default_factory=set)
+    """Bindings of the functions that build a structure's string (`_array_as_string`
+    instances, `'string'` object printers): a printed interpolation streams
+    their argument instead (shared)."""
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
@@ -707,8 +713,13 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
 }
 
 
-def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
-    """Typecheck interpolation fields while retaining literal chunks."""
+def tcr_istring(ast: p0.IString, *, ctx: Context, streamed: bool = False) -> hir.InterpolatedString:
+    """Typecheck interpolation fields while retaining literal chunks.
+
+    A `streamed` interpolation is a `print` argument: a container or object
+    field stays a value, printed as a structure, instead of building its
+    string first.
+    """
 
     from .unicode.graphemes import unicode_scalars
 
@@ -763,6 +774,10 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         # print through their own paths; anything else is rejected where the
         # field is printed or materialized)
         converted = _conversion_method_call(value, ty.StringType(), value.loc, ctx=ctx)
+        if converted is None and not streamed:
+            # a container or a plain object: its literal syntax (`[1 2 3]`,
+            # `[x=1 y="a"]`); a printed interpolation streams it instead
+            converted = _structure_call(value, value.loc, flavor='string', ctx=ctx)
         if converted is not None:
             value = converted
         parts.append(value)
@@ -780,6 +795,19 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
     unfolded = ty.unfold(ty.strip_refinement(value.type))
     if not isinstance(unfolded, ty.ObjectType):
         return None
+    function_binding = _conversion_method_binding(unfolded, target, loc, ctx=ctx)
+    if function_binding is None:
+        return None
+    function_type = function_binding.type
+    assert isinstance(function_type, ty.FunctionType)
+    receiver = replace(value, type=unfolded) if isinstance(value.type, ty.NamedType) else value
+    function = hir.ExpressedIdentifier(loc, function_type, function_binding.name, binding_id=function_binding.id)
+    bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:]), function, receiver)
+    return tcr_function_call(bound, p0.Block(loc, [], '()', None), ctx=ctx)
+
+
+def _conversion_method_binding(unfolded: ty.ObjectType, target: ty.Type, loc: Span, *, ctx: Context) -> sb.Binding | None:
+    """The `__as__` method of an object type whose result fits ``target``, else None."""
     conversions = [method for method in unfolded.methods if method.name == '__as__']
     if not conversions:
         return None
@@ -801,14 +829,7 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
         if ctx.type_system.is_subtype(candidate_type.ret, target) or (_is_string_type(candidate_type.ret) and _is_string_type(target)):
             function_binding = candidate
             break
-    if function_binding is None:
-        return None
-    function_type = function_binding.type
-    assert isinstance(function_type, ty.FunctionType)
-    receiver = replace(value, type=unfolded) if isinstance(value.type, ty.NamedType) else value
-    function = hir.ExpressedIdentifier(loc, function_type, function_binding.name, binding_id=function_binding.id)
-    bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:]), function, receiver)
-    return tcr_function_call(bound, p0.Block(loc, [], '()', None), ctx=ctx)
+    return function_binding
 
 
 def _pack_based_string(
@@ -2496,6 +2517,20 @@ def _in_declared_order(joined: ty.Type, binding_id: int, *, ctx: Context) -> ty.
     return joined
 
 
+def _decided_type_test(value_type: ty.Type, test: ty.TypeExpr, *, ctx: Context) -> bool | None:
+    """The result of `value is? T` when the value's static type settles it —
+    every alternative is a `T` (true) or none can be (false) — else None
+    (a runtime test). `any` says nothing, so it is never decided."""
+    variants = list(value_type.items) if isinstance(value_type, ty.TypeOr) else [value_type]
+    if any(ty.strip_refinement(variant) in (ty.TOP_TYPE, ty.INFERRED_TYPE) for variant in variants):
+        return None
+    if _refine_type_test(value_type, test, matches=False, ctx=ctx) == ty.BOTTOM_TYPE:
+        return True
+    if _refine_type_test(value_type, test, matches=True, ctx=ctx) == ty.BOTTOM_TYPE:
+        return False
+    return None
+
+
 def _refine_type_test(
     current: ty.Type,
     test: ty.TypeExpr,
@@ -3436,18 +3471,22 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             condition = arm.condition(arm_ctx)
             if isinstance(condition, hir.DictContains):
                 condition.hoisted = True  # its search runs right before the flow: the position is in scope
-            if isinstance(condition, hir.TargetBool):
+            if isinstance(condition, (hir.TargetBool, hir.DecidedBool)):
                 # Target queries (`$target =? "..."`) select arms during
                 # checking: dead arms are not checked at all (they may import
                 # files for other targets), and the live arm's `{}` body is
                 # spliced into the enclosing scope so gated imports and
-                # declarations bind there. Plain literal conditions keep the
-                # ordinary flow semantics (every arm checked).
+                # declarations bind there. A type test the static types
+                # decide (`DecidedBool`) selects arms the same way — in a
+                # generic instance, the arm written for this type — but the
+                # live body keeps its own scope. Plain literal conditions keep
+                # the ordinary flow semantics (every arm checked).
                 if not condition.value:
                     continue
                 constant_true = True
                 if (
-                    branch_expected is None
+                    isinstance(condition, hir.TargetBool)
+                    and branch_expected is None
                     and isinstance(body_ast, p0.Block)
                     and body_ast.kind == '{}'
                 ):
@@ -3461,6 +3500,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     body = arm.body(arm_ctx, branch_expected)
                     if branch_expected is not None:
                         body = check_against(body, branch_expected, ctx=ctx)
+                    if not arms:
+                        return body   # the first arm is always taken: the flow is its body
                 arms.append(hir.IfArm(arm.loc, body.type, condition, body))
                 bodies.append(body)
                 if body.type != ty.BOTTOM_TYPE:
@@ -3495,7 +3536,13 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         unhandled = _unhandled_type_test_members(arms, arm_ctx, ctx=ctx) if ast.default is None and not constant_true else None
         chain_exhaustive = (unhandled is not None and unhandled == ty.BOTTOM_TYPE) or (match_total and ast.default is None and not constant_true)
         if constant_true:
-            pass  # later arms and the default are dead
+            # later arms and the default are dead; a type test decided true
+            # after other arms (`… else if v is? string`, the last member) is
+            # the chain's default, so downstream passes see an ordinary if/else
+            if len(arms) > 1 and isinstance(arms[-1].condition, hir.DecidedBool):
+                last = arms.pop()
+                assert isinstance(last, hir.IfArm)
+                default = last.body
         elif chain_exhaustive:
             last = arms.pop()
             assert isinstance(last, hir.IfArm)
@@ -3524,6 +3571,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             default = None
         if constant_true and not arms:
             raise ValueError('INTERNAL ERROR: constant-true flow without arms')
+        if not arms and default is not None:
+            # every arm was a compile-time false: the flow is its `else`
+            return default
         if not arms:
             # Every arm was a compile-time false: nothing remains.
             return hir.Void(ast.loc, ty.VOID_TYPE)
@@ -4795,6 +4845,13 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
         defining,
         declarations=defining.declarations.new_child(),
         binding_scopes=defining.binding_scopes.new_child(),
+        # what the body instantiates or synthesizes is hoisted into the module
+        # being compiled (the caller's), after it — callees come first
+        module=ctx.module,
+        generic_instances=ctx.generic_instances,
+        object_printers=ctx.object_printers,
+        structure_string_callees=ctx.structure_string_callees,
+        synthesized=ctx.synthesized,
     )
     for param in source.params:
         alias = instance_ctx.binding_registry.allocate_param(param.name, ty.TYPE_TYPE, generic.loc)
@@ -6530,7 +6587,11 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
                 continue
             if signature is None:
                 continue
-            deferred_functions.add(id(item))
+            if _generic_function_parts(expression) is None:
+                # (a generic's declaration is only its placeholder — bodies are
+                # checked per instance — so it is checked in order, and a
+                # module-level call after it finds the instantiable source)
+                deferred_functions.add(id(item))
             binding = ctx.binding_registry.by_syntax[id(item)]
             binding.type = signature
             binding.literal_path_parameter = _literal_path_parameter(expression)
@@ -7977,6 +8038,8 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
     )
     if isinstance(target_bool := _unwrap_parens(item), hir.TargetBool) and prefix.op.symbol == 'not':
         return hir.TargetBool(prefix.loc, 'bool', not target_bool.value)
+    if isinstance(target_bool, hir.DecidedBool) and prefix.op.symbol == 'not':
+        return hir.DecidedBool(prefix.loc, 'bool', not target_bool.value)
     if isinstance(item, hir.Integer) and isinstance(result, hir.FunctionCall):
         if prefix.op.symbol == '-':
             return replace(result, type=ty.IntegerLiteralType(-item.value))
@@ -8572,6 +8635,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         equality = _integer_singleton_test(value, test_type, negated=symbol == 'isnt?', loc=binop.loc, op_loc=binop.op.loc, ctx=ctx)
         if equality is not None:
             return equality
+        decided = _decided_type_test(value.type, test_type, ctx=ctx)
+        if decided is not None:
+            return hir.DecidedBool(binop.loc, 'bool', decided != (symbol == 'isnt?'))
         return hir.TypeTest(
             binop.loc,
             'bool',
@@ -8591,6 +8657,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             equality = _integer_singleton_test(value, test_type, negated=binop.op.op == 'is?', loc=binop.loc, op_loc=binop.op.loc, ctx=ctx)
             if equality is not None:
                 return equality
+            decided = _decided_type_test(value.type, test_type, ctx=ctx)
+            if decided is not None:
+                return hir.DecidedBool(binop.loc, 'bool', decided != (binop.op.op == 'is?'))
             return hir.TypeTest(
                 binop.loc,
                 'bool',
@@ -10224,7 +10293,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     """
 
     # make sure we are operating on a block at the top level
-    if not isinstance(signature, p0.Block): return collect_function_signature_args(p0.Block(signature.loc, [signature], kind='()'))
+    if not isinstance(signature, p0.Block): return collect_function_signature_args(p0.Block(signature.loc, [signature], '()', None), ctx=ctx)
 
     pos_or_kw_args: list[hir.Param|hir.BoundParam] = []
     kw_only_args: list[hir.Param|hir.BoundParam] = []
@@ -10749,15 +10818,9 @@ def _literal_path_call_result(
     return ty.PathLiteralType(argument.type.value, methods=methods)   # `p"…"` has `Path`'s methods
 
 
-def _checked_single_argument_call(
-    func: hir.AST,
-    argument: hir.AST,
-    *,
-    loc: Span,
-    ctx: Context,
-) -> hir.FunctionCall:
-    """Build one ordinary checked call from an already-checked argument."""
-
+def _prepared_single_argument(argument: hir.AST, *, ctx: Context) -> hir.AST:
+    """An argument as `print` takes it: rationals materialized, abstract
+    integers as words, dimensions erased."""
     if _is_compile_time_rational(argument.type):
         argument = _materialize_rational(argument, ctx=ctx)
     if argument.type in ('int', 'uint'):
@@ -10767,20 +10830,35 @@ def _checked_single_argument_call(
     if isinstance(argument.type, ty.QuantityType):
         # Dimensions are erased at runtime; the number prints in its canonical scale.
         argument = _strip_dimension(argument)
-    methods: list[ty.FunctionType]
+    return argument
+
+
+def _callable_methods(func: hir.AST, *, ctx: Context) -> list[ty.FunctionType]:
     if isinstance(func.type, ty.FunctionType):
-        methods = [func.type]
-    elif isinstance(func.type, ty.OverloadType):
-        methods = func.type.methods
-    else:
-        type_error(
-            ctx.srcfile,
-            'call target is not a function',
-            Pointer(
-                span=func.loc,
-                message=f'this has type `{type_to_dewy(func.type)}`, which is not callable',
-            ),
-        )
+        return [func.type]
+    if isinstance(func.type, ty.OverloadType):
+        return list(func.type.methods)
+    type_error(
+        ctx.srcfile,
+        'call target is not a function',
+        Pointer(
+            span=func.loc,
+            message=f'this has type `{type_to_dewy(func.type)}`, which is not callable',
+        ),
+    )
+
+
+def _try_single_argument_call(
+    func: hir.AST,
+    argument: hir.AST,
+    *,
+    loc: Span,
+    ctx: Context,
+) -> hir.FunctionCall | None:
+    """One ordinary checked call from an already-checked argument, or None when no method takes it."""
+
+    argument = _prepared_single_argument(argument, ctx=ctx)
+    methods = _callable_methods(func, ctx=ctx)
     try:
         result = ctx.type_system.match_best_function(
             methods,
@@ -10793,12 +10871,7 @@ def _checked_single_argument_call(
             {},
         )
     except ty.DispatchError:
-        type_error(
-            ctx.srcfile,
-            'no string conversion for this interpolation field',
-            Pointer(span=argument.loc, message=f'this has type `{type_to_dewy(argument.type)}`, which does not print'),
-            hint='give the type a conversion method: `__as__ = ():>string => …`',
-        )
+        return None
     contextual = check_against(
         argument,
         result.method.pos_or_kw[0].type,
@@ -10815,50 +10888,329 @@ def _checked_single_argument_call(
     )
 
 
-def _specialize_interpolated_output(
-    call: hir.FunctionCall,
+def _checked_single_argument_call(
+    func: hir.AST,
+    argument: hir.AST,
+    *,
+    loc: Span,
+    ctx: Context,
+) -> hir.FunctionCall:
+    """Build one ordinary checked call from an already-checked argument."""
+
+    call = _try_single_argument_call(func, argument, loc=loc, ctx=ctx)
+    if call is None:
+        type_error(
+            ctx.srcfile,
+            'no string conversion for this interpolation field',
+            Pointer(span=argument.loc, message=f'this has type `{type_to_dewy(argument.type)}`, which does not print'),
+            hint='give the type a conversion method: `__as__ = ():>string => …`',
+        )
+    return call
+
+
+# ---------------------------------------------------------------- printing values
+# `print(x)` is a dispatch on the argument's type: a `print` method takes the
+# strings, numbers, and booleans; everything else prints as its literal syntax
+# through `library/io.dewy`'s structure printers — a container by the generic
+# for its kind, a plain object through its `__as__ = ():>string` when it
+# declares one and otherwise field by field, by a hidden function synthesized
+# per object type. Members print the same way, so nesting is arbitrary.
+# `x as string` and an interpolation field build the same text (the `string`
+# flavor); a printed interpolation streams its structure fields instead.
+
+_STRUCTURE_FUNCTIONS = {
+    'array': ('_print_array', '_array_as_string'),
+    'set': ('_print_set', '_set_as_string'),
+    'dict': ('_print_dict', '_dict_as_string'),
+}
+_MATERIALIZED_INTEGERS = frozenset({'int', 'uint', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64'})
+
+
+def _structure_members(type_: ty.TypeExpr) -> tuple[str, list[ty.TypeExpr]] | None:
+    """The container kind and member types of a container type, else None."""
+    unfolded = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(unfolded, ty.ArrayType):
+        return 'array', [unfolded.element]
+    key_value = ty.dict_key_value(unfolded)
+    if key_value is not None:
+        return 'dict', [key_value[0], key_value[1]]
+    element = ty.set_element(unfolded)
+    if element is not None:
+        return 'set', [element]
+    return None
+
+
+def _plain_object_type(type_: ty.TypeExpr) -> ty.ObjectType | None:
+    """The object type of a value that prints field by field (no compiler-provided family)."""
+    unfolded = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(unfolded, ty.ObjectType) and unfolded.brand is None:
+        return unfolded
+    return None
+
+
+def _quoted_member(type_: ty.TypeExpr) -> bool:
+    """String members print quoted inside a structure (`["a" "b"]`, `[name="x"]`)."""
+    return _is_string_type(ty.strip_refinement(type_))
+
+
+def _prints_directly(type_: ty.TypeExpr, *, ctx: Context) -> bool:
+    """Whether a `print` method takes a value of this type."""
+    if _is_compile_time_rational(type_) or type_ in ('int', 'uint'):
+        return True
+    if isinstance(type_, ty.QuantityType):
+        type_ = type_.number
+    print_func = tcr_identifier(t1.Identifier(Span(0, 0), 'print'), ctx=ctx)
+    try:
+        ctx.type_system.match_best_function(_callable_methods(print_func, ctx=ctx), [type_], {})
+    except ty.DispatchError:
+        return False
+    return True
+
+
+def _unprintable_part(
+    type_: ty.TypeExpr,
+    *,
+    materialized: bool,
+    ctx: Context,
+    seen: frozenset[str] = frozenset(),
+) -> ty.TypeExpr | None:
+    """The type — a member, a field, or `type_` itself — that keeps a value of
+    `type_` from printing as a structure, else None. A materialized structure
+    converts its members to strings rather than streaming them to `print`,
+    which the number objects cannot do yet."""
+    plain = ty.strip_refinement(type_)
+    if materialized:
+        if _is_string_type(plain) or plain == 'bool' or isinstance(plain, ty.IntegerLiteralType) or (isinstance(plain, str) and plain in _MATERIALIZED_INTEGERS):
+            return None
+        if _prints_directly(plain, ctx=ctx):
+            return plain   # a number object: streams, but has no string form yet
+    elif _prints_directly(plain, ctx=ctx):
+        return None
+    members = _structure_members(plain)
+    if members is not None:
+        for member in members[1]:
+            if _structure_members(member) is not None:
+                return member   # iteration over container members is not implemented
+            bad = _unprintable_part(member, materialized=materialized, ctx=ctx, seen=seen)
+            if bad is not None:
+                return bad
+        return None
+    object_type = _plain_object_type(plain)
+    if object_type is not None:
+        if _conversion_method_binding(object_type, ty.StringType(), Span(0, 0), ctx=ctx) is not None:
+            return None
+        key = repr(plain)
+        if key in seen:
+            return None
+        for field_ in object_type.fields:
+            bad = _unprintable_part(field_.type, materialized=materialized, ctx=ctx, seen=seen | {key})
+            if bad is not None:
+                return bad
+        return None
+    return plain
+
+
+def _library_call(name: str, arguments: list[hir.AST], loc: Span, *, ctx: Context) -> hir.FunctionCall:
+    """A call to a prelude function by name with checked arguments; a generic is instantiated for them."""
+    func = tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
+    methods = _callable_methods(func, ctx=ctx)
+    pos_types = [require_valued(argument.type, ctx.srcfile, argument.loc, 'function call argument') for argument in arguments]
+    result = ctx.type_system.match_best_function(methods, pos_types, {}, expected_return=None)
+    if isinstance(func.type, ty.FunctionType) and func.type.type_params:
+        func, result = _instantiate_generic_call(func, result, pos_types, {}, None, ctx=ctx)
+    contextual = [
+        check_against(argument, param.type, ctx=ctx)
+        for argument, param in zip(arguments, result.method.pos_or_kw, strict=True)
+    ]
+    return hir.FunctionCall(
+        loc,
+        ty.strip_refinement(result.method.ret),
+        func,
+        apply_promotions(contextual, result.promote_pos),
+        {},
+        result.method_index if isinstance(func.type, ty.OverloadType) else None,
+    )
+
+
+def _structure_call(value: hir.AST, loc: Span, *, flavor: Literal['print', 'string'], ctx: Context) -> hir.AST | None:
+    """The call that prints (`'print'`) or builds the string of (`'string'`) a
+    container or a plain object, else None. A member that cannot print is an
+    error here, on the value, rather than inside the generated code."""
+    members = _structure_members(value.type)
+    object_type = _plain_object_type(value.type) if members is None else None
+    if members is None and object_type is None:
+        return None
+    bad = _unprintable_part(value.type, materialized=flavor == 'string', ctx=ctx)
+    if bad is not None:
+        subject = 'this' if bad == ty.strip_refinement(value.type) else f'its member of type `{type_to_dewy(bad)}`'
+        detail = (
+            f'{subject} prints but does not convert to string yet'
+            if flavor == 'string' and _prints_directly(bad, ctx=ctx)
+            else f'its members of type `{type_to_dewy(bad)}` are containers, which a loop cannot visit yet'
+            if _structure_members(bad) is not None
+            else f'this has type `{type_to_dewy(bad)}`, which does not print'
+            if subject == 'this'
+            else f'no `print` method takes {subject}'
+        )
+        type_error(
+            ctx.srcfile,
+            'this value does not print' if flavor == 'print' else 'no string conversion for this value',
+            Pointer(span=value.loc, message=detail),
+            hint='give the type a conversion method: `__as__ = ():>string => …`',
+        )
+    if members is not None:
+        kind, member_types = members
+        name = _STRUCTURE_FUNCTIONS[kind][flavor == 'string']
+        flags = [hir.Bool(loc, 'bool', _quoted_member(member)) for member in member_types]
+        call = _library_call(name, [value, *flags], loc, ctx=ctx)
+        if flavor == 'string' and isinstance(call.func, hir.ExpressedIdentifier) and call.func.binding_id is not None:
+            ctx.structure_string_callees.add(call.func.binding_id)
+        return call
+    assert object_type is not None
+    converted = _conversion_method_call(value, ty.StringType(), loc, ctx=ctx)
+    if converted is not None:
+        if flavor == 'string':
+            return converted
+        print_func = tcr_identifier(t1.Identifier(loc, 'print'), ctx=ctx)
+        return _checked_single_argument_call(print_func, converted, loc=loc, ctx=ctx)
+    printer = _object_printer(value.type, object_type, flavor, loc, ctx=ctx)
+    printer_type = printer.type
+    assert isinstance(printer_type, ty.FunctionType)
+    callee = hir.ExpressedIdentifier(loc, printer_type, printer.name, binding_id=printer.id)
+    argument = check_against(value, printer_type.pos_or_kw[0].type, ctx=ctx)
+    return hir.FunctionCall(loc, ty.strip_refinement(printer_type.ret), callee, [argument], {})
+
+
+def _object_printer(
+    type_: ty.TypeExpr,
+    object_type: ty.ObjectType,
+    flavor: Literal['print', 'string'],
+    loc: Span,
     *,
     ctx: Context,
-) -> hir.AST:
-    """Rewrite interpolated ``print``/``printl`` calls into streaming writes."""
+) -> sb.Binding:
+    """The hidden function printing values of an object type field by field —
+    `[x=1 y="a"]`, one per type and flavor — synthesized as Dewy over a hidden
+    alias of the type and hoisted like a generic instance."""
+    plain = ty.strip_refinement(type_)
+    key = (flavor, repr(plain))
+    existing = ctx.object_printers.get(key)
+    if existing is not None:
+        return existing
+    module_ctx = ctx.module if ctx.module is not None else ctx
+    number = 1 + sum(1 for existing_flavor, _ in ctx.object_printers if existing_flavor == flavor)
+    shape = f'__dewy_shape_{flavor}_{number}'
+    alias = ctx.binding_registry.allocate_param(shape, ty.TYPE_TYPE, loc)
+    alias.type_value = plain
+    module_ctx.declarations.maps[0][shape] = ty.TYPE_TYPE
+    module_ctx.binding_scopes.maps[0][shape] = alias
+    lines = [f'(__dewy_value:{shape}):>{"void" if flavor == "print" else "string"} => {{']
+    if flavor == 'string':
+        lines.append('    let __dewy_pieces:array<string> = []')
+    for index, field_ in enumerate(object_type.fields):
+        prefix = ('[' if index == 0 else ' ') + field_.name + '='
+        member = f'__dewy_value.{field_.name}'
+        quoted = _quoted_member(field_.type)
+        if flavor == 'print':
+            lines.append(f'    print"{prefix}"')
+            lines.append(f'    _print_member({member} {"true" if quoted else "false"})')
+        else:
+            text = f"'{{{member}}}'"
+            lines.append(f'    __dewy_pieces.push"{prefix}"')
+            lines.append(f'    __dewy_pieces.push({f"_quoted({text})" if quoted else text})')
+    closing = ']' if object_type.fields else '[]'
+    if flavor == 'print':
+        lines.append(f'    print"{closing}"')
+        lines.append('    return void')
+    else:
+        lines.append(f'    __dewy_pieces.push"{closing}"')
+        lines.append('    return __dewy_pieces.join')
+    lines.append('}')
+    # parsed at the use site's offset, so a report on it points there
+    parsed = p0.parse(SrcFile(None, ' ' * loc.start + '\n'.join(lines) + '\n'))
+    literal = parsed.inner[0]
+    assert isinstance(literal, p0.BinOp)
+    ctx.synthesized.append(literal)
+    name = f'__dewy_{flavor}_object_{number}'
+    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', loc)
+    binding.type = signature_of(literal, ctx=module_ctx)   # known before the body: a field may hold the type again
+    ctx.object_printers[key] = binding
+    if flavor == 'string':
+        ctx.structure_string_callees.add(binding.id)
+    checked = tcr_function_literal(literal, ctx=module_ctx)
+    binding.type = checked.type
+    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, None, checked, binding_id=binding.id)
+    binding.declaration = declaration
+    binding.function = checked
+    ctx.generic_instances.append(declaration)
+    return binding
 
-    if (
-        not isinstance(call.func, hir.ExpressedIdentifier)
-        or call.func.name not in {'print', 'printl'}
-        or len(call.pos_args) != 1
-        or call.kw_args
-        or not isinstance(call.pos_args[0], hir.InterpolatedString)
+
+def _output_argument(right: p0.AST) -> p0.AST | None:
+    """The single positional argument of `print(x)` / `print x`, else None."""
+    items = list(right.inner) if isinstance(right, p0.Block) and right.kind == '()' else [right]
+    if len(items) != 1:
+        return None
+    item = items[0]
+    if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == '=':
+        return None   # a keyword argument
+    if _spread_operand(item) is not None:
+        return None
+    return item
+
+
+def _tcr_output_call(left: hir.AST, right: p0.AST, *, ctx: Context) -> hir.AST | None:
+    """`print(x)` and `printl(x)`: the argument is checked first and printed by
+    its type — a `print` method, or the structure printers — so `printl` takes
+    whatever `print` does, and an interpolated argument streams part by part."""
+    if not (
+        isinstance(left, hir.ExpressedIdentifier)
+        and left.name in {'print', 'printl'}
+        and isinstance(left.type, (ty.FunctionType, ty.OverloadType))
     ):
-        return call
+        return None
+    item = _output_argument(right)
+    if item is None:
+        return None
+    argument = tcr_istring(item, ctx=ctx, streamed=True) if isinstance(item, p0.IString) else typecheck_and_resolve_inner(item, ctx=ctx)
+    require_valued(argument.type, ctx.srcfile, argument.loc, 'function call argument')
+    loc = Span(left.loc.start, right.loc.stop)
+    print_func = left if left.name == 'print' else tcr_identifier(t1.Identifier(left.loc, 'print'), ctx=ctx)
+    statements = _output_statements(print_func, argument, loc, ctx=ctx)
+    if left.name == 'printl':
+        newline = hir.String(loc, ty.StringLiteralType('\n'), '\n')
+        statements.append(_checked_single_argument_call(print_func, newline, loc=loc, ctx=ctx))
+    if len(statements) == 1:
+        return statements[0]
+    return hir.Block(loc, ty.VOID_TYPE, statements, False)
 
-    print_func = tcr_identifier(
-        t1.Identifier(call.func.loc, 'print'),
-        ctx=ctx,
+
+def _output_statements(print_func: hir.AST, argument: hir.AST, loc: Span, *, ctx: Context) -> list[hir.AST]:
+    """The `print` calls that write one argument."""
+    if isinstance(argument, hir.InterpolatedString):
+        statements: list[hir.AST] = []
+        for part in argument.parts:
+            if (
+                isinstance(part, hir.FunctionCall)
+                and isinstance(part.func, hir.ExpressedIdentifier)
+                and part.func.binding_id in ctx.structure_string_callees
+            ):
+                # a structure field: stream it rather than build its string
+                part = part.pos_args[0]
+            statements.extend(_output_statements(print_func, part, part.loc, ctx=ctx))
+        return statements
+    call = _try_single_argument_call(print_func, argument, loc=loc, ctx=ctx)
+    if call is not None:
+        return [call]
+    structure = _structure_call(argument, loc, flavor='print', ctx=ctx)
+    if structure is not None:
+        return [structure]
+    type_error(
+        ctx.srcfile,
+        'this value does not print',
+        Pointer(span=argument.loc, message=f'no `print` method takes `{type_to_dewy(argument.type)}`, and it is not a container or an object'),
+        hint='give the type a conversion method: `__as__ = ():>string => …`',
     )
-    statements = [
-        _checked_single_argument_call(
-            print_func,
-            part,
-            loc=part.loc,
-            ctx=ctx,
-        )
-        for part in call.pos_args[0].parts
-    ]
-    if call.func.name == 'printl':
-        newline = hir.String(
-            call.loc,
-            ty.StringLiteralType('\n'),
-            '\n',
-        )
-        statements.append(
-            _checked_single_argument_call(
-                print_func,
-                newline,
-                loc=call.loc,
-                ctx=ctx,
-            )
-        )
-    return hir.Block(call.loc, ty.VOID_TYPE, statements, False)
 
 
 def _type_constructor_target(ast: p0.AST, *, ctx: Context) -> hir.TypeValue | None:
@@ -11010,6 +11362,11 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
     if constructed is not None:
         assert isinstance(left, hir.TypeValue)
         return _tcr_type_constructor_call(left, constructed, right, ctx=ctx)
+
+    if receiver is None:
+        output = _tcr_output_call(left, right, ctx=ctx)
+        if output is not None:
+            return output
 
     methods: list[ty.FunctionType]
     if isinstance(left.type, ty.FunctionType):
@@ -11267,7 +11624,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         )
     if isinstance(left, hir.DictMethod):
         return _dict_method_call(left, call, ctx=ctx)
-    return _specialize_interpolated_output(call, ctx=ctx)
+    return call
 
 
 def _dict_method_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Context) -> hir.AST:
@@ -11525,6 +11882,8 @@ def _explicit_value_conversion(
     if ctx.type_system.promote_type(source, target) == target:
         return hir.ValueCast(loc, target, node)
     converted = _conversion_method_call(node, target, loc, ctx=ctx)
+    if converted is None and _is_string_type(target):
+        converted = _structure_call(node, loc, flavor='string', ctx=ctx)
     if converted is not None:
         return converted
     type_error(

@@ -1,0 +1,33 @@
+# Values print as their literal syntax: containers by the printers in
+# `library/io.dewy`, objects field by field or through `__as__`; `printl`
+# takes whatever `print` does, and `as string` builds the same text.
+let Point:type = [x:int64 y:int64]
+let Tagged:type = [
+    id:int64
+    __as__ = ():>string => "#{id}"
+]
+
+let main = ():>int64 => {
+    let total:int64 = 0
+    printl(5)
+    let xs = [1 2 3]
+    printl(xs)
+    printl'{xs} and {["a" "b"]}'
+    printl(set["x" "y"])
+    printl(["k" -> 1 "l" -> 2])
+    let pt = Point(3 4)
+    printl(pt)
+    printl([pt pt])
+    printl([Tagged(7) Tagged(8)])
+    printl([name="q\"t" nested=[a=true]])
+    let text:string = xs as string
+    total += text.length            # `[1 2 3]`: 7
+    let object_text:string = pt as string
+    total += object_text.length     # `[x=3 y=4]`: 9
+    let quoted:string = '{["a\n"]}'
+    total += quoted.length          # `["a\n"]`: 7
+    let empty:array<int64> = []
+    printl(empty)
+    total += 19
+    return total
+}

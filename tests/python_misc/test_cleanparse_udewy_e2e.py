@@ -101,6 +101,7 @@ LOWERED_CASES = [
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),
+    ('printing.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),
@@ -392,8 +393,9 @@ def test_prelude_printl_writes_to_console(
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     emitted = codegen(SrcFile.from_path(fixtures / 'hello.dewy'))
-    assert 'let __dewy_module_prelude_io_print' in emitted
-    assert 'let __dewy_module_prelude_io_printl' in emitted
+    # `printl"…"` is checked as `print` calls plus a newline, so only the print methods are emitted
+    assert 'let __dewy_module_prelude_io__print_string' in emitted
+    assert '__dewy_module_prelude_io__print_string(' in emitted
 
     udewy_path = tmp_path / 'hello.udewy'
     udewy_path.write_text(emitted)

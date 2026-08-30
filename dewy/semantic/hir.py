@@ -262,6 +262,15 @@ class TargetBool(Bool):
     skipped entirely, so they may import target-specific files.
     """
 
+
+@dataclass
+class DecidedBool(Bool):
+    """A boolean the checker decided from static types: `x is? T` when `x`'s
+    type is `T` (or cannot be). A flow conditioned on one checks only the
+    live arm — in a generic instance, the arm written for this type — with
+    its ordinary scope.
+    """
+
 @dataclass
 class Integer(AST):
     prefix: t0.BasePrefix

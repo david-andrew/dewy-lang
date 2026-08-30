@@ -124,6 +124,16 @@ let main = ():>int64 => {
 
 Type arguments are inferred from the arguments (and a contextual result type), structurally through arrays, objects, and function types; a literal argument binds its ordinary type (`1` is `int64`, `"one"` is `string`). `T of Bound` restricts the arguments a call may supply. The body is checked per instantiation with the type parameters bound to the inferred types — an operation the instance's types do not support is reported at that use, as it would be in a plain function — and each distinct instantiation is compiled as an ordinary function (`first__string`). A generic function is declared with `let` at module level, is called by name, and cannot be used as a value. Generic type aliases that refer to themselves, and generic *local* functions, are not implemented yet.
 
+A type test the static types settle is decided while checking — `v is? string` is true when `v`'s type is `string` and false when it cannot be — and only the live arm of an `if` on it is checked. In a generic, that is how a body varies by type parameter: each instance keeps the arm written for its type, which may use members the other arm's type lacks.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let size = <T>(v:T):>int64 => if v is? string v.length else 1
+
+let main = ():>int64 => size("abc") + size(true)   # 4
+```
+
 ## Literal Types
 
 In a type context a literal denotes its singleton type: `x:5` admits only `5`, `d:0` only `0`, `s:"one"` only `"one"`, and a packed literal `0x"6869"` only those bytes. Type contexts are annotation positions (`name:T`, `:>T`), the right-hand side of `name:type = …`, and an explicit type block `<…>`; anywhere else a literal is a value, and `<…>` is the way to write a type expression where the context alone would read it as values (`<1 | 2 | 3>` is a type — as values `1 | 2 | 3` would be `or` between numbers).
@@ -197,7 +207,7 @@ let main = ():>int64 => {
 }
 ```
 
-A value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this interpolation field`). A type converts to several targets by adding conversions with `&=` — `__as__ &= ():>int64 => x * 100 + y` after the first — and `x as T` picks the one whose result fits `T`.
+A container, or an object whose type declares no `__as__` to `string`, converts to `string` as its literal syntax (`[1 2 3]`, `[x=1 y=2]`; see [Printing](strings.md#printing)). Any other value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this value`). A type converts to several targets by adding conversions with `&=` — `__as__ &= ():>int64 => x * 100 + y` after the first — and `x as T` picks the one whose result fits `T`.
 
 ## `transmute`
 

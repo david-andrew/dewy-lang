@@ -151,3 +151,124 @@ let printl = (s:string=''):>void => {
     print(s)
     print("\n")
 }
+
+# Anything else prints as its literal syntax. The compiler routes `print(x)`
+# (and `printl`, and an interpolation field) here when no `print` method
+# takes `x` directly: a container to the printer for its kind, an object
+# through its `__as__ = ():>string` conversion when it declares one and
+# otherwise field by field (`[x=1 y="a"]`). Members print the same way,
+# so nesting is arbitrary; `quote` — decided by the compiler from the
+# member type — marks string members, which print quoted inside a
+# structure: `[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`.
+let _print_member = <T>(value:T quote:bool):>void => {
+    if value is? string {   # decided per instance: the other arm is not checked
+        if quote { _print_quoted(value) } else { print(value) }
+    } else {
+        print(value)
+    }
+    return void
+}
+
+# A quoted string carries the escapes of its literal syntax.
+let _escaped = (g:string):>string => {
+    if g =? "\n" { return "\\n" }
+    if g =? "\t" { return "\\t" }
+    if g =? "\r" { return "\\r" }
+    if g =? "\\" { return "\\\\" }
+    if g =? '"' { return '\\"' }
+    return g
+}
+
+let _print_quoted = (text:string):>void => {
+    print'"'
+    loop g in text { print(_escaped(g)) }
+    print'"'
+    return void
+}
+
+let _print_array = <T>(values:array<T> quote:bool):>void => {
+    print"["
+    let first:bool = true
+    loop v in values {
+        if not first { print" " }
+        first = false
+        _print_member(v quote)
+    }
+    print"]"
+    return void
+}
+
+let _print_set = <T>(members:set<T> quote:bool):>void => {
+    print"set["
+    let first:bool = true
+    loop v in members {
+        if not first { print" " }
+        first = false
+        _print_member(v quote)
+    }
+    print"]"
+    return void
+}
+
+let _print_dict = <K V>(entries:dict<K V> quote_keys:bool quote_values:bool):>void => {
+    print"["
+    let first:bool = true
+    loop [k v] in entries {
+        if not first { print" " }
+        first = false
+        _print_member(k quote_keys)
+        print" -> "
+        _print_member(v quote_values)
+    }
+    print"]"
+    return void
+}
+
+# The same shapes as strings (`x as string`, and an interpolation field that
+# is materialized rather than streamed). Each builds its pieces and joins
+# them; a member converts through `'{v}'`, which the compiler routes the
+# same way as printing.
+let _quoted = (text:string):>string => {
+    let pieces:array<string> = ['"']
+    loop g in text { pieces.push(_escaped(g)) }
+    pieces.push('"')
+    return pieces.join
+}
+
+let _array_as_string = <T>(values:array<T> quote:bool):>string => {
+    let pieces:array<string> = ["["]
+    let first:bool = true
+    loop v in values {
+        if not first { pieces.push" " }
+        first = false
+        if quote { pieces.push(_quoted('{v}')) } else { pieces.push('{v}') }
+    }
+    pieces.push"]"
+    return pieces.join
+}
+
+let _set_as_string = <T>(members:set<T> quote:bool):>string => {
+    let pieces:array<string> = ["set["]
+    let first:bool = true
+    loop v in members {
+        if not first { pieces.push" " }
+        first = false
+        if quote { pieces.push(_quoted('{v}')) } else { pieces.push('{v}') }
+    }
+    pieces.push"]"
+    return pieces.join
+}
+
+let _dict_as_string = <K V>(entries:dict<K V> quote_keys:bool quote_values:bool):>string => {
+    let pieces:array<string> = ["["]
+    let first:bool = true
+    loop [k v] in entries {
+        if not first { pieces.push" " }
+        first = false
+        if quote_keys { pieces.push(_quoted('{k}')) } else { pieces.push('{k}') }
+        pieces.push" -> "
+        if quote_values { pieces.push(_quoted('{v}')) } else { pieces.push('{v}') }
+    }
+    pieces.push"]"
+    return pieces.join
+}

@@ -1,0 +1,74 @@
+# #TODO
+# doc = s=>()
+# doc"""
+# Tokenizer Framework
+
+# (TBD attempt to simplify over the )
+# """
+
+# old_printl = @printl
+# old_print = @print
+# let myprint = (s:string|set|array):>void => {
+#     match s
+#     <string> => print(s)
+#     <set> => (print'set[' loop i in s print(i) print']')
+#     <array> => (print'[' loop i in s print(i) print']')
+#     # <type> => old_print"{s}"
+# }
+# let myprintl = <T>(s:string|set<T>|array<T>|type):>void => {
+#     myprint(s)
+#     myprint"\n"
+# }
+
+##### CHARACTER SETS AND USEFUL CONSTANTS #####
+
+whitespace = set[' ' '\t' '\n' '\r']
+# ascii_control_chars = [loop i in [0x0..0x20) if i not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
+# line_comment_start:'#' = '#'
+# block_comment_start: '#\{' = '#\{'
+# block_comment_end: '\}#' = '\}#'
+
+# # TODO: The specific set of digits is open for debate. The following are proposed:
+# # latin = set('ÆØÞßæøþẞ')
+# # misc = set('‽¢£¥€§†‡※')
+# # units = set('℃℉℥ℨ')
+# # Also `ϕϖϗϰϱϴ`, perhaps just `ϕϴ` which would normalize to the greek versions
+# digits = set'0123456789'
+# alpha = set'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+# greek = set'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω'
+# math = set'ℂℕℤℚℝℙℍ𝔼𝕊𝕋𝔽𝔾ℵℒ'
+# misc = set'_‾!°'
+# subscripts   = set'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ'
+# superscripts = set'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ'
+# misc_decorations = set'℠™©®'
+# primes = set'′″‴⁗'
+
+# start_characters = alpha | greek | math | misc # | latin | units
+# continue_characters = start_characters | digits
+# decoration_characters = superscripts | subscripts | misc_decorations | primes
+
+# # note that the prefix is case insensitive, so call .casefold() when matching the prefix
+# # numbers may have _ as a separator (if _ is not in the set of digits)
+# BasePrefix:type = '0b' | '0t' | '0q' | '0s' | '0o' | '0d' | '0z' | '0x' | '0u' | '0r' | '0g'
+
+
+
+#debug
+printl(whitespace)
+# printl(ascii_control_chars)
+# printl(line_comment_start)
+# printl(block_comment_start)
+# printl(block_comment_end)
+# printl(digits)
+# printl(alpha)
+# printl(greek)
+# printl(math)
+# printl(misc)
+# printl(subscripts)
+# printl(superscripts)
+# printl(misc_decorations)
+# printl(primes)
+# printl(start_characters)
+# printl(continue_characters)
+# printl(decoration_characters)
+# printl(BasePrefix)

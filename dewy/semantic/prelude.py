@@ -25,6 +25,7 @@ PORTABLE_LIBRARIES = (
     library / 'reporting.dewy',
     library / 'testing.dewy',
     library / 'units.dewy',
+    library / 'doc.dewy',
 )
 
 # Backend name (udewy's `$target`) -> services layer. The native backends and
