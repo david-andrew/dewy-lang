@@ -194,13 +194,32 @@ let _quoted = (text:string):>string => {
     return pieces.join
 }
 
+# A string of the arena's own (a copy of any string's bytes), for text a
+# function builds and returns.
+let _arena_text = (text:string):>string => {
+    let pieces:array<string> = [text]
+    return pieces.join      # a join built for the return lives in the arena
+}
+
+# A member's text inside a structure: a string member quoted when the
+# container asks (`quote`), anything else — a number, `undefined`, an object —
+# as it prints. The member test is decided per instance where the type
+# settles it, and made at runtime for a union member.
+let _member_text = <T>(v:T quote:bool):>string => {
+    if v is? string {
+        if quote { return _quoted(v) }
+        return v
+    }
+    return _arena_text('{v}')
+}
+
 let _array_as_string = <T>(values:array<T> quote:bool):>string => {
     let pieces:array<string> = ["["]
     let first:bool = true
     loop v in values {
         if not first { pieces.push" " }
         first = false
-        if quote { pieces.push(_quoted('{v}')) } else { pieces.push('{v}') }
+        pieces.push(_member_text(v quote))
     }
     pieces.push"]"
     return pieces.join
@@ -212,7 +231,7 @@ let _set_as_string = <T>(members:set<T> quote:bool):>string => {
     loop v in members {
         if not first { pieces.push" " }
         first = false
-        if quote { pieces.push(_quoted('{v}')) } else { pieces.push('{v}') }
+        pieces.push(_member_text(v quote))
     }
     pieces.push"]"
     return pieces.join
@@ -224,9 +243,9 @@ let _dict_as_string = <K V>(entries:dict<K V> quote_keys:bool quote_values:bool)
     loop [k v] in entries {
         if not first { pieces.push" " }
         first = false
-        if quote_keys { pieces.push(_quoted('{k}')) } else { pieces.push('{k}') }
+        pieces.push(_member_text(k quote_keys))
         pieces.push" -> "
-        if quote_values { pieces.push(_quoted('{v}')) } else { pieces.push('{v}') }
+        pieces.push(_member_text(v quote_values))
     }
     pieces.push"]"
     return pieces.join

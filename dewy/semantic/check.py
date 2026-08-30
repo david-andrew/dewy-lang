@@ -727,6 +727,24 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
 }
 
 
+def _hoisted_union_field(value: hir.AST, *, ctx: Context) -> hir.AST | None:
+    """A union-valued interpolation field that is not a name: bound to a
+    hidden local hoisted before the current statement (see `Context.hoisted`),
+    so the member flow reads a name. None outside a block body."""
+    if ctx.hoisted is None:
+        return None
+    loc = value.loc
+    name = f'__dewy_field_{ctx.binding_registry.next_id}'
+    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', loc)
+    binding.type = value.type
+    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
+    binding.declaration = declaration
+    ctx.declarations[name] = value.type
+    ctx.binding_scopes[name] = binding
+    ctx.hoisted.append(declaration)
+    return _optional_field_flow(hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id), ctx=ctx)
+
+
 def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     """A union-typed value (an optional, or a container union of words,
     strings, `undefined`, and objects) as a string: a flow with one arm per
@@ -813,15 +831,25 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         if spelled is not None:
             parts.append(spelled)   # a type or a function: its spelling
             continue
+        if value.type == 'undefined':
+            parts.append(hir.String(value.loc, ty.StringLiteralType('undefined'), 'undefined'))   # the text of `undefined`
+            continue
         optional_flow = _optional_field_flow(value, ctx=ctx)
         if optional_flow is not None:
             parts.append(optional_flow)   # `undefined`, or the payload's text
             continue
         if _optional_container_element(ty.strip_refinement(value.type)) or _union_container_element(ty.strip_refinement(value.type)):
+            # any other union-valued expression (`xs[i]`, a call): evaluate it
+            # once into a hidden local declared before the statement, then the
+            # flow tests and reads the local
+            named = _hoisted_union_field(value, ctx=ctx)
+            if named is not None:
+                parts.append(named)
+                continue
             user_error(
                 ctx.srcfile,
-                'a union value in an interpolation must be a name',
-                Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`; its member is tested and read separately, so it must be readable twice'),
+                'a union value in an interpolation must be a name here',
+                Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`; its member is tested and read separately, and there is no statement to evaluate it before'),
                 hint='bind it first: `let item = xs[i]` then `"{item}"`',
             )
         require_valued(
@@ -11340,8 +11368,13 @@ def _plain_object_type(type_: ty.TypeExpr) -> ty.ObjectType | None:
 
 
 def _quoted_member(type_: ty.TypeExpr) -> bool:
-    """String members print quoted inside a structure (`["a" "b"]`, `[name="x"]`)."""
-    return ty.string_valued(ty.strip_refinement(type_))
+    """String members print quoted inside a structure (`["a" "b"]`, `[name="x"]`);
+    for a union member the flag applies to its string alternatives."""
+    plain = ty.strip_refinement(type_)
+    if ty.string_valued(plain):
+        return True
+    members = ty.runtime_union_members(plain) or (('undefined', ty.optional_payload(plain)) if ty.optional_payload(plain) is not None else ())
+    return any(member != 'undefined' and ty.string_valued(member) for member in members)
 
 
 def _number_object(type_: ty.TypeExpr, *, ctx: Context) -> str | None:

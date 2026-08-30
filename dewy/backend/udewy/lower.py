@@ -236,6 +236,7 @@ class _Lowerer(
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.owned_string_arrays: set[str] = set()   # those whose elements are strings the array owns (released with it)
+        self.owned_cell_arrays: dict[str, ty.TypeExpr] = {}   # those whose elements are optional/union cells the array owns
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
@@ -2786,6 +2787,7 @@ class _Lowerer(
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set()
         self.owned_string_arrays = set()
+        self.owned_cell_arrays = {}
         previous_state = (
             self.loop_signal_levels,
             self.loop_signal_kind,
@@ -2892,6 +2894,8 @@ class _Lowerer(
             self.owned_array_names.add(node.name)
             if self._is_string_valued(declared_type.element):
                 self.owned_string_arrays.add(node.name)
+            elif self._is_optional_element(declared_type.element) or self._is_union_element(declared_type.element):
+                self.owned_cell_arrays[node.name] = declared_type.element
 
     def _owned_array_declaration(self, node: hir.AST) -> hir.Declare | None:
         """The declaration of a local that will own a runtime-length array's storage (the HIR-level twin of `_note_owned_array`)."""
@@ -3055,7 +3059,7 @@ class _Lowerer(
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]]) -> list[hir.AST]:
-            return [self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays) for scope in scopes for local in reversed(scope)]
+            return [self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(local.name)) for scope in scopes for local in reversed(scope)]
 
         def diverges(item: hir.AST) -> bool:
             return isinstance(item, (hir.Return, hir.Break, hir.Continue))

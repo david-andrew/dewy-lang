@@ -900,7 +900,7 @@ class _ArrayLowering:
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('rebound'))
                 statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied))
                 assignment = replace(node, value=fresh)
-            statements.append(self._release_owned_array(replace(node.target, type='int64'), node.loc, string_elements=node.target.name in self.owned_string_arrays))
+            statements.append(self._release_owned_array(replace(node.target, type='int64'), node.loc, string_elements=node.target.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(node.target.name)))
             return [*statements, assignment]
         return [*prelude, assignment]
 
@@ -1046,7 +1046,7 @@ class _ArrayLowering:
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, function.symbol), [block, size], {})
 
-    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False) -> hir.AST:
+    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False, cell_element: ty.TypeExpr | None = None) -> hir.AST:
         """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
 
         The `owner` word is 1 for arena-owned data (set by growth and by
@@ -1062,6 +1062,8 @@ class _ArrayLowering:
         statements: list[hir.AST] = []
         if string_elements:
             statements.extend(self._release_string_elements(word, loc))
+        elif cell_element is not None:
+            statements.extend(self._release_cell_elements(word, cell_element, loc))
         statements.extend([
             self._arena_release_call(self._load_i64_field(word, ARRAY_DATA_OFFSET, loc), size, loc),
             self._store_i64_field(word, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
@@ -1080,6 +1082,49 @@ class _ArrayLowering:
             self._arena_release_call(word, self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc),
         ], True))], None))
         return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, hir.Block(loc, ty.VOID_TYPE, statements, True))], None)
+
+    def _release_cell_elements(self, word: hir.ExpressedIdentifier, element_type: ty.TypeExpr, loc) -> list[hir.AST]:
+        """Give back each optional/union cell an owned array stores: a string
+        payload the cell owns first (by the active member's tag and the
+        string's owner word), then the 16-byte cell. Object members' handles
+        are not released yet (objects have no release)."""
+        plain = ty.strip_refinement(element_type)
+        payload = ty.optional_payload(plain)
+        members: tuple[ty.TypeExpr, ...] = ('undefined', payload) if payload is not None else (ty.runtime_union_members(plain) or ())
+
+        def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
+            name = self._new_string_temp(loc, 'int64', suffix).name
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
+
+        one = self._int64_literal(loc, 1)
+        index_declare, index = local('cell_index', self._int64_literal(loc, 0))
+        length_declare, length = local('cell_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        data_declare, data = local('cell_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
+        address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
+        cell_declare, cell = local('cell', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
+        tag_declare, tag = local('cell_tag', self._intrinsic_call('__load_u8__', [cell], 'int64', loc))
+        payload_declare, payload_word = local('cell_payload', self._load_i64_field(cell, 8, loc))
+        body: list[hir.AST] = [cell_declare, tag_declare, payload_declare]
+        for tag_index, member in enumerate(members):
+            if not self._is_string_valued(member):
+                continue
+            owner_declare, owner = local('cell_string_owner', self._load_i64_field(payload_word, STRING_OWNER_OFFSET, loc))
+            bytes_plus_one = self._int64_binary('__add__', self._load_i64_field(payload_word, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
+            release_all = hir.Block(loc, ty.VOID_TYPE, [
+                self._arena_release_call(self._load_i64_field(payload_word, STRING_DATA_OFFSET, loc), bytes_plus_one, loc),
+                self._arena_release_call(self._load_i64_field(payload_word, STRING_BOUNDARIES_OFFSET, loc), self._int64_binary('__mul__', bytes_plus_one, self._int64_literal(loc, 4), loc), loc),
+                self._arena_release_call(payload_word, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+            ], True)
+            release_descriptor = hir.Block(loc, ty.VOID_TYPE, [self._arena_release_call(payload_word, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc)], True)
+            by_owner = hir.Flow(loc, ty.VOID_TYPE, [
+                hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
+                hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
+            ], None)
+            body.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(tag, self._int64_literal(loc, tag_index), 'int64', loc), hir.Block(loc, ty.VOID_TYPE, [owner_declare, by_owner], True))], None))
+        body.append(self._arena_release_call(cell, self._int64_literal(loc, 16), loc))
+        body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)))
+        loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
+        return [index_declare, length_declare, data_declare, loop]
 
     def _release_string_elements(self, word: hir.ExpressedIdentifier, loc) -> list[hir.AST]:
         """Give back each element string an owned string array stores, by the element's owner word."""

@@ -1,0 +1,19 @@
+# Arrays of optionals and unions own their cells: at the scope's end each
+# element's cell (and a string payload the cell owns) goes back to the arena,
+# so building and dropping such arrays in a loop runs in constant memory.
+let round = (n:int64):>int64 => {
+    let opts:array<int64|undefined> = []
+    loop i in [0..8) { if i % 2 =? 0 { opts.push(i) } else { opts.push(undefined) } }
+    let words:array<string|undefined> = []
+    loop i in [0..4) { words.push'w{i}-{n}' }
+    let total:int64 = 0
+    loop o in opts { match o { v:int64 => { total += v }  <undefined> => { total += 1 } } }   # 12 + 4
+    loop w in words { match w { s:string => { total += s.length }  <undefined> => {} } }   # 4 * 4 (n < 10)
+    return total
+}
+let main = ():>int64 => {
+    let rounds:int64 = 0
+    let total:int64 = 0
+    loop rounds <? 300 { total = round(rounds % 10)  rounds += 1 }
+    return total + 10                                        # 16 + 16 + 10 = 42
+}

@@ -100,6 +100,15 @@ class _OptionalLowering:
     ) -> list[hir.AST]:
         if isinstance(value, hir.ValueCast):
             return self._optional_write(cell, value.expr, payload)
+        if (
+            isinstance(value, hir.RepresentationCast)
+            and ty.optional_payload(value.type) is not None
+            and not isinstance(ty.unfold(value.expr.type), ty.ArrayType)
+        ):
+            # checking wraps a member value in a conversion to the optional type;
+            # the tag-and-payload store below is that conversion (a decode
+            # `bytes as string | undefined` is a real conversion and stays)
+            return self._optional_write(cell, value.expr, payload)
         if isinstance(payload, ty.NamedType):
             # `Node | undefined`: the payload is a handle, deep-copied on every
             # store, exactly as in a general union cell (the tags coincide)

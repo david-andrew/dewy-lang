@@ -30,6 +30,6 @@ let main = ():>int64 => {
     total += tokens.length - copy.length                 # 1
     let named:dict<string Token> = ['first' -> tokens[0]]
     match named['first'] { n:Number => { total += n.value * 4 }  <Name> => {}  <Punct> => {} }   # 8
-    if copy.length >? 1 { let second:Token = copy[1]  if '{second}' =? '[text="+" level=1]' { total += 8 } }   # 8
+    if copy.length >? 1 { if '{copy[1]}' =? '[text="+" level=1]' { total += 8 } }   # 8 (the element is read once, into a hidden local)
     return total                                         # 42
 }
