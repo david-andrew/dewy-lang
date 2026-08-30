@@ -78,7 +78,6 @@ def based_string(quote: str) -> dict:
 
 RAW = f"storage.type.string.raw.{D}"
 TEMPLATE = f"storage.type.string.template.{D}"
-PATH = f"entity.name.function.call.{D}"
 TYPE_END = "(?!\\s*[<\\[]|\\s*[|&]\\s*)"  # a type expression continues only through `<`, `[`, `|`, `&`
 TYPE_INTRO = "(?:(:>)|(:)(?![=:>?]))"  # `:>` is the return-type arrow, `:` the annotation separator
 TYPE_INTRO_CAPTURES = {
@@ -190,8 +189,8 @@ GRAMMAR = {
                 quoted("template.triple.single", "'''", prefix="t", prefix_scope=TEMPLATE),
                 quoted("template.double", '"', prefix="t", prefix_scope=TEMPLATE),
                 quoted("template.single", "'", prefix="t", prefix_scope=TEMPLATE),
-                quoted("path.double", '"', prefix="p", prefix_scope=PATH, interpolate=False),
-                quoted("path.single", "'", prefix="p", prefix_scope=PATH, interpolate=False),
+                # `p"…"` is not a prefix: `p` is an ordinary function juxtaposed with
+                # a string (`#function-call` + `#string`), like `printl"…"`
             ]
         },
         "heredoc-string": {

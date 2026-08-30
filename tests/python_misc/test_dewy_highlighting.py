@@ -142,6 +142,17 @@ def test_based_strings_use_the_string_scope_for_their_quotes() -> None:
     assert not match(begin, 'x0x"1"')
 
 
+def test_juxtaposed_string_prefixes_are_ordinary_calls() -> None:
+    """`p"…"` (and `printl"…"`) is a function juxtaposed with a string: no prefix rule, so interpolation is highlighted."""
+    prefixed = [rule["begin"] for rule in _repo("prefixed-string")["patterns"]]
+    assert not any(match(begin, 'p"x"') for begin in prefixed)
+    assert not any(match(begin, 'printl"x"') for begin in prefixed)
+    call = _rule("function-call")["match"]
+    assert match(call, 'p"x"').group(1) == "p" and match(call, 'printl"{x}"').group(1) == "printl"
+    plain = _repo("string")["patterns"][-2]   # the `"` rule
+    assert {"include": "#string-interpolation"} in plain["patterns"]
+
+
 def test_string_escapes_flag_hex_escapes_and_accept_unicode() -> None:
     illegal, unicode_escape, continuation, escape = (rule["match"] for rule in _repo("string-escape")["patterns"])
     assert fullmatch(illegal, "\\x41")
