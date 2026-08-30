@@ -117,6 +117,16 @@ def test_identifier_pattern_follows_the_tokenizer_repertoire() -> None:
         assert not fullmatch(pattern, not_identifier), not_identifier
 
 
+def test_identifiers_may_follow_numbers() -> None:
+    """`10kg`, `30m/s`, `45°`: juxtaposition multiplies, so the identifier after a numeral is highlighted as one."""
+    pattern = _repo("identifier")["match"]
+    assert search(pattern, "10kg").group(0) == "kg"
+    assert search(pattern, "30m/s").group(0) == "m"
+    assert search(pattern, "45°").group(0) == "°"
+    assert search(pattern, "x10kg").group(0) == "x10kg"     # a digit inside an identifier does not split it
+    assert search(pattern, "9.8(m/s^2)").group(0) == "m"
+
+
 def test_number_patterns_match_the_literal_forms() -> None:
     based, decimal = (rule["match"] for rule in _repo("number")["patterns"])
     for literal in ("0b101010", "0t1120", "0q222", "0s110", "0o52", "0d42", "0z36", "0x2a", "0xDEAD_BEEF", "0B1"):

@@ -29,6 +29,10 @@ CONT = cls(t0.continue_characters | t0.decoration_characters)
 DECOR = cls(t0.decoration_characters)
 IDENT = f"[{DECOR}]*[{START}][{CONT}]*"
 NOT_BEFORE = f"(?<![{CONT}])"  # not glued to a preceding identifier character
+# An identifier may directly follow a number (`10kg`, `30m`, `45°`: juxtaposition
+# multiplies), so its start is guarded against a preceding *letter* only — an
+# identifier's own trailing digits never end a match, the rule is greedy.
+NOT_BEFORE_IDENT = f"(?<![{START}{DECOR}])"
 NOT_AFTER = f"(?![{CONT}])"
 BASE_PREFIX = "0[bBtTqQsSoOdDzZxXuUrRgG]"
 NUMBER_PREFIX = "0[bBtTqQsSoOdDzZxX]"  # numerals stop at base 16; higher bases are packed strings only
@@ -403,7 +407,7 @@ GRAMMAR = {
             "captures": {"1": {"name": f"storage.modifier.reference.{D}"}, "2": {"name": f"variable.function.{D}"}},
         },
         "function-call": {
-            "match": f"{NOT_BEFORE}({IDENT})(?=\\(|[\"'])",
+            "match": f"{NOT_BEFORE_IDENT}({IDENT})(?=\\(|[\"'])",
             "captures": {"1": {"name": f"entity.name.function.call.{D}"}},
         },
         "operator": {
@@ -426,7 +430,7 @@ GRAMMAR = {
                 rule("punctuation.accessor", "\\."),
             ]
         },
-        "identifier": {"name": f"variable.other.{D}", "match": f"{NOT_BEFORE}{IDENT}{NOT_AFTER}"},
+        "identifier": {"name": f"variable.other.{D}", "match": f"{NOT_BEFORE_IDENT}{IDENT}{NOT_AFTER}"},
         "punctuation": {
             "patterns": [
                 rule("punctuation.section.braces.begin", "\\{"),
