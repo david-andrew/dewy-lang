@@ -147,15 +147,8 @@ let _string_replace = (text:string old:string new:string):>string => {
 
 # ---- scalars
 
-# The one-scalar string of a Unicode scalar value. The range is a proof
-# obligation at the call (a loop over `[0..0x20)` proves it). A surrogate
-# code point (0xD800–0xDFFF) is not a scalar and cannot be in a string, so it
-# yields U+FFFD, the replacement character (a refinement cannot exclude a
-# range in the middle yet).
-let chr = (scalar:int64<scalar >=? 0 and scalar <? 0x110000>):>string => {
-    let code:int64 = scalar
-    if code >=? 0xD800 and code <=? 0xDFFF { code = 0xFFFD }
-    let bytes:array<uint8> = []
+# Appends a scalar's UTF-8 bytes.
+let _push_utf8 = (@bytes:array<uint8> code:int64):>void => {
     if code <? 0x80 {
         bytes.push(code transmute uint8)
     } else if code <? 0x800 {
@@ -171,10 +164,27 @@ let chr = (scalar:int64<scalar >=? 0 and scalar <? 0x110000>):>string => {
         bytes.push((0x80 + ((code >> 6) and 0x3F)) transmute uint8)
         bytes.push((0x80 + (code and 0x3F)) transmute uint8)
     }
+}
+
+# The string of UTF-8 bytes this module produced itself (always valid).
+let _string_of_utf8 = (bytes:array<uint8>):>string => {
     match bytes as string|undefined {
         text:string => return text
-        <undefined> => return ""   # unreachable: the bytes above are valid UTF-8
+        <undefined> => return ""   # unreachable: the bytes were encoded here
     }
+}
+
+# The one-scalar string of a Unicode scalar value. The range is a proof
+# obligation at the call (a loop over `[0..0x20)` proves it). A surrogate
+# code point (0xD800–0xDFFF) is not a scalar and cannot be in a string, so it
+# yields U+FFFD, the replacement character (a refinement cannot exclude a
+# range in the middle yet).
+let chr = (scalar:int64<scalar >=? 0 and scalar <? 0x110000>):>string => {
+    let code:int64 = scalar
+    if code >=? 0xD800 and code <=? 0xDFFF { code = 0xFFFD }
+    let bytes:array<uint8> = []
+    _push_utf8(@bytes code)
+    return _string_of_utf8(bytes)
 }
 
 # ---- sets from other values: `set"0123"` (the graphemes), `set(values)` (the elements)
@@ -189,4 +199,20 @@ let _set_of_array = <T>(values:array<T>):>set<T> => {
     let members:set<T> = set[]
     loop v in values { members.add(v) }
     return members
+}
+
+# ---- loop capture: `[loop i in xs f(i)]`, `set[loop …]`, `[loop … k -> v]`
+# collect each iteration's value (the compiler declares the container and
+# adds every expressed value of the loop body through these)
+
+let _capture_push = <T>(@values:array<T> value:T):>void => {
+    values.push(value)
+}
+
+let _capture_add = <T>(@members:set<T> value:T):>void => {
+    members.add(value)
+}
+
+let _capture_store = <K V>(@entries:dict<K V> key:K value:V):>void => {
+    entries[key] = value
 }

@@ -1448,6 +1448,11 @@ class TypeSystem:
                 return True
             if isinstance(actual, StringLiteralType) and self.is_subtype(actual, current):
                 return True
+            if is_string_spelling(current) and is_string_spelling(actual):
+                # `'string'`, `string`, and `string length=n` are one type to a
+                # type parameter (a container's `string` element meeting an
+                # interpolated argument)
+                return True
             if isinstance(current, BinaryLiteralType) and self.is_subtype(current, actual):
                 bindings[name] = actual
                 return True
@@ -1762,6 +1767,11 @@ type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
 # ---------------------------------------------------------------------------
 # Smart constructors
 # ---------------------------------------------------------------------------
+
+def is_string_spelling(type_: TypeExpr) -> bool:
+    """Whether ``type_`` spells the string type (`'string'`, `StringType`, a sized one, a literal)."""
+    return type_ == 'string' or isinstance(type_, (StringType, StringLiteralType))
+
 
 def intersect(*xs: TypeExpr) -> TypeExpr:
     """Build the intersection of type expressions.

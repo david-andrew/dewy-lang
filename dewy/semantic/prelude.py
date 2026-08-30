@@ -16,6 +16,7 @@ library = project_root / 'library'
 PORTABLE_LIBRARIES = (
     library / 'strings.dewy',
     library / 'path.dewy',
+    library / 'unicode.dewy',
     library / 'math.dewy',
     library / 'rational.dewy',
     library / 'fixed.dewy',

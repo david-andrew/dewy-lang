@@ -85,6 +85,8 @@ let main = ():>int64 => {
 }
 ```
 
+`text.casefold` is the Unicode full case folding (`CaseFolding.txt`, statuses C and F): the form for case-insensitive comparison, not a lowercase for display — `"Straße".casefold` is `"strasse"`, `"İ".casefold` is `"i̇"`. Compare `a.casefold =? b.casefold`, or test `head.casefold is? BasePrefix` (see [Unions and Narrowing](types-and-conversions.md#unions-and-narrowing)).
+
 ## Joining and Building
 
 `xs.join` concatenates the elements of a string array (`array<string>`, `array<grapheme>`) into a new string; `xs.join(sep)` — or, juxtaposed, `xs.join", "` — places the separator between neighbours. The result is re-segmented, so clusters may span the joins. `join` reads its receiver: it applies to any array value, of any length, and is not a mutation.

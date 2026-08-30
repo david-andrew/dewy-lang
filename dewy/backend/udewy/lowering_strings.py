@@ -3588,7 +3588,8 @@ class _StringLowering:
             ],
             None,
         )
-        allocator = '__static_alloca__'
+        # a runtime-sized view: static storage at module startup, the frame otherwise
+        allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
         descriptor_word = replace(descriptor, type='int64')
         statements: list[hir.AST] = [
             *prelude,

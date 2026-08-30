@@ -28,7 +28,37 @@ SOURCES = {
         'GraphemeBreakTest.txt',
         'ee2b9354d270ac061b29f09662cafea06341d77e704b8cc6bd72aaeeda363cb5',
     ),
+    'CaseFolding.txt': (
+        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/CaseFolding.txt',
+        '6f1f9c588eb4a5c718d9e8f93b782685e5c7fec872cf05e8e6878053599e09bb',
+    ),
 }
+
+CASE_FOLDING_RECORD_BYTES = 16   # scalar, then up to three folded scalars (0 = none), little-endian uint32s
+
+
+def _case_folding(text: str) -> list[tuple[int, tuple[int, ...]]]:
+    """The full case folding (statuses C and F) as (scalar, folded scalars), sorted."""
+    entries: list[tuple[int, tuple[int, ...]]] = []
+    for line in text.splitlines():
+        line = line.split('#')[0].strip()
+        if not line:
+            continue
+        code, status, mapping, _ = (part.strip() for part in line.split(';'))
+        if status in ('C', 'F'):
+            entries.append((int(code, 16), tuple(int(part, 16) for part in mapping.split())))
+    entries.sort()
+    return entries
+
+
+def _case_folding_table(entries: list[tuple[int, tuple[int, ...]]]) -> bytes:
+    """Fixed-width records for a binary search in `library/strings.dewy` (`casefold`)."""
+    table = bytearray()
+    for scalar, folded in entries:
+        assert 1 <= len(folded) <= 3
+        for value in (scalar, *folded, *([0] * (3 - len(folded)))):
+            table += value.to_bytes(4, 'little')
+    return bytes(table)
 
 
 def _download(name: str) -> str:
@@ -127,6 +157,13 @@ def generate() -> None:
     test_data.mkdir(exist_ok=True)
     (test_data / f'GraphemeBreakTest-{UNICODE_VERSION}.txt').write_text(
         _download('GraphemeBreakTest.txt')
+    )
+
+    # the case-folding table the prelude includes (`$include_bytes` in strings.dewy)
+    library_unicode = HERE.parents[2] / 'library' / 'unicode'
+    library_unicode.mkdir(exist_ok=True)
+    (library_unicode / 'casefold.bin').write_bytes(
+        _case_folding_table(_case_folding(_download('CaseFolding.txt')))
     )
 
 

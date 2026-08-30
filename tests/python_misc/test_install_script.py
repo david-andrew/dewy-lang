@@ -25,6 +25,8 @@ def _make_source_archive(path: Path) -> None:
         REPO_ROOT / "library" / "testing.dewy",
         REPO_ROOT / "library" / "units.dewy",
         REPO_ROOT / "library" / "doc.dewy",
+        REPO_ROOT / "library" / "unicode.dewy",
+        REPO_ROOT / "library" / "unicode" / "casefold.bin",
         REPO_ROOT / "library" / "linux" / "io.dewy",
         REPO_ROOT / "library" / "linux" / "files.dewy",
         REPO_ROOT / "library" / "linux" / "process.dewy",
@@ -126,6 +128,7 @@ exec "$REAL_PYTHON" "$@"
     assert (runtime / "library" / "path.dewy").is_file()
     assert (runtime / "library" / "units.dewy").is_file()
     assert (runtime / "library" / "doc.dewy").is_file()
+    assert (runtime / "library" / "unicode" / "casefold.bin").is_file()
     assert (runtime / "library" / "linux" / "io.dewy").is_file()
     assert (runtime / "library" / "linux" / "files.dewy").is_file()
     assert (runtime / "library" / "linux" / "process.dewy").is_file()

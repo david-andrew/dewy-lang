@@ -108,6 +108,35 @@ Set equality, ordering, and compound operator forms remain provisional.
 
 Arrays, sets, and dictionaries print — and convert to `string` — as their literal syntax; see [Printing](strings.md#printing).
 
+## Loop Capture
+
+An array literal whose only item is a loop collects the values the loop body expresses, in order — one per iteration, or none when the body expresses nothing on that path, so an `if` without an `else` filters. Nested loops flatten into the one array.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let squares = [loop i in [1..5) i * i]                     # [1 4 9 16]
+    let evens = [loop n in [0..10) if n % 2 =? 0 n]            # [0 2 4 6 8]
+    let pairs = [loop a in [1..3) loop b in [1..3) a * 10 + b]  # [11 12 21 22]
+    return squares.length + evens.length + pairs.length         # 13
+}
+```
+
+`set[loop …]` collects into a set, and a loop whose values are `key -> value` pairs collects into a dictionary (a later pair with the same key replaces the value, as a store does):
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let odds = set[loop n in [0..10) if n % 2 =? 1 n]          # set[1 3 5 7 9]
+    let lengths = [loop w in ["a" "bb" "ccc"] w -> w.length]   # ["a" -> 1 "bb" -> 2 "ccc" -> 3]
+    return odds.length + lengths.length                         # 8
+}
+```
+
+The element (or key and value) type is the values' type, or the annotation's (`let xs:array<string> = [loop …]`); values of different types are an error, as is mixing pairs with plain values. The container is a runtime-length one declared and filled just before the statement that contains the literal, so the loop's `break` and `continue` work as usual. A capture must sit in a block body (`{ … }`), not in an expression-bodied function or a default; a loop whose body is all statements is an error.
+
 ## Literal Classification
 
 At the top level of `[]`:

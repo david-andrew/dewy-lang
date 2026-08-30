@@ -72,6 +72,9 @@ class Context:
     `id(node)`, and a freed node's id could otherwise be reused."""
     object_strings: dict[str, sb.Binding] = field(default_factory=dict)
     """The hidden field-by-field `as string` conversions, by object type (shared)."""
+    hoisted: list[hir.AST] | None = None
+    """Statements a loop capture (`[loop …]`) inside the statement being checked
+    needs before it: the capture array's declaration and the loop that fills it."""
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
@@ -5102,6 +5105,190 @@ def _tcr_dict_literal(
     )
 
 
+def _loop_flow(ast: p0.AST) -> p0.Flow | None:
+    """A `loop …` flow (the only arm is a loop), else None."""
+    if isinstance(ast, p0.Flow) and ast.default is None and len(ast.arms) == 1:
+        arm = ast.arms[0]
+        if arm.parts and isinstance(arm.parts[0], t1.Keyword) and arm.parts[0].name == 'loop':
+            return ast
+    return None
+
+
+def _capture_values(node: hir.AST) -> list[hir.AST]:
+    """The expressed values of a loop body: the last item of a block, every
+    arm of a conditional, a nested loop's body — the positions a capture
+    collects. Statements (void or diverging) express nothing."""
+    if isinstance(node, hir.Block):
+        return _capture_values(node.items[-1]) if node.items else []
+    if isinstance(node, hir.Flow):
+        values: list[hir.AST] = []
+        for arm in node.arms:
+            values.extend(_capture_values(arm.body))
+        if node.default is not None:
+            values.extend(_capture_values(node.default))
+        return values
+    if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+        return []
+    return [node]
+
+
+def _replace_capture_values(node: hir.AST, push: Callable[[hir.AST], hir.AST]) -> hir.AST:
+    """The loop body with each expressed value replaced by its push."""
+    if isinstance(node, hir.Block):
+        if not node.items:
+            return node
+        items = [*node.items[:-1], _replace_capture_values(node.items[-1], push)]
+        return replace(node, type=ty.VOID_TYPE, items=items)
+    if isinstance(node, hir.Flow):
+        arms = [replace(arm, type=ty.VOID_TYPE, body=_replace_capture_values(arm.body, push)) for arm in node.arms]
+        default = _replace_capture_values(node.default, push) if node.default is not None else None
+        return replace(node, type=ty.VOID_TYPE, arms=arms, default=default)
+    if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+        return node
+    return push(node)
+
+
+_CAPTURE_KEY, _CAPTURE_VALUE = '__dewy_key', '__dewy_value'
+
+
+def _capture_positions(ast: p0.AST) -> list[p0.AST]:
+    """The syntax at a loop body's value positions (see `_capture_values`)."""
+    if isinstance(ast, p0.Block) and ast.kind in ('{}', '()'):
+        return _capture_positions(ast.inner[-1]) if ast.inner else []
+    if isinstance(ast, p0.Flow):
+        positions: list[p0.AST] = []
+        for arm in ast.arms:
+            if len(arm.parts) == 3 and isinstance(arm.parts[2], p0.AST):
+                positions.extend(_capture_positions(arm.parts[2]))
+        if ast.default is not None:
+            positions.extend(_capture_positions(ast.default))
+        return positions
+    return [ast]
+
+
+def _rewrite_capture_pairs(ast: p0.AST) -> p0.AST:
+    """`k -> v` at a value position as the object literal `[__dewy_key=k __dewy_value=v]`, so the pair checks as one value."""
+    if isinstance(ast, p0.Block) and ast.kind in ('{}', '()') and ast.inner:
+        return replace(ast, inner=[*ast.inner[:-1], _rewrite_capture_pairs(ast.inner[-1])])
+    if isinstance(ast, p0.Flow):
+        arms = [
+            replace(arm, parts=[*arm.parts[:2], _rewrite_capture_pairs(arm.parts[2])])
+            if len(arm.parts) == 3 and isinstance(arm.parts[2], p0.AST) else arm
+            for arm in ast.arms
+        ]
+        default = _rewrite_capture_pairs(ast.default) if ast.default is not None else None
+        return replace(ast, arms=arms, default=default)
+    if isinstance(ast, p0.BinOp) and _operator_symbol(ast.op) == '->':
+        loc = ast.loc
+        def field(name: str, value: p0.AST) -> p0.AST:
+            return p0.BinOp(loc, t1.Operator(loc, '='), p0.Atom(loc, t1.Identifier(loc, name)), value)
+        return p0.Block(loc, [field(_CAPTURE_KEY, ast.left), field(_CAPTURE_VALUE, ast.right)], '[]', None)
+    return ast
+
+
+def _tcr_loop_capture(block: p0.Block, *, kind: Literal['array', 'set'], expected: ty.Type | None, ctx: Context) -> hir.AST:
+    """`[loop i in xs f(i)]` / `set[loop …]` / `[loop … k -> v]`: the array,
+    set, or dictionary of the values the loop body expresses, in order — an
+    iteration whose body expresses nothing (an `if` without a match, a bare
+    statement) adds nothing, so `[loop i in xs if keep(i) i]` filters. The
+    container is declared before the statement (`let name:array<T> = []`,
+    synthesized) and filled by the loop through `_capture_push` /
+    `_capture_add` / `_capture_store`; the literal is then the container."""
+    if ctx.hoisted is None:
+        not_implemented(ctx.srcfile, block.loc, 'a loop capture outside a block body (in an expression-bodied function or a default)')
+    flow = _loop_flow(block.inner[0])
+    assert flow is not None
+    body_ast = flow.arms[0].parts[2]
+    assert isinstance(body_ast, p0.AST)
+    positions = _capture_positions(body_ast)
+    arrows = [position for position in positions if isinstance(position, p0.BinOp) and _operator_symbol(position.op) in ('->', '<->')]
+    if arrows and kind == 'set':
+        user_error(ctx.srcfile, 'a set capture takes members, not pairs', Pointer(span=arrows[0].loc, message='`->` builds a dictionary: write `[loop …]`'))
+    if arrows and len(arrows) != len(positions):
+        other = next(position for position in positions if position not in arrows)
+        user_error(ctx.srcfile, 'a capture mixes pairs and values', Pointer(span=arrows[0].loc, message='this is a pair'), Pointer(span=other.loc, message='this is a value'))
+    if any(_operator_symbol(arrow.op) == '<->' for arrow in arrows):
+        not_implemented(ctx.srcfile, arrows[0].loc, 'bidirectional dictionary literals')
+    if arrows:
+        kind = 'dict'
+        flow = replace(flow, arms=[replace(flow.arms[0], parts=[*flow.arms[0].parts[:2], _rewrite_capture_pairs(body_ast)])])
+        ctx.synthesized.append(flow)
+    loop = typecheck_and_resolve_inner(flow, ctx=ctx)
+    if not isinstance(loop, hir.Flow) or len(loop.arms) != 1 or not isinstance(loop.arms[0], hir.LoopArm):
+        raise TypeError('INTERNAL ERROR: loop capture did not check to a loop')
+    values = _capture_values(loop.arms[0].body)
+    if not values:
+        user_error(
+            ctx.srcfile,
+            'this loop expresses no value to capture',
+            Pointer(span=block.loc, message='every path through the body is a statement'),
+            hint='end the body with the value to collect, for example `[loop i in xs i * 2]`',
+        )
+
+    def common_type(nodes: list[hir.AST], what: str) -> ty.TypeExpr:
+        widened = [_widen_type_argument(cast(ty.TypeExpr, node.type), loc=node.loc, ctx=ctx) for node in nodes]
+        chosen = widened[0]
+        for index, other in enumerate(widened[1:], start=1):
+            if other == chosen or ctx.type_system.is_subtype(other, chosen):
+                continue
+            if ctx.type_system.is_subtype(chosen, other):
+                chosen = other
+                continue
+            type_error(
+                ctx.srcfile,
+                f'loop capture {what} differ in type',
+                Pointer(span=nodes[0].loc, message=f'this has type `{type_to_dewy(chosen)}`'),
+                Pointer(span=nodes[index].loc, message=f'this has type `{type_to_dewy(other)}`'),
+                hint='a container holds one type; annotate the binding to choose it',
+            )
+        return chosen
+
+    plain_expected = ty.unfold(ty.strip_refinement(expected)) if expected is not None else None
+    loc = block.loc
+    name = f'__dewy_capture_{ctx.binding_registry.next_id}'
+    if kind == 'dict':
+        pairs = [value for value in values if isinstance(value, hir.ObjectLiteral) and [f.name for f in value.fields] == [_CAPTURE_KEY, _CAPTURE_VALUE]]
+        if len(pairs) != len(values):
+            raise TypeError('INTERNAL ERROR: a dictionary capture value is not a pair')
+        expected_entries = ty.dict_key_value(plain_expected) if plain_expected is not None else None
+        key_type = expected_entries[0] if expected_entries is not None else common_type([pair.fields[0].value for pair in pairs], 'keys')
+        value_type = expected_entries[1] if expected_entries is not None else common_type([pair.fields[1].value for pair in pairs], 'values')
+        text = f'let {name}:dict<{type_to_dewy(key_type)} {type_to_dewy(value_type)}> = []\n'
+    else:
+        expected_element = (
+            plain_expected.element if kind == 'array' and isinstance(plain_expected, ty.ArrayType)
+            else ty.set_element(plain_expected) if kind == 'set' and plain_expected is not None
+            else None
+        )
+        element = expected_element if expected_element is not None else common_type(values, 'values')
+        spelled = type_to_dewy(element)
+        text = f'let {name}:array<{spelled}> = []\n' if kind == 'array' else f'let {name}:set<{spelled}> = set[]\n'
+        if kind == 'array':
+            # declared the way a grown array is written by hand, so it takes the runtime-length representation
+            ctx.grown_array_names = ctx.grown_array_names | {name}
+    parsed = p0.parse(SrcFile(None, ' ' * loc.start + text))
+    declaration_ast = parsed.inner[0]
+    ctx.synthesized.append(declaration_ast)
+    declaration = typecheck_and_resolve_inner(declaration_ast, ctx=ctx)
+    binding = ctx.binding_scopes.get(name)
+    declared = ctx.declarations.get(name)   # the runtime-length type reads see (the binding keeps the exact one)
+    if binding is None or declared is None:
+        raise TypeError('INTERNAL ERROR: loop capture container was not declared')
+    container_type = cast(ty.TypeExpr, declared)
+
+    def push(value: hir.AST) -> hir.AST:
+        place = hir.Place(value.loc, container_type, hir.ExpressedIdentifier(value.loc, container_type, name, binding_id=binding.id))
+        if kind == 'dict':
+            assert isinstance(value, hir.ObjectLiteral)
+            return _library_call('_capture_store', [place, value.fields[0].value, value.fields[1].value], value.loc, ctx=ctx)
+        return _library_call('_capture_push' if kind == 'array' else '_capture_add', [place, value], value.loc, ctx=ctx)
+
+    arm = loop.arms[0]
+    filled = replace(loop, type=ty.VOID_TYPE, arms=[replace(arm, type=ty.VOID_TYPE, body=_replace_capture_values(arm.body, push))])
+    ctx.hoisted.extend([declaration, filled])
+    return hir.ExpressedIdentifier(loc, container_type, name, binding_id=binding.id)
+
+
 def _tcr_set_from(operand_ast: p0.AST, loc: Span, *, ctx: Context) -> hir.AST:
     """`set"0123"` / `set(values)`: the set of a string's graphemes or an array's elements (`library/strings.dewy`)."""
     if isinstance(operand_ast, p0.Block) and operand_ast.kind == '()' and len(operand_ast.inner) == 1:
@@ -5484,7 +5671,7 @@ def _auto_call_function_value(node: hir.AST, *, ctx: Context, expected: ty.Type 
 # `library/strings.dewy` as `_string_<name>(text …)` and bound like a type's methods.
 _STRING_METHODS = frozenset({
     'contains', 'starts_with', 'ends_with', 'find', 'rfind', 'split', 'lines',
-    'trim', 'trim_start', 'trim_end', 'replace',
+    'trim', 'trim_start', 'trim_end', 'replace', 'casefold',
 })
 
 
@@ -6612,6 +6799,9 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             outer.module = ctx
             ctx.module = ctx
 
+    if block.kind == '[]' and len(block.inner) == 1 and _loop_flow(block.inner[0]) is not None:
+        return _tcr_loop_capture(block, kind='array', expected=expected, ctx=ctx)
+
     if block.kind == '[]':
         arrows = [item for item in block.inner if _is_top_level_arrow(item)]
         if arrows and len(arrows) != len([item for item in block.inner if _spread_operand(item) is None]):
@@ -6713,12 +6903,18 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             if expected is not None and len(items) == 1
             else None
         )
+        if block.kind == '{}':
+            ctx.hoisted = []   # a loop capture in this statement declares and fills its array first
         results[index] = typecheck_and_resolve_inner(
             item,
             ctx=ctx,
             type_block=type_block,
             expected=item_expected,
         )
+        if block.kind == '{}' and ctx.hoisted:
+            results[index] = hir.Block(item.loc, results[index].type, [*ctx.hoisted, results[index]], False)
+        if block.kind == '{}':
+            ctx.hoisted = None
     for index, item in enumerate(items):
         if id(item) not in deferred_functions:
             continue
@@ -8613,6 +8809,8 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         spread = next((item for item in binop.right.inner if _spread_operand(item) is not None), None)
         if spread is not None:
             not_implemented(ctx.srcfile, spread.loc, 'spreading into a set literal (members need a runtime add)')
+        if len(binop.right.inner) == 1 and _loop_flow(binop.right.inner[0]) is not None:
+            return _tcr_loop_capture(binop.right, kind='set', expected=expected, ctx=ctx)
         return _tcr_set_literal(binop.right, binop.loc, expected=expected, ctx=ctx)
     if (
         isinstance(binop.op, (t2.QJuxtapose, t2.IndexJuxtapose, t2.CallJuxtapose))
@@ -11028,16 +11226,25 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
     return plain
 
 
-def _library_call(name: str, arguments: list[hir.AST], loc: Span, *, ctx: Context) -> hir.FunctionCall:
-    """A call to a prelude function by name with checked arguments; a generic is instantiated for them."""
+def _library_call(
+    name: str,
+    arguments: list[hir.AST],
+    loc: Span,
+    *,
+    ctx: Context,
+    expected_return: ty.TypeExpr | None = None,
+) -> hir.FunctionCall:
+    """A call to a prelude function by name with checked arguments; a generic
+    is instantiated for them (and for `expected_return` when the arguments do
+    not determine every type parameter)."""
     func = tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
     methods = _callable_methods(func, ctx=ctx)
     pos_types = [require_valued(argument.type, ctx.srcfile, argument.loc, 'function call argument') for argument in arguments]
-    result = ctx.type_system.match_best_function(methods, pos_types, {}, expected_return=None)
+    result = ctx.type_system.match_best_function(methods, pos_types, {}, expected_return=expected_return)
     if isinstance(func.type, ty.FunctionType) and func.type.type_params:
-        func, result = _instantiate_generic_call(func, result, pos_types, {}, None, ctx=ctx)
+        func, result = _instantiate_generic_call(func, result, pos_types, {}, expected_return, ctx=ctx)
     contextual = [
-        check_against(argument, param.type, ctx=ctx)
+        argument if isinstance(argument, hir.Place) else check_against(argument, param.type, ctx=ctx)
         for argument, param in zip(arguments, result.method.pos_or_kw, strict=True)
     ]
     return hir.FunctionCall(
