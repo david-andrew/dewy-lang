@@ -27,16 +27,16 @@ def test_paths_convert_through_the_same_protocol() -> None:
 def test_objects_without_a_conversion_print_their_fields() -> None:
     # no `__as__ = ():>string`: the value prints as its literal syntax, through a hidden printer per type
     emitted = _compile('let Pair:type = [a:int64 b:int64]\nlet main = ():>int64 => { let q = Pair(1 2)  printl"{q}"  return 0 }\n')
-    assert '__dewy_print_object_1' in emitted
+    assert '__dewy_object_string_1' in emitted
     emitted = _compile('let Pair:type = [a:int64 b:int64]\nlet main = ():>int64 => { let q = Pair(1 2)  let s:string = q as string  return s.length }\n')
-    assert '__dewy_string_object_1' in emitted
+    assert '__dewy_object_string_1' in emitted
     # a conversion to another target does not serve `string`: the fields print
     emitted = _compile('let Wrap:type = [v:int64 __as__ = ():>int64 => v]\nlet main = ():>int64 => { let w = Wrap(1)  let s:string = w as string  return s.length }\n')
-    assert '__dewy_string_object_1' in emitted and 'Wrap____as__' not in emitted.split('let main')[1]
+    assert '__dewy_object_string_1' in emitted and 'Wrap____as__' not in emitted.split('let main')[1]
 
 
 def test_unprintable_members_are_rejected_on_the_value() -> None:
-    with pytest.raises(TypeCheckError, match='no `print` method takes its member of type `int64 \\| undefined`'):
+    with pytest.raises(TypeCheckError, match='its member of type `int64 \\| undefined` does not convert to string'):
         _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => { let s = Slot(1)  printl"{s}"  return 0 }\n')
     with pytest.raises(TypeCheckError, match='no string conversion for this value'):
         _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => { let s = Slot(1)  let t:string = s as string  return 0 }\n')

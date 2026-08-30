@@ -32,6 +32,11 @@ class Binding:
     and a freed object's id could otherwise be reused by unrelated syntax."""
     """Why the binding cannot be written, when it is not a `const` declaration
     (a loop variable borrowing an array element)."""
+    generic_instance: object = None
+    """For an instance of a generic function: `(generic, type_arguments, ctx)` —
+    the `hir.GenericFunction`, its bindings, and the checking context of the
+    call that created it — so a later pass can instantiate the generic again
+    for other types (the representation pass, when an argument becomes big)."""
     route_root: int | None = None
     """For a hidden *route* binding (`bag.items`): the root binding's id.
     Length and index facts are keyed by these ids so member arrays get the

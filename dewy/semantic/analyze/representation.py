@@ -66,6 +66,7 @@ class _RepresentationPass:
         self.big_nonzero: ty.ObjectType = objects[0]      # `bigint & ~0`
         self.big_bindings: set[int] = set()
         self.notes: list[RepresentationNote] = []
+        self.added_declarations: list[hir.Declare] = []   # generic instances created for big arguments
 
     # ------------------------------------------------------------ helpers
     def _prelude_call(self, name: str, args: list[hir.AST], loc: Span) -> hir.FunctionCall:
@@ -131,6 +132,9 @@ class _RepresentationPass:
             before = len(self.big_bindings)
             self._mark_bindings(root)
             changed = len(self.big_bindings) != before
+        if self.added_declarations:
+            # instances carry no state, so they are declared first, like the checker's own
+            root.items[0:0] = self.added_declarations
 
     def _mark_bindings(self, node: object) -> None:
         if isinstance(node, hir.Declare) and node.binding_id is not None and self._is_big(node.expr) and node.binding_id not in self.big_bindings:
@@ -256,6 +260,10 @@ class _RepresentationPass:
                                 node.selected_method_index = index
                                 self.unfit.pop(id(arg), None)
                                 break
+            if isinstance(node.func.type, ty.FunctionType):
+                reinstantiated = self._reinstantiate(node)
+                if reinstantiated is not None:
+                    return reinstantiated
             return node
         if isinstance(node, hir.FunctionLiteral) and node.rettype in ('int', 'uint'):
             # a word-typed result cannot carry a big value
@@ -279,6 +287,57 @@ class _RepresentationPass:
                     )
         # narrowings the analysis could not justify stay flagged; whatever is
         # still flagged when the pass ends is reported (see select_representations)
+        return node
+
+
+    def _reinstantiate(self, node: hir.FunctionCall) -> hir.AST | None:
+        """A call to a generic's instance whose argument became big: the
+        instance for `T` = `BigInt` instead (`print__int64(cube)` becomes
+        `print__BigInt(cube)`), created now if no call had it yet."""
+        assert isinstance(node.func, hir.ExpressedIdentifier)
+        binding = self.registry.by_id.get(node.func.binding_id) if node.func.binding_id is not None else None
+        if binding is None or binding.generic_instance is None:
+            return None
+        generic, type_arguments, ctx = binding.generic_instance
+        big_positions = [
+            position for position, arg in enumerate(node.pos_args)
+            if isinstance(arg, hir.ValueCast) and self._is_big(arg.expr)
+        ]
+        if not big_positions:
+            return None
+        new_arguments = dict(type_arguments)
+        for position in big_positions:
+            params = generic.type.pos_or_kw
+            parameter_type = params[position].type if position < len(params) else None
+            name = next(
+                (gp.name for gp in generic.type.type_params
+                 if parameter_type == gp.name or (isinstance(parameter_type, ty.TypeVariable) and parameter_type.name == gp.name)),
+                None,
+            )
+            if name is None:
+                return None   # not a bare type parameter: the word-sized rule applies
+            new_arguments[name] = self.big_type
+        if new_arguments == type_arguments:
+            return None
+        from .. import check   # the instantiation is the checker's
+
+        source = generic.source
+        key = tuple((param.name, repr(new_arguments[param.name])) for param in source.params)
+        instance = source.instances.get(key)
+        if instance is None:
+            before = len(ctx.generic_instances)
+            instance = check._instantiate_generic_function(generic, new_arguments, ctx=ctx, call_loc=node.loc)
+            self.added_declarations.extend(ctx.generic_instances[before:])
+        for position in big_positions:
+            cast = node.pos_args[position]
+            assert isinstance(cast, hir.ValueCast)
+            self.unfit.pop(id(cast), None)
+            node.pos_args[position] = cast.expr
+        instance_type = instance.type
+        assert isinstance(instance_type, ty.FunctionType)
+        node.func = hir.ExpressedIdentifier(node.func.loc, instance_type, instance.name, binding_id=instance.id)
+        node.type = instance_type.ret
+        self._note(node.loc, f'`{generic.name}` is instantiated for a big integer here')
         return node
 
 

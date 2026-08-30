@@ -47,7 +47,7 @@ An implementation may stream the literal chunks and converted fields directly to
 
 ## Printing
 
-`print` writes a value; `printl` writes it and a newline. Both take anything that prints: strings, numbers, and booleans directly, and every other value as its literal syntax — an array as `[1 2 3]`, a set as `set["a" "b"]`, a dictionary as `["a" -> 1]`, and an object as `[x=1 name="q"]`, or as its `__as__ = ():>string` conversion when its type declares one. Members print the same way, so nesting is arbitrary. A string inside a structure prints quoted, with the escapes of its literal syntax (`"a\tb"`); a string printed on its own prints bare.
+`print` writes a value; `printl` writes it and a newline. Both are ordinary generic functions of the prelude (`library/io.dewy`): a string, an integer, a boolean, or one of the number objects (`Rational`, `BigInt`, …) prints through its own arm — the arms are type tests decided per instance — and anything else prints as its `as string` text. So every value with a string conversion prints: a container as its literal syntax (`[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`), an object through its `__as__ = ():>string` when its type declares one and otherwise field by field (`[x=1 name="q"]`), members the same way, so nesting is arbitrary. A string inside a structure is quoted, with the escapes of its literal syntax (`"a\tb"`); a string printed on its own prints bare.
 
 <!-- dewy-example: compiler -->
 
@@ -55,8 +55,9 @@ An implementation may stream the literal chunks and converted fields directly to
 let Point:type = [x:int64 y:int64]
 
 let main = ():>int64 => {
+    printl(5)
     printl([1 2 3])                  # [1 2 3]
-    printl(set["a" "b"])             # set["a" "b"]
+    printl(set["ab" "c"])            # set["ab" "c"]
     printl(["k" -> Point(1 2)])      # ["k" -> [x=1 y=2]]
     printl'{[true false]} and {[name="q"]}'
     let text:string = [1 2 3] as string
@@ -64,7 +65,7 @@ let main = ():>int64 => {
 }
 ```
 
-`value as string` and an interpolation field build the same text; a printed interpolation streams its fields instead of building it. A value that cannot print — a member of an optional type, a container whose members are containers, or, when the text must be built, a number object such as `Rational` (which prints but has no string form yet) — is an error where it is printed. Printing a structure is for looking at values: its exact text is not a stable format.
+Because printing is `as string`, an array of graphemes prints as the text they form (`printl(["a" "b"])` writes `ab`), as [`as`](types-and-conversions.md#as) converts it. A value that cannot convert — a member of an optional type, a container whose members are containers, or a number object inside a structure (they print, but have no string form yet) — is an error where it is printed. An interpolated argument is written part by part rather than built into one string first; that representation choice is not observable. Printing a structure is for looking at values: its exact text is not a stable format.
 
 ## Searching, Splitting, and Trimming
 

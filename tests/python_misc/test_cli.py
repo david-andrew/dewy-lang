@@ -14,10 +14,10 @@ def test_analyze_reports_each_decision_through_the_report_renderer() -> None:
     result = _dewy('analyze', 'dewy/tests/bigint_auto.dewy')
     assert result.returncode == 0, result.stderr
     out = result.stdout
-    assert out.count('Info: big integer representation') == 11
+    assert out.count('Info: big integer representation') == 15   # 11 values, and `print`/`printl` instantiated for them 4 times
     assert '╭─[dewy/tests/bigint_auto.dewy:5:16]' in out  # a real source excerpt, not a bare path:line
     assert '`cube` is a big integer: its initializer is one' in out
-    assert '11 representation decisions' in out
+    assert '15 representation decisions' in out
     assert '\x1b[' not in out  # no ANSI colors when stdout is not a terminal
 
 

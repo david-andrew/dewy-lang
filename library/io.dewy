@@ -145,31 +145,33 @@ let _print_bigint = (value:BigInt):>void => {
     return void
 }
 
-let print = @_print_string & @_print_int64 & @_print_bool & @_print_rational & @_print_bigrational & @_print_fixed & @_print_bigint
-
-let printl = (s:string=''):>void => {
-    print(s)
-    print("\n")
-}
-
-# Anything else prints as its literal syntax. The compiler routes `print(x)`
-# (and `printl`, and an interpolation field) here when no `print` method
-# takes `x` directly: a container to the printer for its kind, an object
-# through its `__as__ = ():>string` conversion when it declares one and
-# otherwise field by field (`[x=1 y="a"]`). Members print the same way,
-# so nesting is arbitrary; `quote` — decided by the compiler from the
-# member type — marks string members, which print quoted inside a
-# structure: `[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`.
-let _print_member = <T>(value:T quote:bool):>void => {
-    if value is? string {   # decided per instance: the other arm is not checked
-        if quote { _print_quoted(value) } else { print(value) }
-    } else {
-        print(value)
+# `print(x)` prints a value by its type: the arms below are decided per
+# instance (`value is? …` on a type parameter settles at compile time), and
+# anything else prints as its `as string` text — a container or an object
+# converts to its literal syntax through the shapes below (an object
+# through its `__as__` when it declares one, else field by field). `printl`
+# adds a newline. An interpolated argument is printed part by part by the
+# compiler, each part passed to `print`, which is not observable.
+let print = <T>(value:T):>void => {
+    if value is? string { _print_string(value) }
+    else if value is? int { _print_int64(value transmute int64) }
+    else if value is? bool { _print_bool(value) }
+    else if value is? Rational { _print_rational(value) }
+    else if value is? BigRational { _print_bigrational(value) }
+    else if value is? Fixed { _print_fixed(value) }
+    else if value is? BigInt { _print_bigint(value) }
+    else {
+        let text:string = value as string
+        _print_string(text)
     }
-    return void
 }
 
-# A quoted string carries the escapes of its literal syntax.
+let printl = <T>(value:T):>void => {
+    print(value)
+    print"\n"
+}
+
+# A string inside a structure is quoted, with the escapes of its literal syntax.
 let _escaped = (g:string):>string => {
     if g =? "\n" { return "\\n" }
     if g =? "\t" { return "\\t" }
@@ -179,55 +181,11 @@ let _escaped = (g:string):>string => {
     return g
 }
 
-let _print_quoted = (text:string):>void => {
-    print'"'
-    loop g in text { print(_escaped(g)) }
-    print'"'
-    return void
-}
-
-let _print_array = <T>(values:array<T> quote:bool):>void => {
-    print"["
-    let first:bool = true
-    loop v in values {
-        if not first { print" " }
-        first = false
-        _print_member(v quote)
-    }
-    print"]"
-    return void
-}
-
-let _print_set = <T>(members:set<T> quote:bool):>void => {
-    print"set["
-    let first:bool = true
-    loop v in members {
-        if not first { print" " }
-        first = false
-        _print_member(v quote)
-    }
-    print"]"
-    return void
-}
-
-let _print_dict = <K V>(entries:dict<K V> quote_keys:bool quote_values:bool):>void => {
-    print"["
-    let first:bool = true
-    loop [k v] in entries {
-        if not first { print" " }
-        first = false
-        _print_member(k quote_keys)
-        print" -> "
-        _print_member(v quote_values)
-    }
-    print"]"
-    return void
-}
-
-# The same shapes as strings (`x as string`, and an interpolation field that
-# is materialized rather than streamed). Each builds its pieces and joins
-# them; a member converts through `'{v}'`, which the compiler routes the
-# same way as printing.
+# The literal syntax of a container (`x as string`, an interpolation field,
+# and so `print`): each builds its pieces and joins them; a member converts
+# through `'{v}'`, so nesting is arbitrary. `quote` — decided by the compiler
+# from the member type — marks string members: `[1 2 3]`, `set["a" "b"]`,
+# `["a" -> 1]`.
 let _quoted = (text:string):>string => {
     let pieces:array<string> = ['"']
     loop g in text { pieces.push(_escaped(g)) }

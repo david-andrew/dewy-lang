@@ -1,5 +1,6 @@
-"""Printing values: `print`/`printl` take anything that prints, containers and
-objects print as their literal syntax, and `as string` builds the same text."""
+"""Printing values: `print`/`printl` are library generics that print a value by
+its type and anything else as its `as string` text; containers and objects
+convert to their literal syntax."""
 import re
 from pathlib import Path
 
@@ -24,29 +25,40 @@ def _main(body: str) -> str:
     return _compile('let main = ():>int64 => {\n' + body + '\n    return 0\n}\n')
 
 
-# ------------------------------------------------------------ what `print` takes
+# ------------------------------------------------------------ print by type
 
-def test_printl_takes_whatever_print_takes() -> None:
-    emitted = _main('    printl(5)\n    printl(true)\n    printl(1/2)')
-    assert '_print_int64' in emitted and '_print_bool' in emitted and '_print_rational' in emitted
+def test_print_is_instantiated_per_argument_type_and_picks_its_arm() -> None:
+    emitted = _main('    printl(5)\n    printl(true)\n    printl(1/2)\n    let b:uint8 = 3\n    print(b)')
+    # (an instance is hoisted into the module that first needs it — `print__int64` into the prelude)
+    assert 'print__int64 = (value:int64):>void => {' in emitted and '_print_int64(' in emitted.split('print__int64 = ')[1].split('\nlet ')[0]
+    assert 'print__bool = ' in emitted and 'let printl__bool ' in emitted
+    assert 'let print__uint8 ' in emitted
+    assert 'let print__BigRational ' in emitted or '_print_bigrational(' in emitted   # `1/2` binds the runtime rational
 
 
-def test_containers_print_through_the_library_printers() -> None:
-    emitted = _main('    let xs = [1 2 3]\n    print(xs)\n    printl(set["a"])\n    printl(["k" -> 1])')
-    assert '_print_array__int64(' in emitted
-    assert '_print_set__string(' in emitted
-    assert '_print_dict__string_int64(' in emitted
+def test_containers_convert_through_the_library_shapes() -> None:
+    emitted = _main('    let xs = [1 2 3]\n    print(xs)\n    printl(set["ab"])\n    printl(["k" -> 1])')
+    assert '_array_as_string__int64(' in emitted
+    assert '_set_as_string__string(' in emitted
+    assert '_dict_as_string__string_int64(' in emitted
 
 
 def test_string_members_are_marked_for_quoting() -> None:
-    emitted = _main('    printl(["a" "b"])\n    printl([1 2])')
-    assert re.search(r'_print_array__string\w*\(\w+ true\)', emitted)
-    assert re.search(r'_print_array__int64\(\w+ false\)', emitted)
+    emitted = _main('    printl(["ab" "cd"])\n    printl([1 2])')
+    assert re.search(r'_array_as_string__string\w*\(\w+ true\)', emitted)
+    assert re.search(r'_array_as_string__int64\(\w+ false\)', emitted)
 
 
-def test_printed_interpolations_stream_their_structure_fields() -> None:
+def test_grapheme_arrays_convert_to_their_text() -> None:
+    # `array<char> as string` is the text the graphemes form, and printing is `as string`
+    emitted = _main('    printl(["a" "b"])')
+    assert '_array_as_string' not in emitted
+
+
+def test_printed_interpolations_are_written_part_by_part() -> None:
     emitted = _main('    let xs = [1 2]\n    printl"{xs} items"')
-    assert '_print_array__int64(' in emitted and '_array_as_string' not in emitted
+    body = emitted.split('let __dewy_user_main')[1]
+    assert len(re.findall(r'print__string(?:_\d+)?\(', body)) >= 2 and '_array_as_string__int64(' in emitted
 
 
 def test_materialized_interpolations_and_as_string_build_the_text() -> None:
@@ -54,29 +66,29 @@ def test_materialized_interpolations_and_as_string_build_the_text() -> None:
     assert '_array_as_string__int64(' in emitted and '_set_as_string__int64(' in emitted
 
 
-def test_objects_print_field_by_field_unless_they_convert() -> None:
+def test_objects_convert_field_by_field_unless_they_declare_a_conversion() -> None:
     emitted = _main('    let pt = [x=1 name="a"]\n    printl(pt)')
-    printer = emitted[emitted.index('let __dewy_print_object_1'):]
-    assert '_print_member__int64(' in printer and '_print_member__string(' in printer
+    conversion = emitted[emitted.index('let __dewy_object_string_1'):]
+    assert '_quoted(' in conversion and '.join' in conversion or 'pieces' in conversion
     emitted = _compile('let T:type = [v:int64 __as__ = ():>string => "t"]\nlet main = ():>int64 => { printl(T(1))  return 0 }\n')
-    assert 'T____as__' in emitted and '__dewy_print_object' not in emitted
+    assert 'T____as__' in emitted and '__dewy_object_string' not in emitted
 
 
 def test_nesting_is_arbitrary() -> None:
     emitted = _main('    let pt = [x=1]\n    printl([pt pt])\n    printl([k=[1 2]])')
-    assert '__dewy_print_object_1' in emitted and '_print_array__int64(' in emitted
+    assert '__dewy_object_string_1' in emitted and '_array_as_string__int64(' in emitted
 
 
-def test_members_that_cannot_print_are_reported_on_the_value() -> None:
-    # (a call is one reading of `print(x)`; the readings summary keeps the titles)
-    with pytest.raises(UserError, match='this value does not print'):
-        _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => {\n    let slots = [Slot(1)]\n    printl(slots)\n    return 0\n}\n')
-    with pytest.raises(TypeCheckError, match='no `print` method takes its member of type `int64 \\| undefined`'):
+def test_values_that_cannot_convert_are_reported_on_the_value() -> None:
+    with pytest.raises(TypeCheckError, match='no `print` method takes|does not convert to string'):
         _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => {\n    let slots = [Slot(1)]\n    printl"{slots}"\n    return 0\n}\n')
     with pytest.raises(TypeCheckError, match='containers, which a loop cannot visit yet'):
         _main('    printl"{[[1 2] [3 4]]}"')
-    with pytest.raises(TypeCheckError, match='prints but does not convert to string yet'):
-        _main('    let r:Rational = 1/2\n    let s:string = [r r] as string')
+    with pytest.raises(TypeCheckError, match='`Rational` prints, but has no string form yet'):
+        _main('    let r:Rational = 1/2\n    let s:string = r as string')
+    # the failure inside the library generic is reported at the call, with its reason
+    with pytest.raises(UserError, match='in `printl` for `T` = `int64 \\| undefined`: cannot convert'):
+        _main('    let opt:int64|undefined = 1\n    printl(opt)')
 
 
 # ------------------------------------------------------------ decided type tests
@@ -93,10 +105,10 @@ def test_a_type_test_the_static_type_settles_is_decided() -> None:
 
 def test_a_generic_dispatches_on_its_type_parameter_with_a_type_test() -> None:
     emitted = _compile(
-        'let show = <T>(v:T):>int64 => if v is? string v.length else 7\n'
-        'let main = ():>int64 => show("abc") + show(1)\n'
+        'let size = <T>(v:T):>int64 => if v is? string v.length else 7\n'
+        'let main = ():>int64 => size("abc") + size(1)\n'
     )
-    assert 'show__string' in emitted and 'show__int64' in emitted
+    assert 'size__string' in emitted and 'size__int64' in emitted
 
 
 # ------------------------------------------------------------ the fixes on the way
@@ -114,6 +126,14 @@ def test_doc_strings_are_accepted() -> None:
     _compile('doc"""\nA module.\n"""\nlet main = ():>int64 => {\n    doc"the entry"\n    return 0\n}\n')
 
 
+def test_one_substantive_reading_reports_its_own_error() -> None:
+    with pytest.raises(TypeCheckError, match='unsupported value conversion'):
+        _main('    let opt:int64|undefined = 1\n    let t:string = opt as string')
+    with pytest.raises(UserError) as caught:   # the readings' verdict is definite, with the one reading's own message
+        _main('    let opt:int64|undefined = 1\n    printl(opt)')
+    assert 'no valid interpretation' not in str(caught.value) and 'unsupported value conversion' in str(caught.value)
+
+
 # ------------------------------------------------------------ the output
 
 @needs_toolchain
@@ -122,12 +142,15 @@ def test_printed_text_is_the_literal_syntax(tmp_path: Path, monkeypatch: pytest.
         'let Point:type = [x:int64 y:int64]\n'
         'let main = ():>int64 => {\n'
         '    printl(5)\n'
+        '    let b:uint8 = 200\n'
+        '    printl(b)\n'
         '    printl([1 2 3])\n'
         '    printl(set["a\\tb" "c"])\n'
         '    printl(["k" -> Point(1 2)])\n'
-        '    printl"{[true false]} and {[name="q"]}"\n'
+        '    printl"{[true false]} and {[name="q"]} and {1/3}"\n'
         '    let text:string = [[x=1 y=2]] as string\n'
         '    printl(text)\n'
+        '    printl(["a" "b"])\n'
         '    return 0\n'
         '}\n'
     )
@@ -138,9 +161,11 @@ def test_printed_text_is_the_literal_syntax(tmp_path: Path, monkeypatch: pytest.
     out, _ = capfd.readouterr()
     assert out.splitlines() == [
         '5',
+        '200',
         '[1 2 3]',
         'set["a\\tb" "c"]',
         '["k" -> [x=1 y=2]]',
-        '[true false] and [name="q"]',
+        '[true false] and [name="q"] and 1/3',
         '[[x=1 y=2]]',
+        'ab',
     ]
