@@ -1,0 +1,21 @@
+# The conversion protocol: a type's `__as__ = ():>T => …` method says how its
+# values convert to `T`; `x as T` and string interpolation (`T` = `string`)
+# call it. `Path` converts to its text this way — nothing about a type's
+# name or shape is special to the compiler.
+let Point:type = [
+    x:int64
+    y:int64
+    __as__ = ():>string => "({x}, {y})"
+]
+
+let main = ():>int64 => {
+    let pt = Point(3 4)
+    let text:string = pt as string             # "(3, 4)"
+    let file = p"tests/dewy/x.dewy"
+    let parent:Path = file.parent
+    let binary = p"__dewycache__/{file.parent}/{file.stem}.test"   # a method result interpolates
+    let described:string = "{pt} at {parent}"  # "(3, 4) at tests/dewy" (20)
+    let total:int64 = text.length + described.length + (binary as string).length   # 6 + 20 + 31
+    if binary.path =? "__dewycache__/tests/dewy/x.test" { total += 1 }
+    return total - 16                          # 58 - 16 = 42
+}

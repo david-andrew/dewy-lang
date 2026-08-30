@@ -1,0 +1,37 @@
+# Strings that escape their frame through a growable array are copied into
+# the arena: an interpolation is frame-local, so `found.push("{dir}/{name}")`
+# in a function that returns `found` would otherwise hand back dangling
+# descriptors once later calls reuse the stack.
+let label = (prefix:string i:int64):>string => "{prefix}-{i}"
+
+let collect = (dir:string names:array<string>):>array<string> => {
+    let found:array<string> = []
+    loop name in names {
+        let path:string = if dir =? "." name else "{dir}/{name}"
+        found.push(path)
+        found.push(label(name 7))
+        found.push("{name}")
+        if name.length >? 1 { found.push(name[0..1]) } else { found.push(name) }   # a view into an argument
+    }
+    return found
+}
+
+# deep calls with big frames, to reuse whatever stack the strings lived in
+let churn = (depth:int64):>int64 => {
+    let scratch:string = "scratch {depth} {depth * depth}"
+    if depth >? 0 { return churn(depth - 1) + scratch.length }
+    return scratch.length
+}
+
+let main = ():>int64 => {
+    let names:array<string> = ["ab" "cd"]
+    let found = collect("dir" names)
+    let noise:int64 = churn(20)
+    let total:int64 = 0
+    loop f in found { total += f.length }
+    # dir/ab (6) ab-7 (4) ab (2) ab (2) — twice
+    if found.length =? 8 {
+        if found[0] =? "dir/ab" and found[4] =? "dir/cd" and found[1] =? "ab-7" and found[7] =? "cd" { total += 14 }
+    }
+    return total                             # 28 + 14 = 42
+}

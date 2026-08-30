@@ -2500,6 +2500,40 @@ class _StringLowering:
         ], True)))
         return statements, cell
 
+    def _has_arena(self) -> bool:
+        return any(candidate.logical_name.endswith('_arena_alloc') for candidate in self.functions)
+
+    def _escaping_string_value(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        """A string stored where it outlives the evaluation that made it (a growable array's element).
+
+        A materialized string — an interpolation, a call result copied into
+        this frame — lives in the frame (or, at module level, in one static
+        cell per site that a loop reuses), and a view may point into one, so
+        storing its descriptor would dangle once the frame is gone: the bytes
+        are copied into the arena as a fresh string. Literals are static and
+        stored as they are. (The placement step of the ownership model is
+        where proofs will remove copies that are not needed.)
+        """
+        prelude, value = self._extract_expression(node)
+        source = self._unwrap_transparent(node)
+        while isinstance(source, (hir.ValueCast, hir.RepresentationCast)):   # `"a"` typed as `string`
+            source = self._unwrap_transparent(source.expr)
+        if isinstance(source, hir.String) or isinstance(source.type, ty.StringLiteralType) or not self._has_arena():
+            return prelude, value
+        loc = node.loc
+        statements = list(prelude)
+        if isinstance(value, hir.ExpressedIdentifier):
+            descriptor: hir.ExpressedIdentifier = replace(value, type='int64')
+        else:
+            descriptor = self._new_string_temp(loc, 'int64', 'escaping')
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', value))
+        length = self._new_string_temp(loc, 'int64', 'escaping_length')
+        statements.append(
+            hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(descriptor, STRING_BYTE_LENGTH_OFFSET, loc))
+        )
+        copy, result = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc)
+        return [*statements, *copy], result
+
     def _string_from_bytes(
         self,
         data_pointer: hir.AST,

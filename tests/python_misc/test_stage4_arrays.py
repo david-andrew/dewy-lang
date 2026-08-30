@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -142,7 +144,7 @@ let main = ():>int64 => {
 }
 '''))
 
-    assert 'end' not in emitted
+    assert not re.search(r'(?<![\w])end(?![\w])', emitted)   # the `end` keyword is resolved; `_arena_end` is a global
 
 
 def test_const_integer_index_is_proven() -> None:

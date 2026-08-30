@@ -45,10 +45,7 @@ let collect = (dir:string):>array<string> => {
             if name.length =? 0 { continue }
             if name[0] =? "." { continue }
             if name =? "__dewycache__" or name =? "node_modules" { continue }
-            # `join` builds the path in the arena: it outlives this call (an
-            # interpolation would be a frame-local string, dangling once returned)
-            let path:string = [dir "/" name].join
-            if dir =? "." { path = name }
+            let path:string = if dir =? "." name else "{dir}/{name}"
             if is_directory(path) {
                 let inner = collect(path)
                 loop f in inner { found.push(f) }

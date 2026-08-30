@@ -178,6 +178,27 @@ text as array<uint8>
 
 Conversions may change representation and may invoke overloadable conversion behavior. Lossy or fallible operations require an interface whose type exposes that possibility rather than silently discarding information.
 
+A declared type says how its values convert with a conversion method: `__as__ = ():>T => …` serves `x as T`, and — for `T` = `string` — string interpolation (`"{x}"`). The target type is the method's result type; nothing about a type's name or shape is special to the compiler. The prelude's `Path` converts to its text this way, which is why `p"{root}/{name}"` joins paths:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Point:type = [
+    x:int64
+    y:int64
+    __as__ = ():>string => "({x}, {y})"
+]
+
+let main = ():>int64 => {
+    let pt = Point(3 4)
+    let text:string = pt as string      # "(3, 4)"
+    printl"{pt} and {p"a/b.c".parent}"  # (3, 4) and a
+    return text.length
+}
+```
+
+A value whose type has no fitting `__as__` is an error where it is converted (`unsupported value conversion`, or `no string conversion for this interpolation field`); one conversion method per type for now, so a type converts to one target.
+
 ## `transmute`
 
 `transmute` reinterprets a compatible representation without performing a semantic conversion. It is valid only where source and destination layouts satisfy the transmute contract. It must not be used as an implicit substitute for numeric or textual conversion.

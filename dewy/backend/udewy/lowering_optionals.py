@@ -750,7 +750,11 @@ class _OptionalLowering:
                     value.loc,
                 ),
             ]
-        prelude, payload_value = self._extract_expression(value)
+        if self._is_string_valued(member):
+            # a union cell in an object or array may outlive the frame
+            prelude, payload_value = self._escaping_string_value(value)
+        else:
+            prelude, payload_value = self._extract_expression(value)
         return [
             *prelude,
             tag_store(index),

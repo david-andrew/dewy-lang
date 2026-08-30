@@ -1054,9 +1054,11 @@ class _ArrayLowering:
         node: hir.AST,
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
-        """A value to store into a growable array: objects are copied into the arena (value semantics)."""
+        """A value to store into a growable array: objects (and non-literal strings) are copied into the arena (value semantics)."""
         if isinstance(element_type, ty.ObjectType):
             return self._clone_object_value(node, element_type, arena=True)
+        if self._is_string_valued(element_type):
+            return self._escaping_string_value(node)
         return self._extract_expression(node)
 
     def _is_word_element(self, element: ty.Type) -> bool:
@@ -1967,6 +1969,8 @@ class _ArrayLowering:
             return self._independent_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
             return self._independent_object_value(node, element_type)
+        if self._is_string_valued(element_type):
+            return self._escaping_string_value(node)   # `xs[i] = "{…}"`: the array may outlive the frame
         return self._extract_expression(node)
 
     def _copy_array_element_between_addresses(

@@ -41,7 +41,7 @@ let message = "item {index}: {value}"
 let combined = "{left}{right}"
 ```
 
-The intended conversion path is the same conversion used by `value as string`, so user-defined formatting participates in the general conversion protocol rather than a string-only hook.
+A field's value converts the way `value as string` does: numbers, booleans, and strings directly, and a declared type through its conversion method `__as__ = ():>string => …` (see [`as`](types-and-conversions.md#as)) — user-defined formatting participates in the general conversion protocol rather than a string-only hook. A field whose type has no conversion is an error.
 
 An implementation may stream the literal chunks and converted fields directly to a consumer such as `printl`, or materialize a string value when the surrounding context needs one. That representation choice is not observable.
 

@@ -49,7 +49,7 @@ Installed package lookup, directory or glob imports, non-source artifacts, proje
 
 ## Paths
 
-`p"…"` is a path literal and `p(text)` builds a path at runtime; both are the prelude's `Path`, a value holding its text (`.path`). A path interpolates as its text, so `p"{root}/{name}"` is how paths are joined — there is no `join` method, since interpolation is strictly more flexible. The methods follow Python's `pathlib`:
+`p"…"` is a path literal and `p(text)` builds a path at runtime; both are the prelude's `Path`, a value holding its text (`.path`). A path interpolates as its text (`Path` declares the conversion method `__as__ = ():>string => path`, so `path as string` is the text too), so `p"{root}/{name}"` is how paths are joined — there is no `join` method, since interpolation is strictly more flexible. The methods follow Python's `pathlib`:
 
 - lexical: `name`, `stem`, `suffix` (with its dot; a dotfile has none), `parent`, `parts` (a leading `/` is the root part), `is_absolute`, `with_name(name)`, `with_stem(stem)`, `with_suffix(suffix)`;
 - the file system, every outcome a value: `exists`, `is_file`, `is_dir`, `list` (the directory's entries), `read_text` (`string | FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError | InvalidUtf8`), `read_bytes`, `write_text(text)` and `write_bytes(bytes)` (the byte count or an error), `mkdir`, `rmdir`, `unlink` (`true` or an error). Zero-argument methods are read like fields: `source.parent.name`.

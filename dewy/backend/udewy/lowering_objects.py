@@ -401,6 +401,9 @@ class _ObjectLowering:
                         field.value,
                         field_type,
                     )
+                elif self._is_string_valued(field_type):
+                    # the object may outlive this frame (returned, pushed, stored)
+                    prelude, value = self._escaping_string_value(field.value)
                 else:
                     prelude, value = self._extract_expression(field.value)
                 statements.extend(prelude)
@@ -819,6 +822,8 @@ class _ObjectLowering:
                 node.value,
                 field_type,
             )
+        elif self._is_string_valued(field_type):
+            value_prelude, value = self._escaping_string_value(node.value)
         else:
             value_prelude, value = self._extract_expression(node.value)
         return [*prelude, *value_prelude, *self._value_store(value, address, field_type, node.loc)]
@@ -928,7 +933,11 @@ class _ObjectLowering:
                         )
                     )
                 else:
-                    prelude, value = self._extract_expression(field.value)
+                    if self._is_string_valued(field_type):
+                        # the result outlives this frame: its string fields must too
+                        prelude, value = self._escaping_string_value(field.value)
+                    else:
+                        prelude, value = self._extract_expression(field.value)
                     statements.extend(prelude)
                     statements.extend(
                         self._value_store(value, address, field_type, field.loc)

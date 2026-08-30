@@ -62,6 +62,7 @@ from .lowering_shared import (
     _Binding,
     _FunctionDef,
     _Scope,
+    FIXED_INTEGER_WIDTHS,
 )
 from .lowering_strings import _StringLowering
 
@@ -265,6 +266,7 @@ class _Lowerer(
                         and binding.kind in {'function', 'overload'}
                     )
                     or isinstance(item.expr, (hir.TypeValue, hir.GenericFunction))
+                    or self._zero_initialized_scalar_global(item)
                     or self._is_range_valued(item.annotation or item.expr.type)
                     or self._is_compile_time_rational(item.annotation or item.expr.type)
                     or self._array_representation(item) in {
@@ -303,7 +305,10 @@ class _Lowerer(
                         self._static_array_global(transformed, representation)
                     )
                     continue
-                globals_.append(self._global_storage(transformed))
+                storage = self._global_storage(transformed)
+                globals_.append(storage)
+                if self._zero_initialized_scalar_global(transformed):
+                    continue   # `let cursor:int64 = 0`: inert storage already holds the value
                 assignment = hir.Assign(
                     transformed.loc,
                     ty.VOID_TYPE,
@@ -1067,6 +1072,29 @@ class _Lowerer(
         while f'{base}_{ordinal}' in self.source_names:
             ordinal += 1
         return f'{base}_{ordinal}'
+
+    @staticmethod
+    def _zero_initialized_scalar_global(item: hir.AST) -> bool:
+        """A top-level scalar `let` whose literal initializer is zero (`let cursor:int64 = 0`, `let flag:bool = false`).
+
+        Inert global storage is already zero, so no startup store is needed
+        and the declaration does not by itself require module startup — the
+        prelude's arena globals are of this kind, and without this every
+        program would carry the startup wrapper just to store their zeros.
+        """
+        if not isinstance(item, hir.Declare):
+            return False
+        annotation = ty.strip_refinement(item.annotation or item.expr.type)
+        if isinstance(item.expr, hir.Bool) and annotation == 'bool':
+            return item.expr.value is False
+        return (
+            isinstance(item.expr, hir.Integer)
+            and item.expr.value == 0
+            and (
+                (isinstance(annotation, str) and annotation in FIXED_INTEGER_WIDTHS)
+                or isinstance(annotation, ty.IntegerLiteralType)
+            )
+        )
 
     def _global_storage(self, declaration: hir.Declare) -> hir.Declare:
         """Create inert udewy storage initialized later by module startup."""

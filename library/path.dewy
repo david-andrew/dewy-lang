@@ -109,6 +109,7 @@ let _path_parts = (text:string):>array<string> => {
 
 let Path:type = [
     path:string
+    __as__ = ():>string => path      # `path as string`, and `"{path}"`: the text
     # lexical
     name = ():>string => _path_name(path)
     stem = ():>string => _path_stem(path)

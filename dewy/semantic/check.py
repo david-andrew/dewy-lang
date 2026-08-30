@@ -757,24 +757,52 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
             value.loc,
             'string interpolation field',
         )
-        if _is_path_value(value.type):
-            # a path interpolates as its text: `p"{root}/{name}"` is the join
-            value = hir.MemberAccess(value.loc, ty.StringType(), value, 'path', True)
+        # an object interpolates through its own conversion when it declares
+        # one: `p"{root}/{name}"` is the join because `Path` declares
+        # `__as__ = ():>string => path` (quantities and the number objects
+        # print through their own paths; anything else is rejected where the
+        # field is printed or materialized)
+        converted = _conversion_method_call(value, ty.StringType(), value.loc, ctx=ctx)
+        if converted is not None:
+            value = converted
         parts.append(value)
     return hir.InterpolatedString(ast.loc, ty.StringType(), parts)
 
 
-def _is_path_value(type_: ty.Type) -> bool:
-    """Whether a type is the prelude's `Path` (or a path literal): one string field `path`."""
-    unfolded = ty.unfold(ty.strip_refinement(type_))
-    if isinstance(unfolded, ty.PathType):
-        return True
-    return (
-        isinstance(unfolded, ty.ObjectType)
-        and len(unfolded.fields) == 1
-        and unfolded.fields[0].name == 'path'
-        and (unfolded.fields[0].type == ty.StringType() or isinstance(unfolded.fields[0].type, ty.StringLiteralType))
-    )
+def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: Context) -> hir.AST | None:
+    """`value as target` through the value's type, when it declares `__as__` with a result that fits ``target``.
+
+    The conversion protocol for declared types: a zero-argument method
+    `__as__ = ():>T => …` says how a value converts to `T`; `x as T` and
+    string interpolation (`T` = `string`) call it. Nothing about a type's
+    name or shape is special — `Path` converts to its text this way.
+    """
+    unfolded = ty.unfold(ty.strip_refinement(value.type))
+    if not isinstance(unfolded, ty.ObjectType):
+        return None
+    method = unfolded.method('__as__')
+    if method is None:
+        return None
+    if method.binding_id is None:
+        _declare_pending_methods(ctx=ctx, for_type=unfolded)
+    if method.binding_id is None:
+        return None
+    function_binding = ctx.binding_registry.by_id[method.binding_id]
+    function_type = function_binding.type
+    if not isinstance(function_type, ty.FunctionType) or len(function_type.pos_or_kw) != 1 or function_type.kw_only:
+        user_error(
+            ctx.srcfile,
+            '`__as__` takes no arguments',
+            Pointer(span=loc, message='the conversion of this value is declared with parameters'),
+            hint='a conversion is `__as__ = ():>T => …`; the target type is its result type',
+        )
+    fits = ctx.type_system.is_subtype(function_type.ret, target) or (_is_string_type(function_type.ret) and _is_string_type(target))
+    if not fits:
+        return None
+    receiver = replace(value, type=unfolded) if isinstance(value.type, ty.NamedType) else value
+    function = hir.ExpressedIdentifier(loc, function_type, function_binding.name, binding_id=function_binding.id)
+    bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:]), function, receiver)
+    return tcr_function_call(bound, p0.Block(loc, [], '()', None), ctx=ctx)
 
 
 def _pack_based_string(
@@ -10679,11 +10707,12 @@ def _checked_single_argument_call(
             )],
             {},
         )
-    except ty.DispatchError as error:
+    except ty.DispatchError:
         type_error(
             ctx.srcfile,
-            'no string conversion available for interpolation field',
-            Pointer(span=argument.loc, message=str(error)),
+            'no string conversion for this interpolation field',
+            Pointer(span=argument.loc, message=f'this has type `{type_to_dewy(argument.type)}`, which does not print'),
+            hint='give the type a conversion method: `__as__ = ():>string => …`',
         )
     contextual = check_against(
         argument,
@@ -11410,6 +11439,9 @@ def _explicit_value_conversion(
         return node
     if ctx.type_system.promote_type(source, target) == target:
         return hir.ValueCast(loc, target, node)
+    converted = _conversion_method_call(node, target, loc, ctx=ctx)
+    if converted is not None:
+        return converted
     type_error(
         ctx.srcfile,
         'unsupported value conversion',

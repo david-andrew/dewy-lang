@@ -286,7 +286,7 @@ let main = () => value
 
 def test_void_main_wrapper_runs_startup_then_returns_void() -> None:
     emitted = _codegen("""
-let value:int64 = 0
+let value:int64 = 7   # a zero initializer needs no startup; a nonzero one does
 let main = ():>void => {
     value = 1
 }

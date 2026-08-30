@@ -32,36 +32,6 @@ class ModuleRecord:
 _validated_prelude_modules: set[tuple[Path, int, str]] = set()
 
 
-def _has_handle_union_member(type_: object) -> bool:
-    """Whether a type stores an aggregate behind an arena handle: a union
-    member that is an object, array, or recursive reference inside an object
-    field (field cells have no prepared trees), anywhere in the type."""
-    if isinstance(type_, ty.ObjectType):
-        for field in type_.fields:
-            if isinstance(field.type, ty.TypeOr) and any(
-                isinstance(ty.unfold(item) if not isinstance(item, ty.NamedType) else item, (ty.ObjectType, ty.ArrayType, ty.NamedType))
-                for item in field.type.items
-            ):
-                return True
-            if _has_handle_union_member(field.type):
-                return True
-        return False
-    if isinstance(type_, ty.TypeOr):
-        return any(_has_handle_union_member(item) for item in type_.items)
-    if isinstance(type_, ty.ArrayType):
-        return _has_handle_union_member(type_.element)
-    return False
-
-
-def _has_runtime_array_field(object_type: ty.ObjectType) -> bool:
-    for field in object_type.fields:
-        if isinstance(field.type, ty.ArrayType) and field.type.length is None:
-            return True
-        if isinstance(field.type, ty.ObjectType) and _has_runtime_array_field(field.type):
-            return True
-    return False
-
-
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
@@ -297,89 +267,6 @@ class ModuleCompiler:
     # Prelude declarations the backend may call without a source reference.
     BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc'})
 
-    def _program_needs_arena(self, extra_roots: list[Any] = ()) -> bool:
-        """Whether lowering will call the arena: a runtime-length array result,
-        growth method, dictionary store, or `main(args)` in the program or in
-        the prelude declarations it uses."""
-        found = False
-
-        def walk(value: Any) -> None:
-            nonlocal found
-            if found:
-                return
-            if isinstance(value, hir.TypeValue) and (
-                ty.mentions_named_type(value.value) or _has_handle_union_member(value.value)
-            ):
-                # recursive members and aggregate union members of fields live behind arena handles
-                found = True
-                return
-            if isinstance(value, (hir.ObjectLiteral, hir.Declare)) and _has_handle_union_member(
-                value.type if isinstance(value, hir.ObjectLiteral) else (value.annotation or value.expr.type)
-            ):
-                found = True
-                return
-            if isinstance(value, hir.ArrayLiteral) and isinstance(value.type, ty.ArrayType) and value.type.length is None:
-                # a spread literal of runtime length is built in the arena
-                found = True
-                return
-            if (
-                isinstance(value, hir.RepresentationCast)
-                and ty.optional_payload(value.type) == ty.StringType()
-                and isinstance(value.expr.type, ty.ArrayType)
-            ):
-                # `bytes as string | undefined` builds the decoded string in the arena
-                found = True
-                return
-            if isinstance(value, hir.FunctionLiteral):
-                rettype = value.rettype
-                if isinstance(rettype, ty.ArrayType) and rettype.length is None:
-                    found = True
-                    return
-                if isinstance(rettype, ty.ObjectType) and _has_runtime_array_field(rettype):
-                    # runtime-length array fields of an object result are arena-backed
-                    found = True
-                    return
-            if isinstance(value, (hir.ArrayMethod, hir.DictStore, hir.DictRemove, hir.DictLookup, hir.DictContains, hir.DictEntries, hir.SetAlgebra, hir.DictView)):
-                # Growth methods and dictionary stores relocate data into the arena.
-                found = True
-                return
-            if (
-                isinstance(value, hir.ObjectLiteral)
-                and isinstance(value.type, ty.ObjectType)
-                and _has_runtime_array_field(value.type)
-            ):
-                # runtime-length array fields are copied into the arena at
-                # module startup and when the object is returned
-                found = True
-                return
-            if (
-                isinstance(value, hir.Declare)
-                and value.name in ('main', hir.TEST_ENTRY_NAME)
-                and isinstance(value.expr, hir.FunctionLiteral)
-                and value.expr.pos_or_kw_args
-            ):
-                # `main(args)` builds the argument strings in the arena.
-                found = True
-                return
-            if isinstance(value, hir.AST):
-                for field in fields(value):
-                    walk(getattr(value, field.name))
-            elif isinstance(value, hir.ObjectField):
-                walk(value.value)
-            elif isinstance(value, (list, tuple)):
-                for item in value:
-                    walk(item)
-            elif isinstance(value, dict):
-                for item in value.values():
-                    walk(item)
-
-        for record in self.order:
-            if not record.prelude:
-                walk(record.root)
-        for root in extra_roots:
-            walk(root)
-        return found
-
     def _needed_prelude_binding_ids(self) -> set[int]:
         needed: set[int] = set()
         for record in self.order:
@@ -405,15 +292,17 @@ class ModuleCompiler:
                     changed = changed or len(needed) > before
 
         close_over_references()
-        # Arena consumers may live in prelude code the program pulled in
-        # (for example `read_bytes` growing its result), so include the
-        # needed prelude declarations when deciding whether to keep the arena.
-        needed_prelude = [item for item in prelude_items if item.binding_id in needed]
-        if self._program_needs_arena(extra_roots=needed_prelude):
-            for item in prelude_items:
-                if item.name in self.BACKEND_RUNTIME_HELPERS and item.binding_id is not None:
-                    needed.add(item.binding_id)
-            close_over_references()
+        # The arena is always kept: string views, strings that escape into
+        # arrays and objects, growth, decoded bytes and `main(args)` all
+        # allocate from it, and the lowering falls back to *frame* storage
+        # for views when it is absent — which dangles as soon as a view is
+        # returned (`p"dir/x.dewy".stem` crashed in a program that happened
+        # to touch nothing else in the arena). It is a few lines and maps
+        # memory only on first use, so there is nothing to save by pruning it.
+        for item in prelude_items:
+            if item.name in self.BACKEND_RUNTIME_HELPERS and item.binding_id is not None:
+                needed.add(item.binding_id)
+        close_over_references()
         return needed
 
     def _validate_and_select(
