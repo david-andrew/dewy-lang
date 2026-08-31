@@ -959,6 +959,9 @@ class _FlowLowering:
         ) or ty.string_valued(node.type) or self._is_optional_element(node.type):
             # one-word handles: string-literal unions and optional cells
             return hir.Integer(node.loc, 'int64', t0.base10, 0)
+        if isinstance(node.type, ty.FunctionType):
+            # a function value is its code address
+            return hir.Integer(node.loc, 'int64', t0.base10, 0)
         self._target_error(
             node,
             f'no udewy flow temporary representation for `{type_to_dewy(node.type)}`',

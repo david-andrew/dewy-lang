@@ -63,7 +63,7 @@ loop [name score] in scores
     printl"{name}: {score}"
 ```
 
-`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. `K` may be a union of string literals (`'0b' | '0t'`, an enumeration of allowed keys — such a union is a string at runtime), and `V` may be an object type, an optional (`int64 | undefined`), or a union of objects, words, and strings (`Number | Name | Punct`, a token); arrays likewise hold string-literal unions, optionals, and such unions as elements — a loop over them binds each element for `match`. Unions containing arrays are not container elements yet. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
+`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. `K` may be a union of string literals (`'0b' | '0t'`, an enumeration of allowed keys — such a union is a string at runtime), and `V` may be an object type, an optional (`int64 | undefined`), or a union of objects, words, and strings (`Number | Name | Punct`, a token); arrays likewise hold string-literal unions, optionals, and such unions as elements — a loop over them binds each element for `match`. An abstract `int` or `uint` in an element position — `array<int>`, `dict<string int | undefined>`, `set<uint>` — is the 64-bit word, as `int` in a signature is. Unions containing arrays are not container elements yet. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
 
 ### Lookup
 
@@ -73,7 +73,7 @@ loop [name score] in scores
 
 ### Mutation
 
-`d[key] = value` replaces the value of an existing key in place or appends a new entry. `d.pop(key)` removes a proven key and yields its value; `d.pop(key default=v)` removes the key if present and yields its value, else `v`, without a proof. `d.clear` removes every entry. `d.length` is the number of entries.
+`d[key] = value` replaces the value of an existing key in place or appends a new entry. `d[key] += value` (any compound operator) updates a *proven* key in place: it reads like `d[key]`, so an unproven key is the same compile error, and the counting idiom is `if word in? counts counts[word] += 1 else counts[word] = 1`. `d.pop(key)` removes a proven key and yields its value; `d.pop(key default=v)` removes the key if present and yields its value, else `v`, without a proof. `d.clear` removes every entry. `d.length` is the number of entries.
 
 A dictionary must not be mutated by a loop that iterates it; stores, `pop`, and `clear` inside such a loop are compile errors.
 

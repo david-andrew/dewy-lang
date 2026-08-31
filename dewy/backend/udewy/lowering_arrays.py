@@ -1328,6 +1328,7 @@ class _ArrayLowering:
         return (
             element == 'bool'
             or ty.fixed_integer_layout(element) is not None
+            or isinstance(element, ty.FunctionType)   # a function value is its code address
             or self._is_string_valued(element)
         )
 
@@ -1337,6 +1338,7 @@ class _ArrayLowering:
         return (
             element == 'bool'
             or ty.fixed_integer_layout(element) is not None
+            or isinstance(element, ty.FunctionType)   # a function value is its code address
             or cls._is_string_valued(element)
         )
 
@@ -2426,6 +2428,7 @@ class _ArrayLowering:
         element_type: ty.Type,
         node: hir.AST,
     ) -> tuple[int, bool]:
+        element_type = ty.unfold(element_type)   # `array<Node>` inside `Node`: object handles
         if element_type == 'bool':
             return 1, False
         layout = ty.fixed_integer_layout(element_type)

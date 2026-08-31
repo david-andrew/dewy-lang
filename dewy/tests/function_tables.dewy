@@ -1,0 +1,28 @@
+# function values held by containers and flows: a call through a table entry
+# or a flow-selected handle is checked against every function of that type
+
+double = (x:int64):>int64 => x * 2
+triple = (x:int64):>int64 => x * 3
+negate = (x:int64):>int64 => (-x)
+
+Op:type = <(x:int64):>int64>
+
+apply_all = (ops:array<Op> x:int64):>int64 => {
+    let total:int64 = 0
+    loop op in ops total += op(x)
+    return total
+}
+
+main = () => {
+    let table:dict<string Op> = ['double' -> @double 'triple' -> @triple]
+    table['negate'] = @negate
+    let f = table['double']
+    let total = f(4)                                   # 8
+    total += table['triple'](3)                        # 17
+    let pick = if total >? 10 @negate else @double
+    total += pick(-5)                                  # 22
+    let ops:array<Op> = [@double @triple]
+    ops.push(@negate)
+    total += apply_all(ops 5)                          # 22 + 10 + 15 - 5 = 42
+    return total
+}

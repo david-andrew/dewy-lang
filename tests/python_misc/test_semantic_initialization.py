@@ -3,7 +3,7 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.errors import NotImplementedYet, UserError
+from dewy.semantic.errors import UserError
 
 
 def _codegen(source: str) -> str:
@@ -214,7 +214,10 @@ let main = ():>int64 => {
         _check(invalid)
 
 
-def test_reassigned_callable_effect_is_reported_as_unresolved() -> None:
+def test_reassigned_callable_resolves_to_every_function_of_its_type() -> None:
+    # `callback` may hold `ready` or `first` (its origin is not tracked once
+    # reassigned), so the call is checked against both: `first` reaches `later`
+    # before its declaration
     source = """
 let ready = ():>int64 => 42
 let first = ():>int64 => later()
@@ -223,10 +226,30 @@ callback = @first
 callback()
 let later = ():>int64 => 0
 """
-    with pytest.raises(
-        NotImplementedYet,
-        match='callable initialization effect is not resolved',
-    ):
+    with pytest.raises(UserError, match='`later` used before initialization'):
+        _check(source)
+    # with `later` declared first every candidate is safe, and a call through
+    # a container element (no tracked origin at all) is checked the same way
+    _check("""
+let later = ():>int64 => 0
+let ready = ():>int64 => 42
+let first = ():>int64 => later()
+let callback:<():>int64> = @ready
+callback = @first
+callback()
+let table:dict<string <():>int64>> = ['ready' -> @ready 'first' -> @first]
+table['first']()
+""")
+
+
+def test_call_through_a_container_element_still_checks_initialization() -> None:
+    source = """
+let first = ():>int64 => later()
+let table:dict<string <():>int64>> = ['first' -> @first]
+table['first']()
+let later = ():>int64 => 0
+"""
+    with pytest.raises(UserError, match='`later` used before initialization'):
         _check(source)
 
 

@@ -158,3 +158,20 @@ def test_dictionary_union_and_views() -> None:
         _check("    let a = ['x' -> 1]\n    let b = ['y' -> 2]\n    let u = a & b")
     with pytest.raises(UserError, match='sets have no keys'):
         _check("    let s = set[1]\n    let k = s.keys")
+
+
+def test_compound_store_updates_a_proven_key_in_place() -> None:
+    root = _check(
+        "    let d = ['a' -> 1]\n"
+        "    d['a'] += 1\n"
+        "    let k:string = 'b'\n"
+        "    if k in? d { d[k] *= 2 }"
+    )
+    stores = [item for item in root.items[0].expr.body.items if isinstance(item, hir.DictStore)]   # type: ignore[union-attr]
+    assert len(stores) == 1 and isinstance(stores[0].value, hir.FunctionCall)   # `d['a'] = d['a'] + 1`
+    assert len(_lookups(root)) == 2 and all(lookup.proven for lookup in _lookups(root))
+
+
+def test_compound_store_needs_a_proven_key() -> None:
+    with pytest.raises(UserError, match='dictionary key is not proven present'):
+        _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    d[k] += 1")

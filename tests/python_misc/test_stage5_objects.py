@@ -250,7 +250,9 @@ def test_nonliteral_function_field_is_rejected_before_lowering() -> None:
 
 
 def test_reassigned_object_method_effect_is_not_treated_as_original() -> None:
-    with pytest.raises(NotImplementedYet, match='initialization effect'):
+    # after `o = make()` the method's origin is untracked, so the call is
+    # checked against every `():>int64` function — including the one reading `y`
+    with pytest.raises(UserError, match='`y` used before initialization'):
         _check(
             'let Obj:type = [fn:():>int64]\n'
             'let make = ():>Obj => [fn = ():>int64 => y]\n'

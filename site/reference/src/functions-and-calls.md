@@ -83,6 +83,8 @@ let callback:<(value:int64):>int64> = increment
 
 Position-only function contracts use `<name:type>`, just like function literals. The name describes the parameter inside the contract but is absent from the keyword-call interface. A bare identifier is always a parameter name, so Dewy does not infer an anonymous type-only parameter from its spelling.
 
+A function value is an ordinary value of its contract type: `@name` selects a named function instead of calling it, and such values are stored in arrays and dictionaries (`let table:dict<string <(x:int64):>int64>> = ['double' -> @double]`), chosen by a flow (`let op = if fast @double else @triple`), and called through whatever holds them (`table['double'](4)`, `op(3)`). A call whose callee's origin is not tracked — a table entry, a reassigned function binding — is checked for initialization order against every function of that type in the program. A function that reads enclosing locals cannot be a value yet (it needs a closure record); it is called directly or given what it needs as parameters.
+
 Expected failures appear as direct [error alternatives](errors-and-forwarding.md) in the return contract. Public functions should normally declare a stable set of returned errors even where an unexposed helper could infer them.
 
 ## Calls and Pipes

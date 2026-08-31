@@ -33,6 +33,41 @@ class _InitializationChecker:
         self.reassigned_objects: set[int] = set()
         self.reassigned_members: set[tuple[int, tuple[str, ...]]] = set()
         self._collect_reassigned_callables(root)
+        self.all_functions: list[hir.FunctionLiteral] = []
+        self._collect_functions(root)
+
+    def _collect_functions(self, node: object) -> None:
+        """Every function literal in the program: the candidates for a call
+        through a value whose origin is not tracked (an element of a
+        container, a field read after reassignment)."""
+        if isinstance(node, hir.FunctionLiteral):
+            self.all_functions.append(node)
+        if isinstance(node, hir.AST):
+            for name in node.__dataclass_fields__:
+                self._collect_functions(getattr(node, name))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                self._collect_functions(item)
+        elif isinstance(node, dict):
+            for item in node.values():
+                self._collect_functions(item)
+        elif isinstance(node, hir.ObjectField):
+            self._collect_functions(node.value)
+
+    def _compatible_functions(self, type_: ty.TypeExpr) -> list[hir.FunctionLiteral] | None:
+        """The function literals a value of this function type may hold: those
+        with the same parameter and result types (the conservative target set
+        of a call through a container element)."""
+        if not isinstance(type_, ty.FunctionType):
+            return None
+        shape = ([param.type for param in type_.pos_or_kw], type_.ret)
+        return [
+            function
+            for function in self.all_functions
+            if isinstance(function.type, ty.FunctionType)
+            and not function.type.type_params
+            and ([param.type for param in function.type.pos_or_kw], function.type.ret) == shape
+        ]
 
     def _collect_reassigned_callables(self, node: hir.AST) -> None:
         if isinstance(node, hir.Assign):
@@ -252,6 +287,8 @@ class _InitializationChecker:
             for arg in node.kw_args.values():
                 current = self._check_eager(arg, current, parameters, call_stack)
             targets = self._callable_targets(node.func, parameters, set())
+            if targets is None:
+                targets = self._compatible_functions(node.func.type)
             if targets is None:
                 self._unknown_callable(node)
             for target in targets:

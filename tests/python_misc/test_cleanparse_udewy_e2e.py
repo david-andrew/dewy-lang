@@ -111,6 +111,8 @@ LOWERED_CASES = [
     ('object_release.dewy', 42),
     ('loop_regions.dewy', 42),
     ('string_locals.dewy', 42),
+    ('abstract_int_containers.dewy', 42),
+    ('function_tables.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
     ('error_values.dewy', 42),

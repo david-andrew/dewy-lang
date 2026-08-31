@@ -1499,9 +1499,8 @@ def _proven_key(dictionary: hir.AST, key: hir.AST, *, ctx: Context) -> tuple[str
     return ctx.key_facts.get((dictionary_id, identity))
 
 
-def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
-    """Check `d[key] = value` when `d` names a dictionary."""
-    left = ast.left
+def _dict_index_binding(left: p0.AST, *, ctx: Context) -> sb.Binding | None:
+    """The dictionary binding of an assignment target spelled `d[key]`, else None."""
     if not isinstance(left, p0.BinOp):
         return None
     op = left.op
@@ -1514,6 +1513,16 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
     binding = ctx.binding_scopes.get(left.left.item.name)
     if binding is None or ty.dict_key_value(binding.type) is None:
         return None  # (a set target falls through to the index-assignment error)
+    return binding
+
+
+def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
+    """Check `d[key] = value` when `d` names a dictionary."""
+    left = ast.left
+    binding = _dict_index_binding(left, ctx=ctx)
+    if binding is None:
+        return None
+    assert isinstance(left, p0.BinOp)
     if not isinstance(left.right, p0.Block) or len(left.right.inner) != 1:
         user_error(
             ctx.srcfile,
@@ -1588,6 +1597,31 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
                 f'parentheses, for example `() => (value {symbol}= 1)`'
             ),
         )
+
+    if (dict_binding := _dict_index_binding(ast.left, ctx=ctx)) is not None:
+        # `d[k] op= v` is `d[k] = d[k] op v`: the key must be proven present
+        # (the lookup says so otherwise), and the store replaces its value
+        if (reason := _read_only_reason(dict_binding)) is not None:
+            user_error(
+                ctx.srcfile,
+                'cannot store into a const dictionary',
+                Pointer(span=ast.left.loc, message=f'`{dict_binding.name}` {reason}'),
+            )
+        assert isinstance(ast.left, p0.BinOp)
+        lookup = _tcr_index(ast.left, ctx=ctx)
+        assert isinstance(lookup, hir.DictLookup)
+        value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=lookup.type)
+        result = _dispatch_builtin(
+            builtins.BINOP_DUNDER_MAP[symbol],
+            [lookup, value],
+            loc=ast.loc,
+            op_loc=ast.op.loc,
+            source_name=symbol,
+            ctx=ctx,
+            expected=lookup.type,
+        )
+        result = check_against(result, lookup.type, ctx=ctx)
+        return hir.DictStore(ast.loc, ty.VOID_TYPE, lookup.keys, lookup.values, lookup.key, result)
 
     target = tcr_assignment_target(ast.left, ctx=ctx, refined=True)
     if isinstance(target, hir.Index):
@@ -4779,6 +4813,13 @@ def _validate_recursive_alias(
                 check(field_.type, False)
             return
         if isinstance(type_, ty.ArrayType):
+            # `children:array<Node>` is finite (the elements live behind the
+            # array's descriptor) but the lowering does not unfold a recursive
+            # element yet (every element-kind decision reads the object type)
+            if ty.mentions_named_type(type_.element):
+                not_implemented(ctx.srcfile, binding.loc, f'`array<{binding.name}>` inside `{binding.name}` (arrays of the recursive type; hold the children in a separate array keyed by index for now)')
+            return
+        if isinstance(type_, ty.ArrayType):
             check(type_.element, False)
             return
         if isinstance(type_, ty.RefinedType):
@@ -6777,6 +6818,7 @@ def _tcr_array_literal(
                     f'got `{type_to_dewy(element_type)}`'
                 ),
             ),
+            hint=_ELEMENT_TYPE_HINT,
         )
 
     checked_items: list[hir.AST] = []
@@ -6852,6 +6894,27 @@ def _tcr_spread_array_literal(
             Pointer(span=block.loc, message=f'expected length {expected_array.length}, got {length if length is not None else "a runtime length"}'),
         )
     return hir.ArrayLiteral(block.loc, ty.ArrayType(element_type, length), checked)
+
+
+_ELEMENT_TYPE_HINT = (
+    'container elements need a fixed runtime width: a sized integer (`int64`, `uint8`, …), `bool`, '
+    '`string`, an object type, or a union of those with `undefined`'
+)
+
+
+def _word_element_type(type_: ty.Type) -> ty.Type:
+    """The element type a container annotation names, with the abstract
+    integers taking the 64-bit word representation — `array<int>`,
+    `dict<string int | undefined>`, `set<uint>` — the way `int` in a
+    signature does (the hidden-width selection pass is still ahead)."""
+    if type_ == 'int':
+        return 'int64'
+    if type_ == 'uint':
+        return 'uint64'
+    if isinstance(type_, ty.TypeOr):
+        items = [_word_element_type(item) for item in type_.items]
+        return ty.TypeOr(items) if items != type_.items else type_
+    return type_
 
 
 def _supported_array_element_type(type_: ty.Type) -> bool:
@@ -7009,7 +7072,8 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             if spreads:
                 not_implemented(ctx.srcfile, spreads[0].loc, 'spreading into a dictionary literal (entries need a runtime replace-or-append)')
             return _tcr_dict_literal(block, expected=expected, ctx=ctx)
-        if kind == 'object' or isinstance(expected, ty.ObjectType):
+        if kind == 'object' or isinstance(ty.unfold(ty.strip_refinement(expected)) if expected is not None else None, ty.ObjectType):
+            # (a recursive alias's reference unfolds to its object type for the literal)
             return _tcr_object_literal(block, expected=expected, ctx=ctx)
         if spreads:
             return _tcr_spread_array_literal(block, expected=expected, ctx=ctx)
@@ -10577,11 +10641,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                     'array type requires an element type',
                     Pointer(span=ast.loc, message='use `array<T>`'),
                 )
-            element = ast_to_type(element_ast, ctx=ctx)
-            if element in ('int', 'uint'):
-                # Abstract integers currently take the 64-bit word representation
-                # (the hidden-width selection pass is still ahead).
-                element = 'int64' if element == 'int' else 'uint64'
+            element = _word_element_type(ast_to_type(element_ast, ctx=ctx))
             if not _supported_array_element_type(element):
                 type_error(
                     ctx.srcfile,
@@ -10593,6 +10653,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                             f'got `{type_to_dewy(element)}`'
                         ),
                     ),
+                    hint=_ELEMENT_TYPE_HINT,
                 )
             return _refined(ty.ArrayType(element, length), conditions)
 
@@ -10626,14 +10687,17 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             left=p0.Atom(item=t1.Identifier(name='set')),
             right=p0.Block(kind='<>', inner=[element_ast]),
         ):
-            return ty.set_type(ast_to_type(element_ast, ctx=ctx))
+            return ty.set_type(_word_element_type(ast_to_type(element_ast, ctx=ctx)))
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
             left=p0.Atom(item=t1.Identifier(name='dict')),
             right=p0.Block(kind='<>', inner=[key_ast, value_ast]),
         ):
-            return ty.dict_type(ast_to_type(key_ast, ctx=ctx), ast_to_type(value_ast, ctx=ctx))
+            return ty.dict_type(
+                _word_element_type(ast_to_type(key_ast, ctx=ctx)),
+                _word_element_type(ast_to_type(value_ast, ctx=ctx)),
+            )
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
