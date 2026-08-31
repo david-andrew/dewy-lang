@@ -2583,13 +2583,15 @@ class _StringLowering:
                 return replace(entry.region, loc=loc)
         return self._frame_region(loc)
 
-    def _lower_loop_body(self, arm: hir.LoopArm) -> hir.AST:
+    def _lower_loop_body(self, arm: hir.LoopArm, *, entry: 'LoopRegion | None' = None) -> hir.AST:
         """Lower a loop arm's body inside its own string region: strings the
         body builds that stay within the iteration are given back at its end
         (the block's fall-through, `continue`, `break`); the region itself is
-        declared at function entry and released at exit with the frame's."""
+        declared at function entry and released at exit with the frame's.
+        ``entry`` is the region the loop's condition was lowered in, when any."""
         from .lowering_shared import LoopRegion
-        entry = LoopRegion(self.loop_string_escapes.get(id(arm.body), set()))
+        if entry is None:
+            entry = LoopRegion(self.loop_string_escapes.get(id(arm.body), set()))
         self.loop_regions.append(entry)
         self.lower_loop_depth += 1
         try:
@@ -2767,12 +2769,20 @@ class _StringLowering:
         captured: set[int] = set()
         assigned: list[hir.AST] = []
 
+        def may_hold_string(type_: ty.Type) -> bool:
+            if ty.enum_members(type_) is not None:
+                return False   # `<1 | "fast">`: a tag word, not a handle
+            if self._is_string_valued(type_):
+                return True
+            unfolded = ty.unfold(type_) if not isinstance(type_, str) else type_
+            return isinstance(unfolded, ty.TypeOr) and any(self._is_string_valued(item) for item in unfolded.items)
+
         def fresh(expr: hir.AST) -> bool:
             expr = self._unwrap_transparent(expr)
-            if isinstance(expr, hir.String) or isinstance(expr.type, ty.StringLiteralType):
+            if isinstance(expr, (hir.String, hir.Undefined)) or isinstance(expr.type, ty.StringLiteralType):
                 return True
             if isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
-                return fresh(expr.expr) if self._is_string_valued(expr.expr.type) else False
+                return fresh(expr.expr) if may_hold_string(expr.expr.type) else False
             if isinstance(expr, hir.FunctionCall):
                 if isinstance(expr.func, hir.ArrayMethod):
                     return expr.func.name == 'join'   # a region string (owner 0) or, returned, an arena one (1)
@@ -2789,7 +2799,7 @@ class _StringLowering:
             if isinstance(node, hir.FunctionLiteral) and node is not literal:
                 walk(node.body, True)
                 return
-            if isinstance(node, hir.Declare) and node.binding_id is not None and not nested and self._is_string_valued(node.annotation or node.expr.type):
+            if isinstance(node, hir.Declare) and node.binding_id is not None and not nested and may_hold_string(node.annotation or node.expr.type):
                 declared.setdefault(node.binding_id, [])
             if isinstance(node, hir.ExpressedIdentifier) and nested and node.binding_id is not None:
                 captured.add(node.binding_id)
@@ -2858,10 +2868,10 @@ class _StringLowering:
             if id(expr) in seen:
                 return
             seen.add(id(expr))
-            if isinstance(expr, hir.String) or isinstance(expr.type, ty.StringLiteralType):
-                found.add(('static', None))
+            if isinstance(expr, (hir.String, hir.Undefined)) or isinstance(expr.type, ty.StringLiteralType):
+                found.add(('static', None))   # `undefined` owns nothing
             elif isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
-                if self._is_string_valued(expr.expr.type):
+                if self._is_string_valued(expr.expr.type) or ty.optional_payload(expr.expr.type) is not None or ty.runtime_union_members(expr.expr.type) is not None:
                     visit(expr.expr, viewed)
                 else:
                     found.add(('fresh', None))

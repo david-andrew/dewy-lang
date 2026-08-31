@@ -914,6 +914,7 @@ class _ArrayLowering:
         """Produce an independently mutable array value from one expression."""
 
         if self._array_expression_owns_fresh_storage(node):
+            self._consume_array_value(node)   # the taker owns this fresh storage
             return self._extract_expression(node)
         return self._clone_array_value(node, array_type, move=move)
 
@@ -1799,6 +1800,7 @@ class _ArrayLowering:
             and source.type.length is None
         ):
             # Runtime-length call results are already arena-backed.
+            self._consume_array_value(source)   # the caller takes the result over
             prelude, value = self._extract_expression(source)
             return [*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, replace(value, type='int64'))]
         prelude, copied = self._transfer_array_value(item, source, array_type, site='returned')
@@ -2319,6 +2321,8 @@ class _ArrayLowering:
                 element_type,
                 arena=arena,
             )
+        elif isinstance(element_type, ty.ObjectType) and move:
+            prelude, copied = [], source_value   # the handle moves with its members
         elif isinstance(element_type, ty.ObjectType):
             prelude, copied = self._clone_object_value(
                 replace(source_value, type='int64'),
@@ -2329,8 +2333,6 @@ class _ArrayLowering:
             return self._copy_optional_element(source_value, target_address, loc)
         elif self._is_union_element(element_type) and self._has_arena() and not move:
             return self._copy_union_element(source_value, target_address, element_type, loc)
-        elif isinstance(element_type, ty.ObjectType) and move:
-            prelude, copied = [], source_value   # the handle moves with its members
         elif self._is_string_valued(element_type) and self._has_arena() and not move:
             # an array owns its element strings, so a lasting copy of the array
             # (stored, returned, kept in a dictionary) gets its own copies

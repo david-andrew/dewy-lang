@@ -1,11 +1,27 @@
 # Objects own their runtime-sized members. When a local object's scope ends,
 # its string fields, its array fields (with their elements), and the string
 # payloads of its union cells go back to the arena; a copy of an object owns
-# copies of its own; assigning over a string field releases the old value;
-# and a literal or call result stored into an array (or returned) moves its
-# members instead of cloning them. Dictionaries are objects of arrays, so
-# they release their keys and values the same way. Building and dropping
-# such values in a loop therefore runs in constant memory.
+# copies of its own; assigning over a string field releases the old value —
+# through a nested object or an element too (`o.inner.name = …`, `pts[0].name
+# = …`, `xs[0] = …`), and an exact-length local array releases its element
+# strings and element objects with it; a literal or call result stored into
+# an array (or returned) moves its members instead of cloning them.
+# Dictionaries are objects of arrays, so they release their keys and values
+# the same way. Building and dropping such values in a loop therefore runs
+# in constant memory.
+let Inner:type = [name:string]
+let Outer:type = [inner:Inner tags:array<string>]
+let nested = (n:int64):>int64 => {
+    let o:Outer = [inner=[name="a"] tags=["x" "y"]]
+    o.inner.name = "changed {n}"             # a nested object's field: the old value goes back
+    o.tags[1] = "tag {n}"                    # an array field's element
+    let pts:array<[name:string]> = [[name="p"] [name="q"]]
+    pts[0].name = "moved {n}"                # an element object's field
+    let xs:array<string> = ["m" "n"]
+    xs[0] = "elem {n}"                       # an exact-length array's element
+    xs[0] = "again {n}"
+    return o.inner.name.length + o.tags[1].length + pts[0].name.length + xs[0].length   # 9 + 5 + 7 + 7 = 28 (n < 10)
+}
 let Point:type = [name:string tags:array<string> weight:int64|undefined]
 let make = (n:int64):>Point => [name='p{n}' tags=['a{n}' "b"] weight=n]
 let round = (n:int64):>int64 => {
@@ -17,7 +33,7 @@ let round = (n:int64):>int64 => {
     let table:dict<string int64> = ['k{n}' -> n 'j' -> 2]
     let total:int64 = one.name.length + two.name.length    # 2 + 7 (n < 10)
     loop pt in pts { total += pt.tags.length }               # 5 * 2
-    return total + table.length                              # 9 + 10 + 2 = 21
+    return total + table.length + nested(n) - 28             # 9 + 10 + 2 = 21
 }
 let main = ():>int64 => {
     let rounds:int64 = 0

@@ -53,6 +53,30 @@ def test_a_moved_out_array_forgets_its_elements_as_well_as_its_buffer() -> None:
     assert re.search(r'__store_i64__\(0 parts \+ 40\)\n\s*__store_i64__\(0 parts \+ 8\)', build)
 
 
+def test_stores_through_nested_places_release_the_old_string_and_exact_arrays_release_their_members() -> None:
+    emitted = _compile(
+        'let Inner:type = [name:string]\n'
+        'let Outer:type = [inner:Inner tags:array<string>]\n'
+        'let round = (n:int64):>int64 => {\n'
+        '    let o:Outer = [inner=[name="a"] tags=["x" "y"]]\n'
+        '    o.inner.name = "c{n}"\n'
+        '    o.tags[1] = "t{n}"\n'
+        '    let xs:array<string> = ["m" "n"]\n'
+        '    xs[0] = "e{n}"\n'
+        '    let pts:array<[name:string]> = [[name="p"]]\n'
+        '    pts[0].name = "q{n}"\n'
+        '    return xs[0].length\n'
+        '}\n'
+        'let main = ():>int64 => round(1)\n'
+    )
+    body = _function(emitted, 'round')
+    assert len(re.findall(r'let __dewy_string_old_field_\d+:int64', body)) == 2      # o.inner.name, pts[0].name
+    assert len(re.findall(r'let __dewy_string_old_element_\d+:int64', body)) == 2    # o.tags[1], xs[0]
+    # the exact-length arrays' elements are released with them: strings by owner word, the literal's element objects with their block
+    assert len(re.findall(r'let __dewy_string_raw_element_\d+:int64', body)) == 3
+    assert re.search(r'_arena_release\(__dewy_string_raw_element_\d+ 8\)', body)
+
+
 def test_a_returned_local_object_hands_its_strings_to_the_result_and_releases_nothing_twice() -> None:
     emitted = _compile(POINT + 'let build = (n:int64):>Point => {\n    let pt = make(n)\n    pt.name = "renamed"\n    return pt\n}\nlet main = ():>int64 => build(3).name.length\n')
     build = _function(emitted, 'build')

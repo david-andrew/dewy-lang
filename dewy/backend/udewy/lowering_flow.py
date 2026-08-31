@@ -200,16 +200,25 @@ class _FlowLowering:
             # with the statement for a first arm
             outer_temporaries = self.statement_temporaries
             self.statement_temporaries = []
+            loop_entry = None
+            if isinstance(arm, hir.LoopArm):
+                # the condition's frame-only strings (`loop text.split" ".length >? n`)
+                # live in the loop's region too: the condition runs every iteration
+                from .lowering_shared import LoopRegion
+                loop_entry = LoopRegion(self.loop_string_escapes.get(id(arm.body), set()))
+                self.loop_regions.append(loop_entry)
             try:
                 condition_prelude, condition = self._prepare_condition(arm.condition)
             finally:
                 condition_temporaries, self.statement_temporaries = self.statement_temporaries, outer_temporaries
+                if loop_entry is not None:
+                    self.loop_regions.pop()
             if (condition_prelude or condition_temporaries) and isinstance(arm, hir.LoopArm):
                 # A loop condition that needs statements (`loop … and f(text[i])`):
                 # they must run before every test, so the loop becomes
                 # `loop true { statements; if not cond { break }; body }`
                 # (`continue` returns to the top and re-tests, as it should).
-                body = self._lower_loop_body(arm)
+                body = self._lower_loop_body(arm, entry=loop_entry)
                 loc = arm.condition.loc
                 tested = hir.ExpressedIdentifier(loc, 'bool', self._new_string_temp(loc, 'bool', 'loop_test').name)
                 declarations_and_releases = self._with_temporaries_released([], condition_temporaries)
@@ -249,7 +258,7 @@ class _FlowLowering:
                 prelude.extend(condition_prelude)
                 self.statement_temporaries.extend(condition_temporaries)   # a first arm's: the statement's own
             if isinstance(arm, hir.LoopArm) and target is None:
-                body = self._lower_loop_body(arm)
+                body = self._lower_loop_body(arm, entry=loop_entry)
             else:
                 if isinstance(arm, hir.LoopArm):
                     self.lower_loop_depth += 1

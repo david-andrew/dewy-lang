@@ -63,3 +63,31 @@ def test_stack_descriptors_clear_their_owner_word() -> None:
     assert stack_descriptors
     for name in stack_descriptors:
         assert f'__store_i64__(0 {name} + 40)' in emitted
+
+
+def test_an_array_result_nothing_keeps_is_released_after_its_statement() -> None:
+    emitted = _compile('let count = (text:string):>int64 => text.split" ".length\nlet main = ():>int64 => count("a b")\n')
+    count = _function(emitted, 'count')
+    temp = re.search(r'(__dewy_string_array_temp_\d+) = \S+string_split\(', count)
+    assert temp, count
+    assert f'let {temp.group(1)}:int64 = 0' in count
+    assert re.search(rf'if {temp.group(1)} =\? 0 \{{', count) and re.search(rf'__load_i64__\({temp.group(1)} \+ 40\) =\? 1', count)
+
+
+def test_an_optional_local_owns_a_calls_string_payload_and_return_moves_it() -> None:
+    source = (
+        HEAD
+        + 'let choose = (flag:bool):>string|undefined => if flag join2("a" "b") else undefined\n'
+        + 'let moved = ():>string|undefined => {\n    let maybe:string|undefined = choose(true)\n    return maybe\n}\n'
+        + 'let aliased = ():>string|undefined => {\n    let maybe:string|undefined = choose(true)\n    let other:string|undefined = maybe\n    return other\n}\n'
+        + 'let main = ():>int64 => {\n    let m:string|undefined = moved()\n    match aliased() { s:string => return s.length  <undefined> => return 0 }\n}\n'
+    )
+    emitted = _compile(source)
+    moved = _function(emitted, 'moved')
+    # the payload is released by member tag and owner word …
+    assert re.search(r'let __dewy_string_cell_tag_\d+:int64 = __load_u8__\(maybe\)', moved)
+    # … except that `return maybe` empties the local's payload word first (the caller owns it now)
+    assert '__store_i64__(0 maybe + 8)' in moved
+    aliased = _function(emitted, 'aliased')
+    # a return reaching `maybe` through `other` clones the payload into the result cell
+    assert re.search(r'let __dewy_string_result_tag_\d+:int64', aliased) and re.search(r'let __dewy_string_result_payload_\d+:int64', aliased)

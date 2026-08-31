@@ -816,6 +816,19 @@ class _ObjectLowering:
         prelude, value = self._extract_expression(assigned_value)
         return [*prelude, *self._value_store(value, address, field_type, node.loc)]
 
+    def _place_is_owned(self, place: hir.AST) -> bool:
+        """Whether a place's storage belongs to an owned local of this frame: the
+        local itself, or a member or element reached from one (`a.b`, `xs[i].name`);
+        a parameter's or a global's is not (its members are the caller's)."""
+        place = self._unwrap_transparent(place)
+        if isinstance(place, hir.ExpressedIdentifier):
+            return place.name in self.owned_objects or place.name in self.owned_array_names or place.name in self.owned_raw_arrays
+        if isinstance(place, hir.MemberAccess):
+            return self._place_is_owned(place.value)
+        if isinstance(place, hir.Index):
+            return self._place_is_owned(place.array)
+        return False
+
     def _lower_member_assign(self, node: hir.MemberAssign) -> list[hir.AST]:
         prelude, obj = self._extract_object_pointer(node.target.value)
         if not isinstance(node.target.value.type, ty.ObjectType):
@@ -846,8 +859,8 @@ class _ObjectLowering:
             )
         elif self._is_string_valued(field_type):
             value_prelude, value = self._escaping_string_value(node.value)
-            if isinstance(node.target.value, hir.ExpressedIdentifier) and node.target.value.name in self.owned_objects:
-                # the object owns the string it held: give it back by its owner word
+            if self._place_is_owned(node.target.value):
+                # the object (a local, or a member or element of one) owns the string it held: give it back by its owner word
                 old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'old_field').name)
                 value_prelude = [
                     *value_prelude,
@@ -994,7 +1007,8 @@ class _ObjectLowering:
             and isinstance(source.type, ty.ArrayType)
             and source.type.length is None
         ):
-            # a runtime-length call result is already arena-backed
+            # a runtime-length call result is already arena-backed: the field takes it over
+            self._consume_array_value(node)
             return self._extract_expression(node)
         return self._transfer_array_value(node, source, array_type, site='stored in a field')
 
