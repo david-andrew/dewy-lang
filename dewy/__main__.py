@@ -20,6 +20,7 @@ from udewy.backend import BackendName
 from udewy.cache import cache_artifact, cache_layout
 from udewy.frontend import EntryPointOptions, entry_point
 
+from . import failure_log
 from .backend.udewy import codegen
 from .reporting import Info, Pointer, ReportException, SrcFile, color_enabled
 from .targets import TARGETS, identify_host_target
@@ -57,28 +58,30 @@ def run(argv: list[str]) -> int:
         pdb.set_trace()
         return 0
 
-    # compile the program and output udewy source code
     path = Path(args.file)
-    srcfile = SrcFile.from_path(path)
     target = _resolve_target(args.target)
-    udewy_src = codegen(srcfile, target=target)
+    with failure_log.recording(['dewy', *argv]) as recorder:
+        # compile the program and output udewy source code
+        srcfile = SrcFile.from_path(path)
+        udewy_src = codegen(srcfile, target=target)
 
-    # set up udewy options, and save the udewy source code to a cache file
-    options = EntryPointOptions(
-        compile_only=args.compile,
-        target=target,
-        # TODO: for now wasm extra args are ignored
-    )
-    udewy_path = cache_artifact(path, '.udewy')
-    udewy_path.parent.mkdir(parents=True, exist_ok=True)
-    udewy_path.write_text(udewy_src)
+        # set up udewy options, and save the udewy source code to a cache file
+        options = EntryPointOptions(
+            compile_only=args.compile,
+            target=target,
+            # TODO: for now wasm extra args are ignored
+        )
+        udewy_path = cache_artifact(path, '.udewy')
+        udewy_path.parent.mkdir(parents=True, exist_ok=True)
+        udewy_path.write_text(udewy_src)
 
-    # run the udewy compiler/executor
-    try:
-        return entry_point(udewy_path, args.remainder, options)
-    except Exception as e:
-        print(f'Error: {e}')
-        return 1
+        # run the udewy compiler/executor
+        try:
+            return entry_point(udewy_path, args.remainder, options)
+        except Exception as e:
+            print(f'Error: {e}')
+            recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])
+            return 1
 
 
 # ---------------------------------------------------------- dewy analyze <file>
@@ -92,8 +95,9 @@ def analyze(argv: list[str]) -> int:
     from .backend.udewy import lower
     from .semantic.analyze import representation
 
-    srcfile = SrcFile.from_path(Path(args.file))
-    codegen(srcfile, target=_resolve_target(args.target))   # checks and lowers: both reports come from that
+    with failure_log.recording(['dewy', 'analyze', *argv]):
+        srcfile = SrcFile.from_path(Path(args.file))
+        codegen(srcfile, target=_resolve_target(args.target))   # checks and lowers: both reports come from that
 
     use_color = color_enabled(sys.stdout)
     for note in lower.last_copy_notes:
@@ -221,19 +225,22 @@ def test(argv: list[str]) -> int:
     sources_mtime = max(_newest_mtime(path.resolve().parent, suffixes=('.dewy',)), _compiler_mtime())
     if binary.is_file() and binary.stat().st_mtime >= sources_mtime:
         return subprocess.call([str(binary), *program_args])
-    try:
-        udewy_src = codegen(SrcFile.from_path(path), target=target, test=True)
-    except ReportException as failure:
-        failure.report.use_color = color_enabled(sys.stderr)
-        print(failure.report, file=sys.stderr)
-        return TEST_NOT_BUILT
-    udewy_path.parent.mkdir(parents=True, exist_ok=True)
-    udewy_path.write_text(udewy_src)
-    try:
-        return entry_point(udewy_path, program_args, EntryPointOptions(target=target))
-    except Exception as e:
-        print(f'Error: {e}', file=sys.stderr)
-        return TEST_NOT_BUILT
+    with failure_log.recording(['dewy', 'test', *argv]) as recorder:
+        try:
+            udewy_src = codegen(SrcFile.from_path(path), target=target, test=True)
+        except ReportException as failure:
+            failure.report.use_color = color_enabled(sys.stderr)
+            print(failure.report, file=sys.stderr)
+            recorder.record(failure_log.error_text(failure))
+            return TEST_NOT_BUILT
+        udewy_path.parent.mkdir(parents=True, exist_ok=True)
+        udewy_path.write_text(udewy_src)
+        try:
+            return entry_point(udewy_path, program_args, EntryPointOptions(target=target))
+        except Exception as e:
+            print(f'Error: {e}', file=sys.stderr)
+            recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])
+            return TEST_NOT_BUILT
 
 
 SUBCOMMANDS = {'analyze': analyze, 'test': test}

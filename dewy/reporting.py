@@ -46,6 +46,7 @@ from pathlib import Path
 from bisect import bisect_right
 from os import PathLike
 from typing import Literal, NoReturn, TypeAlias
+from collections.abc import Callable
 import re
 import os
 import sys
@@ -181,6 +182,11 @@ class Pointer:
             self.span = [self.span]
 
 
+# called with every source read from disk while they are registered
+# (`failure_log` collects the files a failed compile pulled in)
+source_readers: list[Callable[[SrcFile], None]] = []
+
+
 @dataclass
 class SrcFile:
     path:PathLike[str]|None
@@ -208,7 +214,10 @@ class SrcFile:
     @classmethod
     def from_path(cls, path:PathLike[str]) -> SrcFile:
         path = Path(path)
-        return cls(path=path, body=path.read_text())
+        srcfile = cls(path=path, body=path.read_text())
+        for reader in source_readers:
+            reader(srcfile)
+        return srcfile
 
     def offset_to_row_col(self, index:int) -> tuple[int, int]:
         index = max(0, min(index, len(self.body)))
