@@ -246,6 +246,11 @@ class _Lowerer(
         self.loop_regions: list[LoopRegion] = []   # the enclosing loops being lowered, innermost last (`_lower_loop_body`)
         self.loop_region_headers: list[hir.ExpressedIdentifier] = []   # the loops' regions of this function (declared at entry, released at exit)
         self.loop_string_escapes: dict[int, set[int]] = {}   # loop body id -> string expressions that reach a binding outside the loop (`_loop_string_escapes`)
+        self.owning_string_bindings: set[int] = set()   # string locals that own their value (`_owning_string_locals`)
+        self.owned_strings: set[str] = set()   # their lowered names: released by owner word at scope exit
+        self.statement_temporaries: list[tuple[str, hir.ExpressedIdentifier]] = []   # string values of the statement being lowered that nothing keeps: released after it (`_lower_statement`)
+        self.consumed_string_values: set[int] = set()   # call nodes whose string result a binding, a return, or a store takes over (not temporaries)
+        self.local_initializers: dict[int, list[hir.AST]] = {}   # every local's initializers and assigned values (`_local_initializers`), this function
         self.returned_string_nodes: set[int] = set()   # string expressions a `return` may hand out (`_returned_string_node_ids`)
         self.array_element_targets: set[int] = set()   # iterator targets over arrays of strings
         self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
@@ -812,6 +817,9 @@ class _Lowerer(
         self.moved_uses = self._compute_moves(analysis_literal)
         self.returned_string_nodes = self._returned_string_node_ids(analysis_literal)
         self.loop_string_escapes = self._loop_string_escapes(analysis_literal)
+        self.local_initializers = self._local_initializers(analysis_literal)
+        self.owning_string_bindings = self._owning_string_locals(analysis_literal)
+        self.owned_strings = set()
         self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.frame_region = None
         self.loop_regions = []
@@ -2812,7 +2820,7 @@ class _Lowerer(
             self.loop_signal_kind = None
         self.lower_loop_depth = 0
 
-        lowered = self._lower_function_body_inner(node, rettype)
+        lowered = self._with_descriptor_owners_zeroed(self._lower_function_body_inner(node, rettype))
         regions = [*([self.frame_region] if self.frame_region is not None else []), *self.loop_region_headers]
         exit_statements = [self._region_call('_region_release', [region], node.loc, ty.VOID_TYPE) for region in regions]
         lowered = self._insert_releases(lowered, exit_statements)
@@ -3078,16 +3086,20 @@ class _Lowerer(
         ends every scope inside the loop it leaves. Names are unique within
         a function, so the lowered tree's blocks are the scopes.
         """
-        if (not self.owned_array_names and not self.owned_objects and not exit_statements) or not isinstance(body, hir.Block):
+        if (not self.owned_array_names and not self.owned_objects and not self.owned_strings and not exit_statements) or not isinstance(body, hir.Block):
             return body
-        owned_names = self.owned_array_names | set(self.owned_objects)
+        owned_names = self.owned_array_names | set(self.owned_objects) | self.owned_strings
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
-        def releases(scopes: list[list[hir.ExpressedIdentifier]]) -> list[hir.AST]:
+        def releases(scopes: list[list[hir.ExpressedIdentifier]], moved: str | None = None) -> list[hir.AST]:
             released: list[hir.AST] = []
             for scope in scopes:
                 for local in reversed(scope):
-                    if local.name in self.owned_objects:
+                    if local.name == moved:
+                        continue   # `return s`: the caller takes the string over
+                    if local.name in self.owned_strings:
+                        released.append(self._release_string_by_owner(local, local.loc))
+                    elif local.name in self.owned_objects:
                         released.extend(self._release_object_members(local, self.owned_objects[local.name], local.loc))
                     else:
                         released.extend(self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(local.name), object_element=self.owned_object_arrays.get(local.name)))
@@ -3111,7 +3123,8 @@ class _Lowerer(
                         temp = hir.ExpressedIdentifier(item.loc, value.type if isinstance(value.type, str) else 'int64', self._new_result_name())
                         items.append(hir.Declare(item.loc, ty.VOID_TYPE, 'let', temp.name, temp.type, value))
                         value = temp
-                    items.extend(releases(live))
+                    moved = value.name if isinstance(value, hir.ExpressedIdentifier) and value.name in self.owned_strings else None
+                    items.extend(releases(live, moved))
                     items.extend(exit_statements)
                     items.append(replace(item, item=value))
                 elif isinstance(item, (hir.Break, hir.Continue)):
@@ -3178,76 +3191,83 @@ class _Lowerer(
                     payload = ty.optional_payload(self.current_optional_result.type)
                     if payload is None:
                         raise TypeError('INTERNAL ERROR: missing optional result payload')
-                    items.extend(
-                        self._optional_write(
-                            replace(self.current_optional_result, type='int64'),
-                            item,
-                            payload,
-                        )
-                    )
-                    items.append(
-                        hir.Return(
-                            item.loc,
-                            ty.BOTTOM_TYPE,
-                            hir.Void(item.loc, ty.VOID_TYPE),
-                        )
-                    )
+                    items.extend(self._lower_result_statements(lambda: [
+                        *self._optional_write(replace(self.current_optional_result, type='int64'), item, payload),
+                        hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
+                    ]))
                     continue
                 if self.current_object_result is not None:
-                    items.extend(self._object_result_write(item))
+                    items.extend(self._lower_result_statements(lambda: self._object_result_write(item)))
                     continue
                 if self.current_array_result is not None:
-                    items.extend(self._array_result_write(item))
+                    items.extend(self._lower_result_statements(lambda: self._array_result_write(item)))
                     continue
                 if self.current_string_result is not None:
-                    items.extend(self._string_result_write(item))
+                    items.extend(self._lower_result_statements(lambda: self._string_result_write(item)))
                     continue
                 if self.current_union_result is not None:
-                    items.extend(self._union_result_write(item))
+                    items.extend(self._lower_result_statements(lambda: self._union_result_write(item)))
                     continue
                 if self.current_dynamic_array_result is not None:
-                    items.extend(self._dynamic_array_result_write(item))
+                    items.extend(self._lower_result_statements(lambda: self._dynamic_array_result_write(item)))
                     continue
-                if self._is_string_valued(item.type) and self._has_arena() and self._string_storage(item) == 'element':
-                    # an element of a local container, released with it at exit: the caller gets its own copy
-                    prelude, value = self._escaping_string_value(item)
-                    items.extend(prelude)
-                    items.append(hir.Return(item.loc, ty.BOTTOM_TYPE, value))
+                if self._is_string_valued(item.type) and self._has_arena():
+                    distributed = self._distributed_return(item)
+                    if distributed is not None:
+                        items.extend(self._lower_statement(distributed))
+                        continue
+                    items.extend(self._lower_result_expression(item, self._returned_string_value))
                     continue
-                prelude, value = self._extract_expression(item)
-                items.extend(prelude)
-                items.append(hir.Return(value.loc, ty.BOTTOM_TYPE, value))
+                items.extend(self._lower_result_expression(item, self._extract_expression))
             return replace(node, type=ty.BOTTOM_TYPE, items=items)
         if self.current_optional_result is not None:
             payload = ty.optional_payload(self.current_optional_result.type)
             if payload is None:
                 raise TypeError('INTERNAL ERROR: missing optional result payload')
-            statements = [
-                *self._optional_write(
-                    replace(self.current_optional_result, type='int64'),
-                    node,
-                    payload,
-                ),
-                hir.Return(
-                    node.loc,
-                    ty.BOTTOM_TYPE,
-                    hir.Void(node.loc, ty.VOID_TYPE),
-                ),
-            ]
+            statements = self._lower_result_statements(lambda: [
+                *self._optional_write(replace(self.current_optional_result, type='int64'), node, payload),
+                hir.Return(node.loc, ty.BOTTOM_TYPE, hir.Void(node.loc, ty.VOID_TYPE)),
+            ])
         elif self.current_object_result is not None:
-            statements = self._object_result_write(node)
+            statements = self._lower_result_statements(lambda: self._object_result_write(node))
         elif self.current_array_result is not None:
-            statements = self._array_result_write(node)
+            statements = self._lower_result_statements(lambda: self._array_result_write(node))
         elif self.current_string_result is not None:
-            statements = self._string_result_write(node)
+            statements = self._lower_result_statements(lambda: self._string_result_write(node))
         elif self.current_union_result is not None:
-            statements = self._union_result_write(node)
+            statements = self._lower_result_statements(lambda: self._union_result_write(node))
         elif self.current_dynamic_array_result is not None:
-            statements = self._dynamic_array_result_write(node)
+            statements = self._lower_result_statements(lambda: self._dynamic_array_result_write(node))
+        elif self._is_string_valued(node.type) and self._has_arena():
+            distributed = self._distributed_return(node)
+            if distributed is not None:
+                statements = self._lower_statement(distributed)
+            else:
+                statements = self._lower_result_expression(node, self._returned_string_value)
         else:
-            prelude, value = self._extract_expression(node)
-            statements = [*prelude, hir.Return(value.loc, ty.BOTTOM_TYPE, value)]
+            statements = self._lower_result_expression(node, self._extract_expression)
         return hir.Block(node.loc, ty.BOTTOM_TYPE, statements, True)
+
+    def _lower_result_statements(self, produce) -> list[hir.AST]:
+        """An implicit result written through a result cell: the statements it
+        takes, with the temporaries they made given back before the return."""
+        outer = self.statement_temporaries
+        self.statement_temporaries = []
+        try:
+            produced = produce()
+        finally:
+            temporaries, self.statement_temporaries = self.statement_temporaries, outer
+        return self._with_temporaries_released(produced, temporaries)
+
+    def _lower_result_expression(self, item: hir.AST, extract) -> list[hir.AST]:
+        """An implicit result: its value, then the statement's temporaries given back, then the return."""
+        outer = self.statement_temporaries
+        self.statement_temporaries = []
+        try:
+            prelude, value = extract(item)
+        finally:
+            temporaries, self.statement_temporaries = self.statement_temporaries, outer
+        return self._with_temporaries_released([*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, value)], temporaries)
 
     @classmethod
     def _contains_nonlocal_exit(cls, node: hir.AST) -> bool:
@@ -3281,7 +3301,51 @@ class _Lowerer(
         return False
 
     def _lower_statement(self, node: hir.AST) -> list[hir.AST]:
-        """Return target statements, inserting expression-extraction preludes."""
+        """Return target statements, inserting expression-extraction preludes,
+        and giving back the statement's string temporaries after it."""
+        outer = self.statement_temporaries
+        self.statement_temporaries = []
+        try:
+            lowered = self._lower_statement_inner(node)
+        finally:
+            temporaries, self.statement_temporaries = self.statement_temporaries, outer
+        return self._with_temporaries_released(lowered, temporaries)
+
+    def _with_temporaries_released(self, lowered: list[hir.AST], temporaries: list[tuple[str, hir.ExpressedIdentifier]]) -> list[hir.AST]:
+        """Append the releases of a statement's string temporaries — a call result
+        nothing keeps (`printl(f(x))`, `g(f(x))`), a literal's element copies
+        (`[a b].join`) — before a `return`/`break`/`continue` that ends it."""
+        if not temporaries:
+            return lowered
+        # the temporaries are declared (empty) at the statement's top and assigned
+        # where they arise — inside a short-circuit's or a later arm's block too —
+        # so the releases below read a valid, possibly still empty, word
+        declarations = [hir.Declare(value.loc, ty.VOID_TYPE, 'let', value.name, 'int64', self._int64_literal(value.loc, 0)) for _kind, value in temporaries]
+        releases: list[hir.AST] = []
+        for kind, value in temporaries:
+            if kind == 'string':
+                releases.append(self._release_string_by_owner(value, value.loc))
+            else:
+                present = self._typed_equality(value, self._int64_literal(value.loc, 0), 'int64', value.loc)
+                releases.append(hir.Flow(value.loc, ty.VOID_TYPE, [hir.IfArm(value.loc, ty.VOID_TYPE, present, hir.Block(value.loc, ty.VOID_TYPE, [], True))], hir.Block(value.loc, ty.VOID_TYPE, self._release_string_elements(value, value.loc), True)))
+        if lowered and isinstance(lowered[-1], (hir.Return, hir.Break, hir.Continue)):
+            last = lowered[-1]
+            if isinstance(last, hir.Return) and last.item is not None and not isinstance(last.item, (hir.ExpressedIdentifier, hir.Integer, hir.Bool, hir.Void)):
+                # the returned value may read a temporary: compute it first
+                temp = hir.ExpressedIdentifier(last.loc, last.item.type if isinstance(last.item.type, str) else 'int64', self._new_result_name())
+                return [*declarations, *lowered[:-1], hir.Declare(last.loc, ty.VOID_TYPE, 'let', temp.name, temp.type, last.item), *releases, replace(last, item=temp)]
+            return [*declarations, *lowered[:-1], *releases, last]
+        return [*declarations, *lowered, *releases]
+
+    def _consume_string_value(self, node: hir.AST) -> None:
+        """A binding, a return, or a store takes this string call's result over: not a temporary."""
+        node = self._unwrap_transparent(node)
+        while isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and self._is_string_valued(node.type):
+            node = self._unwrap_transparent(node.expr)   # `xs as string` is a call inside a cast
+        if isinstance(node, hir.FunctionCall):
+            self.consumed_string_values.add(id(node))
+
+    def _lower_statement_inner(self, node: hir.AST) -> list[hir.AST]:
         if isinstance(node, hir.Suppress):
             return self._lower_statement(node.item)
         if isinstance(node, (hir.ScopeMetatag, hir.Assert)):
@@ -3406,7 +3470,12 @@ class _Lowerer(
                 # a literal or a call result: storage this local owns (a
                 # `bytes as …` view over a string's data is not: it borrows)
                 self._note_owned_array(node, declared_type)
-            prelude, expr = self._extract_expression(node.expr)
+            if node.binding_id is not None and node.binding_id in self.owning_string_bindings and not self.lowering_module_startup:
+                self.owned_strings.add(node.name)   # a call's result: released by its owner word at scope exit
+            if self._is_string_valued(declared_type) and self._has_arena():
+                prelude, expr = self._kept_string_value(node.expr)   # the binding keeps a call's result
+            else:
+                prelude, expr = self._extract_expression(node.expr)
             annotation = (
                 'int64'
                 if isinstance(
@@ -3593,7 +3662,19 @@ class _Lowerer(
                     )
                 statements.extend(self._optional_write(cell, value, payload))
                 return statements
-            prelude, value = self._extract_expression(node.value)
+            if self._is_string_valued(node.target.type) and self._has_arena():
+                prelude, value = self._kept_string_value(node.value)   # the binding keeps a call's result
+            else:
+                prelude, value = self._extract_expression(node.value)
+            if node.target.name in self.owned_strings and self._is_string_valued(node.target.type):
+                # an owning string local: the value it held goes back (after the new one is computed)
+                fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'assigned').name)
+                prelude = [
+                    *prelude,
+                    hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', value),
+                    self._release_string_by_owner(replace(node.target, type='int64'), node.loc),
+                ]
+                value = fresh
             assignment = replace(node, value=value)
             place_cell = (
                 self.current_place_parameter_cells.get(node.target.binding_id)
@@ -3651,9 +3732,11 @@ class _Lowerer(
                 ]
             if node.item is None:
                 return [node]
-            if self._is_string_valued(node.item.type) and self._has_arena() and self._string_storage(node.item) == 'element':
-                # an element of a container, released with it: the caller gets its own copy
-                prelude, item = self._escaping_string_value(node.item)
+            if self._is_string_valued(node.item.type) and self._has_arena():
+                distributed = self._distributed_return(node.item)
+                if distributed is not None:
+                    return self._lower_statement(distributed)
+                prelude, item = self._returned_string_value(node.item)
                 return [*prelude, replace(node, item=item)]
             prelude, item = self._extract_expression(node.item)
             return [*prelude, replace(node, item=item)]
@@ -4320,6 +4403,12 @@ class _Lowerer(
                 )
                 return [*prelude, *place_postlude], replace(result, type=node.type)
             call = replace(node, func=func, pos_args=pos_args, kw_args=kw_args)
+            if self._is_named_string_call(node) and id(node) not in self.consumed_string_values and not self.lowering_module_startup and not place_postlude:
+                # a string result nothing keeps (an argument, a receiver, a part): a
+                # temporary of this statement, given back after it by its owner word
+                temp = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'temp').name)
+                self.statement_temporaries.append(('string', temp))   # declared at the statement's top (`_with_temporaries_released`)
+                return [*prelude, hir.Assign(node.loc, ty.VOID_TYPE, temp, '=', call)], replace(temp, type=node.type)
             if self._is_eager_bool_logical_call(call):
                 eager_args: list[hir.AST] = []
                 for arg in call.pos_args:

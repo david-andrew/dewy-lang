@@ -194,16 +194,29 @@ class _FlowLowering:
         prelude: list[hir.AST] = []
         arms: list[hir.IfArm | hir.LoopArm] = []
         for index, arm in enumerate(node.arms):
-            condition_prelude, condition = self._prepare_condition(arm.condition)
-            if condition_prelude and isinstance(arm, hir.LoopArm):
+            # the condition's string temporaries (`loop f(x).length >? 0`, `else if
+            # p(path).suffix =? ".dewy"`) are released where the condition runs: in a
+            # loop's body after every test, in the nested `else` of a later arm, or
+            # with the statement for a first arm
+            outer_temporaries = self.statement_temporaries
+            self.statement_temporaries = []
+            try:
+                condition_prelude, condition = self._prepare_condition(arm.condition)
+            finally:
+                condition_temporaries, self.statement_temporaries = self.statement_temporaries, outer_temporaries
+            if (condition_prelude or condition_temporaries) and isinstance(arm, hir.LoopArm):
                 # A loop condition that needs statements (`loop … and f(text[i])`):
                 # they must run before every test, so the loop becomes
                 # `loop true { statements; if not cond { break }; body }`
                 # (`continue` returns to the top and re-tests, as it should).
                 body = self._lower_loop_body(arm)
                 loc = arm.condition.loc
+                tested = hir.ExpressedIdentifier(loc, 'bool', self._new_string_temp(loc, 'bool', 'loop_test').name)
+                declarations_and_releases = self._with_temporaries_released([], condition_temporaries)
+                declarations = [item for item in declarations_and_releases if isinstance(item, hir.Declare)]
+                releases = [item for item in declarations_and_releases if not isinstance(item, hir.Declare)]
                 unary_type = ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', [])
-                negated = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, unary_type, '__not__'), [condition], {})
+                negated = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, unary_type, '__not__'), [tested], {})
                 exit_test = hir.Flow(
                     loc, ty.VOID_TYPE,
                     [hir.IfArm(loc, ty.VOID_TYPE, negated, hir.Block(loc, ty.VOID_TYPE, [hir.Break(loc, ty.BOTTOM_TYPE)], True))],
@@ -213,20 +226,28 @@ class _FlowLowering:
                 arms.append(replace(
                     arm,
                     condition=hir.Bool(loc, 'bool', True),
-                    body=hir.Block(arm.body.loc, ty.VOID_TYPE, [*condition_prelude, exit_test, *body_items], True),
+                    body=hir.Block(arm.body.loc, ty.VOID_TYPE, [*declarations, *condition_prelude, hir.Declare(loc, ty.VOID_TYPE, 'let', tested.name, 'bool', condition), *releases, exit_test, *body_items], True),
                 ))
                 continue
-            if condition_prelude:
+            if condition_prelude or condition_temporaries:
                 if index > 0:
                     # A later arm whose condition needs statements (a match
                     # arm reading a field of the narrowed scrutinee): the rest
                     # of the chain becomes a nested flow in the `else`, where
-                    # those statements can run after the earlier tests failed.
+                    # those statements can run after the earlier tests failed
+                    # (this attempt's temporaries are dropped: the nested
+                    # lowering makes its own, released inside the `else`).
                     rest = replace(node, arms=list(node.arms[index:]))
-                    nested_prelude, nested = self._lower_flow(rest, target=target)
-                    default = hir.Block(node.loc, ty.VOID_TYPE, [*nested_prelude, nested], True)
+                    outer_temporaries = self.statement_temporaries
+                    self.statement_temporaries = []
+                    try:
+                        nested_prelude, nested = self._lower_flow(rest, target=target)
+                    finally:
+                        nested_temporaries, self.statement_temporaries = self.statement_temporaries, outer_temporaries
+                    default = hir.Block(node.loc, ty.VOID_TYPE, self._with_temporaries_released([*nested_prelude, nested], nested_temporaries), True)
                     return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
                 prelude.extend(condition_prelude)
+                self.statement_temporaries.extend(condition_temporaries)   # a first arm's: the statement's own
             if isinstance(arm, hir.LoopArm) and target is None:
                 body = self._lower_loop_body(arm)
             else:
@@ -885,6 +906,8 @@ class _FlowLowering:
         members = ty.enum_members(target.type)
         if members is not None:
             return self._enum_word_of(item, members)
+        if self._is_string_valued(item.type):
+            return self._kept_string_value(item)   # the flow's temporary keeps a call's result
         return self._extract_expression(item)
 
     def _placeholder(self, node: hir.AST) -> hir.AST:

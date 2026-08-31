@@ -1,0 +1,42 @@
+# String locals own their values. A local whose every value is a named
+# function's result (or a literal, a view, an interpolation, a join) releases
+# it by its owner word at scope exit; `return s` moves it to the caller, a
+# return that only reaches it (`s.trim`) copies; assigning over it releases
+# the old value first. Every string a function hands back is the caller's:
+# a parameter (or a global) comes back as a fresh view of its bytes, and a
+# call result nothing keeps — an argument, a receiver, a `[a b].join`
+# literal's element copies — is released after its statement. Building
+# strings through calls in a loop therefore runs in constant memory.
+let join2 = (a:string b:string):>string => [a b].join"-"
+let pick = (text:string flag:bool):>string => if flag text else text.trim
+let first_word = (text:string):>string => {
+    match text.find" " { i:int64 => { if i >=? 1 and i <? text.length { return text[0..i) } }  <undefined> => {} }
+    return text
+}
+let shout = (text:string):>string => {
+    let loud:string = join2(text "!")
+    return loud                              # moved out
+}
+let inner = (text:string):>string => {
+    let s:string = join2(text "x")
+    return pick(s true)                      # a view of `s`, which dies here: copied
+}
+let round = (n:int64):>int64 => {
+    let s:string = join2("ab" "cd")
+    let t:string = pick(s true)              # a view of s
+    let u:string = pick(s false)             # a view from trim, twice removed
+    let w:string = first_word("hello world")
+    let v:string = first_word(s)             # the parameter itself: a view
+    s = join2(s "x")                         # the old value goes back first
+    let x:string = if n % 2 =? 0 join2("p" "q") else "lit"
+    let y:string = shout(inner(" hi "))      # nested call results: temporaries
+    let total:int64 = s.length + t.length + u.length + w.length + v.length + y.length   # 7+5+5+5+5+7 = 34
+    if x =? "lit" { total += 1 }
+    return total
+}
+let main = ():>int64 => {
+    let rounds:int64 = 0
+    let total:int64 = 0
+    loop rounds <? 300 { total = round(rounds)  rounds += 1 }   # the last round is odd: 36
+    return total + 6                                              # 36 + 6 = 42
+}

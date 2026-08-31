@@ -143,6 +143,8 @@ class _OptionalLowering:
                 self._intrinsic_call('__store_u8__', [tag, cell], ty.VOID_TYPE, value.loc),
                 self._optional_store_payload(payload_value, cell, payload, value.loc),
             ]
+        if self._is_string_valued(value.type):
+            self._consume_string_value(value)   # the cell keeps a call's result
         prelude, payload_value = self._extract_expression(value)
         return [
             *prelude,
@@ -735,6 +737,8 @@ class _OptionalLowering:
             and ty.runtime_union_members(value.type) == members
         ):
             self.union_result_destinations[id(value)] = cell
+            if self._is_string_valued(value.type):
+                self._consume_string_value(value)   # the cell keeps a call's result
             prelude, result = self._extract_expression(value)
             if id(value) in self.union_result_destinations:
                 del self.union_result_destinations[id(value)]
@@ -845,6 +849,8 @@ class _OptionalLowering:
             # a union cell in an object or array may outlive the frame
             prelude, payload_value = self._escaping_string_value(value)
         else:
+            if self._is_string_valued(value.type):
+                self._consume_string_value(value)   # the cell keeps a call's result
             prelude, payload_value = self._extract_expression(value)
         return [
             *prelude,

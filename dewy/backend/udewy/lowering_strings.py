@@ -1558,6 +1558,7 @@ class _StringLowering:
                 self._int64_literal(loc, 0),
                 loc,
             ),
+            self._store_i64_field(result_word, STRING_OWNER_OFFSET, self._int64_literal(loc, 0), loc),   # a frame block: nobody releases it
             replace(
                 node,
                 type=ty.VOID_TYPE,
@@ -2340,6 +2341,11 @@ class _StringLowering:
         prelude, array = self._extract_expression(method.array)
         statements.extend(prelude)
         array_word = replace(array, type='int64') if isinstance(array, hir.ExpressedIdentifier) else array
+        if isinstance(self._unwrap_transparent(method.array), hir.ArrayLiteral) and isinstance(array_word, hir.ExpressedIdentifier) and self._has_arena():
+            # `[a b].join sep`: the literal is a temporary whose element copies die with the join
+            alias = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'join_literal').name)
+            statements.append(hir.Assign(loc, ty.VOID_TYPE, alias, '=', array_word))
+            self.statement_temporaries.append(('string_elements', alias))
         count = declare('join_count', self._load_i64_field(array_word, ARRAY_LENGTH_OFFSET, loc))
         data = declare('join_data', self._load_i64_field(array_word, ARRAY_DATA_OFFSET, loc))
         separator_arg = self._optional_method_argument(node, 'sep')
@@ -2528,6 +2534,35 @@ class _StringLowering:
             return self._intrinsic_call('__static_alloca__' if self.lowering_module_startup else '__alloca__', [size], 'int64', loc)
         return self._arena_allocation(size, loc)
 
+    def _with_descriptor_owners_zeroed(self, body: hir.AST) -> hir.AST:
+        """Every string descriptor built on the stack (`__alloca__(48)`, whose bytes are
+        not zeroed) gets its owner word cleared right after its declaration, so a
+        release by owner word (an owning local's, a temporary's) leaves it alone."""
+        def is_descriptor_allocation(expr: hir.AST) -> bool:
+            return (
+                isinstance(expr, hir.FunctionCall)
+                and isinstance(expr.func, hir.ExpressedIdentifier)
+                and expr.func.name in ('__alloca__', '__static_alloca__')
+                and len(expr.pos_args) == 1
+                and isinstance(expr.pos_args[0], hir.Integer)
+                and int(expr.pos_args[0].value) == STRING_DESCRIPTOR_SIZE
+            )
+
+        def walk(node: hir.AST) -> hir.AST:
+            if isinstance(node, hir.Block):
+                items: list[hir.AST] = []
+                for item in node.items:
+                    items.append(walk(item))
+                    if isinstance(item, hir.Declare) and is_descriptor_allocation(item.expr):
+                        word = hir.ExpressedIdentifier(item.loc, 'int64', item.name)
+                        items.append(self._store_i64_field(word, STRING_OWNER_OFFSET, self._int64_literal(item.loc, 0), item.loc))
+                return replace(node, items=items)
+            if isinstance(node, hir.Flow):
+                return replace(node, arms=[replace(arm, body=walk(arm.body)) for arm in node.arms], default=walk(node.default) if node.default is not None else None)
+            return node
+
+        return walk(body)
+
     def _frame_region(self, loc: Span) -> hir.ExpressedIdentifier:
         """The current function's region (declared at entry, released at every exit, on first use)."""
         if self.frame_region is None:
@@ -2607,10 +2642,11 @@ class _StringLowering:
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
         return self._reached_string_nodes(self._returned_string_expressions(literal), candidates, params)
 
-    def _reached_string_nodes(self, roots: list[hir.AST], candidates: dict[int, list[hir.AST]], params: set[int | None]) -> set[int]:
+    def _reached_string_nodes(self, roots: list[hir.AST], candidates: dict[int, list[hir.AST]], params: set[int | None], identifiers: list[hir.ExpressedIdentifier] | None = None) -> set[int]:
         """Every expression the string values of ``roots`` may come from: through casts,
         views' sources, locals' initializers and assigned values, string arguments of
-        calls (a callee may return an argument's descriptor), flows' arms, and parts."""
+        calls (a callee may return an argument's descriptor), flows' arms, and parts.
+        The identifiers met on the way are appended to ``identifiers`` when given."""
         reached: set[int] = set()
 
         def mark(expr: hir.AST) -> None:
@@ -2623,6 +2659,8 @@ class _StringLowering:
             elif isinstance(expr, (hir.StringSlice, hir.StringIndex)):
                 mark(expr.string)
             elif isinstance(expr, hir.ExpressedIdentifier):
+                if identifiers is not None:
+                    identifiers.append(expr)
                 if expr.binding_id is not None and expr.binding_id not in params:
                     for candidate in candidates.get(expr.binding_id, []):
                         mark(candidate)
@@ -2714,6 +2752,254 @@ class _StringLowering:
 
         visit(literal.body)
         return escapes
+
+    def _owning_string_locals(self, literal: hir.FunctionLiteral) -> set[int]:
+        """String locals that own their value: every value they receive is a named
+        function's result (static, or arena storage the caller owns — a returned
+        parameter comes back as a view, an element as a copy) or a literal; no
+        string assignment to another binding reaches them (`t = s` in a loop would
+        outlive them); no nested function literal captures them. They are released
+        by their owner word at scope exit, moved out by `return s`, copied when a
+        return only reaches them."""
+        candidates = self._local_initializers(literal)
+        params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
+        declared: dict[int, list[hir.AST]] = {}
+        captured: set[int] = set()
+        assigned: list[hir.AST] = []
+
+        def fresh(expr: hir.AST) -> bool:
+            expr = self._unwrap_transparent(expr)
+            if isinstance(expr, hir.String) or isinstance(expr.type, ty.StringLiteralType):
+                return True
+            if isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
+                return fresh(expr.expr) if self._is_string_valued(expr.expr.type) else False
+            if isinstance(expr, hir.FunctionCall):
+                if isinstance(expr.func, hir.ArrayMethod):
+                    return expr.func.name == 'join'   # a region string (owner 0) or, returned, an arena one (1)
+                return isinstance(expr.func, hir.ExpressedIdentifier) and not (expr.func.name.startswith('__') and expr.func.name.endswith('__'))
+            if isinstance(expr, (hir.StringSlice, hir.StringIndex, hir.InterpolatedString)):
+                return True   # a view (region: 0; returned: an arena view, 2) or a frame interpolation (0)
+            if isinstance(expr, hir.Flow):
+                return all(fresh(arm.body) for arm in expr.arms) and expr.default is not None and fresh(expr.default)
+            if isinstance(expr, hir.Block):
+                return bool(expr.items) and fresh(expr.items[-1])
+            return False
+
+        def walk(node: object, nested: bool) -> None:
+            if isinstance(node, hir.FunctionLiteral) and node is not literal:
+                walk(node.body, True)
+                return
+            if isinstance(node, hir.Declare) and node.binding_id is not None and not nested and self._is_string_valued(node.annotation or node.expr.type):
+                declared.setdefault(node.binding_id, [])
+            if isinstance(node, hir.ExpressedIdentifier) and nested and node.binding_id is not None:
+                captured.add(node.binding_id)
+            if isinstance(node, hir.Assign) and self._is_string_valued(node.target.type):
+                assigned.append(node)
+            if isinstance(node, hir.AST):
+                for field_ in dataclasses.fields(node):
+                    value = getattr(node, field_.name)
+                    for child in (value if isinstance(value, (list, tuple)) else [value]):
+                        if isinstance(child, hir.AST):
+                            walk(child, nested)
+                        elif isinstance(child, hir.ObjectField):
+                            walk(child.value, nested)
+                        elif isinstance(child, dict):
+                            for item in child.values():
+                                walk(item, nested)
+
+        walk(literal.body, False)
+        owning = {
+            binding for binding in declared
+            if binding not in captured and binding not in params
+            and all(fresh(value) for value in candidates.get(binding, []))
+        }
+        for assign in assigned:
+            # a string assigned to another binding must not be released before it
+            reached: list[hir.ExpressedIdentifier] = []
+            self._reached_string_nodes([assign.value], candidates, params, reached)
+            for identifier in reached:
+                if identifier.binding_id != assign.target.binding_id:
+                    owning.discard(identifier.binding_id)
+        return owning
+
+    def _distributed_return(self, item: hir.AST) -> hir.AST | None:
+        """`return if c a else b` as `if c { return a } else { return b }`: each arm's
+        string is then handed to the caller by its own rule (a parameter as a view,
+        a call result as it is, an owning local's copy)."""
+        expr = self._unwrap_transparent(item)
+        if not (isinstance(expr, hir.Flow) and expr.default is not None and expr.arms and all(isinstance(arm, hir.IfArm) for arm in expr.arms)):
+            return None
+
+        def returning(body: hir.AST) -> hir.AST:
+            if isinstance(body, hir.Block) and body.items:
+                last = body.items[-1]
+                if isinstance(last, hir.Return):
+                    return body
+                return replace(body, type=ty.BOTTOM_TYPE, items=[*body.items[:-1], hir.Return(last.loc, ty.BOTTOM_TYPE, last)])
+            if isinstance(body, hir.Return):
+                return body
+            return hir.Return(body.loc, ty.BOTTOM_TYPE, body)
+
+        return replace(expr, type=ty.VOID_TYPE, arms=[replace(arm, body=returning(arm.body)) for arm in expr.arms], default=returning(expr.default))
+
+    def _string_sources(self, item: hir.AST) -> set[tuple[str, int | None]]:
+        """Where a string value's descriptor comes from, precisely: `static`, `fresh`
+        (a view, an interpolation, a decode: an arena descriptor of this frame's),
+        `call` (a named function's result — caller-owned by convention, but maybe a
+        view of an argument's bytes), `param`, `global`, `element` (a container's),
+        `owning` (an owning local's, by binding), or `unknown`."""
+        found: set[tuple[str, int | None]] = set()
+        literal = self.current_literal
+        params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]} if literal is not None else set()
+        seen: set[int] = set()
+
+        def visit(expr: hir.AST, viewed: bool) -> None:
+            expr = self._unwrap_transparent(expr)
+            if id(expr) in seen:
+                return
+            seen.add(id(expr))
+            if isinstance(expr, hir.String) or isinstance(expr.type, ty.StringLiteralType):
+                found.add(('static', None))
+            elif isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
+                if self._is_string_valued(expr.expr.type):
+                    visit(expr.expr, viewed)
+                else:
+                    found.add(('fresh', None))
+            elif isinstance(expr, (hir.StringSlice, hir.StringIndex)):
+                visit(expr.string, True)   # a fresh descriptor over its source's bytes
+            elif isinstance(expr, hir.InterpolatedString):
+                found.add(('fresh', None))
+            elif isinstance(expr, hir.FunctionCall):
+                found.add(('call', id(expr)) if self._is_named_string_call(expr) else ('unknown', None))
+            elif isinstance(expr, hir.Flow):
+                for arm in expr.arms:
+                    visit(arm.body, viewed)
+                if expr.default is not None:
+                    visit(expr.default, viewed)
+            elif isinstance(expr, hir.Block):
+                if expr.items:
+                    visit(expr.items[-1], viewed)
+            elif isinstance(expr, (hir.Index, hir.MemberAccess)):
+                found.add(('element', None))
+            elif isinstance(expr, hir.ExpressedIdentifier):
+                if expr.binding_id is None:
+                    found.add(('unknown', None))
+                elif expr.binding_id in params:
+                    found.add(('fresh' if viewed else 'param', None))
+                elif expr.binding_id in self.owning_string_bindings:
+                    found.add(('owning', expr.binding_id))
+                elif expr.binding_id in self.array_element_targets:
+                    found.add(('element', None))
+                else:
+                    binding = self.binding_by_semantic_id.get(expr.binding_id)
+                    if binding is not None and binding.owner_function is None:
+                        found.add(('fresh' if viewed else 'global', None))
+                        return
+                    candidates = self.local_initializers.get(expr.binding_id, [])
+                    if not candidates:
+                        found.add(('unknown', None))
+                    for candidate in candidates:
+                        visit(candidate, viewed)
+            else:
+                found.add(('unknown', None))
+
+        visit(item, False)
+        return found
+
+    def _is_named_string_call(self, node: hir.AST) -> bool:
+        """A call of a named Dewy function returning a string: its result is caller-owned (static, fresh, or a view)."""
+        node = self._unwrap_transparent(node)
+        return (
+            isinstance(node, hir.FunctionCall)
+            and isinstance(node.func, hir.ExpressedIdentifier)
+            and not (node.func.name.startswith('__') and node.func.name.endswith('__'))   # not an intrinsic
+            and id(node) not in self.string_result_call_targets   # a bounded result block is frame storage
+            and self._is_string_valued(node.type)
+            and self._has_arena()
+        )
+
+    def _copy_if_view(self, descriptor: hir.ExpressedIdentifier, loc: Span) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Take a caller-owned string result over: as it is when its data is its
+        own (owner 0 static, 1 fresh); copied — and the view's descriptor given
+        back — when it is a view (owner 2) of bytes that may belong to a string
+        released before the taker is done."""
+        out = self._new_string_temp(loc, 'int64', 'taken')
+        length = self._new_string_temp(loc, 'int64', 'taken_length')
+        copy, copied = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc)
+        return [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', out.name, 'int64', descriptor),
+            hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                loc, ty.VOID_TYPE,
+                self._typed_equality(self._load_i64_field(descriptor, STRING_OWNER_OFFSET, loc), self._int64_literal(loc, 2), 'int64', loc),
+                hir.Block(loc, ty.VOID_TYPE, [
+                    hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(descriptor, STRING_BYTE_LENGTH_OFFSET, loc)),
+                    *copy,
+                    hir.Assign(loc, ty.VOID_TYPE, out, '=', replace(copied, type='int64')),
+                    self._arena_release_call(descriptor, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+                ], True),
+            )], None),
+        ], out
+
+    def _kept_string_value(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        """A string value a binding keeps: a named call's result is taken over —
+        copied when it is a view and the statement made temporaries the view may
+        point into (`let x = f(g(s))`: `g`'s result dies after the statement)."""
+        self._consume_string_value(node)
+        prelude, value = self._extract_expression(node)
+        if not self._is_named_string_call(node) or not self.statement_temporaries:
+            return prelude, value
+        statements = list(prelude)
+        if isinstance(value, hir.ExpressedIdentifier):
+            descriptor = replace(value, type='int64')
+        else:
+            descriptor = self._new_string_temp(node.loc, 'int64', 'kept')
+            statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', value))
+        copy, out = self._copy_if_view(descriptor, node.loc)
+        return [*statements, *copy], out
+
+    def _returned_string_value(self, item: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        """A string handed to the caller: static, or arena storage the caller owns.
+        A container's element, or an owning local a return only reaches (`s.trim`,
+        `let r = s; return r`), is copied — its owner releases it at exit; the owning
+        local returned as itself is moved (its exit release skips it); a call's
+        result that may be a view of an owning local's bytes (`pick(s true)`) is
+        copied when its owner word says view; a parameter's or a global's string
+        comes back as a fresh view of the same bytes (the caller may release the
+        view; the bytes stay the owner's)."""
+        source = self._unwrap_transparent(item)
+        if isinstance(source, hir.ExpressedIdentifier) and source.binding_id in self.owning_string_bindings:
+            return self._extract_expression(item)   # moved: `_insert_releases` skips it at this return
+        self._consume_string_value(item)   # the caller takes a call's result over
+        kinds = self._string_sources(item)
+        if any(kind in ('owning', 'element', 'unknown') for kind, _ in kinds):
+            return self._escaping_string_value(item)
+        literal = self.current_literal
+        params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]} if literal is not None else set()
+        prelude, value = self._extract_expression(item)
+        loc = item.loc
+        statements = list(prelude)
+        if isinstance(value, hir.ExpressedIdentifier):
+            descriptor: hir.ExpressedIdentifier = replace(value, type='int64')
+        else:
+            descriptor = self._new_string_temp(loc, 'int64', 'returned')
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', value))
+        if any(kind == 'call' for kind, _ in kinds):
+            # a callee may hand back a view of an argument: when that argument's bytes
+            # belong to an owning local released at this exit, or to a temporary of
+            # this statement, the view is copied
+            reached: list[hir.ExpressedIdentifier] = []
+            self._reached_string_nodes([item], self.local_initializers, params, reached)
+            if self.statement_temporaries or any(identifier.binding_id in self.owning_string_bindings for identifier in reached):
+                copy, out = self._copy_if_view(descriptor, loc)
+                return [*statements, *copy], out
+        if not any(kind in ('param', 'global') for kind, _ in kinds):
+            return statements, descriptor
+        view = self._new_string_temp(loc, 'int64', 'returned_view')
+        statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', view.name, 'int64', self._arena_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc)))
+        for offset in (STRING_DATA_OFFSET, STRING_BYTE_LENGTH_OFFSET, STRING_BOUNDARIES_OFFSET, STRING_GRAPHEME_LENGTH_OFFSET, STRING_START_OFFSET):
+            statements.append(self._store_i64_field(view, offset, self._load_i64_field(descriptor, offset, loc), loc))
+        statements.append(self._store_i64_field(view, STRING_OWNER_OFFSET, self._int64_literal(loc, 2), loc))
+        return statements, view
 
     def _local_initializers(self, literal: hir.FunctionLiteral) -> dict[int, list[hir.AST]]:
         """Every local's initializers and assigned values, by binding (any type: a `match` temporary is an optional)."""
@@ -2836,6 +3122,8 @@ class _StringLowering:
         copied too, since its storage belongs to the caller. Each copy made is
         a `CopyNote` for `dewy analyze`.
         """
+        if self._is_named_string_call(node):
+            self._consume_string_value(node)   # the container takes the result over: not a temporary
         prelude, value = self._extract_expression(node)
         storage = self._string_storage(node)
         if storage == 'static' or not self._has_arena():
@@ -2843,6 +3131,17 @@ class _StringLowering:
         fresh = isinstance(self._unwrap_transparent(node), (hir.FunctionCall, hir.RepresentationCast))
         if storage == 'arena' and fresh:
             return prelude, value   # a join or a decode nobody else holds: the container takes it over
+        if self._is_named_string_call(node):
+            # a named function's result is the caller's: fresh data is taken over as
+            # it is; a view of another string's bytes (a parameter's, an owning local's) is copied
+            statements = list(prelude)
+            if isinstance(value, hir.ExpressedIdentifier):
+                descriptor = replace(value, type='int64')
+            else:
+                descriptor = self._new_string_temp(node.loc, 'int64', 'result')
+                statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', value))
+            copy, out = self._copy_if_view(descriptor, node.loc)
+            return [*statements, *copy], out
         reasons = {
             'frame': 'this string is built in the current frame (an interpolation or a call result), so storing it copies it into the arena',
             'caller': 'this string is a parameter, whose storage belongs to the caller, so storing it copies it into the arena',
@@ -4231,6 +4530,8 @@ class _StringLowering:
             self._int64_literal(node.loc, 1),
             node.type,
             node.loc,
+            frame=self._stays_in_frame(node),   # the region unless a return reaches it (as a slice)
+            node=node,
         )
         return [*prelude, *view_prelude], view
 
