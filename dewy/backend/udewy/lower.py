@@ -51,6 +51,7 @@ from .lowering_objects import _ObjectLowering
 from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
 from .lowering_shared import (
+    LoopRegion,
     CopyNote,
     MoveNote,
     ARRAY_LENGTH_OFFSET,
@@ -242,6 +243,9 @@ class _Lowerer(
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
+        self.loop_regions: list[LoopRegion] = []   # the enclosing loops being lowered, innermost last (`_lower_loop_body`)
+        self.loop_region_headers: list[hir.ExpressedIdentifier] = []   # the loops' regions of this function (declared at entry, released at exit)
+        self.loop_string_escapes: dict[int, set[int]] = {}   # loop body id -> string expressions that reach a binding outside the loop (`_loop_string_escapes`)
         self.returned_string_nodes: set[int] = set()   # string expressions a `return` may hand out (`_returned_string_node_ids`)
         self.array_element_targets: set[int] = set()   # iterator targets over arrays of strings
         self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
@@ -807,8 +811,11 @@ class _Lowerer(
         self.current_literal = analysis_literal
         self.moved_uses = self._compute_moves(analysis_literal)
         self.returned_string_nodes = self._returned_string_node_ids(analysis_literal)
+        self.loop_string_escapes = self._loop_string_escapes(analysis_literal)
         self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.frame_region = None
+        self.loop_regions = []
+        self.loop_region_headers = []
         if default_prologue:
             if isinstance(transformed_body, hir.Block):
                 transformed_body = replace(
@@ -2806,13 +2813,15 @@ class _Lowerer(
         self.lower_loop_depth = 0
 
         lowered = self._lower_function_body_inner(node, rettype)
-        region = self.frame_region
-        exit_statements = [self._region_call('_region_release', [region], node.loc, ty.VOID_TYPE)] if region is not None else []
+        regions = [*([self.frame_region] if self.frame_region is not None else []), *self.loop_region_headers]
+        exit_statements = [self._region_call('_region_release', [region], node.loc, ty.VOID_TYPE) for region in regions]
         lowered = self._insert_releases(lowered, exit_statements)
-        if region is not None and isinstance(lowered, hir.Block):
-            # the region is created on entry (a header from the free list; chunks on first use)
-            lowered = replace(lowered, items=[hir.Declare(node.loc, ty.VOID_TYPE, 'let', region.name, 'int64', self._region_call('_region_new', [], node.loc, 'int64')), *lowered.items])
+        if regions and isinstance(lowered, hir.Block):
+            # the regions are created on entry (a header from the free list; chunks on first use)
+            declarations = [hir.Declare(node.loc, ty.VOID_TYPE, 'let', region.name, 'int64', self._region_call('_region_new', [], node.loc, 'int64')) for region in regions]
+            lowered = replace(lowered, items=[*declarations, *lowered.items])
         self.frame_region = None
+        self.loop_region_headers = []
         if uses_nonlocal_exit:
             declarations = self._loop_signal_declarations(node.loc)
             if isinstance(lowered, hir.Block) and lowered.scoped:

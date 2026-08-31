@@ -200,9 +200,7 @@ class _FlowLowering:
                 # they must run before every test, so the loop becomes
                 # `loop true { statements; if not cond { break }; body }`
                 # (`continue` returns to the top and re-tests, as it should).
-                self.lower_loop_depth += 1
-                body = self._lower_statement_body(arm.body)
-                self.lower_loop_depth -= 1
+                body = self._lower_loop_body(arm)
                 loc = arm.condition.loc
                 unary_type = ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', [])
                 negated = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, unary_type, '__not__'), [condition], {})
@@ -229,15 +227,18 @@ class _FlowLowering:
                     default = hir.Block(node.loc, ty.VOID_TYPE, [*nested_prelude, nested], True)
                     return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
                 prelude.extend(condition_prelude)
-            if isinstance(arm, hir.LoopArm):
-                self.lower_loop_depth += 1
-            body = (
-                self._assign_flow_body(arm.body, target)
-                if target is not None
-                else self._lower_statement_body(arm.body)
-            )
-            if isinstance(arm, hir.LoopArm):
-                self.lower_loop_depth -= 1
+            if isinstance(arm, hir.LoopArm) and target is None:
+                body = self._lower_loop_body(arm)
+            else:
+                if isinstance(arm, hir.LoopArm):
+                    self.lower_loop_depth += 1
+                body = (
+                    self._assign_flow_body(arm.body, target)
+                    if target is not None
+                    else self._lower_statement_body(arm.body)
+                )
+                if isinstance(arm, hir.LoopArm):
+                    self.lower_loop_depth -= 1
             arms.append(replace(arm, condition=condition, body=body))
         default = None
         if node.default is not None:

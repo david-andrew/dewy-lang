@@ -1,0 +1,36 @@
+# Loop-iteration regions: a string a loop body builds that stays within the
+# iteration (a join, a decode, a view that no assignment carries outside the
+# loop) lives in the loop's own region, given back at the end of every
+# iteration (`continue` and `break` included), so string work inside a long
+# loop runs in constant memory. A string assigned to a binding declared
+# outside the loop climbs to the enclosing loop's region, or the function's.
+let scan = (text:string):>int64 => {
+    let total:int64 = 0
+    let round:int64 = 0
+    loop round <? 300 {
+        let best:string = ""
+        let k:int64 = 0
+        loop k <? 4 {
+            k += 1
+            if k =? 2 { continue }
+            let pieces = text.split"-"
+            let joined:string = pieces.join"+"          # iteration-local: the inner loop's region
+            if joined.length >? best.length { best = joined }   # reaches `best`: the outer loop's region
+        }
+        total += best.length                             # 11
+        round += 1
+    }
+    return total
+}
+let main = ():>int64 => {
+    let kept:array<string> = []
+    let i:int64 = 0
+    loop i <? 3 {
+        let joined:string = ["x" "y{i}"].join"-"
+        match joined.find"-" { j:int64 => { if j >=? 1 and j <? joined.length { kept.push(joined[0..j)) } }  <undefined> => {} }   # stored: copied out of the region
+        i += 1
+    }
+    let extra:int64 = 0
+    loop k in kept { extra += k.length }                 # 3
+    return scan("ab-cd-ef-gh") // 300 + extra * 10 + 1   # 11 + 30 + 1 = 42
+}

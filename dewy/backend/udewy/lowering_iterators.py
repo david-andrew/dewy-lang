@@ -100,9 +100,7 @@ class _IteratorLowering:
             '+=',
             self._int64_literal(iterator.loc, 1),
         )
-        self.lower_loop_depth += 1
-        lowered_body = self._lower_statement_body(arm.body)
-        self.lower_loop_depth -= 1
+        lowered_body = self._lower_loop_body(arm)
         body_items = (
             lowered_body.items
             if isinstance(lowered_body, hir.Block)
@@ -455,9 +453,7 @@ class _IteratorLowering:
                 self._bool_binary(token, left, right, node.loc)
             )
         formula = formula_stack[0]
-        self.lower_loop_depth += 1
-        lowered_source = self._lower_statement_body(arm.body)
-        self.lower_loop_depth -= 1
+        lowered_source = self._lower_loop_body(arm)
         source_items = (
             lowered_source.items
             if isinstance(lowered_source, hir.Block)

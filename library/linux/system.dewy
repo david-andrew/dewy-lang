@@ -130,7 +130,9 @@ let _region_alloc = (region:int64 size:int64):>int64 => {
     return cursor
 }
 
-let _region_release = (region:int64):>void => {
+# empty a region (its chunks go back) but keep it usable: a loop's region is
+# reset at the end of every iteration
+let _region_reset = (region:int64):>void => {
     let first_address:int64 = region + 16
     let chunk:int64 = __load_i64__(first_address)
     loop chunk not=? 0 {
@@ -145,6 +147,15 @@ let _region_release = (region:int64):>void => {
         }
         chunk = next
     }
+    __store_i64__(0 region)
+    let end_address:int64 = region + 8
+    __store_i64__(0 end_address)
+    __store_i64__(0 first_address)
+    return void
+}
+
+let _region_release = (region:int64):>void => {
+    _region_reset(region)
     __store_i64__(_region_headers region)
     _region_headers = region
     return void

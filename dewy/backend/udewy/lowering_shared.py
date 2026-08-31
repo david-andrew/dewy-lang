@@ -80,6 +80,15 @@ FIXED_INTEGER_WIDTHS = {
 SIGNED_FIXED_INTS = {'int8', 'int16', 'int32', 'int64'}
 
 @dataclass
+class LoopRegion:
+    """A loop being lowered: the string expressions of its body that reach a
+    binding outside it (those climb to the enclosing region), and the loop's
+    own region once a string of the body is placed there (reset every iteration)."""
+    escaping: set[int]
+    region: hir.ExpressedIdentifier | None = None
+
+
+@dataclass
 class LoweredFunction:
     """One concrete function that the udewy backend must emit at module scope."""
 

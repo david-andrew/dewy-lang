@@ -2377,7 +2377,7 @@ class _StringLowering:
                     '__mul__', separator_length, self._int64_binary('__sub__', count, self._int64_literal(loc, 1), loc), loc,
                 )))], True),
             )], None))
-        out = declare('join_out', self._string_allocation(add(total, self._int64_literal(loc, 1)), loc, frame=frame))
+        out = declare('join_out', self._string_allocation(add(total, self._int64_literal(loc, 1)), loc, frame=frame, node=node))
         cursor = declare('join_cursor', self._int64_literal(loc, 0))
         statements.append(assign(index, self._int64_literal(loc, 0)))
         piece = declare('join_piece', self._int64_literal(loc, 0))
@@ -2403,14 +2403,14 @@ class _StringLowering:
             loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, count, loc), hir.Block(loc, ty.VOID_TYPE, copy_body, True),
         )], None))
         boundaries = declare('join_boundaries', self._string_allocation(
-            self._int64_binary('__mul__', add(total, self._int64_literal(loc, 1)), self._int64_literal(loc, 4), loc), loc, frame=frame,
+            self._int64_binary('__mul__', add(total, self._int64_literal(loc, 1)), self._int64_literal(loc, 4), loc), loc, frame=frame, node=node,
         ))
         segmentation, grapheme_count = self._utf8_segmentation(loc, out, total, boundaries)
         statements.extend(segmentation)
         descriptor = self._new_string_temp(loc, ty.StringType(), 'joined')
         descriptor_word = replace(descriptor, type='int64')
         statements.extend([
-            hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame)),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame, node=node)),
             self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, out, loc),
             self._store_i64_field(descriptor_word, STRING_BYTE_LENGTH_OFFSET, total, loc),
             self._store_i64_field(descriptor_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
@@ -2495,7 +2495,7 @@ class _StringLowering:
             hir.Block(loc, ty.VOID_TYPE, [hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, [assign(valid, hir.Bool(loc, 'bool', False))], True))], True),
         )], None))
         cell = declare('decoded', 'int64', self._optional_allocation(loc))
-        build, descriptor = self._string_from_bytes(data, length, loc, frame=self._stays_in_frame(node))
+        build, descriptor = self._string_from_bytes(data, length, loc, frame=self._stays_in_frame(node), node=node)
         statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
             loc, ty.VOID_TYPE, valid,
             hir.Block(loc, ty.VOID_TYPE, [
@@ -2518,9 +2518,9 @@ class _StringLowering:
     # copy frame strings into the arena already) — comes from the function's
     # frame region, released whole at every exit. Everything a return may
     # reach stays in the process arena, as before.
-    def _string_allocation(self, size: hir.AST, loc: Span, *, frame: bool) -> hir.AST:
+    def _string_allocation(self, size: hir.AST, loc: Span, *, frame: bool, node: hir.AST | None = None) -> hir.AST:
         if frame and not self.lowering_module_startup and self.current_literal is not None and self._has_arena():
-            region = self._frame_region(loc)
+            region = self._region_for_node(node, loc)
             function = next(candidate for candidate in self.functions if candidate.logical_name.endswith('_region_alloc'))
             function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
             return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, function_type, function.symbol), [region, size], {})
@@ -2533,6 +2533,62 @@ class _StringLowering:
         if self.frame_region is None:
             self.frame_region = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'region').name)
         return replace(self.frame_region, loc=loc)
+
+    def _region_for_node(self, node: hir.AST | None, loc: Span) -> hir.ExpressedIdentifier:
+        """The region a frame-only string built by ``node`` lives in: the innermost
+        enclosing loop's (reset every iteration) unless the string reaches a
+        binding outside that loop, climbing outward, else the function's."""
+        if node is not None:
+            for entry in reversed(self.loop_regions):
+                if id(node) in entry.escaping:
+                    continue
+                if entry.region is None:
+                    entry.region = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'loop_region').name)
+                    self.loop_region_headers.append(entry.region)
+                return replace(entry.region, loc=loc)
+        return self._frame_region(loc)
+
+    def _lower_loop_body(self, arm: hir.LoopArm) -> hir.AST:
+        """Lower a loop arm's body inside its own string region: strings the
+        body builds that stay within the iteration are given back at its end
+        (the block's fall-through, `continue`, `break`); the region itself is
+        declared at function entry and released at exit with the frame's."""
+        from .lowering_shared import LoopRegion
+        entry = LoopRegion(self.loop_string_escapes.get(id(arm.body), set()))
+        self.loop_regions.append(entry)
+        self.lower_loop_depth += 1
+        try:
+            lowered = self._lower_statement_body(arm.body)
+        finally:
+            self.lower_loop_depth -= 1
+            self.loop_regions.pop()
+        if entry.region is None:
+            return lowered
+        reset = self._region_call('_region_reset', [replace(entry.region, loc=arm.body.loc)], arm.body.loc, ty.VOID_TYPE)
+
+        def diverges(item: hir.AST) -> bool:
+            return isinstance(item, (hir.Return, hir.Break, hir.Continue))
+
+        def with_resets(node: hir.AST) -> hir.AST:
+            if isinstance(node, hir.Block):
+                items: list[hir.AST] = []
+                for item in node.items:
+                    if isinstance(item, (hir.Break, hir.Continue)):
+                        items.append(reset)   # leaving the iteration early
+                    items.append(with_resets(item))
+                return replace(node, items=items)
+            if isinstance(node, hir.Flow):
+                arms = [arm_ if isinstance(arm_, hir.LoopArm) else replace(arm_, body=with_resets(arm_.body)) for arm_ in node.arms]
+                default = with_resets(node.default) if node.default is not None else None
+                return replace(node, arms=arms, default=default)
+            return node
+
+        lowered = with_resets(lowered)
+        if isinstance(lowered, hir.Block):
+            if not (lowered.items and diverges(lowered.items[-1])):
+                lowered = replace(lowered, items=[*lowered.items, reset])
+            return lowered
+        return hir.Block(arm.body.loc, ty.VOID_TYPE, [lowered, reset], True)
 
     def _region_call(self, name: str, arguments: list[hir.AST], loc: Span, result: ty.Type) -> hir.FunctionCall:
         function = next(candidate for candidate in self.functions if candidate.logical_name.endswith(name))
@@ -2547,9 +2603,15 @@ class _StringLowering:
         """Every string expression a `return` may hand to the caller: the returned expressions, the
         initializers of returned locals, the sources of returned views, the string arguments of
         returned calls (a callee may return an argument's descriptor)."""
-        reached: set[int] = set()
         candidates = self._local_initializers(literal)
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
+        return self._reached_string_nodes(self._returned_string_expressions(literal), candidates, params)
+
+    def _reached_string_nodes(self, roots: list[hir.AST], candidates: dict[int, list[hir.AST]], params: set[int | None]) -> set[int]:
+        """Every expression the string values of ``roots`` may come from: through casts,
+        views' sources, locals' initializers and assigned values, string arguments of
+        calls (a callee may return an argument's descriptor), flows' arms, and parts."""
+        reached: set[int] = set()
 
         def mark(expr: hir.AST) -> None:
             expr = self._unwrap_transparent(expr)
@@ -2588,9 +2650,70 @@ class _StringLowering:
                         if isinstance(child, hir.AST) and not isinstance(child, hir.FunctionLiteral):
                             mark(child)
 
-        for expr in self._returned_string_expressions(literal):
+        for expr in roots:
             mark(expr)
         return reached
+
+    def _loop_string_escapes(self, literal: hir.FunctionLiteral) -> dict[int, set[int]]:
+        """For each loop body (by id): the string expressions built in it that
+        reach a binding declared outside the loop — assigned to an outer local
+        (or a module variable), directly or through the body's own locals —
+        and so must outlive the iteration. Stores into containers, fields, and
+        returns copy or go to the arena already; a loop's iterator targets and
+        its body's declarations are inside."""
+        candidates = self._local_initializers(literal)
+        params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
+        escapes: dict[int, set[int]] = {}
+
+        def children(node: hir.AST):
+            for field_ in dataclasses.fields(node):
+                value = getattr(node, field_.name)
+                for child in (value if isinstance(value, (list, tuple)) else [value]):
+                    if isinstance(child, hir.AST):
+                        yield child
+                    elif isinstance(child, hir.ObjectField):
+                        yield child.value
+                    elif isinstance(child, dict):
+                        yield from (item for item in child.values() if isinstance(item, hir.AST))
+
+        def collect(node: hir.AST, declared: set[int], assigns: list[hir.Assign]) -> None:
+            if isinstance(node, hir.FunctionLiteral):
+                return
+            if isinstance(node, hir.Declare) and node.binding_id is not None:
+                declared.add(node.binding_id)
+            if isinstance(node, hir.IteratorExpression) and node.target.binding_id is not None:
+                declared.add(node.target.binding_id)
+            if isinstance(node, hir.Assign):
+                assigns.append(node)
+            for child in children(node):
+                collect(child, declared, assigns)
+
+        def may_hold_string(type_: ty.Type) -> bool:
+            if self._is_string_valued(type_):
+                return True
+            unfolded = ty.unfold(type_) if not isinstance(type_, str) else type_
+            return isinstance(unfolded, ty.TypeOr) and any(self._is_string_valued(item) for item in unfolded.items)
+
+        def visit(node: hir.AST) -> None:
+            if isinstance(node, hir.FunctionLiteral) and node is not literal:
+                return
+            if isinstance(node, hir.Flow):
+                for arm in node.arms:
+                    if isinstance(arm, hir.LoopArm):
+                        declared: set[int] = set()
+                        assigns: list[hir.Assign] = []
+                        collect(arm.condition, declared, assigns)
+                        collect(arm.body, declared, assigns)
+                        roots = [
+                            assign.value for assign in assigns
+                            if assign.target.binding_id not in declared and may_hold_string(assign.value.type)
+                        ]
+                        escapes[id(arm.body)] = self._reached_string_nodes(roots, candidates, params)
+            for child in children(node):
+                visit(child)
+
+        visit(literal.body)
+        return escapes
 
     def _local_initializers(self, literal: hir.FunctionLiteral) -> dict[int, list[hir.AST]]:
         """Every local's initializers and assigned values, by binding (any type: a `match` temporary is an optional)."""
@@ -2775,6 +2898,7 @@ class _StringLowering:
         loc: Span,
         *,
         frame: bool = False,
+        node: hir.AST | None = None,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Copy ``byte_length`` bytes into the arena (or the frame region) and build a segmented string."""
         statements: list[hir.AST] = []
@@ -2787,7 +2911,7 @@ class _StringLowering:
         data = declare(
             'data',
             self._string_allocation(
-                self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc), loc, frame=frame
+                self._int64_binary('__add__', byte_length, self._int64_literal(loc, 1), loc), loc, frame=frame, node=node
             ),
         )
         index = declare('copy_index', self._int64_literal(loc, 0))
@@ -2842,7 +2966,7 @@ class _StringLowering:
                     self._int64_literal(loc, 4),
                     loc,
                 ),
-                loc, frame=frame,
+                loc, frame=frame, node=node,
             ),
         )
         segmentation, grapheme_count = self._utf8_segmentation(loc, data, byte_length, boundaries)
@@ -2852,7 +2976,7 @@ class _StringLowering:
         statements.extend([
             hir.Declare(
                 loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64',
-                self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame),
+                self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame, node=node),
             ),
             self._store_i64_field(descriptor_word, STRING_DATA_OFFSET, data, loc),
             self._store_i64_field(descriptor_word, STRING_BYTE_LENGTH_OFFSET, byte_length, loc),
@@ -4001,11 +4125,11 @@ class _StringLowering:
         address = self._int64_binary('__add__', boundaries, offset, loc)
         return self._intrinsic_call('__load_u32__', [address], 'uint32', loc)
 
-    def _view_allocation(self, loc: Span, *, frame: bool = False) -> hir.AST:
+    def _view_allocation(self, loc: Span, *, frame: bool = False, node: hir.AST | None = None) -> hir.AST:
         """Storage for one view descriptor: the frame region when no return
         reaches the view, else the arena; a prelude-less program has no
         arena and uses a fresh frame allocation per evaluation."""
-        return self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame)
+        return self._string_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc, frame=frame, node=node)
 
     def _string_view(
         self,
@@ -4016,6 +4140,7 @@ class _StringLowering:
         loc: Span,
         *,
         frame: bool = False,
+        node: hir.AST | None = None,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         # A view's descriptor lives in the arena: a slice or indexed grapheme
         # can escape (pushed into an array, returned, stored in a field), and
@@ -4049,7 +4174,7 @@ class _StringLowering:
                 'let',
                 target.name,
                 'int64',
-                self._view_allocation(loc, frame=frame),
+                self._view_allocation(loc, frame=frame, node=node),
             ),
             self._store_i64_field(
                 descriptor,
@@ -4205,6 +4330,7 @@ class _StringLowering:
             node.type,
             node.loc,
             frame=self._stays_in_frame(node),
+            node=node,
         )
         return [*prelude, *view_prelude], view
 
