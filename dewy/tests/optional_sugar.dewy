@@ -1,0 +1,22 @@
+# `T?` in type positions is `T | undefined`; string literals pass into
+# optional/union slots as string handles
+
+measure = (v:string?):>int64 => if v is? string v.length else 0
+first_over = (xs:array<int64> limit:int64):>int64? => {
+    loop x in xs if x >? limit return x
+    return undefined
+}
+
+main = () => {
+    let total:int64 = measure('hello') + measure(undefined)   # 5
+    let word:string? = 'hey'
+    if word is? string total += word.length                   # 8
+    let d:dict<string int64?> = ['a' -> 7 'b' -> undefined]
+    let a = d.get('a' undefined)
+    if a is? int64 total += a                                 # 15
+    let hit = first_over([3 9 4] 5)
+    if hit is? int64 total += hit                             # 24
+    let s = 'literal'
+    total += measure(s) + measure('overflowing')              # 24 + 7 + 11 = 42
+    return total
+}

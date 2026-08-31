@@ -26,8 +26,8 @@ def test_the_error_value_is_spelled_with_the_type_name() -> None:
     assert isinstance(declared['e'].expr, hir.ErrorValue) and declared['e'].expr.type == 'NotFound'
 
 
-def test_only_error_types_can_be_minted_for_now() -> None:
-    with pytest.raises(NotImplementedYet, match='only error types can be minted'):
+def test_only_errors_and_objects_can_be_minted_for_now() -> None:
+    with pytest.raises(NotImplementedYet, match='mintable so far: error types, and object types'):
         _declared('let Weird:type = type of int64\n')
 
 

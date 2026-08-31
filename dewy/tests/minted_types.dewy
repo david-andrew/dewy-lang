@@ -1,0 +1,28 @@
+# `type of` mints nominal types: structurally the operand's object, distinct
+# from every other type, printed and constructed by name. all three alias
+# spellings mint; `T?` is `T | undefined`.
+
+let Name:type = type of any & [text:string]
+Punct = type of any & [text:string]           # same structure, distinct type
+let Vec = type of [x:int64 y:int64  total = ():>int64 => x + y]
+
+classify = (t:Name|Punct):>int64 => match t {
+    n:Name => n.text.length
+    p:Punct => 10
+}
+
+find = (b:bool):>Name? => if b Name(text='yo') else undefined
+
+main = () => {
+    let toks:array<Name|Punct> = [Name(text='hi') Punct(text=';')]
+    let total:int64 = 0
+    loop t in toks total += classify(t)       # 12
+    let by_name:Name = [text='xyz']           # a literal in the minted context takes the brand
+    total += classify(by_name)                # 15
+    total += Vec(11 12).total                 # 38
+    let r = find(true)
+    if r is? Name total += r.text.length      # 40
+    let missing = find(false)
+    if missing is? undefined total += 2       # 42
+    return total
+}

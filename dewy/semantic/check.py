@@ -1182,6 +1182,16 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 op=t1.Operator(symbol='='|'::'|':='),
                 right=p0.AST() as right)
             ]:
+            alias_binding = ctx.binding_registry.by_syntax.get(id(ast))
+            if alias_binding is not None and alias_binding.type_value is not None:
+                # `let MyType = type of ...`: prebound as a minting type alias
+                expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, alias_binding.type_value)
+                ctx.declarations[name] = ty.TYPE_TYPE
+                return _complete_binding(
+                    ast,
+                    hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, ty.TYPE_TYPE, expr),
+                    ctx=ctx,
+                )
             dict_block = _dict_literal_block(right)
             if dict_block is not None:
                 return _tcr_dict_declare(name, ast.loc, dict_block, ctx=ctx, keyword=keyword)
@@ -4651,12 +4661,30 @@ def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
     if (
         isinstance(expression.left, p0.Atom)
         and isinstance(expression.left.item, t1.Identifier)
+        and _is_type_of_expression(expression.right)
+    ):
+        return expression.left.item.name, expression.right
+    if (
+        isinstance(expression.left, p0.Atom)
+        and isinstance(expression.left.item, t1.Identifier)
         and isinstance(expression.right, p0.Block)
         and expression.right.kind == '<>'
         and len(expression.right.inner) == 1
     ):
         return expression.left.item.name, expression.right
     return None
+
+
+def _is_type_of_expression(ast: p0.AST) -> bool:
+    """`type of ...` at the root of a declaration's value: a minting alias."""
+    return (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, t1.Operator)
+        and ast.op.symbol == 'of'
+        and isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Identifier)
+        and ast.left.item.name == 'type'
+    )
 
 
 def _type_expression_root(ast: p0.AST) -> str | None:
@@ -4680,6 +4708,8 @@ def _implicit_type_alias_rhs(item: p0.AST, known_aliases: set[str], *, ctx: Cont
         return None
     if item.left.item.name in ctx.declarations:
         return None  # an assignment to an existing binding
+    if _is_type_of_expression(item.right):
+        return item.left.item.name, item.right
     root = _type_expression_root(item.right)
     if root is None or root in {'undefined', 'void', 'end', 'new', 'ellipsis'}:
         return None  # value keywords that also name types
@@ -4737,7 +4767,7 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
         return None
     parent = ast_to_type(rhs.right, ctx=ctx)
     if not (isinstance(parent, str) and ctx.type_system.is_subtype(parent, 'error')):
-        not_implemented(ctx.srcfile, rhs.loc, f'`type of {type_to_dewy(parent)}` (only error types can be minted so far)')
+        return _mint_branded_object(binding, rhs, parent, ctx=ctx)
     name = binding.name
     known = ty.USER_NOMINAL_TYPES.get(name)
     if known is not None and known != parent:
@@ -4755,6 +4785,45 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     ty.USER_NOMINAL_TYPES[name] = parent
     ctx.type_system.register_user_nominals()
     return name
+
+
+def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, *, ctx: Context) -> ty.ObjectType:
+    """`let Number:type = type of any & [value:int64]` mints a nominal object
+    type: structurally the operand's object (`any` contributes nothing), but
+    distinct from every other type — including a structurally identical one —
+    printed and constructed by its name. `type of` is the sole generative
+    type expression; `&` alone never mints identity."""
+    operands = parent.items if isinstance(parent, ty.TypeAnd) else [parent]
+    fields: list[ty.ObjectField] = []
+    methods: list[ty.MethodSpec] = []
+    for item in operands:
+        if item == 'any':
+            continue
+        if isinstance(item, ty.ObjectType) and item.brand is None:
+            for field_ in item.fields:
+                if any(field_.name == existing.name for existing in fields):
+                    user_error(
+                        ctx.srcfile,
+                        f'minted type `{binding.name}` declares field `{field_.name}` twice',
+                        Pointer(span=rhs.loc, message='two intersected objects both carry it'),
+                    )
+            fields.extend(item.fields)
+            methods.extend(item.methods)
+            continue
+        not_implemented(
+            ctx.srcfile,
+            rhs.loc,
+            f'`type of {type_to_dewy(parent)}` (mintable so far: error types, and object types — possibly intersected with `any`)',
+        )
+    name = binding.name
+    if name in ty.USER_NOMINAL_TYPES or (name in ctx.type_system._named_types and name not in ty.USER_BRANDS):
+        user_error(
+            ctx.srcfile,
+            f'`{name}` is already a type name',
+            Pointer(span=binding.loc, message='choose another name for this minted type'),
+        )
+    ty.USER_BRANDS.add(name)
+    return ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods))
 
 
 def _validate_recursive_alias(
@@ -5113,6 +5182,8 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
     minted = _mint_nominal_type(binding, rhs, ctx=ctx)
     if minted is not None:
         binding.type_value = minted
+        if isinstance(minted, ty.ObjectType) and minted.methods:
+            ctx.pending_methods.append((binding, minted))
         return minted
     ctx.resolving_type_aliases.add(binding.id)
     try:
@@ -5860,7 +5931,7 @@ def _positional_object_literal(block: p0.Block, object_type: ty.ObjectType, *, c
     """`[set'01' false []]` where a plain object type is expected: the items
     fill the fields in declaration order (a field left out takes its
     default), as a constructor call does; None when any item is named."""
-    if object_type.brand is not None or not block.inner:
+    if (object_type.brand is not None and not ty.user_branded(object_type)) or not block.inner:
         return None
     for item in block.inner:
         if isinstance(item, p0.BinOp) and _operator_symbol(item.op) in ('=', '->', '<->'):
@@ -5952,7 +6023,7 @@ def _tcr_object_literal(
             entries.append((_object_field_syntax(item, ctx=ctx), item, None))
             continue
         source = _spread_source(operand, ctx=ctx)
-        if not isinstance(source.type, ty.ObjectType) or source.type.brand is not None:
+        if not isinstance(source.type, ty.ObjectType) or (source.type.brand is not None and not ty.user_branded(source.type)):
             user_error(
                 ctx.srcfile,
                 'object spread requires an object',
@@ -6109,7 +6180,9 @@ def _tcr_object_literal(
     if expected_object is not None:
         check_against(
             hir.ObjectLiteral(block.loc, object_type, fields),
-            expected_object,
+            # a literal in a minted type's context is its construction form:
+            # the fields are checked structurally and the value takes the brand
+            ty.ObjectType(expected_object.fields, methods=expected_object.methods) if ty.user_branded(expected_object) else expected_object,
             ctx=ctx,
         )
         object_type = expected_object
@@ -6955,7 +7028,7 @@ def _union_container_element(type_: ty.Type) -> bool:
         unfolded = ty.unfold(member)
         if member == 'undefined' or member == 'bool' or ty.fixed_integer_layout(member) is not None or ty.string_valued(member):
             continue
-        if isinstance(unfolded, ty.ObjectType) and unfolded.brand is None:
+        if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
             continue
         return False
     return True
@@ -7062,7 +7135,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         if spreads and kind == 'array' and len(spreads) == len(block.inner) and not isinstance(expected, (ty.ArrayType, ty.ObjectType)):
             # `[a...]`: only the operand says whether this builds an object, a dictionary, or an array
             first = _spread_source(_spread_operand(spreads[0]), ctx=ctx)
-            if isinstance(first.type, ty.ObjectType) and first.type.brand is None:
+            if isinstance(first.type, ty.ObjectType) and (first.type.brand is None or ty.user_branded(first.type)):
                 kind = 'object'
             elif ty.dict_key_value(first.type) is not None:
                 kind = 'dict'
@@ -10823,6 +10896,10 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             item = ast_to_type(ast.item, ctx=ctx)
             return ty.TypeNot(item)
         
+        case p0.Postfix(op=t1.Operator(symbol='?')):
+            # `T?` is the optional `T | undefined`
+            return ty.optional(ast_to_type(ast.item, ctx=ctx))
+
         # e.g. probably parameterizations (type jux), types wrapped in blocks, etc. other type expressions...
         # also catch all probably involves typecheck_and_resolve_inner(ast, ctx=ctx, type_block=True)
         case _:
@@ -11426,7 +11503,7 @@ def _structure_members(type_: ty.TypeExpr) -> tuple[str, list[ty.TypeExpr]] | No
 def _plain_object_type(type_: ty.TypeExpr) -> ty.ObjectType | None:
     """The object type of a value that converts field by field (no compiler-provided family)."""
     unfolded = ty.unfold(ty.strip_refinement(type_))
-    if isinstance(unfolded, ty.ObjectType) and unfolded.brand is None:
+    if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
         return unfolded
     return None
 
@@ -11655,7 +11732,7 @@ def _constructed_object_type(left: hir.AST) -> ty.ObjectType | None:
     if not isinstance(left, hir.TypeValue) or isinstance(left.value, ty.GenericTypeAlias):
         return None
     unfolded = ty.unfold(left.value)
-    if isinstance(unfolded, ty.ObjectType) and unfolded.brand is None:
+    if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
         return unfolded
     return None
 
@@ -12390,6 +12467,13 @@ def _refine_string_materialization_target(
 ) -> ty.Type:
     if not isinstance(source, ty.StringLiteralType):
         return target
+    if isinstance(target, ty.TypeOr) and any(
+        item == 'string' or isinstance(item, ty.StringType) for item in target.items
+    ):
+        # a string literal in an optional/union slot materializes as a string
+        # handle (the cell or argument packaging supplies the tag); a value
+        # typed as the union would be mistaken for an already-built cell
+        return ty.StringType()
     if not isinstance(target, ty.ArrayType) or target.length is not None:
         return target
     byte_count, scalar_count, grapheme_count = ty.string_literal_lengths(source.value)

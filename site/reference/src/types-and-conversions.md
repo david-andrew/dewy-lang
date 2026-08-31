@@ -18,12 +18,21 @@ A type alias does not create nominal identity unless its defining construct expl
 
 ## Nominal Identity
 
-`type of Parent` evaluates to a fresh nominal child of `Parent`:
+`type of Parent` evaluates to a fresh nominal child of `Parent`. Implemented today: error types (`type of error`) and object types, where the operand may be an object type, `any` alone (an empty marker type), or an intersection of `any` with object types (`&` contributes structure, never identity):
+
+<!-- dewy-example: compiler -->
+```dewy
+let NotFoundError:type = type of error
+let Name:type = type of any & [text:string]
+Punct = type of any & [text:string]     # same structure, distinct type
+let Vec = type of [x:int64 y:int64  length_squared = ():>int64 => x*x + y*y]
+```
+
+A minted object type is structurally its operand but distinct from every other type, including a structurally identical one: `Name | Punct` is a two-member union that `match` distinguishes, and a `Name` value does not satisfy a `Punct` annotation. The type prints by its name. Values are constructed by calling the type (`Name(text='hi')`, positionally `Vec(3 4)`) or by an object literal in the minted type's context (`let n:Name = [text='hi']`); methods and `&=` constructor overloads work as on any object type. Numeric parents such as `type of int` are not implemented yet:
 
 <!-- dewy-example: design-only -->
 ```dewy
 const UserId:type = type of int
-const NotFoundError:type = type of error
 ```
 
 Each evaluation of `type of` creates a distinct identity. Referring to or aliasing the resulting binding preserves that identity. `<T of Bound>` in a generic parameter is a bound declaration and is not this generative expression.
@@ -66,6 +75,10 @@ These rules keep `&` associative, commutative, idempotent, and independent of de
 Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to `int`; a fixed-width annotation accepts the literal only when it fits.
 
 Function parameters, returns, container elements, object fields, assignments, and operator overloads all provide type context.
+
+## Optional Sugar
+
+`T?` in a type position is `T | undefined`: `let word:string? = undefined`, a parameter `(v:string?)`, a result `:>int64?`, an element `dict<string int64?>`. `?` does not appear in value positions; narrowing an optional is the ordinary `is?`.
 
 ## Unions and Narrowing
 

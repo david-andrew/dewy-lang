@@ -403,6 +403,14 @@ type TypeAliasValue = TypeExpr | GenericTypeAlias
 
 
 USER_NOMINAL_TYPES: dict[str, str] = {}
+
+# object brands minted by user `type of` aliases (compiler brands such as
+# 'dict'/'set' are never in this set)
+USER_BRANDS: set[str] = set()
+
+
+def user_branded(type_: object) -> bool:
+    return isinstance(type_, ObjectType) and type_.brand is not None and type_.brand in USER_BRANDS
 """Nominal types minted by programs (`let NotFound:type = type of error`),
 name -> parent. Every `TypeSystem` registers them, so the lowering's fresh
 instances agree with the checker's about `NotFound of? error`."""

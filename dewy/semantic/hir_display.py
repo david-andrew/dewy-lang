@@ -70,6 +70,9 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.ArrayType):
         length = f' length={t.length}' if t.length is not None else ''
         return f'array<{type_to_dewy(t.element)}{length}>'
+    if ty.user_branded(t):
+        assert isinstance(t, ty.ObjectType) and t.brand is not None
+        return t.brand
     if isinstance(t, ty.ObjectType) and t.brand == 'set':
         element = ty.set_element(t)
         assert element is not None
