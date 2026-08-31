@@ -1,0 +1,27 @@
+# Objects own their runtime-sized members. When a local object's scope ends,
+# its string fields, its array fields (with their elements), and the string
+# payloads of its union cells go back to the arena; a copy of an object owns
+# copies of its own; assigning over a string field releases the old value;
+# and a literal or call result stored into an array (or returned) moves its
+# members instead of cloning them. Dictionaries are objects of arrays, so
+# they release their keys and values the same way. Building and dropping
+# such values in a loop therefore runs in constant memory.
+let Point:type = [name:string tags:array<string> weight:int64|undefined]
+let make = (n:int64):>Point => [name='p{n}' tags=['a{n}' "b"] weight=n]
+let round = (n:int64):>int64 => {
+    let one = make(n)
+    let two:Point = one
+    two.name = "changed"
+    let pts:array<Point> = []
+    loop i in [0..5) { pts.push(make(i + n)) }
+    let table:dict<string int64> = ['k{n}' -> n 'j' -> 2]
+    let total:int64 = one.name.length + two.name.length    # 2 + 7 (n < 10)
+    loop pt in pts { total += pt.tags.length }               # 5 * 2
+    return total + table.length                              # 9 + 10 + 2 = 21
+}
+let main = ():>int64 => {
+    let rounds:int64 = 0
+    let total:int64 = 0
+    loop rounds <? 300 { total = round(rounds % 10)  rounds += 1 }
+    return total * 2                                         # 42
+}

@@ -237,6 +237,8 @@ class _Lowerer(
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.owned_string_arrays: set[str] = set()   # those whose elements are strings the array owns (released with it)
         self.owned_cell_arrays: dict[str, ty.TypeExpr] = {}   # those whose elements are optional/union cells the array owns
+        self.owned_object_arrays: dict[str, ty.ObjectType] = {}   # those whose elements are objects the array owns
+        self.owned_objects: dict[str, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
@@ -2788,6 +2790,8 @@ class _Lowerer(
         self.owned_array_names = set()
         self.owned_string_arrays = set()
         self.owned_cell_arrays = {}
+        self.owned_object_arrays = {}
+        self.owned_objects = {}
         previous_state = (
             self.loop_signal_levels,
             self.loop_signal_kind,
@@ -2883,6 +2887,16 @@ class _Lowerer(
             return replace(rewritten, items=[*hoisted, *rewritten.items])
         return hir.Block(rewritten.loc, rewritten.type, [*hoisted, rewritten], True)
 
+    def _note_owned_object(self, node: hir.Declare, declared_type: ty.Type) -> None:
+        """An object local (a literal or a call result; dictionaries and sets are
+        objects of arrays): its runtime-sized members are released when its
+        scope ends (`_insert_releases`), by their owner words."""
+        unfolded = ty.unfold(ty.strip_refinement(declared_type))
+        if isinstance(unfolded, ty.ObjectType) and not self.lowering_module_startup:
+            # a literal or call result is built in this frame with arena
+            # members; any other source is deep-copied (`_object_copy`)
+            self.owned_objects[node.name] = unfolded
+
     def _note_owned_array(self, node: hir.Declare, declared_type: ty.Type) -> None:
         """A local that owns a runtime-length array's storage: released when its scope ends (`_insert_releases`)."""
         if (
@@ -2896,6 +2910,8 @@ class _Lowerer(
                 self.owned_string_arrays.add(node.name)
             elif self._is_optional_element(declared_type.element) or self._is_union_element(declared_type.element):
                 self.owned_cell_arrays[node.name] = declared_type.element
+            elif isinstance(ty.unfold(declared_type.element), ty.ObjectType):
+                self.owned_object_arrays[node.name] = ty.unfold(declared_type.element)
 
     def _owned_array_declaration(self, node: hir.AST) -> hir.Declare | None:
         """The declaration of a local that will own a runtime-length array's storage (the HIR-level twin of `_note_owned_array`)."""
@@ -3053,13 +3069,20 @@ class _Lowerer(
         ends every scope inside the loop it leaves. Names are unique within
         a function, so the lowered tree's blocks are the scopes.
         """
-        if (not self.owned_array_names and not exit_statements) or not isinstance(body, hir.Block):
+        if (not self.owned_array_names and not self.owned_objects and not exit_statements) or not isinstance(body, hir.Block):
             return body
-        owned_names = self.owned_array_names
+        owned_names = self.owned_array_names | set(self.owned_objects)
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]]) -> list[hir.AST]:
-            return [self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(local.name)) for scope in scopes for local in reversed(scope)]
+            released: list[hir.AST] = []
+            for scope in scopes:
+                for local in reversed(scope):
+                    if local.name in self.owned_objects:
+                        released.extend(self._release_object_members(local, self.owned_objects[local.name], local.loc))
+                    else:
+                        released.extend(self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(local.name), object_element=self.owned_object_arrays.get(local.name)))
+            return released
 
         def diverges(item: hir.AST) -> bool:
             return isinstance(item, (hir.Return, hir.Break, hir.Continue))
@@ -3342,6 +3365,7 @@ class _Lowerer(
                     *self._optional_write(cell, node.expr, payload),
                 ]
             if isinstance(declared_type, ty.ObjectType):
+                self._note_owned_object(node, declared_type)
                 return self._lower_object_declare(node, declared_type)
             if self._array_representation(node) == 'stack_data':
                 return self._lower_stack_array_declare(node)

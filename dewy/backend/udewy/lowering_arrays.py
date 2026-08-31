@@ -900,7 +900,7 @@ class _ArrayLowering:
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('rebound'))
                 statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied))
                 assignment = replace(node, value=fresh)
-            statements.append(self._release_owned_array(replace(node.target, type='int64'), node.loc, string_elements=node.target.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(node.target.name)))
+            statements.extend(self._release_owned_array(replace(node.target, type='int64'), node.loc, string_elements=node.target.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(node.target.name), object_element=self.owned_object_arrays.get(node.target.name)))
             return [*statements, assignment]
         return [*prelude, assignment]
 
@@ -908,17 +908,21 @@ class _ArrayLowering:
         self,
         node: hir.AST,
         array_type: ty.ArrayType,
+        *,
+        move: bool = False,
     ) -> tuple[list[hir.AST], hir.AST]:
         """Produce an independently mutable array value from one expression."""
 
         if self._array_expression_owns_fresh_storage(node):
             return self._extract_expression(node)
-        return self._clone_array_value(node, array_type)
+        return self._clone_array_value(node, array_type, move=move)
 
     def _clone_array_to_raw(
         self,
         node: hir.AST,
         array_type: ty.ArrayType,
+        *,
+        move: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Copy one exact array value into fresh descriptor-free stack data."""
 
@@ -978,6 +982,7 @@ class _ArrayLowering:
                 target_address,
                 array_type.element,
                 node.loc,
+                move=move,
             ))
         return statements, target
 
@@ -987,8 +992,10 @@ class _ArrayLowering:
         array_type: ty.ArrayType,
         *,
         arena: bool = False,
+        move: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Materialize a fresh array descriptor and recursively copied buffer."""
+        """Materialize a fresh array descriptor and recursively copied buffer
+        (with ``move``, the elements change owner as words: the source is dying)."""
 
         if array_type.length is None:
             if self._is_string_valued(array_type.element) and self._has_arena():
@@ -996,7 +1003,7 @@ class _ArrayLowering:
                 # an arena array (owner 1) that its scope releases; a frame copy
                 # sharing the elements would dangle once the source is rebound
                 arena = True
-            return self._clone_dynamic_array_value(node, array_type, arena=arena)
+            return self._clone_dynamic_array_value(node, array_type, arena=arena, move=move)
         if arena:
             self._target_error(node, 'an arena-backed copy of an exact-length array (inside an element of a growable array)')
         source_is_raw = self._array_use_representation(node) is not None
@@ -1035,6 +1042,7 @@ class _ArrayLowering:
                 target_address,
                 array_type.element,
                 node.loc,
+                move=move,
             ))
         return statements, target
 
@@ -1046,7 +1054,7 @@ class _ArrayLowering:
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, function.symbol), [block, size], {})
 
-    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False, cell_element: ty.TypeExpr | None = None) -> hir.AST:
+    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False, cell_element: ty.TypeExpr | None = None, object_element: ty.ObjectType | None = None) -> list[hir.AST]:
         """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
 
         The `owner` word is 1 for arena-owned data (set by growth and by
@@ -1059,11 +1067,16 @@ class _ArrayLowering:
         word = replace(descriptor, type='int64')
         owned = self._typed_equality(self._load_i64_field(word, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), 'int64', loc)
         size = self._int64_binary('__mul__', self._load_i64_field(word, ARRAY_CAPACITY_OFFSET, loc), self._load_i64_field(word, ARRAY_STRIDE_OFFSET, loc), loc)
-        statements: list[hir.AST] = []
+        # the elements first, by their own owner words — an exact-length array
+        # in frame storage still owns the strings and cells stored into it
+        elements: list[hir.AST] = []
         if string_elements:
-            statements.extend(self._release_string_elements(word, loc))
+            elements.extend(self._release_string_elements(word, loc))
         elif cell_element is not None:
-            statements.extend(self._release_cell_elements(word, cell_element, loc))
+            elements.extend(self._release_cell_elements(word, cell_element, loc))
+        elif object_element is not None:
+            elements.extend(self._release_object_elements(word, object_element, loc))
+        statements: list[hir.AST] = []
         statements.extend([
             self._arena_release_call(self._load_i64_field(word, ARRAY_DATA_OFFSET, loc), size, loc),
             self._store_i64_field(word, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
@@ -1081,7 +1094,100 @@ class _ArrayLowering:
         statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, arena_descriptor, hir.Block(loc, ty.VOID_TYPE, [
             self._arena_release_call(word, self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc),
         ], True))], None))
-        return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, hir.Block(loc, ty.VOID_TYPE, statements, True))], None)
+        buffer = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, hir.Block(loc, ty.VOID_TYPE, statements, True))], None)
+        # the descriptor is released inside `buffer`: read nothing from it after
+        return [*elements, buffer]
+
+    def _release_string_by_owner(self, string: hir.ExpressedIdentifier, loc) -> hir.AST:
+        """Give a string's storage back by its owner word: data, boundaries, and
+        descriptor for an arena copy (1); the descriptor alone for an arena view (2)."""
+        one = self._int64_literal(loc, 1)
+        owner = self._load_i64_field(string, STRING_OWNER_OFFSET, loc)
+        bytes_plus_one = self._int64_binary('__add__', self._load_i64_field(string, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
+        release_all = hir.Block(loc, ty.VOID_TYPE, [
+            self._arena_release_call(self._load_i64_field(string, STRING_DATA_OFFSET, loc), bytes_plus_one, loc),
+            self._arena_release_call(self._load_i64_field(string, STRING_BOUNDARIES_OFFSET, loc), self._int64_binary('__mul__', bytes_plus_one, self._int64_literal(loc, 4), loc), loc),
+            self._arena_release_call(string, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+        ], True)
+        release_descriptor = hir.Block(loc, ty.VOID_TYPE, [self._arena_release_call(string, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc)], True)
+        by_owner = hir.Flow(loc, ty.VOID_TYPE, [
+            hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
+            hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
+        ], None)
+        # an emptied slot (the string moved out with a returned object) holds 0
+        empty = self._typed_equality(string, self._int64_literal(loc, 0), 'int64', loc)
+        return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, empty, hir.Block(loc, ty.VOID_TYPE, [], True))], by_owner)
+
+    def _release_object_members(self, base: hir.AST, object_type: ty.ObjectType, loc) -> list[hir.AST]:
+        """Give back the runtime-sized storage an object's fields own, by their
+        owner words: string fields, runtime-length array fields (with their
+        elements), the string payloads of inline union cells, and nested
+        objects' fields. The object's own block is the caller's business."""
+        _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+        statements: list[hir.AST] = []
+
+        def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
+            name = self._new_string_temp(loc, 'int64', suffix).name
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
+
+        for field in object_type.fields:
+            offset = offsets[field.name]
+            field_type = ty.strip_refinement(field.type)
+            unfolded = ty.unfold(field_type)
+            if self._is_string_valued(field_type):
+                declare, string = local('field_string', self._load_i64_field(base, offset, loc))
+                statements.extend([declare, self._release_string_by_owner(string, loc)])
+            elif isinstance(unfolded, ty.ArrayType):
+                declare, array = local('field_array', self._load_i64_field(base, offset, loc))
+                element = unfolded.element
+                statements.append(declare)
+                statements.extend(self._release_owned_array(
+                    array, loc,
+                    string_elements=self._is_string_valued(element),
+                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
+                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                ))
+            elif self._field_union_members(field_type) is not None:
+                members = self._field_union_members(field_type)
+                assert members is not None
+                cell = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
+                cell_declare, cell_ident = local('field_cell', cell)
+                tag_declare, tag = local('field_tag', self._intrinsic_call('__load_u8__', [cell_ident], 'int64', loc))
+                statements.extend([cell_declare, tag_declare])
+                for index, member in enumerate(members):
+                    if self._is_string_valued(member):
+                        payload_declare, payload = local('field_payload', self._load_i64_field(cell_ident, 8, loc))
+                        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                            loc, ty.VOID_TYPE, self._typed_equality(tag, self._int64_literal(loc, index), 'int64', loc),
+                            hir.Block(loc, ty.VOID_TYPE, [payload_declare, self._release_string_by_owner(payload, loc)], True),
+                        )], None))
+            elif isinstance(unfolded, ty.ObjectType):
+                nested = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
+                nested_declare, nested_ident = local('field_object', nested)
+                statements.append(nested_declare)
+                statements.extend(self._release_object_members(nested_ident, unfolded, loc))
+        return statements
+
+    def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc) -> list[hir.AST]:
+        """Give back each element object an owned array stores: its members, then its arena block."""
+        size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+
+        def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
+            name = self._new_string_temp(loc, 'int64', suffix).name
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
+
+        one = self._int64_literal(loc, 1)
+        index_declare, index = local('object_index', self._int64_literal(loc, 0))
+        length_declare, length = local('object_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        data_declare, data = local('object_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
+        address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
+        element_declare, element = local('object_element', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
+        body: list[hir.AST] = [element_declare]
+        body.extend(self._release_object_members(element, object_type, loc))
+        body.append(self._arena_release_call(element, self._int64_literal(loc, size), loc))
+        body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)))
+        loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
+        return [index_declare, length_declare, data_declare, loop]
 
     def _release_cell_elements(self, word: hir.ExpressedIdentifier, element_type: ty.TypeExpr, loc) -> list[hir.AST]:
         """Give back each optional/union cell an owned array stores: a string
@@ -1205,7 +1311,9 @@ class _ArrayLowering:
     ) -> tuple[list[hir.AST], hir.AST]:
         """A value to store into a growable array: objects (and non-literal strings) are copied into the arena (value semantics)."""
         if isinstance(element_type, ty.ObjectType):
-            return self._clone_object_value(node, element_type, arena=True)
+            # a fresh value (a call's result, a literal) dies here: its members move
+            fresh = isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral))
+            return self._clone_object_value(node, element_type, arena=True, move=fresh)
         if self._is_optional_element(element_type):
             return self._optional_element_value(node, element_type)
         if self._is_union_element(element_type):
@@ -1724,6 +1832,7 @@ class _ArrayLowering:
                     loc,
                 ),
                 self._store_i64_field(local, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 0), loc),   # the local no longer owns it
+                self._store_i64_field(local, ARRAY_LENGTH_OFFSET, self._int64_literal(loc, 0), loc),  # nor its elements: nothing to release
                 hir.Assign(loc, ty.VOID_TYPE, moved, '=', fresh),
             ], True)
             clone_prelude, cloned = (
@@ -1739,9 +1848,12 @@ class _ArrayLowering:
         if isinstance(source, hir.ExpressedIdentifier):
             reason = 'it is used again later, or is not a local that owns its storage' if source.binding_id is not None else 'it is not a local'
             self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is copied when {site}: {reason}', False))
+        # a literal or call result is a dying temporary: its element strings,
+        # cells, and objects change owner rather than being cloned and lost
+        fresh = isinstance(source, (hir.ArrayLiteral, hir.FunctionCall))
         if frame_copy:
-            return self._independent_array_value(node, array_type)
-        return self._clone_dynamic_array_value(node, array_type, arena=True)
+            return self._independent_array_value(node, array_type, move=fresh)
+        return self._clone_dynamic_array_value(node, array_type, arena=True, move=fresh)
 
     def _clone_dynamic_array_value(
         self,
@@ -1749,6 +1861,7 @@ class _ArrayLowering:
         array_type: ty.ArrayType,
         *,
         arena: bool = False,
+        move: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Copy a descriptor-backed runtime-length array.
 
@@ -1808,6 +1921,7 @@ class _ArrayLowering:
             # this copy runs in a loop: frame storage for an element object
             # would not survive the iteration, so objects go to the arena
             arena=arena or isinstance(array_type.element, ty.ObjectType),
+            move=move,
         )
         copy_body.append(hir.Assign(
             node.loc,
@@ -2175,6 +2289,8 @@ class _ArrayLowering:
         if isinstance(element_type, ty.ArrayType):
             return self._independent_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
+            if isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral)):
+                return self._clone_object_value(node, element_type, arena=True, move=True)   # a dying temporary: its members move
             return self._independent_object_value(node, element_type)
         if self._is_string_valued(element_type):
             return self._escaping_string_value(node)   # `xs[i] = "{…}"`: the array may outlive the frame
@@ -2213,6 +2329,8 @@ class _ArrayLowering:
             return self._copy_optional_element(source_value, target_address, loc)
         elif self._is_union_element(element_type) and self._has_arena() and not move:
             return self._copy_union_element(source_value, target_address, element_type, loc)
+        elif isinstance(element_type, ty.ObjectType) and move:
+            prelude, copied = [], source_value   # the handle moves with its members
         elif self._is_string_valued(element_type) and self._has_arena() and not move:
             # an array owns its element strings, so a lasting copy of the array
             # (stored, returned, kept in a dictionary) gets its own copies

@@ -61,6 +61,7 @@ class _ObjectLowering:
         object_type: ty.ObjectType,
         *,
         arena: bool = False,
+        move: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Materialize an independent structural object value (in the arena when it must outlive the frame)."""
 
@@ -77,7 +78,7 @@ class _ObjectLowering:
                 'int64',
                 self._object_allocation(node.loc, size, arena=arena),
             ),
-            *self._object_copy(target, source, object_type, node.loc, arena=arena),
+            *self._object_copy(target, source, object_type, node.loc, arena=arena, move=move),
         ]
         return statements, target
 
@@ -287,6 +288,7 @@ class _ObjectLowering:
         loc: Span,
         *,
         arena: bool = False,
+        move: bool = False,
     ) -> list[hir.AST]:
         """Copy every field; with ``arena``, nested mutable storage is arena-backed too."""
         _size, offsets = self._object_layout(object_type, dest)
@@ -298,13 +300,18 @@ class _ObjectLowering:
             if members is not None:
                 statements.extend(self._union_copy_cell(dest_addr, src_addr, members, loc, prepared=False))
             elif isinstance(field.type, ty.ObjectType):
-                statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc, arena=arena))
+                statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc, arena=arena, move=move))
+            elif isinstance(field.type, ty.ArrayType) and move and field.type.length is None:
+                # a dying source's arena array changes owner: the handle word moves
+                loaded = self._intrinsic_call('__load_i64__', [src_addr], 'int64', loc)
+                statements.append(self._intrinsic_call('__store_i64__', [loaded, dest_addr], ty.VOID_TYPE, loc))
             elif isinstance(field.type, ty.ArrayType):
                 source = self._value_load(src_addr, field.type, loc)
                 prelude, copied = self._clone_array_value(
                     replace(source, type='int64'),
                     field.type,
                     arena=arena,
+                    move=move,
                 )
                 statements.extend(prelude)
                 statements.extend(
@@ -325,6 +332,9 @@ class _ObjectLowering:
                         loc,
                     )
                 )
+            elif self._is_string_valued(field.type) and self._has_arena() and not move:
+                # an object owns its string fields: a copy gets its own (a static literal is shared)
+                statements.extend(self._copy_string_element(self._value_load(src_addr, field.type, loc), dest_addr, field.type, loc))
             else:
                 loaded = self._value_load(src_addr, field.type, loc)
                 statements.extend(self._value_store(loaded, dest_addr, field.type, loc))
@@ -836,6 +846,14 @@ class _ObjectLowering:
             )
         elif self._is_string_valued(field_type):
             value_prelude, value = self._escaping_string_value(node.value)
+            if isinstance(node.target.value, hir.ExpressedIdentifier) and node.target.value.name in self.owned_objects:
+                # the object owns the string it held: give it back by its owner word
+                old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'old_field').name)
+                value_prelude = [
+                    *value_prelude,
+                    hir.Declare(node.loc, ty.VOID_TYPE, 'let', old.name, 'int64', self._intrinsic_call('__load_i64__', [address], 'int64', node.loc)),
+                    self._release_string_by_owner(old, node.loc),
+                ]
         else:
             value_prelude, value = self._extract_expression(node.value)
         return [*prelude, *value_prelude, *self._value_store(value, address, field_type, node.loc)]
@@ -1019,6 +1037,9 @@ class _ObjectLowering:
             members = self._field_union_members(field.type)
             if members is not None:
                 statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False))
+                if move == 'adopt' and any(self._is_string_valued(member) for member in members):
+                    # a string payload moved by handle: empty the local's payload word
+                    statements.append(self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._int64_binary('__add__', source_address, self._int64_literal(loc, 8), loc)], ty.VOID_TYPE, loc))
             elif isinstance(field.type, ty.ArrayType) and field.type.length is None:
                 source_array = self._value_load(source_address, field.type, loc)
                 if move is True:
@@ -1066,5 +1087,9 @@ class _ObjectLowering:
                 statements.extend(
                     self._value_store(value, dest_address, field.type, loc)
                 )
+                if move == 'adopt' and self._is_string_valued(field.type):
+                    # the string moves to the result: the local's slot is
+                    # emptied so its scope release leaves the string alone
+                    statements.append(self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), source_address], ty.VOID_TYPE, loc))
         return statements
 
