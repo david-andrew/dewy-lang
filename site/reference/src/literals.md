@@ -4,7 +4,7 @@ A literal introduces a value directly in source. Literal syntax may preserve mor
 
 ## Booleans and Absence
 
-`true` and `false` are the two `bool` values. `undefined` is a storable value used in unions such as `T | undefined`. `void` describes the absence of a produced value and is not interchangeable with `undefined`.
+`true` and `false` are the two `bool` values. `none` is a storable value used in unions such as `T | none`. `void` describes the absence of a produced value and is not interchangeable with `none`.
 
 ## Integers
 

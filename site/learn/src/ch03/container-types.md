@@ -142,7 +142,7 @@ This is Dewy's general rule for operations that raise exceptions in Python: they
 
 ```dewy
 let ratings = ["star trek" -> 89 "star wars" -> 73]
-let maybe = ratings.get("alien")        # int64 | undefined
+let maybe = ratings.get("alien")        # int64 | none
 let score = ratings.get("alien" 0)      # 0 when absent
 ```
 
@@ -178,7 +178,7 @@ permissions.add("execute")
 permissions.length
 
 let taken = permissions.pop("read")               # proven: it came from the literal
-permissions.pop("nope" default=undefined);        # absent: nothing happens
+permissions.pop("nope" default=none);        # absent: nothing happens
 ```
 
 `pop` follows the dictionary rule: a proven member, or a `default` when it may be missing. `s.values` is an array of the members, and the set operators produce new sets:

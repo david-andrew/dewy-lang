@@ -107,7 +107,7 @@ def test_pop_with_a_default_needs_no_proof() -> None:
 
 
 def test_set_literals_and_methods() -> None:
-    root = _check("    let s = set[1 2 2 3]\n    s.add(4)\n    let n = s.length\n    let m = 2 in? s\n    let one = s.pop(1)\n    s.pop(9 default=undefined);\n    loop x in s { let y = x }")
+    root = _check("    let s = set[1 2 2 3]\n    s.add(4)\n    let n = s.length\n    let m = 2 in? s\n    let one = s.pop(1)\n    s.pop(9 default=none);\n    loop x in s { let y = x }")
     body = root.items[0].expr.body.items
     literal = body[0].expr
     assert isinstance(literal, hir.ObjectLiteral) and ty.set_element(literal.type) == 'int64'
@@ -118,8 +118,8 @@ def test_set_literals_and_methods() -> None:
 def test_set_pop_needs_a_proof_unless_defaulted() -> None:
     with pytest.raises(UserError, match='set key is not proven present') as info:
         _check("    let s = set[1 2]\n    let k:int64 = 3\n    s.pop(k)")
-    assert 'default=undefined' in str(info.value.report)
-    root = _check("    let s = set[1 2]\n    let k:int64 = 3\n    let a = s.pop(k default=undefined)\n    let b = s.pop(k default=0)\n    if k in? s { s.pop(k); }")
+    assert 'default=none' in str(info.value.report)
+    root = _check("    let s = set[1 2]\n    let k:int64 = 3\n    let a = s.pop(k default=none)\n    let b = s.pop(k default=0)\n    if k in? s { s.pop(k); }")
     body = {item.name: item for item in root.items[0].expr.body.items if isinstance(item, hir.Declare)}
     assert ty.optional_payload(body['a'].expr.type) == 'int64'
     assert body['b'].expr.type == 'int64'

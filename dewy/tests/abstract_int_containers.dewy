@@ -1,14 +1,14 @@
 # abstract `int`/`uint` in container annotations take the 64-bit word, also inside
-# unions and `dict`/`set` parameters: `array<int|undefined>`, `dict<string int>`
+# unions and `dict`/`set` parameters: `array<int|none>`, `dict<string int>`
 
 Info:type = [
     name:string
-    extra:dict<string int|undefined>
+    extra:dict<string int|none>
 ]
 
 specs:dict<string Info> = [
     'a' -> [ 'x' [] ]
-    'b' -> [ 'y' ['T'->(-1) '='->undefined] ]
+    'b' -> [ 'y' ['T'->(-1) '='->none] ]
 ]
 
 total:int64 = 0
@@ -21,7 +21,7 @@ loop [key info] in specs {
 }
 # 1 + 1 + (-1 + 10) + 20 = 31
 
-xs:array<int|undefined> = [1 undefined 3]
+xs:array<int|none> = [1 none 3]
 loop x in xs if x is? int64 total += x  # 35
 
 ws:set<uint> = set[1 2 3]
@@ -29,6 +29,6 @@ counts:dict<int int> = [7 -> 3]
 counts[7] = 3 + ws.length  # 6
 main = () => {
     let missing = counts.get(8)
-    if missing is? undefined total += 1  # 36
+    if missing is? none total += 1  # 36
     return total + counts.get(7 0)    # 42
 }

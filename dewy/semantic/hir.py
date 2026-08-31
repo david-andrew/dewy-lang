@@ -60,7 +60,7 @@ class Suppress(AST):
 
 
 @dataclass
-class Undefined(AST):
+class NoneValue(AST):
     """The first-class singleton value denoting absence."""
 
 
@@ -379,7 +379,7 @@ class DictLookup(AST):
     ``key in? d`` guard or store may hand over the entry position it found
     (``position`` names that hidden local; ``static_position`` is a literal
     entry), so the value is read without a second search. ``d.get(key)`` is
-    unproven and yields ``V | undefined``, or ``V`` with ``default``.
+    unproven and yields ``V | none``, or ``V`` with ``default``.
     """
 
     keys: AST
@@ -789,7 +789,7 @@ class TypeBlock(AST):
 
 @dataclass
 class Range(AST):
-    bounds: Literal['[]', '[)', '(]', '()'] | None  #none means the range hasn't been wrapped, so bounds are assumed []
+    bounds: Literal['[]', '[)', '(]', '()'] | None  # None means the range hasn't been wrapped, so bounds are assumed []
     step_pair: tuple[AST, AST] | None
     left: AST | None
     right: AST | None
@@ -811,7 +811,7 @@ class RangeMembership(AST):
 """
 primary language types to make hir nodes from:
 [named literals]
-- undefined
+- none
 - void
 - untyped
 - noreturn

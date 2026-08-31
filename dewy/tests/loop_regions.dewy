@@ -27,7 +27,7 @@ let main = ():>int64 => {
     let i:int64 = 0
     loop i <? 3 {
         let joined:string = ["x" "y{i}"].join"-"
-        match joined.find"-" { j:int64 => { if j >=? 1 and j <? joined.length { kept.push(joined[0..j)) } }  <undefined> => {} }   # stored: copied out of the region
+        match joined.find"-" { j:int64 => { if j >=? 1 and j <? joined.length { kept.push(joined[0..j)) } }  <none> => {} }   # stored: copied out of the region
         i += 1
     }
     let extra:int64 = 0

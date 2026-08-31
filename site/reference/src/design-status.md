@@ -23,7 +23,7 @@ The following principles organize the language and should be treated as normativ
 - Dictionaries and sets are values with insertion-ordered iteration, proven-key lookups, and hash-table representations; a container may not be mutated by a loop that iterates it.
 - Every value has one owner and storage is released deterministically; placement (stack, static, arena) is a proof-gated optimization and never changes whether a program is valid.
 - Expected failures are direct union alternatives belonging to a nominal `error` family rather than values wrapped in a `Result` container.
-- Any alternative descended from nominal `exception` forwards through receiver navigation. Both `error` and `undefined` descend from it, while all ordinary alternatives remain subject to member checking; call arguments never forward implicitly.
+- Any alternative descended from nominal `exception` forwards through receiver navigation. Both `error` and `none` descend from it, while all ordinary alternatives remain subject to member checking; call arguments never forward implicitly.
 - Returned errors and evaluation effects occupy separate parts of a function contract.
 - `type of Parent` is the sole generative type operation. It creates a fresh nominal child; `&` is non-generative intersection and preserves nominal ancestry already present in its operands.
 - A unit-like nominal type has one canonical inhabitant written with the type's name. Hybrid nominal/structural values use `Type[field=value ...]` construction.

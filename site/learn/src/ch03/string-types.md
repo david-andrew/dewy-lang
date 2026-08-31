@@ -50,7 +50,7 @@ let main = ():>int64 => {
 
 `join` without a separator concatenates directly. It never mutates the array, so it works on any array of strings — including exact-length ones — and the result can be returned or stored like any other string.
 
-Bytes that should be text are decoded with a check: `bytes as string | undefined` gives the string when the bytes are valid UTF-8 and `undefined` otherwise, so invalid input is a case to handle rather than an exception.
+Bytes that should be text are decoded with a check: `bytes as string | none` gives the string when the bytes are valid UTF-8 and `none` otherwise, so invalid input is a case to handle rather than an exception.
 
 ## Iterating Text
 

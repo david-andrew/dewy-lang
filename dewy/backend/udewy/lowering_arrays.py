@@ -1197,7 +1197,7 @@ class _ArrayLowering:
         are not released yet (objects have no release)."""
         plain = ty.strip_refinement(element_type)
         payload = ty.optional_payload(plain)
-        members: tuple[ty.TypeExpr, ...] = ('undefined', payload) if payload is not None else (ty.runtime_union_members(plain) or ())
+        members: tuple[ty.TypeExpr, ...] = ('none', payload) if payload is not None else (ty.runtime_union_members(plain) or ())
 
         def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
             name = self._new_string_temp(loc, 'int64', suffix).name
@@ -2279,7 +2279,7 @@ class _ArrayLowering:
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
         if self._is_optional_element(element_type):
-            # before the literal shortcut: `1` stored into `array<int64|undefined>` is a cell
+            # before the literal shortcut: `1` stored into `array<int64|none>` is a cell
             return self._optional_element_value(node, element_type)
         if self._is_union_element(element_type):
             return self._union_element_value(node, element_type)

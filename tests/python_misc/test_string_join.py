@@ -1,4 +1,4 @@
-"""`join` on string arrays and the checked UTF-8 decode `bytes as string | undefined`."""
+"""`join` on string arrays and the checked UTF-8 decode `bytes as string | none`."""
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -24,11 +24,11 @@ def test_join_requires_string_elements() -> None:
 def test_unchecked_decode_still_needs_a_proof_and_points_at_the_checked_form() -> None:
     with pytest.raises(TypeCheckError, match='string conversion requires a validity proof') as caught:
         _check('let raw:array<uint8> = [104]\nlet main = ():>int64 => (raw as string).length\n')
-    assert 'as string | undefined' in str(caught.value)
+    assert 'as string | none' in str(caught.value)
 
 
 def test_checked_decode_types_as_an_optional_string() -> None:
-    emitted = codegen(SrcFile(None, 'let main = ():>int64 => {\n    let s = 0x"6869" as string|undefined\n    if s is? string { return s.length }\n    return 0\n}\n'))
+    emitted = codegen(SrcFile(None, 'let main = ():>int64 => {\n    let s = 0x"6869" as string|none\n    if s is? string { return s.length }\n    return 0\n}\n'))
     assert '_arena_alloc' in emitted
 
 

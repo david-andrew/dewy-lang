@@ -9,7 +9,7 @@ A type is a compile-time value of type `type`. A binding may name it explicitly 
 ```dewy
 const Name:type = string
 const Index = <int64>
-const MaybeIndex = <int64 | undefined>
+const MaybeIndex = <int64 | none>
 ```
 
 `<>` groups a type-valued expression where ordinary expression context would otherwise treat it as a runtime value. Alternatives inside use the normal type operators: `<int64 | string>`, not whitespace-separated alternatives.
@@ -58,7 +58,7 @@ Structural-object intersections merge requirements by field name. A field found 
 
 <!-- dewy-example: design-only -->
 ```dewy
-const T1:type = [a:int | bool b:string c:bool | undefined]
+const T1:type = [a:int | bool b:string c:bool | none]
 const T2:type = [a:bool b:int]
 
 # a requires (int | bool) & bool, which simplifies to bool
@@ -78,13 +78,13 @@ Function parameters, returns, container elements, object fields, assignments, an
 
 ## Optional Sugar
 
-`T?` in a type position is `T | undefined`: `let word:string? = undefined`, a parameter `(v:string?)`, a result `:>int64?`, an element `dict<string int64?>`. `?` does not appear in value positions; narrowing an optional is the ordinary `is?`.
+`T?` in a type position is `T | none`: `let word:string? = none`, a parameter `(v:string?)`, a result `:>int64?`, an element `dict<string int64?>`. `?` does not appear in value positions; narrowing an optional is the ordinary `is?`.
 
 ## Unions and Narrowing
 
-`A | B` accepts a value belonging to either alternative. `T | undefined` is an optional value. Type and literal tests such as `is?` and `isnt?` narrow the tested value along control-flow paths.
+`A | B` accepts a value belonging to either alternative. `T | none` is an optional value. Type and literal tests such as `is?` and `isnt?` narrow the tested value along control-flow paths.
 
-General runtime unions are tag-and-payload cells; `undefined`, when present, is always member 0, so an optional is the two-member case of the same layout. A union whose members include several concrete types together with `undefined` (`Node | int64 | undefined`) is an ordinary union, including as a parameter or result.
+General runtime unions are tag-and-payload cells; `none`, when present, is always member 0, so an optional is the two-member case of the same layout. A union whose members include several concrete types together with `none` (`Node | int64 | none`) is an ordinary union, including as a parameter or result.
 
 Narrowing applies to member routes as well as bindings: after `if node.next is? Node`, `node.next` reads as `Node` until the field or its object is assigned. A store into a union field always accepts the field's declared type, and forgets any narrowing of that route.
 
@@ -111,13 +111,13 @@ let main = ():>int64 => classify("0x1f").length     # 2
 A type alias may refer to itself, but only as a union member of one of its fields:
 
 ```dewy
-let Node:type = [value:int64 next:Node|undefined]
-let Tree:type = [value:int64 left:Tree|undefined right:Tree|undefined]
+let Node:type = [value:int64 next:Node|none]
+let Tree:type = [value:int64 left:Tree|none right:Tree|none]
 ```
 
-The recursive member is stored behind a handle, which is what makes the object finite. A field typed exactly `Node` (no union) is rejected as an infinite value, and an alias whose every union member is itself has no base case and is rejected too. Values keep value semantics: copying a `Node | undefined` deep-copies the chain it points to, and narrowing a recursive member (`cur.next is? Node`) yields the object itself, so `cur.next.value` reads and writes through the handle.
+The recursive member is stored behind a handle, which is what makes the object finite. A field typed exactly `Node` (no union) is rejected as an infinite value, and an alias whose every union member is itself has no base case and is rejected too. Values keep value semantics: copying a `Node | none` deep-copies the chain it points to, and narrowing a recursive member (`cur.next is? Node`) yields the object itself, so `cur.next.value` reads and writes through the handle.
 
-An alternative belonging to the nominal `exception` family receives special receiver-navigation behavior. Member access operates on every ordinary alternative that supports the member and forwards every exception alternative. Both `error` and `undefined` descend from `exception`; arbitrary union alternatives do not become skippable. See [Errors, Exceptions, and Forwarding](errors-and-forwarding.md).
+An alternative belonging to the nominal `exception` family receives special receiver-navigation behavior. Member access operates on every ordinary alternative that supports the member and forwards every exception alternative. Both `error` and `none` descend from `exception`; arbitrary union alternatives do not become skippable. See [Errors, Exceptions, and Forwarding](errors-and-forwarding.md).
 
 ## Parameterized Types
 
@@ -138,8 +138,8 @@ A generic function declares its type parameters before the parameter list and mu
 <!-- dewy-example: compiler -->
 
 ```dewy
-let first = <T>(xs:array<T>):>T | undefined =>
-    if xs.length >? 0 xs[0] else undefined
+let first = <T>(xs:array<T>):>T | none =>
+    if xs.length >? 0 xs[0] else none
 
 let swap = <T U>(a:T b:U):>[x:U y:T] => [x=b y=a]
 

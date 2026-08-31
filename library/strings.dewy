@@ -22,8 +22,8 @@ let _string_ends_with = (text:string suffix:string):>bool => {
     return false
 }
 
-# The first position where `needle` occurs, or `undefined`.
-let _string_find = (text:string needle:string):>int64|undefined => {
+# The first position where `needle` occurs, or `none`.
+let _string_find = (text:string needle:string):>int64|none => {
     let m:int64 = needle.length
     if m =? 0 { return 0 }
     let i:int64 = 0
@@ -34,14 +34,14 @@ let _string_find = (text:string needle:string):>int64|undefined => {
         }
         i += 1
     }
-    return undefined
+    return none
 }
 
-# The last position where `needle` occurs, or `undefined`.
-let _string_rfind = (text:string needle:string):>int64|undefined => {
+# The last position where `needle` occurs, or `none`.
+let _string_rfind = (text:string needle:string):>int64|none => {
     let m:int64 = needle.length
     if m =? 0 { return text.length }
-    if m >? text.length { return undefined }
+    if m >? text.length { return none }
     let i:int64 = text.length - m
     loop i >=? 0 {
         let last:int64 = i + m - 1
@@ -50,13 +50,13 @@ let _string_rfind = (text:string needle:string):>int64|undefined => {
         }
         i -= 1
     }
-    return undefined
+    return none
 }
 
 let _string_contains = (text:string needle:string):>bool => {
     match _string_find(text needle) {
         <int64> => return true
-        <undefined> => return false
+        <none> => return false
     }
 }
 
@@ -168,9 +168,9 @@ let _push_utf8 = (@bytes:array<uint8> code:int64):>void => {
 
 # The string of UTF-8 bytes this module produced itself (always valid).
 let _string_of_utf8 = (bytes:array<uint8>):>string => {
-    match bytes as string|undefined {
+    match bytes as string|none {
         text:string => return text
-        <undefined> => return ""   # unreachable: the bytes were encoded here
+        <none> => return ""   # unreachable: the bytes were encoded here
     }
 }
 

@@ -75,13 +75,13 @@ let retry = failed and attempts <? limit
 
 English Boolean operators include `and`, `or`, `not`, `nand`, `nor`, `xor`, and `xnor`.
 
-## `void`, `never`, and `undefined`
+## `void`, `never`, and `none`
 
 - `void` means an expression completed without producing a value.
 - `never` means the path cannot complete normally.
-- `undefined` is a storable value used for missing alternatives.
+- `none` is a storable value used for missing alternatives.
 
-`T | undefined` is an optional value, covered in [Optional Values and Narrowing](optional-types.md).
+`T | none` is an optional value, covered in [Optional Values and Narrowing](optional-types.md).
 
 ## Type Values and Aliases
 
@@ -99,7 +99,7 @@ let origin:Pair = [left=0 right=0]
 
 ```dewy
 const SmallPrime = <2 | 3 | 5 | 7>
-const Result = <string | undefined>
+const Result = <string | none>
 ```
 
 Literal values can therefore participate in types. `|` forms a union of alternatives.
@@ -127,7 +127,7 @@ const DetailedContextError:type =
 
 `DetailedContextError` adds a structural requirement while retaining `ContextError`'s nominal ancestry. It is not another nominal error variant.
 
-When an alternative belongs to the nominal `exception` family, navigation can [forward that exception value](errors-as-values.md#exception-values-forward) while applying the requested member operation to the ordinary alternatives. Both `error` and `undefined` descend from `exception`. This is a rule for exception-classified union members, not for arbitrary unions.
+When an alternative belongs to the nominal `exception` family, navigation can [forward that exception value](errors-as-values.md#exception-values-forward) while applying the requested member operation to the ordinary alternatives. Both `error` and `none` descend from `exception`. This is a rule for exception-classified union members, not for arbitrary unions.
 
 ## Parameterized Type Aliases
 

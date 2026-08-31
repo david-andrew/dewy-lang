@@ -16,7 +16,7 @@
 let join2 = (a:string b:string):>string => [a b].join"-"
 let pick = (text:string flag:bool):>string => if flag text else text.trim
 let first_word = (text:string):>string => {
-    match text.find" " { i:int64 => { if i >=? 1 and i <? text.length { return text[0..i) } }  <undefined> => {} }
+    match text.find" " { i:int64 => { if i >=? 1 and i <? text.length { return text[0..i) } }  <none> => {} }
     return text
 }
 let shout = (text:string):>string => {
@@ -27,26 +27,26 @@ let inner = (text:string):>string => {
     let s:string = join2(text "x")
     return pick(s true)                      # a view of `s`, which dies here: copied
 }
-let choose = (flag:bool n:int64):>string|undefined => if flag join2("v" "{n}") else undefined
-let moved = (n:int64):>string|undefined => {
-    let maybe:string|undefined = choose(true n)
+let choose = (flag:bool n:int64):>string|none => if flag join2("v" "{n}") else none
+let moved = (n:int64):>string|none => {
+    let maybe:string|none = choose(true n)
     return maybe                              # moved: the caller owns the payload
 }
-let aliased = (n:int64):>string|undefined => {
-    let maybe:string|undefined = choose(true n)
-    let other:string|undefined = maybe
+let aliased = (n:int64):>string|none => {
+    let maybe:string|none = choose(true n)
+    let other:string|none = maybe
     return other                              # reaches `maybe`: the payload is cloned
 }
 let cells = (n:int64):>int64 => {
-    let a:string|undefined = moved(n)
-    let b:string|undefined = aliased(n)
-    let c:string|undefined = choose(true n)
+    let a:string|none = moved(n)
+    let b:string|none = aliased(n)
+    let c:string|none = choose(true n)
     c = choose(n % 2 =? 0 n + 1)              # the old payload goes back first
     let total:int64 = 0
-    match a { s:string => { total += s.length }  <undefined> => {} }
-    match b { s:string => { total += s.length }  <undefined> => {} }
-    match c { s:string => { total += s.length }  <undefined> => { total += 100 } }
-    match choose(true n) { s:string => { total += s.length }  <undefined> => {} }   # a `match` temporary owns the payload
+    match a { s:string => { total += s.length }  <none> => {} }
+    match b { s:string => { total += s.length }  <none> => {} }
+    match c { s:string => { total += s.length }  <none> => { total += 100 } }
+    match choose(true n) { s:string => { total += s.length }  <none> => {} }   # a `match` temporary owns the payload
     let i:int64 = 0
     loop i <? 3 and "a b c".split" ".length >? 1 { i += 1 }   # an array temporary in a loop condition
     return total + i                          # 3 + 3 + 3 + 3 + 3 = 15 (n even, n < 10)

@@ -1,11 +1,11 @@
 # Optional Values and Narrowing
 
-`undefined` is a real value representing a missing alternative. It is not `void` or an uninitialized name.
+`none` is a real value representing a missing alternative. It is not `void` or an uninitialized name.
 
-An optional type is a union with `undefined`:
+An optional type is a union with `none`:
 
 ```dewy
-let answer:int64 | undefined = lookup_answer()
+let answer:int64 | none = lookup_answer()
 ```
 
 ## Checking an Optional
@@ -13,14 +13,14 @@ let answer:int64 | undefined = lookup_answer()
 Use `is?` or `isnt?` to establish which alternative is present:
 
 ```dewy
-if answer isnt? undefined
+if answer isnt? none
     printl"the next answer is {answer + 1}"
 ```
 
 Inside the body, `answer` is known to be `int64`. An early exit can establish the same fact afterward:
 
 ```dewy
-if answer is? undefined
+if answer is? none
     return
 
 printl"answer is {answer}"
@@ -33,18 +33,18 @@ printl"answer is {answer}"
 A function can return an optional explicitly:
 
 ```dewy
-let choose = (enabled:bool):>int64 | undefined =>
-    if enabled 42 else undefined
+let choose = (enabled:bool):>int64 | none =>
+    if enabled 42 else none
 ```
 
-Any expression whose alternatives include a value and `undefined` can produce an optional.
+Any expression whose alternatives include a value and `none` can produce an optional.
 
 ## Absence Is an Exception, Not an Error
 
-`undefined` says that a value is absent. An error says that an operation failed and carries its own error type. Both descend from Dewy's `exception` type family, so navigation forwards either one without trying to access a member on it. They nevertheless remain distinct contracts:
+`none` says that a value is absent. An error says that an operation failed and carries its own error type. Both descend from Dewy's `exception` type family, so navigation forwards either one without trying to access a member on it. They nevertheless remain distinct contracts:
 
 ```dewy
-User | undefined       # a user may simply be absent
+User | none       # a user may simply be absent
 ```
 
 <!-- dewy-example: design-only -->
@@ -56,10 +56,10 @@ User | NotFoundError   # looking up the user may fail
 
 <!-- dewy-example: design-only -->
 ```dewy
-let user:User | undefined = findUser(id)
+let user:User | none = findUser(id)
 let city = user.profile.address.city
 
-# city has type string | undefined
+# city has type string | none
 ```
 
 If users want a non-forwarding sentinel, they can define an ordinary type that does not descend from `exception`. Every ordinary alternative must support a requested member or be narrowed away first.

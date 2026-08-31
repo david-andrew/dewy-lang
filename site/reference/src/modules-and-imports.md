@@ -72,8 +72,8 @@ The prelude runs programs as child processes (`library/linux/process.dewy`); eve
 
 - `run(program args):>int64 | SpawnError` waits for the status; the child shares the standard streams. `run_silent` sends its stdout and stderr to `/dev/null`.
 - `spawn(program args):>Child | SpawnError` starts the child and returns it; `child.wait` yields the status. Several children may run at once.
-- `capture(program args):>Output | SpawnError` waits with the child's output collected: `status`, `stdout` and `stderr` (bytes, drained as the pipes fill, so a large output cannot block the child), and `stdout_text` / `stderr_text` (`string | undefined`: the bytes decoded, `undefined` when they are not UTF-8).
-- `environment(name):>string | undefined` reads one of this process's own environment variables.
+- `capture(program args):>Output | SpawnError` waits with the child's output collected: `status`, `stdout` and `stderr` (bytes, drained as the pipes fill, so a large output cannot block the child), and `stdout_text` / `stderr_text` (`string | none`: the bytes decoded, `none` when they are not UTF-8).
+- `environment(name):>string | none` reads one of this process's own environment variables.
 
 <!-- dewy-example: compiler -->
 
@@ -81,7 +81,7 @@ The prelude runs programs as child processes (`library/linux/process.dewy`); eve
 let main = ():>int64 => {
     match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {
         result:Output => {
-            match result.stdout_text { text:string => printl"{text}"  <undefined> => {} }
+            match result.stdout_text { text:string => printl"{text}"  <none> => {} }
             return result.status                       # 3
         }
         <SpawnError> => return 1

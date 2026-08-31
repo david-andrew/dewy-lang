@@ -185,8 +185,8 @@ def _node_label(node: hir.AST | hir.Param) -> str:
         return 'Void'
     if isinstance(node, hir.Suppress):
         return 'Suppress'
-    if isinstance(node, hir.Undefined):
-        return 'Undefined'
+    if isinstance(node, hir.NoneValue):
+        return 'NoneValue'
     if isinstance(node, hir.Return):
         return 'Return'
     if isinstance(node, hir.IfArm):
@@ -721,8 +721,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         if needs_group:
             item = _seq(_text('('), item, _text(')'))
         return _seq(item, _text(';'))
-    if isinstance(node, hir.Undefined):
-        return _text('undefined')
+    if isinstance(node, hir.NoneValue):
+        return _text('none')
     if isinstance(node, hir.RationalConstant):
         return _text(f'{node.numerator}/{node.denominator}')
     if isinstance(node, hir.Integer):

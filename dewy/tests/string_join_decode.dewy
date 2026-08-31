@@ -1,6 +1,6 @@
 # `xs.join` / `xs.join(sep)` concatenates string elements into a new string;
 # an `array<string>` built in a loop is the string builder. `bytes as string |
-# undefined` is the checked UTF-8 decode: a string, or `undefined` for bytes
+# none` is the checked UTF-8 decode: a string, or `none` for bytes
 # that are not valid UTF-8.
 let render = (values:array<int64>):>string => {
     let pieces:array<string> = []
@@ -15,8 +15,8 @@ let main = ():>int64 => {
     if words.join"-" =? "a-bc-def" { checks += 2 }
     let sep:string = " | "
     if words.join(sep).length =? 12 { checks += 4 }
-    let none:array<string> = []
-    if none.join =? "" and none.join"," =? "" { checks += 8 }
+    let empty_words:array<string> = []
+    if empty_words.join =? "" and empty_words.join"," =? "" { checks += 8 }
     let one:array<string> = ["solo"]
     if one.join"," =? "solo" { checks += 16 }
     let parts:array<grapheme> = ['e' '́' 'x']
@@ -25,19 +25,19 @@ let main = ():>int64 => {
     let text = render([1 22 333])
     if text =? "1, 22, 333" and text.length =? 10 { checks += 64 }
 
-    let ok = 0x"68c3a9" as string|undefined     # "hé"
+    let ok = 0x"68c3a9" as string|none     # "hé"
     if ok is? string { if ok =? "hé" and ok.length =? 2 { checks += 128 } }
     let raw:array<uint8> = [0xe2 0x82 0xac 0x21]
-    let euro = raw as string|undefined          # "€!"
+    let euro = raw as string|none          # "€!"
     if euro is? string { if euro.length =? 2 { checks += 256 } }
-    let bad = 0x"68ff" as string|undefined      # a stray continuation byte
-    let truncated = 0x"e282" as string|undefined
-    let overlong = 0x"c080" as string|undefined
-    let surrogate = 0x"eda080" as string|undefined
-    let too_big = 0x"f4908080" as string|undefined
+    let bad = 0x"68ff" as string|none      # a stray continuation byte
+    let truncated = 0x"e282" as string|none
+    let overlong = 0x"c080" as string|none
+    let surrogate = 0x"eda080" as string|none
+    let too_big = 0x"f4908080" as string|none
     if bad isnt? string and truncated isnt? string and overlong isnt? string
         and surrogate isnt? string and too_big isnt? string { checks += 512 }
-    let empty = 0x"" as string|undefined
+    let empty = 0x"" as string|none
     if empty is? string { if empty.length =? 0 { checks += 1024 } }
     return checks - 2005                        # 42
 }

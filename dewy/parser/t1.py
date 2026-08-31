@@ -21,7 +21,7 @@ from typing import Literal, Generator
 keywords: set[str] = {
     'loop', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
     'import', 'from', 'let', 'const', 'local_const', 'overload_only',
-    # 'extern', 'intrinsic', 'undefined', 'void', 'untyped', 'end', 'new' #TBD if these are keywords or just special identifiers
+    # 'extern', 'intrinsic', 'none', 'void', 'untyped', 'end', 'new' #TBD if these are keywords or just special identifiers
 }
 
 # tokenized as symbols, but are treated as identifiers (rather than operators)

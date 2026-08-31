@@ -10,7 +10,7 @@ let main = ():>int64 => {
     let checks:int64 = 0
     if greeting.length =? 13 { checks += 1 }               # "héllo bytes\n": é is two bytes
     if greeting[0] =? 104 and greeting[12] =? 10 { checks += 2 }
-    let text = greeting as string|undefined
+    let text = greeting as string|none
     if text is? string { if text.length =? 12 { checks += 4 } }
     if again.length =? greeting.length { checks += 8 }
     return checks * 2 + 12                                  # 15 * 2 + 12 = 42

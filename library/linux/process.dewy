@@ -23,35 +23,35 @@ let _environment_bytes = ():>array<uint8> => {
 }
 
 # `environ[start..stop)` is one `NAME=value` entry: its value when the name is `wanted`.
-let _environment_value = (environ:array<uint8> start:int64 stop:int64 wanted:array<uint8>):>string|undefined => {
+let _environment_value = (environ:array<uint8> start:int64 stop:int64 wanted:array<uint8>):>string|none => {
     let equals:int64 = start + wanted.length
-    if equals >=? stop { return undefined }
-    if equals >=? environ.length { return undefined }
-    if equals <? 0 { return undefined }
+    if equals >=? stop { return none }
+    if equals >=? environ.length { return none }
+    if equals <? 0 { return none }
     let k:int64 = 0
     loop k <? wanted.length {
         let index:int64 = start + k
-        if index <? 0 { return undefined }
-        if index >=? environ.length { return undefined }
-        if environ[index] not=? wanted[k] { return undefined }
+        if index <? 0 { return none }
+        if index >=? environ.length { return none }
+        if environ[index] not=? wanted[k] { return none }
         k += 1
     }
-    if environ[equals] not=? 61 { return undefined }   # `=`
+    if environ[equals] not=? 61 { return none }   # `=`
     let value_bytes:array<uint8> = []
     let j:int64 = equals + 1
     loop j <? stop {
         if j >=? 0 and j <? environ.length { value_bytes.push(environ[j]) }
         j += 1
     }
-    let text = value_bytes as string|undefined
+    let text = value_bytes as string|none
     match text {
         s:string => return s
-        <undefined> => return undefined
+        <none> => return none
     }
 }
 
-# The value of an environment variable, or `undefined` when it is not set.
-let environment = (name:string):>string|undefined => {
+# The value of an environment variable, or `none` when it is not set.
+let environment = (name:string):>string|none => {
     let wanted:array<uint8> = name as array<uint8>
     let environ:array<uint8> = _environment_bytes()
     let start:int64 = 0
@@ -61,13 +61,13 @@ let environment = (name:string):>string|undefined => {
             let value = _environment_value(environ start i wanted)
             match value {
                 s:string => return s
-                <undefined> => {}
+                <none> => {}
             }
             start = i + 1
         }
         i += 1
     }
-    return undefined
+    return none
 }
 
 # ---- processes ----
@@ -88,8 +88,8 @@ let Output:type = [
     status:int64
     stdout:array<uint8>
     stderr:array<uint8>
-    stdout_text = ():>string|undefined => stdout as string|undefined
-    stderr_text = ():>string|undefined => stderr as string|undefined
+    stdout_text = ():>string|none => stdout as string|none
+    stderr_text = ():>string|none => stderr as string|none
 ]
 
 let run = (program:string args:array<string>):>int64|SpawnError => {
@@ -291,10 +291,10 @@ let list_directory = (path:string):>array<string>|FileNotFound|FileAccessDenied|
                 cursor = cursor + 1
                 byte = __load_u8__(cursor)
             }
-            let name = name_bytes as string|undefined
+            let name = name_bytes as string|none
             match name {
                 text:string => if text not=? "." and text not=? ".." { names.push(text) }
-                <undefined> => {}
+                <none> => {}
             }
             if reclen <=? 0 { offset = count } else { offset = offset + reclen }
         }

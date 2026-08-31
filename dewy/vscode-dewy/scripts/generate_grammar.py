@@ -243,7 +243,7 @@ GRAMMAR = {
             "patterns": [
                 rule("constant.language.boolean", "\\b(true|false)\\b"),
                 rule("constant.language.void", "\\bvoid\\b"),
-                rule("constant.language.undefined", "\\bundefined\\b"),
+                rule("constant.language.none", "\\bnone\\b"),
                 rule("constant.language.end", "\\bend\\b"),
                 rule("constant.language.symbolic", "[∞∅]"),
             ]

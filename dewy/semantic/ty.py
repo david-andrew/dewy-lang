@@ -299,7 +299,7 @@ class PathType(ObjectType):
 class NamedType:
     """A by-name reference to a recursive type alias.
 
-    ``let Node:type = [value:int64 next:Node|undefined]`` cannot be a finite
+    ``let Node:type = [value:int64 next:Node|none]`` cannot be a finite
     structural tree, so the recursive occurrence is this reference; it unfolds
     to the alias's object type on demand (``target``). Two references to the
     same alias are equal. A reference may only appear as a union member, where
@@ -426,7 +426,7 @@ def is_user_nominal(type_: object) -> bool:
 # TODO: do we support multiple inheritance? probably but TBD
 _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     # exceptions
-    ('undefined', EXCEPTION_TYPE),
+    ('none', EXCEPTION_TYPE),
     ('error', EXCEPTION_TYPE),
 
     # basic types
@@ -688,18 +688,18 @@ FIXED_INTEGER_TYPES = frozenset(_fixed_integer_widths)
 
 
 def optional_payload(type_: Type) -> TypeExpr | None:
-    """Return the sole non-undefined member of ``T | undefined``."""
+    """Return the sole non-none member of ``T | none``."""
 
-    if not isinstance(type_, TypeOr) or 'undefined' not in type_.items:
+    if not isinstance(type_, TypeOr) or 'none' not in type_.items:
         return None
-    payloads = [item for item in type_.items if item != 'undefined']
+    payloads = [item for item in type_.items if item != 'none']
     return payloads[0] if len(payloads) == 1 else None
 
 
 def optional(type_: TypeExpr) -> TypeExpr:
     """Construct the canonical optional form for one payload type."""
 
-    return union(type_, 'undefined')
+    return union(type_, 'none')
 
 
 def enum_members(type_: Type) -> tuple[TypeExpr, ...] | None:
@@ -736,7 +736,7 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
 
     Returns None for non-unions and for single-payload optionals, which keep
     their dedicated two-state cells, and for enums (unions of singletons),
-    which are plain words (see `enum_members`). ``undefined`` is always
+    which are plain words (see `enum_members`). ``none`` is always
     member 0 when present, so the general tag numbering coincides with
     optional tags.
     """
@@ -748,12 +748,12 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
         return None
     if string_valued(type_):
         return None   # a union of string literals: one string handle, no tags
-    # Canonical order: `undefined` first, then a deterministic sort, so every
+    # Canonical order: `none` first, then a deterministic sort, so every
     # spelling of the same member set (declared, narrowed, joined) numbers
     # its tags identically.
     members = sorted(
         type_.items,
-        key=lambda member: (0 if member == 'undefined' else 1, repr(member)),
+        key=lambda member: (0 if member == 'none' else 1, repr(member)),
     )
     return tuple(members)
 
@@ -1513,7 +1513,7 @@ class TypeSystem:
                     match_param(pp.type, ap.type) for pp, ap in zip(param_t.pos_or_kw, arg_t.pos_or_kw)
                 ) and match_param(param_t.ret, arg_t.ret)
             if isinstance(param_t, TypeOr) and not isinstance(arg_t, TypeOr):
-                # `T | undefined` against `int64`: bind through the variable member
+                # `T | none` against `int64`: bind through the variable member
                 variables = [
                     item for item in param_t.items
                     if (isinstance(item, TypeVariable) and item.name in type_vars) or (isinstance(item, str) and item in type_vars)

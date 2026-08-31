@@ -19,7 +19,7 @@ let main = ():>int64 => {
     }
     let missing = ages.get('dan')
     let checks:int64 = 0
-    if missing is? undefined { checks += 1 }
+    if missing is? none { checks += 1 }
     if ages.get('dan' 5) =? 5 { checks += 2 }
     if describe(ages 'ann') =? 60 and describe(ages 'zed') =? -1 { checks += 4 }
     printl"{literal} {stored} {sum} {checks}"

@@ -7,17 +7,17 @@ let describe = (line:string):>int64 => {
     let joined:string = parts.join"-"
     let n:int64 = 0
     loop part in parts { n += part.length }
-    match joined.find"-" { i:int64 => { n += i }  <undefined> => {} }
+    match joined.find"-" { i:int64 => { n += i }  <none> => {} }
     return n + joined.length                       # 14 + 5 + 16 = 35
 }
 let first_word = (text:string):>string => {
-    match text.find" " { i:int64 => { if i >=? 1 and i <? text.length { return text[0..i) } }  <undefined> => {} }
+    match text.find" " { i:int64 => { if i >=? 1 and i <? text.length { return text[0..i) } }  <none> => {} }
     return text
 }
 let decoded_upper = (bytes:array<uint8>):>string => {
-    match bytes as string|undefined {
+    match bytes as string|none {
         s:string => return s.replace("a" "A")     # a join built for the return: arena
-        <undefined> => return ""
+        <none> => return ""
     }
 }
 let main = ():>int64 => {

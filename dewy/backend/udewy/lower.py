@@ -461,8 +461,8 @@ class _Lowerer(
         place_parameter_cells: dict[int, hir.ExpressedIdentifier] = {}
 
         def lower_param(param: hir.Param) -> hir.Param:
-            # a union with `undefined` and several other members is an ordinary
-            # general union (`undefined` is member 0, so its tag matches optionals)
+            # a union with `none` and several other members is an ordinary
+            # general union (`none` is member 0, so its tag matches optionals)
             if param.place:
                 if param.binding_id is None:
                     raise TypeError(
@@ -978,7 +978,7 @@ class _Lowerer(
                 self._target_error(value, 'a union operand that is not a runtime union')
             prelude, cell = self._materialize_optional(value, payload)
             self.optional_payloads[binding_id] = payload
-            members = ('undefined', payload)
+            members = ('none', payload)
         holder = hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(cell, type='int64'), binding_id=binding_id)
         if binding_id in self.owning_string_bindings and not self.lowering_module_startup:
             # a `match f() { s:string => … }` temporary the analysis found owning (a
@@ -1036,8 +1036,8 @@ class _Lowerer(
             statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
             return statements, result
         forwarded: hir.AST
-        if node.exception_type == 'undefined':
-            forwarded = hir.Undefined(loc, 'undefined')
+        if node.exception_type == 'none':
+            forwarded = hir.NoneValue(loc, 'none')
         else:
             forwarded = hir.ExpressedIdentifier(loc, node.exception_type, node.name, binding_id=node.binding_id)
         statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, write(forwarded), True)))
@@ -1161,12 +1161,12 @@ class _Lowerer(
         annotation = declaration.annotation or declaration.expr.type
         if (
             isinstance(annotation, ty.TypeOr)
-            and 'undefined' in annotation.items
+            and 'none' in annotation.items
             and ty.optional_payload(annotation) is None
         ):
             self._target_error(
                 declaration,
-                'heterogeneous runtime union containing `undefined`',
+                'heterogeneous runtime union containing `none`',
             )
         if isinstance(annotation, ty.IntegerLiteralType):
             if not ty.integer_literal_fits(annotation.value, 'int64'):
@@ -3295,7 +3295,7 @@ class _Lowerer(
                         raise TypeError('INTERNAL ERROR: missing optional result payload')
                     items.extend(self._lower_result_statements(lambda: [
                         *self._optional_write(replace(self.current_optional_result, type='int64'), item, payload),
-                        *self._moved_or_cloned_cell_return(item, replace(self.current_optional_result, type='int64'), ('undefined', payload)),
+                        *self._moved_or_cloned_cell_return(item, replace(self.current_optional_result, type='int64'), ('none', payload)),
                         hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
                     ]))
                     continue
@@ -3329,7 +3329,7 @@ class _Lowerer(
                 raise TypeError('INTERNAL ERROR: missing optional result payload')
             statements = self._lower_result_statements(lambda: [
                 *self._optional_write(replace(self.current_optional_result, type='int64'), node, payload),
-                *self._moved_or_cloned_cell_return(node, replace(self.current_optional_result, type='int64'), ('undefined', payload)),
+                *self._moved_or_cloned_cell_return(node, replace(self.current_optional_result, type='int64'), ('none', payload)),
                 hir.Return(node.loc, ty.BOTTOM_TYPE, hir.Void(node.loc, ty.VOID_TYPE)),
             ])
         elif self.current_object_result is not None:
@@ -3568,7 +3568,7 @@ class _Lowerer(
                     expr=self._optional_allocation(node.loc),
                 )
                 if node.binding_id is not None and node.binding_id in self.owning_string_bindings and not self.lowering_module_startup:
-                    self.owned_cells[node.name] = ('undefined', payload)   # a call's optional string: its payload is released at scope exit
+                    self.owned_cells[node.name] = ('none', payload)   # a call's optional string: its payload is released at scope exit
                 return [
                     declaration,
                     *self._optional_write(cell, node.expr, payload),
@@ -3873,7 +3873,7 @@ class _Lowerer(
                     payload = ty.optional_payload(function_type)
                 if payload is None:
                     raise TypeError('INTERNAL ERROR: missing optional result payload')
-                moved_cell = self._moved_or_cloned_cell_return(node.item, replace(self.current_optional_result, type='int64'), ('undefined', payload))
+                moved_cell = self._moved_or_cloned_cell_return(node.item, replace(self.current_optional_result, type='int64'), ('none', payload))
                 return [
                     *self._optional_write(
                         replace(self.current_optional_result, type='int64'),
@@ -4099,7 +4099,7 @@ class _Lowerer(
                     # not a member: the lowering's own retyping (`replace(node,
                     # type='int64')`) of a `0 | [...]` cell — the cell address
                     return [], cell
-                if member is None or member == 'undefined':
+                if member is None or member == 'none':
                     self._target_error(node, 'a union payload read of this type')
                 loaded = self._optional_load_payload(cell, member, node.loc)
                 if self._union_member_kind(member) == 'word':
@@ -4113,8 +4113,8 @@ class _Lowerer(
             return self._extract_object_literal(node)
         if isinstance(node, hir.MemberAccess):
             return self._extract_member_access(node)
-        if isinstance(node, hir.Undefined):
-            self._target_error(node, '`undefined` value without an optional context')
+        if isinstance(node, hir.NoneValue):
+            self._target_error(node, '`none` value without an optional context')
         if isinstance(node, hir.ErrorValue):
             # a unit-like error is its tag; the payload word is zero
             return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
@@ -4195,8 +4195,8 @@ class _Lowerer(
                     result = not result
                 return prelude, hir.Bool(node.loc, 'bool', result)
             payload_matches = system.is_subtype(payload, node.test_type)
-            undefined_matches = system.is_subtype('undefined', node.test_type)
-            if payload_matches == undefined_matches:
+            none_matches = system.is_subtype('none', node.test_type)
+            if payload_matches == none_matches:
                 result = payload_matches
                 if node.negated:
                     result = not result

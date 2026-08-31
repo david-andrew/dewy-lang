@@ -15,11 +15,11 @@ Calling `loadCustomer` produces one of those three values. There is no `Result` 
 
 Public functions should normally state a stable set of errors in their return contract. A private helper may allow the compiler to infer them.
 
-> **Dewy never traps.** A running Dewy program has no hidden exits: it stops only where you wrote `return`, an explicit exit, or a `$runtime_assert` of your own. Whatever could fail is either proven safe at compile time (and compiles to nothing) or comes back to you as a value in the type — `rational | Overflow`, `T | undefined`, your own error types — for you to handle. There is no third option, in your code or in the library — and if you write a library yourself, the same courtesy applies: don't exit on your callers' behalf. Ask for the proof in a parameter's type, or hand the failure back in the result.
+> **Dewy never traps.** A running Dewy program has no hidden exits: it stops only where you wrote `return`, an explicit exit, or a `$runtime_assert` of your own. Whatever could fail is either proven safe at compile time (and compiles to nothing) or comes back to you as a value in the type — `rational | Overflow`, `T | none`, your own error types — for you to handle. There is no third option, in your code or in the library — and if you write a library yourself, the same courtesy applies: don't exit on your callers' behalf. Ask for the proof in a parameter's type, or hand the failure back in the result.
 
 ## Exception Values Forward
 
-Safe navigation is governed by a broader `exception` type family. Both `error` and `undefined` descend from `exception`, and programmers can define other exception types. Any alternative in this family forwards through navigation.
+Safe navigation is governed by a broader `exception` type family. Both `error` and `none` descend from `exception`, and programmers can define other exception types. Any alternative in this family forwards through navigation.
 
 Here, “exception” describes an ordinary value's type. It does not imply throwing, catching, or stack unwinding.
 
@@ -64,20 +64,20 @@ When a receiver might be an exception, Dewy applies a member operation to every 
 ```dewy
 let DatabaseError:type = type of error
 let Address:type = [city:string]
-let Profile:type = [address:Address|undefined]
+let Profile:type = [address:Address|none]
 let Customer:type = [profile:Profile]
 
-let find_customer = (id:int64):>Customer | DatabaseError | undefined =>
+let find_customer = (id:int64):>Customer | DatabaseError | none =>
     if id >? 0 [profile=[address=[city="paris"]]] else DatabaseError
 
-let city_of = (id:int64):>string | DatabaseError | undefined => {
+let city_of = (id:int64):>string | DatabaseError | none => {
     let customer = find_customer(id)
     let city = customer.profile.address.city
-    return city                       # string | DatabaseError | undefined
+    return city                       # string | DatabaseError | none
 }
 ```
 
-If `customer` is a `Customer`, the route reads its `profile`, `address`, and `city`. If it is a `DatabaseError` or `undefined`, none of those accesses run; that exception becomes the value of `city`. Every later access in the route follows the same rule, so Dewy does not need a separate `?.` operator.
+If `customer` is a `Customer`, the route reads its `profile`, `address`, and `city`. If it is a `DatabaseError` or `none`, none of those accesses run; that exception becomes the value of `city`. Every later access in the route follows the same rule, so Dewy does not need a separate `?.` operator.
 
 This behavior is type checked rather than based on whether a value happens to be truthy. Every non-exception alternative must support the requested member:
 
@@ -105,7 +105,7 @@ let loadGreeting = (id:CustomerId)
 }
 ```
 
-The expression evaluates `loadCustomer(id)` once. A `Customer` becomes the local `customer`; an exception returns immediately from `loadGreeting`. The enclosing return contract must accept every exception alternative that can be forwarded this way. This applies to `undefined` and user-defined exceptions as well as errors.
+The expression evaluates `loadCustomer(id)` once. A `Customer` becomes the local `customer`; an exception returns immediately from `loadGreeting`. The enclosing return contract must accept every exception alternative that can be forwarded this way. This applies to `none` and user-defined exceptions as well as errors.
 
 Unlike navigation on a receiver, arguments do not forward implicitly:
 
@@ -169,7 +169,7 @@ let main = ():>int64 => {
 
 ## Errors, Absence, and Effects
 
-`undefined` represents absence. It is not an `error`, but it is an `exception`, so optional navigation forwards it automatically. This makes `T | undefined` the common option-like form: use the `T` normally, or carry its exceptional absence through the route. [Optional Values and Narrowing](optional-types.md) covers explicit tests and fallbacks.
+`none` represents absence. It is not an `error`, but it is an `exception`, so optional navigation forwards it automatically. This makes `T | none` the common option-like form: use the `T` normally, or carry its exceptional absence through the route. [Optional Values and Narrowing](optional-types.md) covers explicit tests and fallbacks.
 
 Errors are also separate from [effects](effects.md). An error appears in the returned union because it is a value the caller receives. Effects describe behavior such as I/O, blocking, or mutation even when a call succeeds.
 

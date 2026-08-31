@@ -18,7 +18,7 @@ There shall be an optimization pass that analyzes the possible range any given v
 ## Multiiterator fusion and scalar replacement
 
 Semantic contract: every iterator leaf advances eagerly, left-to-right, exactly
-once per condition evaluation. Exhausted leaves assign `undefined`, contribute
+once per condition evaluation. Exhausted leaves assign `none`, contribute
 `false`, and the complete logical formula retains its literal truth table after
 all leaves are exhausted.
 
@@ -27,7 +27,7 @@ storage, then evaluate the source formula from all active flags.
 
 Deferred lowering: fuse static range compositions into directly mutated
 counters and a simplified exit condition. Constant trip counts can eliminate
-unnecessary active flags, `undefined` writes and tags, and dead iterator
+unnecessary active flags, `none` writes and tags, and dead iterator
 targets.
 
 Proof required: the replacement must preserve source-order effects, one advance
@@ -36,14 +36,14 @@ behavior, and all-exhausted truth-table behavior.
 
 ## Optional layout niches
 
-Semantic contract: `T | undefined` preserves every value of `T`, has a distinct
-`undefined` state, and uses value semantics for assignment and parameter
+Semantic contract: `T | none` preserves every value of `T`, has a distinct
+`none` state, and uses value semantics for assignment and parameter
 binding.
 
 Correct baseline: represent an optional as a defined tag plus one aligned
 payload slot.
 
-Deferred lowering: use a spare representation as the undefined niche. Possible
+Deferred lowering: use a spare representation as the none niche. Possible
 cases include packing a narrow integer and tag into one 64-bit value, using a
 third Boolean state, or using a proven-invalid pointer representation.
 

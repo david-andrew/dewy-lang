@@ -1,4 +1,4 @@
-"""Union-typed container members: string-literal unions are string handles; `T | undefined` elements are owned cells."""
+"""Union-typed container members: string-literal unions are string handles; `T | none` elements are owned cells."""
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -29,8 +29,8 @@ def test_string_literal_unions_are_string_handles() -> None:
 def test_optional_elements_are_arena_cells() -> None:
     emitted = _compile(
         'let main = ():>int64 => {\n'
-        '    let xs:array<int64|undefined> = [1 undefined]\n'
-        "    let d:dict<string int64|undefined> = ['a' -> undefined]\n"
+        '    let xs:array<int64|none> = [1 none]\n'
+        "    let d:dict<string int64|none> = ['a' -> none]\n"
         "    d['b'] = 2\n"
         '    return xs.length + d.length\n'
         '}\n'
@@ -40,7 +40,7 @@ def test_optional_elements_are_arena_cells() -> None:
 
 def test_aggregate_union_members_stay_unsupported() -> None:
     with pytest.raises(TypeCheckError, match='unsupported array element type'):
-        _compile('let main = ():>int64 => {\n    let xs:array<array<int64>|undefined> = []\n    return 0\n}\n')
+        _compile('let main = ():>int64 => {\n    let xs:array<array<int64>|none> = []\n    return 0\n}\n')
 
 
 TOKENS = (
@@ -68,5 +68,5 @@ def test_union_valued_fields_that_are_not_names_are_hoisted() -> None:
 
 
 def test_owned_cell_arrays_release_their_cells() -> None:
-    emitted = _compile('let main = ():>int64 => {\n    let xs:array<string|undefined> = []\n    xs.push"a"\n    return xs.length\n}\n')
+    emitted = _compile('let main = ():>int64 => {\n    let xs:array<string|none> = []\n    xs.push"a"\n    return xs.length\n}\n')
     assert 'cell_string_owner' in emitted and '_arena_release(' in emitted   # the payload string by its owner, then the cell

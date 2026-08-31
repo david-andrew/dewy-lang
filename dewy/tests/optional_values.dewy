@@ -1,10 +1,10 @@
-let choose = (flag:bool):>int64|undefined =>
-    if flag 40 else undefined
+let choose = (flag:bool):>int64|none =>
+    if flag 40 else none
 
 let main = ():>int64 => {
-    let original:int64|undefined = choose(true)
-    let copy:int64|undefined = original
-    copy = undefined
+    let original:int64|none = choose(true)
+    let copy:int64|none = original
+    copy = none
     if original is? int64 {
         return original + 2
     } else {

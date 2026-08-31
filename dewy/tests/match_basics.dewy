@@ -36,8 +36,8 @@ let main = (args:array<string>):>int64 => {
     if classify(true) =? 10 and classify(5 * scale) =? 25 and classify("abc") =? 33 { checks += 2 }
     let seven:Big = [sign = 1 magnitude = (7 * scale) transmute uint64]
     let minus:Big = [sign = -1 magnitude = (3 * scale) transmute uint64]
-    let none:Big = 0
-    if sign_of(seven) =? 7 and sign_of(minus) =? -3 and sign_of(none) =? 0 { checks += 4 }
+    let zero:Big = 0
+    if sign_of(seven) =? 7 and sign_of(minus) =? -3 and sign_of(zero) =? 0 { checks += 4 }
     if widen(9 * scale) =? 9 and widen(Overflow) =? 0 { checks += 8 }
     let sum = match (3 * scale 4 * scale) (a:int64 b:int64) => a + b
     if sum =? 7 { checks += 16 }

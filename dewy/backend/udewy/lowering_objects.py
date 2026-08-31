@@ -233,13 +233,13 @@ class _ObjectLowering:
     @staticmethod
     def _field_union_members(type_: ty.Type) -> tuple[ty.TypeExpr, ...] | None:
         """The storage members of a union-typed field (an optional is the
-        two-member union `undefined | T`, whose tags coincide with optional cells)."""
+        two-member union `none | T`, whose tags coincide with optional cells)."""
         members = ty.runtime_union_members(type_)
         if members is not None:
             return members
         payload = ty.optional_payload(type_)
         if payload is not None:
-            return ('undefined', payload)
+            return ('none', payload)
         return None
 
     @staticmethod
@@ -474,7 +474,7 @@ class _ObjectLowering:
             return replace(cell, type='int64')
         system = ty.TypeSystem()
         member = next((m for m in members if system.is_subtype(static_type, m)), None)
-        if member is None or member == 'undefined':
+        if member is None or member == 'none':
             self._target_error(node, 'a union field read of this type')
         return self._optional_load_payload(replace(cell, type='int64'), member, node.loc)
 

@@ -1,5 +1,5 @@
 # Runtime dictionaries: stores append or replace, `d[k]` reads a proven key,
-# `d.get(k)` yields `V|undefined` for a key that may miss, `in?` tests
+# `d.get(k)` yields `V|none` for a key that may miss, `in?` tests
 # membership, `.length` counts entries, and iteration follows insertion order
 # even after growth.
 let main = ():>int64 => {
@@ -13,7 +13,7 @@ let main = ():>int64 => {
     let total:int64 = 0
     total += counts['apple']                       # 4: stored above, so proven
     let missing = counts.get('plum')
-    if missing is? undefined { total += 10 }        # 14
+    if missing is? none { total += 10 }        # 14
     if 'pear' in? counts { total += 20 }            # 34
     if 'plum' in? counts { total += 100 }
     total += counts.length                          # 36

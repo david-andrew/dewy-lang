@@ -158,4 +158,4 @@ See [Values, Copies, and Places](values.md) for aliasing and overlap rules.
 
 ## Recursive Objects
 
-An object type may contain itself through a union-typed field: `let Node:type = [value:int64 next:Node|undefined]`. The self-referencing member is held behind a handle, copies are deep, and `is?` narrows the field route (`node.next is? Node`) so the field can be read and assigned as a `Node`. See [Recursive Types](types-and-conversions.md#recursive-types).
+An object type may contain itself through a union-typed field: `let Node:type = [value:int64 next:Node|none]`. The self-referencing member is held behind a handle, copies are deep, and `is?` narrows the field route (`node.next is? Node`) so the field can be read and assigned as a `Node`. See [Recursive Types](types-and-conversions.md#recursive-types).

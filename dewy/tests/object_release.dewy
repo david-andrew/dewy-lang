@@ -22,7 +22,7 @@ let nested = (n:int64):>int64 => {
     xs[0] = "again {n}"
     return o.inner.name.length + o.tags[1].length + pts[0].name.length + xs[0].length   # 9 + 5 + 7 + 7 = 28 (n < 10)
 }
-let Point:type = [name:string tags:array<string> weight:int64|undefined]
+let Point:type = [name:string tags:array<string> weight:int64|none]
 let make = (n:int64):>Point => [name='p{n}' tags=['a{n}' "b"] weight=n]
 let round = (n:int64):>int64 => {
     let one = make(n)

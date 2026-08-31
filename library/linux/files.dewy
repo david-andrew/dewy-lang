@@ -67,9 +67,9 @@ let _read_text_at = (path:string):>string|FileNotFound|FileAccessDenied|IsDirect
         <FileExists> => return FileExists
         <FileError> => return FileError
         data:array<uint8> => {
-            let text = data as string|undefined
+            let text = data as string|none
             match text {
-                <undefined> => return InvalidUtf8
+                <none> => return InvalidUtf8
                 s:string => return s
             }
         }

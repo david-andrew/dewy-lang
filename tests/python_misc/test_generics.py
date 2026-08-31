@@ -5,7 +5,7 @@ from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
 from dewy.semantic.errors import TypeCheckError, UserError
 
-FIRST = "let first = <T>(xs:array<T>):>T|undefined => if xs.length >? 0 xs[0] else undefined\n"
+FIRST = "let first = <T>(xs:array<T>):>T|none => if xs.length >? 0 xs[0] else none\n"
 
 
 def _root(source: str) -> hir.Block:
@@ -73,4 +73,4 @@ def test_generic_function_rejections() -> None:
     with pytest.raises(UserError, match='must be declared with `let`'):
         _declared("let main = ():>int64 => (<T>(x:T):>T => x)(1)\n")
     with pytest.raises(UserError, match='cannot be used as a value'):
-        _declared(FIRST + "let apply = (f:<(xs:array<int64>):>int64|undefined>):>int64 => 0\nlet main = ():>int64 => apply(@first)\n")
+        _declared(FIRST + "let apply = (f:<(xs:array<int64>):>int64|none>):>int64 => 0\nlet main = ():>int64 => apply(@first)\n")

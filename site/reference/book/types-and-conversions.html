@@ -213,7 +213,7 @@
 <p>A type is a compile-time value of type <code>type</code>. A binding may name it explicitly or infer a type-valued expression:</p>
 <pre><code class="language-dewy">const Name:type = string
 const Index = &lt;int64&gt;
-const MaybeIndex = &lt;int64 | undefined&gt;
+const MaybeIndex = &lt;int64 | none&gt;
 </code></pre>
 <p><code>&lt;&gt;</code> groups a type-valued expression where ordinary expression context would otherwise treat it as a runtime value. Alternatives inside use the normal type operators: <code>&lt;int64 | string&gt;</code>, not whitespace-separated alternatives.</p>
 <p>A type alias does not create nominal identity unless its defining construct explicitly requests generativity.</p>
@@ -221,7 +221,7 @@ const MaybeIndex = &lt;int64 | undefined&gt;
 <p>Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to <code>int</code>; a fixed-width annotation accepts the literal only when it fits.</p>
 <p>Function parameters, returns, container elements, object fields, assignments, and operator overloads all provide type context.</p>
 <h2 id="unions-and-narrowing"><a class="header" href="#unions-and-narrowing">Unions and Narrowing</a></h2>
-<p><code>A | B</code> accepts a value belonging to either alternative. <code>T | undefined</code> is an optional value. Type and literal tests such as <code>is?</code> and <code>isnt?</code> narrow the tested value along control-flow paths.</p>
+<p><code>A | B</code> accepts a value belonging to either alternative. <code>T | none</code> is an optional value. Type and literal tests such as <code>is?</code> and <code>isnt?</code> narrow the tested value along control-flow paths.</p>
 <p>General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.</p>
 <h2 id="parameterized-and-refined-types"><a class="header" href="#parameterized-and-refined-types">Parameterized and Refined Types</a></h2>
 <p>Parameterized types apply compile-time arguments:</p>

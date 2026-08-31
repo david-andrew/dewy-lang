@@ -134,9 +134,9 @@ Functions inside an object can use sibling fields directly.
 
 ```dewy
 let names:array<string> = ["Ada" "Grace"]
-let answer:int64 | undefined = find_answer()
+let answer:int64 | none = find_answer()
 
-if answer isnt? undefined
+if answer isnt? none
     printl"the answer after this one is {answer + 1}"
 ```
 

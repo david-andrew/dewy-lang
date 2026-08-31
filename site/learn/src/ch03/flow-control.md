@@ -31,7 +31,7 @@ The alternatives must produce compatible types. A conditional without `else` nor
 Use `{}` when an alternative needs several operations:
 
 ```dewy
-let result = if cached isnt? undefined {
+let result = if cached isnt? none {
     record_hit()
     cached
 } else {
@@ -48,9 +48,9 @@ Declarations and bookkeeping assignments are `void`; each block produces its fin
 Conditions establish facts inside their bodies:
 
 ```dewy
-let answer:int64 | undefined = lookup()
+let answer:int64 | none = lookup()
 
-if answer isnt? undefined
+if answer isnt? none
     printl"next is {answer + 1}"
 ```
 
@@ -70,7 +70,7 @@ let describe = (v:int64 | string):>int64 => {
 }
 ```
 
-When a value-producing chain misses an alternative, the error names it: `` `undefined` is not handled by any `is?` arm``.
+When a value-producing chain misses an alternative, the error names it: `` `none` is not handled by any `is?` arm``.
 
 ## `match`
 
@@ -95,7 +95,7 @@ Object shapes bind fields (`[sign:1 limbs] => limbs.length` on a `bigint`), sequ
 This makes guarded use concise:
 
 ```dewy
-if user isnt? undefined and user.active
+if user isnt? none and user.active
     open_dashboard(user)
 ```
 
@@ -104,11 +104,11 @@ if user isnt? undefined and user.active
 `return` exits the current function. `break` exits a loop, and `continue` begins its next condition evaluation.
 
 ```dewy
-let find = (items:array<int64> wanted:int64):>int64 | undefined => {
+let find = (items:array<int64> wanted:int64):>int64 | none => {
     loop item in items
         if item =? wanted
             return item
-    return undefined
+    return none
 }
 ```
 

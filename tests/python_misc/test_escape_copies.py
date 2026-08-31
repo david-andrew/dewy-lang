@@ -15,7 +15,7 @@ def test_static_and_arena_strings_are_stored_without_copies() -> None:
         '    found.push("literal")\n'
         '    loop name in names { found.push(name) }\n'                    # an element: arena-backed
         '    found.push(["a" "b"].join)\n'                                 # a join: a frame-region string, copied when stored
-        '    match bytes as string|undefined { s:string => found.push(s)  <undefined> => {} }\n'   # a decode: frame region, copied when stored
+        '    match bytes as string|none { s:string => found.push(s)  <none> => {} }\n'   # a decode: frame region, copied when stored
         '    let stem:string = "x.dewy"\n'
         '    found.push(stem[0..0])\n'                                     # a view into a static string
         '    return found\n'

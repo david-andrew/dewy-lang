@@ -160,7 +160,7 @@ let print = <T>(value:T):>void => {
     else if value is? BigRational { _print_bigrational(value) }
     else if value is? Fixed { _print_fixed(value) }
     else if value is? BigInt { _print_bigint(value) }
-    else if value is? undefined { _print_string("undefined") }
+    else if value is? none { _print_string("none") }
     else {
         let text:string = value as string
         _print_string(text)
@@ -202,7 +202,7 @@ let _arena_text = (text:string):>string => {
 }
 
 # A member's text inside a structure: a string member quoted when the
-# container asks (`quote`), anything else — a number, `undefined`, an object —
+# container asks (`quote`), anything else — a number, `none`, an object —
 # as it prints. The member test is decided per instance where the type
 # settles it, and made at runtime for a union member.
 let _member_text = <T>(v:T quote:bool):>string => {

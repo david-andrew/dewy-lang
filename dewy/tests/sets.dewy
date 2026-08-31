@@ -16,7 +16,7 @@ let main = ():>int64 => {
     if "delete" in? seen { checks += 100 }
     if seen.length =? 3 { checks += 2 }
     let gone = seen.pop("read")                  # proven: it came from the literal; yields the member
-    seen.pop("nope" default=undefined);          # absent: nothing happens
+    seen.pop("nope" default=none);          # absent: nothing happens
     let name:string = "write"
     if name in? seen { seen.pop(name); }         # proven by the guard; `;` drops the member
     if seen.length =? 1 { checks += 4 }

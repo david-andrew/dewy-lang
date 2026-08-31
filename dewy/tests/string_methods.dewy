@@ -7,9 +7,9 @@ let main = ():>int64 => {
     if text.trim_start =? "héllo, wörld  " and text.trim_end =? "  héllo, wörld" { checks += 2 }
     if t.contains"wör" and not t.contains"world" and t.starts_with"hé" and t.ends_with"ld" { checks += 4 }
     if t.starts_with"" and t.ends_with"" and not t.starts_with"héllo, wörld!" { checks += 8 }
-    match t.find", " { i:int64 => if i =? 5 { checks += 16 }  <undefined> => {} }
-    match t.find"zz" { <int64> => {}  <undefined> => { checks += 32 } }
-    match t.rfind"l" { i:int64 => if i =? 10 { checks += 64 }  <undefined> => {} }
+    match t.find", " { i:int64 => if i =? 5 { checks += 16 }  <none> => {} }
+    match t.find"zz" { <int64> => {}  <none> => { checks += 32 } }
+    match t.rfind"l" { i:int64 => if i =? 10 { checks += 64 }  <none> => {} }
     let parts = t.split", "
     if parts.length =? 2 and parts[0] =? "héllo" and parts[1] =? "wörld" { checks += 128 }
     let empties = "a,,b,".split","

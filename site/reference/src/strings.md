@@ -69,7 +69,7 @@ Because printing is `as string`, an array of graphemes prints as the text they f
 
 ## Searching, Splitting, and Trimming
 
-Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.starts_with(x)`, `text.ends_with(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `undefined`; `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
+Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.starts_with(x)`, `text.ends_with(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `none`; `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
 
 <!-- dewy-example: compiler -->
 
@@ -78,7 +78,7 @@ let main = ():>int64 => {
     let line:string = "  key: value  ".trim
     match line.find": " {
         i:int64 => printl"key ends at {i}"
-        <undefined> => printl"no separator"
+        <none> => printl"no separator"
     }
     let parts = line.split": "
     return parts.length                    # 2
@@ -105,23 +105,23 @@ let render = (values:array<int64>):>string => {
 
 ## Decoding Bytes
 
-`bytes as string` requires a proof that the bytes are valid UTF-8, which the compiler cannot make for runtime data. The checked form is `bytes as string | undefined`: it validates the bytes (RFC 3629 — no overlong forms, no surrogates, nothing above U+10FFFF, no truncated sequences) and yields the decoded string, or `undefined` for invalid input, so the program decides what to do at that point:
+`bytes as string` requires a proof that the bytes are valid UTF-8, which the compiler cannot make for runtime data. The checked form is `bytes as string | none`: it validates the bytes (RFC 3629 — no overlong forms, no surrogates, nothing above U+10FFFF, no truncated sequences) and yields the decoded string, or `none` for invalid input, so the program decides what to do at that point:
 
 ```dewy
 let text = read_text(path)          # `string`, or a file error, or `InvalidUtf8`
 if text is? string { printl(text) } else { printl"not readable text" }
 ```
 
-`read_text` is `read_bytes` followed by this decode, with `undefined` reported as the `InvalidUtf8` error alongside the file errors (`FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileError`); a decode of bytes you already hold is `bytes as string | undefined`.
+`read_text` is `read_bytes` followed by this decode, with `none` reported as the `InvalidUtf8` error alongside the file errors (`FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileError`); a decode of bytes you already hold is `bytes as string | none`.
 
 ## Including Files
 
-`$include_bytes(p"path")` embeds a file's bytes at compile time. The path must be known when compiling — a path literal today, resolved against the source file — and the result is a binary literal (`array<uint8>` of a known length), usable like `0x"…"`: `.length`, indexing, `as string | undefined`. `$include_bytes(p"path") as name` is the statement form, declaring `name`. The generated program does not spell the bytes out; the target embeds the file itself, which is how the compiler's Unicode tables travel.
+`$include_bytes(p"path")` embeds a file's bytes at compile time. The path must be known when compiling — a path literal today, resolved against the source file — and the result is a binary literal (`array<uint8>` of a known length), usable like `0x"…"`: `.length`, indexing, `as string | none`. `$include_bytes(p"path") as name` is the statement form, declaring `name`. The generated program does not spell the bytes out; the target embeds the file itself, which is how the compiler's Unicode tables travel.
 
 ```dewy
 let table = $include_bytes(p"data/table.bin")
 $include_bytes(p"data/notes.bin") as notes
-let text = $include_bytes(p"data/notes.txt") as string | undefined
+let text = $include_bytes(p"data/notes.txt") as string | none
 ```
 
 ## Representation Views
@@ -134,7 +134,7 @@ Explicit array views expose lower-level representations:
 
 Converting a grapheme array to string concatenates its contents and segments the result again, so boundaries between adjacent inputs need not remain grapheme boundaries.
 
-Conversions from arbitrary integers to string representations require proof that the input is valid UTF-8 or valid Unicode scalar data; `array<uint8>` has the checked form `as string | undefined` described above.
+Conversions from arbitrary integers to string representations require proof that the input is valid UTF-8 or valid Unicode scalar data; `array<uint8>` has the checked form `as string | none` described above.
 
 ## Character Ranges
 

@@ -8,8 +8,8 @@ from dewy.semantic.errors import TypeCheckError, UserError
 PRELUDE = """
 let NotFound:type = type of error
 let Address:type = [city:string zip:int64]
-let User:type = [name:string address:Address|undefined]
-let load = (id:int64):>User|NotFound|undefined => if id >? 0 [name="ada" address=undefined] else NotFound
+let User:type = [name:string address:Address|none]
+let load = (id:int64):>User|NotFound|none => if id >? 0 [name="ada" address=none] else NotFound
 """
 
 
@@ -19,25 +19,25 @@ def _declared(source: str) -> dict[str, hir.Declare]:
 
 
 def test_member_access_forwards_the_exception_alternatives() -> None:
-    declared = _declared(PRELUDE + "let f = (id:int64):>string|NotFound|undefined => load(id).name\n")
+    declared = _declared(PRELUDE + "let f = (id:int64):>string|NotFound|none => load(id).name\n")
     body = declared['f'].expr.body
     node = body.items[0] if isinstance(body, hir.Block) else body
     while not isinstance(node, hir.ForwardingAccess):
         node = node.expr if hasattr(node, 'expr') else node.item
     assert isinstance(node, hir.ForwardingAccess) and node.field == 'name'
-    assert set(node.type.items) == {'string', 'NotFound', 'undefined'}
-    assert set(node.exception_type.items) == {'NotFound', 'undefined'}
+    assert set(node.type.items) == {'string', 'NotFound', 'none'}
+    assert set(node.exception_type.items) == {'NotFound', 'none'}
 
 
 def test_each_route_segment_applies_the_rule() -> None:
-    declared = _declared(PRELUDE + "let f = (id:int64):>string|NotFound|undefined => load(id).address.city\n")
+    declared = _declared(PRELUDE + "let f = (id:int64):>string|NotFound|none => load(id).address.city\n")
     assert 'f' in declared
 
 
 def test_every_ordinary_alternative_needs_the_member() -> None:
     # the call/product parse ambiguity resolver reports every reading's reason
     with pytest.raises((TypeCheckError, UserError), match='every ordinary alternative to have `city`'):
-        _declared(PRELUDE + "let f = (id:int64):>string|NotFound|undefined => load(id).city\n")
+        _declared(PRELUDE + "let f = (id:int64):>string|NotFound|none => load(id).city\n")
 
 
 def test_ordinary_unions_do_not_forward() -> None:

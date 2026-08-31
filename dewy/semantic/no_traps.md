@@ -17,7 +17,7 @@ of two ways:
    compiler-inserted runtime check.
 2. **A value.** What is genuinely undecidable at compile time (overflow of
    fixed-width parts, `tan` where `cos` is exactly zero, I/O that may fail)
-   is in the result type — `T | Overflow`, `T | DivisionByZero`, `T | undefined`
+   is in the result type — `T | Overflow`, `T | DivisionByZero`, `T | none`
    — and the caller handles the branch (`is?`, `or_throw`, defaults).
 
 **Consequences for the compiler.**

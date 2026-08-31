@@ -18,7 +18,7 @@ def test_minted_error_types_are_nominal_subtypes_of_error() -> None:
     assert declared['NotFound'].expr.value == 'NotFound'
     system = ty.TypeSystem()
     assert system.is_subtype('NotFound', 'error') and system.is_subtype('NotFound', ty.EXCEPTION_TYPE)
-    assert not system.is_subtype('NotFound', 'Invalid') and not system.is_subtype('NotFound', 'undefined')
+    assert not system.is_subtype('NotFound', 'Invalid') and not system.is_subtype('NotFound', 'none')
 
 
 def test_the_error_value_is_spelled_with_the_type_name() -> None:
@@ -44,8 +44,8 @@ let safe = (id:int64):>int64 => {
 
 def test_or_throw_propagates_and_narrows() -> None:
     declared = _declared(ERRORS + '''
-let lookup = (id:int64):>int64|NotFound|undefined => if id >? 0 id else NotFound
-let twice = (id:int64):>int64|NotFound|Invalid|undefined => {
+let lookup = (id:int64):>int64|NotFound|none => if id >? 0 id else NotFound
+let twice = (id:int64):>int64|NotFound|Invalid|none => {
     let first = lookup(id) or_throw
     return first * 2
 }
@@ -54,16 +54,16 @@ let twice = (id:int64):>int64|NotFound|Invalid|undefined => {
     first = next(item for item in body.items if isinstance(item, hir.Declare) and item.name == 'first')
     assert isinstance(first.expr, hir.OrThrow)
     assert first.expr.type == 'int64'
-    assert set(first.expr.exception_type.items) == {'NotFound', 'undefined'}
+    assert set(first.expr.exception_type.items) == {'NotFound', 'none'}
 
 
 def test_or_throw_needs_an_exception_alternative_and_a_matching_result_type() -> None:
     with pytest.raises(UserError, match='nothing to propagate'):
-        _declared('let f = (x:int64):>int64|undefined => x or_throw\n')
+        _declared('let f = (x:int64):>int64|none => x or_throw\n')
     with pytest.raises(UserError, match='does not return `NotFound`'):
-        _declared(ERRORS + 'let lookup = (id:int64):>int64|NotFound => id\nlet f = (id:int64):>int64|undefined => lookup(id) or_throw\n')
+        _declared(ERRORS + 'let lookup = (id:int64):>int64|NotFound => id\nlet f = (id:int64):>int64|none => lookup(id) or_throw\n')
     with pytest.raises(UserError, match='always returns'):
-        _declared(ERRORS + 'let f = (e:NotFound|undefined):>int64|NotFound|undefined => { let v = e or_throw return 0 }\n')
+        _declared(ERRORS + 'let f = (e:NotFound|none):>int64|NotFound|none => { let v = e or_throw return 0 }\n')
     with pytest.raises(UserError, match='no declared result type'):
         _declared(ERRORS + 'let lookup = (id:int64):>int64|NotFound => id\nlet f = (id:int64) => lookup(id) or_throw\n')
 

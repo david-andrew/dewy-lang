@@ -33,9 +33,9 @@ def test_exhaustive_is_chain_produces_a_value() -> None:
 
 
 def test_missing_member_is_reported_for_value_chains() -> None:
-    with pytest.raises(UserError, match='`undefined` is not handled by any `is\\?` arm'):
+    with pytest.raises(UserError, match='`none` is not handled by any `is\\?` arm'):
         _check(
-            'let f = (v:int64|undefined):>int64 => {\n'
+            'let f = (v:int64|none):>int64 => {\n'
             '    let w:int64 = if v is? int64 v\n'
             '    return w\n'
             '}'
@@ -45,7 +45,7 @@ def test_missing_member_is_reported_for_value_chains() -> None:
 def test_incomplete_return_chain_still_fails_coverage() -> None:
     with pytest.raises(UserError, match='not all paths return'):
         _check(
-            'let f = (v:int64|string|undefined):>int64 => {\n'
+            'let f = (v:int64|string|none):>int64 => {\n'
             '    if v is? int64 { return v } else if v is? string { return 0 }\n'
             '}'
         )

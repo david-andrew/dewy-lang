@@ -47,7 +47,7 @@ def test_intersected_objects_cannot_repeat_a_field() -> None:
 
 
 def test_optional_sugar_desugars_to_a_union_in_type_positions() -> None:
-    root = _check('let x:int64? = undefined\nf = (v:string?):>bool => v is? undefined')
+    root = _check('let x:int64? = none\nf = (v:string?):>bool => v is? none')
     declare = root.items[0]
     assert isinstance(declare, hir.Declare)
     assert ty.optional_payload(declare.annotation) == 'int64'
@@ -63,7 +63,7 @@ def test_question_mark_stays_out_of_value_positions() -> None:
 
 def test_string_literals_materialize_as_strings_in_optional_slots() -> None:
     # a cast typed as the union would be misread as an already-built cell
-    root = _check("f = (v:string|undefined):>bool => v is? string\nlet r = f('hey')")
+    root = _check("f = (v:string|none):>bool => v is? string\nlet r = f('hey')")
     call = root.items[1].expr
     assert isinstance(call, hir.FunctionCall)
     (argument,) = call.pos_args

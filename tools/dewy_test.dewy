@@ -72,7 +72,7 @@ let main = (args:array<string>):>int64 => {
     let python:string = "python3"
     match environment("DEWY_PYTHON") {
         s:string => { python = s }
-        <undefined> => {}
+        <none> => {}
     }
     let files = collect(directory)
     let total_failures:int64 = 0

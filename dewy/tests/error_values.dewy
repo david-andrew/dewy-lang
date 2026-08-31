@@ -1,7 +1,7 @@
 # Error values: `type of error` mints a nominal error type whose one value is
 # written with its name; functions expose failures as union alternatives;
 # `is?` handles them; `value or_throw` propagates the exception alternatives
-# (`error` subtypes and `undefined`) out of the enclosing function.
+# (`error` subtypes and `none`) out of the enclosing function.
 let NotFound:type = type of error
 let Invalid:type = type of error
 
@@ -18,10 +18,10 @@ let describe = (id:int64):>int64 => {
     else { return r }
 }
 
-let twice = (id:int64):>int64|NotFound|Invalid|undefined => {
+let twice = (id:int64):>int64|NotFound|Invalid|none => {
     let first = lookup(id) or_throw
     let second = lookup(first) or_throw
-    if second =? 8 { return undefined }
+    if second =? 8 { return none }
     return second
 }
 
@@ -34,8 +34,8 @@ let main = ():>int64 => {
     if a is? int64 { if a =? 12 { checks += 8 } }
     let b = twice(60)                         # 120 -> NotFound
     if b is? NotFound { checks += 16 }
-    let c = twice(2)                          # 4 -> 8 -> undefined
-    if c is? undefined { checks += 32 }
+    let c = twice(2)                          # 4 -> 8 -> none
+    if c is? none { checks += 32 }
     if b is? error and a isnt? error { checks += 64 }
     let e:NotFound = NotFound
     let stored:int64|NotFound = e

@@ -7,7 +7,7 @@ let main = ():>int64 => {
     let base:int64 = 10
     let label = "abc"
     let words:array<string> = ["x" "yz"]
-    let maybe:int64|undefined = 5
+    let maybe:int64|none = 5
     let point = [x=3 y=4]
 
     let scale = (v:int64):>int64 => v * base
@@ -30,7 +30,7 @@ let main = ():>int64 => {
 
     let unwrap = ():>int64 => if maybe is? int64 maybe else 0   # a union cell is read and narrowed inside
     if unwrap() =? 5 { checks += 16 }
-    maybe = undefined
+    maybe = none
     if unwrap() =? 0 { checks += 32 }
 
     let norm = ():>int64 => point.x * point.x + point.y * point.y

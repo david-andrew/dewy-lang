@@ -16,7 +16,7 @@ def _function(emitted: str, name: str) -> str:
 
 
 POINT = (
-    'let Point:type = [name:string tags:array<string> weight:int64|undefined]\n'
+    'let Point:type = [name:string tags:array<string> weight:int64|none]\n'
     "let make = (n:int64):>Point => [name='p{n}' tags=['a{n}' \"b\"] weight=n]\n"
 )
 

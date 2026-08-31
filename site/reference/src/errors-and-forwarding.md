@@ -2,7 +2,7 @@
 
 Dewy models expected failures as values belonging to nominal error types. A function exposes those values directly as alternatives in its return type rather than wrapping its result in a runtime `Result<T, E>` object.
 
-Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `undefined` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
+Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `none` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
 
 Implemented today: unit-like error types minted with `type of error`, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: errors carrying fields, forwarding through method calls, and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
 
@@ -15,7 +15,7 @@ The built-in hierarchy contains:
 ```text
 exception
 ├── error
-└── undefined
+└── none
 ```
 
 Any value whose type descends from `exception` is a forwarding value. Programs may define additional exception types. A type that does not descend from `exception` remains an ordinary union alternative even if programmers conventionally use it as a sentinel.
@@ -108,14 +108,14 @@ where each `Xi` descends from `exception` and no `Vi` does. For `receiver.member
 ```dewy
 let UserError:type = type of error
 let Address:type = [city:string]
-let User:type = [name:string address:Address|undefined]
+let User:type = [name:string address:Address|none]
 
-let load_user = (id:int64):>User | UserError | undefined =>
+let load_user = (id:int64):>User | UserError | none =>
     if id >? 0 [name="ada" address=[city="paris"]] else UserError
 
-let city_of = (id:int64):>string | UserError | undefined => {
+let city_of = (id:int64):>string | UserError | none => {
     let user = load_user(id)
-    let city = user.address.city      # city: string | UserError | undefined
+    let city = user.address.city      # city: string | UserError | none
     return city
 }
 ```
@@ -165,7 +165,7 @@ For an expression of type `V | X`, where `X` contains its `exception` alternativ
 - returns the encountered `X` value from the enclosing function; or
 - produces the corresponding non-exception `V` value locally.
 
-The enclosing return contract must accept every propagated exception alternative. This includes `undefined` and user-defined exception kinds as well as errors.
+The enclosing return contract must accept every propagated exception alternative. This includes `none` and user-defined exception kinds as well as errors.
 
 <!-- dewy-example: compiler -->
 
@@ -177,10 +177,10 @@ let lookup = (id:int64):>int64 | NotFound => {
     return id * 2
 }
 
-let twice = (id:int64):>int64 | NotFound | undefined => {
+let twice = (id:int64):>int64 | NotFound | none => {
     let first = lookup(id) or_throw      # first: int64
     let second = lookup(first) or_throw
-    if second =? 8 { return undefined }
+    if second =? 8 { return none }
     return second
 }
 ```
@@ -205,9 +205,9 @@ else
 
 The general pattern-selection syntax and type-directed recovery helpers remain provisional. Any recovery operation must remove only the alternatives it actually handles and preserve every unhandled error in the result type.
 
-Forwarded values do not become false in Boolean context. If `user.isAdmin` has type `bool | UserError | undefined`, it is not a valid `if` condition until every exception alternative is propagated, handled, or otherwise narrowed away.
+Forwarded values do not become false in Boolean context. If `user.isAdmin` has type `bool | UserError | none`, it is not a valid `if` condition until every exception alternative is propagated, handled, or otherwise narrowed away.
 
-The current fallback direction keeps absence and failure distinct: `??` would replace `undefined` while preserving any `error` alternative. Under that proposal, applying a default to `Address | DatabaseError | undefined` produces `Address | DatabaseError`, not just `Address`. The final operator split between absence and error recovery is still provisional.
+The current fallback direction keeps absence and failure distinct: `??` would replace `none` while preserving any `error` alternative. Under that proposal, applying a default to `Address | DatabaseError | none` produces `Address | DatabaseError`, not just `Address`. The final operator split between absence and error recovery is still provisional.
 
 ## Mutation
 
@@ -215,7 +215,7 @@ Safe navigation is a read and receiver-selection rule. An assignment through an 
 
 <!-- dewy-example: design-only -->
 ```dewy
-user.profile.name = "Ada"  # invalid if user may be UserError or undefined
+user.profile.name = "Ada"  # invalid if user may be UserError or none
 ```
 
 The program must first narrow or propagate every exception alternative so the destination is a definite place.
@@ -227,10 +227,10 @@ Only alternatives descended from `exception` receive forwarding behavior:
 ```text
 User | Missing         ordinary domain alternatives
 User | NotFoundError   value or propagatable failure
-User | undefined       value or forwarding absence
+User | none       value or forwarding absence
 ```
 
-Code should use an ordinary domain type when both outcomes are meant to participate normally in later operations. It should use an `error` subtype for a forwarding failure, `undefined` for ordinary forwarding absence, or another `exception` subtype when neither built-in category expresses the contract.
+Code should use an ordinary domain type when both outcomes are meant to participate normally in later operations. It should use an `error` subtype for a forwarding failure, `none` for ordinary forwarding absence, or another `exception` subtype when neither built-in category expresses the contract.
 
 ## Errors Versus Effects
 

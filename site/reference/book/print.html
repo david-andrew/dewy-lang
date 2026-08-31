@@ -222,7 +222,7 @@
 <li>Dewy source conventionally uses the <code>.dewy</code> suffix.</li>
 <li>µDewy source conventionally uses <code>.udewy</code>; suffixes do not select Dewy semantic rules.</li>
 <li>Code labelled <strong>provisional</strong> illustrates a design whose stated portions are decided but whose surrounding rules may change.</li>
-<li><code>T | undefined</code> denotes an optional value.</li>
+<li><code>T | none</code> denotes an optional value.</li>
 <li><code>intN</code> and <code>uintN</code> denote fixed-width signed and unsigned integer families when a rule applies uniformly across widths.</li>
 <li>“Produces” describes the value or values expressed by a construct. <code>void</code> means that no value is produced.</li>
 <li>“Place” means a mutable storage location selected explicitly with <code>@</code>; it is not an accidental alias created by an optimization.</li>
@@ -258,7 +258,7 @@ first .. last  # no endpoints
 <div style="break-before: page; page-break-before: always;"></div><h1 id="literals"><a class="header" href="#literals">Literals</a></h1>
 <p>A literal introduces a value directly in source. Literal syntax may preserve more exact type information than the eventual context requires.</p>
 <h2 id="booleans-and-absence"><a class="header" href="#booleans-and-absence">Booleans and Absence</a></h2>
-<p><code>true</code> and <code>false</code> are the two <code>bool</code> values. <code>undefined</code> is a storable value used in unions such as <code>T | undefined</code>. <code>void</code> describes the absence of a produced value and is not interchangeable with <code>undefined</code>.</p>
+<p><code>true</code> and <code>false</code> are the two <code>bool</code> values. <code>none</code> is a storable value used in unions such as <code>T | none</code>. <code>void</code> describes the absence of a produced value and is not interchangeable with <code>none</code>.</p>
 <h2 id="integers"><a class="header" href="#integers">Integers</a></h2>
 <p>Decimal integers require no prefix. Radix prefixes provide bases used by the language's numeral syntax:</p>
 <pre><code class="language-dewy">42
@@ -372,7 +372,7 @@ set(@box.rows[row][column])
 <p>A type is a compile-time value of type <code>type</code>. A binding may name it explicitly or infer a type-valued expression:</p>
 <pre><code class="language-dewy">const Name:type = string
 const Index = &lt;int64&gt;
-const MaybeIndex = &lt;int64 | undefined&gt;
+const MaybeIndex = &lt;int64 | none&gt;
 </code></pre>
 <p><code>&lt;&gt;</code> groups a type-valued expression where ordinary expression context would otherwise treat it as a runtime value. Alternatives inside use the normal type operators: <code>&lt;int64 | string&gt;</code>, not whitespace-separated alternatives.</p>
 <p>A type alias does not create nominal identity unless its defining construct explicitly requests generativity.</p>
@@ -380,7 +380,7 @@ const MaybeIndex = &lt;int64 | undefined&gt;
 <p>Literals retain exact information until context requires a broader type. An unannotated mutable integer binding widens from its literal singleton to <code>int</code>; a fixed-width annotation accepts the literal only when it fits.</p>
 <p>Function parameters, returns, container elements, object fields, assignments, and operator overloads all provide type context.</p>
 <h2 id="unions-and-narrowing"><a class="header" href="#unions-and-narrowing">Unions and Narrowing</a></h2>
-<p><code>A | B</code> accepts a value belonging to either alternative. <code>T | undefined</code> is an optional value. Type and literal tests such as <code>is?</code> and <code>isnt?</code> narrow the tested value along control-flow paths.</p>
+<p><code>A | B</code> accepts a value belonging to either alternative. <code>T | none</code> is an optional value. Type and literal tests such as <code>is?</code> and <code>isnt?</code> narrow the tested value along control-flow paths.</p>
 <p>General heterogeneous runtime-union layout remains provisional. Optional values with one concrete payload have a settled semantic model.</p>
 <h2 id="parameterized-and-refined-types"><a class="header" href="#parameterized-and-refined-types">Parameterized and Refined Types</a></h2>
 <p>Parameterized types apply compile-time arguments:</p>

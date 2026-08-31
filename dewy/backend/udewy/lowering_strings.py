@@ -2432,9 +2432,9 @@ class _StringLowering:
         node: hir.RepresentationCast,
         source: hir.AST,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """`bytes as string | undefined`: validate UTF-8 (RFC 3629: no overlongs,
+        """`bytes as string | none`: validate UTF-8 (RFC 3629: no overlongs,
         no surrogates, nothing above U+10FFFF), then build an arena string, else
-        `undefined`. The result is an optional cell."""
+        `none`. The result is an optional cell."""
         loc = node.loc
         statements: list[hir.AST] = []
 
@@ -2779,7 +2779,7 @@ class _StringLowering:
 
         def fresh(expr: hir.AST) -> bool:
             expr = self._unwrap_transparent(expr)
-            if isinstance(expr, (hir.String, hir.Undefined)) or isinstance(expr.type, ty.StringLiteralType):
+            if isinstance(expr, (hir.String, hir.NoneValue)) or isinstance(expr.type, ty.StringLiteralType):
                 return True
             if isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
                 return fresh(expr.expr) if may_hold_string(expr.expr.type) else False
@@ -2868,8 +2868,8 @@ class _StringLowering:
             if id(expr) in seen:
                 return
             seen.add(id(expr))
-            if isinstance(expr, (hir.String, hir.Undefined)) or isinstance(expr.type, ty.StringLiteralType):
-                found.add(('static', None))   # `undefined` owns nothing
+            if isinstance(expr, (hir.String, hir.NoneValue)) or isinstance(expr.type, ty.StringLiteralType):
+                found.add(('static', None))   # `none` owns nothing
             elif isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
                 if self._is_string_valued(expr.expr.type) or ty.optional_payload(expr.expr.type) is not None or ty.runtime_union_members(expr.expr.type) is not None:
                     visit(expr.expr, viewed)
@@ -3075,7 +3075,7 @@ class _StringLowering:
             return self._string_storage(node.expr, visiting=visiting)
         if isinstance(node, hir.RepresentationCast):
             if isinstance(node.expr.type, ty.ArrayType):
-                # `bytes as string | undefined`: built in the frame region unless a return reaches it
+                # `bytes as string | none`: built in the frame region unless a return reaches it
                 return 'frame' if self._stays_in_frame(node) else 'arena'
             return self._string_storage(node.expr, visiting=visiting)
         if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):

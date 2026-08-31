@@ -29,23 +29,26 @@ def _multi_condition(source: str) -> hir.MultiIteratorExpression:
     return condition
 
 
-def test_undefined_is_a_value_distinct_from_void() -> None:
+def test_none_is_a_value_distinct_from_void() -> None:
     root = _check(
-        'let f = ():>int64|undefined => undefined'
+        'let f = ():>int64|none => none'
     )
     declaration = root.items[0]
     assert isinstance(declaration, hir.Declare)
     assert isinstance(declaration.expr, hir.FunctionLiteral)
-    assert isinstance(declaration.expr.body, hir.Undefined)
-    assert declaration.expr.body.type == 'undefined'
+    assert isinstance(declaration.expr.body, hir.NoneValue)
+    assert declaration.expr.body.type == 'none'
+
+    with pytest.raises(UserError, match='undefined identifier `undefined`'):
+        _check('let old = undefined')
 
 
 def test_optional_type_guards_refine_both_edges() -> None:
     _check("""
-let get = (value:int64|undefined):>int64 => {
+let get = (value:int64|none):>int64 => {
     if value is? int64 {
         return value + 1
-    } else if value isnt? undefined {
+    } else if value isnt? none {
         return value
     } else {
         return 41
@@ -55,16 +58,16 @@ let get = (value:int64|undefined):>int64 => {
 
     with pytest.raises(TypeCheckError, match='no matching overload'):
         _check(
-            'let get = (value:int64|undefined):>int64 => value + 1'
+            'let get = (value:int64|none):>int64 => value + 1'
         )
 
 
 def test_assignment_invalidates_an_optional_refinement() -> None:
     with pytest.raises(TypeCheckError, match='no matching overload'):
         _check("""
-let get = (value:int64|undefined):>int64 => {
-    if value isnt? undefined {
-        value = undefined
+let get = (value:int64|none):>int64 => {
+    if value isnt? none {
+        value = none
         return value + 1
     }
     return 0
@@ -74,19 +77,19 @@ let get = (value:int64|undefined):>int64 => {
 
 def test_short_circuit_rhs_uses_the_guard_refinement() -> None:
     _check("""
-let positive = (value:int64|undefined):>bool =>
-    if value isnt? undefined and value >? 0 true else false
+let positive = (value:int64|none):>bool =>
+    if value isnt? none and value >? 0 true else false
 """)
     _check("""
-let get = (value:int64|undefined):>int64 =>
-    if value not is? undefined value else 0
+let get = (value:int64|none):>int64 =>
+    if value not is? none value else 0
 """)
 
 
 def test_heterogeneous_runtime_union_bindings_lower() -> None:
     # General tagged unions now lower as tag-and-payload cells, including a
-    # heterogeneous union containing `undefined`.
-    source = 'let main = ():>int64 => { let x:int64|string|undefined = 1 return 0 }'
+    # heterogeneous union containing `none`.
+    source = 'let main = ():>int64 => { let x:int64|string|none = 1 return 0 }'
     emitted = codegen(SrcFile(None, source))
     assert '__store_u8__' in emitted
 
@@ -195,7 +198,7 @@ def test_multiiterator_codegen_is_eager_and_eliminates_rich_hir() -> None:
 let f = ():>int64 => {
     let result:int64 = 0
     loop i in 0..1 or j in 0..2 {
-        if i isnt? undefined { result += i }
+        if i isnt? none { result += i }
         result += j
         continue
     }
@@ -209,7 +212,7 @@ let f = ():>int64 => {
     assert first_update < second_update < source_continue
     assert emitted.count('__dewy_iterator_1 += 1') == 1
     assert emitted.count('__dewy_iterator_2 += 1') == 1
-    assert 'undefined' not in emitted
+    assert 'none' not in emitted
     assert ' in [' not in emitted
 
 
@@ -297,8 +300,8 @@ def test_union_member_order_is_canonical_across_spellings() -> None:
     declared = ty.runtime_union_members(ty.TypeOr(['int64', 'string', 'bool']))
     joined = ty.runtime_union_members(ty.union('bool', 'string', 'int64'))
     assert declared == joined
-    with_undefined = ty.runtime_union_members(ty.TypeOr(['string', 'undefined', 'int64']))
-    assert with_undefined is not None and with_undefined[0] == 'undefined'
+    with_none = ty.runtime_union_members(ty.TypeOr(['string', 'none', 'int64']))
+    assert with_none is not None and with_none[0] == 'none'
 
 
 def test_dict_store_lookup_and_membership_check() -> None:

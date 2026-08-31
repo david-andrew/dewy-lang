@@ -77,10 +77,10 @@ def test_an_array_result_nothing_keeps_is_released_after_its_statement() -> None
 def test_an_optional_local_owns_a_calls_string_payload_and_return_moves_it() -> None:
     source = (
         HEAD
-        + 'let choose = (flag:bool):>string|undefined => if flag join2("a" "b") else undefined\n'
-        + 'let moved = ():>string|undefined => {\n    let maybe:string|undefined = choose(true)\n    return maybe\n}\n'
-        + 'let aliased = ():>string|undefined => {\n    let maybe:string|undefined = choose(true)\n    let other:string|undefined = maybe\n    return other\n}\n'
-        + 'let main = ():>int64 => {\n    let m:string|undefined = moved()\n    match aliased() { s:string => return s.length  <undefined> => return 0 }\n}\n'
+        + 'let choose = (flag:bool):>string|none => if flag join2("a" "b") else none\n'
+        + 'let moved = ():>string|none => {\n    let maybe:string|none = choose(true)\n    return maybe\n}\n'
+        + 'let aliased = ():>string|none => {\n    let maybe:string|none = choose(true)\n    let other:string|none = maybe\n    return other\n}\n'
+        + 'let main = ():>int64 => {\n    let m:string|none = moved()\n    match aliased() { s:string => return s.length  <none> => return 0 }\n}\n'
     )
     emitted = _compile(source)
     moved = _function(emitted, 'moved')

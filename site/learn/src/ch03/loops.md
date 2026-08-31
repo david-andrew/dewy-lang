@@ -20,7 +20,7 @@ Use `loop true` for repetition that ends through `break` or `return`:
 ```dewy
 loop true {
     let message = receive()
-    if message is? undefined
+    if message is? none
         break
     handle(message)
 }
@@ -71,14 +71,14 @@ loop index in 0.. and fruit in ["apple" "banana" "peach"]
 
 For a multiiterator formula, every iterator leaf advances once from left to right before the logical formula is evaluated. This is deliberately different from ordinary Boolean short-circuit evaluation: skipping a leaf would make its position drift relative to the others.
 
-`or` continues while either source produces a value. A target that can be exhausted during a body iteration has optional type `T | undefined`:
+`or` continues while either source produces a value. A target that can be exhausted during a body iteration has optional type `T | none`:
 
 ```dewy
 loop left in left_items or right in right_items {
-    if left isnt? undefined
+    if left isnt? none
         process_left(left)
 
-    if right isnt? undefined
+    if right isnt? none
         process_right(right)
 }
 ```

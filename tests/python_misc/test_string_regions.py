@@ -24,7 +24,7 @@ def test_returned_views_stay_in_the_arena() -> None:
 
 def test_a_returned_local_view_keeps_its_source_out_of_the_region() -> None:
     body = _body(
-        'let tail = (bytes:array<uint8>):>string => { match bytes as string|undefined { s:string => return s  <undefined> => return "" } }\n'
+        'let tail = (bytes:array<uint8>):>string => { match bytes as string|none { s:string => return s  <none> => return "" } }\n'
         'let main = ():>int64 => tail([104 105]).length\n', 'tail')
     assert '_region_alloc(' not in body   # the decoded string is returned: arena
 

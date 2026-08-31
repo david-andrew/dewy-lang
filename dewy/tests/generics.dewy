@@ -2,7 +2,7 @@
 # instantiation — the type parameters bound to the concrete types inferred at
 # each call (literals widen: `1` is `int64`) — and each instance is hoisted as
 # an ordinary function, so the udewy backend never sees a type variable.
-let first = <T>(xs:array<T>):>T|undefined => if xs.length >? 0 xs[0] else undefined
+let first = <T>(xs:array<T>):>T|none => if xs.length >? 0 xs[0] else none
 let pair_sum = <T of int>(a:T b:T):>T => a + b
 let swap = <T U>(a:T b:U):>[x:U y:T] => [x=b y=a]
 let count_down = <T of int>(n:T acc:T):>T => if n <=? 0 acc else count_down(n - 1 acc + n)

@@ -11,7 +11,7 @@ let compile_program = (source:string):>void => {
     match capture("/usr/bin/env" ["python3" "-m" "dewy" "--compile" source]) {
         result:Output => {
             let report:string = ""
-            match result.stderr_text { text:string => { report = text }  <undefined> => {} }
+            match result.stderr_text { text:string => { report = text }  <none> => {} }
             $expect result.status =? 0, "compiling {source} failed ({result.status}):\n{report}"
         }
         <SpawnError> => $fail "could not start the compiler"
@@ -194,7 +194,7 @@ let program_output = (name:string expected:string) => {
             $expect result.status =? 0, "{name} exited with {result.status}"
             match result.stdout_text {
                 text:string => $expect text =? expected, "{name} printed {text}"
-                <undefined> => $fail "{name} printed bytes that are not UTF-8"
+                <none> => $fail "{name} printed bytes that are not UTF-8"
             }
         }
         <SpawnError> => $fail "could not run {binary.path}"

@@ -107,12 +107,12 @@ class _OptionalLowering:
         ):
             # checking wraps a member value in a conversion to the optional type;
             # the tag-and-payload store below is that conversion (a decode
-            # `bytes as string | undefined` is a real conversion and stays)
+            # `bytes as string | none` is a real conversion and stays)
             return self._optional_write(cell, value.expr, payload)
         if isinstance(payload, ty.NamedType):
-            # `Node | undefined`: the payload is a handle, deep-copied on every
+            # `Node | none`: the payload is a handle, deep-copied on every
             # store, exactly as in a general union cell (the tags coincide)
-            return self._union_write(cell, value, ('undefined', payload), prepared=False)
+            return self._union_write(cell, value, ('none', payload), prepared=False)
         if isinstance(value, hir.Flow):
             prelude, flow = self._lower_optional_flow(value, cell, payload)
             return [*prelude, flow]
@@ -123,7 +123,7 @@ class _OptionalLowering:
                 ty.VOID_TYPE,
                 value.loc,
             )
-        if isinstance(value, hir.Undefined):
+        if isinstance(value, hir.NoneValue):
             zero = self._int64_literal(value.loc, 0)
             return [
                 tag_store(0),
@@ -265,7 +265,7 @@ class _OptionalLowering:
 
     # ------------------------------------------------------------------
     # General tagged unions share the optional cell layout: a one-byte tag
-    # at offset 0 (the canonical member index; `undefined` is always 0 when
+    # at offset 0 (the canonical member index; `none` is always 0 when
     # present, matching optional tags) and one payload word at offset 8.
 
     def _union_member_supported(self, member: ty.TypeExpr) -> bool:
@@ -278,7 +278,7 @@ class _OptionalLowering:
         if isinstance(member, ty.ArrayType):
             return self._array_result_elements_are_returnable(member)
         return (
-            member == 'undefined'
+            member == 'none'
             or member == 'bool'
             or ty.fixed_integer_layout(member) is not None
             or isinstance(member, (ty.StringType, ty.StringLiteralType, ty.IntegerLiteralType, ty.BinaryLiteralType))
@@ -296,7 +296,7 @@ class _OptionalLowering:
     # an object field is unprepared: every aggregate member is a *handle* to
     # arena storage allocated when the member is tagged. Recursive references
     # (`ty.NamedType`) are handle members in every cell — that is what makes
-    # `[value:int64 next:Node|undefined]` finite. Reads never care: the payload
+    # `[value:int64 next:Node|none]` finite. Reads never care: the payload
     # word is the object pointer in both cases.
 
     @staticmethod
@@ -429,7 +429,7 @@ class _OptionalLowering:
         return synthesized
 
     def _is_optional_element(self, element: ty.Type) -> bool:
-        """Container elements of optional type: `T | undefined` with a word or
+        """Container elements of optional type: `T | none` with a word or
         string payload. Stored as one word — a pointer to an arena cell the
         container owns (tag at 0, payload at 8)."""
         payload = ty.optional_payload(ty.strip_refinement(element)) if not isinstance(element, str) else None
@@ -470,7 +470,7 @@ class _OptionalLowering:
 
     def _is_union_element(self, element: ty.Type) -> bool:
         """Container elements of a general union type (`Number | Name | Punct`,
-        `int64 | string | undefined`): one word — a pointer to an arena cell
+        `int64 | string | none`): one word — a pointer to an arena cell
         the container owns, with no prepared trees (object members are handles)."""
         if isinstance(element, str):
             return False
@@ -756,8 +756,8 @@ class _OptionalLowering:
                 value.loc,
             )
 
-        if isinstance(value, hir.Undefined):
-            index = self._union_member_index(members, 'undefined', value)
+        if isinstance(value, hir.NoneValue):
+            index = self._union_member_index(members, 'none', value)
             zero = self._int64_literal(value.loc, 0)
             return [
                 tag_store(index),

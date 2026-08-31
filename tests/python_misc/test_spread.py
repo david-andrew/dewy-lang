@@ -46,7 +46,7 @@ def test_spread_operands_must_fit_the_literal() -> None:
     with pytest.raises(UserError, match='object spread requires an object'):
         _declared("let xs:array<int64> = [1]\nlet bad = [xs... a=1]\n")
     with pytest.raises(UserError, match='cannot spread a union-typed value'):
-        _declared("let f = (v:[a:int64]|undefined):>[a:int64] => [v...]\n")
+        _declared("let f = (v:[a:int64]|none):>[a:int64] => [v...]\n")
     with pytest.raises(NotImplementedYet, match='spreading a computed value'):
         _declared("let mk = ():>[a:int64] => [a=1]\nlet bad = [mk()... b=2]\n")
 

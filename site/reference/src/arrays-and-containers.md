@@ -63,13 +63,13 @@ loop [name score] in scores
     printl"{name}: {score}"
 ```
 
-`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. `K` may be a union of string literals (`'0b' | '0t'`, an enumeration of allowed keys — such a union is a string at runtime), and `V` may be an object type, an optional (`int64 | undefined`), or a union of objects, words, and strings (`Number | Name | Punct`, a token); arrays likewise hold string-literal unions, optionals, and such unions as elements — a loop over them binds each element for `match`. An abstract `int` or `uint` in an element position — `array<int>`, `dict<string int | undefined>`, `set<uint>` — is the 64-bit word, as `int` in a signature is. Unions containing arrays are not container elements yet. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
+`dict<K V>` names a dictionary type; a dictionary literal in a `dict<K V>` context adopts those entry types, and an empty literal requires such a context. `K` may be a union of string literals (`'0b' | '0t'`, an enumeration of allowed keys — such a union is a string at runtime), and `V` may be an object type, an optional (`int64 | none`), or a union of objects, words, and strings (`Number | Name | Punct`, a token); arrays likewise hold string-literal unions, optionals, and such unions as elements — a loop over them binds each element for `match`. An abstract `int` or `uint` in an element position — `array<int>`, `dict<string int | none>`, `set<uint>` — is the 64-bit word, as `int` in a signature is. Unions containing arrays are not container elements yet. Dictionaries are values with the ordinary value semantics: they are passed, returned, stored, and compared by value, and copies are independent.
 
 ### Lookup
 
 `d[key]` is valid only when the key is *proven present* and then has type `V`. A key is proven when it is a constant entry of the literal that initialized the dictionary, was stored by `d[key] = value`, is the key bound by `loop [key value] in d`, or was tested by a guard `if key in? d`. Facts are path-sensitive (a key proven on every branch stays proven after the branches join) and are invalidated when the dictionary or the key binding is reassigned. A guard's search result is reused by the guarded lookup, so a proven lookup performs no second search. An unproven `d[key]` is a compile error.
 
-`d.get(key)` is the lookup that may miss, with type `V | undefined`. `d.get(key default)` yields `default` when the key is absent and has type `V`.
+`d.get(key)` is the lookup that may miss, with type `V | none`. `d.get(key default)` yields `default` when the key is absent and has type `V`.
 
 ### Mutation
 
@@ -100,7 +100,7 @@ let present = "read" in? permissions
 let taken = permissions.pop("read")
 ```
 
-`set"0123"` is the set of a string's graphemes and `set(values)` the set of an array's elements (`set(xs)` also drops duplicates). `s.add(x)` inserts a member. `x in? s` tests membership. `s.pop(x)` removes a proven member and yields it; `s.pop(x default=v)` removes `x` if present and yields it, else `v` (`default=undefined` makes the result `T | undefined`). `s.clear` empties the set; `s.length` counts members. Sets are not indexable and have no `keys`.
+`set"0123"` is the set of a string's graphemes and `set(values)` the set of an array's elements (`set(xs)` also drops duplicates). `s.add(x)` inserts a member. `x in? s` tests membership. `s.pop(x)` removes a proven member and yields it; `s.pop(x default=v)` removes `x` if present and yields it, else `v` (`default=none` makes the result `T | none`). `s.clear` empties the set; `s.length` counts members. Sets are not indexable and have no `keys`.
 
 Set operators produce new sets: `|`/`or` union, `&`/`and` intersection, `-` difference, `xor` symmetric difference. Operands must have the same element type. Literal members must currently be constants (duplicates collapse at compile time), and a set must not be mutated by a loop that iterates it.
 

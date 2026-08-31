@@ -378,7 +378,7 @@ class _DictLowering:
         search.extend(probe)
         if node.default is not None:
             if self._is_optional_element(parts.value_type) if parts.value_type is not None else False:
-                # the default becomes a cell too (`undefined`, or a payload)
+                # the default becomes a cell too (`none`, or a payload)
                 default_prelude, default = self._array_storage_value(node.default, parts.value_type)
             else:
                 default_prelude, default = self._extract_expression(node.default)
@@ -407,7 +407,7 @@ class _DictLowering:
         return [
             *prelude, *key_prelude, *search,
             hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
-            *self._optional_write(cell_word, hir.Undefined(loc, 'undefined'), payload),
+            *self._optional_write(cell_word, hir.NoneValue(loc, 'none'), payload),
             self._if(found, found_body, loc),
         ], cell
 
@@ -498,13 +498,13 @@ class _DictLowering:
             assert node.default is not None
             payload = ty.optional_payload(node.type)
             if payload is not None:
-                # `default=undefined`: an optional cell, undefined unless the member was present
+                # `default=none`: an optional cell, none unless the member was present
                 cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('set_popped'))
                 cell_word = replace(cell, type='int64')
                 return [
                     *prelude, *key_prelude, *ensure, *probe,
                     hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
-                    *self._optional_write(cell_word, hir.Undefined(loc, 'undefined'), payload),
+                    *self._optional_write(cell_word, hir.NoneValue(loc, 'none'), payload),
                     self._if(found, [*self._optional_write(cell_word, key, payload), *tombstone], loc),
                 ], cell
             default_prelude, default = self._extract_expression(node.default)

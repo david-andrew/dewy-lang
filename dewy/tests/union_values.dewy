@@ -17,12 +17,12 @@ let main = ():>int64 => {
     let c:int64 = 0
     if copied is? int64 { c = copied }   # 42
 
-    let z:bool|string|undefined = true
+    let z:bool|string|none = true
     let d:int64 = 0
     if z is? bool { d = 7 }
     z = "text"
     if z is? string { d = d + 2 }        # 9
-    if z is? undefined { d = 500 }
+    if z is? none { d = 500 }
 
     let choose = b =? 5
     let v:int64|string = if choose 30 else "abc"

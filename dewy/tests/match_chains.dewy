@@ -15,8 +15,8 @@ let area = (v:int64|string|Shape flag:bool):>int64 => match v {
     [kind:1 size] => size
 } else if flag { 100 } else { 0 }
 
-let first_or = (v:int64|undefined fallback:int64):>int64 => {
-    match v { <undefined> => return fallback } else {}    # a chain with a match is total: the empty `else` says so
+let first_or = (v:int64|none fallback:int64):>int64 => {
+    match v { <none> => return fallback } else {}    # a chain with a match is total: the empty `else` says so
     return v + 1                     # `v` is an `int64` here: the only continuing path is the else
 }
 
@@ -28,7 +28,7 @@ let main = (args:array<string>):>int64 => {
     let big:Shape = [kind = 1 size = 9 * scale]
     let small:Shape = [kind = -1 size = 4 * scale]
     if area(3 * scale true) =? 6 and area(big false) =? 9 and area(small true) =? 100 and area("s" false) =? 0 { checks += 2 }
-    if first_or(4 * scale 0) =? 5 and first_or(undefined 7) =? 7 { checks += 4 }
+    if first_or(4 * scale 0) =? 5 and first_or(none 7) =? 7 { checks += 4 }
     let words = match 2 * scale {
         <1> => "one"
         <2> => "two"

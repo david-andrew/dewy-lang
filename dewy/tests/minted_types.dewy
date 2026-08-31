@@ -1,6 +1,6 @@
 # `type of` mints nominal types: structurally the operand's object, distinct
 # from every other type, printed and constructed by name. all three alias
-# spellings mint; `T?` is `T | undefined`.
+# spellings mint; `T?` is `T | none`.
 
 let Name:type = type of any & [text:string]
 Punct = type of any & [text:string]           # same structure, distinct type
@@ -11,7 +11,7 @@ classify = (t:Name|Punct):>int64 => match t {
     p:Punct => 10
 }
 
-find = (b:bool):>Name? => if b Name(text='yo') else undefined
+find = (b:bool):>Name? => if b Name(text='yo') else none
 
 main = () => {
     let toks:array<Name|Punct> = [Name(text='hi') Punct(text=';')]
@@ -23,6 +23,6 @@ main = () => {
     let r = find(true)
     if r is? Name total += r.text.length      # 40
     let missing = find(false)
-    if missing is? undefined total += 2       # 42
+    if missing is? none total += 2       # 42
     return total
 }

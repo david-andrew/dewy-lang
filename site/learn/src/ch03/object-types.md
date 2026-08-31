@@ -26,16 +26,16 @@ The alias does not create a runtime class object or nominal identity. Another va
 
 ## Recursive Shapes
 
-A named shape can refer to itself, as long as the recursion goes through a union — usually `| undefined`, so that a chain can end:
+A named shape can refer to itself, as long as the recursion goes through a union — usually `| none`, so that a chain can end:
 
 <!-- dewy-example: compiler -->
 
 ```dewy
-let Node:type = [value:int64 next:Node|undefined]
+let Node:type = [value:int64 next:Node|none]
 
-let sum = (list:Node|undefined):>int64 => {
+let sum = (list:Node|none):>int64 => {
     let total:int64 = 0
-    let cur:Node|undefined = list
+    let cur:Node|none = list
     loop cur is? Node {
         total += cur.value
         cur = cur.next
@@ -44,7 +44,7 @@ let sum = (list:Node|undefined):>int64 => {
 }
 
 let main = ():>int64 => {
-    let list:Node|undefined = undefined
+    let list:Node|none = none
     let i:int64 = 1
     loop i <=? 4 {
         list = [value=i next=list]

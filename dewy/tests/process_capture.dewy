@@ -6,8 +6,8 @@ let main = ():>int64 => {
     match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {
         result:Output => {
             if result.status =? 3 { checks += 1 }
-            match result.stdout_text { s:string => if s =? "out\n" { checks += 2 }  <undefined> => {} }
-            match result.stderr_text { s:string => if s =? "err\n" { checks += 4 }  <undefined> => {} }
+            match result.stdout_text { s:string => if s =? "out\n" { checks += 2 }  <none> => {} }
+            match result.stderr_text { s:string => if s =? "err\n" { checks += 4 }  <none> => {} }
         }
         <SpawnError> => {}
     }

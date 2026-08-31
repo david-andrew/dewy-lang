@@ -216,7 +216,7 @@ class _IteratorLowering:
                 declarations.extend(
                     self._optional_write(
                         target,
-                        hir.Undefined(iterator.loc, 'undefined'),
+                        hir.NoneValue(iterator.loc, 'none'),
                         payload,
                     )
                 )
@@ -372,7 +372,7 @@ class _IteratorLowering:
                 ]
                 exhausted_body = self._optional_write(
                     target,
-                    hir.Undefined(iterator.loc, 'undefined'),
+                    hir.NoneValue(iterator.loc, 'none'),
                     payload,
                 )
             elif payload is not None:
@@ -389,7 +389,7 @@ class _IteratorLowering:
                 ]
                 exhausted_body = self._optional_write(
                     target,
-                    hir.Undefined(iterator.loc, 'undefined'),
+                    hir.NoneValue(iterator.loc, 'none'),
                     payload,
                 )
             else:

@@ -655,8 +655,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
         case p0.BinOp(): return tcr_binop(ast, ctx=ctx, type_block=type_block, expected=expected, call_target=call_target)
         case p0.Atom(item=t1.Identifier(name='..')): return hir.Range(ast.item.loc, 'range', bounds=None, step_pair=None, left=None, right=None)
         case p0.Atom(item=t1.Identifier(name='void')): return hir.Void(ast.item.loc, ty.VOID_TYPE)
-        case p0.Atom(item=t1.Identifier(name='undefined')):
-            return hir.Undefined(ast.item.loc, 'undefined')
+        case p0.Atom(item=t1.Identifier(name='none')):
+            return hir.NoneValue(ast.item.loc, 'none')
         case p0.Atom(item=t1.Identifier()):
             resolved = tcr_identifier(ast.item, ctx=ctx)
             if call_target or type_block:
@@ -747,8 +747,8 @@ def _hoisted_union_field(value: hir.AST, *, ctx: Context) -> hir.AST | None:
 
 def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     """A union-typed value (an optional, or a container union of words,
-    strings, `undefined`, and objects) as a string: a flow with one arm per
-    member — the text `undefined`, a member's one-part interpolation, or an
+    strings, `none`, and objects) as a string: a flow with one arm per
+    member — the text `none`, a member's one-part interpolation, or an
     object member's literal syntax. The value must be a name or a field, so
     reading it once per arm is free of effects."""
     if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
@@ -757,7 +757,7 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     if _optional_container_element(plain):
         payload = ty.optional_payload(plain)
         assert payload is not None
-        members: tuple[ty.TypeExpr, ...] = ('undefined', payload)
+        members: tuple[ty.TypeExpr, ...] = ('none', payload)
     elif _union_container_element(plain):
         found = ty.runtime_union_members(plain)
         assert found is not None
@@ -767,8 +767,8 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     loc = value.loc
 
     def member_text(member: ty.TypeExpr) -> hir.AST:
-        if member == 'undefined':
-            return hir.String(loc, ty.StringLiteralType('undefined'), 'undefined')
+        if member == 'none':
+            return hir.String(loc, ty.StringLiteralType('none'), 'none')
         narrowed = replace(value, type=member)
         structural = _structure_string(narrowed, loc, ctx=ctx)   # an object member: its literal syntax
         if structural is not None:
@@ -831,12 +831,12 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         if spelled is not None:
             parts.append(spelled)   # a type or a function: its spelling
             continue
-        if value.type == 'undefined':
-            parts.append(hir.String(value.loc, ty.StringLiteralType('undefined'), 'undefined'))   # the text of `undefined`
+        if value.type == 'none':
+            parts.append(hir.String(value.loc, ty.StringLiteralType('none'), 'none'))   # the text of `none`
             continue
         optional_flow = _optional_field_flow(value, ctx=ctx)
         if optional_flow is not None:
-            parts.append(optional_flow)   # `undefined`, or the payload's text
+            parts.append(optional_flow)   # `none`, or the payload's text
             continue
         if _optional_container_element(ty.strip_refinement(value.type)) or _union_container_element(ty.strip_refinement(value.type)):
             # any other union-valued expression (`xs[i]`, a call): evaluate it
@@ -1162,7 +1162,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
     - let vs const
     - typed vs untyped
     - = vs := vs ::   (though := is a bit of a special case since it doesn't need let or const)
-    - expr vs undefined
+    - expr vs none
 
     """
     # typeexpr = None
@@ -1857,7 +1857,7 @@ def tcr_return(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
 
 def tcr_or_throw(ast: p0.Postfix, *, ctx: Context) -> hir.AST:
     """`value or_throw`: propagate the exception alternatives (`error`
-    subtypes and `undefined`) out of the enclosing function; the expression
+    subtypes and `none`) out of the enclosing function; the expression
     continues as the ordinary alternatives."""
     value = typecheck_and_resolve_inner(ast.item, ctx=ctx)
     require_valued(value.type, ctx.srcfile, value.loc, '`or_throw` operand')
@@ -1868,7 +1868,7 @@ def tcr_or_throw(ast: p0.Postfix, *, ctx: Context) -> hir.AST:
         user_error(
             ctx.srcfile,
             'nothing to propagate',
-            Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`, which has no `error` or `undefined` alternative'),
+            Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`, which has no `error` or `none` alternative'),
         )
     if not ordinary:
         user_error(
@@ -1898,8 +1898,8 @@ def tcr_or_throw(ast: p0.Postfix, *, ctx: Context) -> hir.AST:
     binding.type = value.type
     exception_type = ty.union(*exceptions)
     tested = hir.ExpressedIdentifier(ast.loc, exception_type, binding.name, binding_id=binding.id)
-    if exception_type == 'undefined':
-        propagated: hir.AST = hir.Undefined(ast.loc, 'undefined')
+    if exception_type == 'none':
+        propagated: hir.AST = hir.NoneValue(ast.loc, 'none')
     else:
         propagated = tested
     propagated = check_against(propagated, expected, ctx=ctx)
@@ -4711,7 +4711,7 @@ def _implicit_type_alias_rhs(item: p0.AST, known_aliases: set[str], *, ctx: Cont
     if _is_type_of_expression(item.right):
         return item.left.item.name, item.right
     root = _type_expression_root(item.right)
-    if root is None or root in {'undefined', 'void', 'end', 'new', 'ellipsis'}:
+    if root is None or root in {'none', 'void', 'end', 'new', 'ellipsis'}:
         return None  # value keywords that also name types
     binding = ctx.binding_scopes.get(root)
     if not (
@@ -4854,7 +4854,7 @@ def _validate_recursive_alias(
             ctx.srcfile,
             f'recursive type `{binding.name}` must be an object type',
             Pointer(span=binding.loc, message='the recursion has no object to carry it'),
-            hint=f'write `{binding.name}` as `[... {binding.name} | undefined ...]`: the self-reference lives in a field and is optional or one of several members',
+            hint=f'write `{binding.name}` as `[... {binding.name} | none ...]`: the self-reference lives in a field and is optional or one of several members',
         )
 
     def check(type_: object, in_union: bool) -> None:
@@ -4864,7 +4864,7 @@ def _validate_recursive_alias(
                     ctx.srcfile,
                     f'recursive type `{binding.name}` refers to itself without a union',
                     Pointer(span=binding.loc, message=f'a field typed exactly `{type_.name}` would be an infinite value'),
-                    hint=f'make the recursive field a union such as `{type_.name} | undefined`',
+                    hint=f'make the recursive field a union such as `{type_.name} | none`',
                 )
             return
         if isinstance(type_, ty.TypeOr):
@@ -6583,7 +6583,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 )
             elif name == 'pop':
                 # a set's pop removes a proven member and yields it; with the
-                # name-only `default` (any value, e.g. `undefined`) no proof is needed
+                # name-only `default` (any value, e.g. `none`) no proof is needed
                 signature = ty.FunctionType(
                     [ty.PosOrKwArg('key', key_type)],
                     [ty.PosOrKwArg('default', ty.optional(key_type), required=False)],
@@ -6971,14 +6971,14 @@ def _tcr_spread_array_literal(
 
 _ELEMENT_TYPE_HINT = (
     'container elements need a fixed runtime width: a sized integer (`int64`, `uint8`, …), `bool`, '
-    '`string`, an object type, or a union of those with `undefined`'
+    '`string`, an object type, or a union of those with `none`'
 )
 
 
 def _word_element_type(type_: ty.Type) -> ty.Type:
     """The element type a container annotation names, with the abstract
     integers taking the 64-bit word representation — `array<int>`,
-    `dict<string int | undefined>`, `set<uint>` — the way `int` in a
+    `dict<string int | none>`, `set<uint>` — the way `int` in a
     signature does (the hidden-width selection pass is still ahead)."""
     if type_ == 'int':
         return 'int64'
@@ -7016,7 +7016,7 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
 
 
 def _union_container_element(type_: ty.Type) -> bool:
-    """A general union of words, strings, `undefined`, and plain objects
+    """A general union of words, strings, `none`, and plain objects
     (`Number | Name | Punct`): containers hold such elements as one-word
     pointers to tagged cells they own."""
     if isinstance(type_, str):
@@ -7026,7 +7026,7 @@ def _union_container_element(type_: ty.Type) -> bool:
         return False
     for member in members:
         unfolded = ty.unfold(member)
-        if member == 'undefined' or member == 'bool' or ty.fixed_integer_layout(member) is not None or ty.string_valued(member):
+        if member == 'none' or member == 'bool' or ty.fixed_integer_layout(member) is not None or ty.string_valued(member):
             continue
         if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
             continue
@@ -7035,7 +7035,7 @@ def _union_container_element(type_: ty.Type) -> bool:
 
 
 def _optional_container_element(type_: ty.Type) -> bool:
-    """`T | undefined` with a word or string payload: containers hold such
+    """`T | none` with a word or string payload: containers hold such
     elements as one-word cells."""
     if isinstance(type_, str):
         return False
@@ -10435,7 +10435,7 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
 def _canonical_union(type_: ty.TypeOr, *, ctx: Context) -> ty.TypeOr:
     """Spell a recursive alias by reference wherever it is a union member.
 
-    `Node | undefined` written inside `Node`'s own body already resolves to the
+    `Node | none` written inside `Node`'s own body already resolves to the
     reference; written elsewhere it resolves to the alias's object type. Both
     must be the same union — the same member order, the same tags — so every
     union member that is a recursive alias's object type becomes its reference.
@@ -10897,7 +10897,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             return ty.TypeNot(item)
         
         case p0.Postfix(op=t1.Operator(symbol='?')):
-            # `T?` is the optional `T | undefined`
+            # `T?` is the optional `T | none`
             return ty.optional(ast_to_type(ast.item, ctx=ctx))
 
         # e.g. probably parameterizations (type jux), types wrapped in blocks, etc. other type expressions...
@@ -11514,8 +11514,8 @@ def _quoted_member(type_: ty.TypeExpr) -> bool:
     plain = ty.strip_refinement(type_)
     if ty.string_valued(plain):
         return True
-    members = ty.runtime_union_members(plain) or (('undefined', ty.optional_payload(plain)) if ty.optional_payload(plain) is not None else ())
-    return any(member != 'undefined' and ty.string_valued(member) for member in members)
+    members = ty.runtime_union_members(plain) or (('none', ty.optional_payload(plain)) if ty.optional_payload(plain) is not None else ())
+    return any(member != 'none' and ty.string_valued(member) for member in members)
 
 
 def _number_object(type_: ty.TypeExpr, *, ctx: Context) -> str | None:
@@ -11537,12 +11537,12 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
     if _is_string_type(plain) or ty.string_valued(plain) or plain == 'bool' or isinstance(plain, ty.IntegerLiteralType) or (isinstance(plain, str) and plain in _MATERIALIZED_INTEGERS):
         return None
     if _optional_container_element(plain):
-        return None   # an optional member: `undefined` or its payload's text
+        return None   # an optional member: `none` or its payload's text
     if _union_container_element(plain):
         found = ty.runtime_union_members(plain)
         assert found is not None
         for member in found:
-            if member == 'undefined':
+            if member == 'none':
                 continue
             bad = _unconvertible_part(member, ctx=ctx, seen=seen)
             if bad is not None:
@@ -12165,17 +12165,17 @@ def _dict_method_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Co
             hint=(
                 'guard with `if key in? d { d.pop(key) }`, or pass `default=...` to get a value when the key is absent'
                 if value_type is not None
-                else 'guard with `if x in? s { s.pop(x) }`, or pass `default=undefined` (or a member) for a removal that may miss'
+                else 'guard with `if x in? s { s.pop(x) }`, or pass `default=none` (or a member) for a removal that may miss'
             ),
         )
     position, static_position = fact if fact is not None else (None, None)
     _forget_dictionary(dictionary, keys, values, cleared=False, removed=key, ctx=ctx)
     if value_type is None:
-        # a set: the member, or the default when absent (`undefined` makes it optional)
+        # a set: the member, or the default when absent (`none` makes it optional)
         if default is None:
             result_type: ty.Type = _key_type
-        elif isinstance(_unwrap_parens(default), hir.Undefined):
-            default = hir.Undefined(default.loc, 'undefined')
+        elif isinstance(_unwrap_parens(default), hir.NoneValue):
+            default = hir.NoneValue(default.loc, 'none')
             result_type = ty.optional(_key_type)
         else:
             default = check_against(default, _key_type, ctx=ctx)
@@ -12242,7 +12242,7 @@ def _forget_positions(dictionary: hir.AST, *, ctx: Context) -> None:
 
 
 def _dict_get_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Context) -> hir.DictLookup:
-    """`d.get(key)` is `V | undefined`; `d.get(key default)` is `V`."""
+    """`d.get(key)` is `V | none`; `d.get(key default)` is `V`."""
     found = _dict_value(method.dictionary)
     assert found is not None
     dictionary, _key_type, value_type = found
@@ -12323,7 +12323,7 @@ def _explicit_value_conversion(
         and isinstance(target, ty.TypeOr)
         and ty.optional_payload(target) in ('string', ty.StringType())
     ):
-        # `0x"..." as string | undefined`: decode the packed bytes at runtime
+        # `0x"..." as string | none`: decode the packed bytes at runtime
         bytes_node = hir.RepresentationCast(loc, ty.ArrayType('uint8', len(source.value)), node)
         return hir.RepresentationCast(loc, ty.optional(ty.StringType()), bytes_node)
     if isinstance(source, ty.BinaryLiteralType):
@@ -12364,7 +12364,7 @@ def _explicit_value_conversion(
             and isinstance(target, ty.TypeOr)
             and ty.optional_payload(target) in ('string', ty.StringType())
         ):
-            # the checked decode: `undefined` when the bytes are not valid UTF-8
+            # the checked decode: `none` when the bytes are not valid UTF-8
             return hir.RepresentationCast(loc, ty.optional(ty.StringType()), node)
         if target in {'string', 'grapheme', 'char'}:
             if isinstance(source.element, str) and source.element in {'uint8', 'uint32'}:
@@ -12379,7 +12379,7 @@ def _explicit_value_conversion(
                         ),
                     ),
                     hint=(
-                        'write `bytes as string | undefined` for a decode that yields `undefined` on invalid UTF-8'
+                        'write `bytes as string | none` for a decode that yields `none` on invalid UTF-8'
                         if source.element == 'uint8'
                         else 'validation-backed refinement types are not implemented yet'
                     ),

@@ -22,7 +22,7 @@ printl"ready"       # void
 
 `never` describes a path that cannot complete normally, such as an exit operation. It is not another spelling of `void`.
 
-`undefined` is different again: it is a real value that can be stored in an optional type. [Optional Values and Narrowing](optional-types.md) develops that distinction.
+`none` is different again: it is a real value that can be stored in an optional type. [Optional Values and Narrowing](optional-types.md) develops that distinction.
 
 ## Suppressing a Value
 

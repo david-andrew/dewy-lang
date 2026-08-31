@@ -109,8 +109,8 @@ Generic functions work today for the direct cases: declare the type parameters i
 <!-- dewy-example: compiler -->
 
 ```dewy
-let first = <T>(xs:array<T>):>T | undefined =>
-    if xs.length >? 0 xs[0] else undefined
+let first = <T>(xs:array<T>):>T | none =>
+    if xs.length >? 0 xs[0] else none
 
 let main = ():>int64 => {
     let nums:array<int64> = [7 8 9]

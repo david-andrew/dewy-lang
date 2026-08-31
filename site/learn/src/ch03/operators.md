@@ -29,7 +29,7 @@ left <? right
 left <=? right
 value in? range
 value is? Type
-value isnt? undefined
+value isnt? none
 ```
 
 ## Boolean and Bitwise Operations

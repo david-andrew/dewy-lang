@@ -89,9 +89,9 @@ def test_values_that_cannot_convert_are_reported_on_the_value() -> None:
 
 
 def test_optionals_print() -> None:
-    # `int64 | undefined` prints — alone, in containers, and as a field
-    _main('    let opt:int64|undefined = 1\n    printl(opt)\n    let xs:array<int64|undefined> = [opt undefined]\n    printl(xs)\n    printl"{opt}"')
-    _compile('let Slot:type = [v:int64|undefined]\nlet main = ():>int64 => {\n    let slots = [Slot(1)]\n    printl"{slots}"\n    return 0\n}\n')
+    # `int64 | none` prints — alone, in containers, and as a field
+    _main('    let opt:int64|none = 1\n    printl(opt)\n    let xs:array<int64|none> = [opt none]\n    printl(xs)\n    printl"{opt}"')
+    _compile('let Slot:type = [v:int64|none]\nlet main = ():>int64 => {\n    let slots = [Slot(1)]\n    printl"{slots}"\n    return 0\n}\n')
 
 
 # ------------------------------------------------------------ decided type tests
