@@ -13325,6 +13325,80 @@ def _prototype_length(value: hir.AST, loc: Span) -> hir.AST | None:
     return None
 
 
+def _prototype_detail_value(value: hir.AST, loc: Span) -> hir.AST | None:
+    """The value as an `int64` the panic may print, or None when its
+    representation is not a plain word."""
+    plain = ty.strip_refinement(value.type)
+    if isinstance(plain, ty.IntegerLiteralType):
+        return hir.Integer(loc, 'int64', '0d', plain.value) if ty.integer_literal_fits(plain.value, 'int64') else None
+    layout = ty.fixed_integer_layout(plain)
+    if layout is not None:
+        width, signed = layout
+        if width < 64 or signed:
+            return value if plain == 'int64' else hir.ValueCast(loc, 'int64', value)
+        return value if isinstance(value, hir.ExpressedIdentifier) else None   # printed as a signed word; fine below 2^63
+    return None
+
+
+def _prototype_runtime_report(node: hir.AST, kind: str, loc: Span, srcfile: SrcFile):
+    """The report a failed `$prototype` check prints: the *violated requirement*,
+    concretely — at this point the program observed the failure, so the wording
+    is about what happened, not about what could not be proven. Returns the
+    report, the panic's detail kind, and the observed int64 values to print."""
+    from .analyze.bounds import _describe_proposition_text
+
+    if kind == 'index':
+        assert isinstance(node, (hir.Index, hir.StringIndex))
+        sequence = node.array if isinstance(node, hir.Index) else node.string
+        what = 'array' if isinstance(node, hir.Index) else 'string'
+        report = Error(
+            srcfile=srcfile,
+            title='Runtime Panic',
+            message=f'{what} index out of bounds',
+            pointer_messages=[Pointer(span=node.index.loc, message=f'this index was past the {what}\'s end (or negative)')],
+            hint=f'prove it before this point (`i <? xs.length`, or a length guard) and the compiler will catch this case; `$prototype` deferred that proof to this check',
+        )
+        detail = _prototype_detail_value(node.index, loc)
+        length_value = _prototype_length(sequence, loc)
+        if detail is not None and length_value is not None:
+            return report, 1, [detail, length_value]
+        return report, 0, []
+    if kind == 'cast':
+        assert isinstance(node, hir.ValueCast)
+        layout = ty.fixed_integer_layout(node.type)
+        assert layout is not None
+        width, signed = layout
+        minimum = -(1 << (width - 1)) if signed else 0
+        maximum = (1 << (width - (1 if signed else 0))) - 1
+        report = Error(
+            srcfile=srcfile,
+            title='Runtime Panic',
+            message=f'value does not fit `{node.type}`',
+            pointer_messages=[Pointer(span=node.loc, message=f'this value was outside `{node.type}`\'s range [{minimum}, {maximum}]')],
+            hint='narrow the value with a comparison and the compiler will catch this case; `$prototype` deferred that proof to this check',
+        )
+        detail = _prototype_detail_value(node.expr, loc)
+        if detail is not None:
+            return report, 2, [detail]
+        return report, 0, []
+    assert kind == 'obligation' and isinstance(node, hir.Obligation)
+    requirements = ', '.join(_describe_proposition_text(p) for p in node.refined.propositions)
+    report = Error(
+        srcfile=srcfile,
+        title='Runtime Panic!',
+        pointer_messages=[Pointer(span=node.value.loc, message=f'this value was required to satisfy `{requirements}`, and did not')],
+        hint='prove it before this point with a guard and the compiler will catch this case; `$prototype` deferred that proof to this check',
+    )
+    if all(p.subject == 'self' and p.field is None for p in node.refined.propositions):
+        detail = _prototype_detail_value(node.value, loc)
+        if detail is not None:
+            return report, 3, [detail]
+    length_value = _prototype_length(node.value, loc) if all(p.subject == 'length' for p in node.refined.propositions) else None
+    if length_value is not None:
+        return report, 3, [length_value]
+    return report, 0, []
+
+
 def insert_prototype_checks(
     root: hir.Block,
     sites: 'dict[int, tuple[str, object]]',
@@ -13353,11 +13427,18 @@ def insert_prototype_checks(
         )
         if condition is None:
             return None
-        report.use_color = False   # type: ignore[attr-defined]   # the baked runtime text is plain
-        text = 'a `$prototype` runtime check failed — this proof did not hold:\n' + str(report) + '\n'
+        runtime_report, detail_kind, detail_values = _prototype_runtime_report(node, kind, loc, ctx.srcfile)
+        runtime_report.use_color = True
+        colored_text = str(runtime_report) + '\n'
+        runtime_report.use_color = False
+        plain_text = str(runtime_report) + '\n'
         panic = hir.ExpressedIdentifier(loc, panic_binding.type or ty.TOP_TYPE, '_prototype_panic', binding_id=panic_binding.id)
-        message = hir.String(loc, ty.StringLiteralType(text), text)
-        failure = hir.Block(loc, ty.BOTTOM_TYPE, [hir.FunctionCall(loc, ty.BOTTOM_TYPE, panic, [message], {})], True)
+        colored = hir.String(loc, ty.StringLiteralType(colored_text), colored_text)
+        plain = hir.String(loc, ty.StringLiteralType(plain_text), plain_text)
+        arguments: list[hir.AST] = [colored, plain, hir.Integer(loc, 'int64', '0d', detail_kind), *detail_values]
+        while len(arguments) < 5:
+            arguments.append(hir.Integer(loc, 'int64', '0d', 0))
+        failure = hir.Block(loc, ty.BOTTOM_TYPE, [hir.FunctionCall(loc, ty.BOTTOM_TYPE, panic, arguments, {})], True)
         check_flow = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Void(loc, ty.VOID_TYPE))], failure)
         return hir.Block(loc, node.type, [check_flow, node], False)
 

@@ -4,7 +4,7 @@
 # matching layer is imported. The native backends and the C backend all run
 # on the Linux syscall layer for now.
 if $target in? ["x86_64" "riscv" "arm" "c"] {
-    from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal)
+    from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal _stderr_is_terminal)
     from p"linux/system.dewy" import (_exit)
 }
 
@@ -13,10 +13,22 @@ if $target in? ["x86_64" "riscv" "arm" "c"] {
 # broken states into later code.
 let exit = (code:int64):>never => _exit(code)
 
-# The failure path of a `$prototype` runtime check: the compile error that was
-# deferred to runtime, already rendered, printed to stderr before exiting.
-let _prototype_panic = (message:string):>never => {
+# The failure path of a `$prototype` runtime check: the requirement that was
+# deferred to runtime, already rendered both ways, printed to stderr with the
+# observed values before exiting (colors only when stderr is a terminal, as
+# the report renderer does). `kind`: 1 = index (a=index b=length), 2 = a value
+# outside a range (a=value), 3 = a violated requirement on a value (a=value),
+# 0 = no observed values.
+let _prototype_panic = (colored:string plain:string kind:int64 a:int64 b:int64):>never => {
+    let message:string = if _stderr_is_terminal() colored else plain
     let written:int64 = _write_stderr(message as array<uint8>)
+    if kind =? 1 {
+        let detail:string = "  observed: the index was {a} and the length was {b}\n\n"
+        written = _write_stderr(detail as array<uint8>)
+    } else if kind =? 2 or kind =? 3 {
+        let detail:string = "  observed: the value was {a}\n\n"
+        written = _write_stderr(detail as array<uint8>)
+    }
     _exit(102)
 }
 

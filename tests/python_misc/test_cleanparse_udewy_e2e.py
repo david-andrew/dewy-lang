@@ -123,6 +123,7 @@ LOWERED_CASES = [
     ('tokenizer_gaps.dewy', 42),
     ('never_exit.dewy', 42),
     ('prototype_mode.dewy', 42),
+    ('prototype_panic.dewy', 102),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

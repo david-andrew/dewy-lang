@@ -13,6 +13,7 @@ array<int64 length=3>
 A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition compares against an integer literal or a fixed-width type's `min`/`max` (`uint64.max`), and may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 nonemptystring = string<0 <? length <=? uint64.max>
 let eat_whitespace = (src:nonemptystring):>uint64? => {
@@ -43,6 +44,7 @@ A parameter may carry a refinement: `(n:int64 d:int64<d not=? 0>)`, `(xs:array<i
 Two related spellings make invalid states unrepresentable rather than merely checked. A union of integer singletons — `sign:-1|1` as a field, `s:-1|1` as a binding or parameter, `:>-1|1` as a result — is a word whose value set is its invariant: storing into it is an obligation (`sign = -a.sign` is proven from `a.sign`'s facts) and reading it yields the facts; `s is? 1` on such a word is the comparison `s =? 1`, and `s is? -1|1` an `or` of comparisons (`|` binds above `is?`). A union that mixes literals of different kinds (`1 | 2 | "fast"`) remains a tagged union tested with `is?`. A field may also carry a length invariant, `limbs:array<uint64 length >? 0>`, proven at construction and assumed on every read (`v.limbs[0]` needs no guard). And a literal beside an object type, `0 | [sign:-1|1 limbs:…]`, is a tagged union that `x =? 0` / `x not=? 0` narrow like `is?`; `T & ~0` on such a union names it without the literal member — the nonzero object — so a parameter `d:bigint & ~0` is satisfied by a binding narrowed with `if d not=? 0 { … }`. A field may also be refined by a field of its own type — `start:Point<x >=? 0>` — proven where the enclosing value is built (from a literal, or from a guard such as `if p.x >=? 0 { [start = p …] }`) and a fact wherever `s.start.x` is read; on a `0 | [...]` type the same spelling refines the object member, so `bigint<sign =? 1>` is a positive big integer, nonzero by construction (the abstract rational's denominator is one).
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 let percent = (part:int64 whole:int64<whole >? 0>):>int64 => part * 100 // whole
 
@@ -61,6 +63,7 @@ A result may be refined — `let positive = (n:int64):>int64<i => i >=? 1> => �
 A field may declare an invariant: `let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]`. It is proven wherever a `Ratio` is made — `Ratio(1 2)`, a literal, or a plain object flowing into the type — and wherever the field is stored (`r.bottom = z` needs `z >? 0`), and it is assumed wherever the field is read, so `r.top // r.bottom` is proven for any `Ratio`. The prelude's `rational<int64>` (`Rational`) declares `denominator:int64<denominator >? 0>` this way.
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
 let scale = (r:Ratio):>int64 => r.top // r.bottom      # the invariant proves the division
@@ -76,9 +79,10 @@ Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`)
 
 ## Prototyping Without the Proofs
 
-`$prototype` in the entry module defers the program's unproven proof obligations to runtime: an unproven index, integer narrowing, or refinement obligation compiles anyway, wrapped in a runtime check that — if it fails — prints the deferred compile error (the same rendered report) to stderr and exits with status 102. The rigor is unchanged in kind, only in time: no-traps stays the language rule, and the metatag is the program writing the traps, wholesale, the way `$runtime_assert` writes one. Each deferral prints as a compile-time warning (`prototype: …`, silenced by `$prototype_warnings = false`). Type errors, arity errors, and structural rules are not proofs and still reject the program; a site whose check cannot be built (an operand with effects) also stays a compile error. `$prototype` is for development — remove it and the warnings show exactly what remains to prove.
+`$prototype` in the entry module defers the program's unproven proof obligations to runtime: an unproven index, integer narrowing, or refinement obligation compiles anyway, wrapped in a runtime check that — if it fails — reports `Runtime Panic` with the _violated requirement_ stated concretely (e.g. `array index out of bounds`, ``value does not fit `int8` ``, `requirement violated`), pointing at the same source span the compile error would have, with the observed values (`observed: the index was 5 and the length was 1`), then exits with status 102. The rigor is unchanged in kind, only in time: no-traps stays the language rule, and the metatag is the program writing the traps, wholesale, the way `$runtime_assert` writes one. Each deferral prints as a compile-time warning (`prototype: …`, silenced by `$prototype_warnings = false`). Type errors, arity errors, and structural rules are not proofs and still reject the program; a site whose check cannot be built (an operand with effects) also stays a compile error. `$prototype` is for development — remove it and the warnings show exactly what remains to prove.
 
 <!-- dewy-example: compiler -->
+
 ```dewy
 $prototype
 half = (n:int64 d:int64<i => i not=? 0>):>int64 => n // d
@@ -96,12 +100,12 @@ One assumption sits under every length fact: no array or string holds more eleme
 
 Dewy is a trap-free language. A compiled program never aborts, panics, or crashes on a path the programmer did not write: the only exits are the ones spelled out in the source — `return`, a failed `$runtime_assert`, an explicit call to exit. Every operation that could fail is handled in one of two ways, and never a third:
 
-1. **A compile-time proof.** If the precondition is provable — an index within a proven length, a divisor a guard or refinement makes nonzero, a refinement an obligation discharges — the operation compiles to the bare instruction, with no check at runtime. If it is *not* proven, that is a compile error, and the fix is more facts (a guard, a refined type, an assertion), not a runtime check inserted by the compiler.
+1. **A compile-time proof.** If the precondition is provable — an index within a proven length, a divisor a guard or refinement makes nonzero, a refinement an obligation discharges — the operation compiles to the bare instruction, with no check at runtime. If it is _not_ proven, that is a compile error, and the fix is more facts (a guard, a refined type, an assertion), not a runtime check inserted by the compiler.
 2. **A value.** If a failure is genuinely undecidable at compile time — arithmetic on 64-bit parts that may overflow, `tan` of an angle whose cosine may be exactly zero, reading a file that may not exist — the operation's type says so: `rational | Overflow`, `fixed | DivisionByZero`, `T | none`, and the caller handles that branch explicitly (`is?`, `or_throw`, a default).
 
 The compiler therefore never emits a fallback that changes an operation's meaning, and the library never contains one: no silent wrap-to-zero, no clamping, no "unreachable" abort. The rule follows from proofs-over-exceptions — whatever raises in Python must in Dewy be proven safe or return a value — and it is what makes the proofs worth trusting: a program that compiles has no hidden exit.
 
-The same holds for code written *for* others. It is unidiomatic for a library to exit the process on its own account: an explicit exit is a decision about the whole program, which only the program's author can make. A library that cannot prove a precondition moves the proof to its caller (a refined parameter — `divide = (a:int64 b:int64 & ~0)`), and one that meets a failure it cannot rule out returns it (`:> T | Overflow`). Exits and `$runtime_assert` belong in applications, at the points their authors chose. The standard library is written this way throughout.
+The same holds for code written _for_ others. It is unidiomatic for a library to exit the process on its own account: an explicit exit is a decision about the whole program, which only the program's author can make. A library that cannot prove a precondition moves the proof to its caller (a refined parameter — `divide = (a:int64 b:int64 & ~0)`), and one that meets a failure it cannot rule out returns it (`:> T | Overflow`). Exits and `$runtime_assert` belong in applications, at the points their authors chose. The standard library is written this way throughout.
 
 ## Operation Preconditions
 
@@ -136,7 +140,7 @@ let main = ():>int64 => {
 
 `$expect condition, message` is the assertion form for tests: a failure is recorded and returns from the enclosing function instead of exiting, a refuted condition is a warning rather than an error, and the code after it holds the condition's facts like the code after an assertion. See [Testing](testing.md).
 
-The assertion directives are *forms* with their own argument grammar, like `if cond body` or `return expr`, not operators: `$assert expr [, expr]`. The directive owns the top-level comma of its argument — it separates the condition from the message — so the comma's operator precedence (tighter than the comparisons) never applies there, and `x <? 3, "message"` is the condition `x <? 3` with the message `"message"`. A condition that is itself a tuple comparison is parenthesized, `$assert pair =? (1, 2)`, as a form's argument would be anywhere. A compile-time message must be a string literal.
+The assertion directives are _forms_ with their own argument grammar, like `if cond body` or `return expr`, not operators: `$assert expr [, expr]`. The directive owns the top-level comma of its argument — it separates the condition from the message — so the comma's operator precedence (tighter than the comparisons) never applies there, and `x <? 3, "message"` is the condition `x <? 3` with the message `"message"`. A condition that is itself a tuple comparison is parenthesized, `$assert pair =? (1, 2)`, as a form's argument would be anywhere. A compile-time message must be a string literal.
 
 ## Effects
 

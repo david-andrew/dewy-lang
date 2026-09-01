@@ -21,8 +21,8 @@ def test_deferred_proofs_warn_at_compile_and_panic_at_runtime(tmp_path: Path) ->
     assert 'deferred to a runtime check by `$prototype`' in result.stderr
     # `argv[0]` passed its check and printed; `argv[5]` panicked with the deferred report
     assert result.stdout.strip().endswith('p')
-    assert 'a `$prototype` runtime check failed' in result.stderr
-    assert 'the index interval here is `5..5`' in result.stderr
+    assert 'Runtime Panic' in result.stderr and 'array index out of bounds' in result.stderr
+    assert 'observed: the index was 5 and the length was 1' in result.stderr
 
 
 def test_refinement_and_narrowing_checks_pass_when_the_values_behave(tmp_path: Path) -> None:
