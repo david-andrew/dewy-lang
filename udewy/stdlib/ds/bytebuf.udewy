@@ -93,6 +93,11 @@ let bb_push_int = (bb:int n:int):>void => {
         bb_push_byte(bb CH_0)
         return void
     }
+    if n =? 0x8000_0000_0000_0000 {
+        # i64 minimum: `-n` overflows, so its digits are spelled directly
+        bb_push_bytes(bb "-9223372036854775808" 20)
+        return void
+    }
     let neg:int = false
     if n <? 0 {
         neg = true

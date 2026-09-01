@@ -233,3 +233,51 @@ def test_static_words_match_between_compilers(bootstrap_binary, tmp_path) -> Non
 
     assert subprocess.run([str(py_bin)]).returncode == 0
     assert subprocess.run([str(bs_bin)]).returncode == 0
+
+
+INCLUDE_BYTES_SRC = """
+$include_bytes(p"blob.bin") as blob
+
+let main = ():>int => {
+    if __load__(blob - 8) not=? 5 { return 1 }
+    if __load_u8__(blob) not=? 0x01 { return 2 }
+    if __load_u8__(blob + 2) not=? 0xFF { return 3 }
+    if __load_u8__(blob + 3) not=? 0x00 { return 4 }
+    if __load_u8__(blob + 4) not=? 0x80 { return 5 }
+    return 0
+}
+"""
+
+
+def test_include_bytes_matches_between_compilers(bootstrap_binary, tmp_path) -> None:
+    if which("cc") is None:
+        pytest.skip("cc not installed")
+
+    for name, cmd in (("py", ["python", "-m", "udewy"]), ("bs", [str(bootstrap_binary)])):
+        work = tmp_path / name
+        work.mkdir()
+        (work / "blob.bin").write_bytes(bytes([0x01, 0x34, 0xFF, 0x00, 0x80]))
+        binary = _compile_with(cmd, INCLUDE_BYTES_SRC, "c", work)
+        assert subprocess.run([str(binary)]).returncode == 0, name
+
+
+I64_MIN_SRC = """
+let main = ():>int => {
+    let low:int = -9223372036854775808
+    if low not=? 0x8000_0000_0000_0000 { return 1 }
+    let computed:int = 0 - 9223372036854775807 - 1
+    if computed not=? low { return 2 }
+    return 0
+}
+"""
+
+
+def test_i64_minimum_immediate_matches_between_compilers(bootstrap_binary, tmp_path) -> None:
+    if which("cc") is None:
+        pytest.skip("cc not installed")
+
+    for name, cmd in (("py", ["python", "-m", "udewy"]), ("bs", [str(bootstrap_binary)])):
+        work = tmp_path / name
+        work.mkdir()
+        binary = _compile_with(cmd, I64_MIN_SRC, "c", work)
+        assert subprocess.run([str(binary)]).returncode == 0, name
