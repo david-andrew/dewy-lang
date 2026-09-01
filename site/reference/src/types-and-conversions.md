@@ -28,6 +28,15 @@ Punct = type of any & [text:string]     # same structure, distinct type
 let Vec = type of [x:int64 y:int64  length_squared = ():>int64 => x*x + y*y]
 ```
 
+`type of Parent` where `Parent` is itself a minted type mints a nominal *child*: a subtype of the parent (a `Whitespace` value satisfies a `Token` parameter, and `t is? Token` holds for every child in a union), distinct from the parent and from its siblings. The parent's fields lead the child's, and the operand may add more (`type of Token & [text:string]`); one nominal parent per mint.
+
+<!-- dewy-example: compiler -->
+```dewy
+let Token = type of any
+let Whitespace = type of Token
+let Name = type of Token & [text:string]
+```
+
 A minted object type is structurally its operand but distinct from every other type, including a structurally identical one: `Name | Punct` is a two-member union that `match` distinguishes, and a `Name` value does not satisfy a `Punct` annotation. The type prints by its name. Values are constructed by calling the type (`Name(text='hi')`, positionally `Vec(3 4)`) or by an object literal in the minted type's context (`let n:Name = [text='hi']`); methods and `&=` constructor overloads work as on any object type. Numeric parents such as `type of int` are not implemented yet:
 
 <!-- dewy-example: design-only -->

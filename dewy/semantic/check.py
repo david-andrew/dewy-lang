@@ -1120,15 +1120,20 @@ def _tcr_annotated_declaration(
         # is useless unless grown, often by a callee through `@buffer`
         and (name in ctx.grown_array_names or expr.type.length == 0)
     )
+    # an object or array annotation takes the value's exact shape (field
+    # refinements, exact lengths) — but a minted child stored under its parent's
+    # annotation (`let t:Token = Name(…)`) is a parent value: the annotation governs
     ctx.declarations[name] = (
         annotation
         if growable
         else expr.type
         if isinstance(annotation, (ty.ArrayType, ty.ObjectType))
         and isinstance(expr.type, type(annotation))
+        and not ty.user_brand_descends(expr.type, annotation)
         else ty.optional(expr.type)
         if isinstance(optional_annotation_payload, (ty.ArrayType, ty.ObjectType))
         and isinstance(expr.type, type(optional_annotation_payload))
+        and not ty.user_brand_descends(expr.type, optional_annotation_payload)
         else annotation
     )
     declaration = _complete_binding(
@@ -4796,8 +4801,27 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     operands = parent.items if isinstance(parent, ty.TypeAnd) else [parent]
     fields: list[ty.ObjectField] = []
     methods: list[ty.MethodSpec] = []
+    ancestor: str | None = None
     for item in operands:
-        if item == 'any':
+        if ty.user_branded(item):
+            # `type of Token`: a nominal child — the parent's fields lead, so a
+            # child value is a parent value with more behind it
+            assert isinstance(item, ty.ObjectType) and item.brand is not None
+            if ancestor is not None:
+                not_implemented(ctx.srcfile, rhs.loc, f'`type of {type_to_dewy(parent)}` (a minted type with two nominal parents)')
+            ancestor = item.brand
+            for field_ in item.fields:
+                if any(field_.name == existing.name for existing in fields):
+                    user_error(
+                        ctx.srcfile,
+                        f'minted type `{binding.name}` declares field `{field_.name}` twice',
+                        Pointer(span=rhs.loc, message=f'`{ancestor}` already carries it'),
+                    )
+            fields[:0] = item.fields
+            methods[:0] = item.methods
+            continue
+    for item in operands:
+        if item == 'any' or ty.user_branded(item):
             continue
         if isinstance(item, ty.ObjectType) and item.brand is None:
             for field_ in item.fields:
@@ -4823,6 +4847,10 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
             Pointer(span=binding.loc, message='choose another name for this minted type'),
         )
     ty.USER_BRANDS.add(name)
+    if ancestor is not None:
+        ty.USER_BRAND_PARENTS[name] = ancestor
+    else:
+        ty.USER_BRAND_PARENTS.pop(name, None)
     return ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods))
 
 

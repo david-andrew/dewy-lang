@@ -409,8 +409,27 @@ USER_NOMINAL_TYPES: dict[str, str] = {}
 USER_BRANDS: set[str] = set()
 
 
+# the parent brand of a minted type that descends from another minted type
+# (`let Whitespace = type of Token`); a root mint has no entry
+USER_BRAND_PARENTS: dict[str, str] = {}
+
+
 def user_branded(type_: object) -> bool:
     return isinstance(type_, ObjectType) and type_.brand is not None and type_.brand in USER_BRANDS
+
+
+def user_brand_descends(child: object, parent: object) -> bool:
+    """Whether `child` is a minted descendant of `parent` (`type of Parent`, possibly
+    intersected with more fields): the parent's brand is on the child's chain and
+    the parent's fields are a prefix of the child's, so a child value is a parent
+    value with more behind it."""
+    if not (user_branded(child) and user_branded(parent)):
+        return False
+    assert isinstance(child, ObjectType) and isinstance(parent, ObjectType)
+    brand = USER_BRAND_PARENTS.get(child.brand or '')
+    while brand is not None and brand != parent.brand:
+        brand = USER_BRAND_PARENTS.get(brand)
+    return brand is not None and child.fields[:len(parent.fields)] == parent.fields
 """Nominal types minted by programs (`let NotFound:type = type of error`),
 name -> parent. Every `TypeSystem` registers them, so the lowering's fresh
 instances agree with the checker's about `NotFound of? error`."""
@@ -1036,7 +1055,9 @@ class TypeSystem:
                 return a
             return a if a.length == b.length else None
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
-            return a if a == b else None
+            if a == b or user_brand_descends(a, b):
+                return a
+            return b if user_brand_descends(b, a) else None
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a if a == b else None
 
@@ -1176,7 +1197,7 @@ class TypeSystem:
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
-            return a == b
+            return a == b or user_brand_descends(a, b)
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b
 

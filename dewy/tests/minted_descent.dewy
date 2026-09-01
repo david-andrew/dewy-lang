@@ -1,0 +1,23 @@
+# `type of Parent` where Parent is a minted type mints a nominal child: a subtype of
+# the parent (its fields lead), distinct from the parent and its siblings
+
+let Token = type of any
+let Whitespace = type of Token
+let Name = type of Token & [text:string]
+let Number = type of Token & [text:string value:int64]
+describe = (t:Token):>int64 => 1
+main = () => {
+    let n = Name(text='ab')
+    let total:int64 = describe(n)                       # 1
+    let toks:array<Whitespace|Name|Number> = [Whitespace() Name(text='xyz') Number('7' 7)]
+    loop t in toks {
+        if t is? Token total += 10                       # 31
+        match t {
+            w:Whitespace => { total += 1 }               # 32
+            nm:Name => { total += nm.text.length }         # 35
+            m:Number => { total += m.value }             # 42
+        }
+    }
+    if "{Whitespace}" =? "Whitespace" total += 0
+    return total
+}

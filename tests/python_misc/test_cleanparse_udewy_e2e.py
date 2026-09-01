@@ -114,6 +114,7 @@ LOWERED_CASES = [
     ('abstract_int_containers.dewy', 42),
     ('function_tables.dewy', 42),
     ('minted_types.dewy', 42),
+    ('minted_descent.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

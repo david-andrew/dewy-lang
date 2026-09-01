@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tarfile
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[2]
 
@@ -78,6 +77,7 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 case "$url" in
+    */install.sh) cp "$INSTALLER_SCRIPT" "$output" ;;
     */releases/*) cp "$FAKE_UDEWY" "$output" ;;
     *) cp "$SOURCE_ARCHIVE" "$output" ;;
 esac
@@ -112,6 +112,7 @@ exec "$REAL_PYTHON" "$@"
             "SHELL": "/bin/bash",
             "PATH": f"{tools}:{env['PATH']}",
             "FAKE_UDEWY": str(fake_udewy),
+            "INSTALLER_SCRIPT": str(REPO_ROOT / "install.sh"),
             "SOURCE_ARCHIVE": str(source_archive),
             "PYTHON_LOG": str(python_log),
             "REAL_PYTHON": compatible_python,
@@ -178,6 +179,18 @@ let main = ():>int64 => answer
         capture_output=True,
     )
     assert compiled.returncode == 42
+
+    updated = subprocess.run(
+        [str(install_dir / "dewy"), "update"],
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert updated.returncode == 0, updated.stderr
+    assert "Installed" in updated.stdout
+    assert (runtime / "dewy" / "__main__.py").is_file()
 
     python_marker.unlink()
     old_python_env = env | {"FAKE_PYTHON_TOO_OLD": "1"}

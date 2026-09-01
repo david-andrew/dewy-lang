@@ -68,3 +68,30 @@ def test_string_literals_materialize_as_strings_in_optional_slots() -> None:
     assert isinstance(call, hir.FunctionCall)
     (argument,) = call.pos_args
     assert isinstance(argument, hir.RepresentationCast) and argument.type == ty.StringType()
+
+
+DESCENT = (
+    'let Token = type of any & [kind:int64]\n'
+    'let Whitespace = type of Token\n'
+    'let Name = type of [text:string] & Token\n'
+)
+
+
+def test_a_minted_child_is_a_subtype_of_its_parent_with_the_parent_fields_leading() -> None:
+    root = _check(DESCENT + 'describe = (t:Token):>int64 => t.kind\nlet r = describe(Name(text="a" kind=1))')
+    declares = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    name = declares['Name'].expr.value
+    token = declares['Token'].expr.value
+    assert [field.name for field in name.fields] == ['kind', 'text']
+    assert ty.user_brand_descends(name, token) and not ty.user_brand_descends(token, name)
+    assert ty.USER_BRAND_PARENTS['Whitespace'] == 'Token'
+
+
+def test_minted_siblings_stay_distinct() -> None:
+    with pytest.raises(TypeCheckError, match='expected `Whitespace`, got `Name`'):
+        _check(DESCENT + 'let w:Whitespace = Name(text="a" kind=1)')
+
+
+def test_a_minted_type_has_at_most_one_nominal_parent() -> None:
+    with pytest.raises(NotImplementedYet, match='two nominal parents'):
+        _check(DESCENT + 'let Both = type of Whitespace & Name')
