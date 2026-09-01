@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from ...reporting import Pointer, SrcFile
+from ...reporting import Pointer, Span, SrcFile
+from ...targets import ADDRESS_BITS, max_length
 from .. import bindings as sb
 from .. import hir, ty
 from ..errors import user_error, user_warning
+from ..hir_display import type_to_dewy
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,10 @@ class Interval:
 
     lower: int | None
     upper: int | None
+    capped: bool = field(default=False, compare=False)
+    """Whether an endpoint descends from the target's length cap (see `targets.max_length`)
+    rather than from a fact of the program: a proof that needs such an endpoint rests on the
+    address-space axiom, and `dewy analyze` says so."""
 
     @classmethod
     def exact(cls, value: int) -> Interval:
@@ -33,7 +39,7 @@ class Interval:
     def intersect(self, other: Interval) -> Interval:
         lower = _maximum_lower(self.lower, other.lower)
         upper = _minimum_upper(self.upper, other.upper)
-        return Interval(lower, upper)
+        return Interval(lower, upper, capped=self.capped or other.capped)
 
     def union(self, other: Interval) -> Interval:
         lower = (
@@ -46,7 +52,7 @@ class Interval:
             if self.upper is None or other.upper is None
             else max(self.upper, other.upper)
         )
-        return Interval(lower, upper)
+        return Interval(lower, upper, capped=self.capped or other.capped)
 
     def widen(self, other: Interval) -> Interval:
         lower = (
@@ -63,7 +69,7 @@ class Interval:
             and other.upper <= self.upper
             else None
         )
-        return Interval(lower, upper)
+        return Interval(lower, upper, capped=self.capped or other.capped)
 
 
 UNKNOWN_INTERVAL = Interval(None, None)
@@ -81,7 +87,19 @@ _FACT_SHIFT = 20
 
 # A runtime-length array's length is a nonnegative int64, which keeps
 # `i <? xs.length` bounded above so `i + 1` cannot roll over.
-_MAX_LENGTH = (1 << 48) - 1  # more elements than any address space holds; keeps sums of lengths within int64
+_MAX_LENGTH = max_length('x86_64')  # the default cap; the validator carries its target's (`targets.max_length`)
+
+
+@dataclass(frozen=True)
+class CapNote:
+    """A proof that rests on the target's length cap rather than on a fact of the program."""
+
+    srcfile: SrcFile
+    loc: Span
+    message: str
+
+
+last_cap_notes: list[CapNote] = []
 
 
 def _length_key(array_id: int) -> int:
@@ -185,16 +203,16 @@ def _exclude_value(interval: Interval, value: int) -> Interval | None:
         lower += 1
     if upper is not None and upper == value:
         upper -= 1
-    return Interval(lower, upper)
+    return Interval(lower, upper, capped=interval.capped)
 
 
 def _is_length_key(key: int) -> bool:
     return key < 0 and key > -_FACT_BASE
 
 
-def _known_interval(state: State, key: int) -> Interval:
-    """The interval a key currently has; lengths default to `[0, _MAX_LENGTH]`."""
-    default = Interval(0, _MAX_LENGTH) if _is_length_key(key) else UNKNOWN_INTERVAL
+def _known_interval(state: State, key: int, cap: int = _MAX_LENGTH) -> Interval:
+    """The interval a key currently has; lengths default to `[0, cap]` (a capped interval)."""
+    default = Interval(0, cap, capped=True) if _is_length_key(key) else UNKNOWN_INTERVAL
     return state.get(key, default)
 
 
@@ -417,8 +435,12 @@ class _BoundsValidator:
         registry: sb.BindingRegistry,
         srcfile: SrcFile,
         root: hir.Block,
+        target: str = 'x86_64',
     ) -> None:
         self.registry = registry
+        self.target = target
+        self.max_length = max_length(target)
+        self.cap_notes: list[CapNote] = []
         # bindings declared with a refinement (`let d:bigint<sign =? 1>`, refined
         # parameters): their facts are re-established after every assignment
         self.declared_refinements: dict[int, ty.RefinedType] = {}
@@ -550,7 +572,7 @@ class _BoundsValidator:
                         minimum = proposition.lower_bound()
                         if minimum is not None:
                             key = _length_key(binding_id)
-                            current[key] = current.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
+                            current[key] = current.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
             return current
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
@@ -628,6 +650,11 @@ class _BoundsValidator:
         for proposition in node.refined.propositions:
             verdict = self._proposition_verdict(proposition, node.value, interval, state)
             if verdict is True:
+                if proposition.op in ('<?', '<=?') and (proposition.subject == 'length' or proposition.of == 'length'):
+                    _node, subject = self._subject_interval(proposition, node.value, interval, state)
+                    name = {'<?': '__lt__', '<=?': '__le__'}[proposition.op]
+                    if subject is not None and subject.capped and self._decide_comparison(name, Interval(subject.lower, None), Interval.exact(proposition.value)) is not True:
+                        self._cap_note(node.value, f'`{_describe_proposition_text(proposition)}` holds')
                 continue
             requirement = _describe_proposition_text(proposition)
             source = ' '.join(self.srcfile.body[node.value.loc.start:node.value.loc.stop].split())
@@ -652,7 +679,7 @@ class _BoundsValidator:
         sequence_id = _runtime_array_id(node, self.registry)
         if sequence_id is None:
             return None
-        interval = state.get(_length_key(sequence_id), Interval(0, _MAX_LENGTH))
+        interval = state.get(_length_key(sequence_id), self._length_default())
         # `limbs:array<uint64 length >? 0>`: the field's declared length bound is a fact on every read
         declared = _length_propositions_interval(_member_invariant(node))
         return interval if declared is None else interval.intersect(declared)
@@ -731,7 +758,7 @@ class _BoundsValidator:
             minimum = proposition.lower_bound()
             if minimum is not None:
                 key = _length_key(route_id)
-                state[key] = state.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
+                state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
             return
         lower, upper = proposition.lower_bound(), proposition.upper_bound()
         if lower is not None or upper is not None:
@@ -763,7 +790,7 @@ class _BoundsValidator:
                     minimum = proposition.lower_bound()
                     if minimum is not None:
                         key = _length_key(param.binding_id)
-                        state[key] = state.get(key, Interval(0, _MAX_LENGTH)).intersect(Interval(minimum, _MAX_LENGTH))
+                        state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
             if lower is not None or upper is not None:
                 self._set_interval(state, param.binding_id, Interval(lower, upper))
 
@@ -1073,13 +1100,21 @@ class _BoundsValidator:
         if known is not None:
             return known
         if _is_length_key(binding_id):
-            return _known_interval(state, binding_id)   # lengths default to `[0, _MAX_LENGTH]`
+            return _known_interval(state, binding_id, self.max_length)   # lengths default to `[0, cap]`
         binding = self.registry.by_id.get(binding_id)
         layout = ty.fixed_integer_layout(ty.strip_refinement(binding.type)) if binding is not None and binding.type is not None else None
         if layout is None:
             return UNKNOWN_INTERVAL
         width, signed = layout
         return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+
+    def _length_default(self) -> Interval:
+        """An unknown length: `[0, cap]` by the address-space axiom (a capped interval)."""
+        return Interval(0, self.max_length, capped=True)
+
+    def _cap_note(self, node: hir.AST, what: str) -> None:
+        bits = ADDRESS_BITS[self.target]   # type: ignore[index]
+        self.cap_notes.append(CapNote(self.srcfile, node.loc, f'{what} only because lengths are assumed below 2^{bits} on `{self.target}`'))
 
     def _loop_counter_interval(self, iterator: hir.IteratorExpression) -> Interval:
         """The iterator's interval inside its loop. A right-unbounded counter
@@ -1310,6 +1345,8 @@ class _BoundsValidator:
         if isinstance(node, hir.ValueCast):
             inner = self._eval(node.expr, state, validate=validate)
             fitted = self._fit_type(inner, node.type)
+            if validate and fitted is not None and inner is not None and inner.capped and self._fit_type(Interval(inner.lower, None), node.type) is None:
+                self._cap_note(node, f'fits `{type_to_dewy(node.type)}`')
             if (
                 validate
                 and fitted is None
@@ -1335,8 +1372,8 @@ class _BoundsValidator:
                     return Interval.exact(length)
                 array_id = _runtime_array_id(node.array, self.registry)
                 if array_id is not None:
-                    return state.get(_length_key(array_id), Interval(0, _MAX_LENGTH))
-                return Interval(0, _MAX_LENGTH)
+                    return state.get(_length_key(array_id), self._length_default())
+                return self._length_default()
             return None
         if isinstance(node, hir.ArrayMethod):
             self._eval(node.array, state, validate=validate)
@@ -1397,8 +1434,8 @@ class _BoundsValidator:
                 return Interval.exact(length)
             string_id = _runtime_array_id(node.string, self.registry)
             if string_id is not None:
-                return state.get(_length_key(string_id), Interval(0, _MAX_LENGTH))
-            return Interval(0, _MAX_LENGTH)
+                return state.get(_length_key(string_id), self._length_default())
+            return self._length_default()
         if isinstance(node, hir.Index):
             self._eval(node.array, state, validate=validate)
             interval = self._eval(node.index, state, validate=validate)
@@ -1470,7 +1507,7 @@ class _BoundsValidator:
                 index_interval = None
             if array_id is not None:
                 key = _length_key(array_id)
-                current = state.get(key, Interval(0, _MAX_LENGTH))
+                current = state.get(key, self._length_default())
                 if validate and index_arg is not None and name in {'pop', 'insert'}:
                     self._validate_method_index(
                         node, index_arg, index_interval, state, array_id, current,
@@ -1479,7 +1516,7 @@ class _BoundsValidator:
                 if name in {'push', 'insert'}:
                     state[key] = Interval(
                         _add(current.lower, 1),
-                        _minimum_upper(_add(current.upper, 1), _MAX_LENGTH),
+                        _minimum_upper(_add(current.upper, 1), self.max_length),
                     )
                 elif name == 'pop':
                     state[key] = Interval(
@@ -1685,6 +1722,18 @@ class _BoundsValidator:
         return None
 
     def _binary_interval(
+        self,
+        name: str,
+        left: Interval | None,
+        right: Interval | None,
+        result_type: ty.Type,
+    ) -> Interval | None:
+        result = self._binary_interval_plain(name, left, right, result_type)
+        if result is not None and left is not None and right is not None and (left.capped or right.capped) and not result.capped:
+            result = Interval(result.lower, result.upper, capped=True)
+        return result
+
+    def _binary_interval_plain(
         self,
         name: str,
         left: Interval | None,
@@ -1963,7 +2012,7 @@ class _BoundsValidator:
             nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
             if array_id is not None and nonnegative:
                 # the proven minimum: the length fact, tightened by a field's declared length bound
-                minimum_length = (self._length_interval(sequence, state) or Interval(0, _MAX_LENGTH)).lower or 0
+                minimum_length = (self._length_interval(sequence, state) or self._length_default()).lower or 0
                 if interval.upper is not None and interval.upper < minimum_length:
                     if interval.lower == interval.upper:
                         node.constant_index = interval.lower
@@ -2010,7 +2059,7 @@ class _BoundsValidator:
         if length is None and state is not None:
             string_id = _runtime_array_id(node.string, self.registry)
             if string_id is not None:
-                minimum = state.get(_length_key(string_id), Interval(0, _MAX_LENGTH)).lower or 0
+                minimum = state.get(_length_key(string_id), self._length_default()).lower or 0
 
                 def endpoint_proven(endpoint: hir.AST | None, interval: Interval | None, delta: int, limit: int) -> bool:
                     """`endpoint + delta` lies in `[-1 or 0, limit)` for every value, or an index fact bounds it."""
@@ -2189,7 +2238,7 @@ class _BoundsValidator:
                 refined[left_binding] = narrowed
             elif _is_inequality(name, truth) and right_interval.lower is not None and right_interval.lower == right_interval.upper:
                 # `x not =? c` (or a failed `x =? c`) excludes `c`: it tightens a bound it sits on
-                excluded = _exclude_value(_known_interval(refined, left_binding), right_interval.lower)
+                excluded = _exclude_value(_known_interval(refined, left_binding, self.max_length), right_interval.lower)
                 if excluded is None:
                     return None
                 refined[left_binding] = excluded
@@ -2216,7 +2265,7 @@ class _BoundsValidator:
                     return None
                 refined[right_binding] = narrowed
             elif _is_inequality(inverse, truth) and left_interval.lower is not None and left_interval.lower == left_interval.upper:
-                excluded = _exclude_value(_known_interval(refined, right_binding), left_interval.lower)
+                excluded = _exclude_value(_known_interval(refined, right_binding, self.max_length), left_interval.lower)
                 if excluded is None:
                     return None
                 refined[right_binding] = excluded
@@ -2348,8 +2397,8 @@ class _BoundsValidator:
             and node.expr.type.length is None
         ):
             key = _length_key(node.binding_id)
-            current = state.get(key, Interval(0, _MAX_LENGTH))
-            state[key] = current.intersect(Interval(length_lower, _MAX_LENGTH))
+            current = state.get(key, self._length_default())
+            state[key] = current.intersect(Interval(length_lower, self.max_length))
         return interval
 
     @staticmethod
@@ -2377,17 +2426,16 @@ class _BoundsValidator:
             for binding_id in common
         }
 
-    @staticmethod
-    def _widen_states(previous: State, current: State) -> State:
+    def _widen_states(self, previous: State, current: State) -> State:
         common = previous.keys() & current.keys()
         widened: State = {}
         for binding_id in common:
             interval = previous[binding_id].widen(current[binding_id])
             if _is_length_key(binding_id):
-                # array lengths never leave [0, _MAX_LENGTH], even when widened
+                # array lengths never leave [0, cap], even when widened
                 interval = Interval(
                     0 if interval.lower is None else interval.lower,
-                    _MAX_LENGTH if interval.upper is None else interval.upper,
+                    self.max_length if interval.upper is None else interval.upper,
                 )
             widened[binding_id] = interval
         return widened
@@ -2405,6 +2453,8 @@ def validate_bounds(
     registry: sb.BindingRegistry,
     srcfile: SrcFile,
     unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None,
+    *,
+    target: str = 'x86_64',
 ) -> None:
     """Validate every dynamic array index against its source-position facts.
 
@@ -2413,6 +2463,7 @@ def validate_bounds(
     pass instead of being reported as errors.
     """
 
-    validator = _BoundsValidator(registry, srcfile, root)
+    validator = _BoundsValidator(registry, srcfile, root, target=target)
     validator.unfit = unfit
     validator.validate(root)
+    last_cap_notes.extend(validator.cap_notes)

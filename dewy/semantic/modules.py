@@ -386,10 +386,10 @@ class ModuleCompiler:
         the prelude itself.
         """
         if prelude_module or no_prelude or 'BigInt' not in self.prelude_bindings:
-            bounds.validate_bounds(root, self.registry, srcfile)
+            bounds.validate_bounds(root, self.registry, srcfile, target=self.target)
             return
         unfit: dict = {}
-        bounds.validate_bounds(root, self.registry, srcfile, unfit)
+        bounds.validate_bounds(root, self.registry, srcfile, unfit, target=self.target)
         notes = representation.select_representations(root, self.registry, srcfile, self.prelude_bindings, unfit)
         self.representation_notes.extend(notes)
 
@@ -435,6 +435,7 @@ def typecheck_program(
     test: bool = False,
 ) -> hir.Block:
     representation.last_notes.clear()
+    bounds.last_cap_notes.clear()
     compiler = ModuleCompiler(srcfile, target, test=test)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)

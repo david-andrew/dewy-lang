@@ -55,6 +55,23 @@ target:TypeAlias = Literal[
 
 TARGETS: list[target] = [*target.__args__]
 
+# The address width of each target: no array or string can hold more elements
+# than its address space has bytes, so the bounds analysis assumes every
+# length lies below `2^bits` (`max_length`). A trusted axiom, not a proof —
+# `dewy analyze` reports the proofs that rest on it.
+ADDRESS_BITS: dict[target, int] = {
+    'x86_64': 48,   # 4-level paging: 48-bit virtual addresses
+    'arm': 48,      # AArch64 with 4 KiB pages
+    'riscv': 48,    # Sv48
+    'c': 48,        # a 64-bit host; a 32-bit C target would narrow this
+    'wasm32': 32,   # a 32-bit linear memory
+}
+
+
+def max_length(name: str) -> int:
+    """The largest array or string length the analysis admits on a target."""
+    return (1 << ADDRESS_BITS[name]) - 1   # type: ignore[index]
+
 # platform.machine() names -> supported host backends
 _HOST_TARGET_MAP: dict[str, target] = {
     'x86_64': 'x86_64',

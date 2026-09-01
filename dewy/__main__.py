@@ -176,6 +176,30 @@ def analyze(argv: list[str]) -> int:
         else 'every integer is a 64-bit word'
     )
     print(Info(srcfile=srcfile, title='representation report', message=summary, use_color=use_color))
+    print()
+    from .semantic.analyze import bounds
+    from .targets import ADDRESS_BITS
+
+    target = _resolve_target(args.target)
+    for note in bounds.last_cap_notes:
+        print(Info(
+            srcfile=note.srcfile,
+            title='address-space cap',
+            pointer_messages=[Pointer(span=note.loc, message=note.message)],
+            use_color=use_color,
+        ))
+        print()
+    relying = len(bounds.last_cap_notes)
+    print(Info(
+        srcfile=srcfile,
+        title='length cap report',
+        message=(
+            f'on `{target}` every array and string length is assumed below 2^{ADDRESS_BITS[target]} '
+            f'(no address space holds more elements) — an axiom the analysis trusts, not a proof; '
+            + (f'{relying} proof{"s" if relying != 1 else ""} above rest on it' if relying else 'no proof in this program rests on it')
+        ),
+        use_color=use_color,
+    ))
     return 0
 
 

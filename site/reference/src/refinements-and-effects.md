@@ -74,6 +74,10 @@ let main = ():>int64 => {
 
 Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`) are tracked by member route, like array lengths, until the field or its object is reassigned; and a loop over an array or dictionary literal of constants that is never mutated bounds the loop variable by those constants.
 
+## The Length Cap
+
+One assumption sits under every length fact: no array or string holds more elements than the target's address space has bytes. An unknown length is therefore `[0, 2^bits)` rather than `[0, ∞)`, where `bits` is the target's address width — 48 on `x86_64`, `arm`, `riscv`, and `c`; 32 on `wasm32` (`ADDRESS_BITS` in `dewy/targets.py`). It is an axiom the analysis trusts, not something a program proves, and it is what lets `s.length <=? uint64.max` hold for any string on a 64-bit target, or `a.length + b.length` fit a word, without a guard; a bound below the cap (`length <=? uint16.max`) is a real obligation. `dewy analyze` names every proof in a program that rests on the axiom (`address-space cap`, with the target's width) and ends with the `length cap report`. Compiling one program for several targets is a question for later; each target is analyzed against its own cap.
+
 ## No Traps
 
 Dewy is a trap-free language. A compiled program never aborts, panics, or crashes on a path the programmer did not write: the only exits are the ones spelled out in the source — `return`, a failed `$runtime_assert`, an explicit call to exit. Every operation that could fail is handled in one of two ways, and never a third:
