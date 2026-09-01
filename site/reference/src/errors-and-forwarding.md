@@ -185,7 +185,7 @@ let twice = (id:int64):>int64 | NotFound | none => {
 }
 ```
 
-`or_throw` binds more loosely than calls and member access, so `lookup(id) or_throw` propagates the call's result. The propagated alternatives must each be accepted by the enclosing function's declared result type; a function without a declared result type cannot use it. Forms that replace or transform the propagated exception are part of the design direction, but their exact syntax and evaluation rules remain provisional.
+`or_throw` is a postfix just below `as` in precedence, so it applies to the whole expression on its left: `lookup(id) or_throw` propagates the call's result, and `f(x) * 2 or_throw` propagates from the product (see [operators and precedence](operators-and-precedence.md)). The propagated alternatives must each be accepted by the enclosing function's declared result type; a function without a declared result type cannot use it. Forms that replace or transform the propagated exception are part of the design direction, but their exact syntax and evaluation rules remain provisional.
 
 ## Explicit Handling
 

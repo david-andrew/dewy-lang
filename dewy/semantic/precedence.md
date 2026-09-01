@@ -1,6 +1,7 @@
-# Operator precedence — proposed adjustments
+# Operator precedence — adjustments
 
-Proposal (2026-08-31). Not decided. The live table is `operator_groups` in
+Proposed and landed 2026-08-31 (all four moves; `as` left in place). Kept as
+the rationale. The live table is `operator_groups` in
 `dewy/parser/p0.py`; the user-facing copy is
 `site/reference/src/operators-and-precedence.md` (slightly behind: it omits
 `or_throw`).

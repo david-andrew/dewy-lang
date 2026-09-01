@@ -6,11 +6,11 @@ Operator tokens resolve to typed operations. An operator's spelling determines p
 
 - arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `^`;
 - shifts: `<<`, `>>`, `<<<`, `>>>`;
-- comparisons and tests: `=?`, `not =?`, `<?`, `<=?`, `>?`, `>=?`, `is?`, `isnt?`, `in?` (the tests bind like comparisons, so `a is? T and b in? s` needs no grouping);
+- comparisons and tests: `=?`, `not =?`, `<?`, `<=?`, `>?`, `>=?`, `is?`, `isnt?`, `in?` (the tests bind like comparisons, so `a is? T and b in? s` needs no grouping; comparisons chain one direction, see below);
 - symbolic composition: `&`, `|`, `~` — the same operations as `and`, `or`, `not`, binding above the comparisons (see below);
-- Boolean logic: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `not`, binding below the comparisons;
-- conversion: `as`, `transmute`;
-- type relationships and construction: `of`, `has`, `type of Parent`;
+- Boolean logic: `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `not`, binding below the comparisons (`not x =? y` is `not (x =? y)`);
+- conversion: `as`, `transmute`; propagation: postfix `or_throw`, below `as` ("this expression, or throw");
+- type relationships and construction: `of`, `has`, and the prefix `type of Parent`, which binds above `&` and `|`;
 - call pipes: `|>` and `<|`;
 - construction and binding: `:`, `:>`, `=>`, `->`, `<->`, `=`;
 - suppression: an attached postfix `;`.
@@ -42,25 +42,28 @@ The following table is ordered from highest to lowest. “Fail” means an ungro
 | left             | member `.`, call juxtaposition, index juxtaposition  |
 | fail             | type-parameter juxtaposition, ellipsis juxtaposition |
 | postfix / prefix | `` ` ``                                              |
-| prefix           | `not`, `~`                                           |
+| prefix           | `~`                                                  |
 | postfix          | `?`                                                  |
 | right            | `^`                                                  |
 | left             | multiplication juxtaposition                         |
 | prefix           | `*`, `/`, `//`                                       |
-| left             | `*`, `/`, `//`, `%`                                  |
+| left             | `*`, `/`, `//`, `%`, `\` (left division, reserved)  |
 | prefix           | `+`, `-`                                             |
 | left             | `+`, `-`                                             |
-| left             | `<<`, `>>`, `<<<`, `>>>`                             |
+| left             | `<<`, `>>`, `<<<`, `>>>`, `<<!`, `!>>`               |
 | flat             | `,`                                                  |
 | flat             | range juxtaposition (`1..2`)                         |
 | fail             | iterator `in`                                        |
+| prefix           | `type of`                                            |
 | left             | `&`                                                  |
 | left             | `\|`                                                 |
-| left             | comparisons, membership, type tests                  |
+| left             | comparisons (chaining), membership, type tests       |
+| prefix           | `not`                                                |
 | left             | `and`, `nand`                                        |
 | left             | `xor`, `xnor`                                        |
 | left             | `or`, `nor`                                          |
 | left             | `as`, `transmute`                                    |
+| postfix          | `or_throw`                                           |
 | fail             | `of`, `has`                                          |
 | fail             | `:`                                                  |
 | left             | `:>`                                                 |
@@ -82,7 +85,27 @@ The cost is the one expression that mixes them the wrong way round: `x >? 0 & y 
 
 `else` attaches flow alternatives outside these operator levels. Grouping with `()` or a scoped `{}` is required when the precedence table does not express the intended tree.
 
-In particular, `&` binds more tightly than `of`. A fresh nominal type with structural requirements is therefore written `(type of Parent) & Structure`. Without those parentheses, `type of Parent & Structure` groups as `type of (Parent & Structure)`.
+Word-`not` sits just above `and`, below the comparisons — the same symbol/word split — so `not x =? y` is `not (x =? y)` and `not a and b` is `(not a) and b`, while `~flags =? 0` is `(~flags) =? 0`. `x not =? y` is still the one inverted comparison.
+
+## Chained Comparisons
+
+`a <? b <? c` is a chain: consecutive comparisons joined by `and`, each interior operand evaluated once (`0 <? x <? 10` is `0 <? x and x <? 10`; `0 <=? f(x) <? n` calls `f` once). A chain is one monotonic statement: its operators are rising (`<?`, `<=?`) or falling (`>?`, `>=?`), and `=?` may appear in either without changing direction. Mixing directions is an error, and `not =?`, `is?`, `isnt?`, and `in?` do not chain — write `and`. Parenthesizing the left comparison (`(a <? b) =? c`) compares its boolean instead.
+
+<!-- dewy-example: compiler -->
+```dewy
+let x = 5
+$assert 0 <? x <? 10
+$assert 10 >? x >=? 0
+$assert 0 <? x =? 5 <=? 5
+```
+
+## `type of`, `as`, and `or_throw`
+
+`type of` is a prefix that binds above `&` and `|`, so `type of Parent & Structure` mints the parent and then strengthens it — `(type of Parent) & Structure` without the parentheses; a generic bound `<T of A & B>` uses the infix `of`, which stays loose, so the bound is the whole right-hand side.
+
+`as` sits below `|` so that `bytes as string | none` converts to the union. The cost is that `x as int64 + 1` is `x as (int64 + 1)`: write `(x as int64) + 1`.
+
+`or_throw` is a postfix just below `as`: it applies to the whole expression on its left, so `f(x) * 2 or_throw` is `(f(x) * 2) or_throw`, `bytes as string | none or_throw` is `(bytes as (string | none)) or_throw`, and `lookup(id) or_throw` and `f(x) or_throw * 2` read as they look. Scaling a fallible call before propagating needs parentheses: `2 * (f(x) or_throw)`.
 
 This table lists source-language forms whose place in the expression grammar has been selected. Token spellings reserved by the parser for future operations—such as left division, expression-producing assignment, compile-time assignment, and additional shift forms—do not acquire language semantics merely by being tokenizable.
 

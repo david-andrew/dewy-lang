@@ -126,11 +126,10 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.fail, [t2.EllipsisJuxtapose]),  # A...  ...B
     (Associativity.postfix, ['`']), #TODO/Note: at the moment, prefix vs postfix precedence of (`) is backed into the algorithm, and wouldn't listen to the ordering in the table...
     (Associativity.prefix, ['`']),
-    (Associativity.prefix, ['not', '~']),
+    (Associativity.prefix, ['~']),   # word-`not` sits with the word connectives, below the comparisons
     (Associativity.postfix, ['?']),
     (Associativity.right,  ['^']),
     (Associativity.left, [t2.MultiplyJuxtapose]),  # x(y) (x)y
-    (Associativity.postfix, ['or_throw']),  # `load(id) or_throw`: below calls/juxtaposition so it takes the whole call
     (Associativity.prefix, ['*', '/', '//']),
     (Associativity.left, ['*', '/', '//', '%', '\\']),
     (Associativity.prefix, ['+', '-']),
@@ -145,13 +144,17 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     # and masks (`x is? A|B`, `d:int64 & ~0`, `flags & MASK =? 0`), so they
     # bind above the comparisons; the word spellings are boolean logic and
     # bind below them (`x >? 0 and y >? 0`).
+    (Associativity.prefix, ['type of']),  # minting binds above `&`/`|`: `type of Token & [text]` is `(type of Token) & [text]`
     (Associativity.left, ['&']),
     (Associativity.left, ['|']),
+    # comparisons chain one direction (`0 <? x <? 10`); the checker desugars the left-nested tree
     (Associativity.left, ['=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?']),  # tests sit with the comparisons: `a is? T and b in? s`
+    (Associativity.prefix, ['not']),   # `not x =? y` is `not (x =? y)`; `~flags =? 0` is `(~flags) =? 0`
     (Associativity.left, ['and', 'nand']),
     (Associativity.left, ['xor', 'xnor']),
     (Associativity.left, ['or', 'nor']),
     (Associativity.left,  ['as', 'transmute']),  # A as B as C as D
+    (Associativity.postfix, ['or_throw']),  # "this expression, or throw": `f(x) * 2 or_throw` and `bytes as string | none or_throw` take the whole left
     (Associativity.fail, ['of', 'has']), # T of SomeType. T has SomeTrait. no `is` since not really a coherent operation on types
     (Associativity.fail, [':']),    # A:B:C
     (Associativity.left, [':>']),   # A:>B:>C

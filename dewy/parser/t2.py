@@ -257,6 +257,7 @@ binary_ops: set[str] = {
 prefix_ops: set[str] = {
     '@', '~', 'not', '`',
     '+', '-', '*', '/', '//',
+    'type of',   # one token (see `make_type_of_operators`): minting is a prefix, bound-`of` stays infix
 }
 
 postfix_ops: set[str] = {
@@ -539,6 +540,22 @@ def insert_comma_voids(tokens: list[t1.Token]) -> None:
     
     if is_comma(tokens[-1]):
         tokens.append(t1.Identifier(Span(tokens[-1].loc.stop, tokens[-1].loc.stop), 'void'))
+
+
+def make_type_of_operators(tokens: list[t1.Token]) -> None:
+    """`type` followed by `of` becomes the prefix operator `type of`: minting
+    binds tighter than `&`/`|` (`type of Token & [text:string]` is
+    `(type of Token) & [...]`), while the infix `of` of a generic bound
+    (`<T of A & B>`) keeps its loose level."""
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        recurse_into(token, make_type_of_operators)
+
+        if isinstance(token, t1.Identifier) and token.name == 'type':
+            if len(tokens) > i+1 and isinstance(tokens[i+1], t1.Operator) and tokens[i+1].symbol == 'of':
+                tokens[i:i+2] = [t1.Operator(Span(token.loc.start, tokens[i+1].loc.stop), 'type of')]
+        i += 1
 
 
 def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
@@ -1090,6 +1107,8 @@ def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
     # insert void between any instances of `,,` or comma at the beginning or end of a context
     insert_comma_voids(tokens)
 
+    # `type of` is one prefix operator
+    make_type_of_operators(tokens)
     # combine not with comparison operators into a single token
     make_inverted_comparisons(tokens)
     # convert any . operator next to a binary operator (e.g. .+ .^/-) into a broadcast operator

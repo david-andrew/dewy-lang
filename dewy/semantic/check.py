@@ -4681,16 +4681,21 @@ def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
     return None
 
 
+def _is_type_of_prefix(ast: p0.AST) -> bool:
+    return isinstance(ast, p0.Prefix) and isinstance(ast.op, t1.Operator) and ast.op.symbol == 'type of'
+
+
+def _intersection_operands(ast: p0.AST) -> list[p0.AST]:
+    """The operands of an `&` chain (one item for anything else)."""
+    if isinstance(ast, p0.BinOp) and isinstance(ast.op, t1.Operator) and ast.op.symbol == '&':
+        return [*_intersection_operands(ast.left), *_intersection_operands(ast.right)]
+    return [ast]
+
+
 def _is_type_of_expression(ast: p0.AST) -> bool:
-    """`type of ...` at the root of a declaration's value: a minting alias."""
-    return (
-        isinstance(ast, p0.BinOp)
-        and isinstance(ast.op, t1.Operator)
-        and ast.op.symbol == 'of'
-        and isinstance(ast.left, p0.Atom)
-        and isinstance(ast.left.item, t1.Identifier)
-        and ast.left.item.name == 'type'
-    )
+    """A declaration value that mints: `type of X`, or an intersection holding
+    one (`type of Token & [text:string]` is `(type of Token) & [...]`)."""
+    return any(_is_type_of_prefix(item) for item in _intersection_operands(ast))
 
 
 def _type_expression_root(ast: p0.AST) -> str | None:
@@ -4762,18 +4767,24 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     """`let NotFound:type = type of error` mints a fresh nominal type named
     after the alias, a subtype of the `of` operand. Only the `error` family is
     supported so far; its canonical inhabitant is written with the type's name."""
-    if not (
-        isinstance(rhs, p0.BinOp)
-        and isinstance(rhs.op, t1.Operator)
-        and rhs.op.symbol == 'of'
-        and isinstance(rhs.left, p0.Atom)
-        and isinstance(rhs.left.item, t1.Identifier)
-        and rhs.left.item.name == 'type'
-    ):
+    operands = _intersection_operands(rhs)
+    mints = [item for item in operands if _is_type_of_prefix(item)]
+    if not mints:
         return None
-    parent = ast_to_type(rhs.right, ctx=ctx)
+    if len(mints) > 1:
+        user_error(
+            ctx.srcfile,
+            'an alias mints once',
+            Pointer(span=mints[1].loc, message='a second `type of` in the same intersection'),
+        )
+    mint = mints[0]
+    assert isinstance(mint, p0.Prefix)
+    parent = ast_to_type(mint.item, ctx=ctx)
+    extras = [ast_to_type(item, ctx=ctx) for item in operands if item is not mint]
     if not (isinstance(parent, str) and ctx.type_system.is_subtype(parent, 'error')):
-        return _mint_branded_object(binding, rhs, parent, ctx=ctx)
+        return _mint_branded_object(binding, rhs, parent, extras, ctx=ctx)
+    if extras:
+        not_implemented(ctx.srcfile, rhs.loc, 'errors carrying fields (`type of error & [...]`)')
     name = binding.name
     known = ty.USER_NOMINAL_TYPES.get(name)
     if known is not None and known != parent:
@@ -4793,13 +4804,14 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     return name
 
 
-def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, *, ctx: Context) -> ty.ObjectType:
-    """`let Number:type = type of any & [value:int64]` mints a nominal object
-    type: structurally the operand's object (`any` contributes nothing), but
-    distinct from every other type — including a structurally identical one —
-    printed and constructed by its name. `type of` is the sole generative
-    type expression; `&` alone never mints identity."""
-    operands = parent.items if isinstance(parent, ty.TypeAnd) else [parent]
+def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context) -> ty.ObjectType:
+    """`let Number:type = type of any & [value:int64]` — `(type of any) & [...]` —
+    mints a nominal object type: the parent's structure (`any` contributes
+    nothing) strengthened by the intersected objects, distinct from every
+    other type — including a structurally identical one — printed and
+    constructed by its name. `type of` is the sole generative type
+    expression; `&` alone never mints identity."""
+    operands = [*(parent.items if isinstance(parent, ty.TypeAnd) else [parent]), *extras]
     fields: list[ty.ObjectField] = []
     methods: list[ty.MethodSpec] = []
     ancestor: str | None = None
@@ -8567,6 +8579,13 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
     """Typecheck a prefix operator through its builtin dunder."""
     if not isinstance(prefix.op, t1.Operator):
         not_implemented(ctx.srcfile, prefix.op.loc, 'broadcast prefix operator')
+    if prefix.op.symbol == 'type of':
+        user_error(
+            ctx.srcfile,
+            '`type of` mints only in an alias declaration',
+            Pointer(span=prefix.loc, message='a fresh type needs a name to be referred to by'),
+            hint='write `let Name = type of ...` (or `Name:type = ...`) and use `Name` here',
+        )
     if prefix.op.symbol == '@':
         handle_ast = prefix.item
         if isinstance(handle_ast, p0.Block) and handle_ast.kind == '()' and len(handle_ast.inner) == 1:
@@ -9123,6 +9142,100 @@ def _target_membership(left: hir.AST, right: hir.AST, loc: Span) -> hir.TargetBo
     return hir.TargetBool(loc, 'bool', left.content in names)
 
 
+_CHAIN_RISING = {'<?', '<=?'}
+_CHAIN_FALLING = {'>?', '>=?'}
+_CHAIN_COMPARISONS = _CHAIN_RISING | _CHAIN_FALLING | {'=?'}
+_TEST_OPERATORS = {'is?', 'isnt?', 'in?'}
+
+
+def _comparison_operator(op: object) -> str | None:
+    """The spelling of a comparison or test operator, `not =?` included; None for anything else."""
+    if isinstance(op, t2.InvertedComparisonOp):
+        return f'not {op.op}'
+    if isinstance(op, t1.Operator) and op.symbol in _CHAIN_COMPARISONS | _TEST_OPERATORS:
+        return op.symbol
+    return None
+
+
+def _comparison_chain(binop: p0.BinOp, *, ctx: Context, expected: ty.Type | None) -> hir.AST | None:
+    """`0 <? x <? 10` is `0 <? x and x <? 10`, each interior operand evaluated
+    once. A chain is one monotonic statement: rising (`<?` `<=?`) or falling
+    (`>?` `>=?`) comparisons, with `=?` allowed in either; `not =?` and the
+    tests (`is?` `isnt?` `in?`) do not chain. Parenthesizing the left
+    comparison (`(a <? b) <? c`) compares its boolean instead."""
+    if _comparison_operator(binop.op) is None:
+        return None
+    ops: list[p0.BinOp] = []
+    node: p0.AST = binop
+    while isinstance(node, p0.BinOp) and _comparison_operator(node.op) is not None:
+        ops.insert(0, node)
+        node = node.left
+    if len(ops) < 2:
+        return None
+    operands: list[p0.AST] = [ops[0].left, *(op.right for op in ops)]
+    directions: set[str] = set()
+    for op in ops:
+        symbol = _comparison_operator(op.op)
+        assert symbol is not None
+        if symbol not in _CHAIN_COMPARISONS:
+            user_error(
+                ctx.srcfile,
+                'comparison does not chain',
+                Pointer(span=op.op.loc, message=f'`{symbol}` cannot be part of a comparison chain'),
+                hint='combine the tests with `and`',
+            )
+        if symbol in _CHAIN_RISING:
+            directions.add('rising')
+        elif symbol in _CHAIN_FALLING:
+            directions.add('falling')
+    if len(directions) == 2:
+        user_error(
+            ctx.srcfile,
+            'comparison chain changes direction',
+            *[
+                Pointer(span=op.op.loc, message=f'`{_comparison_operator(op.op)}` is {"rising" if _comparison_operator(op.op) in _CHAIN_RISING else "falling"}')
+                for op in ops
+                if _comparison_operator(op.op) in _CHAIN_RISING | _CHAIN_FALLING
+            ],
+            hint='a chain reads one way (`0 <? x <? 10`, `10 >? x >=? 0`); write the other comparison with `and`',
+        )
+    # interior operands are evaluated once: a name or literal is reused as
+    # written, anything else is bound to a hidden local before the statement
+    for index in range(1, len(operands) - 1):
+        operand = operands[index]
+        if isinstance(operand, p0.Atom) and isinstance(operand.item, (t1.Identifier, t1.String, t1.Integer)):
+            continue
+        if ctx.hoisted is None:
+            user_error(
+                ctx.srcfile,
+                'chained comparison needs a bound interior operand here',
+                Pointer(span=operand.loc, message='this operand is used by two comparisons, so it must be evaluated once'),
+                hint='bind it first (`let mid = ...`) and chain on the name',
+            )
+        value = typecheck_and_resolve_inner(operand, ctx=ctx)
+        require_valued(value.type, ctx.srcfile, value.loc, 'comparison operand')
+        name = f'__dewy_chain_{ctx.binding_registry.next_id}'
+        binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', operand.loc)
+        binding.type = value.type
+        declaration = hir.Declare(operand.loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
+        binding.declaration = declaration
+        ctx.declarations[name] = value.type
+        ctx.binding_scopes[name] = binding
+        ctx.hoisted.append(declaration)
+        operands[index] = p0.Atom(operand.loc, t1.Identifier(operand.loc, name))
+    conjunction: p0.AST | None = None
+    for index, op in enumerate(ops):
+        comparison = p0.BinOp(Span(operands[index].loc.start, operands[index + 1].loc.stop), op.op, operands[index], operands[index + 1])
+        conjunction = comparison if conjunction is None else p0.BinOp(
+            Span(conjunction.loc.start, comparison.loc.stop),
+            t1.Operator(op.op.loc, 'and'),
+            conjunction,
+            comparison,
+        )
+    assert conjunction is not None
+    return typecheck_and_resolve_inner(conjunction, ctx=ctx, expected=expected)
+
+
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
@@ -9133,6 +9246,11 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     e.g. `true | false` -> `true` vs `<true | false>` -> `literal<true>|literal<false>`
     most other operators are unaffected by this flag.
     """
+
+    if not type_block:
+        chain = _comparison_chain(binop, ctx=ctx, expected=expected)
+        if chain is not None:
+            return chain
 
     # quantum juxtapose: which operator this is depends on the operand types,
     # so try each reading as a candidate like an Ambiguous node
@@ -10924,6 +11042,14 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         case p0.Prefix(op=t1.Operator(symbol='not'|'~')):
             item = ast_to_type(ast.item, ctx=ctx)
             return ty.TypeNot(item)
+
+        case p0.Prefix(op=t1.Operator(symbol='type of')):
+            user_error(
+                ctx.srcfile,
+                '`type of` mints only in an alias declaration',
+                Pointer(span=ast.loc, message='a fresh type needs a name to be referred to by'),
+                hint='write `let Name = type of ...` (or `Name:type = ...`) and use `Name` here',
+            )
         
         case p0.Postfix(op=t1.Operator(symbol='?')):
             # `T?` is the optional `T | none`

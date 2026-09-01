@@ -1,0 +1,28 @@
+# the 2026-08-31 precedence moves: chained comparisons (one direction, interior
+# operands evaluated once), word-`not` below the comparisons, `or_throw` below `as`,
+# and `type of` as a prefix above `&` (see minted_descent.dewy for the last)
+
+let Missing = type of error
+calls:int64 = 0
+mid = (v:int64):>int64 => { calls += 1  return v }
+# `or_throw` takes the whole expression to its left
+half = (v:int64):>int64|Missing => if v % 2 =? 0 v // 2 else Missing
+scaled = (v:int64):>int64|Missing => { return half(v) or_throw * 3 }   # (half(v) or_throw) * 3 — the same tree at any height
+
+main = () => {
+    let x = 5
+    let total:int64 = 0
+    if 0 <? x <? 10 total += 1                     # 1
+    if 10 >? x >=? 0 total += 1                    # 2
+    if 0 <=? mid(x) <? 6 total += 1                # 3, mid called once
+    if 0 <? x =? 5 <=? 5 total += 1                # 4
+    if (0 <? x) =? true total += 1                 # 5 (parenthesized: a bool compared)
+    if not x =? 6 total += 1                       # 6  not (x =? 6)
+    if not x =? 5 total += 100
+    total += calls                                 # 7
+    let s = scaled(4)
+    if s is? int64 total += s                      # 13
+    let r = scaled(3)
+    if r is? Missing total += 29                   # 42
+    return total
+}
