@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import dewy.__main__ as cli
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -36,3 +38,44 @@ def test_analyze_is_a_subcommand_not_a_flag() -> None:
 def test_version_flag_belongs_to_the_top_level_command() -> None:
     result = _dewy('--version')
     assert result.returncode == 0 and result.stdout.startswith('dewy ')
+
+
+def test_update_downloads_and_runs_the_published_installer(tmp_path: Path, monkeypatch, capsys) -> None:
+    installer = tmp_path / 'published-install.sh'
+    updated = tmp_path / 'updated'
+    installer.write_text(f"#!/bin/sh\nprintf updated > '{updated}'\n")
+    installer.chmod(0o755)
+
+    curl = tmp_path / 'curl'
+    curl.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = -o ]; then shift; cp \"$PUBLISHED_INSTALLER\" \"$1\"; exit 0; fi\n"
+        "  shift\n"
+        "done\n"
+        "exit 2\n"
+    )
+    curl.chmod(0o755)
+    monkeypatch.setenv('PUBLISHED_INSTALLER', str(installer))
+    monkeypatch.setattr(cli.shutil, 'which', lambda command: str(curl) if command == 'curl' else '/bin/bash')
+
+    assert cli.main(['update']) == 0
+    assert updated.read_text() == 'updated'
+    assert cli.INSTALLER_URL in capsys.readouterr().out
+
+
+def test_update_reports_a_download_failure(tmp_path: Path, monkeypatch, capsys) -> None:
+    curl = tmp_path / 'curl'
+    curl.write_text('#!/bin/sh\nexit 22\n')
+    curl.chmod(0o755)
+    monkeypatch.setattr(cli.shutil, 'which', lambda command: str(curl) if command == 'curl' else '/bin/bash')
+
+    assert cli.main(['update']) == 22
+    assert 'failed to download' in capsys.readouterr().err
+
+
+def test_update_help_does_not_download() -> None:
+    result = _dewy('update', '--help')
+    assert result.returncode == 0
+    assert 'latest published version' in result.stdout

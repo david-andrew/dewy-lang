@@ -38,6 +38,12 @@ The first `dewy` invocation checks for Python 3.14 or newer and caches the compa
 dewy path/to/my_script.dewy
 ```
 
+Update both the Dewy compiler and the `udewy` bootstrap binary to the latest published version with:
+
+```
+dewy update
+```
+
 From a checkout, the equivalent command is:
 
 ```

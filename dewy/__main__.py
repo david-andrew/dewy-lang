@@ -3,14 +3,17 @@
     dewy [options] file.dewy [program args]   compile and run a program
     dewy test [options] [file.dewy | dir]     run a module's `$test` functions, or every `$test` under a directory
     dewy analyze [options] file.dewy          compile and report the analysis decisions
+    dewy update                               install the latest published version
 
 Actions are subcommands (`dewy analyze`, `dewy test`, later `dewy lint`, …);
 flags are rare and only ever options of the command or subcommand they follow.
 """
 import io
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from argparse import REMAINDER, SUPPRESS, ArgumentParser
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -24,6 +27,8 @@ from . import failure_log
 from .backend.udewy import codegen
 from .reporting import Info, Pointer, ReportException, SrcFile, color_enabled
 from .targets import TARGETS, identify_host_target
+
+INSTALLER_URL = 'https://dewy-lang.org/install.sh'
 
 
 def get_version() -> str:
@@ -39,9 +44,32 @@ def _resolve_target(name: str | None) -> BackendName:
     return cast(BackendName, name or identify_host_target())
 
 
+# ------------------------------------------------------------- dewy update
+def update(argv: list[str]) -> int:
+    """Replace the installed compiler and bootstrap binary with the latest published versions."""
+    parser = ArgumentParser(prog='dewy update', description='install the latest published version of Dewy')
+    parser.parse_args(argv)
+
+    curl = shutil.which('curl')
+    bash = shutil.which('bash')
+    if curl is None or bash is None:
+        missing = 'curl' if curl is None else 'bash'
+        print(f'Error: dewy update requires {missing}.', file=sys.stderr)
+        return 1
+
+    with tempfile.TemporaryDirectory(prefix='dewy-update-') as temp_dir:
+        installer = Path(temp_dir) / 'install.sh'
+        print(f'Downloading the latest Dewy installer from {INSTALLER_URL}')
+        downloaded = subprocess.run([curl, '-fsSL', INSTALLER_URL, '-o', str(installer)], check=False)
+        if downloaded.returncode != 0:
+            print('Error: failed to download the Dewy installer.', file=sys.stderr)
+            return downloaded.returncode
+        return subprocess.run([bash, str(installer)], check=False).returncode
+
+
 # ---------------------------------------------------------------- dewy <file>
 def run(argv: list[str]) -> int:
-    parser = ArgumentParser(prog='dewy', description='Dewy Compiler', epilog='subcommands: analyze')
+    parser = ArgumentParser(prog='dewy', description='Dewy Compiler', epilog='subcommands: analyze, test, update')
     parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided, enter REPL mode')
     _add_target_option(parser)
     parser.add_argument('-v', '--version', action='version', version=f'dewy {get_version()}', help='Print version information and exit')
@@ -243,7 +271,7 @@ def test(argv: list[str]) -> int:
             return TEST_NOT_BUILT
 
 
-SUBCOMMANDS = {'analyze': analyze, 'test': test}
+SUBCOMMANDS = {'analyze': analyze, 'test': test, 'update': update}
 
 
 def main(argv: list[str] | None = None) -> int:
