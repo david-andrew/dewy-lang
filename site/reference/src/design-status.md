@@ -48,7 +48,10 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - user-defined managed handles, including lifecycle hooks, typed allocation capabilities, and lifetime-bounded payload places;
 - pattern matching, stored generators, and general unpack/collect behavior;
 - compile-time evaluation and metaprogramming beyond type-valued expressions and imports;
-- the final Unicode identifier repertoire and source-normalization policy.
+- the final Unicode identifier repertoire and source-normalization policy;
+- three proposed precedence adjustments (`not` vs `~`, comparison
+  associativity, `or_throw` below `as`) in `dewy/semantic/precedence.md`;
+  `type of` should be a prefix tighter than `&`, not the same `of` as `<T of Bound>`.
 
 Whether a unit-like nominal type value and its canonical inhabitant are literally the same semantic object remains open; the shared spelling is settled independently of that representation question.
 
