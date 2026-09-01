@@ -173,7 +173,7 @@ def test_failing_fixtures_report_refuted_and_unproven_assertions() -> None:
     with pytest.raises(UserError, match='cannot prove assertion') as info:
         codegen(SrcFile.from_path(fixtures / 'assertions_unproven.dewy'))
     report = str(info.value)
-    assert '`i` has no known bound' in report
+    assert '`i` lies in [-9223372036854775808, 9223372036854775807]' in report
     assert '`ys.length` is a runtime length of at least 0' in report
     assert '`i <? ys.length` cannot be decided from these facts' in report
 

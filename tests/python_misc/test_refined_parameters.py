@@ -38,7 +38,7 @@ def test_division_needs_a_nonzero_divisor() -> None:
     for operator in ('//', '%'):
         with pytest.raises(UserError, match='cannot prove the divisor is nonzero') as info:
             _compile(f'let f = (n:int64 d:int64):>int64 => n {operator} d\n')
-        assert '`d` has no known bound' in str(info.value)
+        assert '`d` lies in [-9223372036854775808, 9223372036854775807]' in str(info.value)
         _compile(f'let f = (n:int64 d:int64):>int64 => {{ if d not=? 0 {{ return n {operator} d }}  return 0 }}\n')
         _compile(f'let f = (n:int64 d:int64):>int64 => {{ if d =? 0 {{ return 0 }}  return n {operator} d }}\n')
         _compile(f'let f = (n:int64 d:int64):>int64 => {{ if d <? 0 {{ return n {operator} d }}  return 0 }}\n')

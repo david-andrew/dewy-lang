@@ -10,7 +10,18 @@ A refinement combines a base type with facts every value of that type satisfies.
 array<int64 length=3>
 ```
 
-A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). Conditions currently compare against integer literals.
+A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition compares against an integer literal or a fixed-width type's `min`/`max` (`uint64.max`), and may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
+
+<!-- dewy-example: compiler -->
+```dewy
+nonemptystring = string<0 <? length <=? uint64.max>
+let eat_whitespace = (src:nonemptystring):>uint64? => {
+    loop i in 0..uint64.max and i <? src.length {
+        if src[i] not =? ' ' return i
+    }
+    return src.length
+}
+```
 
 Checking a value against a refined type yields one of three outcomes: proven, refuted (a compile error), or unknown (reported as unproven, never as false). A binding declared with a refined type carries the base type together with the proven facts: integer bounds feed range analysis and minimum lengths feed bounds proofs. Refinements currently apply to bindings; refined parameters and results are provisional.
 

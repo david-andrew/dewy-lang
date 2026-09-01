@@ -1,0 +1,28 @@
+# comparison chains inside refinement blocks (`0 <? length <=? uint64.max`,
+# `i => 0 <=? i <? 100`), fixed-width `min`/`max` as bounds, and an alias of a
+# refined string
+
+const whitespace = set[' ' '\t' '\n' '\r']
+nonemptystring = string<0 <? length <=? uint64.max>
+
+let eat_whitespace = (src:nonemptystring):>uint64? => {
+    if src[0] not in? whitespace return none
+    loop i in 0..uint64.max and i <? src.length {
+        if src[i] not in? whitespace return i
+    }
+    return src.length
+}
+
+let percent = (x:int64<i => 0 <=? i <=? 100>):>int64 => x
+let byte_sized = (n:int64<uint8.min <=? n <=? uint8.max>):>int64 => n
+
+main = () => {
+    let words:uint64 = 0
+    let r = eat_whitespace("   ab")
+    if r is? uint64 words += r                  # 3
+    let all = eat_whitespace("   ")
+    if all is? uint64 words += all              # 6
+    let total:int64 = percent(30) + byte_sized(6)   # 36
+    if words =? 6 total += 6                    # 42
+    return total
+}

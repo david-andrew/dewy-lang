@@ -3905,7 +3905,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 from .analyze.bounds import predicate_bounds_counter
 
                 def guarded(iterator: hir.IteratorExpression) -> hir.IteratorExpression:
-                    if iterator.count is None and iterator.target.binding_id is not None and predicate_bounds_counter(predicate, iterator.target.binding_id):
+                    beyond_word = iterator.count is None or (iterator.last is not None and not ty.integer_literal_fits(iterator.last, 'int64'))
+                    if beyond_word and iterator.target.binding_id is not None and predicate_bounds_counter(predicate, iterator.target.binding_id):
                         return replace(iterator, guarded=True)
                     return iterator
 
@@ -6624,7 +6625,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         and (bounds := ty.fixed_integer_bounds(binop.left.item.name)) is not None
     ):
         if name not in {'min', 'max'}:
-            user_error(
+            type_error(
                 ctx.srcfile,
                 f'fixed-width integer type has no property `{name}`',
                 Pointer(span=binop.right.loc, message='unknown type property'),
@@ -10404,22 +10405,86 @@ def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx
 
     left_subject = subject_of(ast.left)
     if left_subject is not None:
-        value = _literal_integer_ast(ast.right)
+        value = _refinement_bound_ast(ast.right)
         if value is None:
-            not_implemented(ctx.srcfile, ast.right.loc, 'refinement conditions beyond integer literals')
+            not_implemented(ctx.srcfile, ast.right.loc, 'refinement conditions beyond integer literals and fixed-width `min`/`max`')
         return ty.Proposition(left_subject, op, value)
     right_subject = subject_of(ast.right)
     if right_subject is not None:
-        value = _literal_integer_ast(ast.left)
+        value = _refinement_bound_ast(ast.left)
         if value is None:
-            not_implemented(ctx.srcfile, ast.left.loc, 'refinement conditions beyond integer literals')
+            not_implemented(ctx.srcfile, ast.left.loc, 'refinement conditions beyond integer literals and fixed-width `min`/`max`')
         mirrored = {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op)
         return ty.Proposition(right_subject, mirrored, value)
     return None
 
 
+def _refinement_bound_ast(node: p0.AST) -> int | None:
+    """A refinement bound: an integer literal, or a fixed-width type's `min`/`max` (`uint64.max`)."""
+    literal = _literal_integer_ast(node)
+    if literal is not None:
+        return literal
+    if (
+        isinstance(node, p0.BinOp)
+        and _operator_symbol(node.op) == '.'
+        and isinstance(node.left, p0.Atom)
+        and isinstance(node.left.item, t1.Identifier)
+        and isinstance(node.right, p0.Atom)
+        and isinstance(node.right.item, t1.Identifier)
+        and node.right.item.name in {'min', 'max'}
+        and (bounds := ty.fixed_integer_bounds(node.left.item.name)) is not None
+    ):
+        return bounds[0] if node.right.item.name == 'min' else bounds[1]
+    return None
+
+
+def _refinement_comparison_chain(ast: p0.AST) -> list[p0.BinOp] | None:
+    """`0 <? length <=? uint64.max` inside a refinement: the pairwise comparisons
+    of a one-direction chain (see `_comparison_chain`), or None when `ast` is
+    not a chain of two or more."""
+    ops: list[p0.BinOp] = []
+    node = ast
+    while isinstance(node, p0.BinOp) and _comparison_operator(node.op) is not None:
+        ops.insert(0, node)
+        node = node.left
+    if len(ops) < 2:
+        return None
+    operands = [ops[0].left, *(op.right for op in ops)]
+    return [
+        p0.BinOp(Span(operands[index].loc.start, operands[index + 1].loc.stop), op.op, operands[index], operands[index + 1])
+        for index, op in enumerate(ops)
+    ]
+
+
 def _refinement_conditions(item: p0.AST, *, ctx: Context) -> list[ty.Proposition] | None:
-    """All the propositions of one parameterize-block entry (`n >? 0 and n <? 10` is two), or None."""
+    """All the propositions of one parameterize-block entry (`n >? 0 and n <? 10` is two,
+    as is the chain `0 <? n <? 10`), or None."""
+    chain = _refinement_comparison_chain(item)
+    if chain is not None:
+        _validate_refinement_chain(chain, ctx=ctx)
+        parts: list[ty.Proposition] = []
+        for pair in chain:
+            found = _refinement_conditions(pair, ctx=ctx)
+            if found is None:
+                return None
+            parts.extend(found)
+        return parts
+    if (
+        isinstance(item, p0.BinOp)
+        and _operator_symbol(item.op) == '=>'
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+        and (body_chain := _refinement_comparison_chain(item.right)) is not None
+    ):
+        # `i => 0 <? i <? 10`: the lambda body chains the same way
+        _validate_refinement_chain(body_chain, ctx=ctx)
+        parts = []
+        for pair in body_chain:
+            found = _refinement_conditions(replace(item, right=pair), ctx=ctx)
+            if found is None:
+                return None
+            parts.extend(found)
+        return parts
     if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == 'and':
         left = _refinement_conditions(item.left, ctx=ctx)
         right = _refinement_conditions(item.right, ctx=ctx)
@@ -10443,6 +10508,31 @@ def _refinement_conditions(item: p0.AST, *, ctx: Context) -> list[ty.Proposition
         return [*parts, *rest]
     single = _refinement_condition(item, ctx=ctx)
     return None if single is None else [single]
+
+
+def _validate_refinement_chain(chain: list[p0.BinOp], *, ctx: Context) -> None:
+    """A refinement chain reads one way, like a value chain (`_comparison_chain`)."""
+    directions: set[str] = set()
+    for pair in chain:
+        symbol = _comparison_operator(pair.op)
+        if symbol not in _CHAIN_COMPARISONS:
+            user_error(
+                ctx.srcfile,
+                'comparison does not chain',
+                Pointer(span=pair.op.loc, message=f'`{symbol}` cannot be part of a comparison chain'),
+                hint='combine the conditions with `and`',
+            )
+        if symbol in _CHAIN_RISING:
+            directions.add('rising')
+        elif symbol in _CHAIN_FALLING:
+            directions.add('falling')
+    if len(directions) == 2:
+        user_error(
+            ctx.srcfile,
+            'comparison chain changes direction',
+            *[Pointer(span=pair.op.loc, message=f'`{_comparison_operator(pair.op)}` is {"rising" if _comparison_operator(pair.op) in _CHAIN_RISING else "falling"}') for pair in chain if _comparison_operator(pair.op) in _CHAIN_RISING | _CHAIN_FALLING],
+            hint='a chain reads one way (`0 <? x <? 10`, `10 >? x >=? 0`); write the other comparison with `and`',
+        )
 
 
 def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | None:
@@ -12847,8 +12937,25 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         return node
     if ctx.type_system.promote_type(node.type, expected) == expected:
         return hir.ValueCast(node.loc, expected, node)
+    if ty.fixed_integer_layout(ty.strip_refinement(node.type)) is not None and ty.fixed_integer_layout(expected) is not None:
+        # one fixed width meeting another (`int64` length into `uint64`): a
+        # value cast the bounds analysis must prove in range
+        return hir.ValueCast(node.loc, expected, node)
+    if isinstance(expected, ty.TypeOr) and _integer_valued(node.type):
+        # an integer meeting `uint64 | none`: it is the union's one fixed-width
+        # integer member, with that member's proof obligation (the bounds
+        # analysis validates the range, as for a plain `uint64` target)
+        words = [member for member in expected.items if ty.fixed_integer_layout(member) is not None]
+        if len(words) == 1:
+            return check_against(node, words[0], ctx=ctx)
     type_error(ctx.srcfile, 'type mismatch',
         Pointer(span=node.loc, message=f'expected `{type_to_dewy(expected)}`, got `{type_to_dewy(node.type)}`'))
+
+
+def _integer_valued(type_: ty.Type) -> bool:
+    """An abstract or literal integer, or a fixed-width one (a value the bounds analysis ranges)."""
+    plain = ty.strip_refinement(type_)
+    return plain in ('int', 'uint') or isinstance(plain, ty.IntegerLiteralType) or ty.fixed_integer_layout(plain) is not None
 
 
 def apply_promotions(args: list[hir.AST], promote_pos: list[ty.TypeExpr | None]) -> list[hir.AST]:

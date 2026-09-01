@@ -1,0 +1,32 @@
+# integers meeting other widths: an abstract `int` or a fixed width meeting a
+# different fixed width — plain or as the one word member of a union such as
+# `uint64?` — is a cast the bounds analysis proves in range; a string literal
+# keeps its length through the cast to a refined `string` parameter
+
+const whitespace = set[' ' '\t' '\n' '\r']
+
+let eat_whitespace = (src:string<length >? 0>):>uint64? => {
+    if src[0] not in? whitespace return none
+    loop i in 0..uint64.max and i <? src.length {       # a guarded counter: `i <? length` keeps it in the word
+        if src[i] not in? whitespace return i             # `int` in [0, int64.max] into `uint64?`
+    }
+    return src.length                                     # `int64` into `uint64?`: a length is never negative
+}
+
+widen = (b:int8):>int64 => {
+    let w:int64 = b                                       # int8 lies within int64
+    return w
+}
+
+main = () => {
+    let total:int64 = widen(10)                           # 10
+    let words:uint64 = 0
+    let r = eat_whitespace("   ab")
+    if r is? uint64 words += r                            # 3
+    let all = eat_whitespace("   ")
+    if all is? uint64 words += all                        # 6
+    let n = eat_whitespace("ab")
+    if n is? none total += 26                             # 36
+    if words =? 6 total += 6                              # 42
+    return total
+}

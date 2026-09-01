@@ -77,3 +77,17 @@ The intended hierarchy places `int` below `rational`, both below `real` and `num
 Semantic type and storage representation are separate. A value with `int` semantics uses a 64-bit machine representation when compile-time range analysis proves every reachable value fits; the analysis validates every abstract-integer arithmetic result and every narrowing (an `int` meeting `int64`, printing, a fixed-width parameter). When the proof is unavailable, the compiler reports the obligation — the value is only known to lie in some interval — rather than silently choosing overflow; the program annotates a fixed width or narrows the value with a comparison.
 
 `min(a b)` and `max(a b)` are the smaller and larger of two `int64` values (other numeric types will get overloads).
+
+## Meeting Another Width
+
+A value of one integer width meeting another — an abstract `int` or an `int64` length stored into a `uint64`, an `int8` widened to `int64` — is a conversion the bounds analysis must prove in range from the facts it has: the type's own range (widening always passes), a comparison, a length (never negative), or a loop guard. An unproven narrowing is a compile error naming the known range (`let b:int8 = w` for an arbitrary `w:int64`), never a silent wrap. The same holds when the target is a union with one fixed-width integer member such as `uint64?`: the integer becomes that member, with that member's proof.
+
+<!-- dewy-example: compiler -->
+```dewy
+first_over = (xs:array<int64> limit:int64):>uint64? => {
+    loop i in 0.. and i <? xs.length {
+        if xs[i] >? limit return i      # `i` lies in [0, int64.max]: a `uint64`
+    }
+    return none
+}
+```

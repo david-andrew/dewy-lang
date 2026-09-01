@@ -52,7 +52,10 @@ class _IteratorLowering:
             return self._lower_array_iterator_flow(node, arm, iterator)
         if not isinstance(iterator.iterable, hir.Range):
             return self._lower_string_iterator_flow(node, arm, iterator)
-        if not iterator.guarded:
+        # a guarded counter (`loop i in 0.. and i <? n`, or `0..uint64.max`): the
+        # body's guard ends the loop before the counter leaves the word
+        unbounded = iterator.guarded and (iterator.count is None or not ty.integer_literal_fits(iterator.count, 'int64'))
+        if not unbounded:
             self._require_finite_udewy_iterator(iterator)
         offset = self._new_iterator_temp(iterator)
         offset_declaration = hir.Declare(
@@ -112,8 +115,7 @@ class _IteratorLowering:
             [*target_updates, increment, *body_items],
             True,
         )
-        if iterator.count is None:
-            # a guarded unbounded counter: the body's guard ends the loop
+        if unbounded:
             condition: hir.AST = hir.Bool(iterator.loc, 'bool', True)
         else:
             condition = self._int64_comparison(

@@ -118,6 +118,8 @@ LOWERED_CASES = [
     ('minted_descent.dewy', 42),
     ('precedence.dewy', 42),
     ('mixed_loop_conditions.dewy', 42),
+    ('integer_widths.dewy', 42),
+    ('refinement_chains.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

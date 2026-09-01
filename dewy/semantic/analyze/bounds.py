@@ -646,7 +646,7 @@ class _BoundsValidator:
             )
 
     def _length_interval(self, node: hir.AST, state: State) -> Interval | None:
-        known = self._string_length(node.type) if not isinstance(node.type, ty.ArrayType) else node.type.length
+        known = self._string_length(_strip_casts(node).type) if not isinstance(node.type, ty.ArrayType) else node.type.length   # a literal keeps its length through the cast to `string`
         if known is not None:
             return Interval.exact(known)
         sequence_id = _runtime_array_id(node, self.registry)
@@ -1067,13 +1067,28 @@ class _BoundsValidator:
 
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
 
+    def _binding_interval(self, state: State, binding_id: int) -> Interval:
+        """A binding's interval: its tracked facts, else its fixed width's range, else unknown."""
+        known = state.get(binding_id)
+        if known is not None:
+            return known
+        if _is_length_key(binding_id):
+            return _known_interval(state, binding_id)   # lengths default to `[0, _MAX_LENGTH]`
+        binding = self.registry.by_id.get(binding_id)
+        layout = ty.fixed_integer_layout(ty.strip_refinement(binding.type)) if binding is not None and binding.type is not None else None
+        if layout is None:
+            return UNKNOWN_INTERVAL
+        width, signed = layout
+        return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+
     def _loop_counter_interval(self, iterator: hir.IteratorExpression) -> Interval:
         """The iterator's interval inside its loop. A right-unbounded counter
         (`i in 0..`) whose loop guard bounds it (`i <? E` for a word-sized `E`,
         see `predicate_bounds_counter`) never passes `E <= int64.max`: the guard
         breaks the loop at the first `i >= E`."""
-        if iterator.guarded and iterator.count is None and iterator.step > 0:
-            return Interval(iterator.first, (1 << 63) - 1)
+        if iterator.guarded and iterator.step > 0:
+            upper = (1 << 63) - 1
+            return Interval(iterator.first, upper if iterator.last is None else min(upper, iterator.last))
         return self._iterator_interval(iterator)
 
     def _iterator_interval(self, iterator: hir.IteratorExpression) -> Interval:
@@ -1275,7 +1290,15 @@ class _BoundsValidator:
                 if node.binding_id is not None and _nonzero_key(node.binding_id) in state and (interval.lower == 0 or interval.upper == 0):
                     return Interval(1 if interval.lower == 0 else interval.lower, -1 if interval.upper == 0 else interval.upper)
                 return interval
-            return self._constant_binding(node.binding_id, set())
+            constant = self._constant_binding(node.binding_id, set())
+            if constant is not None:
+                return constant
+            layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
+            if layout is not None:
+                # a fixed-width value with no tracked facts lies in its type's range
+                width, signed = layout
+                return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+            return None
         if isinstance(node, hir.Place):
             self._eval(node.target, state, validate=validate)
             root = node.target
@@ -1290,11 +1313,12 @@ class _BoundsValidator:
             if (
                 validate
                 and fitted is None
-                and node.expr.type in ('int', 'uint')
+                and (node.expr.type in ('int', 'uint') or ty.fixed_integer_layout(ty.strip_refinement(node.expr.type)) is not None)
                 and ty.fixed_integer_layout(node.type) is not None
             ):
-                # Narrowing an arbitrary-precision integer to a fixed width is
-                # only allowed when the analysis proves the value fits.
+                # Narrowing an arbitrary-precision integer — or another fixed
+                # width — to a fixed width is only allowed when the analysis
+                # proves the value fits.
                 self._report_unfit(node, inner, node.type)
             return fitted
         if isinstance(node, hir.RepresentationCast):
@@ -2158,7 +2182,7 @@ class _BoundsValidator:
         if left_binding is not None and right_interval is not None:
             constraint = self._comparison_constraint(name, right_interval, truth)
             if constraint is not None:
-                previous = _known_interval(refined, left_binding)
+                previous = self._binding_interval(refined, left_binding)
                 narrowed = previous.intersect(constraint)
                 if narrowed.is_empty:
                     return None
@@ -2186,7 +2210,7 @@ class _BoundsValidator:
         ):
             constraint = self._comparison_constraint(inverse, left_interval, truth)
             if constraint is not None:
-                previous = _known_interval(refined, right_binding)
+                previous = self._binding_interval(refined, right_binding)
                 narrowed = previous.intersect(constraint)
                 if narrowed.is_empty:
                     return None
