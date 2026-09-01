@@ -144,7 +144,16 @@ def _parser_source_digest() -> bytes:
 _PARSER_SOURCE_DIGEST = _parser_source_digest()
 
 
-def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block, bool]:
+@dataclass(frozen=True)
+class ModuleDirectives:
+    """The file-level metatags stripped from a module before checking."""
+
+    no_prelude: bool
+    prototype: bool
+    prototype_warnings: bool
+
+
+def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block, ModuleDirectives]:
     key = (str(srcfile.path), srcfile.body) if srcfile.path is not None else None
     block = _parsed_modules.get(key) if key is not None else None
     if block is None:
@@ -168,6 +177,8 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
         if key is not None:
             _parsed_modules[key] = block
     no_prelude: bool | None = None
+    prototype: bool | None = None
+    prototype_warnings: bool | None = None
     items: list[p0.AST] = []
     for item in block.inner:
         if (
@@ -179,6 +190,28 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
             and item.left.item.name == 'supported_targets'
         ):
             _check_supported_targets(item, srcfile, target)
+            continue
+        if isinstance(item, p0.Atom) and isinstance(item.item, t1.Metatag) and item.item.name == 'prototype':
+            prototype = True   # the bare spelling: `$prototype`
+            continue
+        if (
+            isinstance(item, p0.BinOp)
+            and isinstance(item.op, t1.Operator)
+            and item.op.symbol == '='
+            and isinstance(item.left, p0.Atom)
+            and isinstance(item.left.item, t1.Metatag)
+            and item.left.item.name in ('prototype', 'prototype_warnings')
+        ):
+            if not isinstance(item.right, p0.Atom) or not isinstance(item.right.item, t1.Bool):
+                user_error(
+                    srcfile,
+                    f'`${item.left.item.name}` must be a boolean literal',
+                    Pointer(span=item.right.loc, message='expected `true` or `false`'),
+                )
+            if item.left.item.name == 'prototype':
+                prototype = item.right.item.value
+            else:
+                prototype_warnings = item.right.item.value
             continue
         if not (
             isinstance(item, p0.BinOp)
@@ -203,7 +236,11 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
                 Pointer(span=item.right.loc, message='expected `true` or `false`'),
             )
         no_prelude = item.right.item.value
-    return replace(block, inner=items), bool(no_prelude)
+    return replace(block, inner=items), ModuleDirectives(
+        bool(no_prelude),
+        bool(prototype),
+        prototype_warnings is None or prototype_warnings,
+    )
 
 
 def _check_supported_targets(item: p0.BinOp, srcfile: SrcFile, target: str) -> None:
@@ -13240,6 +13277,119 @@ def apply_promotions(args: list[hir.AST], promote_pos: list[ty.TypeExpr | None])
         else:
             out.append(hir.ValueCast(arg.loc, target, arg))
     return out
+
+
+# `$prototype` deferrals of the entry program's proofs, printed as warnings after the compile
+last_prototype_reports: list = []
+
+_PROTOTYPE_DUNDERS = {'=?': '__eq__', 'not=?': '__ne__', '<?': '__lt__', '<=?': '__le__', '>?': '__gt__', '>=?': '__ge__'}
+
+
+_PROTOTYPE_PURE_CALLS = frozenset({'__add__', '__sub__', '__mul__', '__floordiv__', '__mod__', '__lshift__', '__rshift__', '__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__'})
+
+
+def _prototype_simple(node: hir.AST) -> bool:
+    """An operand a check may re-read: effect-free (names, literals, lengths,
+    member reads, arithmetic over those), so evaluating it twice is only a cost."""
+    if isinstance(node, (hir.ExpressedIdentifier, hir.Integer, hir.Bool)):
+        return True
+    if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
+        return _prototype_simple(node.expr if not isinstance(node, hir.Obligation) else node.value)
+    if isinstance(node, (hir.ArrayLength, hir.StringLength)):
+        return _prototype_simple(node.array if isinstance(node, hir.ArrayLength) else node.string)
+    if isinstance(node, hir.MemberAccess):
+        return _prototype_simple(node.value)
+    if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+        return _prototype_simple(node.items[0])
+    if (
+        isinstance(node, hir.FunctionCall)
+        and isinstance(node.func, hir.ExpressedIdentifier)
+        and node.func.name in _PROTOTYPE_PURE_CALLS
+        and not node.kw_args
+    ):
+        return all(_prototype_simple(argument) for argument in node.pos_args)
+    return False
+
+
+def _prototype_comparison(name: str, left: hir.AST, right: hir.AST, loc: Span) -> hir.FunctionCall:
+    func = hir.ExpressedIdentifier(loc, builtins.builtin_types.get(name, ty.TOP_TYPE), name)
+    return hir.FunctionCall(loc, 'bool', func, [left, right], {})
+
+
+def _prototype_length(value: hir.AST, loc: Span) -> hir.AST | None:
+    plain = ty.unfold(ty.strip_refinement(value.type))
+    if isinstance(plain, ty.ArrayType):
+        return hir.ArrayLength(loc, 'int64', value)
+    if _is_string_type(plain):
+        return hir.StringLength(loc, 'int64', value)
+    return None
+
+
+def insert_prototype_checks(
+    root: hir.Block,
+    sites: 'dict[int, tuple[str, object]]',
+    *,
+    ctx: Context,
+) -> list[object]:
+    """`$prototype`: wrap each unproven site in the runtime check that panics
+    with the deferred compile error. Returns the reports of sites no check
+    could be built for (they stay compile errors)."""
+    from .analyze.bounds import prototype_check_condition
+
+    unhandled: list[object] = []
+    panic_binding = ctx.binding_scopes.get('_prototype_panic')
+    if panic_binding is None:
+        return [report for _kind, report in sites.values()]
+
+    def wrap(node: hir.AST, kind: str, report: object) -> hir.AST | None:
+        loc = node.loc
+        condition = prototype_check_condition(
+            node,
+            kind,
+            simple=_prototype_simple,
+            comparison=lambda name, a, b: _prototype_comparison(name, a, b, loc),
+            length_of=lambda value: _prototype_length(value, loc),
+            integer=lambda value: hir.Integer(loc, 'int64', '0d', value),
+        )
+        if condition is None:
+            return None
+        report.use_color = False   # type: ignore[attr-defined]   # the baked runtime text is plain
+        text = 'a `$prototype` runtime check failed — this proof did not hold:\n' + str(report) + '\n'
+        panic = hir.ExpressedIdentifier(loc, panic_binding.type or ty.TOP_TYPE, '_prototype_panic', binding_id=panic_binding.id)
+        message = hir.String(loc, ty.StringLiteralType(text), text)
+        failure = hir.Block(loc, ty.BOTTOM_TYPE, [hir.FunctionCall(loc, ty.BOTTOM_TYPE, panic, [message], {})], True)
+        check_flow = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Void(loc, ty.VOID_TYPE))], failure)
+        return hir.Block(loc, node.type, [check_flow, node], False)
+
+    def visit(value: object) -> object:
+        if isinstance(value, hir.AST):
+            for name in value.__dataclass_fields__:
+                child = getattr(value, name)
+                replaced = visit(child)
+                if replaced is not child:
+                    object.__setattr__(value, name, replaced)
+            site = sites.get(id(value))
+            if site is not None:
+                kind, report = site
+                wrapped = wrap(value, kind, report)
+                if wrapped is None:
+                    unhandled.append(report)
+                    return value
+                return wrapped
+            return value
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        if isinstance(value, dict):
+            return {key: visit(item) for key, item in value.items()}
+        if isinstance(value, hir.ObjectField):
+            replaced = visit(value.value)
+            if replaced is not value.value:
+                object.__setattr__(value, 'value', replaced)
+            return value
+        return value
+
+    visit(root)
+    return unhandled
 
 
 def typecheck_partial_eval(left: hir.AST, right: hir.AST) -> hir.Partial:

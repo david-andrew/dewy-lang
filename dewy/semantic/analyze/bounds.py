@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ...reporting import Pointer, Span, SrcFile
+from ...reporting import Error, Pointer, Span, SrcFile
 from ...targets import ADDRESS_BITS, max_length
 from .. import bindings as sb
 from .. import hir, ty
-from ..errors import user_error, user_warning
+from ..errors import UserError, user_error, user_warning
 from ..hir_display import type_to_dewy
 
 
@@ -248,6 +248,78 @@ def _is_runtime_string(type_: ty.Type) -> bool:
     return (isinstance(type_, ty.StringType) and type_.length is None) or type_ == 'string'
 
 
+def prototype_check_condition(node: hir.AST, kind: str, *, simple, comparison, length_of, integer) -> hir.AST | None:
+    """The runtime condition of a `$prototype` check for an unproven site, or
+    None when no safe check can be built (the site stays a compile error).
+    The callbacks build checker-shaped HIR without importing it here."""
+    loc = node.loc
+
+    def conjoin(parts: list[hir.AST]) -> hir.AST:
+        condition = parts[0]
+        for part in parts[1:]:
+            condition = hir.ShortCircuit(loc, 'bool', 'and', condition, part)
+        return condition
+
+    if kind == 'index':
+        assert isinstance(node, (hir.Index, hir.StringIndex))
+        sequence = node.array if isinstance(node, hir.Index) else node.string
+        if not (simple(node.index) and isinstance(sequence, hir.ExpressedIdentifier)):
+            return None
+        length = length_of(sequence)
+        if length is None:
+            return None
+        return conjoin([
+            comparison('__le__', integer(0), node.index),
+            comparison('__lt__', node.index, length),
+        ])
+    if kind == 'cast':
+        assert isinstance(node, hir.ValueCast)
+        if not simple(node.expr):
+            return None
+        source_layout = ty.fixed_integer_layout(ty.strip_refinement(node.expr.type))
+        target_layout = ty.fixed_integer_layout(node.type)
+        if source_layout is None or target_layout is None:
+            return None
+        width, signed = target_layout
+        minimum = -(1 << (width - 1)) if signed else 0
+        maximum = (1 << (width - (1 if signed else 0))) - 1
+        _source_width, source_signed = source_layout
+        parts: list[hir.AST] = []
+        if not source_signed:
+            # an unsigned source: only the maximum can fail, compared unsigned
+            if maximum < (1 << 64) - 1:
+                parts.append(comparison('__unsigned_lte__', node.expr, integer(maximum)))
+        else:
+            if minimum > -(1 << 63):
+                parts.append(comparison('__le__', integer(minimum), node.expr))
+            parts.append(comparison('__le__', node.expr, integer(min(maximum, (1 << 63) - 1))))
+        if not parts:
+            return None
+        return conjoin(parts)
+    if kind == 'obligation':
+        assert isinstance(node, hir.Obligation)
+        if not simple(node.value):
+            return None
+        parts = []
+        for proposition in node.refined.propositions:
+            if proposition.field is not None:
+                return None
+            name = {'=?': '__eq__', 'not=?': '__ne__', '<?': '__lt__', '<=?': '__le__', '>?': '__gt__', '>=?': '__ge__'}.get(proposition.op)
+            if name is None:
+                return None
+            if proposition.subject == 'length':
+                subject = length_of(node.value)
+                if subject is None:
+                    return None
+            else:
+                subject = node.value
+            parts.append(comparison(name, subject, integer(proposition.value)))
+        if not parts:
+            return None
+        return conjoin(parts)
+    return None
+
+
 def predicate_bounds_counter(condition: hir.AST, target_id: int) -> bool:
     """Whether a loop guard's predicates strictly bound the target above by a
     value no wider than a signed word (`i <? n`, `n >? i`, possibly among
@@ -459,6 +531,7 @@ class _BoundsValidator:
         self.target = target
         self.max_length = max_length(target)
         self.cap_notes: list[CapNote] = []
+        self.prototype_sites: dict[int, tuple[str, Error]] | None = None
         # bindings declared with a refinement (`let d:bigint<sign =? 1>`, refined
         # parameters): their facts are re-established after every assignment
         self.declared_refinements: dict[int, ty.RefinedType] = {}
@@ -679,16 +752,17 @@ class _BoundsValidator:
             if proposition.field is not None:
                 source = f'{source}.{proposition.field}'
             _node, subject_interval = self._subject_interval(proposition, node.value, interval, state)
-            user_error(
-                self.srcfile,
-                'refinement refuted' if verdict is False else 'cannot prove refinement',
-                Pointer(
+            self._proof_failure(node, 'obligation', Error(
+                srcfile=self.srcfile,
+                title='refinement refuted' if verdict is False else 'cannot prove refinement',
+                pointer_messages=[Pointer(
                     span=node.value.loc,
                     message=f'`{requirement}` is required here' if verdict is False else f'no fact establishes `{requirement}` (neither proven nor refuted)',
-                ),
+                )],
                 notes=[f'`{source}` {self._describe_interval(subject_interval, array=proposition.subject == "length")}'],
                 hint=None if verdict is False else 'establish it with a guard (`if … { }`), or check it with `$runtime_assert`',
-            )
+            ))
+            return
 
     def _length_interval(self, node: hir.AST, state: State) -> Interval | None:
         known = self._string_length(_strip_casts(node).type) if not isinstance(node.type, ty.ArrayType) else node.type.length   # a literal keeps its length through the cast to `string`
@@ -1126,6 +1200,14 @@ class _BoundsValidator:
         width, signed = layout
         return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
 
+    def _proof_failure(self, node: hir.AST, kind: str, report: Error) -> None:
+        """An unproven obligation: a compile error, or in `$prototype` a
+        recorded site that becomes a runtime check panicking with this report."""
+        if self.prototype_sites is not None:
+            self.prototype_sites[id(node)] = (kind, report)
+            return
+        raise UserError(report)
+
     def _length_default(self) -> Interval:
         """An unknown length: `[0, cap]` by the address-space axiom (a capped interval)."""
         return Interval(0, self.max_length, capped=True)
@@ -1362,9 +1444,30 @@ class _BoundsValidator:
             return None
         if isinstance(node, hir.ValueCast):
             inner = self._eval(node.expr, state, validate=validate)
+            if inner is None:
+                # any fixed-width-typed expression lies in its type's range
+                source_layout = ty.fixed_integer_layout(ty.strip_refinement(node.expr.type))
+                if source_layout is not None:
+                    width, signed = source_layout
+                    inner = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
             fitted = self._fit_type(inner, node.type)
             if validate and fitted is not None and inner is not None and inner.capped and self._fit_type(Interval(inner.lower, None), node.type) is None:
                 self._cap_note(node, f'fits `{type_to_dewy(node.type)}`')
+            if (
+                validate
+                and fitted is None
+                and self.prototype_sites is not None
+                and ty.fixed_integer_layout(ty.strip_refinement(node.expr.type)) is not None
+                and ty.fixed_integer_layout(node.type) is not None
+            ):
+                # `$prototype`: a fixed-width narrowing becomes a runtime range check
+                self._proof_failure(node, 'cast', Error(
+                    srcfile=self.srcfile,
+                    title=f'cannot prove this integer fits `{node.type}`',
+                    pointer_messages=[Pointer(span=node.loc, message=f'the value is a `{ty.strip_refinement(node.expr.type)}`, whose range is not proven inside `{node.type}`')],
+                    hint='narrow the value with a comparison to prove it',
+                ))
+                return fitted
             if (
                 validate
                 and fitted is None
@@ -2051,20 +2154,20 @@ class _BoundsValidator:
         notes = []
         if length is None:
             notes.append(f'nothing establishes the {kind}\'s length here, so even a small index may be past the end')
-        user_error(
-            self.srcfile,
-            f'{kind} index is not proven in bounds',
-            Pointer(
+        self._proof_failure(node, 'index', Error(
+            srcfile=self.srcfile,
+            title=f'{kind} index is not proven in bounds',
+            pointer_messages=[Pointer(
                 span=index.loc,
                 message=f'the index interval here is `{known}`',
-            ),
+            )],
             notes=notes,
             hint=(
                 (f'guard on the length first: `if xs.length >? {interval.upper} {{ … }}` proves a constant index, `i <? xs.length` a running one'
                  if length is None and interval is not None and interval.lower is not None and interval.lower >= 0
                  else f'establish both a nonnegative lower bound and an upper bound below the {kind} length')
             ),
-        )
+        ))
 
     def _validate_string_slice(
         self,
@@ -2481,6 +2584,7 @@ def validate_bounds(
     unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None,
     *,
     target: str = 'x86_64',
+    prototype_sites: 'dict[int, tuple[str, Error]] | None' = None,
 ) -> None:
     """Validate every dynamic array index against its source-position facts.
 
@@ -2491,5 +2595,6 @@ def validate_bounds(
 
     validator = _BoundsValidator(registry, srcfile, root, target=target)
     validator.unfit = unfit
+    validator.prototype_sites = prototype_sites
     validator.validate(root)
     last_cap_notes.extend(validator.cap_notes)

@@ -88,6 +88,14 @@ def run(argv: list[str]) -> int:
 
     path = Path(args.file)
     target = _resolve_target(args.target)
+    def print_prototype_warnings() -> None:
+        from .semantic import check as semantic_check
+
+        use_color = color_enabled(sys.stderr)
+        for report in semantic_check.last_prototype_reports:
+            report.use_color = use_color
+            print(report, file=sys.stderr)
+            print(file=sys.stderr)
     # reuse the built binary unless the module, a `.dewy` file near it (its
     # imports), or the compiler changed since it was built (as `dewy test` does)
     udewy_path = cache_artifact(path, '.udewy')
@@ -104,6 +112,7 @@ def run(argv: list[str]) -> int:
         # compile the program and output udewy source code
         srcfile = SrcFile.from_path(path)
         udewy_src = codegen(srcfile, target=target)
+        print_prototype_warnings()
 
         # set up udewy options, and save the udewy source code to a cache file
         options = EntryPointOptions(

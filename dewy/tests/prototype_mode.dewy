@@ -1,0 +1,20 @@
+# `$prototype`: unproven proof obligations become runtime checks that panic
+# with the deferred compile error; the checks here all hold, so the program
+# runs to completion (the deferrals print as warnings at compile time)
+
+$prototype
+
+half = (n:int64 d:int64<i => i not=? 0>):>int64 => n // d
+narrow = (w:int64):>int8 => {
+    let b:int8 = w
+    return b
+}
+
+main = (argv:array<string>) => {
+    let total:int64 = 0
+    total += argv[0].length - argv[0].length    # unproven index: argv always has the program name
+    total += half(80 argv.length + 1)           # unproven divisor: length + 1 is never 0
+    let widened:int64 = narrow(argv.length + 1) # unproven narrowing: fits int8 at runtime
+    total += widened
+    return total                                # 0 + 40 + 2 = 42
+}

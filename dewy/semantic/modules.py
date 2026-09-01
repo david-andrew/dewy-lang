@@ -11,8 +11,9 @@ from typing import Any
 from ..reporting import Pointer, Span, SrcFile
 from . import bindings as sb
 from . import builtins, hir, ty
+from ..reporting import Warning as RepWarning
 from .analyze import bounds, initialization, representation
-from .errors import user_error
+from .errors import user_error, UserError
 from .prelude import prelude_files
 
 
@@ -43,6 +44,7 @@ class ModuleCompiler:
         builtins.apply_builtin_promote_rules(self.type_system)
         self.registry = sb.BindingRegistry()
         self.records: dict[Path, ModuleRecord] = {}
+        self.prototype: check.ModuleDirectives | None = None
         self.order: list[ModuleRecord] = []
         self.stack: list[Path] = []
         self.prelude_bindings: dict[str, sb.Binding] = {}
@@ -174,7 +176,16 @@ class ModuleCompiler:
         srcfile = self.entry if entry else SrcFile.from_path(path)
         from . import check
 
-        block, no_prelude = check._parse_module(srcfile, target=self.target)
+        block, directives = check._parse_module(srcfile, target=self.target)
+        no_prelude = directives.no_prelude
+        if directives.prototype:
+            if not entry:
+                user_error(
+                    srcfile,
+                    '`$prototype` belongs in the entry module',
+                    Pointer(span=Span(0, 0), message='an imported module cannot loosen the program-wide proofs'),
+                )
+            self.prototype = directives
         if not prelude and not no_prelude:
             self._ensure_prelude()
         root, ctx = check._typecheck_module(
@@ -197,7 +208,7 @@ class ModuleCompiler:
         validation_key = (path, path.stat().st_mtime_ns, self.target) if prelude else None
         if validation_key is None or validation_key not in _validated_prelude_modules:
             # `ctx.srcfile`: in test mode the entry's source has the generated runner appended
-            self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude)
+            self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude, ctx=ctx)
             if validation_key is not None:
                 _validated_prelude_modules.add(validation_key)
         exports: dict[str, sb.Binding] = {}
@@ -378,6 +389,7 @@ class ModuleCompiler:
         *,
         prelude_module: bool,
         no_prelude: bool,
+        ctx: object | None = None,
     ) -> None:
         """Bounds validation, then big-integer representation for unproven `int` values.
 
@@ -385,11 +397,33 @@ class ModuleCompiler:
         unproven word is an error) because the big-integer fallback lives in
         the prelude itself.
         """
+        from . import check
+
+        prototype_sites: dict | None = None
+        if self.prototype is not None and ctx is not None and not prelude_module and not no_prelude:
+            prototype_sites = {}
         if prelude_module or no_prelude or 'BigInt' not in self.prelude_bindings:
             bounds.validate_bounds(root, self.registry, srcfile, target=self.target)
             return
         unfit: dict = {}
-        bounds.validate_bounds(root, self.registry, srcfile, unfit, target=self.target)
+        bounds.validate_bounds(root, self.registry, srcfile, unfit, target=self.target, prototype_sites=prototype_sites)
+        if prototype_sites:
+            assert ctx is not None
+            unhandled = check.insert_prototype_checks(root, prototype_sites, ctx=ctx)
+            if unhandled:
+                raise UserError(unhandled[0])   # no runtime check could stand in for this proof
+            if self.prototype is not None and self.prototype.prototype_warnings:
+                check.last_prototype_reports.extend(
+                    RepWarning(
+                        srcfile=report.srcfile,
+                        title=f'prototype: {report.title}',
+                        message=report.message,
+                        pointer_messages=report.pointer_messages,
+                        notes=[*report.notes, 'deferred to a runtime check by `$prototype`'],
+                        hint=report.hint,
+                    )
+                    for _kind, report in prototype_sites.values()
+                )
         notes = representation.select_representations(root, self.registry, srcfile, self.prelude_bindings, unfit)
         self.representation_notes.extend(notes)
 
@@ -434,7 +468,10 @@ def typecheck_program(
     target: str = 'x86_64',
     test: bool = False,
 ) -> hir.Block:
+    from . import check
+
     representation.last_notes.clear()
+    check.last_prototype_reports.clear()
     bounds.last_cap_notes.clear()
     compiler = ModuleCompiler(srcfile, target, test=test)
     if srcfile.path is not None:
@@ -444,7 +481,12 @@ def typecheck_program(
 
     from . import check
 
-    block, no_prelude = check._parse_module(srcfile, target=target)
+    check.last_prototype_reports.clear()
+
+    block, _directives = check._parse_module(srcfile, target=target)
+    no_prelude = _directives.no_prelude
+    if _directives.prototype:
+        compiler.prototype = _directives
     if not no_prelude:
         compiler._ensure_prelude()
     root, ctx = check._typecheck_module(
@@ -457,7 +499,7 @@ def typecheck_program(
         prelude_bindings=compiler.prelude_bindings if not no_prelude else None,
         test=test,
     )
-    compiler._validate_and_select(root, ctx.srcfile, prelude_module=False, no_prelude=no_prelude)
+    compiler._validate_and_select(root, ctx.srcfile, prelude_module=False, no_prelude=no_prelude, ctx=ctx)
     exports = {
         item.name: compiler.registry.by_id[item.binding_id]
         for item in root.items

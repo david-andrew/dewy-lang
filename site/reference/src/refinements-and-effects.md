@@ -74,6 +74,20 @@ let main = ():>int64 => {
 
 Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`) are tracked by member route, like array lengths, until the field or its object is reassigned; and a loop over an array or dictionary literal of constants that is never mutated bounds the loop variable by those constants.
 
+## Prototyping Without the Proofs
+
+`$prototype` in the entry module defers the program's unproven proof obligations to runtime: an unproven index, integer narrowing, or refinement obligation compiles anyway, wrapped in a runtime check that — if it fails — prints the deferred compile error (the same rendered report) to stderr and exits with status 102. The rigor is unchanged in kind, only in time: no-traps stays the language rule, and the metatag is the program writing the traps, wholesale, the way `$runtime_assert` writes one. Each deferral prints as a compile-time warning (`prototype: …`, silenced by `$prototype_warnings = false`). Type errors, arity errors, and structural rules are not proofs and still reject the program; a site whose check cannot be built (an operand with effects) also stays a compile error. `$prototype` is for development — remove it and the warnings show exactly what remains to prove.
+
+<!-- dewy-example: compiler -->
+```dewy
+$prototype
+half = (n:int64 d:int64<i => i not=? 0>):>int64 => n // d
+main = (argv:array<string>) => {
+    printl(half(10 argv.length))    # warned at compile time; checked at runtime
+    return 0
+}
+```
+
 ## The Length Cap
 
 One assumption sits under every length fact: no array or string holds more elements than the target's address space has bytes. An unknown length is therefore `[0, 2^bits)` rather than `[0, ∞)`, where `bits` is the target's address width — 48 on `x86_64`, `arm`, `riscv`, and `c`; 32 on `wasm32` (`ADDRESS_BITS` in `dewy/targets.py`). It is an axiom the analysis trusts, not something a program proves, and it is what lets `s.length <=? uint64.max` hold for any string on a 64-bit target, or `a.length + b.length` fit a word, without a guard; a bound below the cap (`length <=? uint16.max`) is a real obligation. `dewy analyze` names every proof in a program that rests on the axiom (`address-space cap`, with the target's width) and ends with the `length cap report`. Compiling one program for several targets is a question for later; each target is analyzed against its own cap.

@@ -1,0 +1,18 @@
+# `$prototype` demo: three deferred proofs, one of which fails at runtime.
+# Compile-time: three `Warning: prototype:` notes. Runtime: the first two
+# checks hold; the third — dividing by `argv.length - 1` — panics when the
+# program is run with no arguments, printing the deferred compile error and
+# exiting 102. Run with an argument (`dewy examples/prototype_panic.dewy x`)
+# and all three hold.
+
+$prototype
+
+let per_argument = (n:int64 d:int64<i => i not=? 0>):>int64 => n // d
+
+main = (argv:array<string>) => {
+    printl("program: {argv[0]}")                # deferred index proof: holds (argv has the program name)
+    let small:int8 = argv.length                # deferred narrowing proof: holds (argv is short)
+    printl("as int8: {small}")
+    printl(per_argument(100 argv.length - 1))   # deferred divisor proof: 0 with no arguments -> panic
+    return 0
+}
