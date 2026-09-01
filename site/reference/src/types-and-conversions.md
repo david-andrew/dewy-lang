@@ -28,7 +28,7 @@ Punct = type of any & [text:string]     # same structure, distinct type
 let Vec = type of [x:int64 y:int64  length_squared = ():>int64 => x*x + y*y]
 ```
 
-`type of Parent` where `Parent` is itself a minted type mints a nominal *child*: a subtype of the parent (a `Whitespace` value satisfies a `Token` parameter, and `t is? Token` holds for every child in a union), distinct from the parent and from its siblings. The parent's fields lead the child's, and the operand may add more (`type of Token & [text:string]`); one nominal parent per mint.
+`type of Parent` where `Parent` is itself a minted type mints a nominal *child*: a subtype of the parent (a `Whitespace` value satisfies a `Token` parameter, and `t is? Token` holds for every child in a union), distinct from the parent and from its siblings. The parent's fields lead the child's, and the operand may add more (`type of Token & [text:string]`); one nominal parent per mint. A minted type with no fields is both the type and its single inhabitant — written with its name where a value is wanted, as an error type is: `[Whitespace Name(text='x')]`, `return Whitespace`, `let w = Whitespace` (`Whitespace()` constructs the same value).
 
 <!-- dewy-example: compiler -->
 ```dewy

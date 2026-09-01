@@ -95,3 +95,16 @@ def test_minted_siblings_stay_distinct() -> None:
 def test_a_minted_type_has_at_most_one_nominal_parent() -> None:
     with pytest.raises(NotImplementedYet, match='two nominal parents'):
         _check(DESCENT + 'let Both = type of Whitespace & Name')
+
+
+def test_an_empty_minted_type_names_its_single_inhabitant_in_value_positions() -> None:
+    unit = 'let Blank = type of any\nlet Space = type of Blank\n'
+    root = _check(unit + 'let w = Space\nlet s:Space = Space\nlet k:Space = Space()\nlet b:Blank = Space')
+    declares = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    space = declares['Space'].expr.value
+    for name in ('w', 's', 'k', 'b'):
+        assert isinstance(declares[name].expr, hir.ObjectLiteral) and declares[name].expr.type == space
+    with pytest.raises(TypeCheckError, match='expected `Name`'):
+        _check(DESCENT + unit + 'let n:Name = Space')   # the inhabitant must fit the expectation
+    with pytest.raises(NotImplementedYet, match='runtime type values'):
+        _check(DESCENT + 'let w = Whitespace')          # not empty: it carries `kind`, so it is only a type here

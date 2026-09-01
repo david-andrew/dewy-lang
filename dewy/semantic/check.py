@@ -1207,6 +1207,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 ctx.declarations[name] = signature
                 return _complete_binding(ast, hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr), ctx=ctx)
             expr = typecheck_and_resolve_inner(right, ctx=ctx)
+            expr = _unit_inhabitant(expr, None, ctx=ctx) or expr   # `let w = Whitespace`
             if isinstance(expr, hir.TypeValue) and isinstance(right, p0.Atom):
                 # a type read by name is a value only where it converts to its
                 # spelling; a binding holding one would need types at runtime
@@ -11691,13 +11692,15 @@ def _object_string(type_: ty.TypeExpr, object_type: ty.ObjectType, loc: Span, *,
     alias.type_value = plain
     module_ctx.declarations.maps[0][shape] = ty.TYPE_TYPE
     module_ctx.binding_scopes.maps[0][shape] = alias
+    # a minted type's value carries its name (`Name[text="x"]`; an empty one is just `Whitespace`)
+    brand = object_type.brand if ty.user_branded(object_type) else ''
     lines = [f'(__dewy_value:{shape}):>string => {{', '    let __dewy_pieces:array<string> = []']
     for index, field_ in enumerate(object_type.fields):
-        prefix = ('[' if index == 0 else ' ') + field_.name + '='
+        prefix = (f'{brand}[' if index == 0 else ' ') + field_.name + '='
         text = f"'{{__dewy_value.{field_.name}}}'"
         lines.append(f'    __dewy_pieces.push"{prefix}"')
         lines.append(f'    __dewy_pieces.push({f"_quoted({text})" if _quoted_member(field_.type) else text})')
-    lines.append(f'    __dewy_pieces.push"{"]" if object_type.fields else "[]"}"')
+    lines.append(f'    __dewy_pieces.push"{"]" if object_type.fields else brand or "[]"}"')
     lines += ['    return __dewy_pieces.join', '}']
     # parsed at the use site's offset, so a report on it points there
     parsed = p0.parse(SrcFile(None, ' ' * loc.start + '\n'.join(lines) + '\n'))
@@ -12560,10 +12563,29 @@ def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Propo
     return missing
 
 
+def _unit_inhabitant(node: hir.AST, expected: ty.Type | None, *, ctx: Context) -> hir.ObjectLiteral | None:
+    """An empty minted type named where a value is wanted (`[Whitespace Name(…)]`,
+    `return Whitespace`, `let w = Whitespace`) is its single inhabitant, as an
+    error type's name is — the type and the value share the spelling. With an
+    expectation, only where the inhabitant fits it (`Whitespace` for a `Token`)."""
+    if not isinstance(node, hir.TypeValue) or not ty.user_branded(node.value):
+        return None
+    minted = node.value
+    assert isinstance(minted, ty.ObjectType)
+    if minted.fields:
+        return None
+    if expected is not None and not ctx.type_system.is_subtype(minted, ty.strip_refinement(expected)):
+        return None
+    return hir.ObjectLiteral(node.loc, minted, [])
+
+
 def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     if isinstance(expected, ty.RefinedType):
         checked = check_against(node, expected.base, ctx=ctx)
         return _prove_refinements(checked, expected, ctx=ctx)
+    inhabitant = _unit_inhabitant(node, expected, ctx=ctx)
+    if inhabitant is not None:
+        node = inhabitant
     if node.type == expected:
         return node
     if node.type == ty.BOTTOM_TYPE:
@@ -12680,7 +12702,12 @@ def tcr_identifier(
                 value = _resolve_type_alias(binding, ctx=ctx)
             if value is None:
                 not_implemented(ctx.srcfile, id.loc, 'runtime type values')
-            return hir.TypeValue(id.loc, ty.TYPE_TYPE, value, id.name)
+            type_value = hir.TypeValue(id.loc, ty.TYPE_TYPE, value, id.name)
+            if expected is not None and expected != ty.TYPE_TYPE:
+                inhabitant = _unit_inhabitant(type_value, expected, ctx=ctx)
+                if inhabitant is not None:
+                    return inhabitant
+            return type_value
         resolved_type = ty.unfold(ty.strip_refinement(
             ctx.refinements.get(binding.id, declared_type)
             if refined and binding is not None

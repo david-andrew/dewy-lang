@@ -9,7 +9,7 @@ describe = (t:Token):>int64 => 1
 main = () => {
     let n = Name(text='ab')
     let total:int64 = describe(n)                       # 1
-    let toks:array<Whitespace|Name|Number> = [Whitespace() Name(text='xyz') Number('7' 7)]
+    let toks:array<Whitespace|Name|Number> = [Whitespace Name(text='xyz') Number('7' 7)]
     loop t in toks {
         if t is? Token total += 10                       # 31
         match t {
