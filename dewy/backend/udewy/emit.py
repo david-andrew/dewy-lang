@@ -221,7 +221,7 @@ def _entrypoint_wrapper(
             call_args,
             {},
         )
-        if rettype == ty.VOID_TYPE:
+        if rettype in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
             items.extend([call, hir.Return(root.loc, ty.BOTTOM_TYPE, None)])
         else:
             items.append(hir.Return(root.loc, ty.BOTTOM_TYPE, call))
@@ -242,6 +242,8 @@ def _entrypoint_wrapper(
 
 
 def emit_type(t: ty.Type) -> str:
+    if t == ty.BOTTOM_TYPE:
+        return 'void'   # a diverging function's udewy signature; the body never returns
     """Render a semantic type in the annotation syntax accepted by udewy."""
     return type_to_dewy(t)
 
@@ -289,7 +291,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     body = func.body
     if _contains_return(body):
         code.append(emit_ast(body, func_ctx))
-    elif func.rettype == ty.VOID_TYPE:
+    elif func.rettype in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
         stmts = [emit_ast(item, func_ctx) for item in body.items] if isinstance(body, hir.Block) else [emit_ast(body, func_ctx)]
         code.append('{\n' + indent('\n'.join([*stmts, 'return void']), TAB) + '\n}')
     else:

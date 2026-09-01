@@ -967,6 +967,7 @@ class _InitializationChecker:
             )
         if not (
             function.rettype == ty.VOID_TYPE
+            or function.rettype == ty.BOTTOM_TYPE   # a main that always exits
             or isinstance(function.rettype, ty.IntegerLiteralType)
             or function.rettype in (   # a tuple: union return types are unhashable
                 'int',

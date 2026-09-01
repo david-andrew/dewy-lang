@@ -2603,6 +2603,15 @@ class _Lowerer(
                 value=self._require_node(self._transform_node(node.value)),
             )
         if isinstance(node, hir.FunctionCall):
+            if isinstance(node.func, hir.ExpressedIdentifier) and node.func.name == '__unreachable__':
+                # never reached (an exit syscall precedes); an empty infinite
+                # loop keeps the udewy control flow valid
+                return hir.Flow(
+                    node.loc,
+                    ty.VOID_TYPE,
+                    [hir.LoopArm(node.loc, ty.VOID_TYPE, hir.Bool(node.loc, 'bool', True), hir.Block(node.loc, ty.VOID_TYPE, [], True))],
+                    None,
+                )
             source_function_type: ty.FunctionType | None = (
                 node.func.type
                 if isinstance(node.func.type, ty.FunctionType)
@@ -3299,7 +3308,7 @@ class _Lowerer(
 
     def _lower_function_body_inner(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
         """Make an implicit scalar function result explicit while lowering statements."""
-        if rettype == ty.VOID_TYPE:
+        if rettype in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
             # a `void` body may simply end: µDewy wants the return spelled out
             # (and a brace-less body such as `=> $expect …` is its statements, not a value)
             if isinstance(node, hir.Block) and not node.scoped:

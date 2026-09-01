@@ -1,0 +1,18 @@
+# `never` results: `exit` diverges, wrappers propagate it, a diverging arm
+# contributes no type to a flow, and a diverging guard narrows what follows
+
+let panic = (msg:string?=none):>never => {
+    if msg isnt? none printl(msg)
+    exit(1)
+}
+
+classify = (v:int64?):>int64 => {
+    if v is? none panic('no value')
+    return v * 2
+}
+
+main = () => {
+    let x:int64 = if 1 <? 2 21 else panic('impossible')
+    if classify(x) not =? 42 panic('wrong answer')
+    exit(42)
+}

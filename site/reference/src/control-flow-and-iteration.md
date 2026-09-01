@@ -63,7 +63,17 @@ See [Ranges and Iteration](ranges-and-iteration.md) for iterator conditions and 
 
 An exit may target an enclosing labeled loop through Dewy's scope metatag mechanism. Exiting more loop levels than exist is an error.
 
-`never` is the type of a path that cannot complete normally. It is distinct from `void`, which represents normal completion without a produced value.
+`never` is the type of a path that cannot complete normally. It is distinct from `void`, which represents normal completion without a produced value. A function may declare it — `exit(code:int64):>never` ends the process, and a wrapper propagates the divergence:
+
+<!-- dewy-example: compiler -->
+```dewy
+let panic = (msg:string?=none):>never => {
+    if msg isnt? none printl(msg)
+    exit(1)
+}
+```
+
+A `:>never` body must diverge (a body that completes is an error), a call to one is `never` wherever it appears — an `else panic(…)` arm contributes no type, and code after `if v is? none panic(…)` sees `v` narrowed — and `main` may end in one.
 
 Postfix `or_throw` propagates an [exception value](errors-and-forwarding.md) from an expression through the current function. Its ordinary alternatives continue locally; its exception alternatives must be accepted by the enclosing return contract.
 

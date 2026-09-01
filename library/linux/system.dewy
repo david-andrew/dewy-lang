@@ -164,7 +164,7 @@ let _region_release = (region:int64):>void => {
 # Process exit: exit_group(2) is syscall 231. The checker has no
 # never-returning functions yet, so the signature says `void`; callers that
 # need divergence (the `$runtime_assert` failure path) mark it themselves.
-let _exit = (status:int64):>void => {
+let _exit = (status:int64):>never => {
     let ignored:int64 = __syscall1__(231 status)
-    return void
+    __unreachable__()
 }

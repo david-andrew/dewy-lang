@@ -5,7 +5,13 @@
 # on the Linux syscall layer for now.
 if $target in? ["x86_64" "riscv" "arm" "c"] {
     from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal)
+    from p"linux/system.dewy" import (_exit)
 }
+
+# End the process with an exit status. `never` means control cannot continue
+# past a call, so `exit` (and wrappers such as a `panic`) block the flow of
+# broken states into later code.
+let exit = (code:int64):>never => _exit(code)
 
 # Whether ordinary output goes to a terminal (colors are painted only then).
 let _output_is_terminal = ():>bool => _stdout_is_terminal()

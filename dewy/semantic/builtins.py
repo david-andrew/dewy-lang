@@ -306,6 +306,9 @@ udewy_intrinsic_types: dict[str, ty.FunctionType] = {
         )
         for arity in range(7)
     },
+    # asserts to the checker that control cannot reach past this point (an exit
+    # syscall precedes it); lowered to an infinite loop that never runs
+    '__unreachable__': _udewy_intrinsic([], ty.BOTTOM_TYPE),
 }
 
 

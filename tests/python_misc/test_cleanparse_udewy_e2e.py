@@ -121,6 +121,7 @@ LOWERED_CASES = [
     ('integer_widths.dewy', 42),
     ('refinement_chains.dewy', 42),
     ('tokenizer_gaps.dewy', 42),
+    ('never_exit.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),
