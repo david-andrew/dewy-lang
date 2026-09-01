@@ -52,8 +52,8 @@ class _IteratorLowering:
             return self._lower_array_iterator_flow(node, arm, iterator)
         if not isinstance(iterator.iterable, hir.Range):
             return self._lower_string_iterator_flow(node, arm, iterator)
-        self._require_finite_udewy_iterator(iterator)
-        assert iterator.count is not None
+        if not iterator.guarded:
+            self._require_finite_udewy_iterator(iterator)
         offset = self._new_iterator_temp(iterator)
         offset_declaration = hir.Declare(
             iterator.loc,
@@ -112,12 +112,16 @@ class _IteratorLowering:
             [*target_updates, increment, *body_items],
             True,
         )
-        condition = self._int64_comparison(
-            '__lt__',
-            replace(offset, loc=iterator.loc),
-            self._int64_literal(iterator.loc, iterator.count),
-            iterator.loc,
-        )
+        if iterator.count is None:
+            # a guarded unbounded counter: the body's guard ends the loop
+            condition: hir.AST = hir.Bool(iterator.loc, 'bool', True)
+        else:
+            condition = self._int64_comparison(
+                '__lt__',
+                replace(offset, loc=iterator.loc),
+                self._int64_literal(iterator.loc, iterator.count),
+                iterator.loc,
+            )
         loop = hir.Flow(
             node.loc,
             ty.VOID_TYPE,

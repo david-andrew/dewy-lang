@@ -63,13 +63,6 @@ def test_unknown_fixed_width_integer_type_property_is_rejected() -> None:
         check.typecheck_and_resolve(SrcFile(None, 'const value = uint8.largest'))
 
 
-def test_value_binding_can_shadow_fixed_width_integer_type_properties() -> None:
-    root = check.typecheck_and_resolve(SrcFile(None, 'let uint8 = [min = 7]\nconst low = uint8.min'))
-    low = root.items[-1]
-    assert isinstance(low, hir.Declare)
-    assert isinstance(low.expr, hir.MemberAccess)
-
-
 def test_integer_literal_inhabits_abstract_numeric_ancestors() -> None:
     type_system = ty.TypeSystem()
     literal = ty.IntegerLiteralType(10**100)

@@ -2322,8 +2322,10 @@ def _integer_domain(type_: ty.Type) -> _ValueSet | None:
     if stripped == 'bool':
         return _ValueSet([(0, 1)])
     if isinstance(stripped, str):
-        bounds = ty.fixed_integer_bounds(stripped)
-        if bounds is not None:
+        layout = ty.fixed_integer_layout(stripped)
+        if layout is not None:
+            bounds = ty.fixed_integer_bounds(stripped)
+            assert bounds is not None
             domain = _ValueSet([bounds])
         elif stripped == 'int':
             domain = _ValueSet([(None, None)])
@@ -3402,6 +3404,30 @@ def _eval_iterator_formula(
     return stack[0]
 
 
+def _and_operands(ast: p0.AST) -> list[p0.AST]:
+    """The operands of a word-`and` chain (one item for anything else)."""
+    if isinstance(ast, p0.BinOp) and isinstance(ast.op, t1.Operator) and ast.op.symbol == 'and':
+        return [*_and_operands(ast.left), *_and_operands(ast.right)]
+    return [ast]
+
+
+def _join_and(operands: list[p0.AST]) -> p0.AST:
+    joined = operands[0]
+    for operand in operands[1:]:
+        joined = p0.BinOp(Span(joined.loc.start, operand.loc.stop), t1.Operator(Span(joined.loc.stop, operand.loc.start), 'and'), joined, operand)
+    return joined
+
+
+def _split_loop_condition(condition_ast: p0.AST) -> tuple[list[p0.AST], list[p0.AST]]:
+    """`loop i in 0.. and i <? n and src[i] in? ws`: the iterator clauses of the
+    top-level `and` chain, and the Boolean predicates that guard each iteration."""
+    iterators: list[p0.AST] = []
+    predicates: list[p0.AST] = []
+    for operand in _and_operands(condition_ast):
+        (iterators if _contains_iterator_syntax(operand) else predicates).append(operand)
+    return iterators, predicates
+
+
 def _contains_iterator_syntax(ast: p0.AST) -> bool:
     if not isinstance(ast, p0.BinOp):
         return False
@@ -3854,12 +3880,45 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         _, condition_ast, body_ast = arm.parts
         assert isinstance(condition_ast, p0.AST)
         assert isinstance(body_ast, p0.AST)
-        iterator_result = _tcr_loop_iterator(condition_ast, ctx=ctx)
+        # iterator clauses mixed with Boolean predicates (`loop i in 0.. and
+        # i <? n and src[i] in? ws`): the iterators advance, then the
+        # predicates are tested with the targets bound — the loop ends at the
+        # first false — and their truth refines the body
+        predicates: list[p0.AST] = []
+        iterator_ast = condition_ast
+        if _contains_iterator_syntax(condition_ast):
+            iterator_parts, predicates = _split_loop_condition(condition_ast)
+            if predicates and iterator_parts:
+                iterator_ast = _join_and(iterator_parts)
+        iterator_result = _tcr_loop_iterator(iterator_ast, ctx=ctx)
+        guard: hir.AST | None = None
         if iterator_result is None:
             condition = _check_flow_condition(condition_ast, ctx=ctx)
             body_ctx = _refine_condition_context(ctx, condition, truth=True)
         else:
             condition, body_ctx = iterator_result
+            if predicates:
+                predicate_ast = _join_and(predicates)
+                predicate = _check_flow_condition(predicate_ast, ctx=body_ctx)
+                body_ctx = _refine_condition_context(body_ctx, predicate, truth=True)
+                # `loop i in 0.. and i <? n`: the guard bounds the counter
+                from .analyze.bounds import predicate_bounds_counter
+
+                def guarded(iterator: hir.IteratorExpression) -> hir.IteratorExpression:
+                    if iterator.count is None and iterator.target.binding_id is not None and predicate_bounds_counter(predicate, iterator.target.binding_id):
+                        return replace(iterator, guarded=True)
+                    return iterator
+
+                if isinstance(condition, hir.IteratorExpression):
+                    condition = guarded(condition)
+                elif isinstance(condition, hir.MultiIteratorExpression):
+                    condition = replace(condition, iterators=[guarded(iterator) for iterator in condition.iterators])
+                guard = hir.Flow(
+                    predicate_ast.loc,
+                    ty.VOID_TYPE,
+                    [hir.IfArm(predicate_ast.loc, ty.VOID_TYPE, predicate, hir.Void(predicate_ast.loc, ty.VOID_TYPE))],
+                    hir.Break(predicate_ast.loc, ty.BOTTOM_TYPE, None, 0),
+                )
         # A refinement established before the loop is only sound inside the
         # body if nothing in the body can invalidate it on a later iteration,
         # so drop refinements of every binding the body assigns or grows.
@@ -3905,6 +3964,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 loop_boundaries=(*body_ctx.loop_boundaries, boundary),
             ),
         )
+        if guard is not None:
+            body = hir.Block(body.loc, body.type, [guard, body], False)
         loop_arm = hir.LoopArm(arm.loc, ty.VOID_TYPE, condition, body)
         return hir.Flow(ast.loc, ty.VOID_TYPE, [loop_arm], None)
 
@@ -6563,7 +6624,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         and (bounds := ty.fixed_integer_bounds(binop.left.item.name)) is not None
     ):
         if name not in {'min', 'max'}:
-            type_error(
+            user_error(
                 ctx.srcfile,
                 f'fixed-width integer type has no property `{name}`',
                 Pointer(span=binop.right.loc, message='unknown type property'),

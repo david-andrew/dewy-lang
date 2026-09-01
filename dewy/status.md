@@ -345,7 +345,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] Mixed range/string multiiteration, including pairing a right-unbounded counter with finite grapheme iteration as in `loop i in 0.. and c in text`.
 - [x] Exact-length array leaves in multiiterator formulas.
 - [ ] Dynamic-length array leaves and multiiterator sources other than normalized integer ranges, strings, and exact-length arrays.
-- [ ] Conditions that mix iterator clauses with ordinary Boolean predicates.
+- [x] Conditions that mix iterator clauses with ordinary Boolean predicates (2026-08-31): `loop i in 0.. and i <? n and src[i] in? ws` — the `and` chain is split (`_split_loop_condition`), the iterator clauses drive the loop, and the predicates are checked in the iteration context as a guard (`if P {} else break`) whose truth refines the body; a predicate `i <? n` (or `n >? i`) with `n` no wider than a signed word marks a `0..` counter `guarded` — the bounds analysis gives it `[first, int64.max]` and the lowering runs it as a plain word counter on `loop true`, the guard ending the loop — so index scans `loop i in 0.. and i <? src.length and src[i] in? ws` need no companion iterator (`mixed_loop_conditions.dewy`). `<=?` does not bound (the counter could reach `n + 1`).
 - [ ] Iterator fusion and scalar replacement of the baseline per-leaf state.
 
 ## Objects

@@ -1,0 +1,20 @@
+# iterator clauses joined with Boolean predicates: the iterators advance, the
+# predicates are tested with the targets bound (the loop ends at the first false),
+# their truth refines the body, and `i <? n` bounds a `0..` counter to a word
+
+const whitespace = set[' ' '\t' '\n' '\r']
+leading = (src:string):>int64 => {
+    let n:int64 = 0
+    loop i in 0.. and i <? src.length and src[i] in? whitespace { n += 1 }
+    return n
+}
+
+main = () => {
+    let total:int64 = leading("   ab") + leading("ab") + leading("  \t")   # 3 + 0 + 3 = 6
+    let xs = [1 2 3 4 5]
+    loop x in xs and x <? 4 { total += x }                                  # 12: stops at 4, no filtering
+    loop a in [1 2 3] and b in [10 20 30] and a + b <? 30 { total += a + b } # 12 + 11 + 22 = 45
+    let src = "abc"
+    loop i in 0.. and src.length >? i { total -= 1 }                         # 42: the mirrored bound
+    return total
+}

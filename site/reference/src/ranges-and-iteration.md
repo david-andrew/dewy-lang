@@ -75,8 +75,24 @@ The exact truth and exhaustion formulas for `and`, `or`, `xor`, `nand`, `nor`, a
 
 The following remain under design:
 
-- advancement and short-circuit behavior when iterator clauses mix with ordinary Boolean predicates;
+- ~~advancement and short-circuit behavior when iterator clauses mix with ordinary Boolean predicates~~ (settled, see below);
 - stored generators and some dynamic iterator sources; and
 - result types, normalization, empty-span behavior, and representation for arbitrary runtime range arithmetic.
 
 See [Design Maturity and Open Questions](design-status.md).
+
+## Iterators with Boolean Predicates
+
+A loop condition may join iterator clauses and ordinary Boolean predicates with `and`. The iterators advance first, then the predicates are tested with the targets bound; the loop ends at the first false predicate, and inside the body the predicates are known to hold — so `i <? src.length` proves the index in `src[i]`:
+
+<!-- dewy-example: compiler -->
+```dewy
+const whitespace = set[' ' '\t' '\n' '\r']
+leading = (src:string):>int64 => {
+    let n:int64 = 0
+    loop i in 0.. and i <? src.length and src[i] in? whitespace { n += 1 }
+    return n
+}
+```
+
+`loop x in xs and x <? 4 { … }` visits the prefix of `xs` below 4 (it stops at the first element that fails, it does not filter — put an `if` in the body to filter). Predicates may sit anywhere in the chain; only word-`and` joins them to the iterators, and `or`/`xor` chains stay multiiterator formulas.

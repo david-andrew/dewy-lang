@@ -230,6 +230,39 @@ def _is_runtime_string(type_: ty.Type) -> bool:
     return (isinstance(type_, ty.StringType) and type_.length is None) or type_ == 'string'
 
 
+def predicate_bounds_counter(condition: hir.AST, target_id: int) -> bool:
+    """Whether a loop guard's predicates strictly bound the target above by a
+    value no wider than a signed word (`i <? n`, `n >? i`, possibly among
+    `and`-joined predicates): then a `0..` counter never passes `int64.max`."""
+
+    def word_bound(operand: hir.AST) -> bool:
+        if isinstance(operand.type, ty.IntegerLiteralType):
+            return ty.integer_literal_fits(operand.type.value, 'int64')   # a constant length or limit
+        layout = ty.fixed_integer_layout(operand.type)
+        if layout is None:
+            return False
+        width, signed = layout
+        return width < 64 or (width == 64 and signed)
+
+    def is_target(operand: hir.AST) -> bool:
+        operand = _strip_casts(operand)
+        return isinstance(operand, hir.ExpressedIdentifier) and operand.binding_id == target_id
+
+    if isinstance(condition, hir.ShortCircuit) and condition.op == 'and':
+        return predicate_bounds_counter(condition.left, target_id) or predicate_bounds_counter(condition.right, target_id)
+    if (
+        isinstance(condition, hir.FunctionCall)
+        and isinstance(condition.func, hir.ExpressedIdentifier)
+        and len(condition.pos_args) == 2
+    ):
+        left, right = condition.pos_args
+        if condition.func.name == '__lt__':
+            return is_target(left) and word_bound(right)
+        if condition.func.name == '__gt__':
+            return is_target(right) and word_bound(left)
+    return False
+
+
 def _strip_casts(node: hir.AST) -> hir.AST:
     """Through value/representation casts and obligation wrappers to the value itself."""
     while isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
@@ -964,7 +997,7 @@ class _BoundsValidator:
         def enter(head: State) -> State:
             body_state = dict(head)
             if iterator.target.binding_id is not None:
-                body_state[iterator.target.binding_id] = self._iterator_interval(iterator)
+                body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator)
             return body_state
 
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
@@ -1029,10 +1062,19 @@ class _BoundsValidator:
             body_state = dict(head)
             for iterator in condition.iterators:
                 if iterator.count != 0 and iterator.target.binding_id is not None:
-                    body_state[iterator.target.binding_id] = self._iterator_interval(iterator)
+                    body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator)
             return body_state
 
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
+
+    def _loop_counter_interval(self, iterator: hir.IteratorExpression) -> Interval:
+        """The iterator's interval inside its loop. A right-unbounded counter
+        (`i in 0..`) whose loop guard bounds it (`i <? E` for a word-sized `E`,
+        see `predicate_bounds_counter`) never passes `E <= int64.max`: the guard
+        breaks the loop at the first `i >= E`."""
+        if iterator.guarded and iterator.count is None and iterator.step > 0:
+            return Interval(iterator.first, (1 << 63) - 1)
+        return self._iterator_interval(iterator)
 
     def _iterator_interval(self, iterator: hir.IteratorExpression) -> Interval:
         if isinstance(iterator.iterable.type, ty.ArrayType):

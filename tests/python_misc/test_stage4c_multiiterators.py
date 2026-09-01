@@ -169,13 +169,17 @@ let f = ():>int64 => {
 }
 """)
 
-    with pytest.raises(NotImplementedYet, match='mixed Boolean and iterator'):
-        _check("""
+    # a Boolean predicate beside an iterator clause is a per-iteration guard (2026-08-31)
+    root = _check("""
 let f = (keep_going:bool):>int64 => {
     loop i in 0..1 and keep_going {}
     return 0
 }
 """)
+    loop = next(item for item in root.items[0].expr.body.items if isinstance(item, hir.Flow))   # type: ignore[union-attr]
+    assert isinstance(loop.arms[0], hir.LoopArm) and isinstance(loop.arms[0].condition, hir.IteratorExpression)
+    guard = loop.arms[0].body.items[0]   # type: ignore[union-attr]
+    assert isinstance(guard, hir.Flow) and isinstance(guard.default, hir.Break)
 
 
 def test_optional_iterator_target_can_index_after_narrowing() -> None:
