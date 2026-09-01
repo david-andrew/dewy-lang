@@ -1,0 +1,45 @@
+# gaps the bootstrap tokenizer hit (2026-09-01): defaulted optional parameters,
+# runtime range ends, mixed-width comparisons, nested unpacking, enum globals,
+# `let`/`Name:type` aliases, structural `&` strengthening, dicts of arrays,
+# parenthesized assignment arms, and minted field overrides
+
+BasePrefix:type = '0b'|'0d'|'0x'
+base10:BasePrefix = '0d'
+
+let nonempty = string<length >? 0>
+
+let Report = type of any & [title:string severity='none']
+let Err = type of Report & [severity='error']
+
+Context:type = [depth:int64]
+Root = Context & [tag:string='root']
+
+Op:type = <(x:int64):>int64>
+double = (x:int64):>int64 => x * 2
+triple = (x:int64):>int64 => x * 3
+
+greet = (message:string? = none):>int64 => if message is? string message.length else 0
+
+let specs:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2] 'y' -> [a=3 b=4]]
+
+main = (argv:array<string>) => {
+    let total:int64 = greet() + greet('four')                     # 4
+    let i:uint64 = 2
+    let word = 'abcdef'
+    if i <? word.length total += 2                                # 6: uint64 <? int64
+    loop k in [0..argv.length) { if argv.length >? 0 (total += 1) }  # 7 (one argument)
+    loop j in 0..3 total += j                                     # 13: inclusive 0+1+2+3... = 6 -> 13
+    loop [k [a b]] in specs { total += a * b }                    # 27: 2 + 12
+    if base10 =? '0d' total += 1                                  # 28
+    let e = Err(title='x')
+    if e.severity =? 'error' total += 2                           # 30
+    let r = Root(depth=3)
+    total += r.depth                                              # 33
+    if r.tag =? 'root' total += 1                                 # 34
+    let table:dict<string array<Op>> = ['ops' -> [@double @triple]]
+    let ops = table.get('ops' [])
+    loop op in ops total += op(1)                                 # 39: 2 + 3
+    let s:nonempty = 'abc'
+    total += s.length                                             # 42
+    return total
+}

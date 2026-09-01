@@ -41,9 +41,10 @@ def test_only_errors_and_objects_can_be_minted() -> None:
         _check('let A:type = type of int64')
 
 
-def test_intersected_objects_cannot_repeat_a_field() -> None:
-    with pytest.raises(UserError, match='declares field `x` twice'):
-        _check('let A:type = type of [x:int64] & [x:int64]')
+def test_intersected_objects_may_narrow_but_not_weaken_a_field() -> None:
+    _check('let A:type = type of [x:int64] & [x:int64]')   # a same-typed repeat replaces
+    with pytest.raises(UserError, match='weakens field `x`'):
+        _check('let A:type = type of [x:int8] & [x:int64]')
 
 
 def test_optional_sugar_desugars_to_a_union_in_type_positions() -> None:

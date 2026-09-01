@@ -494,9 +494,27 @@ let _assertion_render = (report:Report path:string row:int64 line:string):>void 
 }
 
 
-# let Error = type of Report & [severity='error']
-# let Warning = type of Report & [severity='warning']
-# let Info = type of Report & [severity='info']
-# let Hint = type of Report & [severity='hint']
+# TODO: compiler improvements: ideal shape for this construct, forcing severity to a specific value (narrowing severity provided by Report)
+# let Error = type of Report & [const severity='error']
+# let Warning = type of Report & [const severity='warning']
+# let Info = type of Report & [const severity='info']
+# let Hint = type of Report & [const severity='hint']
 
+# workaround version
+# let Error = (title:string message:string = ""
+# hint:string = ""             # the `help:` line; empty when none
+# pointers:array<Pointer> = []
+# dimmed:array<Span> = []
+# notes:array<string> = []
+# ):Report => [
+#     severity='error'
+#     title=title
+#     message=message
+#     hint=hint
+#     pointers=pointers
+#     dimmed=dimmed
+#     notes=notes
 
+# ]
+
+# let Error = @Report(severity='error')

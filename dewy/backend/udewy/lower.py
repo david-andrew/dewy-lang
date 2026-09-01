@@ -666,8 +666,39 @@ class _Lowerer(
                 continue
             if isinstance(param.type, ty.ObjectType):
                 self._target_error(literal, 'object parameter defaults')
-            if ty.optional_payload(param.type) is not None:
-                self._target_error(literal, 'optional parameter defaults')
+            if (payload := ty.optional_payload(param.type)) is not None:
+                # a defaulted optional (`message:string? = none`): the incoming
+                # cell and a presence flag; absent, the default fills the cell
+                incoming_name = self._new_default_name(f'arg_{param.name}')
+                present_name = self._new_default_name(f'has_{param.name}')
+                lowered_pos.extend([
+                    hir.Param(incoming_name, self._lower_runtime_value_type(param.type)),
+                    hir.Param(present_name, 'bool'),
+                ])
+                incoming = hir.ExpressedIdentifier(literal.loc, param.type, incoming_name)
+                cell = hir.ExpressedIdentifier(literal.loc, 'int64', param.name, binding_id=param.binding_id)
+                default_value = self._require_node(self._transform_node(param.value))
+                parameter_prologue.append(hir.Declare(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    'let',
+                    param.name,
+                    'int64',
+                    self._optional_allocation(literal.loc),
+                    binding_id=param.binding_id,
+                ))
+                parameter_prologue.append(hir.Flow(
+                    literal.loc,
+                    ty.VOID_TYPE,
+                    [hir.IfArm(
+                        literal.loc,
+                        ty.VOID_TYPE,
+                        hir.ExpressedIdentifier(literal.loc, 'bool', present_name),
+                        hir.Block(literal.loc, ty.VOID_TYPE, self._optional_write(cell, incoming, payload), True),
+                    )],
+                    hir.Block(literal.loc, ty.VOID_TYPE, self._optional_write(cell, default_value, payload), True),
+                ))
+                continue
             incoming_name = self._new_default_name(f'arg_{param.name}')
             present_name = self._new_default_name(f'has_{param.name}')
             lowered_pos.extend([
@@ -1192,13 +1223,17 @@ class _Lowerer(
         ) or (
             isinstance(annotation, str)
             and annotation in {'string', 'grapheme', 'char'}
-        ):
+        ) or ty.string_valued(annotation):
+            # (a union of string literals is a string handle)
             annotation = 'int64'
         if isinstance(annotation, ty.QuantityType):
             annotation = self._lower_runtime_value_type(annotation)
         if isinstance(annotation, ty.ObjectType):
             annotation = 'int64'
         if ty.optional_payload(annotation) is not None:
+            annotation = 'int64'
+        if ty.enum_members(annotation) is not None:
+            # an enum word: the member's tag index
             annotation = 'int64'
         if ty.runtime_union_members(annotation) is not None:
             # a tag-and-payload cell in static storage, addressed by this word

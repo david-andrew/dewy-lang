@@ -268,6 +268,20 @@ def predicate_bounds_counter(condition: hir.AST, target_id: int) -> bool:
 
     if isinstance(condition, hir.ShortCircuit) and condition.op == 'and':
         return predicate_bounds_counter(condition.left, target_id) or predicate_bounds_counter(condition.right, target_id)
+    def below_word_max(operand: hir.AST) -> bool:
+        """An inclusive bound the counter may reach and step past without leaving the
+        word: a length (capped by the address space) or a sub-word-range value."""
+        stripped = _strip_casts(operand)
+        if isinstance(stripped, (hir.ArrayLength, hir.StringLength)):
+            return True
+        if isinstance(operand.type, ty.IntegerLiteralType):
+            return operand.type.value < (1 << 63) - 1
+        layout = ty.fixed_integer_layout(ty.strip_refinement(operand.type))
+        if layout is None:
+            return False
+        width, signed = layout
+        return (width < 64) if signed else (width < 63)
+
     if (
         isinstance(condition, hir.FunctionCall)
         and isinstance(condition.func, hir.ExpressedIdentifier)
@@ -278,6 +292,10 @@ def predicate_bounds_counter(condition: hir.AST, target_id: int) -> bool:
             return is_target(left) and word_bound(right)
         if condition.func.name == '__gt__':
             return is_target(right) and word_bound(left)
+        if condition.func.name == '__le__':
+            return is_target(left) and below_word_max(right)
+        if condition.func.name == '__ge__':
+            return is_target(right) and below_word_max(left)
     return False
 
 
@@ -2030,6 +2048,9 @@ class _BoundsValidator:
             else f'{interval.lower if interval.lower is not None else "-∞"}'
             f'..{interval.upper if interval.upper is not None else "∞"}'
         )
+        notes = []
+        if length is None:
+            notes.append(f'nothing establishes the {kind}\'s length here, so even a small index may be past the end')
         user_error(
             self.srcfile,
             f'{kind} index is not proven in bounds',
@@ -2037,7 +2058,12 @@ class _BoundsValidator:
                 span=index.loc,
                 message=f'the index interval here is `{known}`',
             ),
-            hint=f'establish both a nonnegative lower bound and an upper bound below the {kind} length',
+            notes=notes,
+            hint=(
+                (f'guard on the length first: `if xs.length >? {interval.upper} {{ … }}` proves a constant index, `i <? xs.length` a running one'
+                 if length is None and interval is not None and interval.lower is not None and interval.lower >= 0
+                 else f'establish both a nonnegative lower bound and an upper bound below the {kind} length')
+            ),
         )
 
     def _validate_string_slice(

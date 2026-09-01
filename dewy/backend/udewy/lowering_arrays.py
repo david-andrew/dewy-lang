@@ -1302,8 +1302,8 @@ class _ArrayLowering:
         )
 
     def _is_growable_element(self, element: ty.Type) -> bool:
-        """Elements a growable (arena-backed) array may hold: words, string handles, objects and optional cells (as handles)."""
-        return self._is_word_element(element) or isinstance(element, ty.ObjectType) or self._is_optional_element(element) or self._is_union_element(element)
+        """Elements a growable (arena-backed) array may hold: words, string handles, objects, arrays, and optional cells (as handles)."""
+        return self._is_word_element(element) or isinstance(element, (ty.ObjectType, ty.ArrayType)) or self._is_optional_element(element) or self._is_union_element(element)
 
     def _growable_element_value(
         self,
@@ -1311,6 +1311,10 @@ class _ArrayLowering:
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
         """A value to store into a growable array: objects (and non-literal strings) are copied into the arena (value semantics)."""
+        if isinstance(element_type, ty.ArrayType):
+            # a nested array element: an independent arena-backed handle
+            # (released with the owner's elements only one level deep so far)
+            return self._independent_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
             # a fresh value (a call's result, a literal) dies here: its members move
             fresh = isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral))

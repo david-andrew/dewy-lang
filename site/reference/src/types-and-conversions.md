@@ -46,6 +46,8 @@ const UserId:type = type of int
 
 Each evaluation of `type of` creates a distinct identity. Referring to or aliasing the resulting binding preserves that identity. `<T of Bound>` in a generic parameter is a bound declaration and is not this generative expression.
 
+An alias is declared by any of `Name = <type expr>`, `let Name = <type expr>`, `Name:type = <type expr>`, or `let Name:type = <type expr>`. Intersecting object types strengthens structure without minting: `Root = Context & [tag:string='root']` has `Context`'s fields plus `tag` (and stays `Context`'s nominal kind when `Context` is minted — a `Root` satisfies a `Context` parameter); a same-name field must fit the inherited one and replaces it, so a mint may narrow an inherited default (`type of Report & [severity='error']`). A field written `name = value` takes the default's widened type; construction is by calling the type (defaults fill omitted fields).
+
 `type of` is the only generative type operation. Intersection does not mint nominal identity:
 
 <!-- dewy-example: design-only -->

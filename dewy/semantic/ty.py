@@ -426,10 +426,18 @@ def user_brand_descends(child: object, parent: object) -> bool:
     if not (user_branded(child) and user_branded(parent)):
         return False
     assert isinstance(child, ObjectType) and isinstance(parent, ObjectType)
+    def strengthens(narrow: tuple, wide: tuple) -> bool:
+        # every field of the wide shape is carried, in order, possibly narrowed
+        if len(narrow) < len(wide):
+            return False
+        return all(a.name == b.name for a, b in zip(narrow, wide))
+    if child.brand == parent.brand and child != parent:
+        # `Context & [tag:…]`: the same nominal kind, structurally strengthened
+        return strengthens(child.fields, parent.fields)
     brand = USER_BRAND_PARENTS.get(child.brand or '')
     while brand is not None and brand != parent.brand:
         brand = USER_BRAND_PARENTS.get(brand)
-    return brand is not None and child.fields[:len(parent.fields)] == parent.fields
+    return brand is not None and strengthens(child.fields, parent.fields)
 """Nominal types minted by programs (`let NotFound:type = type of error`),
 name -> parent. Every `TypeSystem` registers them, so the lowering's fresh
 instances agree with the checker's about `NotFound of? error`."""

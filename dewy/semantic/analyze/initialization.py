@@ -968,7 +968,7 @@ class _InitializationChecker:
         if not (
             function.rettype == ty.VOID_TYPE
             or isinstance(function.rettype, ty.IntegerLiteralType)
-            or function.rettype in {
+            or function.rettype in (   # a tuple: union return types are unhashable
                 'int',
                 'uint',
                 'uint8',
@@ -979,7 +979,7 @@ class _InitializationChecker:
                 'int16',
                 'int32',
                 'int64',
-            }
+            )
         ):
             self._main_error(
                 declaration,

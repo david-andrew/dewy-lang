@@ -1295,11 +1295,17 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     if (
         alias_binding is not None
         and alias_binding.type_value is not None
-        and isinstance(ast.left, p0.Atom)
-        and isinstance(ast.left.item, t1.Identifier)
+        and (
+            isinstance(ast.left, p0.Atom) and isinstance(ast.left.item, t1.Identifier)
+            or _annotated_type_alias_rhs(ast) is not None
+        )
     ):
-        # `Positive = int< i => i >? 0 >`: prebound as a type alias
-        name = ast.left.item.name
+        # `Positive = int< i => i >? 0 >` / `Context:type = [...]`: prebound as a type alias
+        name = (
+            ast.left.item.name
+            if isinstance(ast.left, p0.Atom) and isinstance(ast.left.item, t1.Identifier)
+            else ast.left.left.item.name   # type: ignore[union-attr]
+        )
         expr = hir.TypeValue(ast.right.loc, ty.TYPE_TYPE, alias_binding.type_value)
         ctx.declarations[name] = ty.TYPE_TYPE
         return _complete_binding(
@@ -1585,6 +1591,13 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
     symbol = ast.op.op.symbol
     if symbol == '&' and (constructor := _type_constructor_target(ast.left, ctx=ctx)) is not None:
         return _declare_constructor_overload(constructor, ast.right, ctx=ctx)
+    if symbol == '=':
+        user_error(
+            ctx.srcfile,
+            '`==` is not an operator',
+            Pointer(span=ast.op.loc, message='this reads as the compound assignment `=` `=`'),
+            hint='equality is `=?` (and inequality `not =?`); assignment is a single `=`',
+        )
     if symbol not in builtins.BINOP_DUNDER_MAP:
         not_implemented(ctx.srcfile, ast.op.loc, f'compound assignment operator `{symbol}=`')
 
@@ -3418,6 +3431,140 @@ def _join_and(operands: list[p0.AST]) -> p0.AST:
     return joined
 
 
+def _runtime_range_parts(iterable: p0.AST) -> tuple[p0.AST, p0.AST, str] | None:
+    """A range spelling whose end is a runtime expression: the open range that
+    replaces it, the end expression, and the comparison that guards it
+    (`0..argv.length` -> `0..`, `argv.length`, `<=?`; `[0..n)` -> `<?`)."""
+    bounds = '[]'
+    flat = iterable
+    if isinstance(flat, p0.Block) and flat.kind in ('[)', '[]') and len(flat.inner) == 1:
+        bounds = flat.kind
+        flat = flat.inner[0]
+    if not (isinstance(flat, p0.Flat) and isinstance(flat.op, t2.RangeJuxtapose) and len(flat.items) == 3):
+        return None
+    start, dots, end = flat.items
+    if _refinement_bound_ast(start) is None or _literal_integer_ast(start) is None and _refinement_bound_ast(start) is None:
+        return None   # a runtime start still needs the general runtime range representation
+    if _refinement_bound_ast(end) is not None:
+        return None   # a constant end stays on the normalized path
+    open_range = p0.Flat(Span(start.loc.start, dots.loc.stop), flat.op, [start, dots])
+    return open_range, end, ('<?' if bounds == '[)' else '<=?')
+
+
+def _rewrite_runtime_range_ends(condition_ast: p0.AST) -> p0.AST:
+    """`loop i in 0..argv.length` (or `[0..n)`) iterates the open range under a
+    guard: the end becomes the predicate `i <=? end` (`<?` when exclusive),
+    joining any written predicates. The guard bounds the counter the way an
+    explicit `i <? n` does."""
+    operands = _and_operands(condition_ast)
+    rewritten: list[p0.AST] = []
+    changed = False
+    for operand in operands:
+        if (
+            isinstance(operand, p0.BinOp)
+            and isinstance(operand.op, t1.Operator)
+            and operand.op.symbol == 'in'
+            and isinstance(operand.left, p0.Atom)
+            and isinstance(operand.left.item, t1.Identifier)
+        ):
+            parts = _runtime_range_parts(operand.right)
+            if parts is not None:
+                open_range, end, comparison = parts
+                rewritten.append(replace(operand, right=open_range))
+                rewritten.append(p0.BinOp(
+                    Span(operand.left.loc.start, end.loc.stop),
+                    t1.Operator(end.loc, comparison),
+                    operand.left,
+                    end,
+                ))
+                changed = True
+                continue
+        rewritten.append(operand)
+    return _join_and(rewritten) if changed else condition_ast
+
+
+def _rewrite_nested_unpack_targets(condition_ast: p0.AST, *, ctx: Context) -> tuple[p0.AST, list[tuple[str, list[tuple[str, Span]], Span]]]:
+    """`loop [prefix [digits ci]] in specs`: a nested unpack target becomes a
+    hidden binding, and the body opens by declaring each written name as the
+    matching field of that binding (by position)."""
+    unpacks: list[tuple[str, list[tuple[str, Span]], Span]] = []
+    operands = _and_operands(condition_ast)
+    rewritten: list[p0.AST] = []
+    changed = False
+    for operand in operands:
+        if (
+            isinstance(operand, p0.BinOp)
+            and isinstance(operand.op, t1.Operator)
+            and operand.op.symbol == 'in'
+            and isinstance(operand.left, p0.Block)
+            and operand.left.kind == '[]'
+            and any(isinstance(item, p0.Block) for item in operand.left.inner)
+        ):
+            targets: list[p0.AST] = []
+            for item in operand.left.inner:
+                if isinstance(item, p0.Block) and item.kind == '[]' and all(
+                    isinstance(inner, p0.Atom) and isinstance(inner.item, t1.Identifier) for inner in item.inner
+                ):
+                    hidden = f'__dewy_unpack_{ctx.binding_registry.next_id}_{len(unpacks)}'
+                    names = [(inner.item.name, inner.loc) for inner in item.inner]   # type: ignore[union-attr]
+                    unpacks.append((hidden, names, item.loc))
+                    targets.append(p0.Atom(item.loc, t1.Identifier(item.loc, hidden)))
+                    changed = True
+                else:
+                    targets.append(item)
+            rewritten.append(replace(operand, left=replace(operand.left, inner=targets)))
+            continue
+        rewritten.append(operand)
+    return (_join_and(rewritten) if changed else condition_ast), unpacks
+
+
+def _declare_nested_unpacks(
+    unpacks: list[tuple[str, list[tuple[str, Span]], Span]],
+    body_ctx: Context,
+    *,
+    ctx: Context,
+) -> tuple[list[hir.AST], Context]:
+    """The per-iteration declarations of a nested unpack: each written name is a
+    copy of the hidden binding's field at the same position."""
+    declares: list[hir.AST] = []
+    additions: dict[str, ty.Type] = {}
+    bindings: dict[str, sb.Binding] = {}
+    for hidden, names, loc in unpacks:
+        hidden_binding = body_ctx.binding_scopes.get(hidden)
+        hidden_type = ty.unfold(ty.strip_refinement(body_ctx.declarations.get(hidden) or ty.TOP_TYPE))
+        if not isinstance(hidden_type, ty.ObjectType):
+            user_error(
+                ctx.srcfile,
+                'nested unpacking needs an object element',
+                Pointer(span=loc, message=f'the iterated element has type `{type_to_dewy(body_ctx.declarations.get(hidden) or ty.TOP_TYPE)}`'),
+            )
+        if len(names) != len(hidden_type.fields):
+            user_error(
+                ctx.srcfile,
+                'nested unpacking must name every field',
+                Pointer(span=loc, message=f'{len(names)} name{"s" if len(names) != 1 else ""} for {len(hidden_type.fields)} field{"s" if len(hidden_type.fields) != 1 else ""} ({", ".join(field.name for field in hidden_type.fields)})'),
+            )
+        source = hir.ExpressedIdentifier(loc, hidden_type, hidden, binding_id=hidden_binding.id if hidden_binding is not None else None)
+        for (name, name_loc), field in zip(names, hidden_type.fields):
+            binding = ctx.binding_registry.allocate_param(name, field.type, name_loc)
+            declares.append(hir.Declare(
+                name_loc,
+                ty.VOID_TYPE,
+                'let',
+                name,
+                field.type,
+                hir.MemberAccess(name_loc, field.type, source, field.name, field.mutable),
+                binding_id=binding.id,
+            ))
+            additions[name] = field.type
+            bindings[name] = binding
+    return declares, replace(
+        body_ctx,
+        declarations=body_ctx.declarations.new_child(additions),
+        binding_scopes=body_ctx.binding_scopes.new_child(bindings),
+    )
+
+
 def _split_loop_condition(condition_ast: p0.AST) -> tuple[list[p0.AST], list[p0.AST]]:
     """`loop i in 0.. and i <? n and src[i] in? ws`: the iterator clauses of the
     top-level `and` chain, and the Boolean predicates that guard each iteration."""
@@ -3884,6 +4031,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # i <? n and src[i] in? ws`): the iterators advance, then the
         # predicates are tested with the targets bound — the loop ends at the
         # first false — and their truth refines the body
+        condition_ast = _rewrite_runtime_range_ends(condition_ast)
+        condition_ast, nested_unpacks = _rewrite_nested_unpack_targets(condition_ast, ctx=ctx)
         predicates: list[p0.AST] = []
         iterator_ast = condition_ast
         if _contains_iterator_syntax(condition_ast):
@@ -3892,11 +4041,16 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 iterator_ast = _join_and(iterator_parts)
         iterator_result = _tcr_loop_iterator(iterator_ast, ctx=ctx)
         guard: hir.AST | None = None
+        unpack_declares: list[hir.AST] = []
         if iterator_result is None:
+            if nested_unpacks:
+                not_implemented(ctx.srcfile, condition_ast.loc, 'nested unpacking in this loop condition')
             condition = _check_flow_condition(condition_ast, ctx=ctx)
             body_ctx = _refine_condition_context(ctx, condition, truth=True)
         else:
             condition, body_ctx = iterator_result
+            if nested_unpacks:
+                unpack_declares, body_ctx = _declare_nested_unpacks(nested_unpacks, body_ctx, ctx=ctx)
             if predicates:
                 predicate_ast = _join_and(predicates)
                 predicate = _check_flow_condition(predicate_ast, ctx=body_ctx)
@@ -3965,8 +4119,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                 loop_boundaries=(*body_ctx.loop_boundaries, boundary),
             ),
         )
-        if guard is not None:
-            body = hir.Block(body.loc, body.type, [guard, body], False)
+        if guard is not None or unpack_declares:
+            body = hir.Block(body.loc, body.type, [*unpack_declares, *([guard] if guard is not None else []), body], False)
         loop_arm = hir.LoopArm(arm.loc, ty.VOID_TYPE, condition, body)
         return hir.Flow(ast.loc, ty.VOID_TYPE, [loop_arm], None)
 
@@ -4760,16 +4914,51 @@ def _is_type_of_expression(ast: p0.AST) -> bool:
 
 
 def _type_expression_root(ast: p0.AST) -> str | None:
-    """The identifier a would-be type expression is rooted at (`int`, `array<...>`, alias names)."""
+    """The identifier a would-be type expression is rooted at (`int`, `array<...>`,
+    alias names, the left of `Context & [...]`)."""
     if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier):
         return ast.item.name
     if isinstance(ast, p0.BinOp) and isinstance(ast.op, t2.TypeParamJuxtapose):
         return _type_expression_root(ast.left)
+    if isinstance(ast, p0.BinOp) and isinstance(ast.op, t1.Operator) and ast.op.symbol in ('&', '|'):
+        return _type_expression_root(ast.left)
+    return None
+
+
+def _annotated_type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
+    """`Name:type = <expr>` without `let` declares a type alias too."""
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol in {'=', '::', ':='}
+        and isinstance(item.left, p0.BinOp)
+        and isinstance(item.left.op, t1.Operator)
+        and item.left.op.symbol == ':'
+        and isinstance(item.left.left, p0.Atom)
+        and isinstance(item.left.left.item, t1.Identifier)
+        and isinstance(item.left.right, p0.Atom)
+        and isinstance(item.left.right.item, t1.Identifier)
+        and item.left.right.item.name == 'type'
+    ):
+        return item.left.left.item.name, item.right
     return None
 
 
 def _implicit_type_alias_rhs(item: p0.AST, known_aliases: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
-    """`Name = <type expression>` without `let`/`:type` declares a type alias."""
+    """`Name = <type expression>` (with or without `let`) declares a type alias."""
+    if _is_top_level_declare(item) and isinstance(item, p0.KeywordExpr) and len(item.parts) == 2 and isinstance(item.parts[1], p0.AST):
+        inner = item.parts[1]
+        if (
+            isinstance(inner, p0.BinOp)
+            and isinstance(inner.op, t1.Operator)
+            and inner.op.symbol == '='
+            and isinstance(inner.right, p0.Atom)
+            and isinstance(inner.right.item, t1.Identifier)
+        ):
+            # `let e = NotFound` / `let w = Space`: a bare name stays a value
+            # use — the error value or the empty mint's inhabitant — not an alias
+            return None
+        return _implicit_type_alias_rhs(inner, known_aliases, ctx=ctx)
     if not (
         isinstance(item, p0.BinOp)
         and isinstance(item.op, t1.Operator)
@@ -4807,7 +4996,7 @@ def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
     aliases: list[sb.Binding] = []
     known_aliases: set[str] = set()
     for item in block.inner:
-        alias = _type_alias_rhs(item) or _implicit_type_alias_rhs(item, known_aliases, ctx=ctx)
+        alias = _type_alias_rhs(item) or _annotated_type_alias_rhs(item) or _implicit_type_alias_rhs(item, known_aliases, ctx=ctx)
         if alias is None:
             continue
         name, rhs = alias
@@ -4865,6 +5054,39 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     return name
 
 
+def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Context) -> ty.ObjectType | None:
+    """`Context & [tag:string='root']`: intersecting object types strengthens the
+    structure — fields merge, a later same-name field must fit and replaces —
+    and never mints identity (a branded operand keeps its nominal kind)."""
+    flattened: list[ty.TypeExpr] = []
+    for operand in operands:
+        flattened.extend(ty.unfold(item) for item in (operand.items if isinstance(operand, ty.TypeAnd) else [operand]))
+    if not flattened or not all(isinstance(item, ty.ObjectType) for item in flattened):
+        return None
+    branded = [item for item in flattened if isinstance(item, ty.ObjectType) and item.brand is not None]
+    if len(branded) > 1 or any(item.brand is not None and not ty.user_branded(item) for item in branded):
+        return None
+    fields: list[ty.ObjectField] = []
+    methods: list[ty.MethodSpec] = []
+    for item in flattened:
+        assert isinstance(item, ty.ObjectType)
+        for field_ in item.fields:
+            existing_index = next((index for index, existing in enumerate(fields) if existing.name == field_.name), None)
+            if existing_index is None:
+                fields.append(field_)
+                continue
+            if not ctx.type_system.is_subtype(field_.type, fields[existing_index].type):
+                type_error(
+                    ctx.srcfile,
+                    'intersection weakens a field',
+                    Pointer(span=loc, message=f'`{field_.name}: {type_to_dewy(field_.type)}` does not fit the earlier `{type_to_dewy(fields[existing_index].type)}`'),
+                )
+            fields[existing_index] = field_
+        methods.extend(item.methods)
+    brand = branded[0].brand if branded else None
+    return ty.ObjectType(tuple(fields), brand=brand, methods=tuple(methods))
+
+
 def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context) -> ty.ObjectType:
     """`let Number:type = type of any & [value:int64]` — `(type of any) & [...]` —
     mints a nominal object type: the parent's structure (`any` contributes
@@ -4899,13 +5121,19 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
             continue
         if isinstance(item, ty.ObjectType) and item.brand is None:
             for field_ in item.fields:
-                if any(field_.name == existing.name for existing in fields):
+                existing_index = next((index for index, existing in enumerate(fields) if existing.name == field_.name), None)
+                if existing_index is None:
+                    fields.append(field_)
+                    continue
+                # strengthening an inherited field (`type of Report & [severity='error']`):
+                # the type must still fit, and the new default replaces the old
+                if not ctx.type_system.is_subtype(field_.type, fields[existing_index].type):
                     user_error(
                         ctx.srcfile,
-                        f'minted type `{binding.name}` declares field `{field_.name}` twice',
-                        Pointer(span=rhs.loc, message='two intersected objects both carry it'),
+                        f'minted type `{binding.name}` weakens field `{field_.name}`',
+                        Pointer(span=rhs.loc, message=f'`{type_to_dewy(field_.type)}` does not fit the inherited `{type_to_dewy(fields[existing_index].type)}`'),
                     )
-            fields.extend(item.fields)
+                fields[existing_index] = field_
             methods.extend(item.methods)
             continue
         not_implemented(
@@ -8472,6 +8700,19 @@ def _dispatch_builtin(
     if rational is not None:
         return rational
     if (
+        fname in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}
+        and len(args) == 2
+        and ty.fixed_integer_layout(ty.strip_refinement(arg_types[0])) is not None
+        and ty.fixed_integer_layout(ty.strip_refinement(arg_types[1])) is not None
+        and ty.strip_refinement(arg_types[0]) != ty.strip_refinement(arg_types[1])
+    ):
+        # `i:uint64 <? length:int64`: the comparison happens in the left
+        # operand's width — the right operand takes a value cast the bounds
+        # analysis must prove in range (`length >= 0` here), so no value is
+        # ever reinterpreted
+        args = [args[0], check_against(args[1], ty.strip_refinement(arg_types[0]), ctx=ctx)]
+        arg_types = [args[0].type, args[1].type]
+    if (
         fname in {'__eq__', '__ne__'}
         and len(args) == 2
         and all(_is_string_type(arg.type) or ty.string_valued(ty.strip_refinement(arg.type)) for arg in args)
@@ -10272,6 +10513,28 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
             declared_type,
             mutable,
         )
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.right, p0.AST)
+    ):
+        # a defaulted field: `stop:int64 = start` declares the type, `severity = 'error'`
+        # takes the default's (widened) type
+        target = item.left
+        if (
+            isinstance(target, p0.BinOp)
+            and isinstance(target.op, t1.Operator)
+            and target.op.symbol == ':'
+            and isinstance(target.left, p0.Atom)
+            and isinstance(target.left.item, t1.Identifier)
+        ):
+            declared_type = _value_type(ast_to_type(target.right, ctx=ctx), loc=target.right.loc, ctx=ctx)
+            return ty.ObjectField(target.left.item.name, ty.strip_refinement(declared_type), mutable, default=item.right)
+        if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
+            value = typecheck_and_resolve_inner(item.right, ctx=ctx)
+            inferred = _widen_type_argument(value.type, loc=item.right.loc, ctx=ctx)
+            return ty.ObjectField(target.item.name, inferred, mutable, default=item.right)
     user_error(
         ctx.srcfile,
         'object type fields must be `name:type`',
@@ -11196,6 +11459,9 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             excluded = _excluded_literals(left)
             if excluded is not None and _is_integer_base(right, ctx=ctx):
                 return _refined(right, [ty.Proposition('self', 'not=?', value) for value in excluded])
+            merged = _intersect_object_types([left, right], loc=ast.loc, ctx=ctx)
+            if merged is not None:
+                return merged
             if isinstance(left, ty.TypeAnd) and isinstance(right, ty.TypeAnd):
                 return ty.TypeAnd(left.items + right.items)
             elif isinstance(left, ty.TypeAnd):
@@ -11342,6 +11608,13 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
                     type=param_type,
                     value=value,
                     position_only=position_only,
+                )
+            case p0.BinOp(op=t1.Operator(symbol=':'), left=p0.Block(kind='()')):
+                user_error(
+                    ctx.srcfile,
+                    'a function result type is written `:>`',
+                    Pointer(span=item.op.loc, message='`:` here reads as an annotation on the parameter list'),
+                    hint='write `(params):>T => body`',
                 )
             case _:
                 not_implemented(ctx.srcfile, item.loc, f'{type(item).__name__} in function signature')

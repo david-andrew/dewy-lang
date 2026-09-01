@@ -571,7 +571,12 @@ def emit_integer(i: hir.Integer) -> str:
 
 def emit_block(block: hir.Block, ctx: EmitContext) -> str:
     if not block.scoped and len(block.items) == 1:
-        return f'({emit_ast(block.items[0], ctx)})'
+        item = block.items[0]
+        if isinstance(item, (hir.Assign, hir.MemberAssign, hir.IndexAssign, hir.DictStore, hir.Declare, hir.Return, hir.Break, hir.Continue)):
+            # `if cond (stack += 1)`: a parenthesized statement — udewy
+            # assignments are statements, so the parens must not survive
+            return emit_ast(item, ctx)
+        return f'({emit_ast(item, ctx)})'
     block_ctx = EmitContext(ctx.direct_function_names, set(ctx.local_names), ctx.include_directives) if block.scoped else ctx
     items: list[str] = []
     for item in block.items:

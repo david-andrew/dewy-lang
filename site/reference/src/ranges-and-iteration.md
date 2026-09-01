@@ -96,3 +96,9 @@ leading = (src:string):>int64 => {
 ```
 
 `loop x in xs and x <? 4 { … }` visits the prefix of `xs` below 4 (it stops at the first element that fails, it does not filter — put an `if` in the body to filter). Predicates may sit anywhere in the chain; only word-`and` joins them to the iterators, and `or`/`xor` chains stay multiiterator formulas.
+
+## Runtime Range Ends
+
+A loop range's end may be a runtime value: `loop i in [0..argv.length)` visits each index, and the bare `loop i in 0..n` includes `n` (ranges are inclusive unless the bracket says otherwise). The end becomes a per-iteration guard on an open counter, so it composes with the mixed conditions above and bounds the counter the same way. A runtime *start* still needs the general runtime range representation.
+
+In a dictionary loop the value target may unpack an object element by position: `loop [prefix [digits case_insensitive extra]] in BASE_SPECS` declares each name as a copy of the matching field; every field must be named.
