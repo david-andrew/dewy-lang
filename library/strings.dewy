@@ -3,7 +3,7 @@
 # zero-argument ones, `text.trim`, into calls), so these read as methods.
 # Positions and lengths are in graphemes, like indexing.
 
-let _string_starts_with = (text:string prefix:string):>bool => {
+let _string_startswith = (text:string prefix:string):>bool => {
     let m:int64 = prefix.length
     if m =? 0 { return true }
     if m >? text.length { return false }
@@ -12,7 +12,7 @@ let _string_starts_with = (text:string prefix:string):>bool => {
     return false
 }
 
-let _string_ends_with = (text:string suffix:string):>bool => {
+let _string_endswith = (text:string suffix:string):>bool => {
     let m:int64 = suffix.length
     if m =? 0 { return true }
     if m >? text.length { return false }

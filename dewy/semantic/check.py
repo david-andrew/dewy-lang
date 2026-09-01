@@ -5979,7 +5979,7 @@ def _auto_call_function_value(node: hir.AST, *, ctx: Context, expected: ty.Type 
 # `text.contains(x)`, `text.trim`, …: methods of `string`, implemented in
 # `library/strings.dewy` as `_string_<name>(text …)` and bound like a type's methods.
 _STRING_METHODS = frozenset({
-    'contains', 'starts_with', 'ends_with', 'find', 'rfind', 'split', 'lines',
+    'contains', 'startswith', 'endswith', 'find', 'rfind', 'split', 'lines',
     'trim', 'trim_start', 'trim_end', 'replace', 'casefold',
 })
 
