@@ -28,6 +28,48 @@ def test_integer_literal_fixed_width_boundaries(
     assert type_system.is_subtype(ty.IntegerLiteralType(value), target) is accepted
 
 
+@pytest.mark.parametrize(
+    ('type_name', 'minimum', 'maximum'),
+    [
+        ('uint8', 0, 255),
+        ('uint16', 0, 65535),
+        ('uint32', 0, 4294967295),
+        ('uint64', 0, 18446744073709551615),
+        ('int8', -128, 127),
+        ('int16', -32768, 32767),
+        ('int32', -2147483648, 2147483647),
+        ('int64', -9223372036854775808, 9223372036854775807),
+    ],
+)
+def test_fixed_width_integer_type_bounds(
+    type_name: str,
+    minimum: int,
+    maximum: int,
+) -> None:
+    assert ty.fixed_integer_bounds(type_name) == (minimum, maximum)
+
+    root = check.typecheck_and_resolve(SrcFile(None, f'const low = {type_name}.min\nconst high = {type_name}.max'))
+    low, high = root.items
+    assert isinstance(low, hir.Declare) and isinstance(low.expr, hir.Integer)
+    assert isinstance(high, hir.Declare) and isinstance(high.expr, hir.Integer)
+    assert low.expr.value == minimum
+    assert low.expr.type == ty.IntegerLiteralType(minimum)
+    assert high.expr.value == maximum
+    assert high.expr.type == ty.IntegerLiteralType(maximum)
+
+
+def test_unknown_fixed_width_integer_type_property_is_rejected() -> None:
+    with pytest.raises(TypeCheckError, match='fixed-width integer type has no property `largest`'):
+        check.typecheck_and_resolve(SrcFile(None, 'const value = uint8.largest'))
+
+
+def test_value_binding_can_shadow_fixed_width_integer_type_properties() -> None:
+    root = check.typecheck_and_resolve(SrcFile(None, 'let uint8 = [min = 7]\nconst low = uint8.min'))
+    low = root.items[-1]
+    assert isinstance(low, hir.Declare)
+    assert isinstance(low.expr, hir.MemberAccess)
+
+
 def test_integer_literal_inhabits_abstract_numeric_ancestors() -> None:
     type_system = ty.TypeSystem()
     literal = ty.IntegerLiteralType(10**100)

@@ -2322,10 +2322,9 @@ def _integer_domain(type_: ty.Type) -> _ValueSet | None:
     if stripped == 'bool':
         return _ValueSet([(0, 1)])
     if isinstance(stripped, str):
-        layout = ty.fixed_integer_layout(stripped)
-        if layout is not None:
-            width, signed = layout
-            domain = _ValueSet([(-(1 << (width - 1)), (1 << (width - 1)) - 1)] if signed else [(0, (1 << width) - 1)])
+        bounds = ty.fixed_integer_bounds(stripped)
+        if bounds is not None:
+            domain = _ValueSet([bounds])
         elif stripped == 'int':
             domain = _ValueSet([(None, None)])
         elif stripped == 'uint':
@@ -6557,6 +6556,21 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     ):
         not_implemented(ctx.srcfile, binop.loc, 'computed member access')
     name = binop.right.item.name
+    if (
+        isinstance(binop.left, p0.Atom)
+        and isinstance(binop.left.item, t1.Identifier)
+        and binop.left.item.name not in ctx.declarations
+        and (bounds := ty.fixed_integer_bounds(binop.left.item.name)) is not None
+    ):
+        if name not in {'min', 'max'}:
+            type_error(
+                ctx.srcfile,
+                f'fixed-width integer type has no property `{name}`',
+                Pointer(span=binop.right.loc, message='unknown type property'),
+                hint='available properties: min, max',
+            )
+        value = bounds[0] if name == 'min' else bounds[1]
+        return hir.Integer(binop.loc, ty.IntegerLiteralType(value), '0d', value)
     if (
         isinstance(binop.left, p0.Atom)
         and isinstance(binop.left.item, t1.Identifier)

@@ -794,19 +794,29 @@ def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
     return _fixed_integer_widths.get(type_) if isinstance(type_, str) else None
 
 
+def fixed_integer_bounds(type_: TypeExpr) -> tuple[int, int] | None:
+    """Return the inclusive `(minimum, maximum)` of a fixed-width integer."""
+
+    layout = fixed_integer_layout(type_)
+    if layout is None:
+        return None
+    width, signed = layout
+    if signed:
+        return -(1 << (width - 1)), (1 << (width - 1)) - 1
+    return 0, (1 << width) - 1
+
+
 def integer_literal_fits(value: int, target: Primitive) -> bool:
     """Whether `value` is a valid mathematical instance of an integer type."""
     if target == 'int':
         return True
     if target == 'uint':
         return value >= 0
-    spec = _fixed_integer_widths.get(target)
-    if spec is None:
+    bounds = fixed_integer_bounds(target)
+    if bounds is None:
         return False
-    width, signed = spec
-    if signed:
-        return -(1 << (width - 1)) <= value < (1 << (width - 1))
-    return 0 <= value < (1 << width)
+    minimum, maximum = bounds
+    return minimum <= value <= maximum
 
 
 def string_literal_lengths(value: str) -> tuple[int, int, int]:
