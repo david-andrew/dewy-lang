@@ -1,3 +1,4 @@
+import re as _re
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -72,21 +73,30 @@ def skip_trivia(src: str, idx: int) -> int:
     return idx
 
 
+_STRING_PLAIN = _re.compile(r'[^"\\{}]*')
+
+
 def string_end(src: str, start: int) -> int:
     assert src[start] == '"', f"INTERNAL ERROR: Expected string at position {start}"
 
     idx = start + 1
-    while idx < len(src) and src[idx] != '"':
-        if src[idx] in "{}":
+    n = len(src)
+    while True:
+        match = _STRING_PLAIN.match(src, idx)
+        assert match is not None
+        idx = match.end()
+        if idx >= n:
+            error(src, idx, "unterminated string")
+        c = src[idx]
+        if c == '"':
+            return idx + 1
+        if c in "{}":
             error(src, idx, "interpolation not supported in udewy strings")
-        if src[idx] == "\\":
-            idx += 1
-            if idx >= len(src):
-                error(src, idx, "unterminated string")
+        # a backslash escape: skip the escaped character
         idx += 1
-    if idx >= len(src) or src[idx] != '"':
-        error(src, idx, "unterminated string")
-    return idx + 1
+        if idx >= n:
+            error(src, idx, "unterminated string")
+        idx += 1
 
 
 @dataclass(frozen=True)

@@ -88,6 +88,18 @@ def run(argv: list[str]) -> int:
 
     path = Path(args.file)
     target = _resolve_target(args.target)
+    # reuse the built binary unless the module, a `.dewy` file near it (its
+    # imports), or the compiler changed since it was built (as `dewy test` does)
+    udewy_path = cache_artifact(path, '.udewy')
+    cache_dir, name = cache_layout(udewy_path)
+    binary = cache_dir / name
+    if binary.is_file() and path.is_file():
+        sources_mtime = max(_newest_mtime(path.resolve().parent, suffixes=('.dewy',)), _compiler_mtime())
+        if binary.stat().st_mtime >= sources_mtime:
+            if args.compile:
+                print(f'Compiled: {binary} (up to date)')
+                return 0
+            return subprocess.call([str(binary), *args.remainder])
     with failure_log.recording(['dewy', *argv]) as recorder:
         # compile the program and output udewy source code
         srcfile = SrcFile.from_path(path)
@@ -99,7 +111,6 @@ def run(argv: list[str]) -> int:
             target=target,
             # TODO: for now wasm extra args are ignored
         )
-        udewy_path = cache_artifact(path, '.udewy')
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
         udewy_path.write_text(udewy_src)
 

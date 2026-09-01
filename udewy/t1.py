@@ -2,11 +2,22 @@
 Tokenizer for udewy
 designed to be straightforward to translate to assembly or etc. low level code
 """
+import re
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import cast
 from . import t0
 from .diagnostics import error
+
+# compiled run-scanners for the hot paths; the token structure stays the
+# straightforward single-pass loop (each of these is a memchr-style run scan
+# in a low-level translation)
+_WS_RUN = re.compile(r'[ \t\r\n]+')
+_LINE_REST = re.compile(r'[^\n]*')
+_IDENT_RUN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+_HEX_RUN = re.compile(r'[0-9A-Fa-f_]*')
+_BIN_RUN = re.compile(r'[01_]*')
+_DEC_RUN = re.compile(r'[0-9_]*')
 
 
 # some basic type aliases
@@ -226,14 +237,12 @@ def tokenize(src:str)->list[Token]:
         
         # whitespace
         if src[i] in t0.whitespace: #c == " " or c == "\t" or c == "\r" or c == "\n":
-            i += 1
+            i = _WS_RUN.match(src, i).end()   # type: ignore[union-attr]
             continue
 
         # line comment: # ...
         if src[i] == "#":
-            i += 1
-            while i < n and src[i] != "\n":
-                i += 1
+            i = _LINE_REST.match(src, i + 1).end()   # type: ignore[union-attr]
             continue
 
         # based string
@@ -246,10 +255,10 @@ def tokenize(src:str)->list[Token]:
         # identifier or keyword
         if t0.is_ident_start(src[i]):
             start = i
-            i += 1
-            while i < n and t0.is_ident(src[i]):
-                i += 1
-            text = src[start:i]
+            match = _IDENT_RUN.match(src, i)
+            assert match is not None
+            i = match.end()
+            text = match.group()
 
             keyword = KEYWORD_TOKENS.get(text)
             if keyword is not None:
@@ -274,31 +283,27 @@ def tokenize(src:str)->list[Token]:
             continue
 
         # hex number
-        if src[i:].startswith('0x'):
+        if src.startswith('0x', i):
             start = i
-            i += 2
-            val = 0
-            saw_digit = False
-            while i < n and (t0.is_hex(src[i]) or src[i] == '_'):
-                if src[i] != '_':
-                    saw_digit = True
-                    val = val << 4 | t0.hex_value(src[i])
-                i += 1
+            match = _HEX_RUN.match(src, i + 2)
+            assert match is not None
+            i = match.end()
+            digits = match.group().replace('_', '')
+            saw_digit = digits != ''
+            val = int(digits, 16) if saw_digit else 0
             validate_number_literal(src, start, val, saw_digit)
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
         
         # binary number
-        if src[i:].startswith('0b'):
+        if src.startswith('0b', i):
             start = i
-            i += 2
-            val = 0
-            saw_digit = False
-            while i < n and src[i] in '01_':
-                if src[i] != '_':
-                    saw_digit = True
-                    val = val << 1 | (ord(src[i]) - ord('0'))
-                i += 1
+            match = _BIN_RUN.match(src, i + 2)
+            assert match is not None
+            i = match.end()
+            digits = match.group().replace('_', '')
+            saw_digit = digits != ''
+            val = int(digits, 2) if saw_digit else 0
             validate_number_literal(src, start, val, saw_digit)
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
@@ -306,14 +311,12 @@ def tokenize(src:str)->list[Token]:
         # number (decimal int)
         if t0.is_digit(src[i]):
             start = i
-            val = 0
-            saw_digit = False
-            while i < n and (t0.is_digit(src[i]) or src[i] == '_'):
-                if src[i] != '_':
-                    saw_digit = True
-                    val = val * 10 + (ord(src[i]) - ord('0'))
-                i += 1
-            validate_number_literal(src, start, val, saw_digit)
+            match = _DEC_RUN.match(src, i)
+            assert match is not None
+            i = match.end()
+            digits = match.group().replace('_', '')
+            val = int(digits)
+            validate_number_literal(src, start, val, True)
             toks.append(Token(val, start, Kind.TK_NUMBER))
             continue
         
