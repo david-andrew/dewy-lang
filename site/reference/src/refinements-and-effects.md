@@ -26,7 +26,7 @@ let eat_whitespace = (src:nonemptystring):>uint64? => {
 
 Checking a value against a refined type yields one of three outcomes: proven, refuted (a compile error), or unknown (reported as unproven, never as false). A binding declared with a refined type carries the base type together with the proven facts: integer bounds feed range analysis and minimum lengths feed bounds proofs. Refinements currently apply to bindings; refined parameters and results are provisional.
 
-Refinement facts may arise from annotations, literals, ordinary control-flow conditions, successful explicit checks, and trusted interfaces. The facts the compiler tracks today include exact and minimum array lengths, `i <? xs.length` index guards, integer intervals, narrowed union members, and proven dictionary and set keys.
+Refinement facts may arise from annotations, literals, ordinary control-flow conditions, successful explicit checks, and trusted interfaces. The facts the compiler tracks today include exact and minimum array lengths, `i <? xs.length` index guards, the difference two compared terms keep (`start <=? end` makes `end - start` nonnegative), integer intervals, narrowed union members, and proven dictionary and set keys.
 
 ```dewy
 if index >=? 0 and index <? values.length

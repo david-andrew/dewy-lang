@@ -8852,10 +8852,12 @@ def _dispatch_builtin(
             elif (
                 isinstance(expected_number, str)
                 and expected_number in ty.FIXED_INTEGER_TYPES
-                and any(arg_type in ('int', 'uint') for arg_type in arg_types)
+                and any(arg_type in ('int', 'uint') or ty.fixed_integer_layout(ty.strip_refinement(arg_type)) is not None for arg_type in arg_types)
             ):
-                # Abstract-integer arithmetic stays abstract and narrows to the
-                # fixed width afterwards (validated by the bounds analysis).
+                # Abstract-integer arithmetic stays abstract, and fixed-width
+                # arithmetic stays at the operands' width (`let w:uint64 = end - start`);
+                # the result meets the fixed width afterwards (validated by
+                # the bounds analysis).
                 expected_return = None
         result = ctx.type_system.match_best_function(methods, arg_types, expected_return=expected_return)
     except ty.DispatchError as e:

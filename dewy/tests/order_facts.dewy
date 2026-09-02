@@ -1,0 +1,36 @@
+# a comparison between two terms is kept as a fact about their difference:
+# `i <? src.length` makes `src.length - i` at least 1, `start <=? end` makes
+# `end - start` at least 0, and the fact drops when either side is assigned
+
+let remaining = (src:string):>uint64 => {
+    i:int64 = 0
+    total:uint64 = 0
+    loop i <? src.length {
+        let rest:uint64 = src.length - i          # at least 1 while the guard holds
+        total += rest
+        i += 1                                    # the fact drops here, and returns with the next test
+    }
+    return total
+}
+
+let width = (start:int64 end:int64):>uint64 => {
+    if 0 <=? start <=? end {
+        let w:uint64 = end - start                # at least 0, and both are nonnegative so no overflow
+        return w
+    }
+    return 0
+}
+
+let gap = (a:int64 b:int64):>uint64 => {
+    if a =? b { let d:uint64 = a - b return d }   # equal: exactly 0
+    return 1
+}
+
+main = () => {
+    let total:int64 = 0
+    if remaining("abcd") =? 10 total += 10        # 4 + 3 + 2 + 1
+    if width(3 40) =? 37 total += 30              # 40
+    if gap(5 5) =? 0 total += 1                   # 41
+    if width(9 2) =? 0 total += 1                 # 42
+    exit(total)
+}

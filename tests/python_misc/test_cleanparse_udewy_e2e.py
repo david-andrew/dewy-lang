@@ -125,6 +125,7 @@ LOWERED_CASES = [
     ('prototype_mode.dewy', 42),
     ('prototype_panic.dewy', 102),
     ('flow_body_lowering.dewy', 42),
+    ('order_facts.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

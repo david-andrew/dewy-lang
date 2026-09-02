@@ -91,3 +91,19 @@ first_over = (xs:array<int64> limit:int64):>uint64? => {
     return none
 }
 ```
+
+A comparison between two terms — bindings, fields, lengths — is also kept as a fact about their *difference*, the one relational fact the analysis holds: under `i <? src.length` the value `src.length - i` is at least 1, under `start <=? end` the value `end - start` is at least 0, and after `a =? b` the difference is exactly 0. So `let rest:uint64 = src.length - i` proves inside the guarded loop, and a span width proves after `if 0 <=? start <=? end` (the lower bounds also keep the subtraction within `int64`). The fact drops when either side is assigned, when the sequence shrinks, and at a join where only one path established it; arithmetic on fixed widths stays at the operands' width and meets the annotated width afterwards, so `let w:uint64 = end - start` is `int64 - int64` followed by the proven cast.
+
+<!-- dewy-example: compiler -->
+```dewy
+remaining = (src:string):>uint64 => {
+    i:int64 = 0
+    total:uint64 = 0
+    loop i <? src.length {
+        let rest:uint64 = src.length - i    # at least 1 while the guard holds
+        total += rest
+        i += 1                              # the fact drops here, and returns with the next test
+    }
+    return total
+}
+```

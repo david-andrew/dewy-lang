@@ -237,10 +237,39 @@ def _nonzero_key(binding_id: int) -> int:
 
 
 def _decode_index_fact(key: int) -> tuple[int, int] | None:
-    if key > -_FACT_BASE:
+    if key > -_FACT_BASE or key <= -_ORDER_BASE:
         return None
     raw = -key - _FACT_BASE
     return raw >> _FACT_SHIFT, raw & ((1 << _FACT_SHIFT) - 1)
+
+
+# *Order facts* keep a comparison between two terms — bindings, member routes,
+# or lengths, whatever `_binding_id` names — as `larger - smaller >= gap`
+# (`i <? xs.length` is gap 1, `start <=? end` gap 0), stored as `[gap, ∞]`.
+# They are the one relational fact the analysis holds: `xs.length - i` and
+# `end - start` read them. Like index facts they join to the weaker gap, drop
+# when either term is assigned, and drop with a sequence's index facts.
+_ORDER_BASE = 1 << 42
+_ORDER_SHIFT = 21
+_LENGTH_TERM = 1 << 20
+
+
+def _order_term(term: int) -> int:
+    """A nonnegative encoding of a `_binding_id` result (length keys are negative)."""
+    return term if term >= 0 else _LENGTH_TERM - term
+
+
+def _order_key(smaller: int, larger: int) -> int:
+    return -(_ORDER_BASE + (_order_term(smaller) << _ORDER_SHIFT) + _order_term(larger))
+
+
+def _decode_order_fact(key: int) -> tuple[int, int] | None:
+    """The `(smaller, larger)` terms of an order-fact key, as `_binding_id` names them."""
+    if key > -_ORDER_BASE:
+        return None
+    raw = -key - _ORDER_BASE
+    encoded = raw >> _ORDER_SHIFT, raw & ((1 << _ORDER_SHIFT) - 1)
+    return tuple(term if term < _LENGTH_TERM else _LENGTH_TERM - term for term in encoded)  # type: ignore[return-value]
 
 
 def _is_runtime_string(type_: ty.Type) -> bool:
@@ -406,6 +435,13 @@ def _drop_index_facts(
     array_id: int | None = None,
 ) -> None:
     for key in [key for key in state if key <= -_FACT_BASE]:
+        order = _decode_order_fact(key)
+        if order is not None:
+            # an order fact mentioning the assigned term, or the sequence's length
+            terms = [index_id, None if array_id is None else _length_key(array_id)]
+            if any(term is not None and term in order for term in terms):
+                del state[key]
+            continue
         decoded = _decode_index_fact(key)
         if decoded is None:
             continue
@@ -1698,6 +1734,7 @@ class _BoundsValidator:
                     arguments[0],
                     arguments[1],
                     node.type,
+                    bound=self._difference_bound(node, state) if name == '__sub__' else None,
                 )
             refined_result = _call_result_refinement(node)
             if refined_result is not None:
@@ -1842,14 +1879,34 @@ class _BoundsValidator:
             return self._binary_interval(name, arguments[0], arguments[1], node.type)
         return None
 
+    def _difference_bound(self, node: hir.FunctionCall, state: State) -> Interval | None:
+        """What the order facts say about `left - right`: `xs.length - i` is at
+        least 1 under `i <? xs.length`, `end - start` at least 0 under
+        `start <=? end` (and at most `-gap` when the facts run the other way)."""
+        left_id, right_id = self._binding_id(node.pos_args[0]), self._binding_id(node.pos_args[1])
+        if left_id is None or right_id is None or left_id == right_id:
+            return None
+        lower = state.get(_order_key(right_id, left_id))   # right <= left - gap
+        upper = state.get(_order_key(left_id, right_id))   # left <= right - gap
+        bound = Interval(
+            None if lower is None else lower.lower,
+            None if upper is None or upper.lower is None else -upper.lower,
+        )
+        return None if bound == UNKNOWN_INTERVAL else bound
+
     def _binary_interval(
         self,
         name: str,
         left: Interval | None,
         right: Interval | None,
         result_type: ty.Type,
+        *,
+        bound: Interval | None = None,
     ) -> Interval | None:
-        result = self._binary_interval_plain(name, left, right, result_type)
+        if bound is not None and (left is None or right is None):
+            # the operands alone say nothing, the order fact still does
+            return self._fit_type(bound, result_type)
+        result = self._binary_interval_plain(name, left, right, result_type, bound=bound)
         if result is not None and left is not None and right is not None and (left.capped or right.capped) and not result.capped:
             result = Interval(result.lower, result.upper, capped=True)
         return result
@@ -1860,6 +1917,8 @@ class _BoundsValidator:
         left: Interval | None,
         right: Interval | None,
         result_type: ty.Type,
+        *,
+        bound: Interval | None = None,
     ) -> Interval | None:
         if left is None or right is None:
             return None
@@ -1908,6 +1967,10 @@ class _BoundsValidator:
             result = Interval(0, right.upper - 1)
         else:
             return None
+        if bound is not None:
+            # a relational fact narrows the mathematical result before the
+            # width check: `xs.length - i` proven positive cannot roll over
+            result = result.intersect(bound)
         return self._fit_type(result, result_type)
 
     def _seed_field_routes(
@@ -2348,6 +2411,15 @@ class _BoundsValidator:
                     decoded = _decode_index_fact(key)
                     if decoded is not None and decoded[0] == larger_id and decoded[1] != _NONZERO_MARK:
                         refined[_index_fact_key(smaller_id, decoded[1])] = Interval.exact(1)
+                # and the comparison itself is kept: `larger - smaller >= gap`
+                gap = 1 if effective in {'__lt__', '__gt__'} else 0
+                refined[_order_key(smaller_id, larger_id)] = Interval(gap, None)
+        if (name == '__eq__') == truth and name in {'__eq__', '__ne__'}:
+            # `a =? b` holding (or `a not=? b` failing): each is at most the other
+            left_id, right_id = self._binding_id(left), self._binding_id(right)
+            if left_id is not None and right_id is not None and left_id != right_id:
+                refined[_order_key(left_id, right_id)] = Interval(0, None)
+                refined[_order_key(right_id, left_id)] = Interval(0, None)
         left_binding = self._binding_id(left)
         right_interval = self._eval(right, refined, validate=False)
         if _is_inequality(name, truth):
