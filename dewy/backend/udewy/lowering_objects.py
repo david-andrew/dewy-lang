@@ -6,6 +6,7 @@ Split from ``lower.py``; methods run as part of ``_Lowerer``.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Callable
 
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
@@ -192,22 +193,114 @@ class _ObjectLowering:
                 return False
         return True
 
+    # the hidden field holding a minted object's brand word (see `_object_layout`)
+    BRAND_FIELD = '__brand__'
+
     def _object_layout(
         self,
         object_type: ty.ObjectType,
         node: hir.AST,
     ) -> tuple[int, dict[str, int]]:
+        """Field offsets and the storage size.
+
+        A minted object (`type of any & [...]`) carries a *brand word* right
+        after its root's fields — the fields every value in the family shares
+        — so a value seen through any ancestor, or through the unbranded
+        structure the root was minted from, still finds its fields and its
+        brand at the same offsets. A child's own fields follow the brand. The
+        storage size of a minted type is the largest in its subtree: a slot
+        typed by the parent holds any child whole, and `is?` on it reads the
+        brand word.
+        """
+        brand = object_type.brand if ty.user_branded(object_type) else None
+        root_fields = len(ty.USER_BRAND_TYPES[ty.brand_root(brand)].fields) if brand is not None and ty.brand_root(brand) in ty.USER_BRAND_TYPES else None
         offset = 0
         align = 1
         offsets: dict[str, int] = {}
-        for field in object_type.fields:
+        for index, field in enumerate(object_type.fields):
+            if root_fields is not None and index == root_fields:
+                offset = (offset + 7) // 8 * 8
+                offsets[self.BRAND_FIELD] = offset
+                offset += 8
+                align = max(align, 8)
             size, field_align = self._field_size_align(field.type, node)
             offset = (offset + field_align - 1) // field_align * field_align
             offsets[field.name] = offset
             offset += size
             align = max(align, field_align)
+        if root_fields is not None and self.BRAND_FIELD not in offsets:
+            offset = (offset + 7) // 8 * 8
+            offsets[self.BRAND_FIELD] = offset
+            offset += 8
+            align = max(align, 8)
         size = (offset + align - 1) // align * align if align else offset
-        return max(size, 1), offsets
+        size = max(size, 1)
+        if brand is not None:
+            for descendant in ty.brand_descendants(brand)[1:]:
+                child_type = ty.USER_BRAND_TYPES.get(descendant)
+                if child_type is not None:
+                    size = max(size, self._object_layout(child_type, node)[0])
+        return size, offsets
+
+    def _brand_word_store(self, dest: hir.AST, object_type: ty.ObjectType, loc: Span) -> list[hir.AST]:
+        """Write a freshly built minted object's brand word."""
+        if not ty.user_branded(object_type):
+            return []
+        assert object_type.brand is not None
+        _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+        ids = ty.brand_ids()
+        if object_type.brand not in ids:
+            return []
+        address = self._field_address(dest, offsets[self.BRAND_FIELD], loc)
+        return [self._intrinsic_call('__store_i64__', [self._int64_literal(loc, ids[object_type.brand][0]), address], ty.VOID_TYPE, loc)]
+
+    def _brand_word_load(self, source: hir.AST, object_type: ty.ObjectType, loc: Span) -> hir.AST:
+        assert ty.user_branded(object_type)
+        _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+        return self._intrinsic_call('__load_i64__', [self._field_address(source, offsets[self.BRAND_FIELD], loc)], 'int64', loc)
+
+    def _brand_range_test(self, brand_word: hir.AST, brand: str, loc: Span) -> hir.AST:
+        """`brand_word in [id, end)`: the value is `brand` or one of its descendants."""
+        start, end = ty.brand_ids()[brand]
+        if end == start + 1:
+            return self._typed_equality(brand_word, self._int64_literal(loc, start), 'int64', loc)
+        lower = self._int64_comparison('__ge__', brand_word, self._int64_literal(loc, start), loc)
+        upper = self._int64_comparison('__lt__', brand_word, self._int64_literal(loc, end), loc)
+        return hir.ShortCircuit(loc, 'bool', 'and', lower, upper)
+
+    def _descendant_extra_fields(self, object_type: ty.ObjectType) -> list[tuple[str, ty.ObjectType, list[ty.ObjectField]]]:
+        """For every brand under ``object_type``'s: its type and the fields beyond ``object_type``'s."""
+        if not ty.user_branded(object_type):
+            return []
+        assert object_type.brand is not None
+        out: list[tuple[str, ty.ObjectType, list[ty.ObjectField]]] = []
+        for descendant in ty.brand_descendants(object_type.brand)[1:]:
+            child_type = ty.USER_BRAND_TYPES.get(descendant)
+            if child_type is None:
+                continue
+            extras = [field for field in child_type.fields if object_type.field(field.name) is None]
+            if extras:
+                out.append((descendant, child_type, extras))
+        return out
+
+    def _by_brand(self, source: hir.AST, object_type: ty.ObjectType, loc: Span, per_child: 'Callable[[ty.ObjectType, list[ty.ObjectField]], list[hir.AST]]') -> list[hir.AST]:
+        """Statements for the fields a value may carry beyond its static type:
+        one arm per brand under it, chosen by the brand word at runtime."""
+        children = self._descendant_extra_fields(object_type)
+        if not children:
+            return []
+        ids = ty.brand_ids()
+        brand_word = self._brand_word_load(source, object_type, loc)
+        arms: list[hir.IfArm] = []
+        for brand, child_type, extras in children:
+            body = per_child(child_type, extras)
+            if not body or brand not in ids:
+                continue
+            test = self._typed_equality(brand_word, self._int64_literal(loc, ids[brand][0]), 'int64', loc)
+            arms.append(hir.IfArm(loc, ty.VOID_TYPE, test, hir.Block(loc, ty.VOID_TYPE, body, True)))
+        if not arms:
+            return []
+        return [hir.Flow(loc, ty.VOID_TYPE, arms, None)]
 
     def _field_size_align(self, type_: ty.Type, node: hir.AST) -> tuple[int, int]:
         if type_ == 'bool':
@@ -290,12 +383,13 @@ class _ObjectLowering:
         arena: bool = False,
         move: bool = False,
     ) -> list[hir.AST]:
-        """Copy every field; with ``arena``, nested mutable storage is arena-backed too."""
+        """Copy every field; with ``arena``, nested mutable storage is arena-backed too.
+        A minted object's brand word is copied, and the fields a child carries
+        beyond the static type follow, selected by that brand at runtime."""
         _size, offsets = self._object_layout(object_type, dest)
-        statements: list[hir.AST] = []
-        for field in object_type.fields:
-            dest_addr = self._field_address(dest, offsets[field.name], loc)
-            src_addr = self._field_address(src, offsets[field.name], loc)
+
+        def copy_field(field: ty.ObjectField, dest_addr: hir.AST, src_addr: hir.AST) -> list[hir.AST]:
+            statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
                 statements.extend(self._union_copy_cell(dest_addr, src_addr, members, loc, prepared=False))
@@ -338,6 +432,24 @@ class _ObjectLowering:
             else:
                 loaded = self._value_load(src_addr, field.type, loc)
                 statements.extend(self._value_store(loaded, dest_addr, field.type, loc))
+            return statements
+
+        statements: list[hir.AST] = []
+        if self.BRAND_FIELD in offsets:
+            brand_addr = offsets[self.BRAND_FIELD]
+            loaded = self._intrinsic_call('__load_i64__', [self._field_address(src, brand_addr, loc)], 'int64', loc)
+            statements.append(self._intrinsic_call('__store_i64__', [loaded, self._field_address(dest, brand_addr, loc)], ty.VOID_TYPE, loc))
+        for field in object_type.fields:
+            statements.extend(copy_field(field, self._field_address(dest, offsets[field.name], loc), self._field_address(src, offsets[field.name], loc)))
+
+        def child_fields(child_type: ty.ObjectType, extras: list[ty.ObjectField]) -> list[hir.AST]:
+            _child_size, child_offsets = self._object_layout(child_type, dest)
+            copied: list[hir.AST] = []
+            for field in extras:
+                copied.extend(copy_field(field, self._field_address(dest, child_offsets[field.name], loc), self._field_address(src, child_offsets[field.name], loc)))
+            return copied
+
+        statements.extend(self._by_brand(src, object_type, loc, child_fields))
         return statements
 
     def _extract_object_literal(
@@ -387,7 +499,7 @@ class _ObjectLowering:
             if field.binding_id is not None
         }
         self.object_literal_contexts.append((dest, node.type, field_names))
-        statements: list[hir.AST] = []
+        statements: list[hir.AST] = self._brand_word_store(dest, node.type, node.loc)
         try:
             for field in node.fields:
                 address = self._field_address(dest, offsets[field.name], field.loc)
@@ -940,6 +1052,14 @@ class _ObjectLowering:
     ) -> list[hir.AST]:
         """Initialize an object literal without replacing prepared child storage."""
 
+        literal_type = ty.unfold(node.type)
+        if isinstance(literal_type, ty.ObjectType) and ty.user_branded(literal_type) and literal_type != object_type and (
+            ty.user_brand_descends(literal_type, object_type) or ty.user_brand_carries(literal_type, object_type)
+        ):
+            # a child (or a mint) written where its parent (or its structure)
+            # is expected: its own layout — the shared fields sit at the same
+            # offsets, its own follow the brand word
+            object_type = literal_type
         _size, offsets = self._object_layout(object_type, node)
         field_names = {
             field.binding_id: field.name
@@ -947,7 +1067,7 @@ class _ObjectLowering:
             if field.binding_id is not None
         }
         self.object_literal_contexts.append((dest, object_type, field_names))
-        statements: list[hir.AST] = []
+        statements: list[hir.AST] = self._brand_word_store(dest, object_type, node.loc)
         try:
             for field in node.fields:
                 expected = object_type.field(field.name)
@@ -1044,10 +1164,9 @@ class _ObjectLowering:
             object_type,
             hir.Void(loc, ty.VOID_TYPE),
         )
-        statements: list[hir.AST] = []
-        for field in object_type.fields:
-            dest_address = self._field_address(dest, offsets[field.name], loc)
-            source_address = self._field_address(src, offsets[field.name], loc)
+
+        def copy_field(field: ty.ObjectField, dest_address: hir.AST, source_address: hir.AST) -> list[hir.AST]:
+            statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
                 statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False))
@@ -1059,7 +1178,7 @@ class _ObjectLowering:
                 if move is True:
                     # the dead source's array changes owner: its handle word moves
                     statements.extend(self._value_store(source_array, dest_address, field.type, loc))
-                    continue
+                    return statements
                 if move == 'adopt' and field.name not in borrowed:
                     # a local object at its last use (`return box`): arena-owned
                     # fields are adopted, frame-backed ones still cloned
@@ -1068,7 +1187,7 @@ class _ObjectLowering:
                     prelude, moved = self._transfer_array_value(handle, handle, field.type, site='returned in an object', adopt=True)
                     statements.extend(prelude)
                     statements.extend(self._value_store(moved, dest_address, field.type, loc))
-                    continue
+                    return statements
                 prelude, copied = self._clone_dynamic_array_value(
                     replace(source_array, type='int64'), field.type, arena=True,
                 )
@@ -1105,5 +1224,23 @@ class _ObjectLowering:
                     # the string moves to the result: the local's slot is
                     # emptied so its scope release leaves the string alone
                     statements.append(self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), source_address], ty.VOID_TYPE, loc))
+            return statements
+
+        statements: list[hir.AST] = []
+        if self.BRAND_FIELD in offsets:
+            brand_addr = offsets[self.BRAND_FIELD]
+            loaded = self._intrinsic_call('__load_i64__', [self._field_address(src, brand_addr, loc)], 'int64', loc)
+            statements.append(self._intrinsic_call('__store_i64__', [loaded, self._field_address(dest, brand_addr, loc)], ty.VOID_TYPE, loc))
+        for field in object_type.fields:
+            statements.extend(copy_field(field, self._field_address(dest, offsets[field.name], loc), self._field_address(src, offsets[field.name], loc)))
+
+        def child_fields(child_type: ty.ObjectType, extras: list[ty.ObjectField]) -> list[hir.AST]:
+            _child_size, child_offsets = self._object_layout(child_type, hir.Void(loc, ty.VOID_TYPE))
+            copied: list[hir.AST] = []
+            for field in extras:
+                copied.extend(copy_field(field, self._field_address(dest, child_offsets[field.name], loc), self._field_address(src, child_offsets[field.name], loc)))
+            return copied
+
+        statements.extend(self._by_brand(src, object_type, loc, child_fields))
         return statements
 

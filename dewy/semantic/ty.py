@@ -414,6 +414,64 @@ USER_BRANDS: set[str] = set()
 USER_BRAND_PARENTS: dict[str, str] = {}
 
 
+# the minted object type of each brand, in minting order (the program's brands:
+# reset per program by `reset_program_brands`, since the registries are process
+# globals and one process compiles many programs)
+USER_BRAND_TYPES: dict[str, 'ObjectType'] = {}
+
+# brands minted `$abstract`: no values of their own, only of their children
+USER_ABSTRACT_BRANDS: set[str] = set()
+
+
+def reset_program_brands() -> None:
+    USER_BRANDS.clear()
+    USER_BRAND_PARENTS.clear()
+    USER_BRAND_TYPES.clear()
+    USER_ABSTRACT_BRANDS.clear()
+
+
+def brand_children(brand: str) -> list[str]:
+    return [child for child, parent in USER_BRAND_PARENTS.items() if parent == brand]
+
+
+def brand_descendants(brand: str) -> list[str]:
+    """Every brand minted under ``brand``, preorder, the brand itself first."""
+    out = [brand]
+    for child in brand_children(brand):
+        out.extend(brand_descendants(child))
+    return out
+
+
+def brand_root(brand: str) -> str:
+    while brand in USER_BRAND_PARENTS:
+        brand = USER_BRAND_PARENTS[brand]
+    return brand
+
+
+def brand_concrete(brand: str) -> bool:
+    return brand not in USER_ABSTRACT_BRANDS
+
+
+def brand_ids() -> dict[str, tuple[int, int]]:
+    """A preorder numbering of the program's brands: ``brand -> (id, end)`` with
+    every descendant of ``brand`` numbered in ``[id, end)``, so a runtime
+    `is? Brand` is one range test on the value's brand word (ids start at 1;
+    0 is an unbranded object)."""
+    ids: dict[str, tuple[int, int]] = {}
+    counter = 1
+    def number(brand: str) -> None:
+        nonlocal counter
+        start = counter
+        counter += 1
+        for child in brand_children(brand):
+            number(child)
+        ids[brand] = (start, counter)
+    for brand in USER_BRAND_TYPES:
+        if brand not in USER_BRAND_PARENTS:
+            number(brand)
+    return ids
+
+
 def user_branded(type_: object) -> bool:
     return isinstance(type_, ObjectType) and type_.brand is not None and type_.brand in USER_BRANDS
 

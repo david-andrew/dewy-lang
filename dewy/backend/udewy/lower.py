@@ -4055,6 +4055,14 @@ class _Lowerer(
         flow_prelude, result = self._extract_expression(flow)
         return [*prelude, *flow_prelude], result
 
+    @staticmethod
+    def _brand_under_test(test_type: ty.TypeExpr) -> str | None:
+        """The brand a type test asks for, when it asks for a minted type."""
+        unfolded = ty.unfold(test_type)
+        if isinstance(unfolded, ty.ObjectType) and ty.user_branded(unfolded) and unfolded.brand in ty.brand_ids():
+            return unfolded.brand
+        return None
+
     def _extract_string_membership_test(self, node: hir.TypeTest) -> tuple[list[hir.AST], hir.AST] | None:
         """`s is? '0b' | '0x'` on a runtime string: equality with each member, the value read once."""
         test = node.test_type
@@ -4204,6 +4212,7 @@ class _Lowerer(
                 stored = self._field_union_members(declared.type) if declared is not None else None
                 if stored is not None:
                     members = stored
+            tested_brand = self._brand_under_test(node.test_type)
             if members is not None:
                 union_prelude, union_value = self._extract_expression(node.value)
                 system = ty.TypeSystem()
@@ -4212,9 +4221,17 @@ class _Lowerer(
                     for index, member in enumerate(members)
                     if system.is_subtype(member, node.test_type) != node.negated
                 ]
+                # a minted member the test descends from (`Token | none` tested
+                # `is? Name`): its tag, and then the brand word of the payload
+                branded = [
+                    index
+                    for index, member in enumerate(members)
+                    if index not in matching and tested_brand is not None
+                    and ty.user_branded(ty.unfold(member)) and ty.user_brand_descends(ty.unfold(node.test_type), ty.unfold(member))
+                ]
                 if len(matching) == len(members):
                     return union_prelude, hir.Bool(node.loc, 'bool', True)
-                if not matching:
+                if not matching and not branded:
                     return union_prelude, hir.Bool(node.loc, 'bool', False)
                 cell = (
                     replace(union_value, type='int64')
@@ -4237,8 +4254,29 @@ class _Lowerer(
                             node.loc, 'bool', 'or', test, comparison
                         )
                     )
+                for index in branded:
+                    member_type = ty.unfold(members[index])
+                    assert isinstance(member_type, ty.ObjectType) and tested_brand is not None
+                    pointer = self._union_source_pointer(cell, node.loc)
+                    in_brand = self._brand_range_test(self._brand_word_load(pointer, member_type, node.loc), tested_brand, node.loc)
+                    if node.negated:
+                        in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
+                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', self._typed_equality(tag, self._uint8_literal(node.loc, index), 'uint8', node.loc), in_brand)
+                    test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
                 assert test is not None
                 return union_prelude, test
+            value_object = ty.unfold(node.value.type)
+            if (
+                tested_brand is not None
+                and isinstance(value_object, ty.ObjectType) and ty.user_branded(value_object)
+                and ty.user_brand_descends(ty.unfold(node.test_type), value_object)
+            ):
+                # `ctx is? Root` on a `Context`: the brand word decides
+                prelude, pointer = self._extract_object_pointer(node.value)
+                in_brand = self._brand_range_test(self._brand_word_load(pointer, value_object, node.loc), tested_brand, node.loc)
+                if node.negated:
+                    in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
+                return prelude, in_brand
             prelude, value = self._extract_expression(node.value)
             payload = ty.optional_payload(node.value.type)
             if payload is None and isinstance(node.value, hir.ExpressedIdentifier):

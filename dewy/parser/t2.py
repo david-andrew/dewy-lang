@@ -181,7 +181,7 @@ class Chain(t1.InedibleToken):
 # condition from the message — so the comma's operator precedence (tighter
 # than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
 # needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
-assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect', 'fail'}   # `$fail [message]` takes no condition
+assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect', 'fail', 'abstract'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint
 
 @dataclass
 class Directive(t1.InedibleToken):
@@ -829,6 +829,18 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
             return Directive(metatag.loc, metatag, None), i
         message, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         return Directive(Span(metatag.loc.start, message.loc.stop), metatag, None, message), i
+    if metatag.name == "abstract":
+        # `$abstract type of any & [...]`: the whole rest of the expression is the mint
+        if ends_here:
+            Error(
+                srcfile=ctx.srcfile,
+                title="`$abstract` needs a `type of` mint",
+                message="",
+                pointer_messages=[Pointer(span=metatag.loc, message="expected `type of …` after the metatag")],
+                hint="`Context = $abstract type of any & [...]`",
+            ).throw()
+        minted, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
+        return Directive(Span(metatag.loc.start, minted.loc.stop), metatag, minted), i
     if ends_here:
         Error(
             srcfile=ctx.srcfile,

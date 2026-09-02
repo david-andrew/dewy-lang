@@ -300,7 +300,8 @@ class Atom(AST):
 
 @dataclass
 class AssertDirective(AST):
-    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]` (see `t2.Directive`)."""
+    """A directive form: `$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`,
+    `$fail [message]`, and `$abstract <type of …>` (its mint as the condition; see `t2.Directive`)."""
     name: str
     condition: AST | None       # `None` only for `$fail`
     message: AST | None = None

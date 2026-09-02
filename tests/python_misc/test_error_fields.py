@@ -3,7 +3,7 @@ import pytest
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check, ty
-from dewy.semantic.errors import NotImplementedYet, UserError
+from dewy.semantic.errors import UserError
 
 
 def _check(source: str) -> None:
@@ -50,7 +50,7 @@ def test_a_child_of_an_error_with_fields_is_one_too() -> None:
     )
 
 
-def test_a_child_stored_as_its_parent_union_member_is_a_target_diagnostic() -> None:
+def test_a_child_stored_as_its_parent_union_member_keeps_its_fields() -> None:
     from dewy.backend.udewy import codegen
-    with pytest.raises(NotImplementedYet, match='a `Name` value stored as the `Token` member of a union'):
-        codegen(SrcFile(None, 'let Token = type of any & [idx:int64]\nlet Name = type of Token & [text:string]\nlet pick = (n:int64):>Token | int64 => if n >? 0 Name(idx=n text="x") else 0\nmain = () => match pick(1) { tk:Token => exit(tk.idx)  v:int64 => exit(2) }'))
+    emitted = codegen(SrcFile(None, 'let Token = type of any & [idx:int64]\nlet Name = type of Token & [text:string]\nlet pick = (n:int64):>Token | int64 => if n >? 0 Name(idx=n text="x") else 0\nmain = () => match pick(1) { nm:Name => exit(nm.text.length + nm.idx)  tk:Token => exit(2)  v:int64 => exit(3) }'))
+    assert 'let main' in emitted

@@ -428,6 +428,8 @@ class ModuleCompiler:
         self.representation_notes.extend(notes)
 
     def finish(self, entry: ModuleRecord) -> hir.Block:
+        from . import check
+        check.validate_brand_matches()   # every module is loaded: the brands are a closed world
         names = self._emitted_names(entry)
         needed_prelude = self._needed_prelude_binding_ids()
         items: list[hir.AST] = []
@@ -472,7 +474,9 @@ def typecheck_program(
 
     representation.last_notes.clear()
     check.last_prototype_reports.clear()
+    check.pending_brand_matches.clear()
     bounds.last_cap_notes.clear()
+    ty.reset_program_brands()   # the program's minted brands: a closed world per compile
     compiler = ModuleCompiler(srcfile, target, test=test)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)

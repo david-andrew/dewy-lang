@@ -4,7 +4,7 @@ Dewy models expected failures as values belonging to nominal error types. A func
 
 Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `none` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
 
-Implemented today: error types minted with `type of error`, unit-like or carrying fields, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: forwarding through method calls, the fallback operators, and storing a *child* of a field-carrying error where the union names its parent (pending the brand-word representation). Examples marked as compiler examples below compile with the current compiler; the rest are design.
+Implemented today: error types minted with `type of error`, unit-like or carrying fields, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: forwarding through method calls and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
 
 Errors are the second half of Dewy's no-trap rule (see [No Traps](refinements-and-effects.md#no-traps)): what cannot be proven safe at compile time is returned as a value, never raised, never aborted.
 

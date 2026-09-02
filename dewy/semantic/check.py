@@ -1108,11 +1108,8 @@ def _tcr_annotated_declaration(
     annotation = ty.strip_refinement(annotation)
     if annotation == ty.TYPE_TYPE:
         binding = ctx.binding_registry.by_syntax.get(id(ast))
-        type_value = (
-            binding.type_value
-            if binding is not None and binding.type_value is not None
-            else _type_alias_value(right, ctx=ctx)
-        )
+        prebound = _prebound_alias_value(binding, ctx=ctx)
+        type_value = prebound if prebound is not None else _type_alias_value(right, ctx=ctx)
         expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, type_value)
         ctx.declarations[name] = ty.TYPE_TYPE
         declaration = _complete_binding(
@@ -1225,9 +1222,10 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 right=p0.AST() as right)
             ]:
             alias_binding = ctx.binding_registry.by_syntax.get(id(ast))
-            if alias_binding is not None and alias_binding.type_value is not None:
+            alias_value = _prebound_alias_value(alias_binding, ctx=ctx)
+            if alias_value is not None:
                 # `let MyType = type of ...`: prebound as a minting type alias
-                expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, alias_binding.type_value)
+                expr = hir.TypeValue(right.loc, ty.TYPE_TYPE, alias_value)
                 ctx.declarations[name] = ty.TYPE_TYPE
                 return _complete_binding(
                     ast,
@@ -1331,11 +1329,11 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     alias_binding = ctx.binding_registry.by_syntax.get(id(ast))
     if (
         alias_binding is not None
-        and alias_binding.type_value is not None
         and (
             isinstance(ast.left, p0.Atom) and isinstance(ast.left.item, t1.Identifier)
             or _annotated_type_alias_rhs(ast) is not None
         )
+        and _prebound_alias_value(alias_binding, ctx=ctx) is not None
     ):
         # `Positive = int< i => i >? 0 >` / `Context:type = [...]`: prebound as a type alias
         name = (
@@ -2398,20 +2396,58 @@ class _MemberCoverage:
     covered: _ValueSet = field(default_factory=_ValueSet)
     full: bool = False
     fields: dict[str, tuple[_ValueSet, _ValueSet]] = field(default_factory=dict)   # object members: field -> (domain, covered)
+    brands: set[str] | None = None                 # a minted member: the concrete brands under it (its children, itself unless abstract)
+    covered_brands: set[str] = field(default_factory=set)
 
     def is_full(self) -> bool:
         if self.full:
             return True
+        if self.brands is not None:
+            return bool(self.brands) and self.brands <= self.covered_brands
         if self.domain is not None:
             return self.covered.covers(self.domain)
         return any(covered.covers(domain) for domain, covered in self.fields.values())
 
     def uncovered(self) -> str:
+        if self.brands is not None:
+            missing = sorted(self.brands - self.covered_brands)
+            if missing:
+                own = ty.unfold(self.member)
+                if isinstance(own, ty.ObjectType) and missing[0] == own.brand:
+                    return f'`{missing[0]}` itself (it is not `$abstract`, so it has values of its own)'
+                return f'`{missing[0]}` (a `{type_to_dewy(self.member)}`)'
         if self.domain is not None and self.covered.intervals:
             probe = self.covered.first_uncovered(self.domain)
             if probe is not None:
                 return f'value `{probe}` of `{type_to_dewy(self.member)}`'
         return f'`{type_to_dewy(self.member)}`'
+
+
+def _concrete_brands_under(brand: str) -> set[str]:
+    return {name for name in ty.brand_descendants(brand) if ty.brand_concrete(name)}
+
+
+def _brand_member_domain(member: ty.TypeExpr) -> set[str] | None:
+    """A minted member's value set as brands: every concrete brand minted under it so far
+    (the closed world is confirmed once every module is loaded)."""
+    unfolded = ty.unfold(member)
+    if not ty.user_branded(unfolded):
+        return None
+    assert isinstance(unfolded, ty.ObjectType) and unfolded.brand is not None
+    return _concrete_brands_under(unfolded.brand)
+
+
+@dataclass
+class PendingBrandMatch:
+    """A match over a minted type accepted as exhaustive by the brands minted so far;
+    re-checked against the whole program once every module is loaded."""
+    srcfile: SrcFile
+    loc: Span
+    brand: str
+    covered: set[str]
+
+
+pending_brand_matches: list[PendingBrandMatch] = []
 
 
 def _pattern_coverage(pattern: _Pattern, coverage: list[_MemberCoverage], *, ctx: Context) -> bool:
@@ -2433,6 +2469,20 @@ def _pattern_coverage(pattern: _Pattern, coverage: list[_MemberCoverage], *, ctx
             if member.is_full():
                 continue
             member_base = ty.strip_refinement(member.member)
+            if member.brands is not None and ty.user_branded(ty.unfold(base)) and not propositions:
+                # an arm for a minted type covers it and every brand under it
+                pattern_brand = ty.unfold(base).brand
+                assert pattern_brand is not None
+                if ctx.type_system.is_subtype(member_base, base):
+                    member.full = True
+                    progressed = True
+                    continue
+                if ctx.type_system.is_subtype(base, member_base):
+                    admitted = _concrete_brands_under(pattern_brand)
+                    if not admitted <= member.covered_brands:
+                        member.covered_brands |= admitted
+                        progressed = True
+                continue
             related = ctx.type_system.is_subtype(member_base, base) or ctx.type_system.is_subtype(base, member_base)
             if member.domain is not None and pattern_domain is not None:
                 # integer-like on both sides: the arm admits the values its
@@ -2538,7 +2588,11 @@ def _match_arm_specs(
         number = ty.strip_refinement(_number_and_dimension(subject_type)[0])
         members = list(number.items) if isinstance(number, ty.TypeOr) else [number]
         coverage_sets.append([
-            _MemberCoverage(member, _integer_domain(subject_type if len(members) == 1 and isinstance(subject_type, ty.RefinedType) else member))
+            _MemberCoverage(
+                member,
+                _integer_domain(subject_type if len(members) == 1 and isinstance(subject_type, ty.RefinedType) else member),
+                brands=_brand_member_domain(member),
+            )
             for member in members
         ])
     specs: list[_FlowArmSpec] = []
@@ -2615,7 +2669,30 @@ def _match_arm_specs(
                     break
             if uncovered is not None:
                 break
+    if total:
+        # exhaustive over the brands minted so far: confirmed against the
+        # whole program by `validate_brand_matches` (a child minted in a later
+        # module would be uncovered)
+        for coverage in coverage_sets:
+            for member in coverage:
+                if member.brands is not None and not member.full:
+                    unfolded = ty.unfold(member.member)
+                    assert isinstance(unfolded, ty.ObjectType) and unfolded.brand is not None
+                    pending_brand_matches.append(PendingBrandMatch(ctx.srcfile, arm.loc, unfolded.brand, set(member.covered_brands)))
     return specs, prelude, total, uncovered
+
+
+def validate_brand_matches() -> None:
+    """Every module loaded: a match accepted over the brands known then must cover the brands minted since."""
+    for pending in pending_brand_matches:
+        missing = sorted(_concrete_brands_under(pending.brand) - pending.covered)
+        if missing:
+            user_error(
+                pending.srcfile,
+                'match is not exhaustive',
+                Pointer(span=pending.loc, message=f'`{missing[0]}` (a `{pending.brand}` minted elsewhere in the program) is not handled by any arm'),
+                hint='add an arm for it, a catch-all arm (`value => …`), or an `else` branch',
+            )
 
 
 def _flow_expected(expected: ty.Type | None) -> ty.Type | None:
@@ -3840,7 +3917,10 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             assert isinstance(body_ast, p0.AST)
             if keyword.name == 'match':
                 match_present = True
+                pending_before = len(pending_brand_matches)
                 arm_specs, prelude, total, uncovered = _match_arm_specs(arm, condition_ast, body_ast, ctx=ctx)
+                if ast.default is not None:
+                    del pending_brand_matches[pending_before:]   # `else` takes whatever is minted later
                 specs.extend(arm_specs)
                 match_prelude.extend(prelude)
                 match_total = match_total or total
@@ -4259,6 +4339,13 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     """
     if ast.name == 'fail':
         return _tcr_fail(ast, ctx=ctx)
+    if ast.name == 'abstract':
+        user_error(
+            ctx.srcfile,
+            '`$abstract` marks a `type of` mint',
+            Pointer(span=ast.loc, message='it belongs on the value of a type alias'),
+            hint='`Context = $abstract type of any & [...]`',
+        )
     assert ast.condition is not None
     condition_ast, message_ast = _sink_ambiguity(ast.condition), ast.message
     condition = _check_flow_condition(condition_ast, ctx=ctx)
@@ -4944,9 +5031,18 @@ def _intersection_operands(ast: p0.AST) -> list[p0.AST]:
     return [ast]
 
 
+def _abstract_mint(ast: p0.AST) -> tuple[p0.AST, bool]:
+    """`$abstract type of any & [...]`: the mint under the directive, and whether it was marked."""
+    if isinstance(ast, p0.AssertDirective) and ast.name == 'abstract' and ast.condition is not None:
+        return ast.condition, True
+    return ast, False
+
+
 def _is_type_of_expression(ast: p0.AST) -> bool:
     """A declaration value that mints: `type of X`, or an intersection holding
-    one (`type of Token & [text:string]` is `(type of Token) & [...]`)."""
+    one (`type of Token & [text:string]` is `(type of Token) & [...]`), either
+    under `$abstract`."""
+    ast, _abstract = _abstract_mint(ast)
     return any(_is_type_of_prefix(item) for item in _intersection_operands(ast))
 
 
@@ -5029,7 +5125,10 @@ def _record_refinement_facts(binding_id: int, refined: ty.RefinedType, *, ctx: C
             ctx.length_bounds[binding_id] = max(ctx.length_bounds.get(binding_id, 0), lower)
 
 
-def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
+def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> list[sb.Binding]:
+    """Bind the block's type aliases by name; each resolves at its first use
+    (or, for one never used, after the block's items — by then the imports
+    it may refer to have run)."""
     aliases: list[sb.Binding] = []
     known_aliases: set[str] = set()
     for item in block.inner:
@@ -5046,17 +5145,19 @@ def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> None:
         ctx.declarations[name] = ty.TYPE_TYPE
         ctx.binding_scopes[name] = binding
         aliases.append(binding)
-    for binding in aliases:
-        _resolve_type_alias(binding, ctx=ctx)
+    return aliases
 
 
 def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.TypeExpr | None:
     """`let NotFound:type = type of error` mints a fresh nominal type named
     after the alias, a subtype of the `of` operand. Only the `error` family is
     supported so far; its canonical inhabitant is written with the type's name."""
+    rhs, abstract = _abstract_mint(rhs)
     operands = _intersection_operands(rhs)
     mints = [item for item in operands if _is_type_of_prefix(item)]
     if not mints:
+        if abstract:
+            user_error(ctx.srcfile, '`$abstract` marks a `type of` mint', Pointer(span=rhs.loc, message='an alias of an existing type cannot be abstract'))
         return None
     if len(mints) > 1:
         user_error(
@@ -5072,12 +5173,14 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     if ty.user_branded(parent) and isinstance(parent, ty.ObjectType) and parent.brand in ty.USER_NOMINAL_TYPES:
         # `type of TokenError & [...]`: a child of an error carrying fields is
         # one too, nominally under its parent
-        child = _mint_branded_object(binding, rhs, parent, extras, ctx=ctx, nominal_parent=parent.brand)
+        child = _mint_branded_object(binding, rhs, parent, extras, ctx=ctx, nominal_parent=parent.brand, abstract=abstract)
         ty.USER_NOMINAL_TYPES[name] = parent.brand
         ctx.type_system.register_user_nominals()
         return child
     if not (isinstance(parent, str) and ctx.type_system.is_subtype(parent, 'error')):
-        return _mint_branded_object(binding, rhs, parent, extras, ctx=ctx)
+        return _mint_branded_object(binding, rhs, parent, extras, ctx=ctx, abstract=abstract)
+    if abstract:
+        user_error(ctx.srcfile, '`$abstract` marks an object mint', Pointer(span=rhs.loc, message='error types are not abstract'))
     if extras:
         # an error carrying fields (`type of error & Report`, `& [code:int64]`):
         # a branded object whose brand is registered as a nominal error, so it
@@ -5138,7 +5241,7 @@ def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Cont
     return ty.ObjectType(tuple(fields), brand=brand, methods=tuple(methods))
 
 
-def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context, nominal_parent: str | None = None) -> ty.ObjectType:
+def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context, nominal_parent: str | None = None, abstract: bool = False) -> ty.ObjectType:
     """`let Number:type = type of any & [value:int64]` — `(type of any) & [...]` —
     mints a nominal object type: the parent's structure (`any` contributes
     nothing) strengthened by the intersected objects, distinct from every
@@ -5205,7 +5308,13 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
         ty.USER_BRAND_PARENTS[name] = ancestor
     else:
         ty.USER_BRAND_PARENTS.pop(name, None)
-    return ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods))
+    minted = ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods))
+    ty.USER_BRAND_TYPES[name] = minted
+    if abstract:
+        ty.USER_ABSTRACT_BRANDS.add(name)   # `$abstract`: values only of its children
+    else:
+        ty.USER_ABSTRACT_BRANDS.discard(name)
+    return minted
 
 
 def _validate_recursive_alias(
@@ -5547,6 +5656,17 @@ def _type_alias_value(ast: p0.AST, *, ctx: Context) -> ty.TypeAliasValue:
         parameters, body = generic
         return _generic_type_alias(parameters, body, ctx=ctx)
     return ast_to_type(ast, ctx=ctx)
+
+
+def _prebound_alias_value(binding: sb.Binding | None, *, ctx: Context) -> ty.TypeAliasValue | None:
+    """A prebound alias's value at its own declaration: resolved now if nothing referred to it yet."""
+    if binding is None:
+        return None
+    if binding.type_value is not None:
+        return binding.type_value
+    if binding.id in ctx.type_alias_asts:
+        return _resolve_type_alias(binding, ctx=ctx)
+    return None
 
 
 def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasValue:
@@ -7549,7 +7669,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             return _tcr_spread_array_literal(block, expected=expected, ctx=ctx)
 
     _collect_block_bindings(block, ctx=ctx)
-    _prebind_type_aliases(block, ctx=ctx)
+    aliases = _prebind_type_aliases(block, ctx=ctx)
 
     deferred_functions: set[int] = set()
     if not type_block:
@@ -7626,6 +7746,8 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         if id(item) not in deferred_functions:
             continue
         results[index] = typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block)
+    for binding in aliases:
+        _resolve_type_alias(binding, ctx=ctx)   # an alias nothing referred to still has to be well-formed
     checked_results: list[hir.AST] = []
     for item, result in zip(items, results, strict=True):
         if result is None:
@@ -12388,6 +12510,17 @@ def _type_constructor_target(ast: p0.AST, *, ctx: Context) -> hir.TypeValue | No
     return candidate if _constructed_object_type(candidate) is not None else None
 
 
+def _reject_abstract_construction(left: hir.AST, object_type: ty.ObjectType, *, ctx: Context) -> None:
+    if object_type.brand in ty.USER_ABSTRACT_BRANDS:
+        children = [child for child in ty.brand_children(object_type.brand) if ty.brand_concrete(child)]
+        user_error(
+            ctx.srcfile,
+            f'`{object_type.brand}` is abstract',
+            Pointer(span=left.loc, message='it was minted `$abstract`, so it has no values of its own'),
+            hint=('construct one of its children: ' + ', '.join(f'`{child}`' for child in children)) if children else 'mint a child with `type of ' + object_type.brand + '`',
+        )
+
+
 def _constructed_object_type(left: hir.AST) -> ty.ObjectType | None:
     """The object type a call target names, when calling it constructs a value."""
     if not isinstance(left, hir.TypeValue) or isinstance(left.value, ty.GenericTypeAlias):
@@ -12525,6 +12658,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
     constructed = _constructed_object_type(left)
     if constructed is not None:
         assert isinstance(left, hir.TypeValue)
+        _reject_abstract_construction(left, constructed, ctx=ctx)
         return _tcr_type_constructor_call(left, constructed, right, ctx=ctx)
 
     if receiver is None:
@@ -13206,8 +13340,8 @@ def _unit_inhabitant(node: hir.AST, expected: ty.Type | None, *, ctx: Context) -
         return None
     minted = node.value
     assert isinstance(minted, ty.ObjectType)
-    if minted.fields:
-        return None
+    if minted.fields or minted.brand in ty.USER_ABSTRACT_BRANDS:
+        return None   # an abstract type has no value of its own
     if expected is not None and not ctx.type_system.is_subtype(minted, ty.strip_refinement(expected)):
         return None
     return hir.ObjectLiteral(node.loc, minted, [])

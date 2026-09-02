@@ -1131,8 +1131,7 @@ class _ArrayLowering:
             name = self._new_string_temp(loc, 'int64', suffix).name
             return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
 
-        for field in object_type.fields:
-            offset = offsets[field.name]
+        def release_field(field: ty.ObjectField, offset: int) -> None:
             field_type = ty.strip_refinement(field.type)
             unfolded = ty.unfold(field_type)
             if self._is_string_valued(field_type):
@@ -1167,6 +1166,21 @@ class _ArrayLowering:
                 nested_declare, nested_ident = local('field_object', nested)
                 statements.append(nested_declare)
                 statements.extend(self._release_object_members(nested_ident, unfolded, loc))
+
+        for field in object_type.fields:
+            release_field(field, offsets[field.name])
+
+        def child_fields(child_type: ty.ObjectType, extras: list[ty.ObjectField]) -> list[hir.AST]:
+            # a child's own fields, released by the brand the value carries
+            _child_size, child_offsets = self._object_layout(child_type, hir.Void(loc, ty.VOID_TYPE))
+            mark = len(statements)
+            for field in extras:
+                release_field(field, child_offsets[field.name])
+            released = statements[mark:]
+            del statements[mark:]
+            return released
+
+        statements.extend(self._by_brand(base, object_type, loc, child_fields))
         return statements
 
     def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc) -> list[hir.AST]:

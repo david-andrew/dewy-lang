@@ -28,7 +28,23 @@ Punct = type of any & [text:string]     # same structure, distinct type
 let Vec = type of [x:int64 y:int64  length_squared = ():>int64 => x*x + y*y]
 ```
 
-`type of Parent` where `Parent` is itself a minted type mints a nominal *child*: a subtype of the parent (a `Whitespace` value satisfies a `Token` parameter, and `t is? Token` holds for every child in a union), distinct from the parent and from its siblings. The parent's fields lead the child's, and the operand may add more (`type of Token & [text:string]`); one nominal parent per mint. A minted type with no fields is both the type and its single inhabitant — written with its name where a value is wanted, as an error type is: `[Whitespace Name(text='x')]`, `return Whitespace`, `let w = Whitespace` (`Whitespace()` constructs the same value).
+`type of Parent` where `Parent` is itself a minted type mints a nominal *child*: a subtype of the parent (a `Whitespace` value satisfies a `Token` parameter, and `t is? Token` holds for every child in a union), distinct from the parent and from its siblings. A minted value carries its *brand* at runtime, so a value seen through the parent still says which child it is: `ctx is? Root` on a `Context` tests the brand, `match ctx { r:Root => … <StringBody> => … }` selects by it and binds the child with its own fields, and a child stored where the parent is expected — a `Context` variable, an element of `array<Context>`, a `Token | none` member — is stored whole (a parent-typed slot is sized for the largest child). The parent's fields lead the child's, and the operand may add more (`type of Token & [text:string]`); one nominal parent per mint.
+
+A `match` over a minted type is exhaustive when its arms cover every brand the *whole program* mints under it — the parent itself included unless it is `$abstract`. `$abstract` is written on the mint and says the type has no values of its own, only its children's: constructing it is an error at that site, it is no unit inhabitant even without fields, and its children alone make a match exhaustive. A child minted in a module compiled later still counts (the program is one closed world), so a match without an `else` reports it; with an `else`, later children take that branch.
+
+<!-- dewy-example: compiler -->
+```dewy
+Context = $abstract type of any & [depth:int64]
+Root = type of Context & [base:string = '0d']
+StringBody = type of Context & [quote:string]
+
+describe = (ctx:Context):>int64 => match ctx {
+    r:Root => r.base.length + r.depth
+    s:StringBody => s.quote.length            # exhaustive: Context is abstract
+}
+```
+
+A minted type with no fields is both the type and its single inhabitant — written with its name where a value is wanted, as an error type is: `[Whitespace Name(text='x')]`, `return Whitespace`, `let w = Whitespace` (`Whitespace()` constructs the same value).
 
 <!-- dewy-example: compiler -->
 ```dewy

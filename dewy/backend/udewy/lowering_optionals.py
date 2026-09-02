@@ -823,14 +823,6 @@ class _OptionalLowering:
         if index in slots:
             root_prelude, root = self._union_tree_root(cell, slots[index], member, value.loc)
             if isinstance(member, ty.ObjectType):
-                stored = ty.unfold(value.type)
-                if isinstance(stored, ty.ObjectType) and ty.user_brand_descends(stored, member) and len(stored.fields) > len(member.fields):
-                    # the slot is sized for the member; a child's extra
-                    # fields need the brand-word representation (pending)
-                    self._target_error(
-                        value,
-                        f'a `{stored.brand}` value stored as the `{member.brand}` member of a union (a minted child with more fields than its parent)',
-                    )
                 write = self._write_object_result_value(
                     replace(root, type='int64'), value, member
                 )

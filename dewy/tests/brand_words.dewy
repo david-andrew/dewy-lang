@@ -1,0 +1,41 @@
+# a minted object carries a brand word, so a value seen through its parent
+# still says which child it is: `is?` and `match` on a parent-typed value,
+# children stored where the parent is expected (a union member, an array
+# element, a copy), and `$abstract` parents whose children are exhaustive
+
+Context = $abstract type of any & [depth:int64]
+Root = type of Context & [base:string = '0d']
+StringBody = type of Context & [quote:string]
+BlockBody = type of Context
+Token = type of any & [idx:int64]                    # a concrete parent: its own values count
+Name = type of Token & [text:string]
+
+let describe = (ctx:Context):>int64 => match ctx {   # exhaustive: Context is abstract
+    r:Root => r.base.length + r.depth
+    s:StringBody => s.quote.length * 10
+    <BlockBody> => 100
+}
+
+let weight = (t:Token):>int64 => match t {           # the parent itself needs an arm
+    n:Name => n.text.length
+    <Token> => 1
+}
+
+let pick = (n:int64):>Token | int64 => if n >? 0 Name(idx=n text="xy") else 0
+
+let stack:array<Context> = []
+
+main = () => {
+    let total:int64 = 0
+    stack.push(Root(depth=1))                        # a child as the element
+    stack.push(StringBody(depth=2 quote="'''"))
+    stack.push(BlockBody(depth=3))
+    loop ctx in stack { total += describe(ctx) }     # 3 + 30 + 100 = 133
+    let copy:Context = stack[1]                      # a copy through the parent keeps the child's fields
+    if copy is? StringBody { if copy isnt? Root total += copy.quote.length }   # 136
+    let last = stack.pop
+    if last is? BlockBody and stack[0] is? Root total += 4                     # 140
+    match pick(1) { tk:Token => { total += weight(tk) }  v:int64 => exit(1) }  # 142
+    total += weight(Token(idx=0))                                              # 143
+    exit(total - 101)                                                          # 42
+}
