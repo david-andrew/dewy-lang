@@ -13043,6 +13043,10 @@ def _explicit_value_conversion(
         return node
     if ctx.type_system.promote_type(source, target) == target:
         return hir.ValueCast(loc, target, node)
+    if ty.fixed_integer_layout(ty.strip_refinement(source)) is not None and ty.fixed_integer_layout(target) is not None:
+        # `src.length as uint64`: one fixed width to another, a value cast the
+        # bounds analysis must prove in range (as at an annotated binding)
+        return hir.ValueCast(loc, target, node)
     converted = _conversion_method_call(node, target, loc, ctx=ctx)
     if converted is None and _is_string_type(target):
         union_flow = _optional_field_flow(node, ctx=ctx)

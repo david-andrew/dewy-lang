@@ -38,3 +38,10 @@ def test_a_string_literal_keeps_its_length_through_a_refined_parameter() -> None
 def test_a_union_with_two_word_members_stays_a_mismatch() -> None:
     with pytest.raises(TypeCheckError, match='type mismatch'):
         _check('let f = (n:int64):>uint8|uint16 => n')
+
+
+def test_an_explicit_as_between_fixed_widths_is_the_same_proven_cast() -> None:
+    _check('let f = (s:string):>uint64 => s.length as uint64')
+    _check('let f = (n:uint64):>int8 => {\n    if n >? 100 return 0\n    return n as int8\n}')
+    with pytest.raises(UserError, match='cannot prove this integer fits `uint64`'):
+        _check('let f = (n:int64):>uint64 => n as uint64')
