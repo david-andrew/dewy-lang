@@ -2849,7 +2849,9 @@ class _Lowerer(
             items: list[hir.AST] = []
             for item in node.items:
                 items.extend(self._lower_statement(item))
-            return replace(node, items=items)
+            # the body is a scope of its own: an unscoped block (a narrowed
+            # binding's declare + use) has nothing after it to leak into
+            return replace(node, items=items, scoped=True)
         statements = self._lower_statement(node)
         if len(statements) == 1:
             return statements[0]
@@ -3457,7 +3459,16 @@ class _Lowerer(
             lowered = self._lower_statement_inner(node)
         finally:
             temporaries, self.statement_temporaries = self.statement_temporaries, outer
-        return self._with_temporaries_released(lowered, temporaries)
+        statements = self._with_temporaries_released(lowered, temporaries)
+        if (
+            node.type == ty.BOTTOM_TYPE
+            and not isinstance(node, (hir.Return, hir.Break, hir.Continue))
+            and not self.lowering_module_startup
+        ):
+            # µDewy's must-return check is syntactic: a body ending in a
+            # diverging call (`err"…"`) still needs a (dead) trailing return
+            statements = [*statements, hir.Return(node.loc, ty.BOTTOM_TYPE, None)]
+        return statements
 
     def _with_temporaries_released(self, lowered: list[hir.AST], temporaries: list[tuple[str, hir.ExpressedIdentifier]]) -> list[hir.AST]:
         """Append the releases of a statement's string temporaries — a call result

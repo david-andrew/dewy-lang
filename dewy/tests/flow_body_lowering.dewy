@@ -1,0 +1,30 @@
+# flow-arm bodies that lower to statement bundles: a narrowed optional's
+# interpolated print, a parenthesized multi-statement group, and a function
+# whose only fall-through path is a diverging call (no explicit return)
+
+let describe = (msg:string?=none) => {
+    if msg is? string printl"got: {msg}" else printl"got: nothing"
+}
+
+let count_up = (limit:int64):>int64 => {
+    stack:int64 = 1
+    i:int64 = 0
+    loop i <? limit {
+        if stack <? 5 (stack += 1 i += 2)
+        else { i += 1 }
+    }
+    return stack
+}
+
+let must_find = (v:int64?):>int64 => {
+    if v is? int64 return v
+    exit(7)   # diverging tail: µDewy still needs its dead trailing return
+}
+
+main = () => {
+    describe('hey')
+    describe
+    if count_up(10) not =? 5 exit(1)
+    if must_find(40) not =? 40 exit(2)
+    exit(42)
+}
