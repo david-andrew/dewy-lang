@@ -1,0 +1,253 @@
+doc"""
+Tokenizer Framework
+
+(TBD attempt to simplify over the )
+"""
+
+from p'../../../library/reporting.dewy' import Report, SrcFile #, Error, Warning, Info, Hint
+from p'../../../library/linux/system.dewy' import _exit
+
+
+
+# some helpers
+let err = (msg:string?=none) => {
+    if msg is? string printl"error: {msg}" else printl"error: unimplemented"  # would be nice if this could print out the location it was called
+    exit(1)
+}
+
+
+
+
+
+##### CHARACTER SETS AND USEFUL CONSTANTS #####
+
+const whitespace = set[' ' '\t' '\n' '\r']
+const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
+const line_comment_start:'#' = '#'
+const block_comment_start: '#\{' = '#\{'
+const block_comment_end: '\}#' = '\}#'
+
+# TODO: The specific set of digits is open for debate. The following are proposed:
+# latin = set('ÆØÞßæøþẞ')
+# misc = set('‽¢£¥€§†‡※')
+# units = set('℃℉℥ℨ')
+# Also `ϕϖϗϰϱϴ`, perhaps just `ϕϴ` which would normalize to the greek versions
+const digits = set'0123456789'
+const alpha = set'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const greek = set'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω'
+const math = set'ℂℕℤℚℝℙℍ𝔼𝕊𝕋𝔽𝔾ℵℒ'
+const misc = set'_‾!°'
+const subscripts   = set'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ'                                  # these get normalized to the corresponding _N form, e.g. x₁ to x_1 (excluding ₊₋₌₍₎)
+const superscripts = set'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ'  # these get normalized to the corresponding ‾N form, e.g. ¹x to ‾1x (excluding ⁺⁻⁼⁽⁾)
+const misc_decorations = set'℠™©®'
+const primes = set'′″‴⁗'
+
+const start_characters = alpha | greek | math | misc # | latin | units
+const continue_characters = start_characters | digits
+const decoration_characters = superscripts | subscripts | misc_decorations | primes
+
+# note that the prefix is case insensitive, so call .casefold() when matching the prefix
+# numbers may have _ as a separator (if _ is not in the set of digits)
+const BasePrefix:type = '0b' | '0t' | '0q' | '0s' | '0o' | '0d' | '0z' | '0x' | '0u' | '0r' | '0g'
+
+BaseInfo:type = [
+    digits:set<string> #length>?1 >  #TODO: compiler improvements: adding the length here didn't work
+    case_insensitive:bool
+    extra_chars:dict<string int?>     # TODO compiler improvements: calling this `:dict<string int|undefined>` gave a pretty cryptic error when below I tried including empty dicts in the structure. "arrays require a fixed-width scalar or handle element type, got `int | undefined`". perhaps the error could highlight multiple places? but also general improvements to the error (e.g. hint to change `int` to some `intN`, etc.). and also just the ability to have `int` here in the first place, and it would figure out what it width it needs based on all the places that do provide something rather than failing on the ones that don't need it
+]
+
+BASE_SPECS: dict<BasePrefix BaseInfo> = [
+    '0b' -> [set'01' false []]    # binary
+    '0t' -> [set'012' false ['T'->(-1)]]    # ternary (and also support balanced ternary with 'T')
+    '0q' -> [set'0123' false []]    # quaternary
+    '0s' -> [set'012345' false []]    # seximal
+    '0o' -> [set'01234567' false []]    # octal
+    '0d' -> [set'0123456789' false []]    # decimal
+    '0z' -> [set'0123456789XE' true []]    # dozenal (case-insensitive)
+    '0x' -> [set'0123456789abcdef' true []]    # hexadecimal (case-insensitive)
+    '0u' -> [set'0123456789abcdefghijklmnopqrstuv' true []]    # base 32 (duotrigesimal) (case-insensitive)
+    '0r' -> [set'0123456789abcdefghijklmnopqrstuvwxyz' true []]    # base 36 (hexatrigesimal) (case-insensitive)
+    '0g' -> [set'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' false ['-'->62 '_'->63 '='->none]]    # base 64 (tetrasexagesimal) (case-sensitive)
+]
+
+base_radixes: dict<BasePrefix int> = [
+    loop [prefix info] in BASE_SPECS
+        prefix -> info.digits.length
+]
+
+
+# commonly used bases
+const base10 = '0d'
+const base16 = '0x'
+const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be based strings or based arrays
+
+
+# Token Structs
+# StringQuoteOpener = type of any & [matching_quote:StringQuoteCloser?=none]
+# StringQuoteCloser = type of any & [matching_quote:StringQuoteOpener|RawStringQuoteOpener|TemplateStringQuoteOpener|BasedStringQuoteOpener|none=none]  # TODO compiler fixes: causes recursion limit overflow
+
+
+# Tokenization Contexts
+Context = $abstract type of any & [srcfile:SrcFile previous:Token?]
+Root:type = type of Context & [default_base:BasePrefix=base10]
+StringBody:type = type of Context# & [opening_quote: StringQuoteOpener | RestOfFileStringQuote | HeredocStringOpener]
+RawStringBody:type = type of Context# & [opening_quote: RawStringQuoteOpener | RawHeredocStringOpener | RawRestOfFileStringQuote]
+TemplateStringBody:type = type of Context# & [opening_quote: TemplateStringQuoteOpener | TemplateHeredocStringOpener | TemplateRestOfFileStringQuote]
+BasedStringBody:type = type of Context#{ & [
+    opening_quote: BasedStringQuoteOpener
+    base: BasePrefix
+]}#
+BlockBody:type = type of Context #{ & [
+    opening_delim: LeftSquareBracket | LeftParenthesis | LeftCurlyBrace | TemplateLeftCurlyBrace | ParametricStringEscape
+    default_base: BasePrefix = base10
+] }#
+TypeBody:type = type of Context #{ & [
+    opening_delim: LeftAngleBracket
+    default_base: BasePrefix = base10
+]}#
+
+# AllContexts = Root | StringBody | RawStringBody | TemplateStringBody | BasedStringBody | BlockBody | TypeBody
+
+# let Context = type of any
+let Push = type of any & [ctx:Context]
+let Pop = type of any
+# ConextAction:type = Push | Pop | none
+
+let nonemptystring:type = string<length >? 0>
+let eatfn:type = (src:nonemptystring ctx:Context):>uint64? | TokenError
+let actionfn:type = (ctx:Context):>Push|Pop
+# let no_op = (ctx:Context)=>none
+
+let Token:type = type of any & [src:string loc:Span idx:uint64] 
+let TokenProtocol:type = [eat:eatfn action_on_eat:actionfn?=none]
+
+let TokenError = type of error  #TODO: merge this with Report...
+let TokenErrorReport = TokenError & Report
+
+# let Whitespace:type = type of Token
+# let Comment:type = type of Token
+
+
+Whitespace = type of TokenProtocol & [
+    eat = (src:nonemptystring ctx:Context):>uint64? => {
+        if src[0] not in? whitespace return none
+        loop i in 0..uint64.max and i <? src.length {  
+            if src[i] not in? whitespace return i
+        }
+        return src.length
+    }
+
+    __as__ = ():>string => "<Whitespace>"  #would it be possible to declare this on the base TokenProtocol type, and it just inserts the child's name there?
+]
+
+# LineComment = TokenProtocol[
+#     eat = (src:nonemptystring ctx:Context):>uint64? => {
+#         if not src.startswith(line_comment_start) return none
+#         loop i in 0..uint64.max and i <? src.length {  
+#             if src[i] =? '\n' return i + 1
+#         }
+#         return src.length
+#     }
+# ]
+
+
+# # # TODO: compiler improvements way too much complaining about int64 vs uint64 stuff... should discuss a bit about what to do..
+# # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
+# BlockComment = TokenProtocol[
+#     eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
+#         if not src.startswith(block_comment_start) return none
+#         stack = 1
+#         i:int64 = 0
+#         loop i <? src.length {  #TODO: compielr improvements, should be able to do this comparison between int64 and uint64..  also why is length int64 instead of uint64? it can never be negative...
+#             if src[i..end].startswith(block_comment_start) {stack += 1 i+=block_comment_start.length}  #TODO: compiler fixes: if this is wrapped in `()` instead of `{}`, there is a syntax error in the lowered udewy
+#             else if src[i..end].startswith(block_comment_end) {stack -= 1 i+=block_comment_end.length} #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
+#             else { i += 1 }
+    
+#             if stack =? 0 return i transmute uint64
+#         }
+    
+#         err"need to return an error report here. missing closer for block comment"
+#     }
+# ]
+
+# # Context = type of any
+
+
+
+
+# TODO compiler bugs: why did I have to move this above tokenize? you're supposed to be able to reference functions before their declaration when inside other functions
+# what tokens are allowed in what contexts
+contextmap = (ctx:Context):>array<TokenProtocol> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
+    <Root> => [
+        Whitespace
+        # LineComment
+        # BlockComment
+    ]
+    <StringBody> => []
+    <RawStringBody> => []
+    <TemplateStringBody> => []
+    <BasedStringBody> => []
+    <BlockBody> => [
+        Whitespace
+        # LineComment
+        # BlockComment
+    ]
+    <TypeBody> => [
+        Whitespace
+        # LineComment
+        # BlockComment
+    ]
+}
+
+
+
+tokenize = (srcfile:SrcFile):>array<Token> => {
+    ctx_stack:array<Context length>?0> = [  #TODO: what's the clean way to share tokens (unlike p0.py where tokens and tokens_so_far were separate views on the same thing. want to reduce the redundancy)
+        Root[srcfile=srcfile previous=none]
+    ]
+    tokens:array<Token> = []
+    
+    src = srcfile.body
+    i:int64 = 0
+    loop i <? src.length {
+        ctx = ctx_stack[end]
+        allowed_tokens = contextmap(ctx)
+        printl"allowed tokens: {allowed_tokens}"
+        i+=1
+    }
+
+    return tokens
+}
+
+
+
+
+# # why is iterating over argv/accessing members so difficult? `loop i in 0..argv.length` complains about argv.length not being a compiletime constant...
+main = (argv:array<string>):>uint64 => {
+    if argv.length <? 2 {
+        err"please specify the path to the file to tokenize"
+    }
+    path_arg = p(argv[1])
+    printl"tokenizing {path_arg}"
+    # if not path.exists { printl"path does not exist: {path}" return }
+    # src = 
+    # src = path.read_text
+    srcfile = SrcFile[
+        path=path_arg.path
+        body=match path_arg.read_text {
+            s:string => s
+            _ => { printl"failed to read file {path_arg}" return 1 }
+        }
+        first_row=0
+    ]
+    tokens = tokenize(srcfile)
+    if tokens is? TokenErrorReport {
+        # todo render the report
+        tokens.render(srcfile)
+        exit(1)
+    }
+    printl"tokens={tokens}"
+
+
+    return 0
+}
