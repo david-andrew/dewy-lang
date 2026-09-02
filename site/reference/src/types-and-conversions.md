@@ -18,7 +18,7 @@ A type alias does not create nominal identity unless its defining construct expl
 
 ## Nominal Identity
 
-`type of Parent` evaluates to a fresh nominal child of `Parent`. Implemented today: error types (`type of error`) and object types, where the operand may be an object type, `any` alone (an empty marker type), or an intersection of `any` with object types (`&` contributes structure, never identity):
+`type of Parent` evaluates to a fresh nominal child of `Parent` — so a value of `type of any & Info` also satisfies an `Info` parameter, the structure's fields leading the child's. Implemented today: error types (`type of error`, alone or `& [...]` for an error carrying fields) and object types, where the operand may be an object type, `any` alone (an empty marker type), or an intersection of `any` with object types (`&` contributes structure, never identity):
 
 <!-- dewy-example: compiler -->
 ```dewy

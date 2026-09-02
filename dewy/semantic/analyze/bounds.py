@@ -1124,6 +1124,24 @@ class _BoundsValidator:
                 break
             head = widened
 
+        # Narrowing: widening over-approximates (`i += 1` sends `i` to [0, ∞]),
+        # so re-run the body from the widened head with the guard applied and
+        # keep what comes back — under `loop i <? xs.length` that is [0, cap].
+        # A decreasing iteration from a post-fixpoint stays sound.
+        for _ in range(3):
+            true_state = self._refine(head, condition, truth=True)
+            if true_state is None:
+                break
+            transfer = self._loop_transfer(body, true_state, validate=False)
+            backedges = [
+                *([transfer.normal] if transfer.normal is not None else []),
+                *transfer.continues.get(0, []),
+            ]
+            narrowed = self._narrow_states(head, self._join_states([state, *backedges]))
+            if narrowed == head:
+                break
+            head = narrowed
+
         self._eval(condition, head, validate=validate)
         true_state = self._refine(head, condition, truth=True)
         break_exits: list[State] = []
@@ -2625,6 +2643,14 @@ class _BoundsValidator:
                 [state[binding_id] for state in states]
             )
             for binding_id in common
+        }
+
+    @staticmethod
+    def _narrow_states(head: State, candidate: State) -> State:
+        """The head tightened by one more pass of the body (keys the pass lost are dropped)."""
+        return {
+            key: head[key].intersect(candidate[key])
+            for key in head.keys() & candidate.keys()
         }
 
     def _widen_states(self, previous: State, current: State) -> State:

@@ -1037,8 +1037,16 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
         second, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         return KeywordExpr(Span(kw.loc.start, second.items[-1].loc.stop), [kw, first, import_kw, second]), i
 
+    if kw.name == "else":
+        # `else` inside a match's braces: it belongs to the flow chain, after them
+        Error(
+            srcfile=ctx.srcfile,
+            title="`else` is not a match arm",
+            pointer_messages=[Pointer(span=kw.loc, message="`else` cannot start an arm here")],
+            hint="`else` attaches to the `match` as a whole, after its braces: `match v { … } else { … }`; "
+            "an arm that takes everything is spelled `v:any => …`",
+        ).throw()
     raise ValueError(f"INTERNAL ERROR: unexpected keyword {kw.name!r}")
-    return KeywordExpr(kw.loc, [kw]), i
 
 
 def bundle_keyword_exprs(tokens: list[t1.Token], *, ctx: Context) -> None:

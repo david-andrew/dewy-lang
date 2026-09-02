@@ -1,0 +1,37 @@
+# errors carrying fields: `type of error & Report` (or `& [...]`) mints a
+# nominal error that is constructed and read like any minted object, sits
+# in the `error` family (`is? error`, `or_throw`, forwarding), and — being a
+# fresh nominal child of its structure — satisfies a `Report` parameter
+
+from p"../../library/reporting.dewy" import Report, Span, Pointer
+
+let TokenError = type of error & Report
+let Unterminated = type of TokenError & [opened_at:int64]        # a child error, nominally under TokenError
+let NotFound = type of error                                     # a unit error alongside
+let Detail = type of error & [code:int64 note:string = "none"]
+
+let count_title = (r:Report):>int64 => r.title.length
+
+let check = (n:int64):>int64 | TokenError | NotFound => {
+    if n <? 0 return TokenError(severity="error" title="negative" pointers=[Pointer(span=Span(start=0 stop=1) message="here")])
+    if n >? 100 return NotFound
+    return n
+}
+
+let passthrough = (n:int64):>int64 | TokenError | NotFound => {
+    let v:int64 = check(n) or_throw
+    return v
+}
+
+let code_of = (n:int64):>int64 | Detail => if n =? 0 Detail(code=5) else n
+
+main = () => {
+    let total:int64 = 0
+    match check(-1) { e:TokenError => { total += count_title(e) + e.pointers.length }  v:int64 => exit(1)  <NotFound> => exit(2) }   # 9
+    match check(200) { <NotFound> => { total += 20 }  e:error => exit(3)  v:int64 => exit(4) }                                       # 29
+    match passthrough(7) { v:int64 => { total += v }  e:error => exit(5) }                                                           # 36
+    let u = Unterminated(severity="error" title="open" opened_at=3)
+    if u is? TokenError and u is? error total += u.opened_at                                                                          # 39
+    match code_of(0) { d:Detail => { if d.note =? "none" total += d.code - 2 }  v:int64 => exit(6) }                                # 42
+    exit(total)
+}

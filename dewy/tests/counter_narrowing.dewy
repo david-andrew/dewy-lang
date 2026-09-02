@@ -1,0 +1,31 @@
+# an abstract-int counter stepped inside `loop i <? xs.length`: widening
+# sends it to [0, ∞], and the narrowing pass brings it back to what the
+# guard admits ([0, cap]), so the comparison and the steps fit a word
+# without an `int64` annotation
+
+let count = (src:string):>int64 => {
+    i = 0
+    loop i <? src.length { i += 1 }
+    return i
+}
+
+let depth = (src:string):>int64 => {          # the block-comment shape: two counters, uneven steps
+    stack = 1
+    i = 2
+    loop i <? src.length {
+        if src[i..end].startswith('#\{') { stack += 1 i += 2 }
+        else if src[i..end].startswith('}#') { stack -= 1 i += 2 }
+        else { i += 1 }
+        if stack =? 0 return i
+    }
+    return (-1)
+}
+
+let upto = (n:int64):>int64 => { i = 0  loop i <? n { i += 1 }  return i }
+
+main = () => {
+    let total:int64 = count("abcd")                 # 4
+    total += depth("#\{ a }# rest")                 # 7 → 11
+    total += upto(31)                               # 42
+    exit(total)
+}

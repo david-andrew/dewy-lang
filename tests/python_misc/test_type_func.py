@@ -217,7 +217,7 @@ def test_dispatch_ambiguous():
 
 def test_dispatch_no_match():
     a = F([('x', 'int')], ret='void')
-    with pytest.raises(DispatchError, match='no matching'):
+    with pytest.raises(DispatchError, match='no overload takes'):
         select([a], ['string'])
 
 

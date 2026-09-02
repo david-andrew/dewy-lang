@@ -63,7 +63,7 @@ def test_generic_bodies_are_checked_at_instantiation() -> None:
     with pytest.raises((TypeCheckError, UserError)):
         _declared("let twice = <T>(a:T):>T => a + a\nlet main = ():>int64 => { let s = twice(true) return 0 }\n")
     # bounds are enforced at the call
-    with pytest.raises((TypeCheckError, UserError), match='no matching method'):
+    with pytest.raises((TypeCheckError, UserError), match='no overload takes'):
         _declared("let twice = <T of int>(a:T):>T => a + a\nlet main = ():>int64 => { let s = twice(\"a\") return 0 }\n")
 
 

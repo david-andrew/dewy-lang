@@ -443,6 +443,19 @@ name -> parent. Every `TypeSystem` registers them, so the lowering's fresh
 instances agree with the checker's about `NotFound of? error`."""
 
 
+def user_brand_carries(child: object, structure: object) -> bool:
+    """Whether a minted object satisfies an unbranded structure: `type of any & Info`
+    is a fresh nominal child of `Info`, so a `Tagged` value is an `Info` (the
+    structure's fields lead the child's, same names in order; a value of the
+    child has the parent's layout in front)."""
+    if not (user_branded(child) and isinstance(structure, ObjectType) and structure.brand is None):
+        return False
+    assert isinstance(child, ObjectType)
+    if len(child.fields) < len(structure.fields):
+        return False
+    return all(a.name == b.name and a.type == b.type for a, b in zip(child.fields, structure.fields))
+
+
 def is_user_nominal(type_: object) -> bool:
     return isinstance(type_, str) and type_ in USER_NOMINAL_TYPES
 
@@ -965,6 +978,10 @@ class TypeSystem:
 
     def _structural_nominal(self, atom: LiteralAtom) -> Primitive | None:
         """Nominal umbrella for a structural TypeExpr atom, if any."""
+        if isinstance(atom, ObjectType) and atom.brand is not None and atom.brand in USER_NOMINAL_TYPES:
+            # an error carrying fields: its brand is a nominal error, so the
+            # object sits under `error` and `exception`, not under `object`
+            return atom.brand
         return STRUCTURAL_NOMINAL_MAP.get(type(atom))
 
 
@@ -1073,9 +1090,9 @@ class TypeSystem:
                 return a
             return a if a.length == b.length else None
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
-            if a == b or user_brand_descends(a, b):
+            if a == b or user_brand_descends(a, b) or user_brand_carries(a, b):
                 return a
-            return b if user_brand_descends(b, a) else None
+            return b if user_brand_descends(b, a) or user_brand_carries(b, a) else None
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a if a == b else None
 
@@ -1215,7 +1232,7 @@ class TypeSystem:
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
-            return a == b or user_brand_descends(a, b)
+            return a == b or user_brand_descends(a, b) or user_brand_carries(a, b)
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b
 
@@ -1738,7 +1755,10 @@ class TypeSystem:
                     promote_pos = [None if t == common else common for t in pos_types]
 
         if not apps:
-            raise DispatchError(f'no matching method for pos={pos_types!r} kw={kw_types!r}')
+            from .hir_display import type_to_dewy   # spelled as the user would write the types, not as reprs
+            shown_pos = ', '.join(f'`{type_to_dewy(t)}`' for t in pos_types)
+            shown_kw = ''.join(f' {name}=`{type_to_dewy(t)}`' for name, t in kw_types.items())
+            raise DispatchError(f'no overload takes ({shown_pos}){shown_kw}')
         winners = [
             (index, method)
             for index, method in apps

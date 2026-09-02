@@ -5068,11 +5068,25 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     assert isinstance(mint, p0.Prefix)
     parent = ast_to_type(mint.item, ctx=ctx)
     extras = [ast_to_type(item, ctx=ctx) for item in operands if item is not mint]
+    name = binding.name
+    if ty.user_branded(parent) and isinstance(parent, ty.ObjectType) and parent.brand in ty.USER_NOMINAL_TYPES:
+        # `type of TokenError & [...]`: a child of an error carrying fields is
+        # one too, nominally under its parent
+        child = _mint_branded_object(binding, rhs, parent, extras, ctx=ctx, nominal_parent=parent.brand)
+        ty.USER_NOMINAL_TYPES[name] = parent.brand
+        ctx.type_system.register_user_nominals()
+        return child
     if not (isinstance(parent, str) and ctx.type_system.is_subtype(parent, 'error')):
         return _mint_branded_object(binding, rhs, parent, extras, ctx=ctx)
     if extras:
-        not_implemented(ctx.srcfile, rhs.loc, 'errors carrying fields (`type of error & [...]`)')
-    name = binding.name
+        # an error carrying fields (`type of error & Report`, `& [code:int64]`):
+        # a branded object whose brand is registered as a nominal error, so it
+        # is constructed and read like any minted object and sits in the
+        # `error` family for `is? error`, `or_throw`, and forwarding
+        carrying = _mint_branded_object(binding, rhs, 'any', extras, ctx=ctx, nominal_parent=parent)
+        ty.USER_NOMINAL_TYPES[name] = parent
+        ctx.type_system.register_user_nominals()
+        return carrying
     known = ty.USER_NOMINAL_TYPES.get(name)
     if known is not None and known != parent:
         user_error(
@@ -5124,7 +5138,7 @@ def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Cont
     return ty.ObjectType(tuple(fields), brand=brand, methods=tuple(methods))
 
 
-def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context) -> ty.ObjectType:
+def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context, nominal_parent: str | None = None) -> ty.ObjectType:
     """`let Number:type = type of any & [value:int64]` — `(type of any) & [...]` —
     mints a nominal object type: the parent's structure (`any` contributes
     nothing) strengthened by the intersected objects, distinct from every
@@ -5179,7 +5193,8 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
             f'`type of {type_to_dewy(parent)}` (mintable so far: error types, and object types — possibly intersected with `any`)',
         )
     name = binding.name
-    if name in ty.USER_NOMINAL_TYPES or (name in ctx.type_system._named_types and name not in ty.USER_BRANDS):
+    reminted = nominal_parent is not None and ty.USER_NOMINAL_TYPES.get(name) == nominal_parent   # the same error minted again (another compile in this process)
+    if (name in ty.USER_NOMINAL_TYPES or name in ctx.type_system._named_types) and name not in ty.USER_BRANDS and not reminted:
         user_error(
             ctx.srcfile,
             f'`{name}` is already a type name',
@@ -9637,7 +9652,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         constructor = _type_constructor_target(binop.left, ctx=ctx)
         if constructor is not None:
             # a type cannot be multiplied: `Span(1 9)` is only ever a construction
-            return tcr_function_call(constructor, binop.right, ctx=ctx, expected=expected)
+            return tcr_function_call(constructor, _construction_arguments(binop.right), ctx=ctx, expected=expected)
         if isinstance(binop.left, p0.BinOp) and _operator_symbol(binop.left.op) == '.':
             # `s.grow(2)`: a method is only ever called, never multiplied
             member = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
@@ -12348,6 +12363,18 @@ def _tcr_output_call(left: hir.AST, right: p0.AST, *, ctx: Context) -> hir.AST |
         for part in parts
     ]
     return hir.Block(loc, ty.VOID_TYPE, statements, False)
+
+
+def _construction_arguments(arguments: p0.AST) -> p0.AST:
+    """`Protocol[let eat = …]`: a field spelled as a declaration, as an untyped
+    object literal accepts it, is the keyword argument `eat = …`."""
+    if not isinstance(arguments, p0.Block):
+        return arguments
+    items = [
+        item.parts[1] if _is_top_level_declare(item) and isinstance(item, p0.KeywordExpr) and len(item.parts) == 2 else item
+        for item in arguments.inner
+    ]
+    return replace(arguments, inner=items) if items != list(arguments.inner) else arguments
 
 
 def _type_constructor_target(ast: p0.AST, *, ctx: Context) -> hir.TypeValue | None:

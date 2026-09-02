@@ -162,7 +162,7 @@ let result = combine(scale=2 10 16)
 
 
 def test_omitted_interleaved_default_does_not_skip_a_missing_required_parameter() -> None:
-    with pytest.raises(UserError, match='no matching method'):
+    with pytest.raises(UserError, match='no overload takes'):
         _declarations('''
 let combine = (left:int64 scale:int64=2 right:int64):>int64 => left + right * scale
 let result = combine(10 16)

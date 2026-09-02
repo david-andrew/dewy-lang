@@ -4,7 +4,7 @@ Dewy models expected failures as values belonging to nominal error types. A func
 
 Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `none` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
 
-Implemented today: unit-like error types minted with `type of error`, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: errors carrying fields, forwarding through method calls, and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
+Implemented today: error types minted with `type of error`, unit-like or carrying fields, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: forwarding through method calls, the fallback operators, and storing a *child* of a field-carrying error where the union names its parent (pending the brand-word representation). Examples marked as compiler examples below compile with the current compiler; the rest are design.
 
 Errors are the second half of Dewy's no-trap rule (see [No Traps](refinements-and-effects.md#no-traps)): what cannot be proven safe at compile time is returned as a value, never raised, never aborted.
 
@@ -46,20 +46,20 @@ let maybeNumber = (flag:bool):>int64 | MyCustomError => {
 
 Minted names are nominal: two `type of error` aliases are distinct types even though both descend from `error`, and a value of one is never a value of the other.
 
-Intersect the fresh nominal type with an object type when an error carries fields:
+Intersect the fresh nominal type with an object type when an error carries fields. The result is constructed, matched, and read like any minted object (`Report`'s methods included when the structure is `Report`), sits in the `error` family for `is? error`, `or_throw`, and forwarding, and — being a fresh nominal child of its structure — satisfies a parameter of that structure:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: compiler -->
 ```dewy
-const MyComplexError:type =
-    (type of error) & [extra:string fields:int64]
+let TokenError:type = type of error & [message:string offset:int64 = 0]
 
-let maybeNumber = ():>int64 | MyComplexError => {
-    if random.coinflip
-        return MyComplexError[
-            extra='some extra context'
-            fields=42
-        ]
-    return 42
+let count = (src:string):>int64 | TokenError => {
+    if src.length =? 0 return TokenError(message='empty input')
+    return src.length
+}
+
+describe = (n:int64):>string => match count("abc") {
+    e:TokenError => e.message
+    v:int64 => "{v} characters"
 }
 ```
 
