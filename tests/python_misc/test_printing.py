@@ -84,8 +84,8 @@ def test_values_that_cannot_convert_are_reported_on_the_value() -> None:
         _main('    printl"{[[1 2] [3 4]]}"')
     with pytest.raises(TypeCheckError, match='`Rational` prints, but has no string form yet'):
         _main('    let r:Rational = 1/2\n    let s:string = r as string')
-    with pytest.raises(TypeCheckError, match='does not convert to string|no `print` method takes'):
-        _compile('let Holder:type = [f:(n:int64):>int64]\nlet main = ():>int64 => {\n    let h = Holder((n:int64):>int64 => n)\n    printl"{h}"\n    return 0\n}\n')
+    # a function-typed field prints as its type's spelling
+    _compile('let Holder:type = [f:(n:int64):>int64]\nlet main = ():>int64 => {\n    let h = Holder((n:int64):>int64 => n)\n    printl"{h}"\n    return 0\n}\n')
 
 
 def test_optionals_print() -> None:
@@ -131,7 +131,7 @@ def test_doc_strings_are_accepted() -> None:
 
 def test_one_substantive_reading_reports_its_own_error() -> None:
     with pytest.raises(TypeCheckError, match='no string conversion for this value'):
-        _compile('let Holder:type = [f:(n:int64):>int64]\nlet main = ():>int64 => { let h = Holder((n:int64):>int64 => n)  let t:string = h as string  return 0 }\n')
+        _compile('let Holder:type = [f:array<array<int64>>]\nlet main = ():>int64 => { let h = Holder([[1]])  let t:string = h as string  return 0 }\n')
     with pytest.raises(UserError) as caught:   # the readings' verdict is definite, with the one reading's own message
         _main('    printl([[1 2] [3 4]])')
     assert 'no valid interpretation' not in str(caught.value) and 'containers, which a loop cannot visit' in str(caught.value)

@@ -44,7 +44,7 @@ describe = (ctx:Context):>int64 => match ctx {
 }
 ```
 
-A minted type with no fields is both the type and its single inhabitant — written with its name where a value is wanted, as an error type is: `[Whitespace Name(text='x')]`, `return Whitespace`, `let w = Whitespace` (`Whitespace()` constructs the same value).
+A minted type with no fields is both the type and its single inhabitant — written with its name where a value is wanted, as an error type is: `[Whitespace Name(text='x')]`, `return Whitespace`, `let w = Whitespace` (`Whitespace()` constructs the same value). The same holds for a minted type every field of which has a default: its bare name is the construction `Name()`, as a callable with no required parameters is called by its name. A method declared in a mint under the name of an inherited function-typed field is that field's value — the child implements the protocol's slot — so `Whitespace = type of Protocol & [eat = (src:string):>int64 => …]` is fully defaulted and `[Whitespace LineComment]` is an `array<Protocol>`.
 
 <!-- dewy-example: compiler -->
 ```dewy

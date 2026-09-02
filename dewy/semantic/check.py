@@ -298,11 +298,6 @@ def _typecheck_module(
     if test:
         runner, srcfile = _synthesize_test_runner(tests, block, srcfile=srcfile)
         block = replace(block, inner=[*block.inner, *runner])
-    declared_names = {
-        declaration[0]
-        for item in block.inner
-        if (declaration := _declaration_parts(item)) is not None
-    }
     ctx = Context(
         srcfile,
         declarations,
@@ -310,10 +305,15 @@ def _typecheck_module(
         binding_scopes=ChainMap(prelude_bindings),
         binding_registry=registry or sb.BindingRegistry(),
         module_loader=module_loader,
-        module_declared_names=declared_names,
+        module_declared_names=set(),
         grown_array_names=_grown_array_names(block),
         target=target,
     )
+    seen_names: set[str] = set()
+    for item in block.inner:
+        declaration = _block_declaration_parts(item, seen_names, ctx=ctx)   # `let x = …` and a bare `x = …` alike
+        if declaration is not None:
+            ctx.module_declared_names.add(declaration[0])
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
         raise TypeError('INTERNAL ERROR: source module did not produce a block')
@@ -1352,7 +1352,10 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     if (
         isinstance(ast.left, p0.Atom)
         and isinstance(ast.left.item, t1.Identifier)
-        and ast.left.item.name not in ctx.declarations
+        and (
+            ast.left.item.name not in ctx.declarations
+            or ctx.binding_registry.by_syntax.get(id(ast)) is not None   # collected as this block's declaration (its signature may already be known)
+        )
     ):
         name = ast.left.item.name
         dict_block = _dict_literal_block(ast.right)
@@ -4962,9 +4965,40 @@ def _declaration_parts(
     return None
 
 
+def _implicit_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
+    """`name = value` at block level declares `name` when nothing outer has it
+    and it is the block's first `name` (later ones assign): the same
+    declaration `let name = value` would make, so it is collected and
+    deferred like one — a function body may call a function written after it."""
+    if not (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.Atom)
+        and isinstance(item.left.item, t1.Identifier)
+    ):
+        return None
+    name = item.left.item.name
+    if name in ctx.declarations or name in seen:
+        return None
+    seen.add(name)
+    return name, item.right
+
+
+def _block_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
+    """A block item's declaration: `let`/`const`, or the block's first bare `name = value`
+    (``seen`` holds the names the block has declared so far, either way)."""
+    declaration = _declaration_parts(item)
+    if declaration is not None:
+        seen.add(declaration[0])
+        return declaration
+    return _implicit_declaration_parts(item, seen, ctx=ctx)
+
+
 def _collect_block_bindings(block: p0.Block, *, ctx: Context) -> None:
+    seen: set[str] = set()
     for item in block.inner:
-        declaration = _declaration_parts(item)
+        declaration = _block_declaration_parts(item, seen, ctx=ctx)
         if declaration is None:
             continue
         if id(item) in ctx.binding_registry.by_syntax:
@@ -5288,7 +5322,15 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                         Pointer(span=rhs.loc, message=f'`{type_to_dewy(field_.type)}` does not fit the inherited `{type_to_dewy(fields[existing_index].type)}`'),
                     )
                 fields[existing_index] = field_
-            methods.extend(item.methods)
+            for method in item.methods:
+                slot = next((index for index, existing in enumerate(fields) if existing.name == method.name), None)
+                if slot is not None and isinstance(fields[slot].type, ty.FunctionType):
+                    # `type of Protocol & [eat = (…) => …]`: a method named like an
+                    # inherited function-typed field is that field's value —
+                    # the child implements the protocol's slot
+                    fields[slot] = replace(fields[slot], default=method.literal)
+                    continue
+                methods.append(method)
             continue
         not_implemented(
             ctx.srcfile,
@@ -7673,8 +7715,9 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
 
     deferred_functions: set[int] = set()
     if not type_block:
+        seen_implicit: set[str] = set()
         for item in block.inner:
-            declaration = _declaration_parts(item)
+            declaration = _block_declaration_parts(item, seen_implicit, ctx=ctx)
             if declaration is None:
                 continue
             name, expression = declaration
@@ -12305,6 +12348,10 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
     plain = ty.strip_refinement(type_)
     if _is_string_type(plain) or ty.string_valued(plain) or plain == 'bool' or isinstance(plain, ty.IntegerLiteralType) or (isinstance(plain, str) and plain in _MATERIALIZED_INTEGERS):
         return None
+    if isinstance(plain, (ty.FunctionType, ty.OverloadType)):
+        return None   # a function field prints as its type's spelling
+    if isinstance(ty.optional_payload(plain), (ty.FunctionType, ty.OverloadType)):
+        return None   # `none` or the spelling
     if _optional_container_element(plain):
         return None   # an optional member: `none` or its payload's text
     if _union_container_element(plain):
@@ -12437,8 +12484,19 @@ def _object_string(type_: ty.TypeExpr, object_type: ty.ObjectType, loc: Span, *,
     lines = [f'(__dewy_value:{shape}):>string => {{', '    let __dewy_pieces:array<string> = []']
     for index, field_ in enumerate(object_type.fields):
         prefix = (f'{brand}[' if index == 0 else ' ') + field_.name + '='
-        text = f"'{{__dewy_value.{field_.name}}}'"
         lines.append(f'    __dewy_pieces.push"{prefix}"')
+        function_payload = ty.optional_payload(field_.type)
+        if isinstance(field_.type, (ty.FunctionType, ty.OverloadType)) or isinstance(function_payload, (ty.FunctionType, ty.OverloadType)):
+            # a function value prints as its type's spelling, as one converts
+            # to string (an optional one: `none` or the spelling)
+            spelled_type = function_payload if isinstance(function_payload, (ty.FunctionType, ty.OverloadType)) else field_.type
+            spelled = type_to_dewy(spelled_type).replace('\\', '\\\\').replace('"', '\\"').replace('{', '\\{').replace('}', '\\}')
+            if function_payload is not None:
+                lines.append(f'    __dewy_pieces.push(if __dewy_value.{field_.name} is? none "none" else "{spelled}")')
+            else:
+                lines.append(f'    __dewy_pieces.push"{spelled}"')
+            continue
+        text = f"'{{__dewy_value.{field_.name}}}'"
         lines.append(f'    __dewy_pieces.push({f"_quoted({text})" if _quoted_member(field_.type) else text})')
     lines.append(f'    __dewy_pieces.push"{"]" if object_type.fields else brand or "[]"}"')
     lines += ['    return __dewy_pieces.join', '}']
@@ -13340,11 +13398,18 @@ def _unit_inhabitant(node: hir.AST, expected: ty.Type | None, *, ctx: Context) -
         return None
     minted = node.value
     assert isinstance(minted, ty.ObjectType)
-    if minted.fields or minted.brand in ty.USER_ABSTRACT_BRANDS:
+    if minted.brand in ty.USER_ABSTRACT_BRANDS:
         return None   # an abstract type has no value of its own
     if expected is not None and not ctx.type_system.is_subtype(minted, ty.strip_refinement(expected)):
         return None
-    return hir.ObjectLiteral(node.loc, minted, [])
+    if not minted.fields:
+        return hir.ObjectLiteral(node.loc, minted, [])
+    if all(field_.default is not None for field_ in minted.fields):
+        # every field defaulted: the name is the construction `Name()`, as a
+        # zero-argument callable is called by its bare name
+        constructed = _tcr_type_constructor_call(node, minted, p0.Block(node.loc, [], '()', None), ctx=ctx)
+        return constructed if isinstance(constructed, hir.ObjectLiteral) else None
+    return None
 
 
 def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:

@@ -1,0 +1,43 @@
+# the tokenizer's protocol table: a type of function-typed slots, children
+# minted with methods that fill those slots, named bare where a value is
+# wanted (every field defaulted, so the name is `Name()`), tabled by a
+# function written after the one that calls it, and printed for debugging
+
+Context = $abstract type of any & [depth:int64]
+Base:type = '0b' | '0d' | '0x'
+Root = type of Context & [base:Base = '0d']                 # a string-literal-union field: one string handle
+BlockBody = type of Context
+
+let Protocol:type = [eat:<(src:string ctx:Context):>int64> priority:int64 = 0]
+
+Whitespace = type of Protocol & [
+    eat = (src:string ctx:Context):>int64 => if src.startswith(" ") 1 else 0
+]
+LineComment = type of Protocol & [
+    eat = (src:string ctx:Context):>int64 => if src.startswith("#") src.length else 0
+    priority = 1
+]
+
+tokenize = (src:string ctx:Context):>int64 => {          # calls `allowed`, declared below
+    let total:int64 = 0
+    loop protocol in allowed(ctx) { total += protocol.eat(src ctx) + protocol.priority }
+    return total
+}
+
+allowed = (ctx:Context):>array<Protocol> => match ctx {
+    <Root> => [Whitespace LineComment]
+    <BlockBody> => [Whitespace]
+}
+
+main = () => {
+    let total:int64 = tokenize("# note" Root(depth=0))       # 0 + (6 + 1) = 7
+    total += tokenize(" x" BlockBody(depth=1))               # 1 → 8
+    let table = allowed(Root(depth=0))
+    if "{table}" =? "[[eat=<(src:string ctx:Context):>int64> priority=0] [eat=<(src:string ctx:Context):>int64> priority=1]]" total += 30   # 38
+    let w = Whitespace
+    if w.priority =? 0 and Whitespace().priority =? 0 total += 2                                                                             # 40
+    let r = Root(depth=0 base='0x')
+    r.base = '0b'
+    if r.base =? '0b' and Root(depth=0).base =? '0d' total += 2                                                                              # 42
+    exit(total)
+}

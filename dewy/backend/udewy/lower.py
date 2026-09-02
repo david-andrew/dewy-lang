@@ -4921,7 +4921,7 @@ class _Lowerer(
         if isinstance(type_, ty.FunctionType):
             loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)
             return hir.Transmute(loc, self._lower_callable_type(type_), loaded)
-        if self._is_handle_type(type_) or ty.is_user_nominal(type_):
+        if self._is_handle_type(type_) or ty.is_user_nominal(type_) or ty.enum_members(type_) is not None or self._is_string_valued(type_):
             loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)
             return replace(loaded, type=type_)
         self._target_error(address, f'object field load `{type_to_dewy(type_)}`')
@@ -4954,11 +4954,14 @@ class _Lowerer(
         if isinstance(type_, ty.FunctionType):
             stored = hir.Transmute(value.loc, 'int64', value)
             return [self._intrinsic_call('__store_i64__', [stored, address], ty.VOID_TYPE, loc)]
-        if self._is_handle_type(type_):
+        if ty.enum_members(type_) is not None:
+            # the member index, a word
+            return [self._intrinsic_call('__store_i64__', [replace(value, type='int64') if isinstance(value, hir.ExpressedIdentifier) else value, address], ty.VOID_TYPE, loc)]
+        if self._is_handle_type(type_) or self._is_string_valued(type_):
             return [
                 self._intrinsic_call(
                     '__store_i64__',
-                    [value, address],
+                    [replace(value, type='int64') if isinstance(value, hir.ExpressedIdentifier) else value, address],
                     ty.VOID_TYPE,
                     loc,
                 )
