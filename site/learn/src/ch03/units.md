@@ -34,6 +34,8 @@ Every dimension has a canonical unit — the SI base unit, and the whole turn fo
 <!-- dewy-example: compiler -->
 
 ```dewy
+import units                                # the units beyond time; the second and its scales are always in scope
+
 const mass = 10kg
 const velocity = 30m/s
 let energy = 1/2 * mass * velocity^2       # 4500 J
@@ -47,10 +49,12 @@ Angles use the turn so that degrees are exact (`45°` is `1/8 turn`) and trigono
 <!-- dewy-example: compiler -->
 
 ```dewy
+from units import (N m cos °)
+
 let work = 20N * 10m * cos(45°)            # about 141.42 J
 ```
 
-The catalog covers the SI base units, the usual prefixes (`km`, `cm`, `mm`, `g`, `mg`, `ms`, `us`, `ns`, `minute`, `hour`), the derived units `Hz N Pa J W`, `turn`, `°`/`deg`, and `rad`.
+Time is the one dimension the prelude carries — `s`, `ms`, `us`, `ns`, `minute`, `hour`, and `Duration` are always in scope. Every other unit is imported from the library module `units` (`import units` for all of them, `from units import (m kg)` for a selection): the SI base units, the usual prefixes (`km`, `cm`, `mm`, `g`, `mg`), the derived units `Hz N Pa J W`, `turn`, `°`/`deg`, `rad`, and the trigonometric functions over angles.
 
 ## Representation-Parameterized Quantities
 

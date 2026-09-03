@@ -78,6 +78,9 @@ class Context:
     module_loader: object | None = None
     module_namespaces: ChainMap[str, object] = field(default_factory=ChainMap)
     module_declared_names: set[str] = field(default_factory=set)
+    foreign_bindings: dict[int, str] = field(default_factory=dict)
+    """Bindings this module did not declare (the prelude's, imports): binding id -> where it is from.
+    Assignable only in their own module; here they are shadowed with `let`."""
     grown_array_names: frozenset[str] = frozenset()  # names some `.push`/`.pop`/... targets
     target: str = 'x86_64'  # backend target: `$target`
     allow_place_expression: bool = False
@@ -306,6 +309,7 @@ def _typecheck_module(
         binding_registry=registry or sb.BindingRegistry(),
         module_loader=module_loader,
         module_declared_names=set(),
+        foreign_bindings={binding.id: 'the prelude' for binding in prelude_bindings.values()},
         grown_array_names=_grown_array_names(block),
         target=target,
     )
@@ -1836,9 +1840,18 @@ def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
                 Pointer(span=ast.loc, message='cannot interpret this import'),
             )
 
-    path_text = _literal_import_path(path_ast, ctx=ctx)
     loader = ctx.module_loader
-    record = loader.import_module(path_text, ctx=ctx, loc=path_ast.loc)  # type: ignore[attr-defined]
+    library_name = _library_module_name(path_ast)
+    if library_name is not None and isinstance(path_ast, p0.Atom) and library_name in ctx.declarations:
+        library_name = None   # a binding holding a path (`let source = p"lib.dewy"`, `from source import …`)
+    if library_name is not None:
+        # `import units`, `from linux.system import …`: a bare name is a
+        # library module (a `p"…"` is a file, relative to this one)
+        path_text = library_name
+        record = loader.import_library(library_name, ctx=ctx, loc=path_ast.loc)  # type: ignore[attr-defined]
+    else:
+        path_text = _literal_import_path(path_ast, ctx=ctx)
+        record = loader.import_module(path_text, ctx=ctx, loc=path_ast.loc)  # type: ignore[attr-defined]
 
     if namespace_name is not None:
         _check_import_name_available(namespace_name, ast.loc, ctx=ctx)
@@ -1872,7 +1885,19 @@ def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
             )
         ctx.declarations[local_name] = binding.type
         ctx.binding_scopes[local_name] = binding
+        ctx.foreign_bindings[binding.id] = f'the module `{path_text}`'
     return hir.Void(ast.loc, ty.VOID_TYPE)
+
+
+def _library_module_name(ast: p0.AST) -> str | None:
+    """`units` or `linux.system` as an import source: the library module's name, `/`-joined for a subfolder."""
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier):
+        return ast.item.name
+    if isinstance(ast, p0.BinOp) and _operator_symbol(ast.op) == '.':
+        left = _library_module_name(ast.left)
+        if left is not None and isinstance(ast.right, p0.Atom) and isinstance(ast.right.item, t1.Identifier):
+            return f'{left}/{ast.right.item.name}'
+    return None
 
 
 def _literal_import_path(ast: p0.AST, *, ctx: Context) -> str:
@@ -10654,6 +10679,17 @@ def tcr_assignment_target(
                 ctx.srcfile,
                 'cannot assign to a read-only binding',
                 Pointer(span=target.loc, message=f'`{binding.name}` {binding.read_only_reason}'),
+            )
+        origin = ctx.foreign_bindings.get(binding.id) if binding is not None else None
+        if origin is not None:
+            # a binding is assigned only in the module that declared it; a bare
+            # `A = …` meaning to declare one's own needs `let`
+            what = 'a type' if binding.type_value is not None or binding.type == ty.TYPE_TYPE else f'a `{type_to_dewy(binding.type)}`' if binding.type is not None else 'a value'
+            user_error(
+                ctx.srcfile,
+                f'cannot assign to `{binding.name}`: it belongs to {origin}',
+                Pointer(span=target.loc, message=f'`{binding.name}` is {what} declared by {origin}; only its own module assigns it'),
+                hint=f'to declare your own `{binding.name}`, write `let {binding.name} = …` — it shadows that one within this module',
             )
         return resolved
 

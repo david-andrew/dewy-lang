@@ -1,22 +1,9 @@
-# Physical dimensions are compile-time type factors. Duration preserves the
-# chosen numeric representation. Canonical scales are the SI base units
-# (second, metre, kilogram, ...), so derived SI units are exact scale 1 and
-# prefixes are exact rationals folded at compile time.
-
-const Duration:type = <T of real>(T * Time)
-
-const s:(1 * Time) = 1 transmute (1 * Time)
-const second:(1 * Time) = s
-const seconds:(1 * Time) = s
-const ms = s / 1000
-const millisecond = ms
-const milliseconds = ms
-const us = s / 1000000
-const microsecond = us
-const microseconds = us
-const ns = s / 1000000000
-const nanosecond = ns
-const nanoseconds = ns
+# The units of measure beyond time: `import units` brings them all in, `from
+# units import (m kg)` a selection (time — the second and its scales — is the
+# prelude's, see `time.dewy`). Physical dimensions are compile-time type
+# factors. Canonical scales are the SI base units (metre, kilogram, ...), so
+# derived SI units are exact scale 1 and prefixes are exact rationals folded
+# at compile time.
 
 # SI base units: metre, kilogram, ampere, kelvin, mole, candela. Derived
 # units and prefixes are exact compile-time rationals of these, so unit
@@ -37,6 +24,7 @@ const A:(1 * Current) = 1 transmute (1 * Current)
 const K:(1 * Temperature) = 1 transmute (1 * Temperature)
 const mol:(1 * Amount) = 1 transmute (1 * Amount)
 const cd:(1 * Luminosity) = 1 transmute (1 * Luminosity)
+
 # Angles: the canonical unit is the whole turn, so degrees are exact
 # rationals (45° is 1/8 turn) and range reduction for trig is exact. The
 # radian's scale (1/2π turn) is irrational, so `rad` is a fixed-point unit.
@@ -48,9 +36,6 @@ const degrees = °
 const rad:(fixed * Angle) = _fixed_from_raw(683565276) transmute (fixed * Angle)   # 2^32 / 2π
 const radian:(fixed * Angle) = rad
 const radians:(fixed * Angle) = rad
-
-const minute = 60 * s
-const hour = 60 * minute
 
 # Derived units.
 const Hz = 1 / s

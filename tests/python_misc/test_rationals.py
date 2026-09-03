@@ -128,7 +128,7 @@ def test_constant_rational_expressions_fold_at_compile_time() -> None:
 
 
 def test_unit_scales_fold_into_dimensioned_constants() -> None:
-    declared = _declared('const speed = 30m/s\nconst accel = 9.8(m/s^2)\nlet energy = 1/2 * 10kg * speed^2')
+    declared = _declared('import units\nconst speed = 30m/s\nconst accel = 9.8(m/s^2)\nlet energy = 1/2 * 10kg * speed^2')
     speed = declared['speed'].expr
     assert isinstance(speed.type, ty.QuantityType)
     assert speed.type.dimension == ty.dimension(('Length', 1), ('Time', -1))
@@ -145,13 +145,13 @@ def test_unit_scales_fold_into_dimensioned_constants() -> None:
 
 def test_mismatched_dimensions_are_rejected() -> None:
     with pytest.raises(TypeCheckError, match='incompatible physical dimensions'):
-        _declared('let x = 2kg + 3m')
+        _declared('import units\nlet x = 2kg + 3m')
     with pytest.raises(TypeCheckError, match='incompatible physical dimensions'):
-        _declared('let x = 2kg <? 3m')
+        _declared('import units\nlet x = 2kg <? 3m')
 
 
 def test_derived_units_are_exact_compile_time_scales() -> None:
-    declared = _declared('const newton = N\nconst joule = J')
+    declared = _declared('import units\nconst newton = N\nconst joule = J')
     assert declared['newton'].expr.type.dimension == ty.dimension(('Mass', 1), ('Length', 1), ('Time', -2))
     assert declared['newton'].expr.type.number == ty.IntegerLiteralType(1)  # SI-canonical scales
     assert declared['joule'].expr.type.number == ty.IntegerLiteralType(1)
@@ -203,7 +203,7 @@ def test_fixed_absorbs_integers_and_rationals() -> None:
 
 
 def test_trig_takes_exact_degree_constants_and_fixed_angles() -> None:
-    declared = _declared('let a = cos(45°)\nlet r:fixed = 1/2\nlet b = sin(r * rad)\nlet w = 20N * 10m * cos(45°)')
+    declared = _declared('import units\nlet a = cos(45°)\nlet r:fixed = 1/2\nlet b = sin(r * rad)\nlet w = 20N * 10m * cos(45°)')
     fixed = _fixed_type()
     assert declared['a'].expr.type == fixed
     assert declared['b'].expr.type == fixed

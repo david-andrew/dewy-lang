@@ -1,0 +1,23 @@
+# Time is the one dimension the prelude carries: every program measures
+# durations (`sleep`, timing), so the second and its scales are always in
+# scope. Physical dimensions are compile-time type factors; `Duration`
+# preserves the chosen numeric representation. The canonical scale is the
+# SI second, so prefixes are exact rationals folded at compile time.
+
+const Duration:type = <T of real>(T * Time)
+
+const s:(1 * Time) = 1 transmute (1 * Time)
+const second:(1 * Time) = s
+const seconds:(1 * Time) = s
+const ms = s / 1000
+const millisecond = ms
+const milliseconds = ms
+const us = s / 1000000
+const microsecond = us
+const microseconds = us
+const ns = s / 1000000000
+const nanosecond = ns
+const nanoseconds = ns
+
+const minute = 60 * s
+const hour = 60 * minute

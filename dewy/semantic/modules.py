@@ -232,6 +232,30 @@ class ModuleCompiler:
         self.stack.pop()
         return record
 
+    def import_library(self, name: str, *, ctx: Any, loc: Span) -> ModuleRecord:
+        """`import units` / `from linux.system import …`: a module of the library by
+        name (a subfolder is a dotted prefix). Looked up in the compiler's library
+        directory; a project-local library directory is the natural first entry
+        of this search when vendoring wants it."""
+        from .prelude import library
+
+        for root in (library,):
+            candidate = root / f'{name}.dewy'
+            if candidate.is_file():
+                importer = ctx.srcfile.path.resolve() if ctx.srcfile.path is not None else None
+                return self.load(candidate, importer=ctx.srcfile, loc=loc, prelude=importer in self.prelude_paths)
+        available = sorted(
+            str(path.relative_to(library).with_suffix('')).replace('/', '.')
+            for path in library.rglob('*.dewy')
+            if 'old' not in path.parts and not path.stem.startswith('_')
+        )
+        user_error(
+            ctx.srcfile,
+            f'no library module `{name.replace("/", ".")}`',
+            Pointer(span=loc, message='not a module of the library'),
+            hint='library modules: ' + ', '.join(available),
+        )
+
     def import_module(
         self,
         path_text: str,

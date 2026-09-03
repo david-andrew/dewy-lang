@@ -13,6 +13,8 @@ import p"lib.dewy" as library
 
 Selective imports bind the requested names directly. `as` renames a selected binding. A namespace import retains qualification. Importing a path without a selection splats its top-level bindings into the current scope.
 
+A bare name as the import source is a module of the *library* — `import units`, `from units import (m kg)`, `from linux.system import _exit` for a subfolder — looked up by name in the compiler's library directory (a `p"…"` is always a file, relative to the importing one; a bare name that is a *binding* holding an exact path, `let source = p"lib.dewy"` then `from source import …`, is that path). The forms never collide, and a vendored library is a matter of which directory the lookup searches first.
+
 The `from path import names` and `import names from path` orders are equivalent.
 
 ## Import Sources
@@ -41,7 +43,7 @@ Reachable source modules share a coherent type environment, initialize once in d
 
 ## Prelude
 
-Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings: paths, printing, `rational` and `fixed` numbers, units, and the current target's services layer. `$no_prelude = true` disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.
+Before checking an ordinary module, the compiler supplies a source prelude of shadowable bindings: paths, printing, `rational` and `fixed` numbers, time (the second and its scales, `Duration`), and the current target's services layer. Every other unit of measure is imported from the library module `units`. `$no_prelude = true` disables those implicit bindings for its containing module only. Imported modules retain their own prelude decision.
 
 ## Provisional Package Facilities
 

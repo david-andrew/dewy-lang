@@ -44,6 +44,8 @@ printl"{value}"        # 1
 
 An eager expression cannot read a binding before that binding is initialized on every reachable path.
 
+A binding is assigned only within the module that declared it. The prelude's bindings and a module's imports are read here but not written: `run = …` or `A = …` at the top of a module is an error naming where the binding belongs and suggesting `let` — `let run = …` declares a new `run` that shadows the prelude's within this module.
+
 Function bodies may refer to declarations that occur later in the same enclosing scope — whether the later function is declared with `let` or by a bare `name = (…) => …` (a first `name = value` in a block declares; a later one assigns). The relevant requirement is that each reachable call occurs after every eagerly read captured binding has been initialized. This permits mutually recursive and forward-declared function relationships without permitting an uninitialized runtime read.
 
 ## Captures

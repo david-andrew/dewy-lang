@@ -14,9 +14,11 @@ const Duration:type = <T of real>(T * Time)
 
 ## Unit Values
 
-Juxtaposing a number with a unit multiplies them:
+Juxtaposing a number with a unit multiplies them. The second and its scales are the prelude's; every other unit is imported from the library module `units`:
 
 ```dewy
+from units import m
+
 let timeout = 300ms
 let distance = 10m
 ```
