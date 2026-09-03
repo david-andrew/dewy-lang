@@ -1,0 +1,72 @@
+# `xs.sort(key=(x) => …)` orders any elements by a fixed-width integer key,
+# stable in both directions; `reverse=true` sorts descending. An unannotated
+# key parameter takes the element type from the call. Long arrays take the
+# radix path, short ones the insertion path; both keep equal keys in order.
+let Hit = type of any & [length:uint64 name:string]
+let Bag = type of any & [items:array<Hit>]
+
+let by_name_length = (h:Hit):>int64 => h.name.length
+let pivot:int64 = 6
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+
+    # objects by a field, descending: ties keep their original order
+    let hits:array<Hit> = [Hit[length=3 name="a"] Hit[length=10 name="b"] Hit[length=5 name="cc"] Hit[length=10 name="d"]]
+    hits.sort(key=(h) => h.length reverse=true)
+    if hits[0].name =? "b" and hits[1].name =? "d" and hits[2].name =? "cc" and hits[3].name =? "a" { checks += 1 }
+    hits.sort(key=(h) => h.length)
+    if hits[0].name =? "a" and hits[1].name =? "cc" and hits[2].name =? "b" and hits[3].name =? "d" { checks += 2 }
+
+    # a named function as the key, and a key with a body that reads a global
+    # (a key cannot capture the caller's locals: it is a function value)
+    hits.sort(key=@by_name_length reverse=true)
+    if hits[0].name =? "cc" and hits[1].name =? "a" { checks += 4 }
+    hits.sort(key=(h) => { let d = (h.length transmute int64) - pivot  if d <? 0 { d = 0 - d }  d })   # distance from 6: 5, 3, 10, 10
+    if hits[0].length =? 5 and hits[1].length =? 3 and hits[2].length =? 10 { checks += 8 }
+
+    # a growable field, and a signed 8-bit key
+    let bag = Bag[items=[Hit[length=1 name="x"] Hit[length=2 name="y"]]]
+    bag.items.sort(key=(h) => (0 - (h.length transmute int64)) transmute int8)
+    if bag.items.length >? 0 { if bag.items[0].name =? "y" { checks += 16 } }
+
+    # strings by length, optionals by their payload
+    let words:array<string> = ["ccc" "a" "bb"]
+    words.sort(key=(w) => w.length)
+    if words[0] =? "a" and words[2] =? "ccc" { checks += 32 }
+    let maybes:array<int64|none> = [3 none 1]
+    maybes.sort(key=(m):>int64 => if m is? int64 m else (-1))
+    let second = maybes[1]
+    if maybes[0] is? none and second is? int64 { if second =? 1 { checks += 64 } }
+
+    # integers descending, and the radix path with a key
+    let xs:array<int64> = [3 (-1) 2]
+    xs.sort(reverse=true)
+    if xs[0] =? 3 and xs[2] =? (-1) { checks += 128 }
+    let many:array<Hit> = []
+    let seed:int64 = 7
+    let n:int64 = 0
+    loop n <? 100 {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        many.push(Hit[length=((seed % 50) transmute uint64) name="{n}"])
+        n = n + 1
+    }
+    many.sort(key=(h) => h.length)
+    let ordered = true
+    let previous:uint64 = 0
+    loop h in many {
+        if previous >? h.length { ordered = false }
+        previous = h.length
+    }
+    if ordered and many.length =? 100 { checks += 256 }
+    many.sort(key=(h) => h.length reverse=true)
+    let descending = true
+    previous = 100
+    loop h in many {
+        if previous <? h.length { descending = false }
+        previous = h.length
+    }
+    if descending { checks += 512 }
+
+    return checks - 981         # 1023 - 981
+}

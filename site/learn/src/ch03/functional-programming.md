@@ -18,6 +18,19 @@ apply(@square 5)
 
 `@square` selects the function binding rather than calling `square` with no arguments.
 
+A function literal written where a function type is expected can leave its parameters unannotated: each takes the type of the matching parameter of the expected function type (positional parameters by position, keyword-only ones by name), and the result type is inferred from the body as usual. An annotated parameter keeps its annotation.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let apply = (
+    transform:<(value:int64):>int64>
+    value:int64
+):>int64 => transform(value)
+
+apply((value) => value * 2 5)      # `value` is an int64 here
+```
+
 A leading `@` governs the complete ungrouped selector-and-application chain. Function-valued nodes inside that chain are selected rather than called. Grouping ends the chain, so a following argument group performs an ordinary call:
 
 ```dewy

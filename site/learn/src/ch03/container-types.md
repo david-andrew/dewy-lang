@@ -50,6 +50,24 @@ xs.clear
 
 Operations that could fail must be proven safe at compile time. `xs.pop` needs a proven non-empty array, `xs.pop(i)` and `xs.insert(v i)` need a proven index, and an ordinary `xs[i]` needs a proven bound. Literal lengths, `push`/`pop` stepping those lengths, and guards such as `if i <? xs.length` all supply the proof; see [Refinements](refinements.md).
 
+### Sorting
+
+`xs.sort` orders fixed-width integer elements ascending. Any other elements are sorted by a *key*: a function of one element that returns a fixed-width integer. `reverse=true` sorts descending. Both directions are stable, so elements with equal keys keep their original order:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Hit = type of any & [length:uint64 name:string]
+let hits:array<Hit> = [Hit[length=3 name="a"] Hit[length=10 name="b"] Hit[length=5 name="c"]]
+hits.sort(key=(h) => h.length reverse=true)     # b, c, a: the longest match first
+let words:array<string> = ["ccc" "a" "bb"]
+words.sort(key=(w) => w.length)                 # a, bb, ccc
+let ns:array<int64> = [3 (-1) 2]
+ns.sort(reverse=true)                           # 3, 2, -1
+```
+
+The key's parameter needs no annotation: it takes the element type from the call (see [Function Values](functional-programming.md#selecting-and-passing-functions)). A named function is passed with `@`: `hits.sort(key=@by_length)`.
+
 ## Loop Capture
 
 A loop can express values for `[]` to collect:

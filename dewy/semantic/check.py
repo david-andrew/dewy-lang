@@ -6759,6 +6759,14 @@ def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
         if isinstance(node, hir.ArrayMethod):
             _apply_array_method_transition(node, node.loc, ctx=ctx)
         return call
+    if isinstance(node, hir.ArrayMethod) and node.name == 'sort':
+        assert isinstance(node.array.type, ty.ArrayType)
+        user_error(
+            ctx.srcfile,
+            'sorting these elements needs a key',
+            Pointer(span=node.loc, message=f'`{type_to_dewy(node.array.type.element)}` elements have no order of their own'),
+            hint='say what to order by: `xs.sort(key=(x) => x.length)`',
+        )
     if isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
         not_implemented(
             ctx.srcfile,
@@ -7323,6 +7331,12 @@ def _bind_array_method(
 ) -> hir.ArrayMethod:
     value = replace(value, type=declared)
     element = declared.element
+    integer_elements = isinstance(element, str) and element in ty.FIXED_INTEGER_TYPES
+    # `xs.sort(key=(x) => … reverse=true)`: a stable ascending (or descending)
+    # sort by a fixed-width integer key. Integer elements are their own key,
+    # so `key` is optional for them and required for everything else. The
+    # key's result is checked after the call binds (`_validate_sort_key`).
+    sort_key = ty.FunctionType([ty.PosOrKwArg(None, element)], [], None, ty.TOP_TYPE)
     signatures: dict[str, ty.FunctionType] = {
         'push': ty.FunctionType([ty.PosOrKwArg('value', element)], [], None, ty.VOID_TYPE),
         # `xs.pop` removes the last element; `xs.pop(idx)` removes and returns
@@ -7332,14 +7346,19 @@ def _bind_array_method(
         'truncate': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
         'clear': ty.FunctionType([], [], None, ty.VOID_TYPE),
         'reserve': ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, ty.VOID_TYPE),
-        # ascending in-place sort of integer elements (comparators later)
-        'sort': ty.FunctionType([], [], None, ty.VOID_TYPE),
+        'sort': ty.FunctionType(
+            [],
+            [
+                ty.KwOnlyArg('key', sort_key, required=not integer_elements),
+                ty.KwOnlyArg('reverse', 'bool', required=False),
+            ],
+            None,
+            ty.VOID_TYPE,
+        ),
         # `xs.join` concatenates string elements; `xs.join(sep)` / `xs.join"sep"`
         # puts the separator between them. The result is a new string.
         'join': ty.FunctionType([ty.PosOrKwArg('sep', 'string', required=False)], [], None, ty.StringType()),
     }
-    if name == 'sort' and not (isinstance(element, str) and element in ty.FIXED_INTEGER_TYPES):
-        not_implemented(ctx.srcfile, loc, f'`sort` on `{type_to_dewy(element)}` elements')
     if name == 'join' and not _is_string_type(element):
         user_error(
             ctx.srcfile,
@@ -10319,7 +10338,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         if isinstance(binop.left, p0.BinOp) and _operator_symbol(binop.left.op) == '.':
             # `s.grow(2)`: a method is only ever called, never multiplied
             member = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
-            if isinstance(member, hir.BoundMethod):
+            if isinstance(member, (hir.BoundMethod, hir.ArrayMethod, hir.DictMethod)):
                 return tcr_function_call(member, binop.right, ctx=ctx, expected=expected)
         candidates: list[p0.AST] = [replace(binop, op=option) for option in binop.op.options]
         return typecheck_and_resolve_inner(p0.Ambiguous(binop.loc, candidates), ctx=ctx, type_block=type_block, expected=expected)
@@ -11049,6 +11068,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     
     # collect function signature parameters
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature, ctx=ctx)
+    pos_or_kw_args, kw_only_args = _contextual_parameter_types(pos_or_kw_args, kw_only_args, expected)
 
     # insert the arguments from the signature into the body, and install a fresh catcher
     # for this function's returns
@@ -11148,6 +11168,34 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
 
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
+
+def _contextual_parameter_types(
+    pos_or_kw_args: list[hir.Param | hir.BoundParam],
+    kw_only_args: list[hir.Param | hir.BoundParam],
+    expected: ty.Type | None,
+) -> tuple[list[hir.Param | hir.BoundParam], list[hir.Param | hir.BoundParam]]:
+    """Unannotated parameters take their types from the function type the
+    literal is checked against: `xs.sort(key=(m) => m.length)` types `m` as
+    the element. Positional parameters pair up by position, keyword-only ones
+    by name; an annotated parameter keeps its annotation (the call site then
+    checks the literal against the expected type as usual)."""
+    expected = ty.strip_refinement(expected) if expected is not None else None
+    if not isinstance(expected, ty.FunctionType) or expected.type_params:
+        return pos_or_kw_args, kw_only_args
+
+    def adopt(param: hir.Param | hir.BoundParam, slot: ty.PosOrKwArg | ty.KwOnlyArg | None) -> hir.Param | hir.BoundParam:
+        if param.type != ty.INFERRED_TYPE or slot is None or slot.type == ty.TOP_TYPE or param.place:
+            return param
+        return replace(param, type=ty.strip_refinement(slot.type))
+
+    positional = [
+        adopt(param, expected.pos_or_kw[index] if index < len(expected.pos_or_kw) else None)
+        for index, param in enumerate(pos_or_kw_args)
+    ]
+    by_name = {slot.name: slot for slot in expected.kw_only}
+    keyword = [adopt(param, by_name.get(param.name)) for param in kw_only_args]
+    return positional, keyword
+
 
 def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
     """Parse named parameter contracts to the left of a function type's `:>`."""
@@ -13536,12 +13584,32 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
     )
     if isinstance(left, hir.ArrayMethod):
+        if left.name == 'sort':
+            _validate_sort_key(call, ctx=ctx)
         _apply_array_method_transition(
             left, call.loc, ctx=ctx, index=_array_method_index_argument(left.name, call),
         )
     if isinstance(left, hir.DictMethod):
         return _dict_method_call(left, call, ctx=ctx)
     return call
+
+
+def _validate_sort_key(call: hir.FunctionCall, *, ctx: Context) -> None:
+    """`key` must be a single function returning a fixed-width integer: the
+    sort orders by the key's numeric value (bigint keys are not supported)."""
+    key = call.kw_args.get('key')
+    if key is None:
+        return
+    if ty.integer_function_result(key.type) is not None:
+        return
+    function_type = ty.strip_refinement(key.type)
+    returned = type_to_dewy(function_type.ret) if isinstance(function_type, ty.FunctionType) else type_to_dewy(key.type)
+    user_error(
+        ctx.srcfile,
+        'a sort key must return a fixed-width integer',
+        Pointer(span=key.loc, message=f'this key returns `{returned}`'),
+        hint='return `int64`, `uint64`, or another fixed-width integer, e.g. `key=(x) => x.length`',
+    )
 
 
 def _dict_method_call(method: hir.DictMethod, call: hir.FunctionCall, *, ctx: Context) -> hir.AST:

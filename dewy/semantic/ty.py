@@ -929,6 +929,20 @@ def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
     return _fixed_integer_widths.get(type_) if isinstance(type_, str) else None
 
 
+def integer_function_result(type_: TypeExpr) -> str | None:
+    """The fixed-width integer a single function type returns, or None.
+
+    A sort key is such a function: the sort orders by the key's numeric value.
+    """
+    function_type = strip_refinement(type_)
+    if not isinstance(function_type, FunctionType):
+        return None
+    returned = strip_refinement(function_type.ret)
+    if isinstance(returned, str) and returned in FIXED_INTEGER_TYPES:
+        return returned
+    return None
+
+
 def fixed_integer_bounds(type_: TypeExpr) -> tuple[int, int] | None:
     """Return the inclusive `(minimum, maximum)` of a fixed-width integer."""
 

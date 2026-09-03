@@ -57,9 +57,10 @@ def test_sort_keeps_length_facts() -> None:
     _check('    let xs:array<int64> = [3 1 2]\n    xs.sort\n    let a = xs[2]\n    let b = xs.pop')
 
 
-def test_sort_is_limited_to_integer_elements_for_now() -> None:
-    with pytest.raises(NotImplementedYet, match='`sort` on `string` elements'):
+def test_sort_of_non_integer_elements_needs_a_key() -> None:
+    with pytest.raises(UserError, match='sorting these elements needs a key'):
         _check('    let xs:array<string> = ["b" "a"]\n    xs.sort')
+    _check('    let xs:array<string> = ["b" "a"]\n    xs.sort(key=(s) => s.length)')
 
 
 def _check_bag(body: str):
