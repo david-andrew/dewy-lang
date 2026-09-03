@@ -128,12 +128,7 @@ let Token:type = $abstract type of any & [
 
 ]
 
-let TokenError = type of error & Report #TODO: merge this with Report...
-# let TokenErrorReport = TokenError & Report
-
-# let Whitespace:type = type of Token
-# let Comment:type = type of Token
-
+let TokenError = type of error & Report
 
 Whitespace = type of Token & [
     eat = (src:nonemptystring ctx:Context):>uint64? => {
@@ -157,31 +152,28 @@ LineComment = type of Token & [
 ]
 
 
-# # # TODO: compiler improvements way too much complaining about int64 vs uint64 stuff... should discuss a bit about what to do..
-# # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
-# BlockComment = type of Token & [
-#     eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
-#         if not src.startswith(block_comment_start) return none
-#         stack = 1
-#         i:int64 = 0
-#         loop i <? src.length {  #TODO: compielr improvements, should be able to do this comparison between int64 and uint64..  also why is length int64 instead of uint64? it can never be negative...
-#             if src[i..end].startswith(block_comment_start) {stack += 1 i+=block_comment_start.length}  #TODO: compiler fixes: if this is wrapped in `()` instead of `{}`, there is a syntax error in the lowered udewy
-#             else if src[i..end].startswith(block_comment_end) {stack -= 1 i+=block_comment_end.length} #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
-#             else { i += 1 }
+# probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
+BlockComment = type of Token & [
+    eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
+        if not src.startswith(block_comment_start) return none
+        stack = 1
+        i:int64 = 0
+        loop i <? src.length {  #TODO: compielr improvements, should be able to do this comparison between int64 and uint64..  also why is length int64 instead of uint64? it can never be negative...
+            if src[i..end].startswith(block_comment_start) {stack += 1 i+=block_comment_start.length}  #TODO: compiler fixes: if this is wrapped in `()` instead of `{}`, there is a syntax error in the lowered udewy
+            else if src[i..end].startswith(block_comment_end) {stack -= 1 i+=block_comment_end.length} #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
+            else { i += 1 }
     
-#             if stack =? 0 return i transmute uint64
-#         }
+            if stack =? 0 return i transmute uint64
+        }
     
-#         err"need to return an error report here. missing closer for block comment"
-#     }
-# ]
-
-# # Context = type of any
+        err"need to return an error report here. missing closer for block comment"
+    }
+]
 
 
 
 
-# TODO compiler bugs: why did I have to move this above tokenize? you're supposed to be able to reference functions before their declaration when inside other functions
+
 # what tokens are allowed in what contexts
 contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
     <Root> => [
