@@ -550,7 +550,25 @@ class Report:
         while next_auto_color_id in used_color_ids:
             next_auto_color_id += 1
         
+        # pointers whose spans overlap an earlier pointer's cannot be drawn on
+        # one line: they keep their message as a note under the first one
+        # rather than failing the report (synthesized code shares locations)
+        pointers: list[Pointer] = []
+
+        def overlaps(a: Pointer, b: Pointer) -> bool:
+            return any(
+                x.start < y.stop and y.start < x.stop and x != y and x.start != x.stop and y.start != y.stop
+                for x in a.span for y in b.span
+            )
+
         for pointer in self.pointer_messages:
+            clash = next((kept for kept in pointers if overlaps(kept, pointer)), None)
+            if clash is not None:
+                if pointer.message not in self.notes:   # (rendered more than once: colored and plain)
+                    self.notes.append(pointer.message)
+                continue
+            pointers.append(pointer)
+        for pointer in pointers:
             if isinstance(pointer.color, str):
                 color_code = COLOR_NAME_TO_CODE[pointer.color]
                 segments.extend(self._build_segments_for_pointer(sf, pointer, color_code, None))

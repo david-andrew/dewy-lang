@@ -213,7 +213,12 @@ class _ObjectLowering:
         brand word.
         """
         brand = object_type.brand if ty.user_branded(object_type) else None
-        root_fields = len(ty.USER_BRAND_TYPES[ty.brand_root(brand)].fields) if brand is not None and ty.brand_root(brand) in ty.USER_BRAND_TYPES else None
+        carriers = ty.structure_carriers(object_type) if brand is None else []
+        root_fields = (
+            len(ty.USER_BRAND_TYPES[ty.brand_root(brand)].fields) if brand is not None and ty.brand_root(brand) in ty.USER_BRAND_TYPES
+            else len(object_type.fields) if carriers   # a structure mints were minted from: their brand word follows its fields
+            else None
+        )
         offset = 0
         align = 1
         offsets: dict[str, int] = {}
@@ -235,27 +240,25 @@ class _ObjectLowering:
             align = max(align, 8)
         size = (offset + align - 1) // align * align if align else offset
         size = max(size, 1)
-        if brand is not None:
-            for descendant in ty.brand_descendants(brand)[1:]:
-                child_type = ty.USER_BRAND_TYPES.get(descendant)
-                if child_type is not None:
-                    size = max(size, self._object_layout(child_type, node)[0])
+        family = ty.brand_descendants(brand)[1:] if brand is not None else [name for root in carriers for name in ty.brand_descendants(root)]
+        for descendant in family:
+            child_type = ty.USER_BRAND_TYPES.get(descendant)
+            if child_type is not None:
+                size = max(size, self._object_layout(child_type, node)[0])
         return size, offsets
 
     def _brand_word_store(self, dest: hir.AST, object_type: ty.ObjectType, loc: Span) -> list[hir.AST]:
-        """Write a freshly built minted object's brand word."""
-        if not ty.user_branded(object_type):
-            return []
-        assert object_type.brand is not None
+        """Write a freshly built object's brand word: its brand's id, or 0 for a
+        plain value of a structure that mints were minted from."""
         _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
-        ids = ty.brand_ids()
-        if object_type.brand not in ids:
+        if self.BRAND_FIELD not in offsets:
             return []
+        ids = ty.brand_ids()
+        brand_id = ids[object_type.brand][0] if ty.user_branded(object_type) and object_type.brand in ids else 0
         address = self._field_address(dest, offsets[self.BRAND_FIELD], loc)
-        return [self._intrinsic_call('__store_i64__', [self._int64_literal(loc, ids[object_type.brand][0]), address], ty.VOID_TYPE, loc)]
+        return [self._intrinsic_call('__store_i64__', [self._int64_literal(loc, brand_id), address], ty.VOID_TYPE, loc)]
 
     def _brand_word_load(self, source: hir.AST, object_type: ty.ObjectType, loc: Span) -> hir.AST:
-        assert ty.user_branded(object_type)
         _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
         return self._intrinsic_call('__load_i64__', [self._field_address(source, offsets[self.BRAND_FIELD], loc)], 'int64', loc)
 
@@ -269,12 +272,9 @@ class _ObjectLowering:
         return hir.ShortCircuit(loc, 'bool', 'and', lower, upper)
 
     def _descendant_extra_fields(self, object_type: ty.ObjectType) -> list[tuple[str, ty.ObjectType, list[ty.ObjectField]]]:
-        """For every brand under ``object_type``'s: its type and the fields beyond ``object_type``'s."""
-        if not ty.user_branded(object_type):
-            return []
-        assert object_type.brand is not None
+        """For every brand a value may carry beyond ``object_type``: its type and the fields beyond ``object_type``'s."""
         out: list[tuple[str, ty.ObjectType, list[ty.ObjectField]]] = []
-        for descendant in ty.brand_descendants(object_type.brand)[1:]:
+        for descendant in ty.brand_alternatives(object_type):
             child_type = ty.USER_BRAND_TYPES.get(descendant)
             if child_type is None:
                 continue

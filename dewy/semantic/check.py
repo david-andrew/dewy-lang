@@ -782,6 +782,58 @@ def _hoisted_union_field(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     return _optional_field_flow(hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id), ctx=ctx)
 
 
+def _readable_object(value: hir.AST, *, ctx: Context) -> hir.AST | None:
+    """The value as something read once per arm without effects: itself when it
+    is a name or a field, else a hidden local hoisted before the statement
+    (None where nothing can be hoisted)."""
+    if isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
+        return value
+    if ctx.hoisted is None:
+        return None
+    loc = value.loc
+    name = f'__dewy_field_{ctx.binding_registry.next_id}'
+    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', loc)
+    binding.type = value.type
+    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
+    binding.declaration = declaration
+    ctx.declarations[name] = value.type
+    ctx.binding_scopes[name] = binding
+    ctx.hoisted.append(declaration)
+    return hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id)
+
+
+def _brand_dispatch(value: hir.AST, loc: Span, per_brand: 'Callable[[hir.AST, ty.ObjectType], hir.AST]', otherwise: 'Callable[[hir.AST], hir.AST]', *, ctx: Context) -> hir.AST | None:
+    """A string-valued flow over the brands a value may carry at runtime (a
+    mint's descendants; the mints minted from a plain structure): one `is?`
+    arm per brand, deepest first, reading the value narrowed to it; else the
+    static form. None when the value has no such alternatives."""
+    plain = ty.unfold(ty.strip_refinement(value.type))
+    if not isinstance(plain, ty.ObjectType):
+        return None
+    alternatives = ty.brand_alternatives(plain)
+    if not alternatives:
+        return None
+    readable = _readable_object(value, ctx=ctx)
+    if readable is None:
+        return None
+    arms = [
+        hir.IfArm(loc, ty.StringType(), hir.TypeTest(loc, 'bool', readable, ty.USER_BRAND_TYPES[brand], False), per_brand(replace(readable, type=ty.USER_BRAND_TYPES[brand]), ty.USER_BRAND_TYPES[brand]))
+        for brand in alternatives
+    ]
+    return hir.Flow(loc, ty.StringType(), arms, otherwise(readable))
+
+
+def _typename(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
+    """`value.typename`: the minted name a value carries (read from its brand
+    word when its static type has descendants), else its structural spelling."""
+    def own(node: hir.AST) -> hir.AST:
+        plain = ty.unfold(ty.strip_refinement(node.type))
+        text = plain.brand if isinstance(plain, ty.ObjectType) and ty.user_branded(plain) and plain.brand is not None else type_to_dewy(plain)
+        return hir.String(loc, ty.StringLiteralType(text), text)
+    dispatched = _brand_dispatch(value, loc, lambda narrowed, _child: own(narrowed), own, ctx=ctx)
+    return dispatched if dispatched is not None else own(value)
+
+
 def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     """A union-typed value (an optional, or a container union of words,
     strings, `none`, and objects) as a string: a flow with one arm per
@@ -900,7 +952,14 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         # `__as__ = ():>string => path` (quantities and the number objects
         # print through their own paths; anything else is rejected where the
         # field is printed or materialized)
-        converted = _conversion_method_call(value, ty.StringType(), value.loc, ctx=ctx)
+        converted = _brand_dispatch(
+            value, value.loc,
+            lambda narrowed, _child: _static_string_conversion(narrowed, value.loc, ctx=ctx),
+            lambda readable: _static_string_conversion(readable, value.loc, ctx=ctx),
+            ctx=ctx,
+        )   # a value carrying a child's brand converts as that child
+        if converted is None:
+            converted = _conversion_method_call(value, ty.StringType(), value.loc, ctx=ctx)
         if converted is None:
             # a container or a plain object: its literal syntax (`[1 2 3]`, `[x=1 y="a"]`)
             converted = _structure_string(value, value.loc, ctx=ctx)
@@ -4697,11 +4756,16 @@ def _local_names(body: p0.AST) -> set[str]:
     return names
 
 
+# the hidden receiver parameter of a compiled method: not a spellable name, so
+# a method body reaches its instance only through bare field and method names
+_RECEIVER = '__dewy_receiver'
+
+
 def _rewrite_members_to_self(node: p0.AST, members: set[str]) -> p0.AST:
-    """Bare references to fields/methods inside a method body become `self.name`."""
+    """Bare references to fields/methods inside a method body become reads of the hidden receiver."""
 
     def self_access(atom: p0.Atom) -> p0.AST:
-        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, 'self')), atom)
+        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, _RECEIVER)), atom)
 
     def rewrite(value: object) -> object:
         if isinstance(value, list):
@@ -4839,14 +4903,19 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
     for method in object_type.methods:
         if method.binding_id is not None:
             continue
+        if method.owner not in (None, alias.name):
+            # inherited: its declaring type compiles it (now, if that is still pending)
+            owner_entry = next(((a, t) for a, t in ctx.pending_methods if a.name == method.owner), None)
+            if owner_entry is not None:
+                ctx.pending_methods.remove(owner_entry)
+                _declare_type_methods(owner_entry[0], owner_entry[1], ctx=ctx)
+            continue
         literal = method.literal
         assert isinstance(literal, p0.BinOp)
         params, result, body = _function_literal_parts(literal)
-        if 'self' in _parameter_names(params):
-            user_error(ctx.srcfile, '`self` is the hidden receiver parameter of a method', Pointer(span=literal.loc, message='rename this parameter'))
-        visible = members - _parameter_names(params) - _local_names(body)
+        visible = (members | {'typename'}) - _parameter_names(params) - _local_names(body)   # `typename` reads the instance's, like a field
         loc = literal.loc
-        self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, 'self'))
+        self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, _RECEIVER))
         method.place_self = _body_mutates_members(body, visible)
         if method.place_self:
             self_name = p0.Prefix(loc, t1.Operator(loc, '@'), self_name)
@@ -5302,7 +5371,7 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                         Pointer(span=rhs.loc, message=f'`{ancestor}` already carries it'),
                     )
             fields[:0] = item.fields
-            methods[:0] = item.methods
+            methods[:0] = item.methods   # inherited: compiled once by their declaring type, a child receiver being a subtype
             continue
     for item in operands:
         if item == 'any' or ty.user_branded(item):
@@ -5330,7 +5399,13 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                     # the child implements the protocol's slot
                     fields[slot] = replace(fields[slot], default=method.literal)
                     continue
-                methods.append(method)
+                inherited = next((index for index, existing in enumerate(methods) if existing.name == method.name), None)
+                if method.owner is None:
+                    method.owner = binding.name   # declared here (an aliased structure's methods keep their owner)
+                if inherited is not None:
+                    methods[inherited] = method   # a child's method overrides the parent's
+                else:
+                    methods.append(method)
             continue
         not_implemented(
             ctx.srcfile,
@@ -5739,6 +5814,10 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
         _validate_recursive_alias(binding, value, named, ctx=ctx)
         named.resolve(value)
     binding.type_value = value
+    if isinstance(value, ty.ObjectType):
+        for method in value.methods:
+            if method.owner is None:
+                method.owner = binding.name
     if isinstance(value, ty.ObjectType) and value.methods:
         # declared at first use (or at the end of the module): the bodies may
         # call functions declared after the alias
@@ -7220,6 +7299,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             ),
         )
     field = value.type.field(name)
+    if field is None and name == 'typename' and value.type.method(name) is None:
+        return _typename(value, binop.loc, ctx=ctx)
     if field is None:
         method = value.type.method(name)
         if method is not None and method.binding_id is None:
@@ -13268,6 +13349,17 @@ def _explicit_value_conversion(
         # `src.length as uint64`: one fixed width to another, a value cast the
         # bounds analysis must prove in range (as at an annotated binding)
         return hir.ValueCast(loc, target, node)
+    if _is_string_type(target):
+        # a value that may carry a child's brand at runtime converts as that
+        # child (its own `__as__`, or its literal syntax under its name)
+        dispatched = _brand_dispatch(
+            node, loc,
+            lambda narrowed, _child: _static_string_conversion(narrowed, loc, ctx=ctx),
+            lambda readable: _static_string_conversion(readable, loc, ctx=ctx),
+            ctx=ctx,
+        )
+        if dispatched is not None:
+            return dispatched
     converted = _conversion_method_call(node, target, loc, ctx=ctx)
     if converted is None and _is_string_type(target):
         union_flow = _optional_field_flow(node, ctx=ctx)
@@ -13293,6 +13385,21 @@ def _explicit_value_conversion(
                 f'`{type_to_dewy(target)}`'
             ),
         ),
+    )
+
+
+def _static_string_conversion(node: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
+    """An object's string form by its static type alone: its `__as__`, else its literal syntax."""
+    converted = _conversion_method_call(node, 'string', loc, ctx=ctx)
+    if converted is not None:
+        return converted
+    structural = _structure_string(node, loc, ctx=ctx)
+    if structural is not None:
+        return structural
+    type_error(
+        ctx.srcfile,
+        'unsupported value conversion',
+        Pointer(span=loc, message=f'cannot convert `{type_to_dewy(node.type)}` to `string`'),
     )
 
 

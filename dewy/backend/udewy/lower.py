@@ -4227,7 +4227,8 @@ class _Lowerer(
                     index
                     for index, member in enumerate(members)
                     if index not in matching and tested_brand is not None
-                    and ty.user_branded(ty.unfold(member)) and ty.user_brand_descends(ty.unfold(node.test_type), ty.unfold(member))
+                    and isinstance(ty.unfold(member), ty.ObjectType)
+                    and (ty.user_brand_descends(ty.unfold(node.test_type), ty.unfold(member)) or ty.user_brand_carries(ty.unfold(node.test_type), ty.unfold(member)))
                 ]
                 if len(matching) == len(members):
                     return union_prelude, hir.Bool(node.loc, 'bool', True)
@@ -4268,8 +4269,11 @@ class _Lowerer(
             value_object = ty.unfold(node.value.type)
             if (
                 tested_brand is not None
-                and isinstance(value_object, ty.ObjectType) and ty.user_branded(value_object)
-                and ty.user_brand_descends(ty.unfold(node.test_type), value_object)
+                and isinstance(value_object, ty.ObjectType)
+                and (
+                    (ty.user_branded(value_object) and ty.user_brand_descends(ty.unfold(node.test_type), value_object))
+                    or (value_object.brand is None and ty.user_brand_carries(ty.unfold(node.test_type), value_object))
+                )
             ):
                 # `ctx is? Root` on a `Context`: the brand word decides
                 prelude, pointer = self._extract_object_pointer(node.value)

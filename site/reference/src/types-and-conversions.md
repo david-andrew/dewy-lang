@@ -30,6 +30,22 @@ let Vec = type of [x:int64 y:int64  length_squared = ():>int64 => x*x + y*y]
 
 `type of Parent` where `Parent` is itself a minted type mints a nominal *child*: a subtype of the parent (a `Whitespace` value satisfies a `Token` parameter, and `t is? Token` holds for every child in a union), distinct from the parent and from its siblings. A minted value carries its *brand* at runtime, so a value seen through the parent still says which child it is: `ctx is? Root` on a `Context` tests the brand, `match ctx { r:Root => … <StringBody> => … }` selects by it and binds the child with its own fields, and a child stored where the parent is expected — a `Context` variable, an element of `array<Context>`, a `Token | none` member — is stored whole (a parent-typed slot is sized for the largest child). The parent's fields lead the child's, and the operand may add more (`type of Token & [text:string]`); one nominal parent per mint.
 
+Conversion to string follows the brand too: a value seen through its parent — or through the structure the mints were minted from — converts as what it is, so an `array<TokenProtocol>` prints each element as its child. A parent's `__as__` applies to every child (a child may override it), and can name the child through `typename`, read bare inside a method like any field: the minted name a value carries, or a plain object's structural spelling.
+
+<!-- dewy-example: compiler -->
+```dewy
+let Protocol:type = [
+    eat:<(src:string):>int64>
+    __as__ = ():>string => "<{typename}>"
+]
+Whitespace = type of Protocol & [eat = (src:string):>int64 => 1]
+
+describe = ():>string => {
+    let table:array<Protocol> = [Whitespace]
+    return "{table}"                    # "[<Whitespace>]"
+}
+```
+
 A `match` over a minted type is exhaustive when its arms cover every brand the *whole program* mints under it — the parent itself included unless it is `$abstract`. `$abstract` is written on the mint and says the type has no values of its own, only its children's: constructing it is an error at that site, it is no unit inhabitant even without fields, and its children alone make a match exhaustive. A child minted in a module compiled later still counts (the program is one closed world), so a match without an `else` reports it; with an `else`, later children take that branch.
 
 <!-- dewy-example: compiler -->

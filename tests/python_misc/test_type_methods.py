@@ -1,4 +1,4 @@
-"""Methods declared in object types (hidden `Type__method(self …)` functions) and `&=` constructor overloads."""
+"""Methods declared in object types (hidden `Type__method(receiver …)` functions) and `&=` constructor overloads."""
 
 import pytest
 
@@ -27,7 +27,7 @@ def test_methods_are_hoisted_functions_taking_self() -> None:
     declared = _declared(SPAN + 'let main = ():>int64 => { let s = Span(1 3)  s.grow(2)  return s.width + s.shifted(1).stop }\n')
     assert isinstance(declared['Span__width'].expr, hir.FunctionLiteral)
     width = declared['Span__width'].expr.type
-    assert isinstance(width, ty.FunctionType) and [p.name for p in width.pos_or_kw] == ['self'] and not width.pos_or_kw[0].place
+    assert isinstance(width, ty.FunctionType) and [p.name for p in width.pos_or_kw] == ['__dewy_receiver'] and not width.pos_or_kw[0].place
     grow = declared['Span__grow'].expr.type
     assert isinstance(grow, ty.FunctionType) and grow.pos_or_kw[0].place  # `stop += by` mutates a field
     body = declared['main'].expr.body
@@ -60,8 +60,10 @@ def test_method_diagnostics() -> None:
         _declared(SPAN + 'let main = ():>int64 => { Span(1 3).grow(2)  return 0 }\n')
     with pytest.raises(TypeCheckError, match='must be called'):
         _declared(SPAN + 'let main = ():>int64 => { let s = Span(1 3)  let g = s.grow  return 0 }\n')
-    with pytest.raises(UserError, match='hidden receiver'):
-        _declared('let T:type = [x:int64 f = (self:int64) => self]\nlet main = ():>int64 => 0\n')
+    # `self` is not a name the language knows: a parameter may be called that, and a bare `self` in a body is undefined
+    _declared('let T:type = [x:int64 f = (self:int64) => self + x]\nlet main = ():>int64 => 0\n')
+    with pytest.raises(UserError, match='undefined identifier `self`'):
+        _declared('let T:type = [x:int64 f = () => self]\nlet main = ():>int64 => 0\n')
     with pytest.raises(UserError, match='duplicate object member'):
         _declared('let T:type = [x:int64 x = () => 1]\nlet main = ():>int64 => 0\n')
     with pytest.raises(NotImplementedYet, match='inside a function'):

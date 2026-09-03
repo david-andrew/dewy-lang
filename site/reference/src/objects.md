@@ -117,7 +117,7 @@ let main = ():>int64 => {
 }
 ```
 
-Methods are compiled as ordinary functions taking the instance first (`Span__width(self)`), so no function value is stored in the object; they are not values yet (`s.grow` without a call is an error). Methods and constructor overloads are declared on module-level types only.
+Methods are compiled as ordinary functions taking the instance first as a hidden parameter — there is no `self`; a body reaches its instance only through bare field and method names — so no function value is stored in the object; they are not values yet (`s.grow` without a call is an error). Methods and constructor overloads are declared on module-level types only.
 
 A structural or hybrid type can also contextually construct an object literal:
 

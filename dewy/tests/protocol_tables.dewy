@@ -2,6 +2,7 @@
 # minted with methods that fill those slots, named bare where a value is
 # wanted (every field defaulted, so the name is `Name()`), tabled by a
 # function written after the one that calls it, and printed for debugging
+# (each element as the child it is, read from its brand word)
 
 Context = $abstract type of any & [depth:int64]
 Base:type = '0b' | '0d' | '0x'
@@ -33,7 +34,7 @@ main = () => {
     let total:int64 = tokenize("# note" Root(depth=0))       # 0 + (6 + 1) = 7
     total += tokenize(" x" BlockBody(depth=1))               # 1 → 8
     let table = allowed(Root(depth=0))
-    if "{table}" =? "[[eat=<(src:string ctx:Context):>int64> priority=0] [eat=<(src:string ctx:Context):>int64> priority=1]]" total += 30   # 38
+    if "{table}" =? "[Whitespace[eat=<(src:string ctx:Context):>int64> priority=0] LineComment[eat=<(src:string ctx:Context):>int64> priority=1]]" total += 30   # 38 (each element prints as what it is)
     let w = Whitespace
     if w.priority =? 0 and Whitespace().priority =? 0 total += 2                                                                             # 40
     let r = Root(depth=0 base='0x')

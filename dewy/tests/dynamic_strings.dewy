@@ -1,0 +1,28 @@
+# a value seen through its parent converts to string as what it is: a
+# parent's `__as__` applies to every child and can name the child through
+# `typename` (read from the brand word), a child may override it, and a
+# plain value of the structure the mints were minted from keeps its own form
+
+let Protocol:type = [
+    eat:<(n:int64):>int64>
+    extra:int64 = 0
+    __as__ = ():>string => "<{typename}>"                  # bare, like a field: the instance's minted name
+]
+Ws = type of Protocol & [eat = (n:int64):>int64 => n + 1]
+Lc = type of Protocol & [
+    eat = (n:int64):>int64 => n + 2
+    __as__ = ():>string => "<line comment>"                 # overrides the inherited one
+]
+Nested = type of Lc & [depth:int64 = 1]                     # inherits Lc's
+
+main = () => {
+    let total:int64 = 0
+    let table:array<Protocol> = [Ws Lc Nested Protocol[eat = (n:int64):>int64 => n]]
+    if "{table}" =? "[<Ws> <line comment> <line comment> <[eat:<(n:int64):>int64> extra:int64]>]" total += 20
+    let p:Protocol = Nested
+    if p.typename =? "Nested" and p is? Lc and p isnt? Ws total += 10           # 30
+    if Ws().typename =? "Ws" and table[3].typename =? "[eat:<(n:int64):>int64> extra:int64]" total += 6   # 36
+    let s:string = table[1] as string
+    if s =? "<line comment>" and "{p}" =? "<line comment>" total += 6         # 42
+    exit(total)
+}

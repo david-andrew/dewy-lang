@@ -254,6 +254,7 @@ class MethodSpec:
     literal: object  # the `(params) => body` syntax
     binding_id: int | None = None
     place_self: bool = False
+    owner: str | None = None   # the alias that declared it: a method compiles once, for its declaring type; inheritors share it
 
 
 @dataclass(frozen=True)
@@ -503,15 +504,55 @@ instances agree with the checker's about `NotFound of? error`."""
 
 def user_brand_carries(child: object, structure: object) -> bool:
     """Whether a minted object satisfies an unbranded structure: `type of any & Info`
-    is a fresh nominal child of `Info`, so a `Tagged` value is an `Info` (the
-    structure's fields lead the child's, same names in order; a value of the
-    child has the parent's layout in front)."""
+    is a fresh nominal child of `Info` — of the *whole* structure it was minted
+    from — so a `Tagged` value is an `Info`. The structure is exactly the root
+    mint's field list (same names and types, in order); a descendant's own
+    fields follow. (A root's brand word sits right after those fields, so the
+    structure's view and the family's agree on every offset.)"""
     if not (user_branded(child) and isinstance(structure, ObjectType) and structure.brand is None):
         return False
-    assert isinstance(child, ObjectType)
-    if len(child.fields) < len(structure.fields):
+    assert isinstance(child, ObjectType) and child.brand is not None
+    root = USER_BRAND_TYPES.get(brand_root(child.brand))
+    if root is None or len(root.fields) != len(structure.fields):
         return False
-    return all(a.name == b.name and a.type == b.type for a, b in zip(child.fields, structure.fields))
+    return all(a.name == b.name and a.type == b.type for a, b in zip(root.fields, structure.fields))
+
+
+def structure_carriers(structure: object) -> list[str]:
+    """The root brands minted from an unbranded structure (`type of any & Info`, `type of Info`)."""
+    if not (isinstance(structure, ObjectType) and structure.brand is None):
+        return []
+    return [
+        brand for brand, minted in USER_BRAND_TYPES.items()
+        if brand not in USER_BRAND_PARENTS and user_brand_carries(minted, structure)
+    ]
+
+
+def brand_alternatives(type_: object) -> list[str]:
+    """The brands a value of ``type_`` may carry beyond its static type, most
+    specific first: a mint's descendants, or every brand under the roots minted
+    from an unbranded structure."""
+    unfolded = unfold(type_) if isinstance(type_, NamedType) else type_
+    if not isinstance(unfolded, ObjectType):
+        return []
+    if user_branded(unfolded):
+        assert unfolded.brand is not None
+        roots = brand_children(unfolded.brand)
+    else:
+        roots = structure_carriers(unfolded)
+    out: list[str] = []
+    for root in roots:
+        for brand in brand_descendants(root):
+            out.append(brand)
+    # deeper brands first: `is? Parent` also holds for its children
+    return sorted(out, key=lambda b: -len(brand_ancestry(b)))
+
+
+def brand_ancestry(brand: str) -> list[str]:
+    chain = [brand]
+    while chain[-1] in USER_BRAND_PARENTS:
+        chain.append(USER_BRAND_PARENTS[chain[-1]])
+    return chain
 
 
 def is_user_nominal(type_: object) -> bool:

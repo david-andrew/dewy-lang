@@ -46,3 +46,22 @@ def test_an_else_takes_children_minted_later(tmp_path) -> None:
     (tmp_path / 'ctx.dewy').write_text(CONTEXTS + 'let k = (c:Context):>int64 => match c { <Root> => 1 } else 0\n')
     (tmp_path / 'main.dewy').write_text('from p"ctx.dewy" import Context, k\nExtra = type of Context\nmain = () => exit(k(Extra(depth=1)))\n')
     check.typecheck_and_resolve(SrcFile.from_path(tmp_path / 'main.dewy'))
+
+
+PROTOCOL = 'let P:type = [eat:<(n:int64):>int64> extra:int64 = 0  __as__ = ():>string => "<{typename}>"]\nWs = type of P & [eat = (n:int64):>int64 => n + 1]\n'
+
+
+def test_typename_is_the_minted_name_or_the_structural_spelling() -> None:
+    _check(PROTOCOL + 'let a:string = Ws().typename\nlet p:P = Ws\nlet b:string = p.typename\nlet c = P[eat = (n:int64):>int64 => n]\nlet d:string = c.typename')
+
+
+def test_a_value_seen_through_its_structure_converts_as_its_brand() -> None:
+    _check(PROTOCOL + 'let table:array<P> = [Ws]\nlet s:string = "{table}"\nlet t:string = table[0] as string')
+
+
+def test_a_structure_that_mints_carry_is_tested_by_brand() -> None:
+    _check(PROTOCOL + 'let p:P = Ws\nlet ok:bool = p is? Ws\nlet q = if p is? Ws p.extra else 1')
+
+
+def test_a_child_method_overrides_and_each_type_compiles_its_own() -> None:
+    _check(PROTOCOL + 'Lc = type of P & [eat = (n:int64):>int64 => n  __as__ = ():>string => "lc"]\nNested = type of Lc & [depth:int64 = 1]\nlet a:string = "{Lc()}"\nlet b:string = "{Nested()}"\nlet c:P = Nested\nlet d:string = "{c}"')
