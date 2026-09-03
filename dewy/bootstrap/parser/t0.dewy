@@ -119,10 +119,15 @@ let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
 let Token:type = type of any & [src:string loc:Span idx:uint64] 
-let TokenProtocol:type = [eat:eatfn action_on_eat:actionfn?=none]
+let TokenProtocol:type = [
+    eat:eatfn
+    action_on_eat:actionfn?=none
+    __as__ = ():>string => "<{typename}>"
 
-let TokenError = type of error  #TODO: merge this with Report...
-let TokenErrorReport = TokenError & Report
+]
+
+let TokenError = type of error & Report #TODO: merge this with Report...
+# let TokenErrorReport = TokenError & Report
 
 # let Whitespace:type = type of Token
 # let Comment:type = type of Token
@@ -137,23 +142,22 @@ Whitespace = type of TokenProtocol & [
         return src.length
     }
 
-    __as__ = ():>string => "<Whitespace>"  #would it be possible to declare this on the base TokenProtocol type, and it just inserts the child's name there?
 ]
 
-# LineComment = TokenProtocol[
-#     eat = (src:nonemptystring ctx:Context):>uint64? => {
-#         if not src.startswith(line_comment_start) return none
-#         loop i in 0..uint64.max and i <? src.length {  
-#             if src[i] =? '\n' return i + 1
-#         }
-#         return src.length
-#     }
-# ]
+LineComment = type of TokenProtocol & [
+    eat = (src:nonemptystring ctx:Context):>uint64? => {
+        if not src.startswith(line_comment_start) return none
+        loop i in 0..uint64.max and i <? src.length {  
+            if src[i] =? '\n' return i + 1
+        }
+        return src.length
+    }
+]
 
 
 # # # TODO: compiler improvements way too much complaining about int64 vs uint64 stuff... should discuss a bit about what to do..
 # # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
-# BlockComment = TokenProtocol[
+# BlockComment = type of TokenProtocol & [
 #     eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
 #         if not src.startswith(block_comment_start) return none
 #         stack = 1
@@ -180,7 +184,7 @@ Whitespace = type of TokenProtocol & [
 contextmap = (ctx:Context):>array<TokenProtocol> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
     <Root> => [
         Whitespace
-        # LineComment
+        LineComment
         # BlockComment
     ]
     <StringBody> => []
@@ -189,12 +193,12 @@ contextmap = (ctx:Context):>array<TokenProtocol> => match ctx { #TODO compiler i
     <BasedStringBody> => []
     <BlockBody> => [
         Whitespace
-        # LineComment
+        LineComment
         # BlockComment
     ]
     <TypeBody> => [
         Whitespace
-        # LineComment
+        LineComment
         # BlockComment
     ]
 }
@@ -212,7 +216,15 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
     loop i <? src.length {
         ctx = ctx_stack[end]
         allowed_tokens = contextmap(ctx)
-        printl"allowed tokens: {allowed_tokens}"
+        matches = [
+            loop token_cls in allowed_tokens {
+                length = token_cls.eat(src[i..] ctx)
+                if length isnt? none
+                    [length=length token_cls=token_cls]
+            }
+        ]
+        printl"matched tokens: {matches}"
+        # printl"allowed tokens: {allowed_tokens}"
         i+=1
     }
 
@@ -241,7 +253,7 @@ main = (argv:array<string>):>uint64 => {
         first_row=0
     ]
     tokens = tokenize(srcfile)
-    if tokens is? TokenErrorReport {
+    if tokens is? TokenError {
         # todo render the report
         tokens.render(srcfile)
         exit(1)
