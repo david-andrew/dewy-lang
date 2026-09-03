@@ -13451,6 +13451,36 @@ def _refine_string_materialization_target(
     return ty.ArrayType(target.element, length) if length is not None else target
 
 
+def _runtime_shape(type_: ty.Type) -> object:
+    """How a value of the type is passed and returned at runtime: two function
+    types with the same shape everywhere can stand in for one another."""
+    plain = ty.unfold(ty.strip_refinement(type_))
+    payload = ty.optional_payload(plain)
+    if payload is not None:
+        return ('optional', _runtime_shape(payload))
+    members = ty.runtime_union_members(plain)
+    if members is not None:
+        return ('union', tuple(repr(member) for member in members))   # tags index the members
+    if isinstance(plain, ty.ObjectType):
+        return 'object'
+    if plain in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+        return 'void'
+    return 'word'   # words, handles: one register either way
+
+
+def _callable_shape_mismatch(actual: ty.FunctionType, expected: ty.FunctionType) -> str | None:
+    """Why a function of type ``actual`` cannot be stored as ``expected`` even
+    though its type fits: a result (or parameter) with another runtime shape.
+    The caller reads the result through the slot's type, so an `int64?` written
+    where `int64? | Bad` is read would be misread."""
+    if _runtime_shape(actual.ret) != _runtime_shape(expected.ret):
+        return f'it returns `{type_to_dewy(actual.ret)}`, whose runtime form differs from `{type_to_dewy(expected.ret)}`'
+    for mine, theirs in zip(actual.pos_or_kw, expected.pos_or_kw):
+        if _runtime_shape(mine.type) != _runtime_shape(theirs.type):
+            return f'its parameter `{mine.name}:{type_to_dewy(mine.type)}` has another runtime form than `{type_to_dewy(theirs.type)}`'
+    return None
+
+
 def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     """Check a synthesized node against an expected type (bidirectional checking's checking mode).
 
@@ -13458,6 +13488,20 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     ValueCast; anything else is a type error. An object type's field invariants the value
     does not already carry become obligations (proven from a literal, else by the analysis).
     """
+    if isinstance(node.type, ty.FunctionType) and isinstance(ty.strip_refinement(expected), ty.FunctionType) and node.type != expected:
+        # a function value stored under another function type: its type may
+        # fit (covariant result), but the call site reads the result through
+        # the slot's type, so the runtime forms must agree
+        assert isinstance(expected, ty.FunctionType)
+        if ctx.type_system.is_subtype(node.type, expected):
+            mismatch = _callable_shape_mismatch(node.type, expected)
+            if mismatch is not None:
+                type_error(
+                    ctx.srcfile,
+                    'function result form does not match the slot',
+                    Pointer(span=node.loc, message=mismatch),
+                    hint=f'declare the function with the slot\'s types: `:>{type_to_dewy(expected.ret)}`',
+                )
     checked = _check_against_shape(node, expected, ctx=ctx)
     target = ty.unfold(ty.strip_refinement(expected))
     if isinstance(target, ty.ObjectType):

@@ -1,0 +1,28 @@
+# a narrowed union value (`length` after `isnt? none`) still lives in the
+# cell its declaration tagged, so copying it into a narrower union — an
+# object field, an array element, a binding — retags by the declaration's
+# members; and a protocol slot's function must return the slot's own form
+
+let Bad = type of error & [code:int64]
+let f = (n:int64):>uint64? | Bad => if n >? 0 n else if n =? 0 none else Bad(code=n)
+
+main = () => {
+    let total:uint64 = 0
+    length = f(7)
+    if length isnt? none {
+        let m = [length=length]                                         # field typed `uint64 | Bad`
+        match m.length { v:uint64 => { total += v }  <Bad> => exit(1) }  # 7
+        let ms = [m]
+        match ms[0].length { v:uint64 => { total += v }  <Bad> => exit(2) }   # 14
+        if "{ms}" =? "[[length=7]]" total += 20                          # 34
+        let narrowed:uint64 | Bad = length
+        match narrowed { v:uint64 => { total += 1 }  <Bad> => exit(3) }  # 35
+    }
+    bad = f(-3)
+    if bad isnt? none {
+        let m = [length=bad]
+        match m.length { v:uint64 => exit(4)  b:Bad => { total += 3 } }   # 38
+    }
+    if total =? 38 exit(42)
+    exit(5)
+}

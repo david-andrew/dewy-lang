@@ -1075,6 +1075,7 @@ class _Lowerer(
         return statements, result
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
+        type_ = ty.strip_refinement(type_)   # a refinement (`string<length >? 0>`) is the checker's; the value is the base's
         if isinstance(type_, ty.TypeOr) and ty.string_valued(type_):
             return 'int64'   # a union of string literals is one string handle
         if ty.optional_payload(type_) is not None:

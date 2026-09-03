@@ -804,6 +804,8 @@ class _BoundsValidator:
         known = self._string_length(_strip_casts(node).type) if not isinstance(node.type, ty.ArrayType) else node.type.length   # a literal keeps its length through the cast to `string`
         if known is not None:
             return Interval.exact(known)
+        if isinstance(_strip_casts(node), hir.StringSlice):
+            return self._slice_length_interval(_strip_casts(node), state)
         sequence_id = _runtime_array_id(node, self.registry)
         if sequence_id is None:
             return None
@@ -811,6 +813,37 @@ class _BoundsValidator:
         # `limbs:array<uint64 length >? 0>`: the field's declared length bound is a fact on every read
         declared = _length_propositions_interval(_member_invariant(node))
         return interval if declared is None else interval.intersect(declared)
+
+    def _slice_length_interval(self, node: hir.StringSlice, state: State) -> Interval | None:
+        """The length of `s[a..b]`: its exclusive end minus its start, read with
+        the order facts (`s[i..]` under `i <? s.length` is at least 1) and
+        never negative (the slice's own validation proved its endpoints)."""
+        loc = node.loc
+        bounds = node.range.bounds or '[]'
+        string_id = _runtime_array_id(node.string, self.registry)
+        start_node: hir.AST = node.range.left if node.range.left is not None else hir.Integer(loc, ty.IntegerLiteralType(0), '0d', 0)
+        start_delta = 1 if bounds[0] == '(' else 0
+        length_node = hir.StringLength(loc, 'int64', node.string)
+        end_delta = 0
+        end_node: hir.AST
+        offset = self._length_offset_index(node.range.right, string_id) if node.range.right is not None and string_id is not None else None
+        if node.range.right is None:
+            end_node = length_node                                   # `s[i..]`: to the end
+        elif offset is not None:
+            end_node = length_node                                   # `s[i..end]`, `s[i..end - 1]`: the length less k
+            end_delta = -offset + (1 if bounds[1] == ']' else 0)
+        else:
+            end_node = node.range.right
+            end_delta = 1 if bounds[1] == ']' else 0
+        end_interval = self._eval(end_node, state, validate=False)
+        start_interval = self._eval(start_node, state, validate=False)
+        difference = hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, 'int64', '__sub__'), [end_node, start_node], {})
+        result = self._binary_interval('__sub__', end_interval, start_interval, 'int64', bound=self._difference_bound(difference, state))
+        if result is None:
+            return None
+        shift = end_delta - start_delta
+        result = Interval(_add(result.lower, shift), _add(result.upper, shift), capped=result.capped)
+        return result.intersect(Interval(0, None))
 
     def _field_node(self, value: hir.AST, field: str) -> hir.AST:
         """`value.field` (a path) as a node: the literal's field, or a member access (tracked by route)."""
@@ -2281,6 +2314,12 @@ class _BoundsValidator:
                         return True
                     binding = self._binding_id(endpoint)
                     if binding is not None and _index_fact_key(binding, string_id) in state:
+                        return True
+                    # an order fact against the length: `i <=? s.length` admits `i` as an
+                    # exclusive end (`s[0..i)`) or a start; `i <? s.length` as an inclusive end
+                    order = state.get(_order_key(binding, _length_key(string_id))) if binding is not None else None
+                    required_gap = delta if limit == minimum + 1 else 1 + delta
+                    if order is not None and order.lower is not None and order.lower >= required_gap:
                         return True
                     # `s.length - k` (`end`, `end - 1`): below the length by construction,
                     # nonnegative when the length is at least k (minus the shift)

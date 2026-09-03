@@ -51,3 +51,11 @@ def test_fixed_width_arithmetic_keeps_its_width_under_an_expected_width() -> Non
     # `let w:uint64 = end - start` dispatches `int64 - int64`, then meets `uint64`
     _check('let f = (a:int64 b:int64):>uint64 => {\n    if 0 <=? a <=? b { let w:uint64 = b - a return w }\n    return 0\n}')
     _check('let f = (a:uint8 b:uint8):>int64 => {\n    let w:int64 = a + b\n    return w\n}')
+
+
+def test_a_slice_length_is_its_endpoints_difference() -> None:
+    nonempty = 'let f = (s:string<length >? 0>):>int64 => s.length\n'
+    _check(nonempty + 'let g = (src:string):>int64 => {\n    i:int64 = 0\n    total:int64 = 0\n    loop i <? src.length { total += f(src[i..]) + f(src[i..end])  i += 1 }\n    return total\n}')
+    _check(nonempty + 'let g = (src:string i:int64):>int64 => if 0 <? i <=? src.length f(src[0..i)) else 0')
+    with pytest.raises(UserError, match='cannot prove refinement'):
+        _check(nonempty + 'let g = (src:string i:int64):>int64 => if 0 <=? i <? src.length f(src[0..i)) else 0')   # `[0..0)` is empty

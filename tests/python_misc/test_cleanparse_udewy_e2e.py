@@ -131,6 +131,8 @@ LOWERED_CASES = [
     ('brand_words.dewy', 42),
     ('protocol_tables.dewy', 42),
     ('dynamic_strings.dewy', 42),
+    ('slice_lengths.dewy', 42),
+    ('narrowed_union_copies.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

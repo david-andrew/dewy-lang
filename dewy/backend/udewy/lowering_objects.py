@@ -771,6 +771,19 @@ class _ObjectLowering:
                 )
             )
             return [*prelude, *place_postlude], replace(result, type=node.type)
+        result_members = ty.runtime_union_members(node.type)
+        if result_members is not None:
+            # a union result (`eat` returning `uint64? | TokenError`): written
+            # into the caller's cell — the one a binding prepared, else a fresh one
+            forwarded = self.union_result_destinations.pop(id(node), None)
+            if forwarded is not None:
+                result = replace(forwarded, type='int64')
+            else:
+                result = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('result_value'))
+                prelude.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', result.name, 'int64', self._union_cell_allocation(result_members, node.loc)))
+                prelude.extend(self._union_prepare_trees(result, result_members, node.loc))
+            prelude.append(replace(node, type=ty.VOID_TYPE, func=loaded, pos_args=[*pos_args, result], kw_args=kw_args))
+            return [*prelude, *place_postlude], replace(result, type=node.type)
         call = replace(node, func=loaded, pos_args=pos_args, kw_args=kw_args)
         return self._finish_scalar_call_place_writebacks(
             call,

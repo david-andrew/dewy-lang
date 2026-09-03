@@ -684,6 +684,16 @@ class _OptionalLowering:
             ),
         ]
 
+    def _stored_union_members(self, value: hir.AST) -> tuple[ty.TypeExpr, ...] | None:
+        """The members a union value's cell is tagged by: its declaration's for a
+        (possibly narrowed) local, the field's declared type for a member read."""
+        if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
+            return self.union_cells.get(value.binding_id)
+        if isinstance(value, hir.MemberAccess) and isinstance(value.value.type, ty.ObjectType):
+            declared = value.value.type.field(value.name)
+            return self._field_union_members(declared.type) if declared is not None else None
+        return None
+
     def _union_member_index(
         self,
         members: tuple[ty.TypeExpr, ...],
@@ -699,6 +709,13 @@ class _OptionalLowering:
         for index, member in enumerate(members):
             if system.is_subtype(value_type, member):
                 return index
+        if value_type in ('int', 'uint') or isinstance(value_type, ty.IntegerLiteralType) or ty.fixed_integer_layout(ty.strip_refinement(value_type)) is not None:
+            # an integer of another width (its proven cast stripped by
+            # extraction: one word either way) is the union's one fixed-width
+            # member, as the checker routed it
+            words = [index for index, member in enumerate(members) if ty.fixed_integer_layout(member) is not None]
+            if len(words) == 1:
+                return words[0]
         self._target_error(
             node,
             'a union store whose member representation cannot be selected',
@@ -771,6 +788,15 @@ class _OptionalLowering:
         if isinstance(value, hir.Integer) and isinstance(value.type, ty.TypeOr):
             # a constant typed as the whole union (`0` as `0 | [...]`): its literal member's word
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
+        stored_members = self._stored_union_members(value)
+        possible = self._field_union_members(value.type)
+        if stored_members is not None and stored_members != members and possible is not None and all(member in members for member in possible):
+            # a narrowed union (`length` after `isnt? none`): its cell still
+            # carries the declaration's tags, so the copy retags by those (a
+            # narrowed-away member gets no arm: it cannot be the live one)
+            prelude, source = self._extract_expression(value)
+            source_word = replace(source, type='int64') if isinstance(source, hir.ExpressedIdentifier) else source
+            return [*prelude, *self._union_retag(cell, source_word, stored_members, members, value.loc, prepared=prepared)]
         if self._field_union_members(value.type) == members:
             # Same-union copy: tag, payload word, and the active aggregate
             # tree — moved rather than cloned when the source is a call's
@@ -876,6 +902,8 @@ class _OptionalLowering:
         ]
         arms: list[hir.IfArm | hir.LoopArm] = []
         for source_index, member in enumerate(source_members):
+            if member not in dest_members:
+                continue   # narrowed away: never the live member here
             dest_index = dest_members.index(member)
             body: list[hir.AST] = [
                 self._intrinsic_call(

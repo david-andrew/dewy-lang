@@ -36,3 +36,11 @@ def test_a_mint_with_a_required_field_is_not_a_value() -> None:
 
 def test_function_fields_print_as_their_type() -> None:
     _check('let P:type = [eat:<(n:int64):>int64>]\nlet p:P = [eat = (n:int64):>int64 => n]\nlet s:string = "{p}"')
+
+
+def test_a_slot_function_must_return_the_slots_runtime_form() -> None:
+    with pytest.raises(TypeCheckError, match='function result form does not match the slot'):
+        _check('let Bad = type of error\nlet P:type = [eat:<(n:int64):>int64? | Bad>]\nWs = type of P & [eat = (n:int64):>int64? => none]\nlet w = Ws()')
+    _check('let Bad = type of error\nlet P:type = [eat:<(n:int64):>int64? | Bad>]\nWs = type of P & [eat = (n:int64):>int64? | Bad => none]\nlet w = Ws()')
+    # covariance that keeps the form is still fine: a word for a word
+    _check('let P:type = [f:<(n:int64):>int64>]\nlet p:P = P[f = (n:int64):>int64 & ~0 => 1]')
