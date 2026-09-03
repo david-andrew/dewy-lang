@@ -211,6 +211,8 @@ class _Lowerer(
         # writes there directly instead of into a temporary that is then
         # deep-copied
         self.union_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
+        # program-wide union tags: member type key -> id (`none` is 0; see `_member_tag`)
+        self.union_tags: dict[str, int] = {}
         self.current_optional_result: hir.ExpressedIdentifier | None = None
         self.current_object_result: hir.ExpressedIdentifier | None = None
         self.current_array_result: hir.ExpressedIdentifier | None = None
@@ -1057,7 +1059,7 @@ class _Lowerer(
             access = hir.MemberAccess(loc, field.type, receiver, node.field)
             arms.append(hir.IfArm(
                 loc, ty.VOID_TYPE,
-                self._typed_equality(tag, self._uint8_literal(loc, index), 'uint8', loc),
+                self._tag_is(tag, member, loc),
                 hir.Block(loc, ty.VOID_TYPE, write(access), True),
             ))
         # the exception alternatives forward: the receiver's cell, viewed as its
@@ -3003,7 +3005,7 @@ class _Lowerer(
             return []   # static, fresh, or a call's: the caller's already
         statements: list[hir.AST] = []
         tag = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'result_tag').name)
-        statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._intrinsic_call('__load_u8__', [result], 'int64', loc)))
+        statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(result, loc)))
         for index, member in enumerate(members):
             if member is None or not self._is_string_valued(member):
                 continue
@@ -3011,7 +3013,7 @@ class _Lowerer(
             length = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'result_length').name)
             copy, copied = self._string_from_bytes(self._string_data_start(payload, loc), length, loc)
             statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                loc, ty.VOID_TYPE, self._typed_equality(tag, self._int64_literal(loc, index), 'int64', loc),
+                loc, ty.VOID_TYPE, self._tag_is(tag, member, loc),
                 hir.Block(loc, ty.VOID_TYPE, [
                     hir.Declare(loc, ty.VOID_TYPE, 'let', payload.name, 'int64', self._load_i64_field(result, 8, loc)),
                     hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(payload, STRING_BYTE_LENGTH_OFFSET, loc)),
@@ -3025,13 +3027,13 @@ class _Lowerer(
         """Give back the string payload an optional/union cell holds, by its member tag and the string's owner word."""
         word = replace(cell, type='int64')
         tag = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'cell_tag').name)
-        statements: list[hir.AST] = [hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._intrinsic_call('__load_u8__', [word], 'int64', loc))]
+        statements: list[hir.AST] = [hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(word, loc))]
         for index, member in enumerate(members):
             if not self._is_string_valued(member):
                 continue
             payload = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'cell_payload').name)
             statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                loc, ty.VOID_TYPE, self._typed_equality(tag, self._int64_literal(loc, index), 'int64', loc),
+                loc, ty.VOID_TYPE, self._tag_is(tag, member, loc),
                 hir.Block(loc, ty.VOID_TYPE, [
                     hir.Declare(loc, ty.VOID_TYPE, 'let', payload.name, 'int64', self._load_i64_field(word, 8, loc)),
                     self._release_string_by_owner(payload, loc),
@@ -4243,12 +4245,7 @@ class _Lowerer(
                 tag = self._optional_tag(cell, node.loc)
                 test: hir.AST | None = None
                 for index in matching:
-                    comparison = self._typed_equality(
-                        tag,
-                        self._uint8_literal(node.loc, index),
-                        'uint8',
-                        node.loc,
-                    )
+                    comparison = self._tag_is(tag, members[index], node.loc)
                     test = (
                         comparison
                         if test is None
@@ -4263,7 +4260,7 @@ class _Lowerer(
                     in_brand = self._brand_range_test(self._brand_word_load(pointer, member_type, node.loc), tested_brand, node.loc)
                     if node.negated:
                         in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
-                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', self._typed_equality(tag, self._uint8_literal(node.loc, index), 'uint8', node.loc), in_brand)
+                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', self._tag_is(tag, members[index], node.loc), in_brand)
                     test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
                 assert test is not None
                 return union_prelude, test
@@ -4299,16 +4296,10 @@ class _Lowerer(
                 if node.negated:
                     result = not result
                 return prelude, hir.Bool(node.loc, 'bool', result)
-            expected_tag = 1 if payload_matches else 0
-            if node.negated:
-                expected_tag = 1 - expected_tag
             tag = self._optional_tag(value, node.loc)
-            return prelude, self._typed_equality(
-                tag,
-                self._uint8_literal(node.loc, expected_tag),
-                'uint8',
-                node.loc,
-            )
+            want_present = payload_matches != node.negated
+            # present is any tag but `none`'s 0
+            return prelude, (self._tag_present(tag, node.loc) if want_present else self._tag_is(tag, 'none', node.loc))
         if isinstance(node, hir.Flow):
             if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
                 self._target_error(node, 'statement-only flow used where a value is required')

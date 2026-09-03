@@ -372,7 +372,7 @@ class _IteratorLowering:
                 defined_body = [
                     *value_updates,
                     hir.Declare(loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', replace(value, type='int64') if isinstance(value, hir.ExpressedIdentifier) else value),
-                    self._intrinsic_call('__store_u8__', [self._intrinsic_call('__load_u8__', [pointer], 'uint8', loc), target], ty.VOID_TYPE, loc),
+                    self._intrinsic_call('__store_i64__', [self._optional_tag(pointer, loc), target], ty.VOID_TYPE, loc),
                     self._intrinsic_call('__store_i64__', [self._intrinsic_call('__load_i64__', [self._int64_binary('__add__', pointer, self._int64_literal(loc, 8), loc)], 'int64', loc), self._optional_payload_address(target, loc)], ty.VOID_TYPE, loc),
                     hir.Assign(loc, ty.VOID_TYPE, offset_value, '+=', self._int64_literal(loc, 1)),
                 ]

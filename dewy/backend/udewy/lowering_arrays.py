@@ -1152,13 +1152,13 @@ class _ArrayLowering:
                 assert members is not None
                 cell = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
                 cell_declare, cell_ident = local('field_cell', cell)
-                tag_declare, tag = local('field_tag', self._intrinsic_call('__load_u8__', [cell_ident], 'int64', loc))
+                tag_declare, tag = local('field_tag', self._optional_tag(cell_ident, loc))
                 statements.extend([cell_declare, tag_declare])
                 for index, member in enumerate(members):
                     if self._is_string_valued(member):
                         payload_declare, payload = local('field_payload', self._load_i64_field(cell_ident, 8, loc))
                         statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                            loc, ty.VOID_TYPE, self._typed_equality(tag, self._int64_literal(loc, index), 'int64', loc),
+                            loc, ty.VOID_TYPE, self._tag_is(tag, member, loc),
                             hir.Block(loc, ty.VOID_TYPE, [payload_declare, self._release_string_by_owner(payload, loc)], True),
                         )], None))
             elif isinstance(unfolded, ty.ObjectType):
@@ -1223,7 +1223,7 @@ class _ArrayLowering:
         data_declare, data = local('cell_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         cell_declare, cell = local('cell', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
-        tag_declare, tag = local('cell_tag', self._intrinsic_call('__load_u8__', [cell], 'int64', loc))
+        tag_declare, tag = local('cell_tag', self._optional_tag(cell, loc))
         payload_declare, payload_word = local('cell_payload', self._load_i64_field(cell, 8, loc))
         body: list[hir.AST] = [cell_declare, tag_declare, payload_declare]
         for tag_index, member in enumerate(members):
@@ -1241,7 +1241,7 @@ class _ArrayLowering:
                 hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
                 hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
             ], None)
-            body.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(tag, self._int64_literal(loc, tag_index), 'int64', loc), hir.Block(loc, ty.VOID_TYPE, [owner_declare, by_owner], True))], None))
+            body.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, [owner_declare, by_owner], True))], None))
         body.append(self._arena_release_call(cell, self._int64_literal(loc, 16), loc))
         body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)))
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)

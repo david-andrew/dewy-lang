@@ -1,0 +1,24 @@
+# union tags are program-wide: a cell tagged by one union reads through any
+# union that contains its member, so a function returning a narrower union
+# stands in for a slot returning a wider one — words, objects, and errors
+# alike — and a narrowed value copies into a narrower cell without retagging
+
+let Bad = type of error & [code:int64]
+let Token:type = [text:string idx:int64]
+let P:type = [eat:<(n:int64):>Token | none | Bad>]
+Ws = type of P & [eat = (n:int64):>Token | none => if n >? 0 Token(text="ws" idx=n) else none]      # no Bad
+Lc = type of P & [eat = (n:int64):>Token | Bad => if n >? 0 Token(text="lc" idx=n) else Bad(code=n)]  # no none
+
+let widen = (n:int64):>int64? => if n >? 0 n else none
+
+main = () => {
+    let table:array<P> = [Ws Lc]
+    let wider:<(n:int64):>int64 | none | Bad> = @widen                                                 # a named function stands in, no adapter
+    let total:int64 = 0
+    match table[0].eat(5) { t:Token => { total += t.idx + t.text.length }  <none> => exit(1)  <Bad> => exit(2) }   # 7
+    match table[0].eat(0) { t:Token => exit(3)  <none> => { total += 10 }  <Bad> => exit(4) }                        # 17
+    match table[1].eat(3) { t:Token => { total += t.idx + t.text.length }  <none> => exit(5)  <Bad> => exit(6) }   # 22
+    match table[1].eat(-20) { t:Token => exit(7)  <none> => exit(8)  b:Bad => { total += 0 - b.code } }             # 42
+    match wider(4) { v:int64 => { total += v - 4 }  <none> => exit(11)  <Bad> => exit(12) }                        # 42
+    exit(total)
+}

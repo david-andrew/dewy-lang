@@ -13455,12 +13455,8 @@ def _runtime_shape(type_: ty.Type) -> object:
     """How a value of the type is passed and returned at runtime: two function
     types with the same shape everywhere can stand in for one another."""
     plain = ty.unfold(ty.strip_refinement(type_))
-    payload = ty.optional_payload(plain)
-    if payload is not None:
-        return ('optional', _runtime_shape(payload))
-    members = ty.runtime_union_members(plain)
-    if members is not None:
-        return ('union', tuple(repr(member) for member in members))   # tags index the members
+    if ty.optional_payload(plain) is not None or ty.runtime_union_members(plain) is not None:
+        return 'cell'   # a tagged cell: tags are program-wide, so any union reads any narrower one
     if isinstance(plain, ty.ObjectType):
         return 'object'
     if plain in (ty.VOID_TYPE, ty.BOTTOM_TYPE):

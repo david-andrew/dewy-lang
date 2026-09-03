@@ -2506,11 +2506,11 @@ class _StringLowering:
             loc, ty.VOID_TYPE, valid,
             hir.Block(loc, ty.VOID_TYPE, [
                 *build,
-                self._intrinsic_call('__store_u8__', [self._uint8_literal(loc, 1), cell], ty.VOID_TYPE, loc),
+                self._tag_write(cell, ty.StringType(), loc),
                 self._intrinsic_call('__store_i64__', [replace(descriptor, type='int64'), self._optional_payload_address(cell, loc)], ty.VOID_TYPE, loc),
             ], True),
         )], hir.Block(loc, ty.VOID_TYPE, [
-            self._intrinsic_call('__store_u8__', [self._uint8_literal(loc, 0), cell], ty.VOID_TYPE, loc),
+            self._tag_write(cell, 'none', loc),
             self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._optional_payload_address(cell, loc)], ty.VOID_TYPE, loc),
         ], True)))
         return statements, cell

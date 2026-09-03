@@ -85,6 +85,20 @@ Position-only function contracts use `<name:type>`, just like function literals.
 
 A function value is an ordinary value of its contract type: `@name` selects a named function instead of calling it, and such values are stored in arrays and dictionaries (`let table:dict<string <(x:int64):>int64>> = ['double' -> @double]`), chosen by a flow (`let op = if fast @double else @triple`), and called through whatever holds them (`table['double'](4)`, `op(3)`). A call whose callee's origin is not tracked — a table entry, a reassigned function binding — is checked for initialization order against every function of that type in the program. A function that reads enclosing locals cannot be a value yet (it needs a closure record); it is called directly or given what it needs as parameters.
 
+A function value fits a slot of a wider contract by the usual rules — parameters contravariant, the result covariant — and a narrower *union* result needs no adapter: a function returning `uint64?` is stored where `uint64? | TokenError` is expected and called through it, because a union value carries its member's identity rather than a position in one particular union. The one result difference that is rejected is a bare value against a tagged one (a function returning `none` alone, or `int64`, in a slot returning `int64?`): those are different runtime forms.
+
+<!-- dewy-example: compiler -->
+```dewy
+let TokenError:type = type of error
+let TokenProtocol:type = [eat:<(src:string):>uint64? | TokenError>]
+Whitespace = type of TokenProtocol & [eat = (src:string):>uint64? => if src.startswith(" ") 1 else none]
+
+count = ():>int64 => {
+    let table:array<TokenProtocol> = [Whitespace]
+    return match table[0].eat(" x") { n:uint64 => n  <none> => 0  <TokenError> => 0 }   # `Whitespace.eat` returns `uint64?`; the slot reads it
+}
+```
+
 Expected failures appear as direct [error alternatives](errors-and-forwarding.md) in the return contract. Public functions should normally declare a stable set of returned errors even where an unexposed helper could infer them.
 
 ## Calls and Pipes

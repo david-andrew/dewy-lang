@@ -168,3 +168,17 @@ let _exit = (status:int64):>never => {
     let ignored:int64 = __syscall1__(231 status)
     __unreachable__()
 }
+
+# The prepared tree of a union member in a cell whose layout the writer does
+# not know (a function's result cell, declared by the caller under a possibly
+# wider union): the cell lists (tag tree) pairs after its count word.
+let _union_tree = (cell:int64 tag:int64):>int64 => {
+    let count:int64 = __load_i64__(cell + 16)
+    i:int64 = 0
+    loop i <? count {
+        let entry:int64 = cell + 24 + i * 16
+        if __load_i64__(entry) =? tag return __load_i64__(entry + 8)
+        i += 1
+    }
+    return 0
+}

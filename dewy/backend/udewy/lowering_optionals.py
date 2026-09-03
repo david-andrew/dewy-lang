@@ -34,8 +34,47 @@ class _OptionalLowering:
     def _uint8_literal(loc: Span, value: int) -> hir.Integer:
         return hir.Integer(loc, 'uint8', t0.base10, value)
 
+    # ------------------------------------------------------------------
+    # Tags are program-wide: every type that is a member of any union gets
+    # one id for the whole program (`none` is 0), and a cell's tag word holds
+    # its live member's id. A cell is therefore readable through any union
+    # that contains its member — a narrower result flows into a wider cell,
+    # a narrowed value copies without renumbering — and presence is `tag > 0`.
+
+    def _member_tag(self, member: ty.TypeExpr) -> int:
+        """The program-wide tag of a union member type."""
+        plain = ty.strip_refinement(member)
+        if plain == 'none':
+            return 0
+        if self._is_string_valued(plain):
+            key = 'string'   # one handle whatever the spelling (`string`, a literal, a union of literals)
+        elif isinstance(plain, ty.NamedType):
+            key = f'named:{plain.name}:{plain.alias_id}'
+        elif isinstance(plain, ty.ObjectType):
+            key = f'object:{plain.brand}:' + ','.join(f'{f.name}:{f.type!r}' for f in plain.fields)
+        else:
+            key = repr(plain)
+        tags = self.union_tags
+        if key not in tags:
+            tags[key] = len(tags) + 1
+        return tags[key]
+
+    def _tag_literal(self, loc: Span, member: ty.TypeExpr) -> hir.Integer:
+        return self._int64_literal(loc, self._member_tag(member))
+
     def _optional_tag(self, cell: hir.AST, loc: Span) -> hir.FunctionCall:
-        return self._intrinsic_call('__load_u8__', [cell], 'uint8', loc)
+        """The tag word of a cell."""
+        return self._intrinsic_call('__load_i64__', [cell], 'int64', loc)
+
+    def _tag_write(self, cell: hir.AST, member: ty.TypeExpr, loc: Span) -> hir.FunctionCall:
+        return self._intrinsic_call('__store_i64__', [self._tag_literal(loc, member), cell], ty.VOID_TYPE, loc)
+
+    def _tag_is(self, tag: hir.AST, member: ty.TypeExpr, loc: Span) -> hir.FunctionCall:
+        return self._typed_equality(tag, self._tag_literal(loc, member), 'int64', loc)
+
+    def _tag_present(self, tag: hir.AST, loc: Span) -> hir.FunctionCall:
+        """Whether a tag names a member other than `none`."""
+        return self._int64_comparison('__gt__', tag, self._int64_literal(loc, 0), loc)
 
     def _optional_store_payload(
         self,
@@ -116,17 +155,12 @@ class _OptionalLowering:
         if isinstance(value, hir.Flow):
             prelude, flow = self._lower_optional_flow(value, cell, payload)
             return [*prelude, flow]
-        def tag_store(tag: int) -> hir.FunctionCall:
-            return self._intrinsic_call(
-                '__store_u8__',
-                [self._uint8_literal(value.loc, tag), cell],
-                ty.VOID_TYPE,
-                value.loc,
-            )
+        def tag_store(member: ty.TypeExpr) -> hir.FunctionCall:
+            return self._tag_write(cell, member, value.loc)
         if isinstance(value, hir.NoneValue):
             zero = self._int64_literal(value.loc, 0)
             return [
-                tag_store(0),
+                tag_store('none'),
                 self._intrinsic_call(
                     '__store_i64__',
                     [zero, self._optional_payload_address(cell, value.loc)],
@@ -140,7 +174,7 @@ class _OptionalLowering:
             payload_value = self._optional_load_payload(source, payload, value.loc)
             return [
                 *prelude,
-                self._intrinsic_call('__store_u8__', [tag, cell], ty.VOID_TYPE, value.loc),
+                self._intrinsic_call('__store_i64__', [tag, cell], ty.VOID_TYPE, value.loc),
                 self._optional_store_payload(payload_value, cell, payload, value.loc),
             ]
         if self._is_string_valued(value.type):
@@ -148,7 +182,7 @@ class _OptionalLowering:
         prelude, payload_value = self._extract_expression(value)
         return [
             *prelude,
-            tag_store(1),
+            tag_store(payload),
             self._optional_store_payload(payload_value, cell, payload, value.loc),
         ]
 
@@ -286,10 +320,13 @@ class _OptionalLowering:
         )
 
     # Aggregate members (fixed-layout objects and exact arrays) get a
-    # prepared storage tree each, allocated with the cell and referenced from
-    # slots after the payload word: [tag u8 @0][payload @8][tree slots @16..].
-    # Tagging to an aggregate member copies the value into its tree and points
-    # the payload word at the tree root.
+    # prepared storage tree each, allocated with the cell and listed after the
+    # payload word with the member's tag: [tag @0][payload @8][count @16]
+    # [(tag, tree) @24, @40, …]. Tagging to an aggregate member copies the
+    # value into its tree and points the payload word at the tree root. The
+    # list is keyed by tag so a writer that knows only a narrower union — a
+    # function whose result cell the caller declared with more members — finds
+    # the tree by scanning (`_union_tree` in the prelude) rather than by offset.
 
     # A cell is *prepared* when it owns storage trees for its fixed-layout
     # aggregate members (locals, parameters, results). A cell stored inline in
@@ -313,13 +350,18 @@ class _OptionalLowering:
 
     @classmethod
     def _union_tree_slots(cls, members: tuple[ty.TypeExpr, ...], *, prepared: bool = True) -> dict[int, int]:
+        """Member index -> offset of its tree-pointer word (the member's tag sits 8 bytes before it)."""
         slots: dict[int, int] = {}
-        offset = 16
+        offset = 32
         for index, member in enumerate(members):
             if cls._union_member_kind(member, prepared=prepared) == 'tree':
                 slots[index] = offset
-                offset += 8
+                offset += 16
         return slots
+
+    def _union_cell_size(self, members: tuple[ty.TypeExpr, ...]) -> int:
+        trees = len(self._union_tree_slots(members))
+        return 16 if not trees else 24 + 16 * trees
 
     def _union_source_pointer(self, cell: hir.AST, loc: Span) -> hir.AST:
         """The active aggregate member's object pointer: the payload word."""
@@ -516,7 +558,7 @@ class _OptionalLowering:
         loc: Span,
     ) -> hir.FunctionCall:
         allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
-        size = 16 + 8 * len(self._union_tree_slots(members))
+        size = self._union_cell_size(members)
         return self._intrinsic_call(
             allocator,
             [self._int64_literal(loc, size)],
@@ -530,9 +572,17 @@ class _OptionalLowering:
         members: tuple[ty.TypeExpr, ...],
         loc: Span,
     ) -> list[hir.AST]:
-        """Allocate the prepared storage tree of every aggregate member."""
+        """Allocate the prepared storage tree of every aggregate member, listed by tag."""
         statements: list[hir.AST] = []
-        for index, offset in self._union_tree_slots(members).items():
+        slots = self._union_tree_slots(members)
+        if not slots:
+            return statements
+        statements.append(self._intrinsic_call(
+            '__store_i64__',
+            [self._int64_literal(loc, len(slots)), self._int64_binary('__add__', cell, self._int64_literal(loc, 16), loc)],
+            ty.VOID_TYPE, loc,
+        ))
+        for index, offset in slots.items():
             member = members[index]
             if isinstance(member, ty.ObjectType):
                 tree_statements, root = self._allocate_object_result_value(member, loc)
@@ -540,6 +590,11 @@ class _OptionalLowering:
                 assert isinstance(member, ty.ArrayType)
                 tree_statements, root = self._allocate_array_result_value(member, loc)
             statements.extend(tree_statements)
+            statements.append(self._intrinsic_call(
+                '__store_i64__',
+                [self._tag_literal(loc, member), self._int64_binary('__add__', cell, self._int64_literal(loc, offset - 8), loc)],
+                ty.VOID_TYPE, loc,
+            ))
             statements.append(
                 self._intrinsic_call(
                     '__store_i64__',
@@ -562,21 +617,31 @@ class _OptionalLowering:
         member: ty.TypeExpr,
         loc: Span,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """The prepared tree of ``member`` in ``cell``: at its offset when the
+        cell is this union's own; found by tag when the cell was declared by
+        the caller under a possibly wider union (a function's result cell)."""
         root = hir.ExpressedIdentifier(loc, member, self._new_optional_name('tree'))
-        declaration = hir.Declare(
-            loc,
-            ty.VOID_TYPE,
-            'let',
-            root.name,
-            'int64',
-            self._intrinsic_call(
+        if self._cell_layout_unknown(cell):
+            found: hir.AST = self._region_call('_union_tree', [replace(cell, type='int64') if isinstance(cell, hir.ExpressedIdentifier) else cell, self._tag_literal(loc, member)], loc, 'int64')
+        else:
+            found = self._intrinsic_call(
                 '__load_i64__',
                 [self._int64_binary('__add__', cell, self._int64_literal(loc, offset), loc)],
                 'int64',
                 loc,
-            ),
-        )
+            )
+        declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', root.name, 'int64', found)
         return [declaration], root
+
+    def _cell_layout_unknown(self, cell: hir.AST) -> bool:
+        """Whether ``cell`` is the enclosing function's result cell: the caller
+        declared it, possibly for a wider union, so its tree list is scanned."""
+        results = [self.current_optional_result, self.current_union_result]
+        return (
+            isinstance(cell, hir.ExpressedIdentifier)
+            and any(result is not None and cell.name == result.name for result in results)
+            and any(candidate.logical_name.endswith('_union_tree') for candidate in self.functions)
+        )
 
     def _union_copy_cell(
         self,
@@ -599,10 +664,10 @@ class _OptionalLowering:
             index for index, member in enumerate(members)
             if self._union_member_kind(member, prepared=prepared) != 'word'
         ]
-        tag = hir.ExpressedIdentifier(loc, 'uint8', self._new_optional_name('tag'))
+        tag = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
-            hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'uint8', self._optional_tag(source, loc)),
-            self._intrinsic_call('__store_u8__', [tag, dest], ty.VOID_TYPE, loc),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(source, loc)),
+            self._intrinsic_call('__store_i64__', [tag, dest], ty.VOID_TYPE, loc),
         ]
         word_copy = self._intrinsic_call(
             '__store_i64__',
@@ -631,7 +696,7 @@ class _OptionalLowering:
                 hir.IfArm(
                     loc,
                     ty.VOID_TYPE,
-                    self._typed_equality(tag, self._uint8_literal(loc, index), 'uint8', loc),
+                    self._tag_is(tag, member, loc),
                     hir.Block(loc, ty.VOID_TYPE, body, True),
                 )
             )
@@ -765,13 +830,8 @@ class _OptionalLowering:
             prelude, flow = self._lower_union_flow(value, cell, members, prepared=prepared)
             return [*prelude, flow]
 
-        def tag_store(tag: int) -> hir.FunctionCall:
-            return self._intrinsic_call(
-                '__store_u8__',
-                [self._uint8_literal(value.loc, tag), cell],
-                ty.VOID_TYPE,
-                value.loc,
-            )
+        def tag_store(index: int) -> hir.FunctionCall:
+            return self._tag_write(cell, members[index], value.loc)
 
         if isinstance(value, hir.NoneValue):
             index = self._union_member_index(members, 'none', value)
@@ -894,57 +954,32 @@ class _OptionalLowering:
         *,
         prepared: bool = True,
     ) -> list[hir.AST]:
-        """Copy a union cell into a wider union, renumbering the tag."""
+        """Copy a union cell into a cell of another union holding its members.
+        Tags are program-wide, so the tag copies as it is; an aggregate live
+        member is copied into the destination's own tree (a source member the
+        destination lacks cannot be live — narrowing ruled it out)."""
         dest_slots = self._union_tree_slots(dest_members, prepared=prepared)
-        tag = hir.ExpressedIdentifier(loc, 'uint8', self._new_optional_name('tag'))
+        tag = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
-            hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'uint8', self._optional_tag(source, loc)),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(source, loc)),
+            self._intrinsic_call('__store_i64__', [tag, dest], ty.VOID_TYPE, loc),
         ]
+        word_copy = self._intrinsic_call(
+            '__store_i64__',
+            [self._intrinsic_call('__load_i64__', [self._optional_payload_address(source, loc)], 'int64', loc), self._optional_payload_address(dest, loc)],
+            ty.VOID_TYPE,
+            loc,
+        )
         arms: list[hir.IfArm | hir.LoopArm] = []
-        for source_index, member in enumerate(source_members):
-            if member not in dest_members:
-                continue   # narrowed away: never the live member here
+        for member in source_members:
+            if member not in dest_members or self._union_member_kind(member, prepared=prepared) == 'word':
+                continue
             dest_index = dest_members.index(member)
-            body: list[hir.AST] = [
-                self._intrinsic_call(
-                    '__store_u8__',
-                    [self._uint8_literal(loc, dest_index), dest],
-                    ty.VOID_TYPE,
-                    loc,
-                ),
-            ]
-            if self._union_member_kind(member, prepared=prepared) != 'word':
-                body.extend(
-                    self._union_aggregate_copy_into(
-                        dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc,
-                    )
-                )
-            else:
-                body.append(
-                    self._intrinsic_call(
-                        '__store_i64__',
-                        [
-                            self._intrinsic_call(
-                                '__load_i64__',
-                                [self._optional_payload_address(source, loc)],
-                                'int64',
-                                loc,
-                            ),
-                            self._optional_payload_address(dest, loc),
-                        ],
-                        ty.VOID_TYPE,
-                        loc,
-                    )
-                )
-            arms.append(
-                hir.IfArm(
-                    loc,
-                    ty.VOID_TYPE,
-                    self._typed_equality(tag, self._uint8_literal(loc, source_index), 'uint8', loc),
-                    hir.Block(loc, ty.VOID_TYPE, body, True),
-                )
-            )
-        statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
+            body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc)
+            arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, body, True)))
+        if not arms:
+            return [*statements, word_copy]
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, hir.Block(loc, ty.VOID_TYPE, [word_copy], True)))
         return statements
 
     def _lower_union_flow(

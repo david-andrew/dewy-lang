@@ -134,7 +134,7 @@ let TokenError = type of error & Report #TODO: merge this with Report...
 
 
 Whitespace = type of TokenProtocol & [
-    eat = (src:nonemptystring ctx:Context):>uint64?|TokenError => {
+    eat = (src:nonemptystring ctx:Context):>uint64? => {
         if src[0] not in? whitespace return none
         loop i in 0..uint64.max and i <? src.length {  
             if src[i] not in? whitespace return i
@@ -145,7 +145,7 @@ Whitespace = type of TokenProtocol & [
 ]
 
 LineComment = type of TokenProtocol & [
-    eat = (src:nonemptystring ctx:Context):>uint64?|TokenError => {
+    eat = (src:nonemptystring ctx:Context):>uint64? => {
         if not src.startswith(line_comment_start) return none
         loop i in 0..uint64.max and i <? src.length {  
             if src[i] =? '\n' return i + 1

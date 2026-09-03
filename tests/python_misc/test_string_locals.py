@@ -85,7 +85,7 @@ def test_an_optional_local_owns_a_calls_string_payload_and_return_moves_it() -> 
     emitted = _compile(source)
     moved = _function(emitted, 'moved')
     # the payload is released by member tag and owner word …
-    assert re.search(r'let __dewy_string_cell_tag_\d+:int64 = __load_u8__\(maybe\)', moved)
+    assert re.search(r'let __dewy_string_cell_tag_\d+:int64 = __load_i64__\(maybe\)', moved)
     # … except that `return maybe` empties the local's payload word first (the caller owns it now)
     assert '__store_i64__(0 maybe + 8)' in moved
     aliased = _function(emitted, 'aliased')

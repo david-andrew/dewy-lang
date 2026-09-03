@@ -87,11 +87,11 @@ let get = (value:int64|none):>int64 =>
 
 
 def test_heterogeneous_runtime_union_bindings_lower() -> None:
-    # General tagged unions now lower as tag-and-payload cells, including a
-    # heterogeneous union containing `none`.
+    # General tagged unions lower as tag-and-payload cells (a program-wide tag
+    # word, then the payload), including a heterogeneous union containing `none`.
     source = 'let main = ():>int64 => { let x:int64|string|none = 1 return 0 }'
     emitted = codegen(SrcFile(None, source))
-    assert '__store_u8__' in emitted
+    assert '__alloca__(16)' in emitted and '__store_i64__(1 x + 8)' in emitted
 
 
 def test_multiiterator_uses_flat_postfix_formula_and_precise_optionals() -> None:
