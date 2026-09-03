@@ -1,0 +1,63 @@
+# types as first-class values: a `type<Token>` value is any type minted under
+# `Token`, carried at runtime as its brand id — stored, compared, matched,
+# and dispatched on; `typeof(value)` reads a value's; a method that reads no
+# field (nor calls one that does) is static: callable off the type name, off
+# a type value, and off an instance alike; a type value constructs its type
+
+Context = $abstract type of any & [depth:int64]
+Root = type of Context
+
+Token = $abstract type of any & [
+    src:string  idx:int64
+    eat:<(src:string ctx:Context):>int64? >               # a slot every kind fills
+    width = ():>int64 => src.length                       # an instance method: reads a field
+]
+Whitespace = type of Token & [
+    eat = (src:string ctx:Context):>int64? => if src.startswith(" ") count(src) else none
+    count = (src:string):>int64 => {                      # static: called by `eat` by bare name
+        i:int64 = 0
+        loop i <? src.length { if src[i] not=? " " return i  i += 1 }
+        return i
+    }
+]
+LineComment = type of Token & [
+    text:string = "#"                                     # an extra field with a default: constructible through a type value
+    eat = (src:string ctx:Context):>int64? => if src.startswith("#") src.length else none
+]
+
+allowed = (ctx:Context):>array<type<Token>> => match ctx { <Root> => [Whitespace LineComment] }
+
+tokenize = (src:string):>array<Token> => {
+    let tokens:array<Token> = []
+    let ctx = Root(depth=0)
+    i:int64 = 0
+    loop i <? src.length {
+        let rest = src[i..]
+        let step:int64 = 1
+        loop kind in allowed(ctx) {
+            match kind.eat(rest ctx) {                                                 # dispatched by the type value
+                n:int64 => { if 0 <? n <=? rest.length { tokens.push(kind(src=rest[0..n) idx=i))  step = n  break } }   # constructed by it
+                <none> => {}
+            }
+        }
+        i += step
+    }
+    return tokens
+}
+
+main = () => {
+    let total:int64 = 0
+    let ctx = Root(depth=0)
+    match Whitespace.eat("   x" ctx) { n:int64 => { total += n }  <none> => exit(1) }     # 3: off the type name
+    total += Whitespace.count("  ")                                                        # 5
+    let kinds:array<type<Token> length=2> = [Whitespace LineComment]
+    if kinds[0] =? Whitespace and kinds[1] not=? Whitespace and kinds[1] is? Token total += 1   # 6
+    if kinds[1].typename =? "LineComment" and Whitespace.typename =? "Whitespace" total += 1     # 7
+    let tokens = tokenize(" # hi")
+    loop tok in tokens {
+        match tok { w:Whitespace => { total += w.width }  c:LineComment => { total += c.width * 8 + c.text.length } }   # 1 + 33 = 41
+    }
+    if tokens.length =? 2 { if typeof(tokens[1]) =? LineComment and typeof(tokens[0]).typename =? "Whitespace" total += 1 }   # 42
+    if tokens.length >? 0 { match tokens[0].eat("  z" ctx) { n:int64 => { total += n - 2 }  <none> => exit(2) } }   # off an instance: the same static
+    exit(total)
+}

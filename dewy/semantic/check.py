@@ -808,16 +808,21 @@ def _brand_dispatch(value: hir.AST, loc: Span, per_brand: 'Callable[[hir.AST, ty
     arm per brand, deepest first, reading the value narrowed to it; else the
     static form. None when the value has no such alternatives."""
     plain = ty.unfold(ty.strip_refinement(value.type))
-    if not isinstance(plain, ty.ObjectType):
+    if isinstance(plain, ty.MetaType):
+        alternatives = ty.brand_alternatives(plain.family)
+        narrowed_type = lambda brand: ty.MetaType(ty.USER_BRAND_TYPES[brand])
+    elif isinstance(plain, ty.ObjectType):
+        alternatives = ty.brand_alternatives(plain)
+        narrowed_type = lambda brand: ty.USER_BRAND_TYPES[brand]
+    else:
         return None
-    alternatives = ty.brand_alternatives(plain)
     if not alternatives:
         return None
     readable = _readable_object(value, ctx=ctx)
     if readable is None:
         return None
     arms = [
-        hir.IfArm(loc, ty.StringType(), hir.TypeTest(loc, 'bool', readable, ty.USER_BRAND_TYPES[brand], False), per_brand(replace(readable, type=ty.USER_BRAND_TYPES[brand]), ty.USER_BRAND_TYPES[brand]))
+        hir.IfArm(loc, ty.StringType(), hir.TypeTest(loc, 'bool', readable, ty.USER_BRAND_TYPES[brand], False), per_brand(replace(readable, type=narrowed_type(brand)), ty.USER_BRAND_TYPES[brand]))
         for brand in alternatives
     ]
     return hir.Flow(loc, ty.StringType(), arms, otherwise(readable))
@@ -828,6 +833,8 @@ def _typename(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
     word when its static type has descendants), else its structural spelling."""
     def own(node: hir.AST) -> hir.AST:
         plain = ty.unfold(ty.strip_refinement(node.type))
+        if isinstance(plain, ty.MetaType):
+            plain = plain.family   # a type value names its family's type
         text = plain.brand if isinstance(plain, ty.ObjectType) and ty.user_branded(plain) and plain.brand is not None else type_to_dewy(plain)
         return hir.String(loc, ty.StringLiteralType(text), text)
     dispatched = _brand_dispatch(value, loc, lambda narrowed, _child: own(narrowed), own, ctx=ctx)
@@ -987,6 +994,9 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
     assert isinstance(function_type, ty.FunctionType)
     receiver = replace(value, type=unfolded) if isinstance(value.type, ty.NamedType) else value
     function = hir.ExpressedIdentifier(loc, function_type, function_binding.name, binding_id=function_binding.id)
+    method = unfolded.method('__as__')
+    if method is not None and method.static:
+        return tcr_function_call(function, p0.Block(loc, [], '()', None), ctx=ctx)   # reads nothing of the value
     bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:]), function, receiver)
     return tcr_function_call(bound, p0.Block(loc, [], '()', None), ctx=ctx)
 
@@ -1004,7 +1014,8 @@ def _conversion_method_binding(unfolded: ty.ObjectType, target: ty.Type, loc: Sp
             continue
         candidate = ctx.binding_registry.by_id[method.binding_id]
         candidate_type = candidate.type
-        if not isinstance(candidate_type, ty.FunctionType) or len(candidate_type.pos_or_kw) != 1 or candidate_type.kw_only:
+        expected_params = 0 if method.static else 1   # the receiver, unless the conversion reads nothing of the value
+        if not isinstance(candidate_type, ty.FunctionType) or len(candidate_type.pos_or_kw) != expected_params or candidate_type.kw_only:
             user_error(
                 ctx.srcfile,
                 '`__as__` takes no arguments',
@@ -2489,14 +2500,22 @@ def _concrete_brands_under(brand: str) -> set[str]:
     return {name for name in ty.brand_descendants(brand) if ty.brand_concrete(name)}
 
 
+def _brand_family(type_: ty.TypeExpr) -> ty.ObjectType | None:
+    """The minted type a value's brand ranges over: itself for a minted object, its family for a `type<Family>` value."""
+    unfolded = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(unfolded, ty.MetaType):
+        return unfolded.family
+    return unfolded if isinstance(unfolded, ty.ObjectType) and ty.user_branded(unfolded) else None
+
+
 def _brand_member_domain(member: ty.TypeExpr) -> set[str] | None:
     """A minted member's value set as brands: every concrete brand minted under it so far
     (the closed world is confirmed once every module is loaded)."""
-    unfolded = ty.unfold(member)
-    if not ty.user_branded(unfolded):
+    family = _brand_family(member)
+    if family is None:
         return None
-    assert isinstance(unfolded, ty.ObjectType) and unfolded.brand is not None
-    return _concrete_brands_under(unfolded.brand)
+    assert family.brand is not None
+    return _concrete_brands_under(family.brand)
 
 
 @dataclass
@@ -2535,11 +2554,13 @@ def _pattern_coverage(pattern: _Pattern, coverage: list[_MemberCoverage], *, ctx
                 # an arm for a minted type covers it and every brand under it
                 pattern_brand = ty.unfold(base).brand
                 assert pattern_brand is not None
-                if ctx.type_system.is_subtype(member_base, base):
+                family = _brand_family(member_base)
+                assert family is not None
+                if ctx.type_system.is_subtype(family, base):
                     member.full = True
                     progressed = True
                     continue
-                if ctx.type_system.is_subtype(base, member_base):
+                if ctx.type_system.is_subtype(base, family):
                     admitted = _concrete_brands_under(pattern_brand)
                     if not admitted <= member.covered_brands:
                         member.covered_brands |= admitted
@@ -2738,9 +2759,9 @@ def _match_arm_specs(
         for coverage in coverage_sets:
             for member in coverage:
                 if member.brands is not None and not member.full:
-                    unfolded = ty.unfold(member.member)
-                    assert isinstance(unfolded, ty.ObjectType) and unfolded.brand is not None
-                    pending_brand_matches.append(PendingBrandMatch(ctx.srcfile, arm.loc, unfolded.brand, set(member.covered_brands)))
+                    family = _brand_family(member.member)
+                    assert family is not None and family.brand is not None
+                    pending_brand_matches.append(PendingBrandMatch(ctx.srcfile, arm.loc, family.brand, set(member.covered_brands)))
     return specs, prelude, total, uncovered
 
 
@@ -2865,6 +2886,40 @@ def _in_declared_order(joined: ty.Type, binding_id: int, *, ctx: Context) -> ty.
     return joined
 
 
+def _tcr_typeof(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
+    """`typeof(value)`: the minted type a value carries, as a `type<Family>`
+    value — read from its brand word when the static type has types under it,
+    else that type itself."""
+    arguments = binop.right.inner if isinstance(binop.right, p0.Block) else [binop.right]
+    if len(arguments) != 1:
+        user_error(ctx.srcfile, '`typeof` takes one value', Pointer(span=binop.right.loc, message='the value whose type is wanted'))
+    value = typecheck_and_resolve_inner(arguments[0], ctx=ctx)
+    require_valued(value.type, ctx.srcfile, value.loc, '`typeof` operand')
+    plain = ty.unfold(ty.strip_refinement(value.type))
+    if isinstance(plain, ty.MetaType):
+        return value   # a type value's type is itself
+    if not (isinstance(plain, ty.ObjectType) and ty.user_branded(plain)):
+        # not a minted value: its static type, as a compile-time type value
+        return hir.TypeValue(binop.loc, ty.TYPE_TYPE, plain)
+    return hir.TypeOf(binop.loc, ty.MetaType(plain), value)
+
+
+def _metatype_test(value: hir.AST, test: ty.TypeExpr, *, negated: bool, loc: Span, ctx: Context) -> hir.AST | None:
+    """`kind is? Whitespace` on a `type<Token>` value: whether the type it names is
+    `Whitespace` or minted under it — the brand range test on the value itself."""
+    metatype = ty.unfold(ty.strip_refinement(value.type))
+    if not isinstance(metatype, ty.MetaType):
+        return None
+    tested = ty.unfold(test)
+    if not (isinstance(tested, ty.ObjectType) and ty.user_branded(tested)):
+        type_error(ctx.srcfile, 'a type value is tested against a minted type', Pointer(span=loc, message=f'`{type_to_dewy(test)}` is not minted'))
+    if tested == metatype.family or ty.user_brand_descends(metatype.family, tested):
+        return hir.DecidedBool(loc, 'bool', not negated)   # every type under the family is under the test
+    if not ty.user_brand_descends(tested, metatype.family):
+        return hir.DecidedBool(loc, 'bool', negated)       # unrelated families
+    return hir.TypeTest(loc, 'bool', value, tested, negated)
+
+
 def _decided_type_test(value_type: ty.Type, test: ty.TypeExpr, *, ctx: Context) -> bool | None:
     """The result of `value is? T` when the value's static type settles it —
     every alternative is a `T` (true) or none can be (false) — else None
@@ -2905,6 +2960,12 @@ def _refine_type_test(
     matches: bool,
     ctx: Context,
 ) -> ty.Type:
+    if isinstance(current, ty.MetaType):
+        # `kind is? Whitespace`: the type value names a type under `Whitespace`
+        tested = ty.unfold(test)
+        if matches and isinstance(tested, ty.ObjectType) and ty.user_branded(tested):
+            return ty.MetaType(tested)
+        return current
     variants: list[ty.TypeExpr] = (
         list(current.items)
         if isinstance(current, ty.TypeOr)
@@ -3456,7 +3517,7 @@ def _tcr_range_iterator(
                 or ty.fixed_integer_layout(element_type) is not None
                 or isinstance(
                     element_type,
-                    (ty.FunctionType, ty.StringLiteralType, ty.StringType, ty.ObjectType),
+                    (ty.FunctionType, ty.StringLiteralType, ty.StringType, ty.ObjectType, ty.MetaType),
                 )
                 or isinstance(element_type, str)
                 and element_type in {'string', 'grapheme', 'char'}
@@ -4805,6 +4866,63 @@ def _rewrite_members_to_self(node: p0.AST, members: set[str]) -> p0.AST:
     return result
 
 
+def _referenced_members(body: p0.AST, members: set[str]) -> set[str]:
+    """The bare member names a method body reads (the ones `_rewrite_members_to_self` would rewrite)."""
+    found: set[str] = set()
+
+    def walk(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+            return
+        if isinstance(value, p0.Atom):
+            if isinstance(value.item, t1.Identifier) and value.item.name in members:
+                found.add(value.item.name)
+            return
+        if isinstance(value, p0.BinOp) and _operator_symbol(value.op) == '.':
+            walk(value.left)   # the member name on the right is not a bare read
+            return
+        if isinstance(value, p0.Block) and value.kind == '[]':
+            for item in value.inner:
+                if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == '=' and isinstance(item.left, p0.Atom) and isinstance(item.left.item, t1.Identifier):
+                    walk(item.right)   # an object literal's keys are field names
+                else:
+                    walk(item)
+            return
+        if is_dataclass(value) and not isinstance(value, type):
+            for field_ in fields(value):
+                walk(getattr(value, field_.name))
+
+    walk(body)
+    return found
+
+
+def _rewrite_static_calls(node: p0.AST, statics: set[str], alias: str) -> p0.AST:
+    """In a static method, bare names of the type's other static methods become `Alias.name`."""
+
+    def type_access(atom: p0.Atom) -> p0.AST:
+        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, alias)), atom)
+
+    def rewrite(value: object) -> object:
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        if isinstance(value, p0.Atom):
+            if isinstance(value.item, t1.Identifier) and value.item.name in statics:
+                return type_access(value)
+            return value
+        if isinstance(value, p0.BinOp) and _operator_symbol(value.op) == '.':
+            return replace(value, left=rewrite(value.left))
+        if isinstance(value, (t1.Token, t2.Operator, t1.Operator)):
+            return value   # tokens and operators carry no member reads
+        if is_dataclass(value) and not isinstance(value, type):
+            return replace(value, **{field_.name: rewrite(getattr(value, field_.name)) for field_ in fields(value) if field_.init and field_.name != 'loc'})
+        return value
+
+    result = rewrite(node)
+    assert isinstance(result, p0.AST)
+    return result
+
+
 def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
     """Whether a method body assigns a field, mutates one in place, or takes its place."""
 
@@ -4900,31 +5018,67 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
     if alias.name not in ctx.module_declared_names:
         not_implemented(ctx.srcfile, alias.loc, 'methods on a type declared inside a function')
     members = {f.name for f in object_type.fields} | {m.name for m in object_type.methods}
+    field_names = {f.name for f in object_type.fields}
     for method in object_type.methods:
-        if method.binding_id is not None:
-            continue
-        if method.owner not in (None, alias.name):
+        if method.binding_id is None and method.owner not in (None, alias.name):
             # inherited: its declaring type compiles it (now, if that is still pending)
             owner_entry = next(((a, t) for a, t in ctx.pending_methods if a.name == method.owner), None)
             if owner_entry is not None:
                 ctx.pending_methods.remove(owner_entry)
                 _declare_type_methods(owner_entry[0], owner_entry[1], ctx=ctx)
-            continue
+    own = [method for method in object_type.methods if method.binding_id is None and method.owner in (None, alias.name)]
+    # a method is static when it reads no field and calls no method that does
+    # (transitively; an inherited method's verdict is its declaring type's)
+    parts = {}
+    for method in own:
         literal = method.literal
         assert isinstance(literal, p0.BinOp)
         params, result, body = _function_literal_parts(literal)
         visible = (members | {'typename'}) - _parameter_names(params) - _local_names(body)   # `typename` reads the instance's, like a field
+        parts[method.name] = (params, result, body, visible, _referenced_members(body, visible))
+    instance_level = {name for name, (_p, _r, _b, _v, refs) in parts.items() if refs & (field_names | {'typename'})}
+    instance_level |= {m.name for m in object_type.methods if m.binding_id is not None and not m.static}
+    changed = True
+    while changed:
+        changed = False
+        for name, (_p, _r, _b, _v, refs) in parts.items():
+            if name not in instance_level and refs & instance_level:
+                instance_level.add(name)
+                changed = True
+    statics = {name for name in parts if name not in instance_level}
+    # callees before callers, so a call to another method resolves to a declared function
+    ordered: list = []
+    remaining = list(own)
+    while remaining:
+        progressed = False
+        for method in list(remaining):
+            refs = parts[method.name][4]
+            if any(other.name in refs for other in remaining if other is not method):
+                continue
+            ordered.append(method)
+            remaining.remove(method)
+            progressed = True
+        if not progressed:
+            ordered.extend(remaining)   # mutually recursive methods: declared in order (the later one is unresolved)
+            break
+    for method in ordered:
+        literal = method.literal
+        assert isinstance(literal, p0.BinOp)
+        params, result, body, visible, _refs = parts[method.name]
         loc = literal.loc
-        self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, _RECEIVER))
-        method.place_self = _body_mutates_members(body, visible)
-        if method.place_self:
-            self_name = p0.Prefix(loc, t1.Operator(loc, '@'), self_name)
-        self_param = p0.BinOp(loc, t1.Operator(loc, ':'), self_name, p0.Atom(loc, t1.Identifier(loc, alias.name)))
-        new_params = replace(params, inner=[self_param, *params.inner])
-        signature: p0.AST = new_params
-        if result is not None:
-            signature = p0.BinOp(loc, t1.Operator(loc, ':>'), new_params, result)
-        rewritten = _rewrite_members_to_self(body, visible)
+        if method.name in statics:
+            method.static = True
+            rewritten = _rewrite_static_calls(body, statics - {method.name}, alias.name)
+            signature: p0.AST = params if result is None else p0.BinOp(loc, t1.Operator(loc, ':>'), params, result)
+        else:
+            self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, _RECEIVER))
+            method.place_self = _body_mutates_members(body, visible)
+            if method.place_self:
+                self_name = p0.Prefix(loc, t1.Operator(loc, '@'), self_name)
+            self_param = p0.BinOp(loc, t1.Operator(loc, ':'), self_name, p0.Atom(loc, t1.Identifier(loc, alias.name)))
+            new_params = replace(params, inner=[self_param, *params.inner])
+            signature = new_params if result is None else p0.BinOp(loc, t1.Operator(loc, ':>'), new_params, result)
+            rewritten = _rewrite_members_to_self(body, visible)
         new_literal = replace(literal, left=signature, right=rewritten)
         ctx.synthesized.append(new_literal)
         ordinal = sum(1 for earlier in object_type.methods[:object_type.methods.index(method)] if earlier.name == method.name)
@@ -5395,10 +5549,13 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                 slot = next((index for index, existing in enumerate(fields) if existing.name == method.name), None)
                 if slot is not None and isinstance(fields[slot].type, ty.FunctionType):
                     # `type of Protocol & [eat = (…) => …]`: a method named like an
-                    # inherited function-typed field is that field's value —
-                    # the child implements the protocol's slot
-                    fields[slot] = replace(fields[slot], default=method.literal)
-                    continue
+                    # inherited function-typed field is that field's value — the
+                    # child implements the protocol's slot; the default is the
+                    # compiled static method `Child.eat` (so its body may call
+                    # the child's other static methods by bare name)
+                    literal = method.literal
+                    assert isinstance(literal, p0.BinOp)
+                    fields[slot] = replace(fields[slot], default=_slot_forwarder(literal, binding.name, method.name, ctx=ctx))
                 inherited = next((index for index, existing in enumerate(methods) if existing.name == method.name), None)
                 if method.owner is None:
                     method.owner = binding.name   # declared here (an aliased structure's methods keep their owner)
@@ -5432,6 +5589,37 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     else:
         ty.USER_ABSTRACT_BRANDS.discard(name)
     return minted
+
+
+def _slot_forwarder(literal: p0.BinOp, alias: str, method: str, *, ctx: Context) -> p0.AST:
+    """A field's default forwarding to a static method: `(params) => Alias.method(params)`.
+    A function stored in a field is called with the object first (a field literal
+    may read its siblings), a static method without — so the slot holds a literal
+    in the field's convention that calls the method, whose body keeps its own."""
+    params_ast, _result, _body = _function_literal_parts(literal)
+    signature_text = ctx.srcfile.body[literal.left.loc.start:literal.left.loc.stop]   # the parameter list as written, its types with it
+    names = [name for name in _parameter_names_in_order(params_ast)]
+    text = f'{signature_text} => {alias}.{method}({" ".join(names)})'
+    parsed = p0.parse(SrcFile(None, ' ' * literal.loc.start + text + '\n'))
+    forwarder = parsed.inner[0]
+    assert isinstance(forwarder, p0.BinOp)
+    ctx.synthesized.append(forwarder)
+    return forwarder
+
+
+def _parameter_names_in_order(params: p0.Block) -> list[str]:
+    names: list[str] = []
+    for item in params.inner:
+        node: p0.AST = item
+        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == '=':
+            node = node.left
+        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == ':':
+            node = node.left
+        if isinstance(node, p0.Prefix):
+            node = node.item
+        if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier):
+            names.append(node.item.name)
+    return names
 
 
 def _validate_recursive_alias(
@@ -6522,6 +6710,8 @@ def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
     if isinstance(node, hir.BoundMethod):
         if ty.is_zero_arg_function(node.type):
             return tcr_function_call(node, p0.Block(node.loc, [], '()', None), ctx=ctx)
+        if node.receiver is None:
+            return node.function   # a static method with parameters is its function, an ordinary value
         type_error(ctx.srcfile, 'a method must be called', Pointer(span=node.loc, message='this method takes arguments; methods are not values yet'))
     if not isinstance(node, (hir.MemberAccess, hir.ArrayMethod, hir.DictMethod)):
         return node
@@ -7280,6 +7470,10 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             return forwarding
     if _is_string_type(value.type) and name in _STRING_METHODS:
         return _string_method(value, name, binop, ctx=ctx)
+    if isinstance(ty.unfold(ty.strip_refinement(value.type)), ty.MetaType):
+        return _metatype_member(value, name, binop, ctx=ctx)
+    if isinstance(value, hir.TypeValue) and isinstance(ty.unfold(value.value), ty.ObjectType):
+        return _type_name_member(value, name, binop, ctx=ctx)
     if not isinstance(value.type, ty.ObjectType):
         if name == 'length':
             type_error(
@@ -7309,6 +7503,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             function_binding = ctx.binding_registry.by_id[method.binding_id]
             assert isinstance(function_binding.type, ty.FunctionType)
             function = hir.ExpressedIdentifier(binop.right.loc, function_binding.type, function_binding.name, binding_id=function_binding.id)
+            if method.static:
+                return hir.BoundMethod(binop.loc, function_binding.type, function, None)   # needs no receiver; still only ever called
             bound_type = replace(function_binding.type, pos_or_kw=function_binding.type.pos_or_kw[1:])
             return hir.BoundMethod(binop.loc, bound_type, function, value)
         user_error(
@@ -7334,6 +7530,173 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             Pointer(span=binop.loc, message='this field is const'),
         )
     return hir.Place(binop.loc, field.type, access)
+
+
+def _static_method(object_type: ty.ObjectType, name: str, *, ctx: Context) -> sb.Binding | None:
+    """The hidden function of a static method of the type (declared now if pending), else None."""
+    method = object_type.method(name)
+    if method is None:
+        return None
+    if method.binding_id is None:
+        _declare_pending_methods(ctx=ctx, for_type=object_type)
+        if method.binding_id is None and method.owner is not None:
+            owner = ctx.binding_scopes.get(method.owner)
+            owner_type = owner.type_value if owner is not None else None
+            if isinstance(owner_type, ty.ObjectType):
+                _declare_pending_methods(ctx=ctx, for_type=owner_type)
+    if method.binding_id is None or not method.static:
+        return None
+    return ctx.binding_registry.by_id[method.binding_id]
+
+
+def _type_name_member(value: hir.TypeValue, name: str, binop: p0.BinOp, *, ctx: Context) -> hir.AST:
+    """`Whitespace.eat`: a static method off the type's name; `Whitespace.typename` its name."""
+    object_type = ty.unfold(value.value)
+    assert isinstance(object_type, ty.ObjectType)
+    if name == 'typename':
+        text = object_type.brand if ty.user_branded(object_type) and object_type.brand is not None else type_to_dewy(object_type)
+        return hir.String(binop.loc, ty.StringLiteralType(text), text)
+    function_binding = _static_method(object_type, name, ctx=ctx)
+    if function_binding is not None:
+        assert isinstance(function_binding.type, ty.FunctionType)
+        function = hir.ExpressedIdentifier(binop.right.loc, function_binding.type, function_binding.name, binding_id=function_binding.id)
+        return hir.BoundMethod(binop.loc, function_binding.type, function, None)
+    spelled = value.name or type_to_dewy(object_type)
+    if object_type.method(name) is not None:
+        type_error(
+            ctx.srcfile,
+            f'`{name}` needs an instance',
+            Pointer(span=binop.right.loc, message=f'it reads a field of `{spelled}` (directly or through a method that does)'),
+            hint=f'call it on a value: `{spelled}(…).{name}`',
+        )
+    if object_type.field(name) is not None:
+        type_error(
+            ctx.srcfile,
+            f'`{name}` is a field of `{spelled}`',
+            Pointer(span=binop.right.loc, message='a type has no field values; a value of it does'),
+        )
+    type_error(
+        ctx.srcfile,
+        f'`{spelled}` has no member `{name}`',
+        Pointer(span=binop.right.loc, message='not a method or field of the type'),
+    )
+
+
+def _family_signature(family: ty.ObjectType, name: str, *, ctx: Context) -> ty.FunctionType | None:
+    """The signature a family declares for `name`: a static method's, or a function-typed slot's."""
+    function_binding = _static_method(family, name, ctx=ctx)
+    if function_binding is not None and isinstance(function_binding.type, ty.FunctionType):
+        return function_binding.type
+    slot = family.field(name)
+    if slot is not None and isinstance(slot.type, ty.FunctionType):
+        return slot.type
+    return None
+
+
+def _brand_dispatcher(family: ty.ObjectType, name: str, loc: Span, *, ctx: Context) -> sb.Binding:
+    """The hidden function `Family__dispatch__name(kind args…)` calling the static
+    method `name` of whichever type under the family `kind` names — synthesized
+    as Dewy: a `match` over the family's concrete types, each arm a static call."""
+    assert family.brand is not None
+    key = f'dispatch:{family.brand}:{name}'
+    existing = ctx.object_strings.get(key)
+    if existing is not None:
+        return existing
+    module_ctx = ctx.module if ctx.module is not None else ctx
+    signature = _family_signature(family, name, ctx=ctx)
+    if signature is None:
+        type_error(
+            ctx.srcfile,
+            f'`{family.brand}` declares no `{name}` for its types',
+            Pointer(span=loc, message=f'dispatching `{name}` through a `type<{family.brand}>` needs a static method or a function-typed slot on `{family.brand}`'),
+        )
+    brands = sorted(_concrete_brands_under(family.brand))
+    missing = [brand for brand in brands if _static_method(ty.USER_BRAND_TYPES[brand], name, ctx=ctx) is None and not _slot_filled(ty.USER_BRAND_TYPES[brand], name)]
+    if missing:
+        type_error(
+            ctx.srcfile,
+            f'`{missing[0]}` has no static `{name}`',
+            Pointer(span=loc, message=f'every type under `{family.brand}` needs one to dispatch `{name}` through a type value'),
+        )
+    params = ' '.join(f'{p.name or f"__dewy_p{i}"}:{type_to_dewy(p.type)}' for i, p in enumerate(signature.pos_or_kw))
+    args = ' '.join(p.name or f'__dewy_p{i}' for i, p in enumerate(signature.pos_or_kw))
+    result = f':>{type_to_dewy(signature.ret)}' if signature.ret not in (ty.VOID_TYPE, ty.INFERRED_TYPE) else ''
+    arms = '\n'.join(f'    <{brand}> => return {brand}.{name}({args})' for brand in brands)
+    text = f'(__dewy_kind:type<{family.brand}> {params}){result} => {{ match __dewy_kind {{\n{arms}\n}} }}'
+    parsed = p0.parse(SrcFile(None, ' ' * loc.start + text + '\n'))
+    literal = parsed.inner[0]
+    assert isinstance(literal, p0.BinOp)
+    ctx.synthesized.append(literal)
+    binding = _hoist_hidden_function(f'{family.brand}__dispatch__{name}', literal, ctx=module_ctx)
+    ctx.object_strings[key] = binding
+    return binding
+
+
+def _brand_constructor(family: ty.ObjectType, loc: Span, *, ctx: Context) -> sb.Binding:
+    """The hidden function `Family__construct(kind fields…)` constructing whichever
+    type under the family `kind` names, with the family's own required fields
+    (a function-typed slot is the child's; a child's extra fields default)."""
+    assert family.brand is not None
+    key = f'construct:{family.brand}'
+    existing = ctx.object_strings.get(key)
+    if existing is not None:
+        return existing
+    module_ctx = ctx.module if ctx.module is not None else ctx
+    given = [f for f in family.fields if f.default is None and not isinstance(f.type, ty.FunctionType)]
+    brands = sorted(_concrete_brands_under(family.brand))
+    for brand in brands:
+        child = ty.USER_BRAND_TYPES[brand]
+        extra = [f.name for f in child.fields if f.default is None and family.field(f.name) is None and not isinstance(f.type, ty.FunctionType)]
+        if extra:
+            type_error(
+                ctx.srcfile,
+                f'`{brand}` cannot be constructed through a `type<{family.brand}>` value',
+                Pointer(span=loc, message=f'its field `{extra[0]}` has no default, and only `{family.brand}`\'s fields are given here'),
+            )
+        unfilled = [f.name for f in child.fields if f.default is None and isinstance(f.type, ty.FunctionType)]
+        if unfilled:
+            type_error(
+                ctx.srcfile,
+                f'`{brand}` leaves the slot `{unfilled[0]}` unfilled',
+                Pointer(span=loc, message=f'every type constructed through a `type<{family.brand}>` value fills its function-typed slots with a method'),
+            )
+    params = ' '.join(f'{f.name}:{type_to_dewy(f.type)}' for f in given)
+    args = ' '.join(f'{f.name}={f.name}' for f in given)
+    arms = '\n'.join(f'    <{brand}> => return {brand}({args})' for brand in brands)
+    text = f'(__dewy_kind:type<{family.brand}> {params}):>{family.brand} => {{ match __dewy_kind {{\n{arms}\n}} }}'
+    parsed = p0.parse(SrcFile(None, ' ' * loc.start + text + '\n'))
+    literal = parsed.inner[0]
+    assert isinstance(literal, p0.BinOp)
+    ctx.synthesized.append(literal)
+    binding = _hoist_hidden_function(f'{family.brand}__construct', literal, ctx=module_ctx)
+    ctx.object_strings[key] = binding
+    return binding
+
+
+def _slot_filled(object_type: ty.ObjectType, name: str) -> bool:
+    """Whether a function-typed slot has a default (a child's method became its value)."""
+    slot = object_type.field(name)
+    return slot is not None and isinstance(slot.type, ty.FunctionType) and slot.default is not None
+
+
+def _metatype_member(value: hir.AST, name: str, binop: p0.BinOp, *, ctx: Context) -> hir.AST:
+    """A member of a `type<Family>` value: `typename`, or a static method dispatched by the brand."""
+    if name == 'typename':
+        return _typename(value, binop.loc, ctx=ctx)
+    metatype = ty.unfold(ty.strip_refinement(value.type))
+    assert isinstance(metatype, ty.MetaType)
+    if _family_signature(metatype.family, name, ctx=ctx) is not None:
+        dispatcher = _brand_dispatcher(metatype.family, name, binop.loc, ctx=ctx)
+        assert isinstance(dispatcher.type, ty.FunctionType)
+        function = hir.ExpressedIdentifier(binop.right.loc, dispatcher.type, dispatcher.name, binding_id=dispatcher.id)
+        bound_type = replace(dispatcher.type, pos_or_kw=dispatcher.type.pos_or_kw[1:])
+        return hir.BoundMethod(binop.loc, bound_type, function, value)   # the type value is the first argument
+    type_error(
+        ctx.srcfile,
+        f'a type value has no member `{name}`',
+        Pointer(span=binop.right.loc, message=f'`{type_to_dewy(metatype)}` names a type, not a value of it'),
+        hint='`typename` gives its name; a static method or a function-typed slot declared on the family dispatches',
+    )
 
 
 def _forwarding_member_access(value: hir.AST, name: str, binop: p0.BinOp, *, ctx: Context) -> hir.AST | None:
@@ -7642,6 +8005,7 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
                 ty.StringType,
                 ty.TypeVariable,  # concrete at instantiation
                 ty.NamedType,
+                ty.MetaType,      # a type value: a word
             ),
         )
         or isinstance(type_, str)
@@ -8988,6 +9352,14 @@ def _dispatch_builtin(
         member_test = _literal_member_test(args, negated=fname == '__ne__', loc=loc, ctx=ctx)
         if member_test is not None:
             return member_test
+        metatypes = [ty.unfold(ty.strip_refinement(arg.type)) for arg in args]
+        if any(isinstance(item, ty.MetaType) for item in metatypes):
+            # `kind =? Whitespace`: type values compare by brand id
+            family = next(item for item in metatypes if isinstance(item, ty.MetaType))
+            root = ty.MetaType(ty.USER_BRAND_TYPES[ty.brand_root(family.brand or '')])   # any type of the family compares
+            words = [hir.Transmute(arg.loc, 'int64', check_against(arg, root, ctx=ctx)) for arg in args]
+            comparison = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, ty.FunctionType([ty.PosOrKwArg('left', 'int64'), ty.PosOrKwArg('right', 'int64')], [], None, 'bool', []), fname), words, {})
+            return comparison
     big = _dispatch_bigint(fname, args, loc=loc, source_name=source_name, ctx=ctx, expected=expected)
     if big is not None:
         return big
@@ -9908,6 +10280,11 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         return typecheck_and_resolve_inner(p0.Ambiguous(binop.loc, candidates), ctx=ctx, type_block=type_block, expected=expected)
 
     if isinstance(binop.op, t2.CallJuxtapose):
+        if (
+            isinstance(binop.left, p0.Atom) and isinstance(binop.left.item, t1.Identifier)
+            and binop.left.item.name == 'typeof' and 'typeof' not in ctx.declarations
+        ):
+            return _tcr_typeof(binop, ctx=ctx)
         constructor = _type_constructor_target(binop.left, ctx=ctx)
         if constructor is not None:
             return tcr_function_call(constructor, binop.right, ctx=ctx, expected=expected)
@@ -10001,6 +10378,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         equality = _integer_singleton_test(value, test_type, negated=symbol == 'isnt?', loc=binop.loc, op_loc=binop.op.loc, ctx=ctx)
         if equality is not None:
             return equality
+        metatype_test = _metatype_test(value, test_type, negated=symbol == 'isnt?', loc=binop.loc, ctx=ctx)
+        if metatype_test is not None:
+            return metatype_test
         decided = _decided_type_test(value.type, test_type, ctx=ctx)
         if decided is not None:
             return hir.DecidedBool(binop.loc, 'bool', decided != (symbol == 'isnt?'))
@@ -11329,8 +11709,36 @@ def _canonical_union(type_: ty.TypeOr, *, ctx: Context) -> ty.TypeOr:
     return ty.TypeOr([canonical(item) for item in type_.items])
 
 
+def _metatype(ast: p0.AST, *, ctx: Context) -> ty.MetaType | None:
+    """`type<Token>`: the type of the types under the minted `Token`, as runtime values."""
+    if not (
+        isinstance(ast, p0.BinOp)
+        and isinstance(ast.op, t2.TypeParamJuxtapose)
+        and isinstance(ast.left, p0.Atom)
+        and isinstance(ast.left.item, t1.Identifier)
+        and ast.left.item.name == 'type'
+        and 'type' not in ctx.declarations
+        and isinstance(ast.right, p0.Block)
+        and ast.right.kind == '<>'
+    ):
+        return None
+    if len(ast.right.inner) != 1:
+        user_error(ctx.srcfile, '`type<…>` takes one type', Pointer(span=ast.right.loc, message='the family whose types are the values'))
+    family = ty.unfold(ast_to_type(ast.right.inner[0], ctx=ctx))
+    if not (isinstance(family, ty.ObjectType) and ty.user_branded(family)):
+        user_error(
+            ctx.srcfile,
+            '`type<…>` needs a minted type',
+            Pointer(span=ast.right.inner[0].loc, message=f'`{type_to_dewy(family)}` is not minted with `type of`, so its types are not runtime values'),
+        )
+    return ty.MetaType(family)
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
+    metatype = _metatype(ast, ctx=ctx)
+    if metatype is not None:
+        return metatype
     if (
         isinstance(ast, p0.BinOp)
         and isinstance(ast.op, t2.TypeParamJuxtapose)
@@ -12799,6 +13207,15 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         assert isinstance(left, hir.TypeValue)
         _reject_abstract_construction(left, constructed, ctx=ctx)
         return _tcr_type_constructor_call(left, constructed, right, ctx=ctx)
+    if receiver is None and isinstance(ty.unfold(ty.strip_refinement(left.type)), ty.MetaType):
+        # `kind(src=… idx=…)`: construct whichever type under the family `kind` names
+        metatype = ty.unfold(ty.strip_refinement(left.type))
+        assert isinstance(metatype, ty.MetaType)
+        constructor = _brand_constructor(metatype.family, left.loc, ctx=ctx)
+        assert isinstance(constructor.type, ty.FunctionType)
+        function = hir.ExpressedIdentifier(left.loc, constructor.type, constructor.name, binding_id=constructor.id)
+        bound = hir.BoundMethod(left.loc, replace(constructor.type, pos_or_kw=constructor.type.pos_or_kw[1:]), function, left)
+        return tcr_function_call(bound, right, ctx=ctx, expected=expected)
 
     if receiver is None:
         output = _tcr_output_call(left, right, ctx=ctx)
@@ -13559,6 +13976,22 @@ def _unit_inhabitant(node: hir.AST, expected: ty.Type | None, *, ctx: Context) -
     return None
 
 
+def _brand_value(node: hir.AST, expected: ty.Type | None, *, ctx: Context) -> hir.BrandValue | None:
+    """A minted type named where a `type<Family>` value is wanted: its brand id, when it is under the family."""
+    if not isinstance(node, hir.TypeValue) or not isinstance(expected, ty.MetaType):
+        return None
+    minted = node.value
+    if not (isinstance(minted, ty.ObjectType) and ty.user_branded(minted) and minted.brand is not None):
+        return None
+    if not (minted == expected.family or ty.user_brand_descends(minted, expected.family)):
+        type_error(
+            ctx.srcfile,
+            'type value outside its family',
+            Pointer(span=node.loc, message=f'`{minted.brand}` is not minted under `{type_to_dewy(expected.family)}`'),
+        )
+    return hir.BrandValue(node.loc, ty.MetaType(minted), minted.brand)
+
+
 def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     if isinstance(expected, ty.RefinedType):
         checked = check_against(node, expected.base, ctx=ctx)
@@ -13566,6 +13999,9 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
     inhabitant = _unit_inhabitant(node, expected, ctx=ctx)
     if inhabitant is not None:
         node = inhabitant
+    brand_value = _brand_value(node, expected, ctx=ctx)
+    if brand_value is not None:
+        node = brand_value
     if node.type == expected:
         return node
     if node.type == ty.BOTTOM_TYPE:

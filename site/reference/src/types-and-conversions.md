@@ -46,6 +46,34 @@ describe = ():>string => {
 }
 ```
 
+## Types as Values
+
+The types minted under a family are runtime values. `type<Token>` is the type of those values — `Token` itself when it is not `$abstract`, and every type minted under it — and a value of it is carried as the brand id an instance carries. It is stored, compared (`kind =? Whitespace`), tested (`kind is? Whitespace`: the type it names is `Whitespace` or minted under it), and matched, exhaustively by the same closed-world rule as an instance; `kind.typename` is its name. `typeof(value)` reads the type a minted value carries as such a value.
+
+A method that reads no field of its type — and calls no method that does, transitively — is *static*: it is called off the type's name (`Whitespace.eat(src ctx)`), off a type value (`kind.eat(src ctx)`, which dispatches to the named type's method), and off an instance alike. A method that reads a field needs an instance, and saying `Whitespace.width` for one is an error. Calling a type value constructs the type it names, with the family's own required fields: `kind(src=… idx=…)` — a type under the family may add fields only with defaults, and fills every function-typed slot with a method.
+
+<!-- dewy-example: compiler -->
+```dewy
+Token = $abstract type of any & [
+    src:string  idx:int64
+    eat:<(src:string):>int64?>                     # a slot every kind fills
+    width = ():>int64 => src.length                # reads a field: an instance method
+]
+Whitespace = type of Token & [eat = (src:string):>int64? => if src.startswith(" ") 1 else none]
+LineComment = type of Token & [eat = (src:string):>int64? => if src.startswith("#") src.length else none]
+
+next_token = (src:string):>Token | none => {
+    let kinds:array<type<Token>> = [Whitespace LineComment]
+    loop kind in kinds {
+        match kind.eat(src) {
+            n:int64 => { if 0 <? n <=? src.length return kind(src=src[0..n) idx=0) }
+            <none> => {}
+        }
+    }
+    return none
+}
+```
+
 A `match` over a minted type is exhaustive when its arms cover every brand the *whole program* mints under it — the parent itself included unless it is `$abstract`. `$abstract` is written on the mint and says the type has no values of its own, only its children's: constructing it is an error at that site, it is no unit inhabitant even without fields, and its children alone make a match exhaustive. A child minted in a module compiled later still counts (the program is one closed world), so a match without an `else` reports it; with an `else`, later children take that branch.
 
 <!-- dewy-example: compiler -->

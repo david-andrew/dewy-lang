@@ -1346,7 +1346,7 @@ class _ArrayLowering:
         return (
             element == 'bool'
             or ty.fixed_integer_layout(element) is not None
-            or isinstance(element, ty.FunctionType)   # a function value is its code address
+            or isinstance(element, (ty.FunctionType, ty.MetaType))   # a function value is its code address; a type value its brand id
             or self._is_string_valued(element)
         )
 
@@ -1356,7 +1356,7 @@ class _ArrayLowering:
         return (
             element == 'bool'
             or ty.fixed_integer_layout(element) is not None
-            or isinstance(element, ty.FunctionType)   # a function value is its code address
+            or isinstance(element, (ty.FunctionType, ty.MetaType))   # a function value is its code address; a type value its brand id
             or cls._is_string_valued(element)
         )
 
@@ -2462,12 +2462,13 @@ class _ArrayLowering:
                 ty.StringLiteralType,
                 ty.BinaryLiteralType,
                 ty.StringType,
+                ty.MetaType,
             ),
         ) or (
             isinstance(element_type, str)
             and element_type in {'string', 'grapheme', 'char'}
         ) or ty.string_valued(element_type) or self._is_optional_element(element_type) or self._is_union_element(element_type):
-            return 8, True   # one-word handles (a string-literal union is a string; optional and union elements are cell pointers)
+            return 8, True   # one-word handles (a string-literal union is a string; optional and union elements are cell pointers; a type value is its brand id)
         self._target_error(
             node,
             f'array element layout `{type_to_dewy(element_type)}`',

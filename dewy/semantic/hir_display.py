@@ -41,6 +41,8 @@ def type_to_dewy(t: ty.Type) -> str:
         return f'p{t.value!r}'
     if isinstance(t, ty.PathType):
         return 'Path'
+    if isinstance(t, ty.MetaType):
+        return f'type<{type_to_dewy(t.family)}>'
     if isinstance(t, ty.ModuleType):
         return 'module'
     if isinstance(t, ty.StringType):

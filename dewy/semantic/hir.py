@@ -344,8 +344,8 @@ class MemberAssign(AST):
 class BoundMethod(AST):
     """`value.method`: a type's method with its receiver; only ever called (see `tcr_function_call`)."""
 
-    function: ExpressedIdentifier  # the hidden `Type__method(self …)` function
-    receiver: AST
+    function: ExpressedIdentifier  # the hidden `Type__method(receiver …)` function
+    receiver: AST | None           # None for a static method: it takes no receiver
 
 
 @dataclass
@@ -354,6 +354,20 @@ class TypeValue(AST):
 
     value: ty.TypeAliasValue
     name: str | None = None  # the alias name it was spelled with, for diagnostics
+
+
+@dataclass
+class BrandValue(AST):
+    """A minted type as a runtime value of `type<Family>`: its brand id."""
+
+    brand: str
+
+
+@dataclass
+class TypeOf(AST):
+    """`typeof(value)`: the minted type a value carries, as a `type<Family>` value (its brand word)."""
+
+    value: AST
 
 
 @dataclass

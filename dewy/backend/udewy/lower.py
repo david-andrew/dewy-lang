@@ -1078,6 +1078,8 @@ class _Lowerer(
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
         type_ = ty.strip_refinement(type_)   # a refinement (`string<length >? 0>`) is the checker's; the value is the base's
+        if isinstance(type_, ty.MetaType):
+            return 'int64'   # a type value is its brand id
         if isinstance(type_, ty.TypeOr) and ty.string_valued(type_):
             return 'int64'   # a union of string literals is one string handle
         if ty.optional_payload(type_) is not None:
@@ -2479,6 +2481,10 @@ class _Lowerer(
             )
         if isinstance(node, hir.TypeValue):
             return node
+        if isinstance(node, hir.BrandValue):
+            return node
+        if isinstance(node, hir.TypeOf):
+            return replace(node, value=self._require_node(self._transform_node(node.value)))
         if isinstance(node, hir.GenericFunction):
             self._target_error(node, 'a generic function used as a value')
         if isinstance(node, hir.ModuleNamespace):
@@ -4184,6 +4190,15 @@ class _Lowerer(
         if isinstance(node, hir.ErrorValue):
             # a unit-like error is its tag; the payload word is zero
             return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
+        if isinstance(node, hir.BrandValue):
+            # a type as a runtime value: its brand id
+            return [], hir.Integer(node.loc, 'int64', t0.base10, ty.brand_ids()[node.brand][0])
+        if isinstance(node, hir.TypeOf):
+            # the brand word of the value (0 for a plain value of a carried structure)
+            static = ty.unfold(ty.strip_refinement(node.value.type))
+            assert isinstance(static, ty.ObjectType)
+            prelude, pointer = self._extract_object_pointer(node.value)
+            return prelude, self._brand_word_load(pointer, static, node.loc)
         if isinstance(node, hir.OrThrow):
             return self._extract_or_throw(node)
         if isinstance(node, hir.ForwardingAccess):
@@ -4265,6 +4280,13 @@ class _Lowerer(
                 assert test is not None
                 return union_prelude, test
             value_object = ty.unfold(node.value.type)
+            if tested_brand is not None and isinstance(value_object, ty.MetaType):
+                # `kind is? Whitespace` on a type value: the value is the brand id
+                prelude, word = self._extract_expression(node.value)
+                in_brand = self._brand_range_test(replace(word, type='int64') if isinstance(word, hir.ExpressedIdentifier) else word, tested_brand, node.loc)
+                if node.negated:
+                    in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
+                return prelude, in_brand
             if (
                 tested_brand is not None
                 and isinstance(value_object, ty.ObjectType)

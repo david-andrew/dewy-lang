@@ -255,6 +255,7 @@ class MethodSpec:
     binding_id: int | None = None
     place_self: bool = False
     owner: str | None = None   # the alias that declared it: a method compiles once, for its declaring type; inheritors share it
+    static: bool = False       # reads no field, and calls no method that does: callable off the type, no receiver
 
 
 @dataclass(frozen=True)
@@ -396,7 +397,21 @@ class ModuleType:
         return next((field for field in self.fields if field.name == name), None)
 
 
-type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType | NamedType
+@dataclass(frozen=True)
+class MetaType:
+    """`type<T>`: a type under the minted type `T` (T itself when it is not
+    `$abstract`, and every type minted under it), as a *runtime* value — its
+    brand id. Such a value is compared, matched, and dispatched on like the
+    brand word of an instance; `typeof(value)` produces one."""
+
+    family: ObjectType
+
+    @property
+    def brand(self) -> str | None:
+        return self.family.brand
+
+
+type TypeExpr = Primitive | TypeAnd | TypeOr | TypeNot | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | PathType | PathLiteralType | ModuleType | NamedType | MetaType
 type Type = TypeExpr | VoidType | InferredType # | NoReturnEffect # probably won't ever have a dynamic type, but if we did, it would also go here
 type TypeAliasValue = TypeExpr | GenericTypeAlias
 
@@ -1194,6 +1209,10 @@ class TypeSystem:
             return b if user_brand_descends(b, a) or user_brand_carries(b, a) else None
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a if a == b else None
+        if isinstance(a, MetaType) and isinstance(b, MetaType):
+            if a == b or user_brand_descends(a.family, b.family):
+                return a
+            return b if user_brand_descends(b.family, a.family) else None
 
         a_nom = self._structural_nominal(a)
         b_nom = self._structural_nominal(b)
@@ -1334,6 +1353,8 @@ class TypeSystem:
             return a == b or user_brand_descends(a, b) or user_brand_carries(a, b)
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b
+        if isinstance(a, MetaType) and isinstance(b, MetaType):
+            return a == b or user_brand_descends(a.family, b.family)
 
         a_nom = self._structural_nominal(a)
         if a_nom is not None and isinstance(b, str) and self._is_nom_subtype(a_nom, b):
@@ -1942,7 +1963,7 @@ class TypeSystem:
 #######################################################################
 
 
-type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType | NamedType
+type LiteralAtom = Primitive | TypeParameterize | TypeVariable | DimensionType | QuantityType | FunctionType | OverloadType | SequenceType | IntegerLiteralType | RationalLiteralType | RefinedType | StringLiteralType | BinaryLiteralType | StringType | ArrayType | ObjectType | ModuleType | NamedType | MetaType
 # (is_positive, atom)
 type DnfClause = tuple[tuple[bool, LiteralAtom], ...]
 type Dnf = tuple[DnfClause, ...]  # () == never; ((),) == any (one empty clause)
@@ -2085,7 +2106,7 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
             ),
             t.brand,
         )
-    if isinstance(t, ModuleType):
+    if isinstance(t, (ModuleType, MetaType)):
         return t
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
 
@@ -2106,7 +2127,7 @@ def _dnf(t: TypeExpr) -> Dnf:
     if isinstance(t, TypeNot):
         # NNF: inner is atom
         return (((False, t.type),),)
-    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, RefinedType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType, NamedType)):
+    if isinstance(t, (str, TypeParameterize, TypeVariable, DimensionType, QuantityType, FunctionType, OverloadType, SequenceType, IntegerLiteralType, RationalLiteralType, RefinedType, StringLiteralType, BinaryLiteralType, StringType, ArrayType, ObjectType, PathType, PathLiteralType, ModuleType, NamedType, MetaType)):
         return (((True, t),),)
     if isinstance(t, TypeOr):
         clauses: list[DnfClause] = []
@@ -2211,7 +2232,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return t
     if isinstance(t, RefinedType):
         return RefinedType(substitute_type(t.base, bindings), t.propositions)
-    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType, NamedType)):
+    if isinstance(t, (StringLiteralType, BinaryLiteralType, StringType, DimensionType, PathType, PathLiteralType, ModuleType, NamedType, MetaType)):
         return t
     if isinstance(t, QuantityType):
         return QuantityType(substitute_type(t.number, bindings), t.dimension)
