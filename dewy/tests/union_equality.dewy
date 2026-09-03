@@ -1,0 +1,37 @@
+# `x =? v` on a tagged cell (`T | none`, `A | B`) is true when the cell holds
+# `v`'s member and the payload is equal; `x =? none` tests the tag. Values
+# that are not bindings (elements, fields) compare through a hidden `let`.
+let Pair = type of any & [v:int64|none]
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let x:int64|none = 1
+    if x =? 1 { checks += 1 }
+    if 1 =? x { checks += 2 }
+    if x =? 2 { checks += 1000 }
+    if x not=? 2 { checks += 4 }
+    if x =? none { checks += 1000 }
+    if x not=? none { checks += 8 }
+    x = none
+    if x =? none { checks += 16 }
+    if x =? 1 { checks += 1000 }
+    if x not=? 1 { checks += 32 }
+
+    let y:int64|string = 1
+    if y =? 1 { checks += 64 }
+    if y =? "a" { checks += 1000 }
+    y = "a"
+    if y =? "a" { checks += 128 }
+    if y =? 1 { checks += 1000 }
+
+    let xs:array<int64|none> = [1 none]
+    if xs[0] =? 1 { checks += 256 }
+    if xs[1] =? 1 { checks += 1000 }
+    if xs[1] =? none { checks += 512 }
+    let pair = Pair[v=xs[0]]
+    if pair.v =? 1 { checks += 1024 }
+    let count:int64 = 0
+    loop e in xs { if e =? 1 { count += 1 } }
+    if count =? 1 { checks += 2048 }
+    return checks - 4053         # 4095 - 4053
+}

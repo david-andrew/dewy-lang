@@ -28,6 +28,17 @@ printl"answer is {answer}"
 
 `value is? Type` tests membership in a type. Literal alternatives can be tested directly as well.
 
+Equality against a value of one alternative asks both questions at once: `answer =? 3` is true when `answer` holds an `int64` equal to 3, and false when it is `none` (so `answer not=? 3` is true then). `answer =? none` is the same test as `answer is? none`. Only the test narrows, though: use `is?` when the body needs `answer` as an `int64`.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let answer:int64|none = 3
+if answer =? 3 { printl"three" }
+let words:array<string|none> = ["a" none]
+if words[1] =? none { printl"missing" }
+```
+
 ## Producing Optional Values
 
 A function can return an optional explicitly:

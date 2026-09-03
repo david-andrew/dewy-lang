@@ -9390,6 +9390,60 @@ def _literal_member_test(args: list[hir.AST], *, negated: bool, loc: Span, ctx: 
     return None
 
 
+def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, source_name: str, ctx: Context) -> hir.AST | None:
+    """`x =? v` where `x` is a tagged cell (`T | none`, `A | B`) and `v` a value of one member type.
+
+    The cell is equal to `v` when it holds that member and the payload is
+    equal: `x is? M and payload =? v`, spelled as a test on the value (a
+    hidden `let` when it is not a binding) and the member's own equality.
+    `x =? none` is `x is? none`. Two cells cannot be compared yet.
+    """
+    for value, other in ((args[0], args[1]), (args[1], args[0])):
+        union = ty.unfold(ty.strip_refinement(value.type))
+        if not isinstance(union, ty.TypeOr) or (ty.optional_payload(union) is None and ty.runtime_union_members(union) is None):
+            continue
+        other = _unwrap_parens(other)
+        other_type = ty.unfold(ty.strip_refinement(other.type))
+        if other_type == 'none':
+            return hir.TypeTest(loc, 'bool', value, 'none', negated)
+        if isinstance(other_type, ty.TypeOr):
+            not_implemented(ctx.srcfile, loc, 'equality between two union values (narrow one side with `is?` first)')
+        members = [
+            member for member in union.items
+            if member != 'none' and ctx.type_system.is_subtype(other_type, member)
+        ]
+        if not members:
+            continue   # not a member: the generic overload reports the mismatch
+        if len(members) > 1:
+            type_error(
+                ctx.srcfile,
+                'ambiguous equality against a union',
+                Pointer(span=other.loc, message=f'this could be compared as {" or ".join(f"`{type_to_dewy(m)}`" for m in members)}'),
+                hint='narrow the union with `is?` first',
+            )
+        member = members[0]
+        if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
+            tested: hir.AST = value
+            prelude: list[hir.AST] = []
+        else:
+            local = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_eq_{ctx.binding_registry.next_id}', 'value', value.loc)
+            local.type = value.type
+            declaration = hir.Declare(value.loc, ty.VOID_TYPE, 'let', local.name, value.type, value, binding_id=local.id)
+            local.declaration = declaration
+            tested = hir.ExpressedIdentifier(value.loc, value.type, local.name, binding_id=local.id)
+            prelude = [declaration]
+        narrowed = replace(tested, type=member)
+        payload_equal = _dispatch_builtin(
+            '__ne__' if negated else '__eq__', [narrowed, other], loc=loc, op_loc=loc, source_name=source_name, ctx=ctx,
+        )
+        test = hir.TypeTest(loc, 'bool', tested, member, False)
+        comparison = hir.Flow(loc, 'bool', [hir.IfArm(loc, 'bool', test, payload_equal)], hir.Bool(loc, 'bool', negated))
+        if not prelude:
+            return comparison
+        return hir.Block(loc, 'bool', [*prelude, comparison], False)   # statements, then the value (as a match's hidden scrutinee)
+    return None
+
+
 def _dispatch_builtin(
     fname: str,
     args: list[hir.AST],
@@ -9433,6 +9487,11 @@ def _dispatch_builtin(
     rational = _dispatch_rational(fname, args, loc=loc, source_name=source_name, ctx=ctx)
     if rational is not None:
         return rational
+    if fname in ('__eq__', '__ne__') and len(args) == 2:
+        # after the numeric unions (bigint, rational) have taken their equalities
+        cell_test = _union_member_equality(args, negated=fname == '__ne__', loc=loc, source_name=source_name, ctx=ctx)
+        if cell_test is not None:
+            return cell_test
     if (
         fname in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}
         and len(args) == 2
