@@ -1,0 +1,30 @@
+# minted types may refer to each other, forwards and in cycles, through a
+# field's optional member or through a function type: a context whose
+# tokens' `eat` takes the context, and a pair of quote kinds that name each
+# other — resolved in declaration order, the cycle a recursive reference
+
+from p"../../library/reporting.dewy" import SrcFile
+
+Context = $abstract type of any & [srcfile:SrcFile previous:Token?]      # `Token` is declared below
+Root = type of Context
+
+let eatfn:type = (src:string ctx:Context):>int64?                        # a function type through the cycle
+Token = $abstract type of any & [src:string idx:int64  eat:eatfn]
+Whitespace = type of Token & [eat = (src:string ctx:Context):>int64? => if src.startswith(" ") 1 else none]
+
+Opener = type of any & [closer:Closer? = none]                           # mutual recursion, forward reference
+Closer = type of any & [opener:Opener? = none  text:string = ")"]
+
+main = () => {
+    let total:int64 = 0
+    let ctx:Context = Root(srcfile=SrcFile(path="x" first_row=0 body="") previous=none)
+    match Whitespace.eat(" x" ctx) { n:int64 => { total += n }  <none> => exit(1) }              # 1
+    let tok = Whitespace(src=" " idx=0)
+    let next:Context = Root(srcfile=SrcFile(path="x" first_row=0 body="") previous=tok)
+    if next.previous is? Token total += 1                                                          # 2
+    let o = Opener(closer=Closer())
+    match o.closer { c:Closer => { total += c.text.length + 39 }  <none> => exit(2) }              # 42
+    let kinds:array<type<Token>> = [Whitespace]
+    if "{kinds}" =? "[Whitespace]" and "{kinds[0]}" =? "Whitespace" total += 0                    # type values print as their names
+    exit(total)
+}

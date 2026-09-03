@@ -312,8 +312,8 @@ class _ObjectLowering:
             return size, size
         if self._is_handle_type(type_) or ty.is_user_nominal(type_) or self._is_string_valued(type_):
             return 8, 8   # (a union of string literals is one string handle)
-        if ty.enum_members(type_) is not None:
-            return 8, 8   # an enum value is its member index: one word
+        if ty.enum_members(type_) is not None or isinstance(type_, ty.MetaType):
+            return 8, 8   # an enum value is its member index, a type value its brand id: one word
         if self._field_union_members(type_) is not None:
             return 16, 8  # an inline union cell: tag word and payload word, no trees
         if isinstance(type_, ty.ObjectType):

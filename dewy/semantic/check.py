@@ -927,6 +927,9 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         if spelled is not None:
             parts.append(spelled)   # a type or a function: its spelling
             continue
+        if isinstance(ty.unfold(ty.strip_refinement(value.type)), ty.MetaType):
+            parts.append(_typename(value, value.loc, ctx=ctx))   # a type value: its name
+            continue
         if value.type == 'none':
             parts.append(hir.String(value.loc, ty.StringLiteralType('none'), 'none'))   # the text of `none`
             continue
@@ -2912,7 +2915,7 @@ def _metatype_test(value: hir.AST, test: ty.TypeExpr, *, negated: bool, loc: Spa
         return None
     tested = ty.unfold(test)
     if not (isinstance(tested, ty.ObjectType) and ty.user_branded(tested)):
-        type_error(ctx.srcfile, 'a type value is tested against a minted type', Pointer(span=loc, message=f'`{type_to_dewy(test)}` is not minted'))
+        return hir.DecidedBool(loc, 'bool', negated)   # a type value is never a string, a number, …: decided
     if tested == metatype.family or ty.user_brand_descends(metatype.family, tested):
         return hir.DecidedBool(loc, 'bool', not negated)   # every type under the family is under the test
     if not ty.user_brand_descends(tested, metatype.family):
@@ -5986,21 +5989,21 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
             ctx.named_types[binding.id] = named
         return named
     rhs = ctx.type_alias_asts[binding.id]
-    minted = _mint_nominal_type(binding, rhs, ctx=ctx)
-    if minted is not None:
-        binding.type_value = minted
-        if isinstance(minted, ty.ObjectType) and minted.methods:
-            ctx.pending_methods.append((binding, minted))
-        return minted
-    ctx.resolving_type_aliases.add(binding.id)
+    ctx.resolving_type_aliases.add(binding.id)   # a mint too: a cycle through it is a recursive reference, not a re-entry
     try:
-        value = _type_alias_value(rhs, ctx=ctx)
+        minted = _mint_nominal_type(binding, rhs, ctx=ctx)
+        value = minted if minted is not None else _type_alias_value(rhs, ctx=ctx)
     finally:
         ctx.resolving_type_aliases.remove(binding.id)
     named = ctx.named_types.get(binding.id)
     if named is not None:
         _validate_recursive_alias(binding, value, named, ctx=ctx)
         named.resolve(value)
+    if minted is not None:
+        binding.type_value = minted
+        if isinstance(minted, ty.ObjectType) and minted.methods:
+            ctx.pending_methods.append((binding, minted))
+        return minted
     binding.type_value = value
     if isinstance(value, ty.ObjectType):
         for method in value.methods:
@@ -8158,6 +8161,20 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     _collect_block_bindings(block, ctx=ctx)
     aliases = _prebind_type_aliases(block, ctx=ctx)
 
+    # The block's leading imports run first, then its aliases resolve in
+    # declaration order: the signature pre-pass below would otherwise touch
+    # them in use order, and a cycle through a function type (a context whose
+    # tokens' `eat` takes the context) would surface at the function alias —
+    # which cannot carry a recursion — instead of at the object that can.
+    leading_results: dict[int, hir.AST] = {}
+    if not type_block:
+        for index, item in enumerate(block.inner):
+            if not (isinstance(item, p0.KeywordExpr) and item.parts and isinstance(item.parts[0], t1.Keyword) and item.parts[0].name in ('import', 'from')):
+                break
+            leading_results[index] = typecheck_and_resolve_inner(item, ctx=ctx, type_block=type_block)
+        for binding in aliases:
+            _resolve_type_alias(binding, ctx=ctx)
+
     deferred_functions: set[int] = set()
     if not type_block:
         seen_implicit: set[str] = set()
@@ -8202,6 +8219,9 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
     items = block.inner
     results: list[hir.AST | None] = [None] * len(items)
     for index, item in enumerate(items):
+        if index in leading_results:
+            results[index] = leading_results[index]   # a leading import, already run
+            continue
         if _test_annotation(item) is not None:
             user_error(
                 ctx.srcfile,
@@ -12841,6 +12861,8 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
         return None   # a function field prints as its type's spelling
     if isinstance(ty.optional_payload(plain), (ty.FunctionType, ty.OverloadType)):
         return None   # `none` or the spelling
+    if isinstance(plain, ty.MetaType):
+        return None   # a type value prints as its name
     if _optional_container_element(plain):
         return None   # an optional member: `none` or its payload's text
     if _union_container_element(plain):
@@ -13766,6 +13788,8 @@ def _explicit_value_conversion(
         # `src.length as uint64`: one fixed width to another, a value cast the
         # bounds analysis must prove in range (as at an annotated binding)
         return hir.ValueCast(loc, target, node)
+    if _is_string_type(target) and isinstance(ty.unfold(ty.strip_refinement(node.type)), ty.MetaType):
+        return _typename(node, loc, ctx=ctx)   # a type value converts to its name
     if _is_string_type(target):
         # a value that may carry a child's brand at runtime converts as that
         # child (its own `__as__`, or its literal syntax under its name)

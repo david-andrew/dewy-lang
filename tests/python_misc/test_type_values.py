@@ -44,3 +44,17 @@ def test_static_transitively_through_static_calls() -> None:
     _check('P = type of any & [x:int64  a = (n:int64):>int64 => b(n) + 1  b = (n:int64):>int64 => n * 2]\nlet r:int64 = P.a(3)')
     with pytest.raises(TypeCheckError, match='`a` needs an instance'):
         _check('P = type of any & [x:int64  a = (n:int64):>int64 => b(n) + 1  b = (n:int64):>int64 => n * x]\nlet r:int64 = P.a(3)')
+
+
+def test_mints_may_refer_to_each_other_forwards_and_through_function_types() -> None:
+    _check('Opener = type of any & [closer:Closer? = none]\nCloser = type of any & [opener:Opener? = none]\nlet o = Opener(closer=Closer())')
+    _check('Ctx = $abstract type of any & [previous:Tok?]\nlet eatfn:type = (c:Ctx):>int64?\nTok = type of any & [eat:eatfn]\nlet f = (c:Ctx):>int64 => 1')
+
+
+def test_a_self_referencing_mint_field_still_needs_a_union() -> None:
+    with pytest.raises(UserError, match='refers to itself without a union'):
+        _check('Node = type of any & [next:Node]')
+
+
+def test_type_values_print_as_their_names() -> None:
+    _check('T = $abstract type of any & [x:int64]\nKind = type of T\nlet kinds:array<type<T>> = [Kind]\nlet s:string = "{kinds} {kinds[0]}"\nlet k:type<T> = Kind\nlet t:string = k as string')

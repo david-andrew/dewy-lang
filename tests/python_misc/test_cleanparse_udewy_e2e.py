@@ -135,6 +135,7 @@ LOWERED_CASES = [
     ('narrowed_union_copies.dewy', 42),
     ('covariant_slots.dewy', 42),
     ('type_values.dewy', 42),
+    ('recursive_mints.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

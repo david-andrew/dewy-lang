@@ -118,8 +118,10 @@ let eatfn:type = (src:nonemptystring ctx:Context):>uint64? | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
-let Token:type = type of any & [src:string loc:Span idx:uint64] 
-let TokenProtocol:type = [
+let Token:type = $abstract type of any & [
+    src:string
+    loc:Span
+    idx:uint64
     eat:eatfn
     action_on_eat:actionfn?=none
     __as__ = ():>string => "<{typename}>"
@@ -133,7 +135,7 @@ let TokenError = type of error & Report #TODO: merge this with Report...
 # let Comment:type = type of Token
 
 
-Whitespace = type of TokenProtocol & [
+Whitespace = type of Token & [
     eat = (src:nonemptystring ctx:Context):>uint64? => {
         if src[0] not in? whitespace return none
         loop i in 0..uint64.max and i <? src.length {  
@@ -144,7 +146,7 @@ Whitespace = type of TokenProtocol & [
 
 ]
 
-LineComment = type of TokenProtocol & [
+LineComment = type of Token & [
     eat = (src:nonemptystring ctx:Context):>uint64? => {
         if not src.startswith(line_comment_start) return none
         loop i in 0..uint64.max and i <? src.length {  
@@ -157,7 +159,7 @@ LineComment = type of TokenProtocol & [
 
 # # # TODO: compiler improvements way too much complaining about int64 vs uint64 stuff... should discuss a bit about what to do..
 # # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
-# BlockComment = type of TokenProtocol & [
+# BlockComment = type of Token & [
 #     eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
 #         if not src.startswith(block_comment_start) return none
 #         stack = 1
@@ -181,7 +183,7 @@ LineComment = type of TokenProtocol & [
 
 # TODO compiler bugs: why did I have to move this above tokenize? you're supposed to be able to reference functions before their declaration when inside other functions
 # what tokens are allowed in what contexts
-contextmap = (ctx:Context):>array<TokenProtocol> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
+contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
     <Root> => [
         Whitespace
         LineComment
