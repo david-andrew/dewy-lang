@@ -3007,8 +3007,10 @@ class _Lowerer(
         if isinstance(source, hir.ExpressedIdentifier) and source.name in self.owned_cells:
             return [self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._int64_binary('__add__', replace(source, type='int64'), self._int64_literal(loc, 8), loc)], ty.VOID_TYPE, loc)]
         kinds = self._string_sources(item)
-        if not any(kind in ('owning', 'element', 'unknown') for kind, _ in kinds):
-            return []   # static, fresh, or a call's: the caller's already
+        if not any(kind in ('owning', 'element', 'unknown', 'fresh') for kind, _ in kinds):
+            return []   # static or a call's: the caller's already
+        # (`fresh` — a decode, an interpolation, a view — is a descriptor in this
+        # frame's string region, which is released on exit: it is cloned too)
         statements: list[hir.AST] = []
         tag = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'result_tag').name)
         statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(result, loc)))

@@ -281,6 +281,7 @@ udewy_intrinsic_types: dict[str, ty.FunctionType] = {
     '__load__': _udewy_intrinsic([ty.TOP_TYPE], 'int64'),
     '__store__': _udewy_intrinsic(['int64', ty.TOP_TYPE], ty.VOID_TYPE),
     '__alloca__': _udewy_intrinsic(['int64'], 'int64'),
+    '__breakpoint__': _udewy_intrinsic([], ty.VOID_TYPE),   # `$breakpoint`: trap into an attached debugger
     '__static_alloca__': _udewy_intrinsic(['int64'], 'int64'),
     '__signed_shr__': _signed_shift_intrinsic(),
     '__unsigned_idiv__': _udewy_intrinsic(['uint64', 'uint64'], 'uint64'),

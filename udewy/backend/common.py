@@ -47,6 +47,7 @@ CORE_INTRINSIC_ARITIES: dict[str, int] = {
     "__unsigned_gt__": 2,
     "__unsigned_lte__": 2,
     "__unsigned_gte__": 2,
+    "__breakpoint__": 0,
 }
 
 
@@ -88,6 +89,18 @@ class Backend(ABC):
 
         Backends should run this initializer exactly once before user-visible entry
         points when a name is provided.
+        """
+
+    def mark_location(self, path: str, line: int, column: int) -> None:
+        """
+        Note the source position of the code emitted next (debug information).
+
+        The parser reports the position of every statement: by default the
+        udewy source's own, or the position a `# @loc path:line:column` comment
+        names for the statements that follow it (a compiler emitting udewy uses
+        it to point a debugger at the original source). Purely metadata — a
+        backend that ignores it produces the same program — so the default does
+        nothing.
         """
 
     def set_imported_sources(self, paths: list[Path]) -> None:

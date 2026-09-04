@@ -5,6 +5,8 @@ The frontend stays single-pass and emits directly through the backend protocol,
 but it uses ordinary Python data structures for symbol tracking.
 """
 
+import bisect
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -83,6 +85,45 @@ class ParseState:
     fn_references: dict[int, set[int]] = field(default_factory=dict)
     top_level_fn_refs: set[int] = field(default_factory=set)
     static_word_fn_locs: dict[int, int] = field(default_factory=dict)
+    # debug locations: the source's own path, its line starts, the
+    # `# @loc path:line:column` markers (by offset), and the last position told to the backend
+    source_path: str | None = None
+    line_starts: list[int] = field(default_factory=list)
+    location_markers: list[tuple[int, str, int, int]] = field(default_factory=list)
+    last_location: tuple[str, int, int] | None = None
+
+
+_LOCATION_MARKER = re.compile(r"^[ \t]*#[ \t]*@loc[ \t]+(.+?):(\d+):(\d+)[ \t]*$", re.MULTILINE)
+
+
+def collect_location_markers(src: str) -> list[tuple[int, str, int, int]]:
+    """`# @loc path:line:column` comments: each applies to the statements after it."""
+    return [
+        (match.end(), match.group(1), int(match.group(2)), int(match.group(3)))
+        for match in _LOCATION_MARKER.finditer(src)
+    ]
+
+
+def mark_statement_location(state: "ParseState", offset: int) -> None:
+    """Tell the backend where the statement at ``offset`` comes from.
+
+    The latest marker before the statement wins; without one the position is
+    the udewy source's own. Repeats of the last reported position are skipped.
+    """
+    markers = state.location_markers
+    index = bisect.bisect_right(markers, (offset, "", 0, 0)) - 1
+    if index >= 0:
+        _, path, line, column = markers[index]
+        location = (path, line, column)
+    elif state.source_path is not None:
+        line_index = bisect.bisect_right(state.line_starts, offset) - 1
+        location = (state.source_path, line_index + 1, offset - state.line_starts[line_index] + 1)
+    else:
+        return
+    if location == state.last_location:
+        return
+    state.last_location = location
+    state.backend.mark_location(*location)
 
 
 def note_fn_use(state: "ParseState", target_label_id: int) -> None:
@@ -1506,6 +1547,7 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
 
 def parse_statement(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, bool]:
     kind = toks[idx].kind
+    mark_statement_location(state, toks[idx].location)
     
     if is_decl_kind(kind):
         if looks_like_fn_decl(toks, idx):
@@ -1616,8 +1658,11 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
 # Main entry point
 # ============================================================================
 
-def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
+def parse(toks: list[t1.Token], src: str, backend: Backend, source_path: str | None = None) -> str:
     """Parse tokens and generate code for the specified target.
+
+    ``source_path`` names the source for debug locations (see
+    ``mark_statement_location``); without it only `# @loc` markers report.
     
     Returns:
         Generated code as a string or bytes.
@@ -1638,6 +1683,9 @@ def parse(toks: list[t1.Token], src: str, backend: Backend) -> str:
         scope_stack=scope_stack,
         type_decl_stack=type_decl_stack,
         ctx=ctx,
+        source_path=source_path,
+        line_starts=[0, *(index + 1 for index, char in enumerate(src) if char == "\n")],
+        location_markers=collect_location_markers(src),
     )
     
     parse_program(toks, state)

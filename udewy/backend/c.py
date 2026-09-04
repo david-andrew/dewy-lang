@@ -1401,6 +1401,9 @@ class CBackend(Backend):
             self.store_mem(32)
         elif name == "__store_i64__":
             self.store_mem(64)
+        elif name == "__breakpoint__":
+            self._emit("__builtin_trap();")   # a debugger attached to the process stops here
+            self.push_void()
         elif name == "__alloca__":
             self._require_helper("alloca")
             size = self._current_expr()

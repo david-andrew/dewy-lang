@@ -1301,6 +1301,9 @@ class Wasm32Backend(Backend):
             self.unsigned_cmp("gte")
         elif name == "__alloca__":
             self.alloca()
+        elif name == "__breakpoint__":
+            # no debugger protocol for the browser target: a breakpoint is a no-op
+            self.push_void()
         elif name == "__host_log__":
             self.emit_host_log()
         elif name == "__host_exit__":

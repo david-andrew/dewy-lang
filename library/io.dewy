@@ -4,7 +4,7 @@
 # matching layer is imported. The native backends and the C backend all run
 # on the Linux syscall layer for now.
 if $target in? ["x86_64" "riscv" "arm" "c"] {
-    from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal _stderr_is_terminal)
+    from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal _stderr_is_terminal _read_stdin_line _debugger_attached)
     from p"linux/system.dewy" import (_exit)
 }
 
@@ -274,4 +274,39 @@ let _dict_as_string = <K V>(entries:dict<K V> quote_keys:bool quote_values:bool)
     }
     pieces.push"]"
     return pieces.join
+}
+
+# `$breakpoint`: the compiler prints the live bindings (`_breakpoint_banner`,
+# then one line per binding) and stops. Under a debugger the stop is a trap
+# at the directive itself (`__breakpoint__`, emitted in the user's function so
+# the debugger lands on that line); otherwise `_breakpoint_pause` holds the
+# program at a prompt. Commands start with `\` — `\c` continues (so does an
+# empty line, or the end of input), `\q` quits, `\h` lists them; anything
+# else is an expression, which a compiled program cannot evaluate yet.
+let _breakpoint_banner = (where:string):>void => {
+    _print_string("\n── breakpoint at {where} ──\n")
+    return void
+}
+
+let _breakpoint_under_debugger = ():>bool => _debugger_attached()
+
+let _breakpoint_pause = ():>void => {
+    loop true {
+        _print_string(">>> ")
+        match _read_stdin_line() {
+            <none> => { _print_string("\n")  return void }
+            line:string => {
+                let command = _string_trim(line)
+                if command =? "" or command =? "\\c" { return void }
+                if command =? "\\q" { _print_string("quit\n")  _exit(130) }
+                if command =? "\\h" {
+                    _print_string("  \\c  continue (also an empty line)\n  \\q  quit the program\n  \\h  this list\n")
+                } else if _string_startswith(command "\\") {
+                    _print_string("unknown command `{command}`; `\\h` lists them\n")
+                } else {
+                    _print_string("expressions cannot be evaluated here yet (the program is compiled); `\\c` continues, `\\q` quits\n")
+                }
+            }
+        }
+    }
 }

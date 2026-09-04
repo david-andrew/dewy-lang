@@ -214,7 +214,7 @@ def test_udewy_fixture_roundtrip(fixture_name: str) -> None:
     path = fixtures / fixture_name
     source = path.read_text()
     no_prelude = SrcFile(path, f'$no_prelude = true\n{source}')
-    assert codegen(no_prelude) == source
+    assert codegen(no_prelude, debug_locations=False) == source   # (the location markers aside, a udewy program reproduces itself)
 
 
 @pytest.mark.parametrize(('fixture_name', 'expected_exit'), CASES)
@@ -258,7 +258,7 @@ def test_fixed_local_array_fixtures_use_stack_data() -> None:
     assert '__alloca__(48)' not in dynamic
 
     recursive = codegen(SrcFile.from_path(fixtures / 'array_fresh_local.dewy'))
-    assert 'let probe = (depth:int64):>int64 => {\n    let values:int64 = __alloca__(8)' in recursive
+    assert 'let probe = (depth:int64):>int64 => {\n    # @loc' in recursive and '\n    let values:int64 = __alloca__(8)' in recursive
     assert '__store_i64__(40 values)' in recursive
     assert 'let ignored:int64 = probe(1)' in recursive
     assert 'return __load_i64__(values)' in recursive
@@ -567,7 +567,7 @@ def test_explicit_signed_shift_intrinsic_roundtrips(tmp_path: Path) -> None:
     path = tmp_path / 'intrinsic.udewy'
     path.write_text(source)
 
-    assert codegen(SrcFile(path, f'$no_prelude = true\n{source}')) == source
+    assert codegen(SrcFile(path, f'$no_prelude = true\n{source}'), debug_locations=False) == source
 
 
 def test_abstract_integer_right_shift_lowers_as_a_signed_word(tmp_path: Path) -> None:

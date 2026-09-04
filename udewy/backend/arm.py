@@ -1065,6 +1065,9 @@ class ArmBackend(Backend):
             self.unsigned_cmp("gte")
         elif name == "__alloca__":
             self.alloca()
+        elif name == "__breakpoint__":
+            self._emit("brk #0")   # a debugger attached to the process stops here
+            self.push_void()
         elif name == "__i64_to_f32_bits__":
             self._emit("scvtf s0, x0")
             self._emit("fmov w0, s0")

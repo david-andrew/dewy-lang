@@ -999,6 +999,9 @@ class RiscvBackend(Backend):
             self.unsigned_cmp("gte")
         elif name == "__alloca__":
             self.alloca()
+        elif name == "__breakpoint__":
+            self._emit("ebreak")   # a debugger attached to the process stops here
+            self.push_void()
         elif name == "__i64_to_f32_bits__":
             self.i64_to_f32_bits()
         elif name == "__i64_to_f64_bits__":

@@ -8,6 +8,7 @@
 - [Getting Started](ch01/00-getting-started.md)
   - [Installation](ch01/01-installation.md)
   - [Your First Dewy Program](ch01/02-hello-world.md)
+  - [Stopping to Look: `$breakpoint`](ch01/03-debugging.md)
 
 ## The Core Language
 

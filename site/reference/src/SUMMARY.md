@@ -22,6 +22,7 @@
 - [Ranges and Iteration](ranges-and-iteration.md)
 - [Refinements, Effects, and Safety](refinements-and-effects.md)
 - [Testing](testing.md)
+- [Debugging](debugging.md)
 
 ## Data Types
 

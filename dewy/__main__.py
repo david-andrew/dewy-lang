@@ -69,7 +69,7 @@ def update(argv: list[str]) -> int:
 
 # ---------------------------------------------------------------- dewy <file>
 def run(argv: list[str]) -> int:
-    parser = ArgumentParser(prog='dewy', description='Dewy Compiler', epilog='subcommands: analyze, test, update')
+    parser = ArgumentParser(prog='dewy', description='Dewy Compiler', epilog='subcommands: analyze, debug, test, update')
     parser.add_argument('file', nargs='?', help='.dewy file to run. If not provided, enter REPL mode')
     _add_target_option(parser)
     parser.add_argument('-v', '--version', action='version', version=f'dewy {get_version()}', help='Print version information and exit')
@@ -315,7 +315,45 @@ def test(argv: list[str]) -> int:
             return TEST_NOT_BUILT
 
 
-SUBCOMMANDS = {'analyze': analyze, 'test': test, 'update': update}
+# ------------------------------------------------------- dewy debug <file>
+def debug(argv: list[str]) -> int:
+    """Build the program and run it under a native debugger with Dewy source lines.
+
+    The compiler emits DWARF line information for `.dewy` files, so the
+    debugger's breakpoints (`b t0.dewy:222`), stepping, and backtraces speak
+    Dewy source, and a `$breakpoint` in the program traps into the debugger
+    at its own line. Plain gdb or lldb underneath: everything they can do is
+    available; Dewy-shaped values are still ahead.
+    """
+    parser = ArgumentParser(prog='dewy debug', description='run a Dewy program under gdb or lldb')
+    parser.add_argument('file', help='.dewy file to debug')
+    _add_target_option(parser)
+    parser.add_argument('--debugger', choices=['gdb', 'lldb'], help='which debugger to use (default: gdb if installed, else lldb)')
+    parser.add_argument('remainder', nargs=REMAINDER, default=[], help='arguments to pass to the program')
+    args = parser.parse_args(argv)
+
+    debugger = args.debugger or next((name for name in ('gdb', 'lldb') if shutil.which(name)), None)
+    if debugger is None or shutil.which(debugger) is None:
+        print('Error: dewy debug needs gdb or lldb on the PATH.', file=sys.stderr)
+        return 1
+    status = run([*(['--target', args.target] if args.target else []), '--compile', args.file])
+    if status != 0:
+        return status
+    binary = _program_binary(Path(args.file))
+    if debugger == 'gdb':
+        command = ['gdb', '-q', '--args', str(binary), *args.remainder]
+    else:
+        command = ['lldb', '--', str(binary), *args.remainder]
+    return subprocess.call(command)
+
+
+def _program_binary(path: Path) -> Path:
+    """The executable `dewy file.dewy` builds for ``path``."""
+    cache_dir, name = cache_layout(cache_artifact(path, '.udewy'))
+    return cache_dir / name
+
+
+SUBCOMMANDS = {'analyze': analyze, 'test': test, 'update': update, 'debug': debug}
 
 
 def main(argv: list[str] | None = None) -> int:

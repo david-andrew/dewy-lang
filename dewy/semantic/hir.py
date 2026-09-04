@@ -24,7 +24,7 @@ perhaps after this phase theres a second typechecking phase making use of all th
 from dataclasses import dataclass, field
 from typing import Literal
 from ..parser import t0
-from ..reporting import Span
+from ..reporting import Span, SrcFile
 from . import ty
 
 # Type: TypeAlias = ty.TypeExpr
@@ -668,6 +668,9 @@ class FunctionLiteral(AST):
     object_receiver: bool = False
     object_fields: tuple[tuple[int, str], ...] = ()
     object_type: ty.ObjectType | None = None
+    source: SrcFile | None = field(default=None, kw_only=True, compare=False)
+    """The file the literal (and so every span in its body) was written in:
+    debug locations point there. None for compiler-synthesized functions."""
 
 # TODO: Partial evaluation is roughly a stack of function calls. Explicitly
 # supplied values are evaluated and saved immediately; signature defaults stay

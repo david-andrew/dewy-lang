@@ -181,13 +181,13 @@ class Chain(t1.InedibleToken):
 # condition from the message — so the comma's operator precedence (tighter
 # than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
 # needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
-assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect', 'fail', 'abstract'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint
+assertion_directives: set[str] = {'assert', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
 
 @dataclass
 class Directive(t1.InedibleToken):
-    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]`."""
+    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]`, `$breakpoint`."""
     metatag: t1.Metatag
-    condition: Chain | None      # `None` only for `$fail`
+    condition: Chain | None      # `None` for `$fail` and `$breakpoint`
     message: Chain | None = None
 
     @property
@@ -817,6 +817,9 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
     if not isinstance(metatag, t1.Metatag):
         raise ValueError(f"INTERNAL ERROR: expected an assertion metatag, got {metatag=}")
     i = start + 1
+    if metatag.name == "breakpoint":
+        # `$breakpoint` takes nothing: whatever follows is the next statement
+        return Directive(metatag.loc, metatag, None), i
     ends_here = (
         i >= len(tokens)
         or is_stop_keyword(tokens[i], stop_keywords)

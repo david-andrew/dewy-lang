@@ -35,7 +35,7 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
     loaded = t0.load_program(input_file, target_backend=options.target)
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     toks = t1.tokenize(loaded.source)
-    asm = p0.parse(toks, loaded.source, backend)
+    asm = p0.parse(toks, loaded.source, backend, source_path=str(Path(input_file).resolve()))
 
     
     cache_dir, input_name = cache_layout(input_file)

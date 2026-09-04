@@ -34,6 +34,7 @@ class X86_64Backend(Backend):
     
     def __init__(self) -> None:
         self._function_code: list[tuple[int, list[str]]] = []
+        self._source_files: dict[str, int] = {}   # DWARF file numbers for `.loc`
         self._current_fn_code: list[str] | None = None
         self._reachable_fn_label_ids: set[int] | None = None
         self._data: list[str] = []
@@ -78,9 +79,17 @@ class X86_64Backend(Backend):
         """Emit label to data section."""
         self._data.append(label + ":")
     
+    _SYMBOL_LABEL_PREFIXES = frozenset({"str", "global", "static", "fn"})
+
     def _new_label(self, prefix: str = "L") -> str:
-        """Generate a new unique label."""
-        label = f".{prefix}{self._next_label}"
+        """Generate a new unique label.
+
+        Control-flow labels are assembler-local (`.L…`, dropped from the symbol
+        table) so a debugger names frames by their function, not by the
+        nearest loop or branch label; data and function labels stay symbols.
+        """
+        local = "" if prefix in self._SYMBOL_LABEL_PREFIXES else "L"
+        label = f".{local}{prefix}{self._next_label}"
         self._next_label += 1
         return label
 
@@ -173,9 +182,22 @@ class X86_64Backend(Backend):
     def set_reachable_functions(self, label_ids: set[int]) -> None:
         self._reachable_fn_label_ids = label_ids
     
+    def mark_location(self, path: str, line: int, column: int) -> None:
+        """A `.loc` row: the assembler builds the DWARF line table from these."""
+        if self._current_fn_code is None:
+            return   # nothing is emitted between functions
+        number = self._source_files.get(path)
+        if number is None:
+            number = len(self._source_files) + 1
+            self._source_files[path] = number
+        self._current_fn_code.append(f"    .loc {number} {line} {column}")
+
     def finish_module(self) -> str:
         """Finalize and return the generated assembly."""
         output = []
+        for path, number in self._source_files.items():
+            escaped = path.replace("\\", "\\\\").replace('"', '\\"')
+            output.append(f'.file {number} "{escaped}"')
         output.append(".text")
         output.append(".globl _start")
         for symbol in sorted(self._extern_symbols):
@@ -386,7 +408,7 @@ class X86_64Backend(Backend):
             
             self._stack_offset -= 8
         
-        self._current_fn_epilogue = f"{label}_epilogue"
+        self._current_fn_epilogue = f".L{label}_epilogue"
     
     def end_function(self) -> None:
         """End function definition."""
@@ -988,6 +1010,10 @@ class X86_64Backend(Backend):
             self.unsigned_cmp("gte")
         elif name == "__alloca__":
             self.alloca()
+        elif name == "__breakpoint__":
+            # a debugger attached to the process stops here (SIGTRAP otherwise)
+            self._emit("int3")
+            self.push_void()
         elif name == "__i64_to_f32_bits__":
             self._emit("cvtsi2ss %rax, %xmm0")
             self._emit("movd %xmm0, %eax")

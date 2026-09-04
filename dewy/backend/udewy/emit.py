@@ -1,6 +1,7 @@
 """Emit udewy source from HIR prepared by the udewy lowering pass."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from textwrap import indent
 
 from ...reporting import SrcFile
@@ -96,17 +97,59 @@ class EmitContext:
     direct_function_names: set[str]
     local_names: set[str]
     include_directives: dict[str, str] | None = None   # included file path -> bound name (prelude directives)
+    source: SrcFile | None = None
+    """The Dewy file the current function was written in: statements are
+    preceded by `# @loc path:line:column` markers pointing into it, which
+    the udewy compiler turns into debug line information."""
+    last_marker: list[str | None] = field(default_factory=lambda: [None])
+    """The marker last emitted in this function (shared by its blocks), so a
+    run of udewy statements lowered from one Dewy statement is marked once."""
+    debug_locations: bool = True
 
-def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False) -> str:
+    def child(self, local_names: set[str]) -> 'EmitContext':
+        return EmitContext(self.direct_function_names, local_names, self.include_directives, self.source, self.last_marker, self.debug_locations)
+
+
+def location_marker(node: hir.AST, ctx: EmitContext) -> str | None:
+    """The `# @loc` line for a statement, or None when it repeats the last one or has no source."""
+    source = ctx.source
+    if source is None or source.path is None or node.loc.stop > len(source.body):
+        return None
+    if node.loc.start == 0 and node.loc.stop == 0:
+        return None   # a synthesized node without a position
+    row, column = source.offset_to_row_col(node.loc.start)
+    marker = f'# @loc {Path(source.path).resolve()}:{row + 1}:{column + 1}'
+    if marker == ctx.last_marker[0]:
+        return None
+    ctx.last_marker[0] = marker
+    return marker
+
+
+def emit_statements(items: list[hir.AST], ctx: EmitContext) -> list[str]:
+    """Statements in order, each behind its location marker; declarations shadow direct names from then on."""
+    lines: list[str] = []
+    for item in items:
+        marker = location_marker(item, ctx)
+        if marker is not None:
+            lines.append(marker)
+        lines.append(emit_ast(item, ctx))
+        if isinstance(item, hir.Declare):
+            ctx.local_names.add(item.name)
+    return lines
+
+def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debug_locations: bool = True) -> str:
     """Type-check Dewy source and emit equivalent udewy source.
 
     With ``test``, the module's `$test` functions are compiled with the
-    generated test runner as the program's entry (`dewy --test`).
+    generated test runner as the program's entry (`dewy --test`). With
+    ``debug_locations`` (the default) every statement is preceded by a
+    `# @loc path:line:column` marker naming its Dewy position, which the
+    udewy compiler turns into debug line information.
     """
     ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test)
-    return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main')
+    return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
 
-def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: str = 'main') -> str:
+def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: str = 'main', debug_locations: bool = True) -> str:
     """Emit checked HIR after legalizing Dewy callable constructs.
 
     ``lower_for_udewy`` supplies concrete module-level function units, global
@@ -166,6 +209,7 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: s
     ctx = EmitContext(
         set(functions) | set(builtins.builtin_types),
         global_names,
+        debug_locations=debug_locations,
     )
     ctx.include_directives = {}
     for declaration in program.globals:
@@ -287,15 +331,17 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     local_names.update(arg.name for arg in func.kw_only_args)
     if func.rest_args is not None:
         local_names.add(func.rest_args.name)
-    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives)
+    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives, func.source if ctx.debug_locations else None, debug_locations=ctx.debug_locations)
     body = func.body
     if _contains_return(body):
         code.append(emit_ast(body, func_ctx))
     elif func.rettype in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
-        stmts = [emit_ast(item, func_ctx) for item in body.items] if isinstance(body, hir.Block) else [emit_ast(body, func_ctx)]
+        stmts = emit_statements(body.items, func_ctx) if isinstance(body, hir.Block) else emit_statements([body], func_ctx)
         code.append('{\n' + indent('\n'.join([*stmts, 'return void']), TAB) + '\n}')
     else:
-        code.append('{\n' + indent(f'return {emit_ast(body, func_ctx)}', TAB) + '\n}')
+        marker = location_marker(body, func_ctx)
+        prefix = f'{marker}\n' if marker is not None else ''
+        code.append('{\n' + indent(f'{prefix}return {emit_ast(body, func_ctx)}', TAB) + '\n}')
     return ''.join(code)
 
 def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
@@ -579,12 +625,8 @@ def emit_block(block: hir.Block, ctx: EmitContext) -> str:
             # assignments are statements, so the parens must not survive
             return emit_ast(item, ctx)
         return f'({emit_ast(item, ctx)})'
-    block_ctx = EmitContext(ctx.direct_function_names, set(ctx.local_names), ctx.include_directives) if block.scoped else ctx
-    items: list[str] = []
-    for item in block.items:
-        items.append(emit_ast(item, block_ctx))
-        if isinstance(item, hir.Declare):
-            block_ctx.local_names.add(item.name)
+    block_ctx = ctx.child(set(ctx.local_names)) if block.scoped else ctx
+    items = emit_statements(block.items, block_ctx)
     inner = indent('\n'.join(items), TAB)
     if block.scoped:
         return f'{{\n{inner}\n}}'

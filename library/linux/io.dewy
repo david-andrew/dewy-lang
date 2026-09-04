@@ -25,3 +25,53 @@ let _stdout_is_terminal = ():>bool => {
     let status:int64 = __syscall3__(16 1 21505 termios)
     return status =? 0
 }
+
+# One line from stdin (without its newline), or `none` at end of input; bytes
+# that are not UTF-8 also read as `none`. Reads a byte at a time: the prompt
+# of a breakpoint is not worth a buffer, and nothing else reads stdin yet.
+let _read_stdin_line = ():>string|none => {
+    let bytes:array<uint8> = []
+    let slot:int64 = __alloca__(8)
+    let count:int64 = __syscall3__(0 0 slot 1)
+    loop count >? 0 {
+        let byte:uint8 = __load_u8__(slot)
+        if byte =? 10 { return bytes as string|none }
+        bytes.push(byte)
+        count = __syscall3__(0 0 slot 1)
+    }
+    if bytes.length =? 0 { return none }
+    return bytes as string|none
+}
+
+# Whether a debugger has this process: `/proc/self/status` names the tracer
+# (`TracerPid:\t<pid>`, 0 when there is none). A breakpoint then traps into
+# the debugger instead of prompting.
+let _debugger_attached = ():>bool => {
+    let c_path:array<uint8> = "/proc/self/status" as array<uint8>
+    c_path.push(0)
+    let fd:int64 = __syscall3__(2 __load_i64__(c_path) 0 0)
+    if fd <? 0 { return false }
+    let buffer:int64 = __alloca__(4096)
+    let count:int64 = __syscall3__(0 fd buffer 4096)
+    let closed:int64 = __syscall1__(3 fd)
+    let key:array<uint8> = "TracerPid:" as array<uint8>
+    let i:int64 = 0
+    loop i + 10 <=? count {
+        let j:int64 = 0
+        loop j <? 10 and __load_u8__(buffer + i + j) =? key[j] { j += 1 }
+        if j =? 10 {
+            let k:int64 = i + 10
+            let value:int64 = 0
+            loop k <? count {
+                let byte:int64 = __load_u8__(buffer + k) transmute int64
+                if byte >=? 48 and byte <=? 57 { value = value * 10 + byte - 48 }
+                else if byte =? 10 { return value >? 0 }
+                else if byte not=? 32 and byte not=? 9 { return value >? 0 }
+                k += 1
+            }
+            return value >? 0
+        }
+        i += 1
+    }
+    return false
+}

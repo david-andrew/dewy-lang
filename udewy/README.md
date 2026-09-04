@@ -90,6 +90,8 @@ let x:int = 42  # inline comment
 
 Block comments are not supported.
 
+One comment form carries metadata. A line of the form `# @loc path:line:column` names the source position of the statements that follow it (until the next such line); a compiler that emits udewy from another language uses it to point a debugger at the original source. Without markers, a statement's position is its own line in the udewy file. Positions are debug information only — a backend that ignores them produces the same program — and reach the backend through the `mark_location` hook of the `Backend` protocol.
+
 ### Identifiers
 
 Identifiers consist of letters, digits, and underscores, and must begin with a letter or underscore:
@@ -964,6 +966,7 @@ These are the operations defined in [Part 2: Core Intrinsics](#part-2-core-intri
 
 - Memory: `__load__` / `__store__` and the sized variants, `__alloca__`, `__static_alloca__`, `__static_words__`
 - Arithmetic helpers: `__signed_shr__`, `__unsigned_idiv__`, `__unsigned_mod__`, unsigned comparisons
+- Debugging: `__breakpoint__()` traps into a debugger attached to the process (`int3`, `ebreak`, `brk #0`; a no-op where the target has no debugger protocol, such as wasm32) and yields `void`
 
 A program that uses only core intrinsics plus ordinary udewy syntax is backend-portable at the *language* level. It still needs a platform layer for I/O, allocation, and exit unless it is fully freestanding.
 

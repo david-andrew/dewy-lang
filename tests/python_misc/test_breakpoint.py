@@ -1,0 +1,145 @@
+"""`$breakpoint`: the live bindings are printed and the program stops — at a prompt, or in an attached debugger.
+The compiler also marks every emitted statement with its Dewy position for the debugger's line table."""
+import subprocess
+from pathlib import Path
+from shutil import which
+
+import pytest
+
+from dewy.backend.udewy import codegen
+from dewy.reporting import SrcFile
+from dewy.semantic import check, hir
+from dewy.semantic.errors import UserError
+from udewy.frontend import EntryPointOptions, entry_point
+
+here = Path(__file__).parent
+repo = here.parent.parent
+
+PROGRAM = '''let Hit = type of any & [length:uint64 name:string]
+let scale:int64 = 3
+let describe = (hits:array<Hit> label:string):>int64 => {
+    let total:int64 = 0
+    loop h in hits {
+        total += (h.length transmute int64) * scale
+        let maybe:int64|none = if total >? 10 total else none
+        $breakpoint
+    }
+    return total
+}
+let main = ():>int64 => {
+    let hits:array<Hit> = [Hit[length=3 name="a"] Hit[length=10 name="b"]]
+    let r = describe(hits "run")
+    $breakpoint
+    return 42
+}
+'''
+
+
+def _check(source: str) -> hir.AST:
+    return check.typecheck_and_resolve(SrcFile(None, source))
+
+
+def _calls(node: object) -> list[str]:
+    names: list[str] = []
+
+    def walk(value: object) -> None:
+        if isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier):
+            names.append(value.func.name)
+        if hasattr(value, '__dataclass_fields__'):
+            for name in value.__dataclass_fields__:
+                walk(getattr(value, name))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+
+    walk(node)
+    return names
+
+
+def test_a_breakpoint_prints_the_functions_bindings_and_traps_or_pauses() -> None:
+    checked = _check(PROGRAM)
+    names = _calls(checked)
+    # prelude names are mangled in the merged program
+    assert any(name.endswith('_breakpoint_banner') for name in names) and any(name.endswith('_breakpoint_under_debugger') for name in names)
+    assert '__breakpoint__' in names and any(name.endswith('_breakpoint_pause') for name in names)
+
+
+def test_the_snapshot_shows_the_current_functions_values_only() -> None:
+    checked = _check('let outer:int64 = 1\nlet f = (n:int64):>int64 => {\n    let inner = n + 1\n    $breakpoint\n    return inner\n}\n')
+    printed = [item.content for item in _strings(checked) if item.content.startswith('  ')]
+    assert any(text.startswith('  n = ') for text in printed) and any(text.startswith('  inner = ') for text in printed)
+    assert not any(text.startswith('  outer') or text.startswith('  f ') for text in printed)
+
+
+def _strings(node: object) -> list[hir.String]:
+    found: list[hir.String] = []
+
+    def walk(value: object) -> None:
+        if isinstance(value, hir.String):
+            found.append(value)
+        if hasattr(value, '__dataclass_fields__'):
+            for name in value.__dataclass_fields__:
+                walk(getattr(value, name))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+
+    walk(node)
+    return found
+
+
+def test_a_breakpoint_takes_no_argument() -> None:
+    with pytest.raises(UserError):
+        _check('let main = ():>int64 => {\n    $breakpoint 1\n    return 0\n}\n')
+
+
+def test_emitted_statements_carry_their_dewy_positions(tmp_path: Path) -> None:
+    source = tmp_path / 'located.dewy'
+    source.write_text('let square = (n:int64):>int64 => n * n\nlet main = ():>int64 => {\n    let total:int64 = square(3)\n    return total\n}\n')
+    emitted = codegen(SrcFile.from_path(source))
+    assert f'# @loc {source.resolve()}:3:5' in emitted and f'# @loc {source.resolve()}:4:5' in emitted
+    assert f'# @loc {source.resolve()}:1:34' in emitted     # the expression body of `square`
+
+
+@pytest.mark.skipif(which('as') is None or which('ld') is None, reason='needs the x86_64 toolchain')
+def test_a_breakpoint_holds_the_program_at_a_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / 'stops.dewy'
+    source.write_text(PROGRAM)
+    udewy_path = tmp_path / 'stops.udewy'
+    udewy_path.write_text(codegen(SrcFile.from_path(source)))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, [], EntryPointOptions(compile_only=True)) == 0
+    binary = tmp_path / '__dewycache__' / 'stops'
+    # `\h` lists the commands, an expression is refused, `\c` continues; the remaining stops read end of input and continue
+    result = subprocess.run([str(binary)], input=b'\\h\nfoo\n\\c\n', capture_output=True, timeout=60)
+    assert result.returncode == 42
+    text = result.stdout.decode()
+    assert text.count('── breakpoint at stops.dewy:8 ──') == 2 and '── breakpoint at stops.dewy:15 ──' in text
+    assert '  label = "run"' in text and '  total = 9' in text and '  maybe = none' in text and '  maybe = 39' in text
+    assert '  r = 39' in text
+    assert '\\c  continue' in text and 'expressions cannot be evaluated here yet' in text
+    # `\q` ends the program
+    result = subprocess.run([str(binary)], input=b'\\q\n', capture_output=True, timeout=60)
+    assert result.returncode == 130 and result.stdout.decode().count('── breakpoint') == 1
+
+
+@pytest.mark.skipif(which('as') is None or which('ld') is None, reason='needs the x86_64 toolchain')
+def test_a_decoded_string_survives_being_returned_in_an_optional(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # regression: the decoded string lived in the function's string region, released on exit
+    source = tmp_path / 'decoded.dewy'
+    source.write_text(
+        'let read = ():>string|none => {\n    let bytes:array<uint8> = [32 120 32]\n    return bytes as string|none\n}\n'
+        'let shout = (text:string):>string => "<{text}>"\n'
+        'let main = ():>int64 => {\n    match read() {\n        <none> => return 1\n        line:string => {\n'
+        '            if shout(line) =? "< x >" and line.trim =? "x" { return 42 }\n            return 2\n        }\n    }\n}\n'
+    )
+    udewy_path = tmp_path / 'decoded.udewy'
+    udewy_path.write_text(codegen(SrcFile.from_path(source)))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 42

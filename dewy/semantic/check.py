@@ -53,6 +53,10 @@ class Context:
     label_scopes: tuple[LabelScope, ...] = ()
     loop_boundaries: tuple[LoopBoundary, ...] = ()
     function_boundary_labels: dict[str, Span] = field(default_factory=dict)
+    function_scope_depth: int = 0
+    """How many binding scopes were open when the current function's body
+    began (0 at module level): the scopes above it are the function's own,
+    which is what `$breakpoint` shows."""
     refinements: dict[int, ty.Type] = field(default_factory=dict)
     refinement_subject: str | None = None
     """The name being annotated (`d:int64<d not=? 0>`): inside its type's
@@ -4502,6 +4506,8 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     """
     if ast.name == 'fail':
         return _tcr_fail(ast, ctx=ctx)
+    if ast.name == 'breakpoint':
+        return _tcr_breakpoint(ast, ctx=ctx)
     if ast.name == 'abstract':
         user_error(
             ctx.srcfile,
@@ -4570,6 +4576,82 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     ctx.key_facts.clear()
     ctx.key_facts.update(keys)
     return hir.Block(ast.loc, ty.VOID_TYPE, [obligation, flow], False)
+
+
+def _breakpoint_bindings(ctx: Context) -> list[sb.Binding]:
+    """The runtime values in scope that a breakpoint shows: the current
+    function's bindings (the module's, at module level), innermost shadowing
+    outer, in declaration order; hidden, foreign, and compile-time bindings
+    (functions, types, modules, ranges) are left out."""
+    maps = ctx.binding_scopes.maps
+    own = maps[:len(maps) - ctx.function_scope_depth + 1] if ctx.function_scope_depth else maps
+    visible: dict[str, sb.Binding] = {}
+    for scope in own:   # innermost first: the first sighting of a name is the visible one
+        for name, binding in scope.items():
+            if name in visible or name.startswith('__dewy') or binding.id in ctx.foreign_bindings:
+                continue
+            if binding.kind != 'value' and binding.kind != 'param':
+                continue
+            type_ = ty.strip_refinement(binding.type) if binding.type is not None else None
+            if type_ is None or type_ == ty.TYPE_TYPE or type_ in (ty.VOID_TYPE, ty.BOTTOM_TYPE, ty.INFERRED_TYPE):
+                continue
+            if isinstance(type_, (ty.FunctionType, ty.OverloadType, ty.ModuleType)) or _is_range_type(type_):
+                continue
+            visible[name] = binding
+    ordered = [binding for scope in reversed(own) for name, binding in scope.items() if visible.get(name) is binding]
+    return ordered
+
+
+def _relocated(node: object, loc: Span) -> object:
+    """A copy of checked HIR with every node's span set to ``loc`` (types untouched)."""
+    if isinstance(node, list):
+        return [_relocated(item, loc) for item in node]
+    if isinstance(node, tuple):
+        return tuple(_relocated(item, loc) for item in node)
+    if isinstance(node, dict):
+        return {key: _relocated(value, loc) for key, value in node.items()}
+    if not is_dataclass(node) or isinstance(node, type) or type(node).__module__ == ty.__name__:
+        return node
+    changes = {
+        field_.name: (loc if field_.name == 'loc' and isinstance(getattr(node, field_.name), Span) else _relocated(getattr(node, field_.name), loc))
+        for field_ in fields(node)
+        if field_.init and field_.name not in ('type', 'annotation')
+    }
+    return replace(node, **changes)
+
+
+def _tcr_breakpoint(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
+    """`$breakpoint`: show the live bindings, then stop.
+
+    Desugars to ordinary statements: a banner naming the site, one `printl`
+    per binding (strings in their literal form; a value that cannot print
+    shows its type instead), then — under a debugger — the trap intrinsic in
+    this very function, so the debugger lands on this line; otherwise the
+    prelude's prompt holds the program (see `_breakpoint_pause` in io.dewy).
+    """
+    row, _column = ctx.srcfile.offset_to_row_col(ast.loc.start)
+    where = f'{ctx.srcfile.path.name if ctx.srcfile.path is not None else "<input>"}:{row + 1}'
+    statements: list[hir.AST] = []
+
+    def synthesized(text: str) -> hir.AST:
+        parsed = p0.parse(SrcFile(None, ' ' * ast.loc.start + text + '\n'))
+        statement = parsed.inner[0]
+        ctx.synthesized.append(statement)
+        # every span of the synthesized code is the directive's: the debug
+        # location of the trap, and any report, point at `$breakpoint`
+        return _relocated(typecheck_and_resolve_inner(statement, ctx=ctx), ast.loc)
+
+    statements.append(synthesized(f'_breakpoint_banner("{where}")'))
+    for binding in _breakpoint_bindings(ctx):
+        type_ = ty.strip_refinement(binding.type) if binding.type is not None else ty.TOP_TYPE
+        shown = f'_quoted({binding.name})' if _is_string_type(type_) or ty.string_valued(type_) else binding.name
+        try:
+            statements.append(synthesized(f'printl"  {binding.name} = {{{shown}}}"'))
+        except ReportException:
+            described = type_to_dewy(type_).replace('"', "'").replace('{', '(').replace('}', ')')
+            statements.append(synthesized(f'printl"  {binding.name} : {described}"'))
+    statements.append(synthesized('if _breakpoint_under_debugger() { __breakpoint__() } else { _breakpoint_pause() }'))
+    return hir.Block(ast.loc, ty.VOID_TYPE, statements, False)
 
 
 def _tcr_fail(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
@@ -11375,6 +11457,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         refinements={},
         length_bounds={},
         key_facts=_const_key_facts(ctx),
+        function_scope_depth=len(inner_bindings.maps),
     )
     body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
 
@@ -11434,7 +11517,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
 
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
 
-    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body)
+    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile)
 
 def _contextual_parameter_types(
     pos_or_kw_args: list[hir.Param | hir.BoundParam],
