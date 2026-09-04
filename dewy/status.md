@@ -538,7 +538,7 @@ In no particular order
   - [ ] math standard lib
   - [ ] complex and quaternion math
 - [ ] Generators (`yield`)
-- [ ] Unpack and collect
+- [ ] Unpack and collect — **unpacking assignment landed (2026-09-03):** `[a b] = v` / `let [a b] = v` / `const [a b] = v`. Objects unpack **by field name** (any subset, any order; the loop's nested `loop [k [a b]] in d` target now follows the same rule); arrays, dictionaries, and sets unpack **by position** in insertion order when the exact count is known (a literal, an exact annotation, or a growable container whose length is a fact): every element named, `_` discards, nested `[…]` unpack further, dictionary entries as `[key value]` pairs (`[[k1 v1] [k2 v2]] = d`). Desugared in the checker: the value goes to a hidden `let` (unless it is a binding), then each target is the ordinary synthesized statement `a = hidden.field` / `let a = hidden[i]` (dictionary and set entries first go to hidden element bindings, since their arrays are not spellable), so bare targets declare-or-assign like `a = …`, foreign-binding and mutation rules apply, and the statements splice into the enclosing block (module-level targets are globals). TBD: `[p1 p2] = d` binding whole entries would need a pair value (`Pair<K V>`); collecting (`[a b...] = …`); iterator-target destructuring beyond the dictionary and nested-object forms.
 - [ ] Effects and error values
 - [ ] Compile-time evaluation and meta-programming
   - [ ] metatags for things historically passed as compiler flags

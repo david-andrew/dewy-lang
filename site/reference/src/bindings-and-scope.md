@@ -25,6 +25,8 @@ const Name:type = string
 
 Declarations and assignments produce `void`.
 
+An unpacking target `[a b]` on the left of `=` (with or without `let`/`const`) binds each name. An object source is unpacked by field name: each target names the field it takes, in any order and any subset. An array, dictionary, or set source is unpacked by position (insertion order for dictionaries and sets), and its exact count must be known: the target count must equal it, `_` discards a value, a nested `[…]` unpacks an element further, and a dictionary entry is unpacked as `[key value]`. Each name follows the ordinary declaration rule: `let`/`const` declare, and a bare target declares a new name or assigns an existing one. The source value is evaluated once.
+
 ## Lexical Identity
 
 Each declaration creates a distinct lexical binding. A child scope may shadow an outer binding without changing the outer value.

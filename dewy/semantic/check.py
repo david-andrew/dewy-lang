@@ -318,6 +318,9 @@ def _typecheck_module(
         declaration = _block_declaration_parts(item, seen_names, ctx=ctx)   # `let x = …` and a bare `x = …` alike
         if declaration is not None:
             ctx.module_declared_names.add(declaration[0])
+        unpacked = _unpack_declaration_targets(item)
+        if unpacked is not None:
+            ctx.module_declared_names.update(_unpack_target_names(unpacked))
     checked = tcr_block(block, ctx=ctx)
     if not isinstance(checked, hir.Block):
         raise TypeError('INTERNAL ERROR: source module did not produce a block')
@@ -1292,6 +1295,11 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
 
     match ast.parts:
         case [
+            t1.Keyword(name='let'|'const' as keyword),
+            p0.BinOp(left=p0.Block(kind='[]') as targets, op=t1.Operator(symbol='='), right=p0.AST() as right),
+        ]:
+            return _tcr_unpack(targets, right, ast.loc, keyword=keyword, ctx=ctx)
+        case [
             t1.Keyword(name='let'|'const' as keyword), 
             p0.BinOp(
                 left=p0.Atom(item=t1.Identifier(name=name)), 
@@ -1389,6 +1397,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     assert isinstance(ast.op, t1.Operator)
     if ast.op.symbol != '=':
         not_implemented(ctx.srcfile, ast.op.loc, f'assignment operator `{ast.op.symbol}`')
+    if isinstance(ast.left, p0.Block) and ast.left.kind == '[]':
+        return _tcr_unpack(ast.left, ast.right, ast.loc, keyword=None, ctx=ctx)
 
     if (
         isinstance(ast.left, p0.BinOp)
@@ -3751,7 +3761,7 @@ def _rewrite_runtime_range_ends(condition_ast: p0.AST) -> p0.AST:
 def _rewrite_nested_unpack_targets(condition_ast: p0.AST, *, ctx: Context) -> tuple[p0.AST, list[tuple[str, list[tuple[str, Span]], Span]]]:
     """`loop [prefix [digits ci]] in specs`: a nested unpack target becomes a
     hidden binding, and the body opens by declaring each written name as the
-    matching field of that binding (by position)."""
+    field of that binding with the same name (objects unpack by name)."""
     unpacks: list[tuple[str, list[tuple[str, Span]], Span]] = []
     operands = _and_operands(condition_ast)
     rewritten: list[p0.AST] = []
@@ -3790,7 +3800,7 @@ def _declare_nested_unpacks(
     ctx: Context,
 ) -> tuple[list[hir.AST], Context]:
     """The per-iteration declarations of a nested unpack: each written name is a
-    copy of the hidden binding's field at the same position."""
+    copy of the hidden binding's field of that name (any subset, any order)."""
     declares: list[hir.AST] = []
     additions: dict[str, ty.Type] = {}
     bindings: dict[str, sb.Binding] = {}
@@ -3803,14 +3813,16 @@ def _declare_nested_unpacks(
                 'nested unpacking needs an object element',
                 Pointer(span=loc, message=f'the iterated element has type `{type_to_dewy(body_ctx.declarations.get(hidden) or ty.TOP_TYPE)}`'),
             )
-        if len(names) != len(hidden_type.fields):
-            user_error(
-                ctx.srcfile,
-                'nested unpacking must name every field',
-                Pointer(span=loc, message=f'{len(names)} name{"s" if len(names) != 1 else ""} for {len(hidden_type.fields)} field{"s" if len(hidden_type.fields) != 1 else ""} ({", ".join(field.name for field in hidden_type.fields)})'),
-            )
         source = hir.ExpressedIdentifier(loc, hidden_type, hidden, binding_id=hidden_binding.id if hidden_binding is not None else None)
-        for (name, name_loc), field in zip(names, hidden_type.fields):
+        for name, name_loc in names:
+            field = hidden_type.field(name)
+            if field is None:
+                user_error(
+                    ctx.srcfile,
+                    f'no field `{name}` to unpack',
+                    Pointer(span=name_loc, message=f'the element has fields {", ".join(f"`{f.name}`" for f in hidden_type.fields)}'),
+                    hint='objects unpack by field name: write the names of the fields you need',
+                )
             binding = ctx.binding_registry.allocate_param(name, field.type, name_loc)
             declares.append(hir.Declare(
                 name_loc,
@@ -5221,6 +5233,19 @@ def _implicit_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -
     and it is the block's first `name` (later ones assign): the same
     declaration `let name = value` would make, so it is collected and
     deferred like one — a function body may call a function written after it."""
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.Block)
+        and item.left.kind == '[]'
+    ):
+        # `[a b] = value` declares each new name (and assigns the others);
+        # there is no single binding to collect, but later `a = …` assign
+        for name in _unpack_target_names(item.left):
+            if name not in ctx.declarations:
+                seen.add(name)
+        return None
     if not (
         isinstance(item, p0.BinOp)
         and isinstance(item.op, t1.Operator)
@@ -5234,6 +5259,184 @@ def _implicit_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -
         return None
     seen.add(name)
     return name, item.right
+
+
+def _unpack_declaration_targets(item: p0.AST) -> p0.Block | None:
+    """The `[a b]` of an unpacking statement (`[a b] = v`, `let [a b] = v`), if ``item`` is one."""
+    if isinstance(item, p0.KeywordExpr) and len(item.parts) == 2 and isinstance(item.parts[0], t1.Keyword) and item.parts[0].name in ('let', 'const'):
+        item = item.parts[1]
+    if (
+        isinstance(item, p0.BinOp)
+        and isinstance(item.op, t1.Operator)
+        and item.op.symbol == '='
+        and isinstance(item.left, p0.Block)
+        and item.left.kind == '[]'
+    ):
+        return item.left
+    return None
+
+
+def _unpack_target_names(targets: p0.Block) -> list[str]:
+    """The names an unpack target `[a [b c] _]` writes (`_` discards)."""
+    names: list[str] = []
+    for item in targets.inner:
+        if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
+            if item.item.name != '_':
+                names.append(item.item.name)
+        elif isinstance(item, p0.Block) and item.kind == '[]':
+            names.extend(_unpack_target_names(item))
+    return names
+
+
+def _tcr_unpack(targets: p0.Block, right: p0.AST, loc: Span, *, keyword: str | None, ctx: Context) -> hir.AST:
+    """`[a b] = value` / `let [a b] = value`: unpack an object by field name, or an array, dictionary, or set by position.
+
+    The value is bound once (a hidden `let`, unless it is already a binding),
+    then each target is the ordinary statement `a = hidden.field` /
+    `let a = hidden_element` — so a bare target declares a new name or
+    assigns an existing one exactly as `a = …` would, and `let` always
+    declares. Objects unpack by name (any subset of the fields, in any
+    order). Arrays unpack by position and must name every element (`_`
+    discards one); a nested `[…]` unpacks an element further. Dictionaries
+    and sets unpack their entries in insertion order, when the entry count
+    is known: a set's members like array elements, a dictionary's entries as
+    `[key value]` pairs (`[[k1 v1] [k2 v2]] = d`).
+    """
+    for item in targets.inner:
+        if not (
+            (isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier))
+            or (isinstance(item, p0.Block) and item.kind == '[]')
+        ):
+            user_error(
+                ctx.srcfile,
+                'unpack targets must be names',
+                Pointer(span=item.loc, message='this is not a name (or a nested `[…]`)'),
+                hint='write `[a b] = value`; use `_` to discard a value',
+            )
+    if isinstance(right, p0.Atom) and isinstance(right.item, t1.Identifier) and ctx.binding_scopes.get(right.item.name) is not None:
+        source_name = right.item.name
+        statements: list[hir.AST] = []
+        source = typecheck_and_resolve_inner(right, ctx=ctx)
+        source_id = source.binding_id if isinstance(source, hir.ExpressedIdentifier) else None
+    else:
+        source_name = f'__dewy_unpack_{ctx.binding_registry.next_id}'
+        hidden = p0.KeywordExpr(right.loc, [
+            t1.Keyword(right.loc, 'let'),
+            p0.BinOp(right.loc, t1.Operator(right.loc, '='), p0.Atom(right.loc, t1.Identifier(right.loc, source_name)), right),
+        ])
+        ctx.synthesized.append(hidden)
+        declaration = tcr_declare(hidden, ctx=ctx)
+        statements = [declaration]
+        source_id = declaration.binding_id if isinstance(declaration, hir.Declare) else None
+    declared_type = ctx.declarations[source_name]
+    source_type = ty.unfold(ty.strip_refinement(declared_type))
+    if source_id is not None and isinstance(source_type, ty.ArrayType) and source_type.length is None:
+        # a growable array whose exact length is a fact here (`let xs:array<T> = [1 2]`)
+        refined = ctx.refinements.get(source_id)
+        if isinstance(refined, ty.ArrayType) and refined.length is not None:
+            source_type = refined
+
+    def assign(target: p0.AST, value_text: str) -> None:
+        # the ordinary statement for one target: `a = …`, `let a = …`, or a nested `[…] = …`
+        target_text = ctx.srcfile.body[target.loc.start:target.loc.stop]
+        text = f'{keyword + " " if keyword is not None else ""}{target_text} = {value_text}'
+        parsed = p0.parse(SrcFile(None, ' ' * (target.loc.start - (len(keyword) + 1 if keyword is not None else 0)) + text + '\n'))
+        statement = parsed.inner[0]
+        ctx.synthesized.append(statement)
+        statements.append(typecheck_and_resolve_inner(statement, ctx=ctx))
+
+    def hidden_element(array: hir.AST, index: int, target_loc: Span) -> str:
+        # an entry of a dictionary or set, read once into a hidden binding (its arrays are not spellable)
+        assert isinstance(array.type, ty.ArrayType)
+        element = hir.Index(target_loc, array.type.element, array, hir.Integer(target_loc, ty.IntegerLiteralType(index), '0d', index), index)
+        name = f'__dewy_entry_{ctx.binding_registry.next_id}'
+        ctx.declarations[name] = element.type
+        statements.append(_complete_binding(_fresh_syntax(ctx), hir.Declare(target_loc, ty.VOID_TYPE, 'let', name, None, element), ctx=ctx))
+        return name
+
+    def is_discard(target: p0.AST) -> bool:
+        return isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier) and target.item.name == '_'
+
+    def count_check(count: int, described: str, what: str) -> None:
+        if len(targets.inner) != count:
+            user_error(
+                ctx.srcfile,
+                f'unpacking must name every {what}',
+                Pointer(span=targets.loc, message=f'{len(targets.inner)} target{"s" if len(targets.inner) != 1 else ""} for {described}'),
+                hint='use `_` for a value you do not need',
+            )
+
+    entry_types = ty.container_entry_types(source_type)
+    if isinstance(source_type, ty.ObjectType) and entry_types is None:
+        # by name: any subset of the fields, in any order
+        for target in targets.inner:
+            if not (isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier)) or is_discard(target):
+                user_error(
+                    ctx.srcfile,
+                    'objects unpack by field name',
+                    Pointer(span=target.loc, message='each target names the field it takes' if is_discard(target) else 'a nested target has no field name'),
+                    hint='name the fields you need (`[length name] = hit`); fields left out are simply not taken, so `_` is not needed',
+                )
+            field = source_type.field(target.item.name)
+            if field is None:
+                user_error(
+                    ctx.srcfile,
+                    f'no field `{target.item.name}` to unpack',
+                    Pointer(span=target.loc, message=f'the value has fields {", ".join(f"`{f.name}`" for f in source_type.fields)}'),
+                )
+            assign(target, f'{source_name}.{field.name}')
+    elif entry_types is not None:
+        # a dictionary or set: entries by insertion position
+        key_type, value_type = entry_types
+        container = hir.ExpressedIdentifier(right.loc, declared_type, source_name, binding_id=source_id)
+        keys, values = _dict_arrays(container, right.loc, ctx=ctx)
+        assert isinstance(keys.type, ty.ArrayType)
+        kind = 'dictionary' if value_type is not None else 'set'
+        if keys.type.length is None:
+            user_error(
+                ctx.srcfile,
+                f'cannot prove how many entries this {kind} has',
+                Pointer(span=right.loc, message=f'this has type `{type_to_dewy(declared_type)}`, whose entry count is not known here'),
+                hint='unpacking needs an exact count: look entries up by key instead',
+            )
+        count_check(keys.type.length, f'{keys.type.length} {"entr" + ("ies" if keys.type.length != 1 else "y") if values is not None else "member" + ("s" if keys.type.length != 1 else "")}', 'entry' if values is not None else 'member')
+        for index, target in enumerate(targets.inner):
+            if is_discard(target):
+                continue
+            if values is None:
+                assign(target, hidden_element(keys, index, target.loc))
+                continue
+            if not (isinstance(target, p0.Block) and target.kind == '[]' and len(target.inner) == 2):
+                user_error(
+                    ctx.srcfile,
+                    'a dictionary entry is a key and a value',
+                    Pointer(span=target.loc, message='unpack it as `[key value]`'),
+                    hint='write `[[k1 v1] [k2 v2]] = d` (a pair is not a value of its own yet)',
+                )
+            key_target, value_target = target.inner
+            if not is_discard(key_target):
+                assign(key_target, hidden_element(keys, index, key_target.loc))
+            if not is_discard(value_target):
+                assign(value_target, hidden_element(values, index, value_target.loc))
+    elif isinstance(source_type, ty.ArrayType) and source_type.length is not None:
+        count_check(source_type.length, f'{source_type.length} element{"s" if source_type.length != 1 else ""}', 'element')
+        for index, target in enumerate(targets.inner):
+            if not is_discard(target):
+                assign(target, f'{source_name}[{index}]')
+    elif isinstance(source_type, ty.ArrayType):
+        user_error(
+            ctx.srcfile,
+            'cannot prove how many elements this array has',
+            Pointer(span=right.loc, message=f'this has type `{type_to_dewy(source_type)}`, whose length is not known here'),
+            hint='unpacking needs an exact length: index the elements you need under a length guard instead',
+        )
+    else:
+        user_error(
+            ctx.srcfile,
+            'this value cannot be unpacked',
+            Pointer(span=right.loc, message=f'this has type `{type_to_dewy(source_type)}`; unpacking takes an object, an array, a dictionary, or a set'),
+        )
+    return hir.Block(loc, ty.VOID_TYPE, statements, False)
 
 
 def _block_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
@@ -8305,12 +8508,13 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         if result is None:
             raise ValueError('INTERNAL ERROR: block item was not checked')
         if (
-            isinstance(item, p0.Flow)
+            (isinstance(item, p0.Flow) or _unpack_declaration_targets(item) is not None)
             and isinstance(result, hir.Block)
             and not result.scoped
         ):
-            # A target-gated `{}` arm was already checked in this scope;
-            # its items belong to this block directly.
+            # A target-gated `{}` arm was already checked in this scope, and
+            # an unpack's statements declare in it: their items belong to
+            # this block directly (module-level ones are globals).
             checked_results.extend(result.items)
         else:
             checked_results.append(result)

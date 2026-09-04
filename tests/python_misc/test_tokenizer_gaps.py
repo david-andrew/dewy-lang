@@ -39,10 +39,11 @@ def test_mixed_width_comparison_casts_the_right_operand_with_a_proof() -> None:
         _check('let f = (i:uint8 w:int64):>bool => i <? w')   # the proof still gates it
 
 
-def test_nested_unpacking_names_every_field() -> None:
-    _check("let d:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2]]\nlet main = ():>int64 => {\n    let t:int64 = 0\n    loop [k [a b]] in d { t += a + b }\n    return t\n}")
-    with pytest.raises(UserError, match='must name every field'):
-        _check("let d:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2]]\nlet main = ():>int64 => {\n    loop [k [a]] in d { }\n    return 0\n}")
+def test_nested_unpacking_takes_fields_by_name() -> None:
+    _check("let d:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2]]\nlet main = ():>int64 => {\n    let t:int64 = 0\n    loop [k [b a]] in d { t += a + b }\n    return t\n}")
+    _check("let d:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2]]\nlet main = ():>int64 => {\n    loop [k [a]] in d { }\n    return 0\n}")   # a subset
+    with pytest.raises(UserError, match='no field `c` to unpack'):
+        _check("let d:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2]]\nlet main = ():>int64 => {\n    loop [k [c]] in d { }\n    return 0\n}")
 
 
 def test_intersection_strengthens_but_never_weakens() -> None:

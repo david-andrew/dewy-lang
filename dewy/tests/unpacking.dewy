@@ -1,0 +1,48 @@
+# `[a b] = value` unpacks an object by field name (any subset, any order), or
+# an array, dictionary, or set by position (every element named; `_`
+# discards one; nested `[…]` unpack an element further; dictionary entries
+# are `[key value]` pairs). `let [a b] = value` declares. A bare target
+# declares a new name or assigns an existing one, as `a = …` does.
+let Hit = type of any & [length:uint64 name:string]
+let origin = [ox=0 oy=0]
+[ox oy] = origin                    # module level, implicit declarations
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let hits:array<Hit> = [Hit[length=3 name="a"] Hit[length=10 name="b"]]
+    hits.sort(key=(h) => h.length reverse=true)
+    [name length] = hits[0]         # an element, read once into a hidden binding; fields by name
+    if length =? 10 and name =? "b" { checks += 1 }
+    [length] = hits[1]              # a subset; the second time assigns
+    if length =? 3 and name =? "b" { checks += 2 }
+    length = 7
+    if length =? 7 { checks += 4 }
+
+    let pair = [x=1 y=2]
+    let [x y] = pair                # a binding: read directly
+    if x + y =? 3 { checks += 8 }
+    [x y] = [y x]                   # an array swap: the source is read before the targets are written
+    if x =? 2 and y =? 1 { checks += 16 }
+    let xs:array<int64 length=3> = [10 20 30]
+    let [first _ last] = xs         # an exact-length array, one element discarded
+    if first + last =? 40 { checks += 32 }
+    let grown:array<int64> = []
+    grown.push(5)
+    grown.push(6)
+    let [g0 g1] = grown             # the exact length is a fact here
+    if g0 * g1 =? 30 { checks += 64 }
+    let grid = [[1 2] [3 4]]
+    let [[a0 a1] [b0 b1]] = grid    # nested arrays by position
+    if a0 + a1 + b0 + b1 =? 10 { checks += 128 }
+    const [cx cy] = [cx=8 cy=9]
+    if cx + cy =? 17 { checks += 256 }
+    if ox + oy =? 0 { checks += 512 }
+
+    let ages = ['ann' -> 30  'bob' -> 7  'cy' -> 12]
+    [[k1 v1] [_ v2] [k3 _]] = ages  # dictionary entries in insertion order
+    if k1 =? "ann" and v1 =? 30 and v2 =? 7 and k3 =? "cy" { checks += 1024 }
+    let members = set[7 8]
+    let [m1 m2] = members           # set members in insertion order
+    if m1 * m2 =? 56 { checks += 2048 }
+    return checks - 4053            # 4095 - 4053
+}
