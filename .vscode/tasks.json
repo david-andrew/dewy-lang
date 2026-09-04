@@ -14,13 +14,24 @@
             "presentation": { "reveal": "silent", "clear": true }
         },
         {
-            "label": "dewy: build t0 debug",
+            // asks which program (Enter keeps the default) and builds it as
+            // __dewycache__/debug-target, the name the launch configuration
+            // "Dewy: debug a program on current file" runs
+            "label": "dewy: build debug target",
             "type": "shell",
             "command": "python",
-            "args": ["-m", "dewy", "debug", "--build", "dewy/bootstrap/parser/t0.dewy"],
+            "args": ["-m", "dewy", "debug", "--build", "--as", "__dewycache__/debug-target", "${input:debugProgram}"],
             "options": { "cwd": "${workspaceFolder}" },
             "problemMatcher": [],
             "presentation": { "reveal": "silent", "clear": true }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "debugProgram",
+            "type": "promptString",
+            "description": "The .dewy program to debug; its argument is the file in the active editor",
+            "default": "dewy/bootstrap/parser/t0.dewy"
         }
     ]
 }

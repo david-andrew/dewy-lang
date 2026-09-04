@@ -351,6 +351,7 @@ def debug(argv: list[str]) -> int:
     _add_target_option(parser)
     parser.add_argument('--debugger', choices=['gdb', 'lldb'], help='which debugger to use (default: gdb if installed, else lldb)')
     parser.add_argument('--build', action='store_true', help="build the debug executable and print its path; don't launch a debugger (an editor's pre-launch task)")
+    parser.add_argument('--as', dest='as_path', metavar='PATH', help='with --build: also place a copy of the executable at PATH (a fixed name an editor configuration can point at)')
     parser.add_argument('remainder', nargs=REMAINDER, default=[], help='arguments to pass to the program')
     args = parser.parse_args(argv)
 
@@ -359,7 +360,13 @@ def debug(argv: list[str]) -> int:
     if args.build:
         status = _build_and_run(path, target, [], ['debug', *argv], compile_only=True, debug_values=True, print_prototype_warnings=lambda: None)
         if status == 0:
-            print(_program_binary(path))
+            binary = _program_binary(path)
+            if args.as_path is not None:
+                destination = Path(args.as_path)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(binary, destination)
+                binary = destination
+            print(binary)
         return status
     debugger = args.debugger or next((name for name in ('gdb', 'lldb') if shutil.which(name)), None)
     if debugger is None or shutil.which(debugger) is None:

@@ -233,8 +233,12 @@ def test_the_editor_configurations_agree_on_paths_and_scripts() -> None:
     by_name = {configuration['name']: configuration for configuration in workspace['configurations']}
     for name, configuration in by_name.items():
         assert configuration['preLaunchTask'] in task_labels
-        if 't0' in name:
-            assert configuration['program'] == '${workspaceFolder}/__dewycache__/dewy/bootstrap/parser/t0.debug' and configuration['args'] == ['${file}']
+        if 'a program on current file' in name:
+            # the build task asks which program and places it at a fixed name; the editor's file is its argument
+            assert configuration['program'] == '${workspaceFolder}/__dewycache__/debug-target' and configuration['args'] == ['${file}']
+            task = next(task for task in tasks['tasks'] if task['label'] == configuration['preLaunchTask'])
+            assert task['args'][-3:] == ['--as', '__dewycache__/debug-target', '${input:debugProgram}']
+            assert any(entry['id'] == 'debugProgram' and entry['default'].endswith('t0.dewy') for entry in tasks['inputs'])
         else:
             assert configuration['program'] == program
     assert by_name['Dewy: debug current file with arguments (lldb)']['args'] == '${input:programArguments}'   # CodeLLDB splits a string like a shell

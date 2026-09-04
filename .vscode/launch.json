@@ -32,14 +32,16 @@
             "sourceLanguages": ["c"]
         },
         {
-            // the bootstrap tokenizer, run on the file in the active editor
-            "name": "Dewy: t0 on current file (lldb)",
+            // a program whose argument is the file in the active editor (the
+            // bootstrap tokenizer on a source file): the build task asks which
+            // program (Enter keeps t0) and places it at a fixed name
+            "name": "Dewy: debug a program on current file (lldb)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/__dewycache__/dewy/bootstrap/parser/t0.debug",
+            "program": "${workspaceFolder}/__dewycache__/debug-target",
             "args": ["${file}"],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "dewy: build t0 debug",
+            "preLaunchTask": "dewy: build debug target",
             "initCommands": ["command script import ${workspaceFolder}/tools/dewy_lldb.py"],
             "sourceLanguages": ["c"]
         },
