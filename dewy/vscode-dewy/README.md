@@ -34,6 +34,23 @@ The grammar aims to highlight the following (non-exhaustive) constructs:
 
 The identifier character classes in the grammar are generated from the compiler's own tokenizer tables (`dewy/parser/t0.py`), and `tests/python_misc/test_dewy_highlighting.py` checks that the keyword and operator lists stay in step with the parser.
 
+## Debugging
+
+The extension lets you set breakpoints in `.dewy` files (click the gutter). The debugging itself is done by the stock native debugger extensions — [CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb) (`lldb`; also on Open VSX for Cursor and VSCodium) or C/C++ (`cppdbg`, gdb) — because the Dewy compiler emits DWARF for its source, and its `tools/dewy_lldb.py` / `tools/dewy_gdb.py` scripts show values the Dewy way in the Variables pane, hovers, and the Debug Console. "Add Configuration…" in `launch.json` offers **Dewy: debug current file (lldb)** and **(gdb)**; each builds the active file with `dewy debug --build` (a `tasks.json` task named `dewy: build debug`) and launches `__dewycache__/<path>/<name>.debug`. Fill in where the scripts live: `tools/` of a checkout, or `~/.dewy/runtime/tools` of an installation. The task:
+
+```json
+{
+    "label": "dewy: build debug",
+    "type": "shell",
+    "command": "dewy",
+    "args": ["debug", "--build", "${file}"],
+    "options": { "cwd": "${workspaceFolder}" },
+    "problemMatcher": []
+}
+```
+
+See the Reference's [Debugging](https://dewy-lang.org/reference/debugging.html) page for the details, and for the terminal experience (`dewy debug`, `$breakpoint`).
+
 ## Limitations and roadmap
 
 This extension currently provides a TextMate grammar + language configuration (highlighting, brackets, comments, folding). Highlighting is purely lexical: it cannot tell a type name from a variable outside annotation positions, resolve overloads, or know which `[…]` is an array, object, dictionary, or set literal.

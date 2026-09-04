@@ -2984,7 +2984,9 @@ class _Lowerer(
                 items: list[hir.AST] = []
                 for item in node.items:
                     if in_loop and is_frame_allocation(item):
-                        hoisted.append(item)
+                        # at function entry it has no source position of its own: a
+                        # breakpoint on its original line must not resolve to it
+                        hoisted.append(replace(item, loc=Span(0, 0)))
                         continue
                     items.append(walk(item, in_loop))
                 return replace(node, items=items)

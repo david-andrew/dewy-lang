@@ -32,4 +32,4 @@ For stepping through code, breakpoints on lines you did not edit, and the call s
 dewy debug hits.dewy
 ```
 
-That makes a debug build and opens gdb (or lldb) on it. The debugger knows Dewy files, lines, and values — `b hits.dewy:5`, `n`, `bt`, and `frame variable` or `p total` show the bindings as Dewy prints them — and a `$breakpoint` in the program stops the debugger on that line instead of prompting. See [Debugging](../../reference/debugging.html) in the Reference for the details.
+That makes a debug build and opens gdb (or lldb) on it. The debugger knows Dewy files, lines, and values — `b hits.dewy:5`, `n`, `bt`, and `frame variable` or `p total` show the bindings as Dewy prints them — and a `$breakpoint` in the program stops the debugger on that line instead of prompting. The same works inside Cursor or VS Code with the Dewy extension and CodeLLDB: breakpoints in the gutter, stepping, and the Variables pane. See [Debugging](../../reference/debugging.html) in the Reference for the details and the editor configuration.

@@ -1,0 +1,69 @@
+{
+    // Debug the .dewy file in the active editor. Breakpoints in .dewy files,
+    // stepping, the call stack, and the Variables pane all work through the
+    // stock native debuggers: the Dewy compiler emits DWARF for its source
+    // and the tools/dewy_*.py scripts show values the Dewy way.
+    //
+    // "lldb" needs the CodeLLDB extension (vadimcn.vscode-lldb; on Open VSX
+    // for Cursor/VSCodium). "cppdbg" needs C/C++ (ms-vscode.cpptools) and gdb.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Dewy: debug current file (lldb)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "dewy: build debug",
+            "initCommands": ["command script import ${workspaceFolder}/tools/dewy_lldb.py"],
+            "sourceLanguages": ["c"]
+        },
+        {
+            // asks for the command line each time; CodeLLDB splits the string like a shell
+            "name": "Dewy: debug current file with arguments (lldb)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
+            "args": "${input:programArguments}",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "dewy: build debug",
+            "initCommands": ["command script import ${workspaceFolder}/tools/dewy_lldb.py"],
+            "sourceLanguages": ["c"]
+        },
+        {
+            // the bootstrap tokenizer, run on the file in the active editor
+            "name": "Dewy: t0 on current file (lldb)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/__dewycache__/dewy/bootstrap/parser/t0.debug",
+            "args": ["${file}"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "dewy: build t0 debug",
+            "initCommands": ["command script import ${workspaceFolder}/tools/dewy_lldb.py"],
+            "sourceLanguages": ["c"]
+        },
+        {
+            "name": "Dewy: debug current file (gdb)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "dewy: build debug",
+            "MIMode": "gdb",
+            "setupCommands": [
+                { "text": "source ${workspaceFolder}/tools/dewy_gdb.py", "description": "Dewy value printers", "ignoreFailures": false },
+                { "text": "-enable-pretty-printing", "ignoreFailures": true }
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "programArguments",
+            "type": "promptString",
+            "description": "Command-line arguments for the program (split like a shell)",
+            "default": ""
+        }
+    ]
+}

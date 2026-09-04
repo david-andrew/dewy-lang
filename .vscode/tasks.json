@@ -1,0 +1,26 @@
+{
+    // `dewy debug --build` makes the debug executable (line and variable
+    // information plus the value formatters) under __dewycache__, mirroring
+    // the source path: dewy/tests/x.dewy -> __dewycache__/dewy/tests/x.debug
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dewy: build debug",
+            "type": "shell",
+            "command": "python",
+            "args": ["-m", "dewy", "debug", "--build", "${file}"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "silent", "clear": true }
+        },
+        {
+            "label": "dewy: build t0 debug",
+            "type": "shell",
+            "command": "python",
+            "args": ["-m", "dewy", "debug", "--build", "dewy/bootstrap/parser/t0.dewy"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "silent", "clear": true }
+        }
+    ]
+}

@@ -2,7 +2,7 @@
   "name": "dewy",
   "displayName": "dewy",
   "description": "Syntax highlighting for the Dewy programming language",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "RedFoxLabs",
   "engines": {
     "vscode": "^1.75.0"
@@ -45,6 +45,52 @@
         "unbalancedBracketScopes": [
           "keyword.operator",
           "punctuation.separator.angle"
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "dewy"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "dewy",
+        "label": "Dewy",
+        "configurationSnippets": [
+          {
+            "label": "Dewy: debug current file (lldb)",
+            "description": "Build the active .dewy file with `dewy debug --build` and run it under CodeLLDB with Dewy values",
+            "body": {
+              "name": "Dewy: debug current file (lldb)",
+              "type": "lldb",
+              "request": "launch",
+              "program": "^\"\\${workspaceFolder}/__dewycache__/\\${relativeFileDirname}/\\${fileBasenameNoExtension}.debug\"",
+              "args": [],
+              "cwd": "^\"\\${workspaceFolder}\"",
+              "preLaunchTask": "dewy: build debug",
+              "initCommands": ["command script import ${1:~/.dewy/runtime/tools}/dewy_lldb.py"],
+              "sourceLanguages": ["c"]
+            }
+          },
+          {
+            "label": "Dewy: debug current file (gdb)",
+            "description": "Build the active .dewy file with `dewy debug --build` and run it under gdb (C/C++ extension) with Dewy values",
+            "body": {
+              "name": "Dewy: debug current file (gdb)",
+              "type": "cppdbg",
+              "request": "launch",
+              "program": "^\"\\${workspaceFolder}/__dewycache__/\\${relativeFileDirname}/\\${fileBasenameNoExtension}.debug\"",
+              "args": [],
+              "cwd": "^\"\\${workspaceFolder}\"",
+              "preLaunchTask": "dewy: build debug",
+              "MIMode": "gdb",
+              "setupCommands": [
+                { "text": "source ${1:~/.dewy/runtime/tools}/dewy_gdb.py", "description": "Dewy value printers", "ignoreFailures": false },
+                { "text": "-enable-pretty-printing", "ignoreFailures": true }
+              ]
+            }
+          }
         ]
       }
     ]

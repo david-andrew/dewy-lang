@@ -206,3 +206,45 @@ def test_gdb_shows_dewy_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert '$1 = 9' in text
     assert 'describe (hits=[Hit[length=3 name="a"] Hit[length=10 name="b"]], label="run") at' in text   # frames show their arguments
     assert 'Program received signal SIGTRAP' in text and '__dewy_user_main () at' in text                  # `$breakpoint` traps
+
+
+def test_debug_build_prints_the_executable_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dewy.__main__ import main
+    if which('as') is None or which('ld') is None:
+        pytest.skip('needs the x86_64 toolchain')
+    source = tmp_path / 'sub' / 'built.dewy'
+    source.parent.mkdir()
+    source.write_text('let main = ():>int64 => 42\n')
+    monkeypatch.chdir(tmp_path)
+    import io, contextlib
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert main(['debug', '--build', 'sub/built.dewy']) == 0
+    assert out.getvalue().strip().splitlines()[-1] == '__dewycache__/sub/built.debug'   # the editor's launch configuration names this path
+    assert (tmp_path / '__dewycache__' / 'sub' / 'built.debug').is_file()
+
+
+def test_the_editor_configurations_agree_on_paths_and_scripts() -> None:
+    import json, re
+    workspace = json.loads(re.sub(r'^\s*//.*$', '', (repo / '.vscode' / 'launch.json').read_text(), flags=re.M))
+    tasks = json.loads(re.sub(r'^\s*//.*$', '', (repo / '.vscode' / 'tasks.json').read_text(), flags=re.M))
+    task_labels = {task['label'] for task in tasks['tasks']}
+    program = '${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug'
+    by_name = {configuration['name']: configuration for configuration in workspace['configurations']}
+    for name, configuration in by_name.items():
+        assert configuration['preLaunchTask'] in task_labels
+        if 't0' in name:
+            assert configuration['program'] == '${workspaceFolder}/__dewycache__/dewy/bootstrap/parser/t0.debug' and configuration['args'] == ['${file}']
+        else:
+            assert configuration['program'] == program
+    assert by_name['Dewy: debug current file with arguments (lldb)']['args'] == '${input:programArguments}'   # CodeLLDB splits a string like a shell
+    assert any(entry['id'] == 'programArguments' for entry in workspace['inputs'])
+    assert all('dewy_lldb.py' in command for configuration in by_name.values() if configuration['type'] == 'lldb' for command in configuration['initCommands'])
+    assert any('dewy_gdb.py' in command['text'] for command in by_name['Dewy: debug current file (gdb)']['setupCommands'])
+    extension = json.loads((repo / 'dewy' / 'vscode-dewy' / 'package.json').read_text())
+    assert {'language': 'dewy'} in extension['contributes']['breakpoints']
+    snippets = extension['contributes']['debuggers'][0]['configurationSnippets']
+    assert {snippet['body']['type'] for snippet in snippets} == {'lldb', 'cppdbg'}
+    for snippet in snippets:
+        assert snippet['body']['program'] == '^"' + program.replace('${', '\\${') + '"'
+        assert snippet['body']['preLaunchTask'] in task_labels

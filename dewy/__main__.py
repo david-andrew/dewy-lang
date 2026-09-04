@@ -350,15 +350,21 @@ def debug(argv: list[str]) -> int:
     parser.add_argument('file', help='.dewy file to debug')
     _add_target_option(parser)
     parser.add_argument('--debugger', choices=['gdb', 'lldb'], help='which debugger to use (default: gdb if installed, else lldb)')
+    parser.add_argument('--build', action='store_true', help="build the debug executable and print its path; don't launch a debugger (an editor's pre-launch task)")
     parser.add_argument('remainder', nargs=REMAINDER, default=[], help='arguments to pass to the program')
     args = parser.parse_args(argv)
 
+    path = Path(args.file)
+    target = _resolve_target(args.target)
+    if args.build:
+        status = _build_and_run(path, target, [], ['debug', *argv], compile_only=True, debug_values=True, print_prototype_warnings=lambda: None)
+        if status == 0:
+            print(_program_binary(path))
+        return status
     debugger = args.debugger or next((name for name in ('gdb', 'lldb') if shutil.which(name)), None)
     if debugger is None or shutil.which(debugger) is None:
         print('Error: dewy debug needs gdb or lldb on the PATH.', file=sys.stderr)
         return 1
-    path = Path(args.file)
-    target = _resolve_target(args.target)
     status = _build_and_run(path, target, [], ['debug', *argv], compile_only=True, debug_values=True, print_prototype_warnings=lambda: None)
     if status != 0:
         return status

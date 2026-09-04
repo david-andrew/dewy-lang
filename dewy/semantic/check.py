@@ -442,8 +442,9 @@ def _debug_spelling(type_: ty.TypeExpr) -> ty.TypeExpr:
 
 def _debug_formatter(spelled: str, quoted: bool, declarations: list[hir.AST], *, ctx: Context) -> int | None:
     """Synthesize and check the formatter for one type; its binding id, or None when the type cannot be formatted."""
-    if '>>' in spelled or ':>' in spelled:
-        return None   # nested generics tokenize as a shift, and a function value has no text worth a formatter
+    if ':>' in spelled:
+        return None   # a function value has no text worth a formatter
+    spelled = spelled.replace('>>', '> >')   # nested generics: adjacent closers would tokenize as a shift
     name = f'__dewy_debug_show_{ctx.binding_registry.next_id}'
     shown = '_quoted(v)' if quoted else 'v'
     text = (
@@ -11644,7 +11645,13 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
 
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
 
-    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile)
+    # the literal's file, for debug positions — when it was written there: a
+    # literal synthesized by the compiler (a dispatcher, a formatter, a
+    # forwarder) has spans into generated text, and a debugger must not land
+    # breakpoints on whatever lines those offsets happen to name
+    arrow = binop.op.loc
+    written = 0 <= arrow.start < arrow.stop <= len(ctx.srcfile.body) and ctx.srcfile.body[arrow.start:arrow.stop] == '=>'
+    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile if written else None)
 
 def _contextual_parameter_types(
     pos_or_kw_args: list[hir.Param | hir.BoundParam],
