@@ -9394,9 +9394,13 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
     """`x =? v` where `x` is a tagged cell (`T | none`, `A | B`) and `v` a value of one member type.
 
     The cell is equal to `v` when it holds that member and the payload is
-    equal: `x is? M and payload =? v`, spelled as a test on the value (a
-    hidden `let` when it is not a binding) and the member's own equality.
-    `x =? none` is `x is? none`. Two cells cannot be compared yet.
+    equal: `x is? M and payload =? v` (`not=?` is `x isnt? M or payload not=? v`),
+    spelled as a short-circuit so the condition narrows like any other: in
+    the true branch of `x =? 3` the binding is an `int64`, and 3 (a value
+    fact of the bounds analysis, as for a plain integer); in the else branch
+    of `x not=? 3` likewise. A value that is not a binding (an element)
+    compares through a hidden `let`. `x =? none` is `x is? none`. Two cells
+    cannot be compared yet.
     """
     for value, other in ((args[0], args[1]), (args[1], args[0])):
         union = ty.unfold(ty.strip_refinement(value.type))
@@ -9436,8 +9440,8 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
         payload_equal = _dispatch_builtin(
             '__ne__' if negated else '__eq__', [narrowed, other], loc=loc, op_loc=loc, source_name=source_name, ctx=ctx,
         )
-        test = hir.TypeTest(loc, 'bool', tested, member, False)
-        comparison = hir.Flow(loc, 'bool', [hir.IfArm(loc, 'bool', test, payload_equal)], hir.Bool(loc, 'bool', negated))
+        test = hir.TypeTest(loc, 'bool', tested, member, negated)
+        comparison = hir.ShortCircuit(loc, 'bool', 'or' if negated else 'and', test, payload_equal)
         if not prelude:
             return comparison
         return hir.Block(loc, 'bool', [*prelude, comparison], False)   # statements, then the value (as a match's hidden scrutinee)

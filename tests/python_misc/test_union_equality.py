@@ -30,16 +30,24 @@ def _conditions(node: object) -> list[hir.AST]:
 def test_a_binding_compares_by_tag_then_payload() -> None:
     checked = _check('let x:int64|none = 1\nif x =? 1 { let a = 0 }')
     outer = _conditions(checked)[0]
-    assert isinstance(outer, hir.Flow)                      # `if x is? int64 { payload =? 1 } else false`
-    test = outer.arms[0].condition
-    assert isinstance(test, hir.TypeTest) and test.test_type == 'int64' and not test.negated
-    assert isinstance(outer.default, hir.Bool) and outer.default.value is False
+    assert isinstance(outer, hir.ShortCircuit) and outer.op == 'and'      # `x is? int64 and payload =? 1`
+    assert isinstance(outer.left, hir.TypeTest) and outer.left.test_type == 'int64' and not outer.left.negated
+    assert outer.right.pos_args[0].type == 'int64'                        # the payload read
 
 
-def test_not_equal_defaults_to_true_when_the_member_is_absent() -> None:
+def test_not_equal_is_absent_or_different() -> None:
     checked = _check('let x:int64|none = 1\nif x not=? 1 { let a = 0 }')
     outer = _conditions(checked)[0]
-    assert isinstance(outer, hir.Flow) and isinstance(outer.default, hir.Bool) and outer.default.value is True
+    assert isinstance(outer, hir.ShortCircuit) and outer.op == 'or'       # `x isnt? int64 or payload not=? 1`
+    assert isinstance(outer.left, hir.TypeTest) and outer.left.negated
+
+
+def test_equality_narrows_the_binding_like_a_type_test() -> None:
+    _check('let f = ():>int64|none => 3\nlet x = f()\nif x =? 3 { let y:int64 = x }')
+    _check('let f = ():>int64|none => 3\nlet x = f()\nif x not=? 3 { let a = 0 } else { let y:int64 = x }')
+    _check('let g = ():>int64|string => 3\nlet s = g()\nif s =? "a" { let t:string = s } else { let a = 0 }')
+    with pytest.raises(TypeCheckError, match='type mismatch'):
+        _check('let f = ():>int64|none => 3\nlet x = f()\nif x =? 3 { let a = 0 } else { let y:int64 = x }')
 
 
 def test_none_is_a_tag_test() -> None:
@@ -55,7 +63,7 @@ def test_an_element_compares_through_a_hidden_binding() -> None:
     assert isinstance(outer, hir.Block) and not outer.scoped
     declaration, flow = outer.items
     assert isinstance(declaration, hir.Declare) and declaration.name.startswith('__dewy_eq_')
-    assert isinstance(flow, hir.Flow)
+    assert isinstance(flow, hir.ShortCircuit)
 
 
 def test_string_members_compare_as_strings() -> None:

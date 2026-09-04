@@ -1,6 +1,8 @@
 # `x =? v` on a tagged cell (`T | none`, `A | B`) is true when the cell holds
 # `v`'s member and the payload is equal; `x =? none` tests the tag. Values
 # that are not bindings (elements, fields) compare through a hidden `let`.
+# A binding narrows like a type test: in the body of `x =? 3` it is an
+# `int64` whose value is 3; in the else of `x not=? 3` likewise.
 let Pair = type of any & [v:int64|none]
 
 let main = ():>int64 => {
@@ -33,5 +35,11 @@ let main = ():>int64 => {
     let count:int64 = 0
     loop e in xs { if e =? 1 { count += 1 } }
     if count =? 1 { checks += 2048 }
-    return checks - 4053         # 4095 - 4053
+
+    x = 3
+    if x =? 3 { let narrow:int8 = x  if narrow =? 3 { checks += 4096 } }        # int64, and the value 3
+    if x not=? 3 { checks += 1000 } else { let also:int8 = x  if also =? 3 { checks += 8192 } }
+    let s:int64|string = 3
+    if s =? 3 { let n:int64 = s  if n =? 3 { checks += 16384 } }
+    return checks - 32725         # 32767 - 32725
 }

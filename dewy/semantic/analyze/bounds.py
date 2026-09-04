@@ -2618,7 +2618,8 @@ class _BoundsValidator:
                     None if other.upper is None else other.upper - 1,
                 )
             )
-        if name == '__eq__' and truth:
+        if (name == '__eq__' and truth) or (name == '__ne__' and not truth):
+            # `x =? c` holding, or `x not=? c` failing: the value is `c`
             return other
         return None
 

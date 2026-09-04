@@ -219,7 +219,13 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
                     [length=length token_cls=token_cls]
             }
         ]
+        matches.sort(key=m=>m.length reverse=true)
+        longest_match_length = if matches.length >? 0 matches[0].length else 0
+        matches = [loop m in matches if m.length =? longest_match_length m else break]
         printl"matched tokens: {matches}"
+        if matches.length >? 1 err"TODO: handling multiple matches not handled yet: {matches}"
+        if matches.length =? 0 err"TODO: no tokens matched this round"
+        # [length token_cls] = matches[0]
         # printl"allowed tokens: {allowed_tokens}"
         i+=1
     }
