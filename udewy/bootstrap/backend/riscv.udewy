@@ -1244,6 +1244,10 @@ let rv_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__unsigned_lte__")  { rv_unsigned_cmp(3) }
     else if str_eq(name "__unsigned_gte__")  { rv_unsigned_cmp(2) }
     else if str_eq(name "__alloca__")        { rv_alloca() }
+    else if str_eq(name "__breakpoint__") {
+        rv_emit_indented("ebreak")   # a debugger attached to the process stops here
+        rv_push_void()
+    }
     else if str_eq(name "__i64_to_f32_bits__") {
         rv_requires_hard_float = true
         rv_emit_indented("fcvt.s.l ft0, a0")
@@ -1366,6 +1370,10 @@ let rv_install_backend = ():>void => {
     be_finish_module = rv_finish_module
     be_set_module_init = rv_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
+    be_mark_location = be_default_mark_location
+    be_note_local = be_default_note_local
+    be_begin_scope = be_default_scope_hook
+    be_end_scope = be_default_scope_hook
     be_intern_string = rv_intern_string
     be_intern_words = rv_intern_words
     be_define_global = rv_define_global

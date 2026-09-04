@@ -66,3 +66,51 @@ let main = ():>int => {
 }
 """)
     assert '    int3' in asm
+
+
+def test_variables_and_scopes_reach_the_debug_info() -> None:
+    asm = assemble("""
+let helper = (a:int b:int):>int => {
+    let sum:int = a + b
+    if sum >? 3 {
+        let big:int = sum * 2
+        return big
+    }
+    return sum
+}
+let main = ():>int => {
+    return helper(1 2)
+}
+""")
+    assert '.section .debug_info' in asm and '.section .debug_abbrev' in asm and '.section .debug_aranges' in asm
+    for name in ('helper', 'main', 'a', 'b', 'sum', 'big'):
+        assert f'    .string "{name}"' in asm
+    assert asm.count('    .uleb128 5\n') == 2 and asm.count('    .uleb128 7\n') == 2   # two locals, two formal parameters
+    assert '    .byte 0x91' in asm                        # DW_OP_fbreg locations
+    assert asm.count('    .uleb128 6\n') >= 3            # lexical blocks: one per declaration, plus the `if` scope
+    assert '    .long .Ldebug_line0' in asm               # the unit names its line table
+
+
+def test_var_markers_name_the_type_the_shown_name_and_the_formatter() -> None:
+    asm = assemble("""
+# @var xs - __dewy_debug_show_7 array<Hit>
+let f = (xs:int):>int => {
+    # @var tmp -
+    let tmp:int = xs
+    # @var __iter i - int64 | none
+    let __iter:int = 0
+    return tmp
+}
+let __dewy_debug_show_7 = (v:int):>int => { return v }
+let main = ():>int => { return f(1) }
+""")
+    assert '    .string "array<Hit>"' in asm and '    .string "__dewy_debug_show_7"' in asm
+    assert '    .string "i"' in asm and '    .string "__iter"' not in asm   # shown under its own name
+    assert '    .string "int64 | none"' in asm                              # a type name may contain spaces
+    assert '    .string "tmp"' not in asm                                   # hidden
+    # the typedef chain: the Dewy type is a typedef of the formatter's typedef of the word
+    info = asm[asm.index('.section .debug_info'):]
+    formatter_label = info[info.index('.Ldbg_fmt0:'):]
+    assert '.string "__dewy_debug_show_7"' in formatter_label[:120] and '.Ldbg_type_word - .Ldebug_info0' in formatter_label[:200]
+    hit_type = info[info.index('.string "array<Hit>"'):]
+    assert '.Ldbg_fmt0 - .Ldebug_info0' in hit_type[:120]

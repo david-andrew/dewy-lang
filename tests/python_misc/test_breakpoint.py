@@ -143,3 +143,66 @@ def test_a_decoded_string_survives_being_returned_in_an_optional(tmp_path: Path,
     udewy_path.write_text(codegen(SrcFile.from_path(source)))
     monkeypatch.chdir(tmp_path)
     assert entry_point(udewy_path, []) == 42
+
+
+def test_a_debug_build_names_each_variables_type_and_formatter(tmp_path: Path) -> None:
+    source = tmp_path / 'values.dewy'
+    source.write_text(PROGRAM)
+    plain = codegen(SrcFile.from_path(source))
+    assert '# @var total - - int64\n' in plain and '__dewy_debug_show_' not in plain      # types, no formatters
+    debug = codegen(SrcFile.from_path(source), debug_values=True)
+    lines = debug.splitlines()
+    markers = {line.split()[2]: line.split()[3:] for line in lines if line.strip().startswith('# @var') and len(line.split()) > 4}
+    assert markers['hits'][1].startswith('__dewy_debug_show_')                       # a parameter's formatter
+    assert markers['label'][1].startswith('__dewy_debug_show_') and markers['maybe'][1].startswith('__dewy_debug_show_')
+    assert markers['maybe'][2:] == ['int64', '|', 'none']
+    loop_variable = next(line for line in lines if line.strip().startswith('# @var __dewy_iterator_value'))
+    assert loop_variable.split()[3] == 'h' and loop_variable.split()[5] == 'Hit'      # the loop variable, shown as `h`
+    assert '__dewy_debug_show_raw_0' in debug                                          # main's `hits` is raw frame data: a descriptor thunk
+    assert 'const __dewy_debug_formatters:int64 = __static_words__(' in debug          # the formatters stay reachable
+    assert 'let __dewy_debug_show_' in debug
+
+
+def test_arrays_of_fixed_length_strings_print() -> None:
+    _check('let main = ():>int64 => {\n    let words = ["x" "y"]\n    printl"{words}"\n    return 0\n}\n')   # `array<string<length=1> length=2>` reads as `array<string>`
+
+
+@pytest.mark.skipif(which('as') is None or which('ld') is None or which('lldb') is None, reason='needs the x86_64 toolchain and lldb')
+def test_lldb_shows_dewy_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / 'shown.dewy'
+    source.write_text(PROGRAM)
+    udewy_path = tmp_path / 'shown.udewy'
+    udewy_path.write_text(codegen(SrcFile.from_path(source), debug_values=True))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, [], EntryPointOptions(compile_only=True)) == 0
+    binary = tmp_path / '__dewycache__' / 'shown'
+    script = tmp_path / 'session.lldb'
+    script.write_text(f'command script import {repo / "tools" / "dewy_lldb.py"}\nb shown.dewy:8\nrun\nframe variable\nup\nframe variable\nq\n')
+    result = subprocess.run(['lldb', '--batch', '-s', str(script), str(binary)], capture_output=True, timeout=120, text=True)
+    text = result.stdout
+    assert '(array<Hit>) hits = [Hit[length=3 name="a"] Hit[length=10 name="b"]]' in text
+    assert '(string) label = "run"' in text and '(int64 | none) maybe = none' in text and '(int64) total = 9' in text
+    assert '(Hit) h = Hit[length=3 name="a"]' in text
+    caller = text[text.rindex('frame variable'):]
+    assert '(array<Hit length=2>) hits = [Hit[length=3 name="a"] Hit[length=10 name="b"]]' in caller   # raw frame data, through the thunk
+    assert ' r = ' not in caller                                                                    # not declared yet at the call
+
+
+@pytest.mark.skipif(which('as') is None or which('ld') is None or which('gdb') is None, reason='needs the x86_64 toolchain and gdb')
+def test_gdb_shows_dewy_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / 'shown.dewy'
+    source.write_text(PROGRAM)
+    udewy_path = tmp_path / 'shown.udewy'
+    udewy_path.write_text(codegen(SrcFile.from_path(source), debug_values=True))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, [], EntryPointOptions(compile_only=True)) == 0
+    binary = tmp_path / '__dewycache__' / 'shown'
+    script = tmp_path / 'session.gdb'
+    script.write_text('set pagination off\nbreak shown.dewy:8\nrun\ninfo args\ninfo locals\nprint total\nup\ninfo locals\ncontinue\nbt 2\nquit\n')
+    result = subprocess.run(['gdb', '-q', '-batch', '-x', str(repo / 'tools' / 'dewy_gdb.py'), '-x', str(script), str(binary)], capture_output=True, timeout=120, text=True)
+    text = result.stdout + result.stderr
+    assert 'hits = [Hit[length=3 name="a"] Hit[length=10 name="b"]]' in text and 'label = "run"' in text   # `info args`
+    assert 'total = 9' in text and 'maybe = none' in text and 'h = Hit[length=3 name="a"]' in text
+    assert '$1 = 9' in text
+    assert 'describe (hits=[Hit[length=3 name="a"] Hit[length=10 name="b"]], label="run") at' in text   # frames show their arguments
+    assert 'Program received signal SIGTRAP' in text and '__dewy_user_main () at' in text                  # `$breakpoint` traps

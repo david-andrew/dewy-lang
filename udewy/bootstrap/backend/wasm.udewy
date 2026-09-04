@@ -980,6 +980,10 @@ let w_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__unsigned_lte__")  { w_unsigned_cmp(3) }
     else if str_eq(name "__unsigned_gte__")  { w_unsigned_cmp(2) }
     else if str_eq(name "__alloca__")        { w_alloca() }
+    else if str_eq(name "__breakpoint__") {
+        # no debugger protocol for the browser target: a breakpoint is a no-op
+        w_push_void()
+    }
     else if str_eq(name "__i64_to_f32_bits__") {
         w_emit("f32.convert_i64_s")
         w_emit("i32.reinterpret_f32")
@@ -3252,6 +3256,10 @@ let w_install_backend = ():>void => {
     be_finish_module = w_finish_module
     be_set_module_init = w_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
+    be_mark_location = be_default_mark_location
+    be_note_local = be_default_note_local
+    be_begin_scope = be_default_scope_hook
+    be_end_scope = be_default_scope_hook
     be_intern_string = w_intern_string
     be_intern_words = w_intern_words
     be_define_global = w_define_global

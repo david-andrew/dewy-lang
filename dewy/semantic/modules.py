@@ -36,10 +36,11 @@ _validated_prelude_modules: set[tuple[Path, int, str]] = set()
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
-    def __init__(self, entry: SrcFile, target: str = 'x86_64', *, test: bool = False):
+    def __init__(self, entry: SrcFile, target: str = 'x86_64', *, test: bool = False, debug: bool = False):
         self.entry = entry
         self.target = target
         self.test = test   # the entry module's `$test` functions get the generated runner as the program's entry
+        self.debug = debug   # user modules get the debugger's formatters
         self.type_system = ty.TypeSystem()
         builtins.apply_builtin_promote_rules(self.type_system)
         self.registry = sb.BindingRegistry()
@@ -195,6 +196,8 @@ class ModuleCompiler:
             registry=self.registry,
             module_loader=self,
             target=self.target,
+            debug_formatters=self.debug and not prelude and not no_prelude,   # the prelude is cached and never debugged
+            prelude_module=prelude,
             prelude_bindings=(
                 self.prelude_bindings
                 if prelude or not no_prelude
@@ -493,15 +496,18 @@ def typecheck_program(
     include_prelude: bool = True,
     target: str = 'x86_64',
     test: bool = False,
+    debug: bool = False,
 ) -> hir.Block:
     from . import check
 
     representation.last_notes.clear()
     check.last_prototype_reports.clear()
     check.pending_brand_matches.clear()
+    check.debug_formatters.clear()
+    check.debug_variable_types.clear()
     bounds.last_cap_notes.clear()
     ty.reset_program_brands()   # the program's minted brands: a closed world per compile
-    compiler = ModuleCompiler(srcfile, target, test=test)
+    compiler = ModuleCompiler(srcfile, target, test=test, debug=debug)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)
         merged = compiler.finish(entry)

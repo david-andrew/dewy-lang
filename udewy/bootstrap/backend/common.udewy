@@ -43,6 +43,7 @@ let core_intrinsics_init = ():>void => {
     map_put_str(m "__unsigned_gt__" 2)
     map_put_str(m "__unsigned_lte__" 2)
     map_put_str(m "__unsigned_gte__" 2)
+    map_put_str(m "__breakpoint__" 0)
     g_core_intrinsics = m
     return void
 }
@@ -56,6 +57,11 @@ let be_begin_module:int = 0           # fn ():>void
 let be_finish_module:int = 0          # fn ():>int (returns length-prefixed code string)
 let be_set_module_init:int = 0        # fn (name:int):>void   (0 if no init)
 let be_set_imported_sources:int = 0   # fn (paths_vec:int):>void
+# Debug information (metadata only; the defaults do nothing)
+let be_mark_location:int = 0          # fn (path:int line:int column:int):>void — the source position of the code emitted next
+let be_note_local:int = 0             # fn (slot:int name:int type_name:int formatter:int parameter:int):>void — a declared variable or parameter
+let be_begin_scope:int = 0            # fn ():>void
+let be_end_scope:int = 0              # fn ():>void
 
 # Data section
 let be_intern_string:int = 0          # fn (data:int len:int):>int
@@ -206,6 +212,18 @@ let be_default_should_warn_unused_extern = (name:int):>int => {
 }
 
 let be_default_set_imported_sources = (paths_vec:int):>void => {
+    return void
+}
+
+let be_default_mark_location = (path:int line:int column:int):>void => {
+    return void
+}
+
+let be_default_note_local = (slot:int name:int type_name:int formatter:int parameter:int):>void => {
+    return void
+}
+
+let be_default_scope_hook = ():>void => {
     return void
 }
 

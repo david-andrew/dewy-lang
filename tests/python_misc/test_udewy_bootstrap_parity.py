@@ -281,3 +281,63 @@ def test_i64_minimum_immediate_matches_between_compilers(bootstrap_binary, tmp_p
         work.mkdir()
         binary = _compile_with(cmd, I64_MIN_SRC, "c", work)
         assert subprocess.run([str(binary)]).returncode == 0, name
+
+
+DEBUG_SRC = '''
+# @var a - __fmt_a apples
+# @var b -
+let helper = (a:int b:int):>int => {
+    # @loc /src/main.dewy:12:9
+    # @var sum - - total_type
+    let sum:int = a + b
+    if sum >? 3 {
+        # @var tmp -
+        let tmp:int = sum
+        let big:int = tmp * 2
+        return big
+    }
+    # @var __iter i - int64 | none
+    let __iter:int = 0
+    __breakpoint__()
+    return sum
+}
+let __fmt_a = (v:int):>int => { return v }
+const keep:int = __static_words__(__fmt_a)
+let main = ():>int => {
+    return helper(1 2) - 3
+}
+'''
+
+
+def _normalized_assembly(path: Path) -> list[str]:
+    """The x86_64 assembly with every number blanked (label numbering differs
+    between the compilers) and the source path (the work directory) dropped."""
+    import re
+    lines = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        if '.udewy"' in line:
+            continue
+        lines.append(re.sub(r'\d+', '', line))
+    return lines
+
+
+@pytest.mark.skipif(which("as") is None or which("ld") is None, reason="needs the x86_64 toolchain")
+def test_x86_64_debug_information_matches_between_compilers(bootstrap_binary, tmp_path) -> None:
+    """The bootstrap compiler emits the same DWARF (line rows, variables,
+    scopes, typedef chains), local labels, retained symbol tables, and
+    `int3` for `__breakpoint__` as the Python compiler."""
+    py_work = tmp_path / "py"
+    py_work.mkdir()
+    _compile_with(["python", "-m", "udewy"], DEBUG_SRC, "x86_64", py_work)
+    bs_work = tmp_path / "bs"
+    bs_work.mkdir()
+    _compile_with([str(bootstrap_binary)], DEBUG_SRC, "x86_64", bs_work)
+    py_asm = _normalized_assembly(py_work / "__dewycache__" / "smoke.s")
+    bs_asm = _normalized_assembly(bs_work / "__dewycache__" / "smoke.s")
+    assert py_asm == bs_asm
+    joined = "\n".join(py_asm)
+    for expected in ('.section .debug_info', '.string "apples"', '.string "__fmt_a"', '.string "int | none"', '.string "i"', '    int', '"awR",@progbits', '.loc  '):   # (digits blanked)
+        assert expected in joined
+    assert '.string "tmp"' not in joined and '.string "b"' not in joined

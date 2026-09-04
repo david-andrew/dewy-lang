@@ -157,6 +157,7 @@ class _Lowerer(
         self.next_object_temp = 1
         self.next_iterator_temp = 1
         self.next_iterator_value = 1
+        self.debug_aliases: dict[str, tuple[str, int]] = {}   # an emitted temporary that is a source binding: (its name, binding id)
         self.next_optional_temp = 1
         self.next_result_temp = 1
         self.next_default_temp = 1
@@ -316,10 +317,17 @@ class _Lowerer(
             self.user_main_base = self._internal_symbol('__dewy_user_main')
         self._allocate_symbols()
 
-        lowered_functions = [
-            self._lower_function(function)
-            for function in sorted(self.functions, key=lambda item: item.order)
-        ]
+        lowered_functions = []
+        for function in sorted(self.functions, key=lambda item: item.order):
+            if function.logical_name.startswith('__dewy_debug_show_'):
+                # a debugger formatter the target cannot lower is left out
+                # (its variables show as words); it never breaks the program
+                try:
+                    lowered_functions.append(self._lower_function(function))
+                except NotImplementedYet:
+                    continue
+                continue
+            lowered_functions.append(self._lower_function(function))
         lowered_functions.extend(self._synthesize_named_copies())
         lowered_functions.extend(self._synthesize_string_clone())
 
@@ -402,7 +410,32 @@ class _Lowerer(
             self.needs_startup,
             argv_prologue,
             argv_value,
+            debug_aliases=dict(self.debug_aliases),
+            debug_raw_arrays=self._debug_raw_arrays(),
         )
+
+    def _debug_raw_arrays(self) -> dict[int, tuple[int, int]]:
+        """Bindings whose frame slot is the raw data of an exact-length array
+        (not a descriptor): binding id -> (length, element bytes). A debugger
+        formatter for the array's type expects a descriptor, so the emitter
+        gives such a variable a thunk that builds one."""
+        raw: dict[int, tuple[int, int]] = {}
+        for binding_id, representation in self.array_representations.items():
+            if representation != 'stack_data':
+                continue
+            declare = self.array_declarations.get(binding_id)
+            if declare is None:
+                continue
+            # the literal's exact length is the frame's (an `array<T>` annotation says nothing about it)
+            array_type = declare.expr.type
+            if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
+                continue
+            try:
+                element_bytes, _signed = self._array_element_layout(array_type.element, declare)
+            except Exception:   # noqa: BLE001 - an element the target cannot lay out gets no thunk
+                continue
+            raw[binding_id] = (array_type.length, element_bytes)
+        return raw
 
     def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
         literal = function.literal
@@ -1696,6 +1729,9 @@ class _Lowerer(
                             iterator.target.binding_id,
                         )
                         binding.emitted_name = self._new_iterator_name('value')
+                        if binding.semantic_id is not None:
+                            # the debugger shows the loop variable under its own name
+                            self.debug_aliases[binding.emitted_name] = (binding.name, binding.semantic_id)
                         self.identifier_bindings[id(iterator.target)] = binding
                         payload = ty.optional_payload(iterator.target.type)
                         if payload is not None and iterator.target.binding_id is not None:

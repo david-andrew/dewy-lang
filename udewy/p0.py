@@ -91,9 +91,48 @@ class ParseState:
     line_starts: list[int] = field(default_factory=list)
     location_markers: list[tuple[int, str, int, int]] = field(default_factory=list)
     last_location: tuple[str, int, int] | None = None
+    # `# @var name type` markers (by offset) naming a declared variable's type for the debugger
+    variable_markers: list[tuple[int, str, str, str | None, str | None]] = field(default_factory=list)
+    previous_statement_offset: int = -1   # a `# @var` marker applies to the declaration after it: it lies past the previous statement
+    current_statement_offset: int = -1
 
 
 _LOCATION_MARKER = re.compile(r"^[ \t]*#[ \t]*@loc[ \t]+(.+?):(\d+):(\d+)[ \t]*$", re.MULTILINE)
+_VARIABLE_MARKER = re.compile(r"^[ \t]*#[ \t]*@var[ \t]+(\S+)[ \t]+(\S+)(?:[ \t]+(\S+)[ \t]+(.+?))?[ \t]*$", re.MULTILINE)
+
+
+def collect_variable_markers(src: str) -> list[tuple[int, str, str, str | None, str | None]]:
+    """`# @var name shown formatter type` comments describe the declaration
+    right after them for the debugger: the name it is shown under (`-` keeps
+    the declared name), a function in the program that renders the value as
+    text (`-` for none), and its type as spelled (to the end of the line).
+    `# @var name -` hides a declaration (a compiler's temporary)."""
+    markers: list[tuple[int, str, str, str | None, str | None]] = []
+    for match in _VARIABLE_MARKER.finditer(src):
+        name, shown, formatter, type_name = match.groups()
+        if type_name is None:
+            markers.append((match.end(), name, "-", None, None))       # hidden
+        else:
+            markers.append((match.end(), name, type_name, None if shown == "-" else shown, None if formatter == "-" else formatter))
+    return markers
+
+
+def type_annotation_text(token: t1.Token, src: str) -> str:
+    """The annotated type's spelling (`int64` of `:int64`)."""
+    return src[token.location:token.location + int(token.value)]   # type: ignore[arg-type]
+
+
+def declared_variable(state: "ParseState", name: str, declaration_offset: int, annotation: str) -> tuple[str, str, str | None]:
+    """`(shown name, type name, formatter)` the debugger sees for a
+    declaration: from a `# @var` marker between the previous statement and
+    this one that names it, else the declared name and the udewy annotation."""
+    markers = state.variable_markers
+    index = bisect.bisect_right(markers, (declaration_offset, "", "", None, None)) - 1
+    while index >= 0 and markers[index][0] > state.previous_statement_offset:
+        if markers[index][1] == name:
+            return markers[index][3] or name, markers[index][2], markers[index][4]
+        index -= 1
+    return name, annotation, None
 
 
 def collect_location_markers(src: str) -> list[tuple[int, str, int, int]]:
@@ -529,11 +568,13 @@ def pop_scope(scope_stack: ScopeStack) -> None:
 def push_parse_scope(state: ParseState) -> None:
     push_scope(state.scope_stack)
     state.type_decl_stack.append(set())
+    state.backend.begin_scope()
 
 
 def pop_parse_scope(state: ParseState) -> None:
     pop_scope(state.scope_stack)
     state.type_decl_stack.pop()
+    state.backend.end_scope()
 
 
 def error_type_decl_runtime_use(state: ParseState, name: str, loc: int) -> None:
@@ -1274,7 +1315,9 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     idx = idx + 1
     
     subject = "constant" if is_const else "variable"
+    annotation_idx = idx
     idx = require_type_annotation(toks, idx, f"{subject} {name!r}", state)
+    annotation = type_annotation_text(toks[annotation_idx], state.src)
     
     if idx >= len(toks) or toks[idx].kind != t1.Kind.TK_ASSIGN:
         error(state.src, toks[idx].location, "Expected '='")
@@ -1296,6 +1339,9 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     slot = backend.alloc_local()
     var_declare(state.scope_stack, name, LocalEntry(slot=slot, is_const=is_const, const_value=const_value), state.src, name_loc)
     backend.store_local(slot)
+    shown, type_name, formatter = declared_variable(state, name, name_loc, annotation)
+    if type_name != "-":   # `# @var name -`: a compiler's temporary, not shown to the debugger
+        backend.note_local(slot, shown, type_name, formatter)
     
     return idx
 
@@ -1315,6 +1361,7 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     
     params: list[str] = []
     param_locs: list[int] = []
+    param_annotations: list[str] = []
     param_names: set[str] = set()
     while idx < len(toks) and toks[idx].kind != t1.Kind.TK_RIGHT_PAREN:
         if toks[idx].kind != t1.Kind.TK_IDENT:
@@ -1327,7 +1374,9 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         params.append(param_name)
         param_locs.append(param_loc)
         idx = idx + 1
+        param_annotation_idx = idx
         idx = require_type_annotation(toks, idx, f"parameter {param_name!r}", state)
+        param_annotations.append(type_annotation_text(toks[param_annotation_idx], state.src))
     
     idx = expect(toks, idx, t1.Kind.TK_RIGHT_PAREN, state)
     idx = require_fn_type_annotation(toks, idx, fn_name, state)
@@ -1364,6 +1413,9 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         backend.load_param(i)
         backend.store_local(slot)
         var_declare(state.scope_stack, param_name, LocalEntry(slot=slot, is_const=False), state.src, param_locs[i])
+        shown, type_name, formatter = declared_variable(state, param_name, param_locs[i], param_annotations[i])
+        if type_name != "-":
+            backend.note_local(slot, shown, type_name, formatter, parameter=True)
     
     idx, body_returns = parse_block(toks, idx, state)
     
@@ -1548,6 +1600,8 @@ def parse_assign_or_expr(toks: list[t1.Token], idx: int, state: ParseState) -> i
 def parse_statement(toks: list[t1.Token], idx: int, state: ParseState) -> tuple[int, bool]:
     kind = toks[idx].kind
     mark_statement_location(state, toks[idx].location)
+    state.previous_statement_offset = state.current_statement_offset
+    state.current_statement_offset = toks[idx].location
     
     if is_decl_kind(kind):
         if looks_like_fn_decl(toks, idx):
@@ -1686,6 +1740,7 @@ def parse(toks: list[t1.Token], src: str, backend: Backend, source_path: str | N
         source_path=source_path,
         line_starts=[0, *(index + 1 for index, char in enumerate(src) if char == "\n")],
         location_markers=collect_location_markers(src),
+        variable_markers=collect_variable_markers(src),
     )
     
     parse_program(toks, state)

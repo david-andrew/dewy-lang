@@ -32,4 +32,4 @@ For stepping through code, breakpoints on lines you did not edit, and the call s
 dewy debug hits.dewy
 ```
 
-That builds the program and opens gdb (or lldb) on it. The debugger knows Dewy files and lines — `b hits.dewy:5`, `n`, `bt` — and a `$breakpoint` in the program stops the debugger on that line instead of prompting. It does not yet show Dewy values on its own (`p total` prints a bare number; strings and arrays are pointers), which is why `$breakpoint` prints them for you. See [Debugging](../../reference/debugging.html) in the Reference for the details.
+That makes a debug build and opens gdb (or lldb) on it. The debugger knows Dewy files, lines, and values — `b hits.dewy:5`, `n`, `bt`, and `frame variable` or `p total` show the bindings as Dewy prints them — and a `$breakpoint` in the program stops the debugger on that line instead of prompting. See [Debugging](../../reference/debugging.html) in the Reference for the details.

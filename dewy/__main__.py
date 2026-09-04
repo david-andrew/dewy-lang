@@ -96,27 +96,46 @@ def run(argv: list[str]) -> int:
             report.use_color = use_color
             print(report, file=sys.stderr)
             print(file=sys.stderr)
+    return _build_and_run(path, target, args.remainder, argv, compile_only=args.compile, debug_values=getattr(args, 'debug_values', False), print_prototype_warnings=print_prototype_warnings)
+
+
+def _build_and_run(
+    path: Path,
+    target: BackendName,
+    program_args: list[str],
+    argv: list[str],
+    *,
+    compile_only: bool,
+    debug_values: bool,
+    print_prototype_warnings,
+) -> int:
+    """Build `path` (reusing an up-to-date binary) and run it unless ``compile_only``.
+
+    A debug build (``debug_values``: the debugger's per-type formatters, which
+    cost compile time and size) is a separate artifact, `<name>.debug`, so the
+    ordinary binary stays lean.
+    """
     # reuse the built binary unless the module, a `.dewy` file near it (its
     # imports), or the compiler changed since it was built (as `dewy test` does)
-    udewy_path = cache_artifact(path, '.udewy')
+    udewy_path = cache_artifact(path, '.debug.udewy' if debug_values else '.udewy')
     cache_dir, name = cache_layout(udewy_path)
     binary = cache_dir / name
     if binary.is_file() and path.is_file():
         sources_mtime = max(_newest_mtime(path.resolve().parent, suffixes=('.dewy',)), _compiler_mtime())
         if binary.stat().st_mtime >= sources_mtime:
-            if args.compile:
+            if compile_only:
                 print(f'Compiled: {binary} (up to date)')
                 return 0
-            return subprocess.call([str(binary), *args.remainder])
+            return subprocess.call([str(binary), *program_args])
     with failure_log.recording(['dewy', *argv]) as recorder:
         # compile the program and output udewy source code
         srcfile = SrcFile.from_path(path)
-        udewy_src = codegen(srcfile, target=target)
+        udewy_src = codegen(srcfile, target=target, debug_values=debug_values)
         print_prototype_warnings()
 
         # set up udewy options, and save the udewy source code to a cache file
         options = EntryPointOptions(
-            compile_only=args.compile,
+            compile_only=compile_only,
             target=target,
             # TODO: for now wasm extra args are ignored
         )
@@ -125,7 +144,7 @@ def run(argv: list[str]) -> int:
 
         # run the udewy compiler/executor
         try:
-            return entry_point(udewy_path, args.remainder, options)
+            return entry_point(udewy_path, program_args, options)
         except Exception as e:
             print(f'Error: {e}')
             recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])
@@ -319,11 +338,13 @@ def test(argv: list[str]) -> int:
 def debug(argv: list[str]) -> int:
     """Build the program and run it under a native debugger with Dewy source lines.
 
-    The compiler emits DWARF line information for `.dewy` files, so the
-    debugger's breakpoints (`b t0.dewy:222`), stepping, and backtraces speak
-    Dewy source, and a `$breakpoint` in the program traps into the debugger
+    The compiler emits DWARF line and variable information for `.dewy`
+    files, so the debugger's breakpoints (`b t0.dewy:222`), stepping, and
+    backtraces speak Dewy source, `frame variable` / `p x` show Dewy values
+    (`tools/dewy_lldb.py` and `tools/dewy_gdb.py` call the program's own
+    formatters), and a `$breakpoint` in the program traps into the debugger
     at its own line. Plain gdb or lldb underneath: everything they can do is
-    available; Dewy-shaped values are still ahead.
+    available.
     """
     parser = ArgumentParser(prog='dewy debug', description='run a Dewy program under gdb or lldb')
     parser.add_argument('file', help='.dewy file to debug')
@@ -336,20 +357,23 @@ def debug(argv: list[str]) -> int:
     if debugger is None or shutil.which(debugger) is None:
         print('Error: dewy debug needs gdb or lldb on the PATH.', file=sys.stderr)
         return 1
-    status = run([*(['--target', args.target] if args.target else []), '--compile', args.file])
+    path = Path(args.file)
+    target = _resolve_target(args.target)
+    status = _build_and_run(path, target, [], ['debug', *argv], compile_only=True, debug_values=True, print_prototype_warnings=lambda: None)
     if status != 0:
         return status
-    binary = _program_binary(Path(args.file))
+    binary = _program_binary(path)
+    tools = Path(__file__).parents[1] / 'tools'
     if debugger == 'gdb':
-        command = ['gdb', '-q', '--args', str(binary), *args.remainder]
+        command = ['gdb', '-q', '-x', str(tools / 'dewy_gdb.py'), '--args', str(binary), *args.remainder]
     else:
-        command = ['lldb', '--', str(binary), *args.remainder]
+        command = ['lldb', '-o', f'command script import {tools / "dewy_lldb.py"}', '--', str(binary), *args.remainder]
     return subprocess.call(command)
 
 
 def _program_binary(path: Path) -> Path:
-    """The executable `dewy file.dewy` builds for ``path``."""
-    cache_dir, name = cache_layout(cache_artifact(path, '.udewy'))
+    """The debug executable `dewy debug file.dewy` builds for ``path``."""
+    cache_dir, name = cache_layout(cache_artifact(path, '.debug.udewy'))
     return cache_dir / name
 
 

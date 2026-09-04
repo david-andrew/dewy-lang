@@ -1,6 +1,6 @@
 """Emit udewy source from HIR prepared by the udewy lowering pass."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from textwrap import indent
 
@@ -8,7 +8,18 @@ from ...reporting import SrcFile
 from ...semantic import builtins, check, hir, ty
 from ...semantic.hir_display import type_to_dewy
 from . import lower
-from .lowering_shared import ARGC_NAME, ARGV_NAME
+from .lowering_shared import (
+    ARGC_NAME,
+    ARGV_NAME,
+    ARRAY_CAPACITY_OFFSET,
+    ARRAY_DATA_OFFSET,
+    ARRAY_DESCRIPTOR_SIZE,
+    ARRAY_FLAGS_OFFSET,
+    ARRAY_LENGTH_OFFSET,
+    ARRAY_MUTABLE,
+    ARRAY_OWNER_OFFSET,
+    ARRAY_STRIDE_OFFSET,
+)
 
 TAB = '    '
 
@@ -105,9 +116,12 @@ class EmitContext:
     """The marker last emitted in this function (shared by its blocks), so a
     run of udewy statements lowered from one Dewy statement is marked once."""
     debug_locations: bool = True
+    debug_aliases: dict[str, tuple[str, int]] = field(default_factory=dict)
+    debug_raw_arrays: dict[int, tuple[int, int]] = field(default_factory=dict)
+    raw_array_thunks: dict[tuple[str, int, int], str] = field(default_factory=dict)   # (formatter, length, element bytes) -> thunk name
 
     def child(self, local_names: set[str]) -> 'EmitContext':
-        return EmitContext(self.direct_function_names, local_names, self.include_directives, self.source, self.last_marker, self.debug_locations)
+        return EmitContext(self.direct_function_names, local_names, self.include_directives, self.source, self.last_marker, self.debug_locations, self.debug_aliases, self.debug_raw_arrays, self.raw_array_thunks)
 
 
 def location_marker(node: hir.AST, ctx: EmitContext) -> str | None:
@@ -125,28 +139,62 @@ def location_marker(node: hir.AST, ctx: EmitContext) -> str | None:
     return marker
 
 
+def variable_marker(name: str, binding_id: int | None, ctx: EmitContext) -> str | None:
+    """The `# @var name type [shown-as]` line naming a local's type for the
+    debugger: its formatter's symbol when the checker made one, else its
+    Dewy type; a temporary holding a loop variable is shown under the
+    variable's name, and the compiler's other temporaries are hidden (`-`)."""
+    if not ctx.debug_locations or ctx.source is None or ctx.source.path is None:
+        return None   # (no file to debug)
+    shown = name
+    if name in ctx.debug_aliases:
+        shown, binding_id = ctx.debug_aliases[name]
+    if binding_id is None or shown.startswith('__dewy'):
+        return f'# @var {name} -'
+    spelled = check.debug_variable_types.get(binding_id)
+    if spelled is None:
+        return None
+    formatter = check.debug_formatters.get(binding_id)
+    formatter_name = formatter.declaration.name if formatter is not None and formatter.declaration is not None else None
+    if formatter_name is not None and formatter_name not in ctx.direct_function_names:
+        formatter_name = None   # the target could not lower the formatter
+    raw = ctx.debug_raw_arrays.get(binding_id)
+    if formatter_name is not None and raw is not None:
+        # the slot is the array's data, the formatter takes a descriptor: a thunk builds one
+        formatter_name = ctx.raw_array_thunks.setdefault((formatter_name, *raw), f'__dewy_debug_show_raw_{len(ctx.raw_array_thunks)}')
+    return f'# @var {name} {shown if shown != name else "-"} {formatter_name or "-"} {spelled}'
+
+
 def emit_statements(items: list[hir.AST], ctx: EmitContext) -> list[str]:
-    """Statements in order, each behind its location marker; declarations shadow direct names from then on."""
+    """Statements in order, each behind its location marker (and a declaration
+    behind its variable marker); declarations shadow direct names from then on."""
     lines: list[str] = []
     for item in items:
         marker = location_marker(item, ctx)
         if marker is not None:
             lines.append(marker)
+        if isinstance(item, hir.Declare):
+            variable = variable_marker(item.name, item.binding_id, ctx)
+            if variable is not None:
+                lines.append(variable)
         lines.append(emit_ast(item, ctx))
         if isinstance(item, hir.Declare):
             ctx.local_names.add(item.name)
     return lines
 
-def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debug_locations: bool = True) -> str:
+def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debug_locations: bool = True, debug_values: bool = False) -> str:
     """Type-check Dewy source and emit equivalent udewy source.
 
     With ``test``, the module's `$test` functions are compiled with the
     generated test runner as the program's entry (`dewy --test`). With
     ``debug_locations`` (the default) every statement is preceded by a
-    `# @loc path:line:column` marker naming its Dewy position, which the
-    udewy compiler turns into debug line information.
+    `# @loc path:line:column` marker naming its Dewy position, and every
+    declaration by a `# @var` marker, which the udewy compiler turns into
+    debug line and variable information. ``debug_values`` (a `dewy debug`
+    build) adds the per-type formatters that let a debugger show Dewy
+    values; they cost compile time and size, so an ordinary build has none.
     """
-    ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test)
+    ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values)
     return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
 
 def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: str = 'main', debug_locations: bool = True) -> str:
@@ -210,12 +258,38 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: s
         set(functions) | set(builtins.builtin_types),
         global_names,
         debug_locations=debug_locations,
+        debug_aliases=program.debug_aliases,
+        debug_raw_arrays=program.debug_raw_arrays,
     )
     ctx.include_directives = {}
     for declaration in program.globals:
         code.append(emit_declare(declaration, ctx))
     for name, func in functions.items():
         code.append(emit_function_decl(name, func, ctx))
+    formatters = sorted({
+        formatter.declaration.name
+        for formatter in check.debug_formatters.values()
+        if formatter.declaration is not None and formatter.declaration.name in functions
+    })
+    for (formatter_name, length, element_bytes), thunk in ctx.raw_array_thunks.items():
+        # an exact array kept as raw frame data: the thunk wraps it in a borrowed descriptor
+        code.append('\n'.join([
+            f'let {thunk} = (data:int64):>int64 => {{',
+            f'    let descriptor:int64 = __alloca__({ARRAY_DESCRIPTOR_SIZE})',
+            f'    __store_i64__(data descriptor + {ARRAY_DATA_OFFSET})',
+            f'    __store_i64__({length} descriptor + {ARRAY_LENGTH_OFFSET})',
+            f'    __store_i64__({length} descriptor + {ARRAY_CAPACITY_OFFSET})',
+            f'    __store_i64__({element_bytes} descriptor + {ARRAY_STRIDE_OFFSET})',
+            f'    __store_i64__({ARRAY_MUTABLE} descriptor + {ARRAY_FLAGS_OFFSET})',
+            f'    __store_i64__(0 descriptor + {ARRAY_OWNER_OFFSET})',
+            f'    return {formatter_name}(descriptor)',
+            '}',
+        ]))
+        formatters.append(thunk)
+    if formatters and debug_locations:
+        # the debugger's formatters are called by nothing in the program: a
+        # static table keeps them out of the unreachable-function sweep
+        code.append(f'const __dewy_debug_formatters:int64 = __static_words__({" ".join(formatters)})')
     # included files are prelude directives: they precede everything else
     directives = [f'$include_bytes(p"{path}") as {name}' for path, name in ctx.include_directives.items()]
     return '\n'.join([*directives, *code]) + '\n'
@@ -312,6 +386,11 @@ def _contains_return(node: hir.AST) -> bool:
 
 def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -> str:
     code: list[str] = []
+    if ctx.debug_locations and func.source is not None:
+        for arg in func.pos_or_kw_args:
+            marker = variable_marker(arg.name, arg.binding_id, replace(ctx, source=func.source))
+            if marker is not None:
+                code.append(marker + '\n')
     code.append(f'let {name} = (')
 
     # build the argument list
@@ -331,7 +410,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     local_names.update(arg.name for arg in func.kw_only_args)
     if func.rest_args is not None:
         local_names.add(func.rest_args.name)
-    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives, func.source if ctx.debug_locations else None, debug_locations=ctx.debug_locations)
+    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives, func.source if ctx.debug_locations else None, debug_locations=ctx.debug_locations, debug_aliases=ctx.debug_aliases, debug_raw_arrays=ctx.debug_raw_arrays, raw_array_thunks=ctx.raw_array_thunks)
     body = func.body
     if _contains_return(body):
         code.append(emit_ast(body, func_ctx))

@@ -143,7 +143,7 @@ let main = (argc:int argv:int):>int => {
     diag_set_source(input_cstr combined str_len(combined))
     (@be_set_imported_sources)(loaded_sources(loaded))
     let toks:int = t1_tokenize(combined)
-    let asm:int = parse_run(toks combined)
+    let asm:int = parse_run(toks combined path_absolute(g_input_path))
 
     # Build CompileOptions threaded through compile_and_link and run.
     let opts:int = be_options_new()

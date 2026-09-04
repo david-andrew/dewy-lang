@@ -119,7 +119,17 @@ const PS_CURRENT_FN:int = 88         # label_id (-1 if none)
 const PS_FN_REFERENCES:int = 96      # IntMap label -> IntSet
 const PS_TOP_LEVEL_FN_REFS:int = 104 # IntSet
 const PS_STATIC_WORD_FN_LOCS:int = 112 # IntMap label -> source location
-const PS_SIZE:int = 120
+# debug locations (mirrors p0.py): the source's path and line starts, the
+# `# @loc` / `# @var` markers by offset, the last position told to the
+# backend, and the previous/current statement offsets a `# @var` sits between
+const PS_SOURCE_PATH:int = 120        # str, or 0
+const PS_LINE_STARTS:int = 128        # Vec<int>
+const PS_LOC_MARKERS:int = 136        # Vec<LocMarker>
+const PS_VAR_MARKERS:int = 144        # Vec<VarMarker>
+const PS_LAST_LOC:int = 152           # LocMarker, or 0
+const PS_PREV_STMT:int = 160
+const PS_CUR_STMT:int = 168
+const PS_SIZE:int = 176
 
 let ps_src = (s:int):>int => { return __load__(s + PS_SRC) }
 let ps_toks = (s:int):>int => { return __load__(s + PS_TOKS) }
@@ -163,7 +173,265 @@ let ps_new = (src:int toks:int):>int => {
     __store__(intmap_new() s + PS_FN_REFERENCES)
     __store__(intset_new() s + PS_TOP_LEVEL_FN_REFS)
     __store__(intmap_new() s + PS_STATIC_WORD_FN_LOCS)
+    __store__(0 s + PS_SOURCE_PATH)
+    __store__(line_starts_of(src) s + PS_LINE_STARTS)
+    __store__(collect_loc_markers(src) s + PS_LOC_MARKERS)
+    __store__(collect_var_markers(src) s + PS_VAR_MARKERS)
+    __store__(0 s + PS_LAST_LOC)
+    __store__(-1 s + PS_PREV_STMT)
+    __store__(-1 s + PS_CUR_STMT)
     return s
+}
+
+# ----------------------------------------------------------------------------
+# Debug locations and variables (mirrors mark_statement_location,
+# collect_location_markers, collect_variable_markers, declared_variable)
+# ----------------------------------------------------------------------------
+
+# LocMarker: +0 offset (end of the marker line), +8 path, +16 line, +24 column
+const LM_OFFSET:int = 0
+const LM_PATH:int = 8
+const LM_LINE:int = 16
+const LM_COLUMN:int = 24
+const LM_SIZE:int = 32
+
+# VarMarker: +0 offset, +8 name, +16 type ("-" hides), +24 shown (0: the name), +32 formatter (0: none)
+const VM_OFFSET:int = 0
+const VM_NAME:int = 8
+const VM_TYPE:int = 16
+const VM_SHOWN:int = 24
+const VM_FORMATTER:int = 32
+const VM_SIZE:int = 40
+
+let line_starts_of = (src:int):>int => {
+    let starts:int = vec_new(64)
+    vec_push(starts 0)
+    let n:int = str_len(src)
+    let i:int = 0
+    loop i <? n {
+        if __load_u8__(src + i) =? 10 { vec_push(starts i + 1) }
+        i = i + 1
+    }
+    return starts
+}
+
+let is_blank_byte = (b:int):>int => {
+    return (b =? 32) or (b =? 9)
+}
+
+let skip_blanks = (src:int i:int end:int):>int => {
+    loop (i <? end) and is_blank_byte(__load_u8__(src + i)) { i = i + 1 }
+    return i
+}
+
+let line_end_of = (src:int i:int n:int):>int => {
+    loop (i <? n) and (__load_u8__(src + i) not=? 10) { i = i + 1 }
+    return i
+}
+
+let str_of_range = (src:int start:int stop:int):>int => {
+    let bb:int = bb_new(stop - start + 1)
+    bb_push_bytes(bb src + start stop - start)
+    return bb_finalize_as_string(bb)
+}
+
+# The start of `# @<word> ` on the line at `i`, or -1: the byte after the word and its blanks.
+let marker_word_start = (src:int i:int end:int word:int):>int => {
+    i = skip_blanks(src i end)
+    if (i >=? end) or (__load_u8__(src + i) not=? 35) { return -1 }   # '#'
+    i = skip_blanks(src i + 1 end)
+    let wl:int = str_len(word)
+    if i + wl >? end { return -1 }
+    if not str_eq_len(src + i wl word wl) { return -1 }
+    i = i + wl
+    if (i >=? end) or (not is_blank_byte(__load_u8__(src + i))) { return -1 }
+    return skip_blanks(src i end)
+}
+
+let parse_decimal = (src:int start:int stop:int):>int => {
+    let value:int = 0
+    let i:int = start
+    loop i <? stop {
+        let d:int = __load_u8__(src + i) - 48
+        if (d <? 0) or (d >? 9) { return -1 }
+        value = value * 10 + d
+        i = i + 1
+    }
+    if start =? stop { return -1 }
+    return value
+}
+
+let trim_end_index = (src:int start:int stop:int):>int => {
+    loop (stop >? start) and (is_blank_byte(__load_u8__(src + stop - 1)) or (__load_u8__(src + stop - 1) =? 13)) { stop = stop - 1 }
+    return stop
+}
+
+# `# @loc path:line:column` lines, in order.
+let collect_loc_markers = (src:int):>int => {
+    let markers:int = vec_new(64)
+    let n:int = str_len(src)
+    let i:int = 0
+    loop i <? n {
+        let end:int = line_end_of(src i n)
+        let body:int = marker_word_start(src i end "@loc")
+        if body not=? -1 {
+            let stop:int = trim_end_index(src body end)
+            # split at the last two colons: `path:line:column`
+            let c2:int = stop - 1
+            loop (c2 >? body) and (__load_u8__(src + c2) not=? 58) { c2 = c2 - 1 }
+            let c1:int = c2 - 1
+            loop (c1 >? body) and (__load_u8__(src + c1) not=? 58) { c1 = c1 - 1 }
+            if (c1 >? body) and (c2 >? c1) {
+                let line:int = parse_decimal(src c1 + 1 c2)
+                let column:int = parse_decimal(src c2 + 1 stop)
+                if (line >=? 0) and (column >=? 0) {
+                    let m:int = arena_alloc(LM_SIZE)
+                    __store__(end m + LM_OFFSET)
+                    __store__(str_of_range(src body c1) m + LM_PATH)
+                    __store__(line m + LM_LINE)
+                    __store__(column m + LM_COLUMN)
+                    vec_push(markers m)
+                }
+            }
+        }
+        i = end + 1
+    }
+    return markers
+}
+
+# One blank-separated field starting at `i`: its end (or `stop`).
+let field_end = (src:int i:int stop:int):>int => {
+    loop (i <? stop) and (not is_blank_byte(__load_u8__(src + i))) { i = i + 1 }
+    return i
+}
+
+let dash_is_none = (text:int):>int => {
+    if str_eq(text "-") { return 0 }
+    return text
+}
+
+# `# @var name shown formatter type…` lines (`# @var name -` hides), in order.
+let collect_var_markers = (src:int):>int => {
+    let markers:int = vec_new(64)
+    let n:int = str_len(src)
+    let i:int = 0
+    loop i <? n {
+        let end:int = line_end_of(src i n)
+        let body:int = marker_word_start(src i end "@var")
+        if body not=? -1 {
+            let stop:int = trim_end_index(src body end)
+            let name_end:int = field_end(src body stop)
+            let name:int = str_of_range(src body name_end)
+            let f2:int = skip_blanks(src name_end stop)
+            let f2_end:int = field_end(src f2 stop)
+            if f2_end >? f2 {
+                let m:int = arena_alloc(VM_SIZE)
+                __store__(end m + VM_OFFSET)
+                __store__(name m + VM_NAME)
+                let f3:int = skip_blanks(src f2_end stop)
+                let f3_end:int = field_end(src f3 stop)
+                let f4:int = skip_blanks(src f3_end stop)
+                if f4 <? stop {
+                    __store__(dash_is_none(str_of_range(src f2 f2_end)) m + VM_SHOWN)
+                    __store__(dash_is_none(str_of_range(src f3 f3_end)) m + VM_FORMATTER)
+                    __store__(str_of_range(src f4 stop) m + VM_TYPE)
+                } else {
+                    # two fields: hidden
+                    __store__("-" m + VM_TYPE)
+                    __store__(0 m + VM_SHOWN)
+                    __store__(0 m + VM_FORMATTER)
+                }
+                vec_push(markers m)
+            }
+        }
+        i = end + 1
+    }
+    return markers
+}
+
+# The index of the last marker (a Vec of structs whose first word is the offset) at or before `offset`, or -1.
+let last_marker_before = (markers:int offset:int):>int => {
+    let lo:int = 0
+    let hi:int = vec_len(markers)
+    loop lo <? hi {
+        let mid:int = (lo + hi) >> 1
+        if __load__(vec_get(markers mid)) <=? offset {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    return lo - 1
+}
+
+let mark_statement_location = (state:int offset:int):>void => {
+    let markers:int = __load__(state + PS_LOC_MARKERS)
+    let index:int = last_marker_before(markers offset)
+    let path:int = 0
+    let line:int = 0
+    let column:int = 0
+    if index >=? 0 {
+        let m:int = vec_get(markers index)
+        path = __load__(m + LM_PATH)
+        line = __load__(m + LM_LINE)
+        column = __load__(m + LM_COLUMN)
+    } else {
+        path = __load__(state + PS_SOURCE_PATH)
+        if path =? 0 { return void }
+        let starts:int = __load__(state + PS_LINE_STARTS)
+        let li:int = 0
+        let lo:int = 0
+        let hi:int = vec_len(starts)
+        loop lo <? hi {
+            let mid:int = (lo + hi) >> 1
+            if vec_get(starts mid) <=? offset { lo = mid + 1 } else { hi = mid }
+        }
+        li = lo - 1
+        line = li + 1
+        column = offset - vec_get(starts li) + 1
+    }
+    let last:int = __load__(state + PS_LAST_LOC)
+    if last not=? 0 {
+        if (__load__(last + LM_LINE) =? line) and (__load__(last + LM_COLUMN) =? column) and str_eq(__load__(last + LM_PATH) path) {
+            return void
+        }
+    }
+    let record:int = arena_alloc(LM_SIZE)
+    __store__(offset record + LM_OFFSET)
+    __store__(path record + LM_PATH)
+    __store__(line record + LM_LINE)
+    __store__(column record + LM_COLUMN)
+    __store__(record state + PS_LAST_LOC)
+    (@be_mark_location)(path line column)
+    return void
+}
+
+# The `# @var` marker naming `name` between the previous statement and this declaration, or 0.
+let variable_marker_for = (state:int name:int declaration_offset:int):>int => {
+    let markers:int = __load__(state + PS_VAR_MARKERS)
+    let index:int = last_marker_before(markers declaration_offset)
+    let previous:int = __load__(state + PS_PREV_STMT)
+    loop (index >=? 0) and (__load__(vec_get(markers index)) >? previous) {
+        let m:int = vec_get(markers index)
+        if str_eq(__load__(m + VM_NAME) name) { return m }
+        index = index - 1
+    }
+    return 0
+}
+
+# Tell the backend about a declared variable or parameter (see `note_local`).
+let note_declared_variable = (state:int slot:int name:int declaration_offset:int annotation:int parameter:int):>void => {
+    let m:int = variable_marker_for(state name declaration_offset)
+    if m =? 0 {
+        (@be_note_local)(slot name annotation 0 parameter)
+        return void
+    }
+    let type_name:int = __load__(m + VM_TYPE)
+    if str_eq(type_name "-") { return void }   # hidden: a compiler's temporary
+    let shown:int = __load__(m + VM_SHOWN)
+    if shown =? 0 { shown = name }
+    (@be_note_local)(slot shown type_name __load__(m + VM_FORMATTER) parameter)
+    return void
 }
 
 # ----------------------------------------------------------------------------
@@ -454,12 +722,14 @@ let check_top_level_value_name = (state:int name:int loc:int):>void => {
 let push_parse_scope = (state:int):>void => {
     vec_push(ps_scope_stack(state) map_new())
     vec_push(ps_type_decl_stack(state) set_new())
+    (@be_begin_scope)()
     return void
 }
 
 let pop_parse_scope = (state:int):>void => {
     vec_pop(ps_scope_stack(state))
     vec_pop(ps_type_decl_stack(state))
+    (@be_end_scope)()
     return void
 }
 
@@ -1416,6 +1686,7 @@ let parse_var_decl = (state:int idx:int):>int => {
     let name_loc:int = tok_location(state idx)
     let name:int = get_token_name(state idx)
     idx = idx + 1
+    let annotation:int = get_token_name(state idx)   # the type's spelling
     idx = require_type_annotation(state idx)
     if (idx >=? n) or (tok_kind(state idx) not=? TK_ASSIGN) {
         diag_error(tok_location(state idx) "Expected '='")
@@ -1440,6 +1711,7 @@ let parse_var_decl = (state:int idx:int):>int => {
     let slot:int = (@be_alloc_local)()
     var_declare(state name le_new(slot is_const const_value) name_loc)
     (@be_store_local)(slot)
+    note_declared_variable(state slot name name_loc annotation false)
     return idx
 }
 
@@ -1460,6 +1732,7 @@ let parse_fn_decl = (state:int idx:int):>int => {
     idx = expect(state idx TK_LEFT_PAREN)
     let param_names:int = vec_new(4)
     let param_locs:int = vec_new(4)
+    let param_annotations:int = vec_new(4)
     let seen:int = set_new()
     loop (idx <? n) and (tok_kind(state idx) not=? TK_RIGHT_PAREN) {
         if tok_kind(state idx) not=? TK_IDENT {
@@ -1474,6 +1747,7 @@ let parse_fn_decl = (state:int idx:int):>int => {
         vec_push(param_names pname)
         vec_push(param_locs pl)
         idx = idx + 1
+        vec_push(param_annotations get_token_name(state idx))
         idx = require_type_annotation(state idx)
     }
     idx = expect(state idx TK_RIGHT_PAREN)
@@ -1514,6 +1788,7 @@ let parse_fn_decl = (state:int idx:int):>int => {
         (@be_load_param)(i)
         (@be_store_local)(slot)
         var_declare(state vec_get(param_names i) le_new(slot false 0) vec_get(param_locs i))
+        note_declared_variable(state slot vec_get(param_names i) vec_get(param_locs i) vec_get(param_annotations i) true)
         i = i + 1
     }
     let returns_out:int = __static_alloca__(8)
@@ -1709,6 +1984,9 @@ let parse_assign_or_expr = (state:int idx:int):>int => {
 
 let parse_statement = (state:int idx:int returns_out:int):>int => {
     let k:int = tok_kind(state idx)
+    mark_statement_location(state tok_location(state idx))
+    __store__(__load__(state + PS_CUR_STMT) state + PS_PREV_STMT)
+    __store__(tok_location(state idx) state + PS_CUR_STMT)
     if is_decl_kind(k) {
         if looks_like_fn_decl(state idx) {
             diag_error(tok_location(state idx) "Functions may only be declared at top level")
@@ -1890,9 +2168,10 @@ let compute_reachable_functions = (state:int globals_init_label_id:int):>int => 
 
 const GLOBALS_INIT_NAME:int = 0  # set in parse_run()
 
-let parse_run = (toks:int src:int):>int => {
+let parse_run = (toks:int src:int source_path:int):>int => {
     core_intrinsics_init()
     let state:int = ps_new(src toks)
+    __store__(source_path state + PS_SOURCE_PATH)
     __store__((@be_get_builtin_constants)() state + PS_BUILTIN_CONSTS)
     (@be_begin_module)()
     parse_program(state)

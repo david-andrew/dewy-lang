@@ -243,13 +243,13 @@ def test_dynamic_array_returns_use_the_prelude_arena() -> None:
 
 
 def test_fixed_local_array_fixtures_use_stack_data() -> None:
-    local_sum = codegen(SrcFile.from_path(fixtures / 'array_local_sum.dewy'))
+    local_sum = codegen(SrcFile.from_path(fixtures / 'array_local_sum.dewy'), debug_locations=False)
     assert 'let values:int64 = __alloca__(24)' in local_sum
     assert '__store_i64__(10 values)' in local_sum
     assert '__load_i64__(values + 16)' in local_sum
     assert '__alloca__(48)' not in local_sum
 
-    dynamic = codegen(SrcFile.from_path(fixtures / 'array_dynamic_narrow.dewy'))
+    dynamic = codegen(SrcFile.from_path(fixtures / 'array_dynamic_narrow.dewy'), debug_locations=False)
     assert 'let bytes:int64 = __alloca__(3)' in dynamic
     assert 'loop i <? 3' in dynamic
     assert '__store_u8__(42 bytes + 1)' in dynamic
@@ -259,6 +259,7 @@ def test_fixed_local_array_fixtures_use_stack_data() -> None:
 
     recursive = codegen(SrcFile.from_path(fixtures / 'array_fresh_local.dewy'))
     assert 'let probe = (depth:int64):>int64 => {\n    # @loc' in recursive and '\n    let values:int64 = __alloca__(8)' in recursive
+    recursive = codegen(SrcFile.from_path(fixtures / 'array_fresh_local.dewy'), debug_locations=False)   # (the debugger's thunks build descriptors)
     assert '__store_i64__(40 values)' in recursive
     assert 'let ignored:int64 = probe(1)' in recursive
     assert 'return __load_i64__(values)' in recursive
@@ -266,7 +267,7 @@ def test_fixed_local_array_fixtures_use_stack_data() -> None:
 
 
 def test_array_call_adapter_fixture_codegen_shape() -> None:
-    emitted = codegen(SrcFile.from_path(fixtures / 'array_call_adapters.dewy'))
+    emitted = codegen(SrcFile.from_path(fixtures / 'array_call_adapters.dewy'), debug_locations=False)
 
     assert 'const words:int64 = __static_words__(0 2)' in emitted
     assert 'const bytes:int64 = 0x"2802"' in emitted

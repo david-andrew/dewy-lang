@@ -54,7 +54,7 @@ let main = ():>int => {
 
     w_install_backend()
     let toks:int = t1_tokenize(src)
-    let wat:int = parse_run(toks src)
+    let wat:int = parse_run(toks src 0)
 
     host_compile_emit_wat(wat str_len(wat))
     return 0

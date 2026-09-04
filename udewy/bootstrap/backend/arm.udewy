@@ -1450,6 +1450,10 @@ let arm_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__unsigned_lte__")  { arm_unsigned_cmp(3) }
     else if str_eq(name "__unsigned_gte__")  { arm_unsigned_cmp(2) }
     else if str_eq(name "__alloca__")        { arm_alloca() }
+    else if str_eq(name "__breakpoint__") {
+        arm_emit_indented("brk #0")   # a debugger attached to the process stops here
+        arm_push_void()
+    }
     else if str_eq(name "__i64_to_f32_bits__") {
         arm_emit_indented("scvtf s0, x0")
         arm_emit_indented("fmov w0, s0")
@@ -1552,6 +1556,10 @@ let arm_install_backend = ():>void => {
     be_finish_module = arm_finish_module
     be_set_module_init = arm_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
+    be_mark_location = be_default_mark_location
+    be_note_local = be_default_note_local
+    be_begin_scope = be_default_scope_hook
+    be_end_scope = be_default_scope_hook
     be_intern_string = arm_intern_string
     be_intern_words = arm_intern_words
     be_define_global = arm_define_global

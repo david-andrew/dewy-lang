@@ -1176,6 +1176,10 @@ let c_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__store_i16__") { c_store_mem(16) }
     else if str_eq(name "__store_i32__") { c_store_mem(32) }
     else if str_eq(name "__store_i64__") { c_store_mem(64) }
+    else if str_eq(name "__breakpoint__") {
+        c_emit_line("__builtin_trap();")   # a debugger attached to the process stops here
+        c_push_void()
+    }
     else if str_eq(name "__alloca__") {
         c_helpers = c_helpers or CH_ALLOCA
         let size:int = c_current_expr
@@ -1723,6 +1727,10 @@ let c_install_backend = ():>void => {
     be_finish_module = c_finish_module
     be_set_module_init = c_set_module_init
     be_set_imported_sources = c_set_imported_sources
+    be_mark_location = be_default_mark_location
+    be_note_local = be_default_note_local
+    be_begin_scope = be_default_scope_hook
+    be_end_scope = be_default_scope_hook
     be_intern_string = c_intern_string
     be_intern_words = c_intern_words
     be_define_global = c_define_global

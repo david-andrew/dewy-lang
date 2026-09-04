@@ -5,7 +5,7 @@ Split from ``lower.py``; see that module's docstring for the overall design.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from ...reporting import Span, SrcFile
@@ -117,6 +117,11 @@ class LoweredProgram:
     needs_startup: bool
     argv_prologue: list[hir.AST] | None = None
     argv_value: hir.AST | None = None
+    debug_aliases: dict[str, tuple[str, int]] = field(default_factory=dict)
+    """Emitted temporaries that hold a source binding (a loop variable):
+    name -> (the source name, its binding id), for the debugger's markers."""
+    debug_raw_arrays: dict[int, tuple[int, int]] = field(default_factory=dict)
+    """Bindings whose slot is an exact array's raw data: id -> (length, element bytes)."""
 
 @dataclass
 class _Scope:

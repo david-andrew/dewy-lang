@@ -96,8 +96,11 @@ def typecheck_and_resolve(
     include_prelude: bool | None = None,
     target: str = 'x86_64',
     test: bool = False,
+    debug: bool = False,
 ) -> hir.AST:
-    """Check a program; with ``test``, the entry module's `$test` functions get a generated runner as its entry."""
+    """Check a program; with ``test``, the entry module's `$test` functions get
+    a generated runner as its entry; with ``debug``, each user module gets the
+    debugger's per-type formatters (see `_debug_formatter_declarations`)."""
     from .modules import typecheck_program
 
     return typecheck_program(
@@ -109,6 +112,7 @@ def typecheck_and_resolve(
         ),
         target=target,
         test=test,
+        debug=debug,
     )
 
 
@@ -280,6 +284,8 @@ def _typecheck_module(
     prelude_bindings: dict[str, sb.Binding] | None = None,
     target: str = 'x86_64',
     test: bool = False,
+    debug_formatters: bool = False,
+    prelude_module: bool = False,
 ) -> tuple[hir.Block, Context]:
 
     # set up the base type system/builtins
@@ -337,12 +343,133 @@ def _typecheck_module(
             if isinstance(binding.type, ty.ArrayType) and binding.type.length is not None:
                 binding.type = replace(binding.type, length=None)
     _declare_pending_methods(ctx=ctx.module if ctx.module is not None else ctx)  # methods never called still get checked
+    if not prelude_module:
+        # the debugger's view of the module's variables: their types always,
+        # and in a debug build a formatter per type (the root block's scope holds the module's names)
+        checked = replace(checked, items=[*checked.items, *_debug_formatter_declarations(checked, formatters=debug_formatters, ctx=ctx.module if ctx.module is not None else ctx)])
     if ctx.generic_instances:
         # instantiations of generic functions, methods, and constructor
         # overloads are ordinary module-level functions; they carry no state,
         # so they are declared first and module-level code may call them
         checked = replace(checked, items=[*ctx.generic_instances, *checked.items])
     return checked, ctx
+
+
+debug_formatters: dict[int, sb.Binding] = {}
+"""Debug information for the emitter: a function-local binding's id -> the
+binding of the formatter function for its type (see `_debug_formatter_declarations`)."""
+debug_variable_types: dict[int, str] = {}
+"""A function-local binding's id -> its Dewy type as spelled, for the debugger."""
+
+
+def _debug_formatter_declarations(module: hir.Block, *, formatters: bool, ctx: Context) -> list[hir.AST]:
+    """One formatter per type of the module's function-local bindings, for the debugger.
+
+    `__dewy_debug_show_N = (v:T):>int64` renders a value the way `"{v}"`
+    does (a string in its literal form) into a static `[length][bytes]`
+    block and returns its address; a debugger calls it on a stopped frame's
+    variable and reads the text (see `tools/dewy_lldb.py`). The emitter names
+    each variable's DWARF type after its formatter, which is how the
+    debugger finds it. A type the module cannot spell or print gets no
+    formatter (the variable shows as a word); the prelude gets none at all.
+    """
+    bindings: dict[int, ty.Type] = {}
+
+    def collect(node: object, inside_function: bool) -> None:
+        if isinstance(node, hir.FunctionLiteral):
+            for param in [*node.pos_or_kw_args, *node.kw_only_args]:
+                if param.binding_id is not None:
+                    bindings.setdefault(param.binding_id, param.type)
+            collect(node.body, True)
+            return
+        if isinstance(node, hir.Declare) and inside_function and node.binding_id is not None and not node.name.startswith('__dewy'):
+            declared = node.expr.type if node.annotation is None else node.annotation
+            binding = ctx.binding_registry.by_id.get(node.binding_id)
+            if binding is not None and binding.type is not None and isinstance(ty.strip_refinement(binding.type), ty.ArrayType):
+                # an array's binding type carries its representation: `let xs:array<T> = [a b]`
+                # that is never grown is the exact `array<T length=2>` in the frame
+                declared = binding.type
+            bindings.setdefault(node.binding_id, declared)
+        if isinstance(node, hir.IteratorExpression) and inside_function and node.target.binding_id is not None:
+            bindings.setdefault(node.target.binding_id, node.target.type)
+        if is_dataclass(node) and not isinstance(node, type) and type(node).__module__ != ty.__name__:
+            for field_ in fields(node):
+                collect(getattr(node, field_.name), inside_function)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                collect(item, inside_function)
+        elif isinstance(node, dict):
+            for item in node.values():
+                collect(item, inside_function)
+
+    collect(module, False)
+    declarations: list[hir.AST] = []
+    by_type: dict[str, int | None] = {}
+    for binding_id, declared in bindings.items():
+        type_ = ty.strip_refinement(declared)
+        if type_ in (ty.VOID_TYPE, ty.BOTTOM_TYPE, ty.INFERRED_TYPE, ty.TYPE_TYPE) or isinstance(type_, (ty.FunctionType, ty.OverloadType, ty.ModuleType)) or _is_range_type(type_):
+            continue
+        spelled = type_to_dewy(_debug_spelling(type_))
+        debug_variable_types[binding_id] = spelled
+        if not formatters:
+            continue
+        number, _dimension = _number_and_dimension(type_)
+        if _number_object(ty.strip_refinement(number), ctx=ctx) is not None:
+            continue   # prints through its own arm but has no string form yet
+        if spelled not in by_type:
+            by_type[spelled] = _debug_formatter(spelled, _is_string_type(type_) or ty.string_valued(type_), declarations, ctx=ctx)
+        formatter = by_type[spelled]
+        if formatter is not None:
+            debug_formatters[binding_id] = ctx.binding_registry.by_id[formatter]
+    return declarations
+
+
+def _debug_spelling(type_: ty.TypeExpr) -> ty.TypeExpr:
+    """The type as a formatter's parameter: a string's exact length is a
+    static fact with no spelling in a signature (`string<length=1>` is
+    display only) and no runtime form, so it is dropped, inside arrays,
+    unions, and plain objects alike."""
+    if isinstance(type_, ty.StringType):
+        return ty.StringType(None)
+    if isinstance(type_, ty.ArrayType):
+        return ty.ArrayType(_debug_spelling(type_.element), type_.length)
+    if isinstance(type_, ty.TypeOr):
+        return ty.TypeOr([_debug_spelling(item) for item in type_.items])
+    if type(type_) is ty.ObjectType and type_.brand is None:
+        return replace(type_, fields=[replace(field_, type=_debug_spelling(field_.type)) for field_ in type_.fields])
+    return type_
+
+
+def _debug_formatter(spelled: str, quoted: bool, declarations: list[hir.AST], *, ctx: Context) -> int | None:
+    """Synthesize and check the formatter for one type; its binding id, or None when the type cannot be formatted."""
+    if '>>' in spelled or ':>' in spelled:
+        return None   # nested generics tokenize as a shift, and a function value has no text worth a formatter
+    name = f'__dewy_debug_show_{ctx.binding_registry.next_id}'
+    shown = '_quoted(v)' if quoted else 'v'
+    text = (
+        f'let {name} = (v:{spelled}):>int64 => {{\n'
+        f'    let text:string = "{{{shown}}}"\n'
+        '    let bytes:array<uint8> = text as array<uint8>\n'
+        '    let block:int64 = __static_alloca__(65544)\n'
+        '    let i:int64 = 0\n'
+        '    loop i <? bytes.length and i <? 65536 { __store_u8__(bytes[i] block + 8 + i)  i += 1 }\n'
+        '    __store_i64__(i block)\n'
+        '    return block\n'
+        '}\n'
+    )
+    try:
+        parsed = p0.parse(SrcFile(None, text))
+        statement = parsed.inner[0]
+        ctx.synthesized.append(statement)
+        checked = typecheck_and_resolve_inner(statement, ctx=ctx)
+    except Exception:   # noqa: BLE001 - a type the module cannot spell or print gets no formatter
+        return None
+    if not isinstance(checked, hir.Declare) or checked.binding_id is None or not isinstance(checked.expr, hir.FunctionLiteral):
+        return None
+    # no source of its own: its statements carry no debug positions (they would
+    # land on the module's lines and catch the debugger's breakpoints)
+    declarations.append(replace(checked, expr=replace(checked.expr, source=None)))
+    return checked.binding_id
 
 # ---------------------------------------------------------------- `$test`
 TEST_ENTRY_NAME = hir.TEST_ENTRY_NAME

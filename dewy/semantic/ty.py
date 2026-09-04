@@ -1360,7 +1360,7 @@ class TypeSystem:
             return b == TOP_TYPE
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
             return (
-                a.element == b.element
+                (a.element == b.element or self._string_element_widens(a.element, b.element))
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
@@ -1542,6 +1542,12 @@ class TypeSystem:
     # Function Subtyping
     ########################################################
 
+
+    @staticmethod
+    def _string_element_widens(narrow: TypeExpr, wide: TypeExpr) -> bool:
+        """`array<string<length=1>>` reads as `array<string>`: a string element's
+        length is a static fact about the same handle, not another representation."""
+        return isinstance(narrow, StringType) and narrow.length is not None and (wide == 'string' or wide == StringType(None))
 
     def function_subtype(self, f: FunctionType, g: FunctionType) -> bool:
         """True if F is usable wherever G is expected (call-shape inclusion).

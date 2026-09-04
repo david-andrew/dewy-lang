@@ -103,6 +103,25 @@ class Backend(ABC):
         nothing.
         """
 
+    def note_local(self, slot: int, name: str, type_name: str, formatter: str | None = None, *, parameter: bool = False) -> None:
+        """
+        Name a local slot for the debugger (debug information).
+
+        Called after ``alloc_local`` for every declared variable and parameter
+        with the source name and a type name: the udewy annotation, or what a
+        `# @var name shown formatter type` comment before the declaration
+        supplies — a compiler emitting udewy names the original type, and
+        ``formatter`` a function in the program a debugger may call to render
+        the value. ``parameter`` marks a function parameter (visible
+        throughout the function). Metadata only; the default does nothing.
+        """
+
+    def begin_scope(self) -> None:
+        """A lexical scope opens (debug information; the default does nothing)."""
+
+    def end_scope(self) -> None:
+        """The innermost lexical scope closes (debug information; the default does nothing)."""
+
     def set_imported_sources(self, paths: list[Path]) -> None:
         """
         Receive the resolved udewy source paths imported by the entrypoint.

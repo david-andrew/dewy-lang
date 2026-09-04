@@ -4,6 +4,7 @@ x86_64 backend for udewy.
 Generates GNU assembler syntax targeting Linux x86_64 with System V ABI.
 """
 
+from dataclasses import dataclass, field
 from os import PathLike
 from pathlib import Path
 
@@ -11,6 +12,39 @@ from .. import t1
 from ..third_party.sdl import desktop_launch
 from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
 from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
+
+def _sleb128_bytes(value: int) -> list[int]:
+    """The signed LEB128 encoding of ``value``."""
+    out: list[int] = []
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if (value == 0 and not byte & 0x40) or (value == -1 and byte & 0x40):
+            out.append(byte)
+            return out
+        out.append(byte | 0x80)
+
+
+@dataclass
+class _DebugScope:
+    """A DWARF lexical block: a udewy scope, or the remainder of a scope after a
+    declaration (so a variable is visible only from its declaration on)."""
+
+    low: str
+    high: str
+    variables: list[tuple[str, int, str, str | None]] = field(default_factory=list)   # name, frame offset, type name, formatter
+    children: list["_DebugScope"] = field(default_factory=list)
+    parameters: list[tuple[str, int, str, str | None]] = field(default_factory=list)  # (a function's root scope only)
+
+
+@dataclass
+class _DebugFunction:
+    name: str
+    label: str
+    end_label: str
+    scope: _DebugScope
+    label_id: int
+
 
 class X86_64Backend(Backend):
     """
@@ -35,6 +69,11 @@ class X86_64Backend(Backend):
     def __init__(self) -> None:
         self._function_code: list[tuple[int, list[str]]] = []
         self._source_files: dict[str, int] = {}   # DWARF file numbers for `.loc`
+        # debug information: every function's variables in their lexical scopes
+        self._debug_functions: list[_DebugFunction] = []
+        self._debug_function: _DebugFunction | None = None
+        self._debug_scope: _DebugScope | None = None        # the innermost open scope node
+        self._debug_frames: list[tuple[_DebugScope, str, _DebugScope]] = []   # (frame root, its end label, the node to return to)
         self._current_fn_code: list[str] | None = None
         self._reachable_fn_label_ids: set[int] | None = None
         self._data: list[str] = []
@@ -230,6 +269,7 @@ class X86_64Backend(Backend):
         output.append("    .quad 0")
         output.extend(self._data)
         output.append("")
+        output.extend(self._debug_info_sections())
         output.append(".section .note.GNU-stack,\"\",@progbits")
         output.append("")
         return "\n".join(output)
@@ -296,7 +336,12 @@ class X86_64Backend(Backend):
         label = self._new_label("static")
         self._static_labels[label_id] = label
 
-        self._emit_data(f".section .data.{label},\"aw\",@progbits")
+        # a table of symbols is retained (SHF_GNU_RETAIN) even when nothing in
+        # the program reads it: it may exist for something outside the program
+        # (a debugger's formatters), and the linker would otherwise drop the
+        # table and the functions only it names
+        flags = "awR" if any(isinstance(element, str) for element in elements) else "aw"
+        self._emit_data(f".section .data.{label},\"{flags}\",@progbits")
         self._emit_data("    .balign 8")
         self._emit_data_label(label)
         for element in elements:
@@ -376,6 +421,11 @@ class X86_64Backend(Backend):
         if is_main:
             self._emit_label("__main__")
         self._emit_label(label)
+        end_label = f".L{label}_end"
+        self._debug_function = _DebugFunction(name, label, end_label, _DebugScope(label, end_label), label_id)
+        self._debug_functions.append(self._debug_function)
+        self._debug_scope = self._debug_function.scope
+        self._debug_frames = []
         
         # Prologue
         self._emit("pushq %rbp")
@@ -413,6 +463,7 @@ class X86_64Backend(Backend):
     def end_function(self) -> None:
         """End function definition."""
         assert self._current_fn_code is not None
+        self._end_debug_function()
         frame_bytes = self._frame_bytes()
         self._current_fn_code[self._frame_subtract_index] = f"    subq ${frame_bytes}, %rsp"
         self._emit_label(self._current_fn_epilogue)
@@ -426,7 +477,225 @@ class X86_64Backend(Backend):
         self._emit("movq %rbp, %rsp")
         self._emit("popq %rbp")
         self._emit("ret")
+        if self._debug_function is not None:
+            self._emit_label(self._debug_function.end_label)
         self._current_fn_code = None
+
+    # ========================================================================
+    # Debug information (DWARF): scopes, variables, and their emission
+    # ========================================================================
+
+    def _debug_label(self) -> str:
+        label = self._new_label("dbg")
+        self._emit_label(label)
+        return label
+
+    def _end_debug_function(self) -> None:
+        """The scopes still open close with the function (the parser pops the
+        body's scope after `end_function`): their end labels go here."""
+        for _node, end_label, _outer in reversed(self._debug_frames):
+            self._emit_label(end_label)
+        self._debug_frames = []
+        self._debug_scope = None
+
+    def begin_scope(self) -> None:
+        if self._debug_scope is None or self._current_fn_code is None:
+            return
+        end_label = self._new_label("dbg_end")
+        node = _DebugScope(self._debug_label(), end_label)
+        self._debug_scope.children.append(node)
+        self._debug_frames.append((node, end_label, self._debug_scope))
+        self._debug_scope = node
+
+    def end_scope(self) -> None:
+        if not self._debug_frames or self._current_fn_code is None:
+            return
+        _node, end_label, outer = self._debug_frames.pop()
+        self._emit_label(end_label)
+        self._debug_scope = outer
+
+    def note_local(self, slot: int, name: str, type_name: str, formatter: str | None = None, *, parameter: bool = False) -> None:
+        """A variable is visible from its declaration to the end of its scope:
+        a lexical block from here to the scope's end holds it (later
+        declarations of the scope nest inside, so each sees only what was
+        declared before it). A parameter is visible throughout: a formal
+        parameter of the function itself."""
+        if self._debug_scope is None or self._current_fn_code is None:
+            return
+        if parameter:
+            self._debug_function.scope.parameters.append((name, slot, type_name, formatter))   # type: ignore[union-attr]
+            return
+        high = self._debug_frames[-1][1] if self._debug_frames else self._debug_function.end_label   # type: ignore[union-attr]
+        node = _DebugScope(self._debug_label(), high, [(name, slot, type_name, formatter)])
+        self._debug_scope.children.append(node)
+        self._debug_scope = node
+
+    @staticmethod
+    def _dwarf_string(text: str) -> str:
+        return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    def _debug_info_sections(self) -> list[str]:
+        """DWARF 4: one compile unit with the functions, their parameters and
+        locals (each at a fixed `%rbp` offset), and a typedef per type name so
+        a debugger script can format values by the name (a formatter symbol
+        when the udewy came from a compiler). The assembler builds the line
+        table from `.loc`; `.debug_aranges` maps addresses to the unit."""
+        functions = [
+            function for function in self._debug_functions
+            if self._reachable_fn_label_ids is None or function.label_id in self._reachable_fn_label_ids
+        ]
+        if not functions:
+            return []
+        # a type name is a typedef of the word; with a formatter it is a
+        # typedef of the formatter's typedef, so a debugger shows the type's
+        # name and its script finds the formatter through the chain
+        type_names: dict[tuple[str, str | None], str] = {}   # (type name, formatter) -> typedef label
+        formatters: dict[str, str] = {}                      # formatter -> typedef label
+
+        def collect(scope: _DebugScope) -> None:
+            for _name, _slot, type_name, formatter in [*scope.parameters, *scope.variables]:
+                if formatter is not None and formatter not in formatters:
+                    formatters[formatter] = f".Ldbg_fmt{len(formatters)}"
+                if (type_name, formatter) not in type_names:
+                    type_names[(type_name, formatter)] = f".Ldbg_type{len(type_names)}"
+            for child in scope.children:
+                collect(child)
+
+        for function in functions:
+            collect(function.scope)
+        has_lines = bool(self._source_files)
+        out: list[str] = []
+        out.append('.section .debug_abbrev,"",@progbits')
+        out.append(".Ldebug_abbrev0:")
+        # 1: compile unit
+        out.append("    .uleb128 1")
+        out.append("    .uleb128 0x11")   # DW_TAG_compile_unit
+        out.append("    .byte 1")
+        out.append("    .uleb128 0x25 ; .uleb128 0x08")   # producer: string
+        out.append("    .uleb128 0x13 ; .uleb128 0x05")   # language: data2
+        out.append("    .uleb128 0x03 ; .uleb128 0x08")   # name: string
+        if has_lines:
+            out.append("    .uleb128 0x10 ; .uleb128 0x17")   # stmt_list: sec_offset
+        out.append("    .byte 0 ; .byte 0")
+        # 2: base type
+        out.append("    .uleb128 2 ; .uleb128 0x24 ; .byte 0")
+        out.append("    .uleb128 0x03 ; .uleb128 0x08")   # name
+        out.append("    .uleb128 0x3e ; .uleb128 0x0b")   # encoding: data1
+        out.append("    .uleb128 0x0b ; .uleb128 0x0b")   # byte_size: data1
+        out.append("    .byte 0 ; .byte 0")
+        # 3: typedef
+        out.append("    .uleb128 3 ; .uleb128 0x16 ; .byte 0")
+        out.append("    .uleb128 0x03 ; .uleb128 0x08")   # name
+        out.append("    .uleb128 0x49 ; .uleb128 0x13")   # type: ref4
+        out.append("    .byte 0 ; .byte 0")
+        # 4: subprogram
+        out.append("    .uleb128 4 ; .uleb128 0x2e ; .byte 1")
+        out.append("    .uleb128 0x03 ; .uleb128 0x08")   # name
+        out.append("    .uleb128 0x11 ; .uleb128 0x01")   # low_pc: addr
+        out.append("    .uleb128 0x12 ; .uleb128 0x07")   # high_pc: data8 (length)
+        out.append("    .uleb128 0x40 ; .uleb128 0x18")   # frame_base: exprloc
+        out.append("    .uleb128 0x3f ; .uleb128 0x19")   # external: flag_present
+        out.append("    .byte 0 ; .byte 0")
+        # 5: variable
+        out.append("    .uleb128 5 ; .uleb128 0x34 ; .byte 0")
+        out.append("    .uleb128 0x03 ; .uleb128 0x08")   # name
+        out.append("    .uleb128 0x49 ; .uleb128 0x13")   # type: ref4
+        out.append("    .uleb128 0x02 ; .uleb128 0x18")   # location: exprloc
+        out.append("    .byte 0 ; .byte 0")
+        # 6: lexical block
+        out.append("    .uleb128 6 ; .uleb128 0x0b ; .byte 1")
+        out.append("    .uleb128 0x11 ; .uleb128 0x01")   # low_pc
+        out.append("    .uleb128 0x12 ; .uleb128 0x07")   # high_pc: data8 (length)
+        out.append("    .byte 0 ; .byte 0")
+        # 7: formal parameter
+        out.append("    .uleb128 7 ; .uleb128 0x05 ; .byte 0")
+        out.append("    .uleb128 0x03 ; .uleb128 0x08")   # name
+        out.append("    .uleb128 0x49 ; .uleb128 0x13")   # type: ref4
+        out.append("    .uleb128 0x02 ; .uleb128 0x18")   # location: exprloc
+        out.append("    .byte 0 ; .byte 0")
+        out.append("    .byte 0")
+        out.append("")
+        out.append('.section .debug_info,"",@progbits')
+        out.append(".Ldebug_info0:")
+        out.append("    .long .Ldebug_info_end - .Ldebug_info_start")
+        out.append(".Ldebug_info_start:")
+        out.append("    .value 4")
+        out.append("    .long .Ldebug_abbrev0")
+        out.append("    .byte 8")
+        out.append("    .uleb128 1")
+        out.append(f"    .string {self._dwarf_string('udewy')}")
+        out.append("    .value 0x0c")   # DW_LANG_C99: the debuggers' expression parsers are happy with it
+        name = next(iter(self._source_files), "udewy")
+        out.append(f"    .string {self._dwarf_string(name)}")
+        if has_lines:
+            out.append("    .long .Ldebug_line0")
+        out.append(".Ldbg_type_word:")
+        out.append("    .uleb128 2")
+        out.append(f"    .string {self._dwarf_string('int64')}")
+        out.append("    .byte 5")   # DW_ATE_signed
+        out.append("    .byte 8")
+        for formatter, label in formatters.items():
+            out.append(f"{label}:")
+            out.append("    .uleb128 3")
+            out.append(f"    .string {self._dwarf_string(formatter)}")
+            out.append("    .long .Ldbg_type_word - .Ldebug_info0")
+        for (type_name, formatter), label in type_names.items():
+            base = formatters[formatter] if formatter is not None else ".Ldbg_type_word"
+            out.append(f"{label}:")
+            out.append("    .uleb128 3")
+            out.append(f"    .string {self._dwarf_string(type_name)}")
+            out.append(f"    .long {base} - .Ldebug_info0")
+
+        def emit_scope(scope: _DebugScope, *, block: bool) -> None:
+            if block:
+                out.append("    .uleb128 6")
+                out.append(f"    .quad {scope.low}")
+                out.append(f"    .quad {scope.high} - {scope.low}")
+            entries = [(7, entry) for entry in scope.parameters] + [(5, entry) for entry in scope.variables]
+            for abbrev, (variable_name, slot, type_name, formatter) in entries:
+                out.append(f"    .uleb128 {abbrev}")
+                out.append(f"    .string {self._dwarf_string(variable_name)}")
+                out.append(f"    .long {type_names[(type_name, formatter)]} - .Ldebug_info0")
+                offset_bytes = _sleb128_bytes(slot)
+                out.append(f"    .uleb128 {1 + len(offset_bytes)}")
+                out.append("    .byte 0x91")   # DW_OP_fbreg
+                out.append("    .byte " + ", ".join(str(byte) for byte in offset_bytes))
+            for child in scope.children:
+                emit_scope(child, block=True)
+            if block:
+                out.append("    .byte 0")
+
+        for function in functions:
+            out.append("    .uleb128 4")
+            out.append(f"    .string {self._dwarf_string(function.name)}")
+            out.append(f"    .quad {function.label}")
+            out.append(f"    .quad {function.end_label} - {function.label}")
+            out.append("    .uleb128 1")
+            out.append("    .byte 0x56")   # DW_OP_reg6: %rbp is the frame base
+            emit_scope(function.scope, block=False)
+            out.append("    .byte 0")
+        out.append("    .byte 0")
+        out.append(".Ldebug_info_end:")
+        out.append("")
+        out.append('.section .debug_aranges,"",@progbits')
+        out.append("    .long .Ldebug_aranges_end - .Ldebug_aranges_start")
+        out.append(".Ldebug_aranges_start:")
+        out.append("    .value 2")
+        out.append("    .long .Ldebug_info0")
+        out.append("    .byte 8")
+        out.append("    .byte 0")
+        out.append("    .zero 4")
+        for function in functions:
+            out.append(f"    .quad {function.label}")
+            out.append(f"    .quad {function.end_label} - {function.label}")
+        out.append("    .quad 0")
+        out.append("    .quad 0")
+        out.append(".Ldebug_aranges_end:")
+        if has_lines:
+            out.append('.section .debug_line,"",@progbits')
+            out.append(".Ldebug_line0:")
+        out.append("")
+        return out
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""

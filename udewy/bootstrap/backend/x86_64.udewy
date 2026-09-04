@@ -57,6 +57,46 @@ let x86_global_labels:int = 0
 let x86_string_labels:int = 0
 let x86_static_labels:int = 0
 
+# Debug information (mirrors x86_64.py): DWARF file numbers for `.loc`, and
+# every function's variables in their lexical scopes.
+let x86_source_files:int = 0         # Map path -> file number
+let x86_source_file_paths:int = 0    # Vec<str>, in numbering order
+let x86_debug_functions:int = 0      # Vec<DebugFunction>
+let x86_debug_function:int = 0       # DebugFunction, or 0
+let x86_debug_scope:int = 0          # the innermost open DebugScope, or 0
+let x86_debug_frames:int = 0         # Vec of (frame root, end label, outer scope), flattened in threes
+
+# DebugScope: +0 low label, +8 high label, +16 Vec<DebugVar>, +24 Vec<DebugScope>, +32 Vec<DebugVar> parameters (a function's root only)
+const DS_LOW:int = 0
+const DS_HIGH:int = 8
+const DS_VARS:int = 16
+const DS_CHILDREN:int = 24
+const DS_PARAMS:int = 32
+const DS_SIZE:int = 40
+# DebugVar: +0 name, +8 slot, +16 type name, +24 formatter (0: none)
+const DV_NAME:int = 0
+const DV_SLOT:int = 8
+const DV_TYPE:int = 16
+const DV_FORMATTER:int = 24
+const DV_SIZE:int = 32
+# DebugFunction: +0 name, +8 label, +16 end label, +24 scope, +32 label id
+const DF_NAME:int = 0
+const DF_LABEL:int = 8
+const DF_END:int = 16
+const DF_SCOPE:int = 24
+const DF_LABEL_ID:int = 32
+const DF_SIZE:int = 40
+
+let x86_debug_scope_new = (low:int high:int):>int => {
+    let d:int = arena_alloc(DS_SIZE)
+    __store__(low d + DS_LOW)
+    __store__(high d + DS_HIGH)
+    __store__(vec_new(2) d + DS_VARS)
+    __store__(vec_new(2) d + DS_CHILDREN)
+    __store__(vec_new(2) d + DS_PARAMS)
+    return d
+}
+
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
@@ -76,6 +116,12 @@ let x86_alloc_state = ():>void => {
     x86_global_labels = intmap_new()
     x86_string_labels = intmap_new()
     x86_static_labels = intmap_new()
+    x86_source_files = map_new()
+    x86_source_file_paths = vec_new(4)
+    x86_debug_functions = vec_new(16)
+    x86_debug_function = 0
+    x86_debug_scope = 0
+    x86_debug_frames = vec_new(12)
     return void
 }
 
@@ -119,14 +165,364 @@ let x86_emit_data_label = (label:int):>void => {
     return void
 }
 
-# Generate a new unique label string ".<prefix><n>".
+# Generate a new unique label string ".<prefix><n>" — ".L<prefix><n>" for
+# control-flow labels, which are assembler-local (dropped from the symbol
+# table) so a debugger names frames by their function; data and function
+# labels stay symbols.
 let x86_new_label = (prefix:int):>int => {
     let bb:int = bb_new(8 + str_len(prefix))
     bb_push_byte(bb 46)   # '.'
+    if not (str_eq(prefix "str") or str_eq(prefix "global") or str_eq(prefix "static") or str_eq(prefix "fn")) {
+        bb_push_byte(bb 76)   # 'L'
+    }
     bb_push_str(bb prefix)
     bb_push_int(bb x86_next_label)
     x86_next_label = x86_next_label + 1
     return bb_finalize_as_string(bb)
+}
+
+# ----------------------------------------------------------------------------
+# Debug information: locations, scopes, variables (mirrors x86_64.py)
+# ----------------------------------------------------------------------------
+
+let x86_mark_location = (path:int line:int column:int):>void => {
+    if x86_current_fn_code =? 0 { return void }   # nothing is emitted between functions
+    let number:int = 0
+    if map_has_str(x86_source_files path) {
+        number = map_get_str(x86_source_files path)
+    } else {
+        number = vec_len(x86_source_file_paths) + 1
+        map_put_str(x86_source_files path number)
+        vec_push(x86_source_file_paths path)
+    }
+    let bb:int = bb_new(48)
+    bb_push_str(bb "    .loc ")
+    bb_push_int(bb number)
+    bb_push_byte(bb 32)
+    bb_push_int(bb line)
+    bb_push_byte(bb 32)
+    bb_push_int(bb column)
+    vec_push(x86_current_fn_code bb_finalize_as_string(bb))
+    return void
+}
+
+let x86_debug_label = ():>int => {
+    let label:int = x86_new_label("dbg")
+    x86_emit_label_str(label)
+    return label
+}
+
+# The scopes still open close with the function (the parser pops the body's
+# scope after `end_function`): their end labels go here.
+let x86_end_debug_function = ():>void => {
+    let n:int = vec_len(x86_debug_frames)
+    let i:int = n - 3
+    loop i >=? 0 {
+        x86_emit_label_str(vec_get(x86_debug_frames i + 1))
+        i = i - 3
+    }
+    vec_set_len(x86_debug_frames 0)
+    x86_debug_scope = 0
+    return void
+}
+
+let x86_begin_scope = ():>void => {
+    if (x86_debug_scope =? 0) or (x86_current_fn_code =? 0) { return void }
+    let end_label:int = x86_new_label("dbg_end")
+    let node:int = x86_debug_scope_new(x86_debug_label() end_label)
+    vec_push(__load__(x86_debug_scope + DS_CHILDREN) node)
+    vec_push(x86_debug_frames node)
+    vec_push(x86_debug_frames end_label)
+    vec_push(x86_debug_frames x86_debug_scope)
+    x86_debug_scope = node
+    return void
+}
+
+let x86_end_scope = ():>void => {
+    let n:int = vec_len(x86_debug_frames)
+    if (n =? 0) or (x86_current_fn_code =? 0) { return void }
+    let outer:int = vec_get(x86_debug_frames n - 1)
+    let end_label:int = vec_get(x86_debug_frames n - 2)
+    vec_set_len(x86_debug_frames n - 3)
+    x86_emit_label_str(end_label)
+    x86_debug_scope = outer
+    return void
+}
+
+# A variable is visible from its declaration to the end of its scope: a
+# lexical block from here to the scope's end holds it (later declarations of
+# the scope nest inside, so each sees only what was declared before it).
+let x86_debug_var_new = (slot:int name:int type_name:int formatter:int):>int => {
+    let v:int = arena_alloc(DV_SIZE)
+    __store__(name v + DV_NAME)
+    __store__(slot v + DV_SLOT)
+    __store__(type_name v + DV_TYPE)
+    __store__(formatter v + DV_FORMATTER)
+    return v
+}
+
+let x86_note_local = (slot:int name:int type_name:int formatter:int parameter:int):>void => {
+    if (x86_debug_scope =? 0) or (x86_current_fn_code =? 0) { return void }
+    if parameter {
+        # visible throughout: a formal parameter of the function itself
+        vec_push(__load__(__load__(x86_debug_function + DF_SCOPE) + DS_PARAMS) x86_debug_var_new(slot name type_name formatter))
+        return void
+    }
+    let high:int = 0
+    let n:int = vec_len(x86_debug_frames)
+    if n >? 0 {
+        high = vec_get(x86_debug_frames n - 2)
+    } else {
+        high = __load__(x86_debug_function + DF_END)
+    }
+    let node:int = x86_debug_scope_new(x86_debug_label() high)
+    vec_push(__load__(node + DS_VARS) x86_debug_var_new(slot name type_name formatter))
+    vec_push(__load__(x86_debug_scope + DS_CHILDREN) node)
+    x86_debug_scope = node
+    return void
+}
+
+let x86_dwarf_string = (out:int text:int):>void => {
+    bb_push_str(out "    .string \"")
+    let n:int = str_len(text)
+    let i:int = 0
+    loop i <? n {
+        let b:int = __load_u8__(text + i)
+        if (b =? 92) or (b =? 34) { bb_push_byte(out 92) }   # escape '\' and '"'
+        bb_push_byte(out b)
+        i = i + 1
+    }
+    bb_push_str(out "\"\n")
+    return void
+}
+
+let x86_sleb128 = (out:int value:int):>void => {
+    loop true {
+        let byte:int = value and 127
+        value = __signed_shr__(value 7)
+        let done:int = false
+        if (value =? 0) and ((byte and 64) =? 0) { done = true }
+        if (value =? -1) and ((byte and 64) not=? 0) { done = true }
+        if done {
+            bb_push_int(out byte)
+            return void
+        }
+        bb_push_int(out byte or 128)
+        bb_push_str(out ", ")
+    }
+    return void
+}
+
+let x86_sleb128_length = (value:int):>int => {
+    let count:int = 0
+    loop true {
+        let byte:int = value and 127
+        value = __signed_shr__(value 7)
+        count = count + 1
+        if (value =? 0) and ((byte and 64) =? 0) { return count }
+        if (value =? -1) and ((byte and 64) not=? 0) { return count }
+    }
+    return count
+}
+
+# a type name is a typedef of the word; with a formatter it is a typedef of
+# the formatter's typedef, so a debugger shows the type's name and its
+# script finds the formatter through the chain
+let x86_type_key = (type_name:int formatter:int):>int => {
+    let bb:int = bb_new(str_len(type_name) + 2)
+    bb_push_str(bb type_name)
+    bb_push_byte(bb 0)
+    if formatter not=? 0 { bb_push_str(bb formatter) }
+    return bb_finalize_as_string(bb)
+}
+
+let x86_collect_debug_vars = (vars:int type_names:int type_keys:int formatters:int formatter_names:int):>void => {
+    let i:int = 0
+    loop i <? vec_len(vars) {
+        let v:int = vec_get(vars i)
+        let formatter:int = __load__(v + DV_FORMATTER)
+        if (formatter not=? 0) and (not map_has_str(formatters formatter)) {
+            map_put_str(formatters formatter vec_len(formatter_names))
+            vec_push(formatter_names formatter)
+        }
+        let key:int = x86_type_key(__load__(v + DV_TYPE) formatter)
+        if not map_has_str(type_names key) {
+            map_put_str(type_names key vec_len(type_keys))
+            vec_push(type_keys v)
+        }
+        i = i + 1
+    }
+    return void
+}
+
+let x86_collect_debug_types = (scope:int type_names:int type_keys:int formatters:int formatter_names:int):>void => {
+    x86_collect_debug_vars(__load__(scope + DS_PARAMS) type_names type_keys formatters formatter_names)
+    x86_collect_debug_vars(__load__(scope + DS_VARS) type_names type_keys formatters formatter_names)
+    let children:int = __load__(scope + DS_CHILDREN)
+    let c:int = 0
+    loop c <? vec_len(children) {
+        x86_collect_debug_types(vec_get(children c) type_names type_keys formatters formatter_names)
+        c = c + 1
+    }
+    return void
+}
+
+let x86_push_label_ref = (out:int prefix:int index:int suffix:int):>void => {
+    bb_push_str(out prefix)
+    bb_push_int(out index)
+    bb_push_str(out suffix)
+    return void
+}
+
+let x86_emit_debug_scope = (out:int scope:int block:int type_names:int):>void => {
+    if block {
+        bb_push_str(out "    .uleb128 6\n")
+        bb_push_str(out "    .quad ")
+        bb_push_str(out __load__(scope + DS_LOW))
+        bb_push_str(out "\n    .quad ")
+        bb_push_str(out __load__(scope + DS_HIGH))
+        bb_push_str(out " - ")
+        bb_push_str(out __load__(scope + DS_LOW))
+        bb_push_byte(out 10)
+    }
+    x86_emit_debug_vars(out __load__(scope + DS_PARAMS) 7 type_names)
+    x86_emit_debug_vars(out __load__(scope + DS_VARS) 5 type_names)
+    let children:int = __load__(scope + DS_CHILDREN)
+    let c:int = 0
+    loop c <? vec_len(children) {
+        x86_emit_debug_scope(out vec_get(children c) true type_names)
+        c = c + 1
+    }
+    if block { bb_push_str(out "    .byte 0\n") }
+    return void
+}
+
+let x86_emit_debug_vars = (out:int vars:int abbrev:int type_names:int):>void => {
+    let i:int = 0
+    loop i <? vec_len(vars) {
+        let v:int = vec_get(vars i)
+        bb_push_str(out "    .uleb128 ")
+        bb_push_int(out abbrev)
+        bb_push_byte(out 10)
+        x86_dwarf_string(out __load__(v + DV_NAME))
+        let key:int = x86_type_key(__load__(v + DV_TYPE) __load__(v + DV_FORMATTER))
+        x86_push_label_ref(out "    .long .Ldbg_type" map_get_str(type_names key) " - .Ldebug_info0\n")
+        let slot:int = __load__(v + DV_SLOT)
+        bb_push_str(out "    .uleb128 ")
+        bb_push_int(out 1 + x86_sleb128_length(slot))
+        bb_push_str(out "\n    .byte 0x91\n    .byte ")   # DW_OP_fbreg
+        x86_sleb128(out slot)
+        bb_push_byte(out 10)
+        i = i + 1
+    }
+    return void
+}
+
+# DWARF 4: one compile unit with the functions, their parameters and locals
+# (each at a fixed `%rbp` offset), and a typedef per type name so a debugger
+# script can format values by the name. The assembler builds the line table
+# from `.loc`; `.debug_aranges` maps addresses to the unit.
+let x86_debug_info_sections = (out:int):>void => {
+    let functions:int = vec_new(16)
+    let fi:int = 0
+    loop fi <? vec_len(x86_debug_functions) {
+        let f:int = vec_get(x86_debug_functions fi)
+        if (not x86_have_reachable) or intset_has(x86_reachable_fn_label_ids __load__(f + DF_LABEL_ID)) {
+            vec_push(functions f)
+        }
+        fi = fi + 1
+    }
+    if vec_len(functions) =? 0 { return void }
+    let type_names:int = map_new()      # type key -> typedef index
+    let type_keys:int = vec_new(16)     # index -> a DebugVar with that type and formatter
+    let formatters:int = map_new()      # formatter -> typedef index
+    let formatter_names:int = vec_new(8)
+    fi = 0
+    loop fi <? vec_len(functions) {
+        x86_collect_debug_types(__load__(vec_get(functions fi) + DF_SCOPE) type_names type_keys formatters formatter_names)
+        fi = fi + 1
+    }
+    let has_lines:int = vec_len(x86_source_file_paths) >? 0
+    bb_push_str(out ".section .debug_abbrev,\"\",@progbits\n.Ldebug_abbrev0:\n")
+    bb_push_str(out "    .uleb128 1\n    .uleb128 0x11\n    .byte 1\n")
+    bb_push_str(out "    .uleb128 0x25 ; .uleb128 0x08\n    .uleb128 0x13 ; .uleb128 0x05\n    .uleb128 0x03 ; .uleb128 0x08\n")
+    if has_lines { bb_push_str(out "    .uleb128 0x10 ; .uleb128 0x17\n") }
+    bb_push_str(out "    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .uleb128 2 ; .uleb128 0x24 ; .byte 0\n    .uleb128 0x03 ; .uleb128 0x08\n    .uleb128 0x3e ; .uleb128 0x0b\n    .uleb128 0x0b ; .uleb128 0x0b\n    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .uleb128 3 ; .uleb128 0x16 ; .byte 0\n    .uleb128 0x03 ; .uleb128 0x08\n    .uleb128 0x49 ; .uleb128 0x13\n    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .uleb128 4 ; .uleb128 0x2e ; .byte 1\n    .uleb128 0x03 ; .uleb128 0x08\n    .uleb128 0x11 ; .uleb128 0x01\n    .uleb128 0x12 ; .uleb128 0x07\n    .uleb128 0x40 ; .uleb128 0x18\n    .uleb128 0x3f ; .uleb128 0x19\n    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .uleb128 5 ; .uleb128 0x34 ; .byte 0\n    .uleb128 0x03 ; .uleb128 0x08\n    .uleb128 0x49 ; .uleb128 0x13\n    .uleb128 0x02 ; .uleb128 0x18\n    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .uleb128 6 ; .uleb128 0x0b ; .byte 1\n    .uleb128 0x11 ; .uleb128 0x01\n    .uleb128 0x12 ; .uleb128 0x07\n    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .uleb128 7 ; .uleb128 0x05 ; .byte 0\n    .uleb128 0x03 ; .uleb128 0x08\n    .uleb128 0x49 ; .uleb128 0x13\n    .uleb128 0x02 ; .uleb128 0x18\n    .byte 0 ; .byte 0\n")
+    bb_push_str(out "    .byte 0\n\n")
+    bb_push_str(out ".section .debug_info,\"\",@progbits\n.Ldebug_info0:\n")
+    bb_push_str(out "    .long .Ldebug_info_end - .Ldebug_info_start\n.Ldebug_info_start:\n")
+    bb_push_str(out "    .value 4\n    .long .Ldebug_abbrev0\n    .byte 8\n    .uleb128 1\n")
+    x86_dwarf_string(out "udewy")
+    bb_push_str(out "    .value 0x0c\n")   # DW_LANG_C99: the debuggers' expression parsers are happy with it
+    let unit_name:int = "udewy"
+    if has_lines { unit_name = vec_get(x86_source_file_paths 0) }
+    x86_dwarf_string(out unit_name)
+    if has_lines { bb_push_str(out "    .long .Ldebug_line0\n") }
+    bb_push_str(out ".Ldbg_type_word:\n    .uleb128 2\n")
+    x86_dwarf_string(out "int64")
+    bb_push_str(out "    .byte 5\n    .byte 8\n")   # DW_ATE_signed, 8 bytes
+    let k:int = 0
+    loop k <? vec_len(formatter_names) {
+        x86_push_label_ref(out ".Ldbg_fmt" k ":\n    .uleb128 3\n")
+        x86_dwarf_string(out vec_get(formatter_names k))
+        bb_push_str(out "    .long .Ldbg_type_word - .Ldebug_info0\n")
+        k = k + 1
+    }
+    k = 0
+    loop k <? vec_len(type_keys) {
+        let v:int = vec_get(type_keys k)
+        x86_push_label_ref(out ".Ldbg_type" k ":\n    .uleb128 3\n")
+        x86_dwarf_string(out __load__(v + DV_TYPE))
+        let formatter:int = __load__(v + DV_FORMATTER)
+        if formatter not=? 0 {
+            x86_push_label_ref(out "    .long .Ldbg_fmt" map_get_str(formatters formatter) " - .Ldebug_info0\n")
+        } else {
+            bb_push_str(out "    .long .Ldbg_type_word - .Ldebug_info0\n")
+        }
+        k = k + 1
+    }
+    fi = 0
+    loop fi <? vec_len(functions) {
+        let f:int = vec_get(functions fi)
+        bb_push_str(out "    .uleb128 4\n")
+        x86_dwarf_string(out __load__(f + DF_NAME))
+        bb_push_str(out "    .quad ")
+        bb_push_str(out __load__(f + DF_LABEL))
+        bb_push_str(out "\n    .quad ")
+        bb_push_str(out __load__(f + DF_END))
+        bb_push_str(out " - ")
+        bb_push_str(out __load__(f + DF_LABEL))
+        bb_push_str(out "\n    .uleb128 1\n    .byte 0x56\n")   # DW_OP_reg6: %rbp is the frame base
+        x86_emit_debug_scope(out __load__(f + DF_SCOPE) false type_names)
+        bb_push_str(out "    .byte 0\n")
+        fi = fi + 1
+    }
+    bb_push_str(out "    .byte 0\n.Ldebug_info_end:\n\n")
+    bb_push_str(out ".section .debug_aranges,\"\",@progbits\n")
+    bb_push_str(out "    .long .Ldebug_aranges_end - .Ldebug_aranges_start\n.Ldebug_aranges_start:\n")
+    bb_push_str(out "    .value 2\n    .long .Ldebug_info0\n    .byte 8\n    .byte 0\n    .zero 4\n")
+    fi = 0
+    loop fi <? vec_len(functions) {
+        let f:int = vec_get(functions fi)
+        bb_push_str(out "    .quad ")
+        bb_push_str(out __load__(f + DF_LABEL))
+        bb_push_str(out "\n    .quad ")
+        bb_push_str(out __load__(f + DF_END))
+        bb_push_str(out " - ")
+        bb_push_str(out __load__(f + DF_LABEL))
+        bb_push_byte(out 10)
+        fi = fi + 1
+    }
+    bb_push_str(out "    .quad 0\n    .quad 0\n.Ldebug_aranges_end:\n")
+    if has_lines { bb_push_str(out ".section .debug_line,\"\",@progbits\n.Ldebug_line0:\n") }
+    bb_push_byte(out 10)
+    return void
 }
 
 let x86_arg_reg = (i:int):>int => {
@@ -374,6 +770,23 @@ let x86_set_reachable_functions = (label_ids:int):>void => {
 
 let x86_finish_module = ():>int => {
     let out:int = bb_new(4096)
+    let pf:int = 0
+    loop pf <? vec_len(x86_source_file_paths) {
+        bb_push_str(out ".file ")
+        bb_push_int(out pf + 1)
+        bb_push_str(out " \"")
+        let path:int = vec_get(x86_source_file_paths pf)
+        let pn:int = str_len(path)
+        let pi:int = 0
+        loop pi <? pn {
+            let b:int = __load_u8__(path + pi)
+            if (b =? 92) or (b =? 34) { bb_push_byte(out 92) }
+            bb_push_byte(out b)
+            pi = pi + 1
+        }
+        bb_push_str(out "\"\n")
+        pf = pf + 1
+    }
     bb_push_str(out ".text\n")
     bb_push_str(out ".globl _start\n")
     let externs:int = x86_extern_symbols
@@ -459,6 +872,7 @@ let x86_finish_module = ():>int => {
         di = di + 1
     }
     bb_push_byte(out 10)
+    x86_debug_info_sections(out)
     bb_push_str(out ".section .note.GNU-stack,\"\",@progbits\n")
     bb_push_byte(out 10)
     return bb_finalize_as_string(out)
@@ -501,10 +915,24 @@ let x86_intern_words = (elements_vec:int kinds_vec:int):>int => {
     let label_id:int = x86_next_label
     let label:int = x86_new_label("static")
     intmap_put(x86_static_labels label_id label)
+    # a table of symbols is retained (SHF_GNU_RETAIN) even when nothing in
+    # the program reads it: it may exist for something outside the program
+    # (a debugger's formatters), and the linker would otherwise drop the
+    # table and the functions only it names
+    let has_symbol:int = false
+    let e:int = 0
+    loop e <? vec_len(elements_vec) {
+        if vec_get(kinds_vec e) not=? 1 { has_symbol = true }
+        e = e + 1
+    }
     let bb:int = bb_new(64 + str_len(label))
     bb_push_str(bb ".section .data.")
     bb_push_str(bb label)
-    bb_push_str(bb ",\"aw\",@progbits")
+    if has_symbol {
+        bb_push_str(bb ",\"awR\",@progbits")
+    } else {
+        bb_push_str(bb ",\"aw\",@progbits")
+    }
     vec_push(x86_data bb_finalize_as_string(bb))
     vec_push(x86_data "    .balign 8")
     x86_emit_data_label(label)
@@ -694,6 +1122,20 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
         x86_emit_label_str("__main__")
     }
     x86_emit_label_str(label)
+    let endbb:int = bb_new(str_len(label) + 8)
+    bb_push_str(endbb ".L")
+    bb_push_str(endbb label)
+    bb_push_str(endbb "_end")
+    let f:int = arena_alloc(DF_SIZE)
+    __store__(name f + DF_NAME)
+    __store__(label f + DF_LABEL)
+    __store__(bb_finalize_as_string(endbb) f + DF_END)
+    __store__(x86_debug_scope_new(label __load__(f + DF_END)) f + DF_SCOPE)
+    __store__(label_id f + DF_LABEL_ID)
+    vec_push(x86_debug_functions f)
+    x86_debug_function = f
+    x86_debug_scope = __load__(f + DF_SCOPE)
+    vec_set_len(x86_debug_frames 0)
     x86_emit_indented("pushq %rbp")
     x86_emit_indented("movq %rsp, %rbp")
     x86_frame_subtract_index = vec_len(x86_current_fn_code)
@@ -723,6 +1165,7 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
         i = i + 1
     }
     let ebb:int = bb_new(str_len(label) + 16)
+    bb_push_str(ebb ".L")
     bb_push_str(ebb label)
     bb_push_str(ebb "_epilogue")
     x86_current_fn_epilogue = bb_finalize_as_string(ebb)
@@ -730,6 +1173,7 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
 }
 
 let x86_end_function = ():>void => {
+    x86_end_debug_function()
     let fb:int = x86_frame_bytes()
     let bb:int = bb_new(32)
     bb_push_str(bb "    subq $")
@@ -745,6 +1189,9 @@ let x86_end_function = ():>void => {
     x86_emit_indented("movq %rbp, %rsp")
     x86_emit_indented("popq %rbp")
     x86_emit_indented("ret")
+    if x86_debug_function not=? 0 {
+        x86_emit_label_str(__load__(x86_debug_function + DF_END))
+    }
     x86_current_fn_code = 0
     return void
 }
@@ -1356,6 +1803,11 @@ let x86_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
     else if str_eq(name "__load_u32__")  { x86_load_mem(32 0) }
     else if str_eq(name "__load_u64__")  { x86_load_mem(64 0) }
     else if str_eq(name "__load__")      { x86_load_mem(64 0) }
+    else if str_eq(name "__breakpoint__") {
+        # a debugger attached to the process stops here (SIGTRAP otherwise)
+        x86_emit_indented("int3")
+        x86_push_void()
+    }
     else if str_eq(name "__store_u8__")  { x86_store_mem(8) }
     else if str_eq(name "__store_u16__") { x86_store_mem(16) }
     else if str_eq(name "__store_u32__") { x86_store_mem(32) }
@@ -1544,6 +1996,10 @@ let x86_install_backend = ():>void => {
     be_finish_module = x86_finish_module
     be_set_module_init = x86_set_module_init
     be_set_imported_sources = be_default_set_imported_sources
+    be_mark_location = x86_mark_location
+    be_note_local = x86_note_local
+    be_begin_scope = x86_begin_scope
+    be_end_scope = x86_end_scope
 
     be_intern_string = x86_intern_string
     be_intern_words = x86_intern_words
