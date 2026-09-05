@@ -769,8 +769,13 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     raise unimplemented[0]
                 # a reading rejected for its shape (`f x` read as an index, a
                 # call read as juxtaposition) says nothing; when one reading got
-                # past its shape, its error is the report
-                substantive = [r for r in rejections if not _is_shape_rejection(r)]
+                # past its shape — or every reading that did failed the same way
+                # (`src[i..i+length]` under both bracketings of the `+`) — that
+                # error is the report
+                substantive: list[ReportException] = []
+                for rejection in rejections:
+                    if not _is_shape_rejection(rejection) and all(rejection.report != seen.report for seen in substantive):
+                        substantive.append(rejection)
                 if len(substantive) == 1:
                     raise UserError(substantive[0].report)   # definite, like the summary it replaces
                 reasons = '\n'.join(f'- {r.report.title or r.report.message}' for r in rejections)

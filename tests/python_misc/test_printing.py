@@ -172,3 +172,12 @@ def test_printed_text_is_the_literal_syntax(tmp_path: Path, monkeypatch: pytest.
         '[[x=1 y=2]]',
         'ab',
     ]
+
+
+def test_readings_failing_the_same_way_report_that_error() -> None:
+    # `src[i..i+length]` brackets the `+` two ways; both fail as `int64 + uint64`,
+    # and that is the report, not a summary of the readings
+    with pytest.raises(UserError) as caught:
+        _main('    let src = "hello"  let i:int64 = 1  let length:uint64 = 2  let piece = src[i..i+length]')
+    assert 'no valid interpretation' not in str(caught.value)
+    assert 'no overload takes (`int64`, `uint64`)' in str(caught.value)

@@ -408,7 +408,9 @@ def _strip_casts(node: hir.AST) -> hir.AST:
 
 
 def _sequence_of(node: hir.AST) -> hir.AST | None:
-    """The sequence a `.length` node measures (arrays and strings alike)."""
+    """The sequence a `.length` node measures (arrays and strings alike), through
+    the cast a comparison with a fixed width wraps it in (`i:uint64 <? xs.length`)."""
+    node = _strip_casts(node)
     if isinstance(node, hir.ArrayLength):
         return node.array
     if isinstance(node, hir.StringLength):
@@ -1280,10 +1282,19 @@ class _BoundsValidator:
             return known
         if _is_length_key(binding_id):
             return _known_interval(state, binding_id, self.max_length)   # lengths default to `[0, cap]`
+        declared = self._type_interval(binding_id)
+        return UNKNOWN_INTERVAL if declared is None else declared
+
+    def _type_interval(self, binding_id: int) -> Interval | None:
+        """The range of a binding's fixed width (`[0, 2^64-1]` for a `uint64`), if it has one."""
         binding = self.registry.by_id.get(binding_id)
-        layout = ty.fixed_integer_layout(ty.strip_refinement(binding.type)) if binding is not None and binding.type is not None else None
+        if binding is None:
+            return None
+        # `let i:uint64 = 0` records the initializer's type (`0`) on the binding; the annotation is the width
+        declared = binding.declaration.annotation if isinstance(binding.declaration, hir.Declare) and binding.declaration.annotation is not None else binding.type
+        layout = ty.fixed_integer_layout(ty.strip_refinement(declared)) if declared is not None else None
         if layout is None:
-            return UNKNOWN_INTERVAL
+            return None
         width, signed = layout
         return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
 
@@ -2704,6 +2715,11 @@ class _BoundsValidator:
                     0 if interval.lower is None else interval.lower,
                     self.max_length if interval.upper is None else interval.upper,
                 )
+            else:
+                # nor a variable its width: a `uint64` counter widens to `[0, 2^64-1]`, not `[-∞, ∞]`
+                declared = self._type_interval(binding_id)
+                if declared is not None:
+                    interval = interval.intersect(declared)
             widened[binding_id] = interval
         return widened
 

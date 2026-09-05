@@ -207,7 +207,7 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
     
     src = srcfile.body
     printl"src: {src}"
-    i:int64 = 0
+    i:uint64 = 0
     loop i <? src.length {
         ctx = ctx_stack[end]
         allowed_tokens = contextmap(ctx)
@@ -226,7 +226,7 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
         if matches.length >? 1 err"TODO: handling multiple matches not handled yet: {matches}"
         if matches.length =? 0 err"TODO: no tokens matched this round"
         [length token_cls] = matches[0]
-        token = token_cls[src[i..i+length] Span[i i+length] tokens.length]
+        token = token_cls[src[i..i+length) Span[i i+length] tokens.length]
         printl"matched token {token}"
         tokens.push(token)
         i+=length

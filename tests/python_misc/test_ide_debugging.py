@@ -212,32 +212,52 @@ def test_the_extension_splits_arguments_like_a_shell() -> None:
         assert _split_like_the_extension(line) == shlex.split(line)
 
 
+TOKENIZER = '''let count = (src:string):>uint64 => {
+    let lines:uint64 = 0
+    loop c in src if c =? '\\n' lines += 1
+    return lines
+}
+let main = (argv:array<string>):>uint64 => {
+    if argv.length <? 2 { printl"please specify a file"  return 2 }
+    let src = match p(argv[1]).read_text { s:string => s  _ => { printl"failed to read {argv[1]}"  return 1 } }
+    let lines = count(src)
+    printl"{lines} lines"
+    return 0
+}
+'''
+
+
 @pytest.mark.skipif(which('as') is None or which('ld') is None or which('node') is None or _codelldb() is None, reason='needs the x86_64 toolchain, node, and the CodeLLDB extension')
-def test_the_current_file_with_typed_arguments(tmp_path: Path) -> None:
-    """`Dewy: debug current file with arguments`: the bootstrap tokenizer open in
-    the editor, the file to tokenize typed at the extension's prompt."""
+def test_the_current_file_with_typed_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Dewy: debug current file with arguments`: a program taking a file (the shape
+    of the bootstrap tokenizer) open in the editor, the file typed at the extension's prompt."""
     adapter, liblldb = _codelldb()   # type: ignore[misc]
-    t0 = repo / 'dewy' / 'bootstrap' / 'parser' / 't0.dewy'
+    workspace = tmp_path / 'workspace'
+    program = workspace / 'src' / 'tokenizer.dewy'
+    program.parent.mkdir(parents=True)
+    program.write_text(TOKENIZER)
     tokenized = tmp_path / 'one comment.dewy'
     tokenized.write_text('# just a comment\n')
-    command = _task_command('dewy: build debug', {'workspaceFolder': str(repo), 'file': str(t0)})
+    monkeypatch.chdir(workspace)
+    command = _task_command('dewy: build debug', {'workspaceFolder': str(workspace), 'file': str(program)})
     command[0] = sys.executable if command[0] == 'python' else command[0]
-    built = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=600, env={**os.environ, 'PYTHONPATH': str(repo)})
+    built = subprocess.run(command, cwd=workspace, capture_output=True, text=True, timeout=600, env={**os.environ, 'PYTHONPATH': str(repo)})
     assert built.returncode == 0, built.stderr
     configuration = _launch_configuration('Dewy: debug current file with arguments', {
-        'workspaceFolder': str(repo), 'relativeFileDirname': 'dewy/bootstrap/parser', 'fileBasenameNoExtension': 't0',
+        'workspaceFolder': str(workspace), 'relativeFileDirname': 'src', 'fileBasenameNoExtension': 'tokenizer',
         'dewy.programArguments': f'"{tokenized}"'})                                        # typed with quotes: the path has a space
-    assert Path(configuration['program']) == Path(built.stdout.strip().splitlines()[-1]).resolve()
+    configuration['initCommands'] = [command.replace(str(workspace) + '/tools', str(repo / 'tools')) for command in configuration['initCommands']]
+    assert Path(configuration['program']) == (workspace / built.stdout.strip().splitlines()[-1]).resolve()
     configuration['args'] = _split_like_the_extension(configuration['args'])
     assert configuration['args'] == [str(tokenized)]
-    line = next(number for number, text in enumerate(t0.read_text().splitlines(), 1) if text.strip().startswith('matches.sort('))
+    line = next(number for number, text in enumerate(TOKENIZER.splitlines(), 1) if text.strip().startswith('let lines = count('))
     session = _Session(adapter, liblldb)
     try:
         session.send('initialize', {'adapterID': 'lldb', 'linesStartAt1': True, 'columnsStartAt1': True, 'pathFormat': 'path'})
         session.wait(command='initialize')
         session.send('launch', configuration)
         session.wait(event='initialized')
-        session.send('setBreakpoints', {'source': {'path': str(t0)}, 'breakpoints': [{'line': line}]})
+        session.send('setBreakpoints', {'source': {'path': str(program)}, 'breakpoints': [{'line': line}]})
         assert session.wait(command='setBreakpoints')['body']['breakpoints'][0]['verified']
         session.send('configurationDone')
         assert session.wait(event='stopped')['body']['reason'] == 'breakpoint'
@@ -245,12 +265,12 @@ def test_the_current_file_with_typed_arguments(tmp_path: Path) -> None:
         thread = session.wait(command='threads')['body']['threads'][0]['id']
         session.send('stackTrace', {'threadId': thread})
         frames = session.wait(command='stackTrace')['body']['stackFrames']
-        assert (frames[0]['name'], frames[0]['line']) == ('tokenize', line)
+        assert (frames[0]['name'], frames[0]['line']) == ('__dewy_user_main', line)
         session.send('scopes', {'frameId': frames[0]['id']})
         locals_scope = next(scope for scope in session.wait(command='scopes')['body']['scopes'] if scope['name'] == 'Local')
         session.send('variables', {'variablesReference': locals_scope['variablesReference']})
         shown = {variable['name']: variable['value'] for variable in session.wait(command='variables')['body']['variables']}
         assert shown['src'] == '"# just a comment\\n"'
-        assert shown['matches'] == '[[length=17 token_cls=LineComment]]'
+        assert shown['argv'] == f'[{json.dumps(configuration["program"])} {json.dumps(str(tokenized))}]'
     finally:
         session.close()

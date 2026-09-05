@@ -690,3 +690,28 @@ let f = ():>int64 => {
     return 0
 }
 """)
+
+
+def test_a_loop_carried_counter_keeps_its_declared_width() -> None:
+    # widening `i += length` forgets the counter's growth, not its width: a `uint64`
+    # starts at 0 wherever the analysis lost track of it (the binding itself records
+    # the initializer's literal type), so `src[i..]` under `i <? src.length` proves
+    program = '''
+let eat = (src:string):>uint64? => if src.length >? 0 1 else none
+let f = (src:string):>uint64 => {
+    let i:uint64 = 0
+    loop i <? src.length {
+        let length = eat(src[i..])
+        if length is? none break
+        i += length
+    }
+    return i
+}
+'''
+    _check(program)
+    with pytest.raises(UserError, match='not proven in bounds'):   # the end still needs its own fact
+        _check(program.replace('i += length', 'let piece = src[i..i+length)  i += length'))
+    _check(program.replace('i += length', 'let stop = i + length  if stop >? src.length break  let piece = src[i..stop)  i = stop'))
+    # and `i <? bytes.length` is the index fact for `bytes[i]` although the comparison
+    # casts the length to the counter's width
+    _check('let f = (bytes:array<uint8>):>int64 => { let n:int64 = 0  let i:uint64 = 0  loop i <? bytes.length { if bytes[i] =? 10 { n += 1 }  i += 1 }  return n }')

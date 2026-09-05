@@ -35,10 +35,10 @@ if $target in? ["x86_64" "riscv" "arm" "c"] {
 }
 
 let Span:type = [
-    start:int64
-    stop:int64 = start
+    start:uint64
+    stop:uint64 = start
     is_zero_width = () => start >=? stop
-    contains = (offset:int64):>bool => start <=? offset and offset <? stop
+    contains = (offset:uint64):>bool => start <=? offset and offset <? stop
 ]
 
 let Pointer:type = [span:Span message:string]
@@ -118,7 +118,7 @@ let SrcFile:type = [
     line_count = ():>int64 => {
         let bytes:array<uint8> = body as array<uint8>
         let count:int64 = 1
-        let i:int64 = 0
+        let i:uint64 = 0
         loop i <? bytes.length {
             if bytes[i] =? 10 { count += 1 }
             i += 1
@@ -126,10 +126,10 @@ let SrcFile:type = [
         return count
     }
     # the byte offset where `line` starts
-    line_start = (line:int64):>int64 => {
+    line_start = (line:int64):>uint64 => {
         let bytes:array<uint8> = body as array<uint8>
         let current:int64 = 0
-        let i:int64 = 0
+        let i:uint64 = 0
         loop i <? bytes.length {
             if current =? line { return i }
             if bytes[i] =? 10 { current += 1 }
@@ -138,22 +138,21 @@ let SrcFile:type = [
         return bytes.length
     }
     # one past the last byte of `line`, excluding its newline
-    line_end = (line:int64):>int64 => {
+    line_end = (line:int64):>uint64 => {
         let bytes:array<uint8> = body as array<uint8>
-        let i:int64 = line_start(line)
-        if i <? 0 { i = 0 }
+        let i:uint64 = line_start(line)
         loop i <? bytes.length {
             if bytes[i] =? 10 { return i }
             i += 1
         }
         return bytes.length
     }
-    line_of = (offset:int64):>int64 => {
+    line_of = (offset:uint64):>int64 => {
         let bytes:array<uint8> = body as array<uint8>
         let line:int64 = 0
-        let i:int64 = 0
+        let i:uint64 = 0
         loop i <? offset {
-            if i >=? 0 and i <? bytes.length {
+            if i <? bytes.length {
                 if bytes[i] =? 10 { line += 1 }
             }
             i += 1
@@ -161,12 +160,12 @@ let SrcFile:type = [
         return line
     }
     # characters (UTF-8 lead bytes) in bytes[first, stop)
-    chars_between = (first:int64 stop:int64):>int64 => {
+    chars_between = (first:uint64 stop:uint64):>int64 => {
         let bytes:array<uint8> = body as array<uint8>
         let count:int64 = 0
-        let i:int64 = first
+        let i:uint64 = first
         loop i <? stop {
-            if i >=? 0 and i <? bytes.length {
+            if i <? bytes.length {
                 if not _is_continuation_byte(bytes[i]) { count += 1 }
             }
             i += 1
@@ -174,15 +173,15 @@ let SrcFile:type = [
         return count
     }
     # 1-based column of a byte offset within its line
-    column_of = (offset:int64):>int64 => 1 + chars_between(line_start(line_of(offset)) offset)
+    column_of = (offset:uint64):>int64 => 1 + chars_between(line_start(line_of(offset)) offset)
     # the bytes of `line`, greying out the dimmed spans
     write_line = (line:int64 dimmed:array<Span> theme:Theme) => {
         let bytes:array<uint8> = body as array<uint8>
         let dimming:bool = false
-        let i:int64 = line_start(line)
-        let stop:int64 = line_end(line)
+        let i:uint64 = line_start(line)
+        let stop:uint64 = line_end(line)
         loop i <? stop {
-            if i >=? 0 and i <? bytes.length {
+            if i <? bytes.length {
                 let dim:bool = false
                 loop span in dimmed { if span.contains(i) { dim = true } }
                 if dim and not dimming { theme.paint(theme.dim_color) }
@@ -215,8 +214,8 @@ let Report:type = [
     notes:array<string> = []
 
     describe = (text:string) => { message = text }
-    point = (start:int64 stop:int64 text:string) => { pointers.push(Pointer(Span(start stop) text)) }
-    dim = (start:int64 stop:int64) => { dimmed.push(Span(start stop)) }
+    point = (start:uint64 stop:uint64 text:string) => { pointers.push(Pointer(Span(start stop) text)) }
+    dim = (start:uint64 stop:uint64) => { dimmed.push(Span(start stop)) }
     note = (text:string) => { notes.push(text) }
     help = (text:string) => { hint = text }
 
@@ -228,13 +227,13 @@ let Report:type = [
     # the pointers on `line`, with their columns
     segments_on = (line:int64 src:SrcFile):>array<Segment> => {
         let segments:array<Segment> = []
-        let line_begin:int64 = src.line_start(line)
-        let line_stop:int64 = src.line_end(line)
+        let line_begin:uint64 = src.line_start(line)
+        let line_stop:uint64 = src.line_end(line)
         let index:int64 = 0
         loop index <? pointers.length {
             let p:Pointer = pointers[index]
             if src.line_of(p.span.start) =? line {
-                let stop:int64 = p.span.stop
+                let stop:uint64 = p.span.stop
                 if stop >? line_stop { stop = line_stop }
                 let start_col:int64 = src.chars_between(line_begin p.span.start)
                 if stop <=? p.span.start {
@@ -410,7 +409,7 @@ let Report:type = [
         }
 
         # the header points at the earliest pointer
-        let first_offset:int64 = pointers[0].span.start
+        let first_offset:uint64 = pointers[0].span.start
         let first_line:int64 = src.line_of(first_offset)
         let last_line:int64 = first_line
         loop p in pointers {
@@ -473,15 +472,15 @@ let Report:type = [
 # ---- the report of a failed `$runtime_assert` or `$expect` (the compiler emits the calls) ----
 # The condition is the pointer, its message the pointer text, and the
 # `, message` tail of the source (up to `dim_stop`) is greyed out.
-let _condition_report = (title:string start:int64 stop:int64 dim_stop:int64 message:string):>Report => {
+let _condition_report = (title:string start:uint64 stop:uint64 dim_stop:uint64 message:string):>Report => {
     let report = Report("error" title)
     report.point(start stop message)
     if dim_stop >? stop { report.dim(stop dim_stop) }
     return report
 }
 
-let _assertion_report = (start:int64 stop:int64 dim_stop:int64 message:string):>Report => _condition_report("assertion failed" start stop dim_stop message)
-let _expectation_report = (start:int64 stop:int64 dim_stop:int64 message:string):>Report => _condition_report("expectation failed" start stop dim_stop message)
+let _assertion_report = (start:uint64 stop:uint64 dim_stop:uint64 message:string):>Report => _condition_report("assertion failed" start stop dim_stop message)
+let _expectation_report = (start:uint64 stop:uint64 dim_stop:uint64 message:string):>Report => _condition_report("expectation failed" start stop dim_stop message)
 
 let _assertion_note = (@report:Report text:string):>void => {
     report.note(text)
