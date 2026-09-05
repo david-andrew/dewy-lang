@@ -104,3 +104,96 @@ let count = (s:string):>int64 => {
     _check(program)
     with pytest.raises(UserError, match='cannot prove fact'):   # an implementation that does not establish the slot's promise
         _check(program.replace("    matches = (src:string):>bool => src.length >=? 2 and src[0] not=? src[1]\n", "    matches = (src:string):>bool => src.length >=? 1\n"))
+
+
+def test_a_type_test_written_as_two_returns_proves_both_arms() -> None:
+    family = 'let Tok:type = $abstract type of any & [text:string]\nlet Word = type of Tok & []\nlet Space = type of Tok & []\n'
+    # the fall-through after `if tok is? Word return true` remembers the exclusion (`Tok & ~Word` is not a type)
+    _check(family + 'let is_word = (tok:Tok):> tok is? Word => { if tok is? Word return true  return false }\n')
+    _check(family + 'let not_space = (tok:Tok):> tok isnt? Space => { if tok is? Space { return false }  return true }\n')
+    with pytest.raises(UserError, match='cannot prove type fact'):   # not a Space is not necessarily a Word
+        _check(family + 'let wrong = (tok:Tok):> tok is? Word => { if tok is? Space return false  return true }\n')
+
+
+def test_a_fact_on_a_local_names_a_binding_in_scope() -> None:
+    program = '''let main = ():>int64 => {
+    let src = "hello"
+    let n:uint64<v => v <=? src.length> = 3     # proven: `src` is 5 long
+    let piece = src[0..n)                        # the fact
+    n = 5                                        # re-proven on assignment, the fact re-established
+    let all = src[0..n)
+    return 0
+}
+'''
+    _check(program)
+    with pytest.raises(UserError, match='cannot prove refinement'):
+        _check(program.replace('n = 5', 'n = 6'))
+    with pytest.raises(UserError, match='fact names a binding that is reassigned'):
+        _check(program.replace('let src = "hello"', 'let src:string = "hello"').replace('n = 5', 'src = "hi"'))
+    with pytest.raises(UserError, match='fact names an unknown binding'):
+        _check('let main = ():>int64 => { let n:uint64<v => v <=? text.length> = 3  return 0 }\n')
+
+
+def test_a_parameter_fact_may_name_a_sibling_parameter() -> None:
+    take = 'let take = (src:string n:uint64<v => v <=? src.length>):>string => src[0..n)\n'   # `n` is in bounds by contract
+    _check(take + 'let main = ():>int64 => { let text:string = "world!"  let k:uint64 = 9  if k <=? text.length { let h = take(text k) }  return 0 }\n')
+    with pytest.raises(UserError, match='cannot prove refinement'):   # nothing bounds `k` by `text`
+        _check(take + 'let main = ():>int64 => { let text:string = "world!"  let k:uint64 = 9  let h = take(text k)  return 0 }\n')
+    with pytest.raises(UserError, match='cannot prove refinement'):   # a term needs a binding to name
+        _check(take + 'let main = ():>int64 => { let k:uint64 = 2  let h = take("abc" k)  return 0 }\n')
+
+
+def test_a_refined_local_is_rechecked_on_assignment() -> None:
+    with pytest.raises(TypeCheckError, match='refinement refuted'):   # was silently accepted before
+        _check('let main = ():>int64 => { let x:int64<i => i >? 0> = 1  x = -5  return x }\n')
+
+
+def test_a_loop_keeps_its_counter_within_the_length_at_its_exit() -> None:
+    scan = 'let f = (src:string):>uint64<n => n <=? src.length> => { let i:uint64 = 0  loop i <? src.length { i += STEP }  return i }\n'
+    _check(scan.replace('STEP', '1'))          # `i <= src.length` from the entry (`i = 0`) through every step
+    with pytest.raises(UserError, match='cannot prove refinement'):
+        _check(scan.replace('STEP', '2'))
+
+
+def test_facts_about_a_parameters_value_and_between_parameters() -> None:
+    program = '''let positive = (n:int64):> true & <n >? 0> | false => n >? 0
+let ordered = (a:uint64 b:uint64) => a <=? b                       # inferred: `a <=? b` / `a >? b`
+let main = ():>int64 => {
+    let x:int64 = 7
+    if positive(x) { let p:int64<i => i >? 0> = x }               # the fact narrows the argument
+    let a:uint64 = 2
+    let b:uint64 = 5
+    if ordered(a b) { let w:uint64 = b - a }                       # `b - a` fits: `a <= b`
+    return 0
+}
+'''
+    _check(program)
+    assert type_to_dewy(_function_type(program, 'ordered').ret) == 'true & <a <=? b> | false & <a >? b>'
+    with pytest.raises(UserError, match='cannot prove fact'):
+        _check(program.replace('=> n >? 0', '=> n >=? 0'))
+    with pytest.raises(UserError, match='cannot prove fact'):
+        _check('let ordered = (a:uint64 b:uint64):> true & <a <=? b> | false => a >=? b\n')
+
+
+def test_length_bounds_in_both_directions_and_windows() -> None:
+    program = '''let at_least = (src:string):>uint64<n => n >=? src.length> => src.length + 2
+let exactly = (src:string):>uint64<n => n =? src.length> => src.length
+let take = (src:string):>uint64<n => n <=? src.length> => if src.length >? 3 3 else src.length
+let f = (text:string i:uint64 j:uint64):>uint64 => {
+    let n = at_least(text)
+    let m = exactly(text)
+    let whole = text[0..m)                       # exact: the whole text
+    if i <=? j and j <? text.length {
+        let k = take(text[i..j))                 # k <= j - i
+        let piece = text[i..i+k)                 # i + k <= j <= text.length
+        let l = take(text[i..j])                 # l <= j - i + 1
+        return piece.length
+    }
+    return n
+}
+'''
+    _check(program)
+    with pytest.raises(UserError, match='cannot prove refinement'):
+        _check(program.replace('=> src.length + 2', '=> src.length - 1'))
+    with pytest.raises(UserError, match='string slice is not proven in bounds'):
+        _check(program.replace('let piece = text[i..i+k)', 'let piece = text[i..i+k+2)'))   # `i + k + 1 <= j + 1 <= text.length` would still hold

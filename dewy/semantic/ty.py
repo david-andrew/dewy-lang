@@ -667,6 +667,8 @@ class Proposition:
     """The binding the term names, once resolved (a function literal resolves
     its result refinement's terms to its parameters); not part of identity,
     so a slot's contract and its implementation's agree."""
+    term_of: str = 'length'
+    """What of the term is the bound: its `'length'` (`n <=? src.length`) or its `'value'` (`a <=? b`)."""
     type_: 'TypeExpr | None' = None
     """For `is?`/`isnt?` facts: the type tested."""
     when: bool | None = None
@@ -688,7 +690,9 @@ class Proposition:
         if self.type_ is not None:
             from .hir_display import type_to_dewy
             return type_to_dewy(self.type_)
-        return f'{self.term}.length' if self.term is not None else str(self.value)
+        if self.term is not None:
+            return f'{self.term}.length' if self.term_of == 'length' else self.term
+        return str(self.value)
 
     @property
     def subject_text(self) -> str:
@@ -702,7 +706,7 @@ class Proposition:
     def negated(self) -> 'Proposition':
         """The fact that holds when this one does not (`is?` ↔ `isnt?`, `<=?` ↔ `>?`)."""
         flipped = {'is?': 'isnt?', 'isnt?': 'is?', '=?': 'not=?', 'not=?': '=?', '<?': '>=?', '>=?': '<?', '<=?': '>?', '>?': '<=?'}[self.op]
-        return Proposition(self.subject, flipped, self.value, self.of, self.term, self.term_id, self.type_, None if self.when is None else not self.when, self.subject_id)
+        return Proposition(self.subject, flipped, self.value, self.of, self.term, self.term_id, self.term_of, self.type_, None if self.when is None else not self.when, self.subject_id)
 
     @property
     def field(self) -> str | None:

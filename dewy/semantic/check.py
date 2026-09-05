@@ -1321,6 +1321,7 @@ def _tcr_annotated_declaration(
     """`let name:T = value` (and the keyword-less `name:T = value`)."""
     # decl assign + type annotation: check the expression against the annotation
     annotation = _value_type(ast_to_type(typeexpr, ctx=replace(ctx, refinement_subject=name)), loc=typeexpr.loc, ctx=ctx)
+    annotation = _resolve_scope_terms(annotation, ctx=ctx, loc=typeexpr.loc)
     refined_annotation = annotation if isinstance(annotation, ty.RefinedType) else None
     annotation = ty.strip_refinement(annotation)
     if annotation == ty.TYPE_TYPE:
@@ -1625,6 +1626,13 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         if declared is not None:
             target = replace(target, type=declared.type)
     store_expected = _field_expectation(declared) if isinstance(target, hir.MemberAccess) and declared is not None else target.type
+    if isinstance(target, hir.ExpressedIdentifier) and target.binding_id is not None:
+        # a refined binding (`let x:int64<i => i >? 0>`, `n:uint64<v => v <=? src.length>`)
+        # accepts only values proven against its refinement, at every assignment
+        binding = ctx.binding_registry.by_id.get(target.binding_id)
+        declaration_annotation = binding.declaration.annotation if binding is not None and isinstance(binding.declaration, hir.Declare) else None
+        if isinstance(declaration_annotation, ty.RefinedType):
+            store_expected = declaration_annotation
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=ty.strip_refinement(store_expected))
     value = check_against(value, store_expected, ctx=ctx)
     if isinstance(target, hir.Index):
@@ -1654,6 +1662,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         not_implemented(ctx.srcfile, ast.loc, 'reassigning a range value')
     if target.binding_id is not None:
         ctx.refinements.pop(target.binding_id, None)
+        ctx.refinements.pop(_exclusion_key(target.binding_id), None)
         ctx.length_bounds.pop(target.binding_id, None)
         _invalidate_routes(target.binding_id, ctx=ctx)
         _drop_key_facts(ctx, dictionary_id=target.binding_id)
@@ -1702,6 +1711,7 @@ def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = 
     """Drop length facts of the member routes under a reassigned binding or field."""
     for route_id in ctx.binding_registry.routes_under(root_id, prefix):
         ctx.refinements.pop(route_id, None)
+        ctx.refinements.pop(_exclusion_key(route_id), None)
         ctx.length_bounds.pop(route_id, None)
         _drop_key_facts(ctx, dictionary_id=route_id)
     if not prefix:
@@ -3128,6 +3138,36 @@ def _disjoint_types(a: ty.TypeExpr, b: ty.TypeExpr, *, ctx: Context) -> bool:
     return all(disjoint(x, y) for x in members(a) for y in members(b))
 
 
+def _exclusion_key(fact_id: int) -> int:
+    """Exclusions ride in `refinements` under the negated id: `-id -> ~Excluded`.
+    A failed `tok is? Word` on a family that has no type for "a Tok that is
+    not a Word" is remembered this way (joined, forked, reset, and dropped on
+    assignment along with the refinements, since it is one)."""
+    return -fact_id - 1
+
+
+def _record_exclusion(refinements: dict[int, ty.Type], fact_id: int, excluded: ty.TypeExpr) -> None:
+    key = _exclusion_key(fact_id)
+    previous = refinements.get(key)
+    items = [*(previous.items if isinstance(previous, ty.TypeAnd) else [previous] if previous is not None else []), ty.TypeNot(excluded)]
+    refinements[key] = items[0] if len(items) == 1 else ty.TypeAnd(items)
+
+
+def _excluded(fact_id: int, test: ty.TypeExpr, *, ctx: Context) -> bool:
+    """Whether the facts exclude `test` for the binding: every path recorded an exclusion it is within."""
+    recorded = ctx.refinements.get(_exclusion_key(fact_id))
+    if recorded is None:
+        return False
+    # one path: `~A` or `~A & ~B`; joined paths: `(~A) | (~B & ~C)` — excluded when every alternative excludes it
+    alternatives = recorded.items if isinstance(recorded, ty.TypeOr) else [recorded]
+
+    def excludes(alternative: ty.Type) -> bool:
+        nots = alternative.items if isinstance(alternative, ty.TypeAnd) else [alternative]
+        return any(isinstance(item, ty.TypeNot) and ctx.type_system.is_subtype(test, item.type) for item in nots)
+
+    return all(excludes(alternative) for alternative in alternatives)
+
+
 def _refine_type_test(
     current: ty.Type,
     test: ty.TypeExpr,
@@ -3287,6 +3327,8 @@ def _refine_condition_context(
                 if fact_id is not None:
                     current = refinements.get(fact_id, argument.type)
                     refinements[fact_id] = _refine_type_test(current, proposition.type_, matches=proposition.op == 'is?', ctx=ctx)
+                    if proposition.op == 'isnt?':
+                        _record_exclusion(refinements, fact_id, proposition.type_)
         return replace(ctx, refinements=refinements, key_facts=key_facts)
     if isinstance(condition, hir.TypeTest):
         value = condition.value
@@ -3304,6 +3346,8 @@ def _refine_condition_context(
                 matches=truth != condition.negated,
                 ctx=ctx,
             )
+            if truth == condition.negated:
+                _record_exclusion(refinements, fact_id, condition.test_type)   # `isnt? Word` held: a Tok that is not a Word
         return replace(ctx, refinements=refinements, key_facts=key_facts)
     length_fact = _length_bound_fact(condition, truth, ctx=ctx)
     if length_fact is not None:
@@ -4561,8 +4605,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     *ctx.binding_registry.routes_under(mutated_binding.id),
                 ]
                 for invalidated_id in invalidated:
-                    ctx.refinements.pop(invalidated_id, None)
-                    body_ctx.refinements.pop(invalidated_id, None)
+                    for key in (invalidated_id, _exclusion_key(invalidated_id)):
+                        ctx.refinements.pop(key, None)
+                        body_ctx.refinements.pop(key, None)
                     ctx.length_bounds.pop(invalidated_id, None)
                     body_ctx.length_bounds.pop(invalidated_id, None)
                     _drop_key_facts(ctx, dictionary_id=invalidated_id)
@@ -9941,6 +9986,8 @@ def _dispatch_builtin(
     expected: ty.Type | None = None,
 ) -> hir.AST:
     """Resolve a builtin dunder call and apply any selected promotions."""
+    if expected is not None:
+        expected = ty.strip_result_refinement(expected)   # the operator computes the base type; the facts are the return's to prove
     arg_types = [
         require_valued(
             arg.type,
@@ -11643,7 +11690,11 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # refinement, and every return proves it; a length term names the
     # implementation's parameter in the slot's position
     rettype = _adopt_result_refinement(rettype, expected, pos_or_kw_args, ctx=ctx, loc=rettype_loc or binop.loc)
-    rettype = _resolve_result_terms(rettype, {param.name: param.binding_id for param in [*pos_or_kw_args, *kw_only_args] if param.binding_id is not None}, ctx=ctx, loc=rettype_loc or binop.loc)
+    param_ids = {param.name: param.binding_id for param in [*pos_or_kw_args, *kw_only_args] if param.binding_id is not None}
+    rettype = _resolve_result_terms(rettype, param_ids, ctx=ctx, loc=rettype_loc or binop.loc)
+    # a parameter's facts may name its siblings (`(src:string n:uint64<v => v <=? src.length>)`)
+    pos_or_kw_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in pos_or_kw_args]
+    kw_only_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in kw_only_args]
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
     catcher = Catcher(expected=annotated)
     function_boundary_labels = dict(ctx.function_boundary_labels)
@@ -11752,13 +11803,21 @@ def _inferred_predicate(body: hir.AST, params: dict[int, str], *, ctx: Context) 
             sequence = side.array if isinstance(side, hir.ArrayLength) else side.string if isinstance(side, hir.StringLength) else None
             return sequence.binding_id if isinstance(sequence, hir.ExpressedIdentifier) and sequence.binding_id in params else None
 
+        def value_param(side: hir.AST) -> int | None:
+            return side.binding_id if isinstance(side, hir.ExpressedIdentifier) and side.binding_id in params else None
+
         left_param, right_param = measured_param(left), measured_param(right)
-        if op in ('<?', '<=?') and left_param is not None and right_param is not None:
+        left_value, right_value = value_param(left), value_param(right)
+        if op is not None and op != 'not=?' and left_param is not None and right_param is not None:
             fact = ty.Proposition(f'@{params[left_param]}', op, 0, of='length', term=params[right_param], term_id=right_param, subject_id=left_param)
-        elif op in ('>?', '>=?') and left_param is not None and right_param is not None:
-            fact = ty.Proposition(f'@{params[right_param]}', {'>?': '<?', '>=?': '<=?'}[op], 0, of='length', term=params[left_param], term_id=left_param, subject_id=right_param)
         elif op is not None and left_param is not None and (constant := _constant_integer(right, ctx=ctx)) is not None:
             fact = ty.Proposition(f'@{params[left_param]}', op, constant, of='length', subject_id=left_param)
+        elif op is not None and op != 'not=?' and left_value is not None and right_value is not None:
+            fact = ty.Proposition(f'@{params[left_value]}', op, 0, term=params[right_value], term_id=right_value, term_of='value', subject_id=left_value)
+        elif op is not None and left_value is not None and (constant := _constant_integer(right, ctx=ctx)) is not None:
+            fact = ty.Proposition(f'@{params[left_value]}', op, constant, subject_id=left_value)
+        elif op is not None and right_value is not None and (constant := _constant_integer(left, ctx=ctx)) is not None:
+            fact = ty.Proposition(f'@{params[right_value]}', {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op), constant, subject_id=right_value)
     if fact is None:
         return None
     return _refined('bool', [replace(fact, when=True), replace(fact.negated(), when=False)])
@@ -11812,6 +11871,54 @@ def _adopt_result_refinement(rettype: ty.Type, expected: ty.Type | None, params:
     return contract_members.get(rettype, rettype)
 
 
+def _parameter_type_at_call(param_type: ty.Type, arguments: dict[str, hir.AST]) -> ty.Type:
+    """A parameter's type as an obligation on its argument: a fact naming a
+    sibling parameter (`n:uint64<v => v <=? src.length>`) names the argument
+    passed for it — a binding's id, or nothing provable when the argument is
+    not a binding."""
+    if not _refined_members(param_type):
+        return param_type
+
+    def substituted(refined: ty.RefinedType) -> ty.RefinedType:
+        propositions = []
+        for proposition in refined.propositions:
+            if proposition.term is not None:
+                argument = arguments.get(proposition.term)
+                argument = _strip_obligations(argument) if argument is not None else None
+                term_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) and argument.binding_id is not None else None
+                proposition = replace(proposition, term_id=term_id if term_id is not None else _UNPROVABLE_TERM)
+            propositions.append(proposition)
+        return ty.RefinedType(refined.base, tuple(propositions))
+
+    return _map_result_type(param_type, substituted)
+
+
+_UNPROVABLE_TERM = -1   # a term whose argument is not a binding: the obligation cannot be discharged
+
+
+def _resolve_scope_terms(annotation: ty.Type, *, ctx: Context, loc: Span) -> ty.Type:
+    """`let n:uint64<v => v <=? src.length> = …`: a fact on a local's annotation
+    names a binding in scope; the analysis holds the fact while neither is
+    reassigned (it rejects a term that the function assigns)."""
+    if not _refined_members(annotation):
+        return annotation
+
+    def resolved(refined: ty.RefinedType) -> ty.RefinedType:
+        propositions = []
+        for proposition in refined.propositions:
+            if proposition.term is not None and proposition.term_id is None:
+                binding = ctx.binding_scopes.get(proposition.term)
+                if binding is None or binding.kind not in ('value', 'param'):
+                    user_error(ctx.srcfile, 'fact names an unknown binding', Pointer(span=loc, message=f'`{proposition.term}.length` — no value binding `{proposition.term}` is in scope'))
+                proposition = replace(proposition, term_id=binding.id)
+            if proposition.param is not None and proposition.subject_id is None:
+                not_implemented(ctx.srcfile, loc, f'a fact about `{proposition.param}` on a declaration (facts about other bindings here are length bounds on the value)')
+            propositions.append(proposition)
+        return ty.RefinedType(refined.base, tuple(propositions))
+
+    return _map_result_type(annotation, resolved)
+
+
 def _resolve_result_terms(rettype: ty.Type, params: dict[str, int], *, ctx: Context, loc: Span) -> ty.Type:
     """Resolve the length terms of a result refinement to the literal's parameters."""
     if not _refined_members(rettype):
@@ -11824,8 +11931,8 @@ def _resolve_result_terms(rettype: ty.Type, params: dict[str, int], *, ctx: Cont
                 if proposition.term not in params:
                     user_error(
                         ctx.srcfile,
-                        'fact names a length that is not a parameter',
-                        Pointer(span=loc, message=f'`{proposition.term}.length` — a result\'s facts may only speak of the function\'s own parameters'),
+                        'fact names a length that is not a parameter' if proposition.term_of == 'length' else 'fact names something that is not a parameter',
+                        Pointer(span=loc, message=f'`{proposition.bound_text}` — a result\'s facts may only speak of the function\'s own parameters'),
                     )
                 proposition = replace(proposition, term_id=params[proposition.term])
             if proposition.param is not None:
@@ -12134,9 +12241,14 @@ def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx
             return ty.Proposition(subject_placeholder, op, value, of=of)
         term = _refinement_term_ast(node)
         if term is not None and term != subject_name:
-            if op not in ('<?', '<=?'):
-                not_implemented(ctx.srcfile, node.loc, 'a length term as a lower bound or an equality (`>=? src.length`)')
+            if op == 'not=?':
+                not_implemented(ctx.srcfile, node.loc, 'a length term in an inequality (`not=? src.length`)')
             return ty.Proposition(subject_placeholder, op, 0, of=of, term=term)
+        if (name := identifier(node)) is not None and name != subject_name and name != 'length':
+            # `a <=? b` between two names: a value term (bound as a parameter afterwards)
+            if op == 'not=?':
+                not_implemented(ctx.srcfile, node.loc, 'a value term in an inequality (`not=? b`)')
+            return ty.Proposition(subject_placeholder, op, 0, of=of, term=name, term_of='value')
         not_implemented(ctx.srcfile, node.loc, 'refinement conditions beyond integer literals, fixed-width `min`/`max`, and a binding\'s `.length`')
 
     left_subject = subject_of(ast.left)
@@ -12331,9 +12443,10 @@ def _bind_fact_subjects(base: ty.Type, propositions: list[ty.Proposition], *, lo
     an integer)."""
     bound: list[ty.Proposition] = []
     for proposition in propositions:
-        if (field_name := proposition.field) is not None and '.' not in field_name and (proposition.of == 'length' or proposition.type_ is not None):
-            # (a fact comparing a parameter's *value* is not supported yet, so a
-            # bare name compared as a value stays a field — and errors as one)
+        if (field_name := proposition.field) is not None and '.' not in field_name and (proposition.of == 'length' or proposition.type_ is not None or base == 'bool' or proposition.term is not None):
+            # (a bare name compared as a value on a non-boolean type stays a
+            # field — `Ratio<width >? 0>` errors as a missing field, not as a
+            # parameter; on `true & <n >? 0>` there are no fields to mean)
             unfolded = ty.unfold(_union_object_member(ty.strip_refinement(base)))
             if not (isinstance(unfolded, ty.ObjectType) and unfolded.field(field_name) is not None):
                 bound.append(replace(proposition, subject=f'@{field_name}'))
@@ -12346,9 +12459,7 @@ def _bind_fact_subjects(base: ty.Type, propositions: list[ty.Proposition], *, lo
 def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition], *, loc: Span, ctx: Context) -> None:
     for proposition in propositions:
         if proposition.param is not None:
-            if proposition.type_ is not None or proposition.of == 'length' or proposition.term is not None:
-                continue
-            not_implemented(ctx.srcfile, loc, f'a fact comparing the value of `{proposition.param}` (facts about parameters are type tests and length bounds so far)')
+            continue   # about a parameter: resolved and checked where the function binds its parameters
         if proposition.type_ is not None:
             if proposition.subject == 'self':
                 not_implemented(ctx.srcfile, loc, 'a type fact about the value itself (write the type)')
@@ -12505,7 +12616,7 @@ def _prove_type_fact(node: hir.AST, proposition: ty.Proposition, *, ctx: Context
             current = binding.type if binding is not None else None
         holds = current is not None and (
             ctx.type_system.is_subtype(current, proposition.type_) if proposition.op == 'is?'
-            else _disjoint_types(current, proposition.type_, ctx=ctx)
+            else _disjoint_types(current, proposition.type_, ctx=ctx) or _excluded(proposition.subject_id, proposition.type_, ctx=refined_ctx)
         )
         if not holds:
             user_error(
@@ -12523,13 +12634,27 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
     `hir.Obligation` for the bounds analysis, which proves it from intervals,
     guards, and length facts — or reports it, like `$assert`.
     """
+    if isinstance(node, hir.Obligation) and node.refined == refined:
+        # already deferred once (arguments are checked at parsing and again at
+        # dispatch): keep the obligation, with the better-resolved terms (the
+        # dispatch substitutes a sibling parameter's term with the argument)
+        resolved = tuple(
+            new if (new.term_id is not None and new.term_id >= 0) or new.subject_id is not None else old
+            for old, new in zip(node.refined.propositions, refined.propositions)
+        ) if len(node.refined.propositions) == len(refined.propositions) else node.refined.propositions
+        return replace(node, refined=ty.RefinedType(node.refined.base, resolved))
     if _carries_obligation(node, refined):
-        return node  # already deferred once (arguments are checked at parsing and again at dispatch; an `if` per arm)
+        return node  # an `if` whose arms already owe the facts
     if node.type == ty.BOTTOM_TYPE:
         return node  # a `return`/`break` in value position produces nothing to prove about (its own value was checked)
     pending: list[ty.Proposition] = []
     for proposition in refined.propositions:
         fact: int | None
+        if (proposition.term is not None and proposition.term_id is None) or (proposition.param is not None and proposition.subject_id is None):
+            # a fact naming another binding is only resolved on a function's result
+            # (and its parameters' annotations); elsewhere it would be inert
+            named = proposition.term if proposition.term is not None else proposition.param
+            not_implemented(ctx.srcfile, node.loc, f'a fact naming `{named}` outside a function\'s result type (facts about other bindings are resolved on results and parameters)')
         if proposition.type_ is not None and proposition.param is not None:
             _prove_type_fact(node, proposition, ctx=ctx)   # decided here: the checker holds the narrowings
             continue
@@ -13871,8 +13996,9 @@ def _library_call(
     result = ctx.type_system.match_best_function(methods, pos_types, {}, expected_return=expected_return)
     if isinstance(func.type, ty.FunctionType) and func.type.type_params:
         func, result = _instantiate_generic_call(func, result, pos_types, {}, expected_return, ctx=ctx)
+    arguments_by_name = {param.name: argument for argument, param in zip(arguments, result.method.pos_or_kw, strict=True) if param.name is not None}
     contextual = [
-        argument if isinstance(argument, hir.Place) else check_against(argument, param.type, ctx=ctx)
+        argument if isinstance(argument, hir.Place) else check_against(argument, _parameter_type_at_call(param.type, arguments_by_name), ctx=ctx)
         for argument, param in zip(arguments, result.method.pos_or_kw, strict=True)
     ]
     return hir.FunctionCall(
@@ -14401,6 +14527,10 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         ctx=ctx,
     )
 
+    arguments_by_name = {
+        **{param.name: pos_args[index] for index, param in enumerate(result.method.pos_or_kw) if param.name is not None and index < len(pos_args)},
+        **kw_args,
+    }
     contextual_pos_args = [
         arg
         if isinstance(arg, hir.Place)
@@ -14410,7 +14540,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
                 result.method.pos_or_kw[index].type,
                 ctx=ctx,
             ),
-            result.method.pos_or_kw[index].type,
+            _parameter_type_at_call(result.method.pos_or_kw[index].type, arguments_by_name),
             ctx=ctx,
         )
         if index < len(result.method.pos_or_kw)
@@ -14430,7 +14560,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
                 parameter_types[name],
                 ctx=ctx,
             ),
-            parameter_types[name],
+            _parameter_type_at_call(parameter_types[name], arguments_by_name),
             ctx=ctx,
         )
         for name, argument in kw_args.items()

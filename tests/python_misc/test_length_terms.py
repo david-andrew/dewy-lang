@@ -55,12 +55,13 @@ def test_a_promise_is_about_the_argument_not_a_name() -> None:
     _check(promise + 'let g = (text:string):>uint64<n => n <=? text.length> => h(text)\n')
 
 
-def test_a_term_must_name_a_parameter_and_be_an_upper_bound() -> None:
+def test_a_term_must_name_a_parameter_and_may_bound_either_way() -> None:
     from dewy.semantic.errors import NotImplementedYet
     with pytest.raises(UserError, match='fact names a length that is not a parameter'):
         _check('let f = (src:string):>uint64<n => n <=? text.length> => src.length\n')
-    with pytest.raises(NotImplementedYet):
-        _check('let f = (src:string):>uint64<n => n >=? src.length> => src.length\n')
+    _check('let f = (src:string):>uint64<n => n >=? src.length> => src.length\n')        # a lower bound by a length
+    with pytest.raises(NotImplementedYet):                                                 # an inequality is not a bound
+        _check('let f = (src:string):>uint64<n => n not=? src.length> => src.length + 1\n')
 
 
 def test_the_spelling_round_trips() -> None:
