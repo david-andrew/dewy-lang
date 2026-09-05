@@ -5237,10 +5237,10 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
     return found
 
 
-def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context) -> sb.Binding:
+def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None) -> sb.Binding:
     """Typecheck a synthesized function literal as a module-level function (like a generic instance)."""
     binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', literal.loc)
-    checked = tcr_function_literal(literal, ctx=ctx)
+    checked = tcr_function_literal(literal, ctx=ctx, expected=expected)
     binding.type = checked.type
     declaration = hir.Declare(literal.loc, ty.VOID_TYPE, 'let', name, None, checked, binding_id=binding.id)
     binding.declaration = declaration
@@ -5338,7 +5338,21 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         ctx.synthesized.append(new_literal)
         ordinal = sum(1 for earlier in object_type.methods[:object_type.methods.index(method)] if earlier.name == method.name)
         hidden_name = f'{alias.name}__{method.name}' + (f'_{ordinal + 1}' if ordinal else '')
-        method.binding_id = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx).id
+        # a static method implementing an inherited function-typed slot
+        # (`eat:eatfn`) is checked against the slot's contract: its result
+        # refinements are what the method's returns must prove
+        slot = object_type.field(method.name) if method.name in statics else None
+        expected = slot.type if slot is not None and isinstance(slot.type, ty.FunctionType) else None
+        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected)
+        method.binding_id = hoisted.id
+        if expected is not None and isinstance(hoisted.type, ty.FunctionType) and not ctx.type_system.is_subtype(hoisted.type, expected):
+            assert slot is not None
+            user_error(
+                ctx.srcfile,
+                f'`{alias.name}.{method.name}` does not fit its slot',
+                Pointer(span=literal.left.loc, message=f'`{type_to_dewy(hoisted.type)}` is not a `{type_to_dewy(expected)}`, the type `{slot.name}` is declared with'),
+                hint='a method implementing an inherited function-typed field takes and returns what the field declares',
+            )
 
 
 def _declare_constructor_overload(constructor: hir.TypeValue, literal: p0.AST, *, ctx: Context) -> hir.AST:
@@ -11574,6 +11588,13 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         inner_scope[param.name] = ty.strip_refinement(param.type)
     if rest_args is not None:
         inner_scope[rest_args.name] = ty.strip_refinement(rest_args.type)
+    # the result contract of the function type this literal implements (a
+    # slot `eat:eatfn`, an annotation) is the literal's own: `:>uint64?`
+    # written against `:>uint64<n => n <=? src.length> | none` promises the
+    # refinement, and every return proves it; a length term names the
+    # implementation's parameter in the slot's position
+    rettype = _adopt_result_refinement(rettype, expected, pos_or_kw_args, ctx=ctx, loc=rettype_loc or binop.loc)
+    rettype = _resolve_result_terms(rettype, {param.name: param.binding_id for param in [*pos_or_kw_args, *kw_only_args] if param.binding_id is not None}, ctx=ctx, loc=rettype_loc or binop.loc)
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
     catcher = Catcher(expected=annotated)
     function_boundary_labels = dict(ctx.function_boundary_labels)
@@ -11657,6 +11678,76 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     arrow = binop.op.loc
     written = 0 <= arrow.start < arrow.stop <= len(ctx.srcfile.body) and ctx.srcfile.body[arrow.start:arrow.stop] == '=>'
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile if written else None)
+
+def _refined_members(type_: ty.Type) -> list[ty.RefinedType]:
+    """The refined types a result type is or contains (`uint64<…> | none`)."""
+    if isinstance(type_, ty.RefinedType):
+        return [type_]
+    if isinstance(type_, ty.TypeOr):
+        return [item for item in type_.items if isinstance(item, ty.RefinedType)]
+    return []
+
+
+def _map_result_type(type_: ty.Type, transform: 'Callable[[ty.RefinedType], ty.TypeExpr]') -> ty.Type:
+    """`type_` with each refined member replaced by `transform` of it."""
+    if isinstance(type_, ty.RefinedType):
+        return transform(type_)
+    if isinstance(type_, ty.TypeOr):
+        return ty.union(*(transform(item) if isinstance(item, ty.RefinedType) else item for item in type_.items))
+    return type_
+
+
+def _adopt_result_refinement(rettype: ty.Type, expected: ty.Type | None, params: list[hir.Param | hir.BoundParam], *, ctx: Context, loc: Span) -> ty.Type:
+    """The literal's result type strengthened by the refinements of the function
+    type it is checked against, when its own result (or its base) matches."""
+    expected = ty.strip_refinement(expected) if expected is not None else None
+    if not isinstance(expected, ty.FunctionType) or expected.type_params or not _refined_members(expected.ret):
+        return rettype
+    # a term names the expected type's parameter; the literal's parameter in that position is meant
+    renamed: dict[str, str] = {}
+    for index, slot in enumerate(expected.pos_or_kw):
+        if slot.name is not None and index < len(params):
+            renamed[slot.name] = params[index].name
+
+    def renamed_refinement(refined: ty.RefinedType) -> ty.RefinedType:
+        return ty.RefinedType(refined.base, tuple(
+            replace(p, term=renamed.get(p.term, p.term)) if p.term is not None else p for p in refined.propositions
+        ))
+
+    contract = _map_result_type(expected.ret, renamed_refinement)
+    if rettype == ty.INFERRED_TYPE:
+        return contract
+    if isinstance(rettype, ty.RefinedType) or (isinstance(rettype, ty.TypeOr) and _refined_members(rettype)):
+        return rettype   # its own refinements: checked against the contract by the subtyping of the call site
+    if ty.strip_refinement(contract) == rettype or (isinstance(contract, ty.TypeOr) and ty.union(*(ty.strip_refinement(item) for item in contract.items)) == rettype):
+        return contract
+    contract_members = {ty.strip_refinement(member.base) if isinstance(member, ty.RefinedType) else member: member for member in (contract.items if isinstance(contract, ty.TypeOr) else [contract])}
+    if isinstance(rettype, ty.TypeOr):
+        return ty.union(*(contract_members.get(item, item) for item in rettype.items))
+    return contract_members.get(rettype, rettype)
+
+
+def _resolve_result_terms(rettype: ty.Type, params: dict[str, int], *, ctx: Context, loc: Span) -> ty.Type:
+    """Resolve the length terms of a result refinement to the literal's parameters."""
+    if not _refined_members(rettype):
+        return rettype
+
+    def resolved(refined: ty.RefinedType) -> ty.RefinedType:
+        propositions = []
+        for proposition in refined.propositions:
+            if proposition.term is not None:
+                if proposition.term not in params:
+                    user_error(
+                        ctx.srcfile,
+                        'refinement names a length that is not a parameter',
+                        Pointer(span=loc, message=f'`{proposition.term}.length` — a result refinement may only compare against the function\'s own parameters'),
+                    )
+                proposition = replace(proposition, term_id=params[proposition.term])
+            propositions.append(proposition)
+        return ty.RefinedType(refined.base, tuple(propositions))
+
+    return _map_result_type(rettype, resolved)
+
 
 def _contextual_parameter_types(
     pos_or_kw_args: list[hir.Param | hir.BoundParam],
@@ -11939,19 +12030,41 @@ def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx
             return 'length' if member == 'length' else f'.{member}'
         return None
 
+    def bound(node: p0.AST, op: str) -> ty.Proposition:
+        value = _refinement_bound_ast(node)
+        if value is not None:
+            return ty.Proposition(subject_placeholder, op, value)
+        term = _refinement_term_ast(node)
+        if term is not None and term != subject_name:
+            if op not in ('<?', '<=?'):
+                not_implemented(ctx.srcfile, node.loc, 'a length term as a lower bound or an equality (`>=? src.length`)')
+            return ty.Proposition(subject_placeholder, op, 0, term=term)
+        not_implemented(ctx.srcfile, node.loc, 'refinement conditions beyond integer literals, fixed-width `min`/`max`, and a binding\'s `.length`')
+
+    subject_placeholder = ''
     left_subject = subject_of(ast.left)
     if left_subject is not None:
-        value = _refinement_bound_ast(ast.right)
-        if value is None:
-            not_implemented(ctx.srcfile, ast.right.loc, 'refinement conditions beyond integer literals and fixed-width `min`/`max`')
-        return ty.Proposition(left_subject, op, value)
+        subject_placeholder = left_subject
+        return bound(ast.right, op)
     right_subject = subject_of(ast.right)
     if right_subject is not None:
-        value = _refinement_bound_ast(ast.left)
-        if value is None:
-            not_implemented(ctx.srcfile, ast.left.loc, 'refinement conditions beyond integer literals and fixed-width `min`/`max`')
-        mirrored = {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op)
-        return ty.Proposition(right_subject, mirrored, value)
+        subject_placeholder = right_subject
+        return bound(ast.left, {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op))
+    return None
+
+
+def _refinement_term_ast(node: p0.AST) -> str | None:
+    """A refinement bound naming another binding's length (`src.length`): the binding's name."""
+    if (
+        isinstance(node, p0.BinOp)
+        and _operator_symbol(node.op) == '.'
+        and isinstance(node.left, p0.Atom)
+        and isinstance(node.left.item, t1.Identifier)
+        and isinstance(node.right, p0.Atom)
+        and isinstance(node.right.item, t1.Identifier)
+        and node.right.item.name == 'length'
+    ):
+        return node.left.item.name
     return None
 
 
@@ -12217,7 +12330,19 @@ def _describe_proposition(proposition: ty.Proposition) -> str:
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
     if proposition.field is not None and proposition.of == 'length':
         subject = f'{proposition.field}.length'
-    return f'{subject} {op} {proposition.value}'
+    return f'{subject} {op} {proposition.bound_text}'
+
+
+def _carries_obligation(node: hir.AST, refined: ty.RefinedType) -> bool:
+    """Whether the value already owes these propositions: an obligation on it,
+    or an `if` chain whose every arm (and default) owes them."""
+    if isinstance(node, hir.Obligation):
+        return node.refined == refined or set(refined.propositions) <= set(node.refined.propositions)
+    if isinstance(node, hir.Block) and node.items:
+        return _carries_obligation(node.items[-1], refined)
+    if isinstance(node, hir.Flow) and node.default is not None and all(isinstance(arm, hir.IfArm) for arm in node.arms):
+        return all(_carries_obligation(arm.body, refined) for arm in node.arms) and _carries_obligation(node.default, refined)
+    return False
 
 
 def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) -> hir.AST:
@@ -12227,11 +12352,14 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
     `hir.Obligation` for the bounds analysis, which proves it from intervals,
     guards, and length facts — or reports it, like `$assert`.
     """
-    if isinstance(node, hir.Obligation) and node.refined == refined:
-        return node  # already deferred once (arguments are checked at parsing and again at dispatch)
+    if _carries_obligation(node, refined):
+        return node  # already deferred once (arguments are checked at parsing and again at dispatch; an `if` per arm)
     pending: list[ty.Proposition] = []
     for proposition in refined.propositions:
         fact: int | None
+        if proposition.term is not None:
+            pending.append(proposition)   # a bound by a length: the analysis's facts decide it
+            continue
         if (field_name := proposition.field) is not None:
             literal = node
             field_value: hir.AST | None = None
@@ -13497,7 +13625,7 @@ def _library_call(
     ]
     return hir.FunctionCall(
         loc,
-        ty.strip_refinement(result.method.ret),
+        ty.strip_result_refinement(result.method.ret),
         func,
         apply_promotions(contextual, result.promote_pos),
         {},
@@ -13544,7 +13672,7 @@ def _structure_string(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST | N
     assert isinstance(conversion_type, ty.FunctionType)
     callee = hir.ExpressedIdentifier(loc, conversion_type, conversion.name, binding_id=conversion.id)
     argument = check_against(value, conversion_type.pos_or_kw[0].type, ctx=ctx)
-    return hir.FunctionCall(loc, ty.strip_refinement(conversion_type.ret), callee, [argument], {})
+    return hir.FunctionCall(loc, ty.strip_result_refinement(conversion_type.ret), callee, [argument], {})
 
 
 def _object_string(type_: ty.TypeExpr, object_type: ty.ObjectType, loc: Span, *, ctx: Context) -> sb.Binding:
@@ -14055,7 +14183,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         )
         for name, argument in kw_args.items()
     }
-    return_type = ty.strip_refinement(result.method.ret)
+    return_type = ty.strip_result_refinement(result.method.ret)
     literal_path_type = _literal_path_call_result(
         left,
         pos_args,
@@ -14623,6 +14751,17 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         return node
     if node.type == ty.BOTTOM_TYPE:
         return node  # unreachable; vacuously satisfies any expectation
+    if isinstance(expected, ty.TypeOr) and _refined_members(expected):
+        # a value meeting a union with a refined member (`uint64<n => n <=? src.length> | none`):
+        # the member it is carries the obligation — subtyping alone never assumes a refinement
+        for member in _refined_members(expected):
+            if ctx.type_system.is_subtype(node.type, member.base) or (_integer_valued(node.type) and ty.fixed_integer_layout(member.base) is not None):
+                return check_against(node, member, ctx=ctx)
+        if isinstance(node.type, ty.TypeOr) and ctx.type_system.is_subtype(node.type, expected):
+            # a union value (`uint64 | none`) meeting the refined union: the
+            # refinements of the members it may be are obligations on the value
+            pending = tuple(p for member in _refined_members(expected) if any(ctx.type_system.is_subtype(item, member.base) for item in node.type.items) for p in member.propositions)
+            return _prove_refinements(node, ty.RefinedType(ty.strip_refinement(expected), pending), ctx=ctx) if pending else node
     if node.type == ty.VOID_TYPE or node.type == ty.INFERRED_TYPE or expected == ty.VOID_TYPE:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
@@ -14687,7 +14826,7 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         # an integer meeting `uint64 | none`: it is the union's one fixed-width
         # integer member, with that member's proof obligation (the bounds
         # analysis validates the range, as for a plain `uint64` target)
-        words = [member for member in expected.items if ty.fixed_integer_layout(member) is not None]
+        words = [member for member in expected.items if ty.fixed_integer_layout(ty.strip_refinement(member)) is not None]
         if len(words) == 1:
             return check_against(node, words[0], ctx=ctx)
     type_error(ctx.srcfile, 'type mismatch',

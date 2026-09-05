@@ -1,0 +1,79 @@
+# A result refinement may bound the result by a parameter's length:
+# `:>uint64<n => n <=? src.length>` (or `<?`). The function proves it at
+# every return; a call proves what it needs from it. The promise follows
+# the value: `eat(src[i..])` gives `length <= src.length - i`, which a
+# record field, an array of records, a sort, an element read, and an unpack
+# all carry, so `src[i..i+length)` at the end proves without a guard —
+# the bootstrap tokenizer's shape.
+let nonempty:type = string<length >? 0>
+let eatfn:type = (src:nonempty):>uint64< n => n <=? src.length > | none
+
+let Tok:type = $abstract type of any & [
+    eat:eatfn
+]
+
+let Spaces = type of Tok & [
+    eat = (src:nonempty):>uint64? => {         # the slot's contract is this literal's: its returns prove it
+        if src[0] not=? ' ' return none
+        loop i in 0..uint64.max and i <? src.length {
+            if src[i] not=? ' ' return i
+        }
+        return src.length
+    }
+]
+
+let Word = type of Tok & [
+    eat = (src:nonempty):>uint64? => {
+        if src[0] =? ' ' return none
+        loop i in 0..uint64.max and i <? src.length {
+            if src[i] =? ' ' return i + 1      # a word keeps its trailing space; `i + 1 <= src.length` from `i <? src.length`
+        }
+        return src.length
+    }
+]
+
+let tokenize = (src:string):>array<string> => {
+    let out:array<string> = []
+    let kinds:array<type<Tok>> = [Spaces Word]
+    let i:uint64 = 0
+    loop i <? src.length {
+        matches = [
+            loop k in kinds {
+                length = k.eat(src[i..])
+                if length isnt? exception
+                    [length=length k=k]
+            }
+        ]
+        matches.sort(key=m=>m.length reverse=true)
+        if matches.length =? 0 break
+        [length k] = matches[0]
+        out.push(src[i..i+length))                # proven: length <= src.length - i
+        i += length
+    }
+    return out
+}
+
+# a promise about the sequence itself, and one passed through
+let take = (src:string):>uint64<n => n <=? src.length> => if src.length >? 3 3 else src.length
+let relay = (text:string):>uint64<n => n <? text.length> | none => {
+    if text.length =? 0 return none
+    let n = take(text)                         # n <= text.length
+    if n =? text.length return n - 1
+    return n                                   # n < text.length here
+}
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let words = tokenize("ab  cd e")
+    if words.length =? 4 and words[0] =? "ab " and words[1] =? " " and words[2] =? "cd " and words[3] =? "e" { checks += 1 }
+    let text = "hello"
+    let n = take(text)
+    let head = text[0..n)                      # proven from the promise on `take`
+    if head =? "hel" { checks += 2 }
+    let m = relay(text)
+    if m is? uint64 { let rest = text[m..]  if rest =? "lo" { checks += 4 } }
+    let empty = relay("")
+    if empty is? none { checks += 8 }
+    if checks =? 15 { return 42 }
+    return checks
+}

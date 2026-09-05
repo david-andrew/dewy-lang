@@ -280,7 +280,7 @@ class ObjectType:
     def invariants(self) -> list['Proposition']:
         """The field refinements as field-subject propositions on the object."""
         return [
-            Proposition(f'.{f.name}', p.op, p.value)
+            Proposition(f'.{f.name}', p.op, p.value, term=p.term, term_id=p.term_id)
             for f in self.fields
             for p in f.refinement
         ]
@@ -657,6 +657,20 @@ class Proposition:
     op: str
     value: int
     of: str = 'value'   # for a field subject: the field's `'value'` or its `'length'`
+    term: str | None = None
+    """A bound that is another binding's length rather than a number
+    (`n <=? src.length`): the binding's name — a parameter of the function
+    whose result the refinement describes, or a binding in scope. ``value``
+    is then unused (0)."""
+    term_id: int | None = field(default=None, compare=False, hash=False)
+    """The binding the term names, once resolved (a function literal resolves
+    its result refinement's terms to its parameters); not part of identity,
+    so a slot's contract and its implementation's agree."""
+
+    @property
+    def bound_text(self) -> str:
+        """The bound as written: the number, or `src.length`."""
+        return f'{self.term}.length' if self.term is not None else str(self.value)
 
     @property
     def field(self) -> str | None:
@@ -669,6 +683,8 @@ class Proposition:
         return self.subject == 'length' or (self.field is not None and self.of == 'length')
 
     def holds(self, fact: int) -> bool:
+        if self.term is not None:
+            raise ValueError('INTERNAL ERROR: a term proposition is not decided by a constant')
         match self.op:
             case '>?': return fact > self.value
             case '>=?': return fact >= self.value
@@ -680,6 +696,8 @@ class Proposition:
 
     def lower_bound(self) -> int | None:
         """The minimum value this proposition guarantees, if it is a lower bound."""
+        if self.term is not None:
+            return None
         if self.op == '>?':
             return self.value + 1
         if self.op in {'>=?', '=?'}:
@@ -687,6 +705,8 @@ class Proposition:
         return None
 
     def upper_bound(self) -> int | None:
+        if self.term is not None:
+            return None
         if self.op == '<?':
             return self.value - 1
         if self.op in {'<=?', '=?'}:
@@ -794,6 +814,17 @@ def strip_refinement(type_: TypeExpr) -> TypeExpr:
     return type_.base if isinstance(type_, RefinedType) else type_
 
 
+def strip_result_refinement(type_: TypeExpr) -> TypeExpr:
+    """A result type as a value's type: refinements stripped, also inside a union
+    (`uint64<n => n <=? src.length> | none` is the value `uint64 | none`; the
+    promise lives on the function type and becomes facts at the call)."""
+    if isinstance(type_, RefinedType):
+        return type_.base
+    if isinstance(type_, TypeOr) and any(isinstance(item, RefinedType) for item in type_.items):
+        return union(*(strip_refinement(item) for item in type_.items))
+    return type_
+
+
 @dataclass(frozen=True)
 class RationalLiteralType:
     """The singleton type of one exact compile-time rational (normalized)."""
@@ -894,6 +925,9 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     member 0 when present, so the general tag numbering coincides with
     optional tags.
     """
+    if not isinstance(type_, TypeOr):
+        return None
+    type_ = strip_result_refinement(type_)   # a refined member (`uint64<n => n <=? src.length> | none`) is its base at runtime
     if not isinstance(type_, TypeOr):
         return None
     if optional_payload(type_) is not None:

@@ -134,15 +134,49 @@ def _excludes_zero(propositions: tuple[ty.Proposition, ...] | list[ty.Propositio
     return any(p.subject == 'self' and p.op == 'not=?' and p.value == 0 for p in propositions)
 
 
-def _call_result_refinement(node: hir.AST) -> ty.RefinedType | None:
-    """The refined return type of a call (`f():>int64<i => i >=? 1>`), if any."""
+def _call_function_type(node: hir.AST) -> ty.FunctionType | None:
+    """The function type a call invokes (the selected overload), if the node is a call."""
     node = _strip_casts(node)
     if isinstance(node, hir.FunctionCall):
         function_type = node.func.type
         if isinstance(function_type, ty.OverloadType) and node.selected_method_index is not None:
             function_type = function_type.methods[node.selected_method_index]
-        if isinstance(function_type, ty.FunctionType) and isinstance(function_type.ret, ty.RefinedType):
-            return function_type.ret
+        if isinstance(function_type, ty.FunctionType):
+            return function_type
+    return None
+
+
+def _call_result_refinement(node: hir.AST) -> ty.RefinedType | None:
+    """The refined return type of a call (`f():>int64<i => i >=? 1>`), if any."""
+    function_type = _call_function_type(node)
+    if function_type is not None and isinstance(function_type.ret, ty.RefinedType):
+        return function_type.ret
+    return None
+
+
+def _call_result_refinements(node: hir.AST) -> list[ty.RefinedType]:
+    """The refined members of a call's result type (`uint64<…> | none` has one)."""
+    function_type = _call_function_type(node)
+    if function_type is None:
+        return []
+    if isinstance(function_type.ret, ty.RefinedType):
+        return [function_type.ret]
+    if isinstance(function_type.ret, ty.TypeOr):
+        return [item for item in function_type.ret.items if isinstance(item, ty.RefinedType)]
+    return []
+
+
+def _call_argument(node: hir.AST, name: str) -> hir.AST | None:
+    """The argument a call passes for the parameter `name`, positionally or by keyword."""
+    function_type = _call_function_type(node)
+    call = _strip_casts(node)
+    if function_type is None or not isinstance(call, hir.FunctionCall):
+        return None
+    if name in call.kw_args:
+        return call.kw_args[name]
+    for index, param in enumerate(function_type.pos_or_kw):
+        if param.name == name:
+            return call.pos_args[index] if index < len(call.pos_args) else None
     return None
 
 
@@ -172,7 +206,7 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
         parent_field = parent_type.field(parent.name) if parent_type is not None else None
         if parent_field is not None:
             propositions.extend(
-                ty.Proposition('length' if p.of == 'length' else 'self', p.op, p.value)
+                ty.Proposition('length' if p.of == 'length' else 'self', p.op, p.value, term=p.term, term_id=p.term_id)
                 for p in parent_field.refinement
                 if p.field == suffix
             )
@@ -186,7 +220,7 @@ def _describe_proposition_text(proposition: ty.Proposition) -> str:
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
     if proposition.field is not None and proposition.of == 'length':
         subject = f'{proposition.field}.length'
-    return f'{subject} {op} {proposition.value}'
+    return f'{subject} {op} {proposition.bound_text}'
 
 
 def _is_inequality(name: str, truth: bool) -> bool:
@@ -265,11 +299,36 @@ def _order_key(smaller: int, larger: int) -> int:
 
 def _decode_order_fact(key: int) -> tuple[int, int] | None:
     """The `(smaller, larger)` terms of an order-fact key, as `_binding_id` names them."""
-    if key > -_ORDER_BASE:
+    if key > -_ORDER_BASE or key <= -_REMAINDER_BASE:
         return None
     raw = -key - _ORDER_BASE
     encoded = raw >> _ORDER_SHIFT, raw & ((1 << _ORDER_SHIFT) - 1)
     return tuple(term if term < _LENGTH_TERM else _LENGTH_TERM - term for term in encoded)  # type: ignore[return-value]
+
+
+# *Remainder facts* bound a value by what is left of a sequence past an
+# offset: `src.length - offset - subject >= gap`, stored as `[gap, ∞]`. They
+# come from a call whose result is refined against its parameter's length
+# (`eat(src[i..])` with `eat:(src) :> uint64<n => n <=? src.length>` gives
+# `length <= src.length - i`), and prove `src[i..i+length)`. Like order facts
+# they join to the weaker gap and drop when any of the three terms is
+# assigned. The subject may be a binding, a member route, or an element
+# route (`matches.*.length`: every element's field).
+_REMAINDER_BASE = 1 << 44
+_REMAINDER_SHIFT = 21
+
+
+def _remainder_key(subject: int, sequence_id: int, offset_id: int) -> int:
+    return -(_REMAINDER_BASE + (subject << (2 * _REMAINDER_SHIFT)) + (sequence_id << _REMAINDER_SHIFT) + offset_id)
+
+
+def _decode_remainder_fact(key: int) -> tuple[int, int, int] | None:
+    """The `(subject, sequence, offset)` of a remainder-fact key."""
+    if key > -_REMAINDER_BASE:
+        return None
+    raw = -key - _REMAINDER_BASE
+    mask = (1 << _REMAINDER_SHIFT) - 1
+    return raw >> (2 * _REMAINDER_SHIFT), (raw >> _REMAINDER_SHIFT) & mask, raw & mask
 
 
 def _is_runtime_string(type_: ty.Type) -> bool:
@@ -334,7 +393,7 @@ def prototype_check_condition(node: hir.AST, kind: str, *, simple, comparison, l
             if proposition.field is not None:
                 return None
             name = {'=?': '__eq__', 'not=?': '__ne__', '<?': '__lt__', '<=?': '__le__', '>?': '__gt__', '>=?': '__ge__'}.get(proposition.op)
-            if name is None:
+            if name is None or proposition.term is not None:
                 return None
             if proposition.subject == 'length':
                 subject = length_of(node.value)
@@ -437,6 +496,12 @@ def _drop_index_facts(
     array_id: int | None = None,
 ) -> None:
     for key in [key for key in state if key <= -_FACT_BASE]:
+        remainder = _decode_remainder_fact(key)
+        if remainder is not None:
+            subject, sequence, offset = remainder
+            if (index_id is not None and index_id in (subject, offset)) or (array_id is not None and array_id == sequence):
+                del state[key]
+            continue
         order = _decode_order_fact(key)
         if order is not None:
             # an order fact mentioning the assigned term, or the sequence's length
@@ -652,6 +717,7 @@ class _BoundsValidator:
                         self._analyze_function(alternate, validate=validate, enclosing=current)
             if node.binding_id is not None:
                 self._set_interval(current, node.binding_id, interval)
+                self._seed_value_facts(node.binding_id, node.expr, current, node.loc)
             return current
         if isinstance(node, hir.Assign):
             value = self._eval(node.value, current, validate=validate)
@@ -684,6 +750,8 @@ class _BoundsValidator:
                 if known is not None:
                     current[_length_key(binding_id)] = Interval.exact(known)
             self._drop_route_facts(current, binding_id)
+            if node.op == '=':
+                self._seed_value_facts(binding_id, node.value, current, node.loc)
             declared = self.declared_refinements.get(binding_id)
             if declared is not None:
                 # `result = f(…)` on `result:bigint<sign =? 1>`: the assigned value
@@ -706,6 +774,11 @@ class _BoundsValidator:
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
             self._eval(node.value, current, validate=validate)
+            target = _strip_casts(node.target)
+            if isinstance(target, hir.Index):
+                stored_into = _runtime_array_id(target.array, self.registry)
+                if stored_into is not None:
+                    self._store_element(current, stored_into, node.value, node.loc)
             return current
         if isinstance(node, hir.Flow):
             return self._analyze_flow(node, current, validate=validate)
@@ -876,6 +949,13 @@ class _BoundsValidator:
 
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
+        if proposition.term is not None:
+            # `n <=? src.length`: the subject is bounded by that parameter's length
+            if proposition.term_id is None:
+                return None
+            subject_node, _interval = self._subject_interval(proposition, value, interval, state)
+            gap = 1 if proposition.op == '<?' else 0
+            return True if self._bounded_by_length(subject_node, proposition.term_id, gap, state) else None
         refined_result = _call_result_refinement(value)
         if refined_result is not None and proposition in refined_result.propositions:
             return True   # `f():>bigint<sign =? 1>` proves `sign =? 1` of its result
@@ -1202,10 +1282,14 @@ class _BoundsValidator:
             return dict(state)
         target_ids = {iterator.target.binding_id} - {None}
 
+        iterated = _runtime_array_id(iterator.iterable, self.registry) if isinstance(iterator.iterable.type, ty.ArrayType) else None
+
         def enter(head: State) -> State:
             body_state = dict(head)
             if iterator.target.binding_id is not None:
                 body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator)
+                if iterated is not None:
+                    self._read_element(body_state, iterated, iterator.target.binding_id, iterator.loc)
             return body_state
 
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
@@ -1293,6 +1377,10 @@ class _BoundsValidator:
         # `let i:uint64 = 0` records the initializer's type (`0`) on the binding; the annotation is the width
         declared = binding.declaration.annotation if isinstance(binding.declaration, hir.Declare) and binding.declaration.annotation is not None else binding.type
         layout = ty.fixed_integer_layout(ty.strip_refinement(declared)) if declared is not None else None
+        if layout is None and isinstance(declared, ty.TypeOr):
+            # `uint64 | none`: read as a number, the value is the one fixed-width member
+            layouts = {ty.fixed_integer_layout(ty.strip_refinement(item)) for item in declared.items} - {None}
+            layout = layouts.pop() if len(layouts) == 1 else None
         if layout is None:
             return None
         width, signed = layout
@@ -1539,6 +1627,7 @@ class _BoundsValidator:
                 root = root.value if isinstance(root, hir.MemberAccess) else root.array
             if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
                 state.pop(root.binding_id, None)
+                self._drop_route_facts(state, root.binding_id)   # the callee may store anything
             return None
         if isinstance(node, hir.ValueCast):
             inner = self._eval(node.expr, state, validate=validate)
@@ -1733,6 +1822,9 @@ class _BoundsValidator:
                         allow_end=name == 'insert',
                     )
                 if name in {'push', 'insert'}:
+                    stored = node.pos_args[0] if node.pos_args else node.kw_args.get('value')
+                    if stored is not None:
+                        self._store_element(state, array_id, stored, node.loc)
                     state[key] = Interval(
                         _add(current.lower, 1),
                         _minimum_upper(_add(current.upper, 1), self.max_length),
@@ -1754,6 +1846,16 @@ class _BoundsValidator:
                 elif name == 'clear':
                     state[key] = Interval.exact(0)
                     _drop_index_facts(state, array_id=array_id)
+            return None
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
+            # `[loop … value]`: the capture's push — the element's facts join the array's
+            self._eval(node.pos_args[1], state, validate=validate)
+            target = _strip_casts(node.pos_args[0].target)
+            capture_id = _runtime_array_id(target, self.registry)
+            if capture_id is not None:
+                self._store_element(state, capture_id, node.pos_args[1], node.loc)
+                length = state.get(_length_key(capture_id), self._length_default())
+                state[_length_key(capture_id)] = Interval(_add(length.lower, 1), _minimum_upper(_add(length.upper, 1), self.max_length))
             return None
         if isinstance(node, hir.FunctionCall):
             self._eval(node.func, state, validate=validate)
@@ -2151,6 +2253,317 @@ class _BoundsValidator:
             return None
         return self._join_states(alternatives)
 
+    # ---- facts that bound a value by a sequence's length ----
+
+    def _bounded_by_length(self, node: hir.AST, sequence_id: int, gap: int, state: State) -> bool:
+        """Whether `sequence.length - node >= gap` is established: by an order or
+        index fact on a binding (`i <? src.length`), by the node being the
+        length itself less a constant, by a binding plus a constant, by a sum
+        `i + length` with a remainder fact, by an interval under the proven
+        minimum length, or by a call whose result is refined against the
+        parameter this sequence (or a tail of it) was passed for."""
+        node = _strip_casts(node)
+        if isinstance(node, hir.Transmute):
+            # `i transmute uint64`: the same number when the source is not negative
+            inner = self._eval(node.expr, state, validate=False)
+            if inner is not None and inner.lower is not None and inner.lower >= 0:
+                return self._bounded_by_length(node.expr, sequence_id, gap, state)
+            return False
+        subject = self._binding_id(node)
+        if subject is None:
+            subject = self._element_route_of(node)
+        if subject is not None:
+            if subject < 0:
+                if subject == _length_key(sequence_id) and gap <= 0:
+                    return True   # the length itself
+            else:
+                order = state.get(_order_key(subject, _length_key(sequence_id)))
+                if order is not None and order.lower is not None and order.lower >= gap:
+                    return True
+                if gap <= 1 and _index_fact_key(subject, sequence_id) in state:
+                    return True
+                for key, interval in state.items():
+                    remainder = _decode_remainder_fact(key)
+                    if remainder is not None and remainder[0] == subject and remainder[1] == sequence_id and interval.lower is not None and interval.lower >= gap:
+                        return True   # `length <= src.length - i` bounds `length` by `src.length` too (`i >= 0`)
+        offset = self._length_offset_index(node, sequence_id)
+        if offset is not None and offset >= gap:
+            return True
+        minimum = state.get(_length_key(sequence_id), self._length_default()).lower or 0
+        interval = self._eval(node, state, validate=False)
+        if interval is not None and interval.upper is not None and interval.upper <= minimum - gap:
+            return True
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name == '__sub__' and len(node.pos_args) == 2:
+            # `n - c`: bounded when `n` is, by `c` less
+            constant = self._constant_expr(node.pos_args[1], set())
+            if constant is not None and constant.lower is not None and constant.lower == constant.upper and constant.lower >= 0:
+                return self._bounded_by_length(node.pos_args[0], sequence_id, gap - constant.lower, state)
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name == '__add__' and len(node.pos_args) == 2:
+            left, right = node.pos_args
+            for value, other in ((left, right), (right, left)):
+                constant = self._constant_expr(other, set())
+                if constant is not None and constant.lower is not None and constant.lower == constant.upper and constant.lower >= 0:
+                    return self._bounded_by_length(value, sequence_id, gap + constant.lower, state)
+            left_id, right_id = self._binding_id(left), self._binding_id(right)
+            if left_id is not None and right_id is not None and left_id >= 0 and right_id >= 0:
+                for subject_id, offset_id in ((left_id, right_id), (right_id, left_id)):
+                    remainder = state.get(_remainder_key(subject_id, sequence_id, offset_id))
+                    if remainder is not None and remainder.lower is not None and remainder.lower >= gap:
+                        return True
+        for fact in self._call_term_facts(node):
+            fact_sequence, fact_offset, fact_gap = fact
+            if fact_sequence == sequence_id and fact_gap >= gap and (fact_offset is None or self._nonnegative(fact_offset, state)):
+                return True
+        return False
+
+    def _nonnegative(self, binding_id: int, state: State) -> bool:
+        interval = self._binding_interval(state, binding_id)
+        return interval.lower is not None and interval.lower >= 0
+
+    def _call_term_facts(self, node: hir.AST) -> list[tuple[int, int | None, int]]:
+        """What a call's refined result promises about a sequence it was passed:
+        `(sequence id, offset binding or None, gap)` per length term — the
+        result is at most `sequence.length - offset - gap` (`offset` when the
+        argument was a tail `src[i..]`, None when the sequence itself)."""
+        facts: list[tuple[int, int | None, int]] = []
+        for refined in _call_result_refinements(node):
+            for proposition in refined.propositions:
+                if proposition.term is None or proposition.subject != 'self':
+                    continue
+                gap = 1 if proposition.op == '<?' else 0
+                argument = _call_argument(node, proposition.term)
+                if argument is None:
+                    continue
+                argument = _strip_casts(argument)
+                sequence_id = _runtime_array_id(argument, self.registry)
+                if sequence_id is not None:
+                    facts.append((sequence_id, None, gap))
+                    continue
+                if isinstance(argument, hir.StringSlice) and argument.range.right is None and argument.range.left is not None and (argument.range.bounds or '[]')[0] == '[':
+                    sequence_id = _runtime_array_id(argument.string, self.registry)
+                    offset_id = self._binding_id(argument.range.left)
+                    if sequence_id is not None and offset_id is not None and offset_id >= 0:
+                        facts.append((sequence_id, offset_id, gap))
+        return facts
+
+    def _seed_call_term_facts(self, subject: int, value: hir.AST, state: State) -> None:
+        """`let length = eat(src[i..])`: the call's promise as facts on the binding."""
+        for refined in _call_result_refinements(value):
+            for proposition in refined.propositions:
+                if proposition.term is None or proposition.subject != 'self':
+                    continue
+                argument = _call_argument(value, proposition.term)
+                known = self._length_interval(argument, state) if argument is not None else None
+                if known is not None and known.upper is not None:
+                    # a sequence of known length: the promise is a plain bound
+                    bound = Interval(None, known.upper - (1 if proposition.op == '<?' else 0))
+                    state[subject] = self._binding_interval(state, subject).intersect(bound)
+        for sequence_id, offset_id, gap in self._call_term_facts(value):
+            if offset_id is None:
+                state[_order_key(subject, _length_key(sequence_id))] = Interval(gap, None)
+            elif self._nonnegative(offset_id, state):
+                state[_remainder_key(subject, sequence_id, offset_id)] = Interval(gap, None)
+                state[_order_key(subject, _length_key(sequence_id))] = Interval(gap, None)
+
+    def _seed_value_facts(self, subject: int, value: hir.AST, state: State, loc: Span) -> None:
+        """What a stored value says about its new binding: a refined call's
+        promise, a sum's bound, another binding's (or element's) facts."""
+        self._seed_call_term_facts(subject, value, state)
+        self._seed_sum_facts(subject, value, state)
+        stripped = _strip_casts(value)
+        source = self._binding_id(stripped) if isinstance(stripped, (hir.ExpressedIdentifier, hir.MemberAccess)) else None
+        if source is not None and source >= 0:
+            self._copy_relational_facts(state, source, subject)
+            if isinstance(stripped, hir.ExpressedIdentifier):
+                self._copy_element_facts(state, source, subject, loc)
+                for route in self.registry.routes_under(source):
+                    path = self.registry.route_paths[route]
+                    if path and path[0] != '*':
+                        self._copy_relational_facts(state, route, self.registry.route_id(subject, path, 'int64', loc))
+            return
+        element = self._element_route_of(stripped)
+        if element is not None:
+            self._copy_relational_facts(state, element, subject)
+            if isinstance(stripped, hir.Index):
+                read_from = _runtime_array_id(stripped.array, self.registry)
+                if read_from is not None:
+                    self._read_element(state, read_from, subject, loc)
+            return
+        if isinstance(stripped, hir.Index):
+            read_from = _runtime_array_id(stripped.array, self.registry)
+            if read_from is not None:
+                self._read_element(state, read_from, subject, loc)
+
+    def _seed_sum_facts(self, subject: int, value: hir.AST, state: State) -> None:
+        """`let stop = i + length` under `length <= src.length - i`: `stop <= src.length`."""
+        value = _strip_casts(value)
+        if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier) and value.func.name == '__add__' and len(value.pos_args) == 2):
+            return
+        left_id, right_id = self._binding_id(value.pos_args[0]), self._binding_id(value.pos_args[1])
+        if left_id is None or right_id is None or left_id < 0 or right_id < 0:
+            return
+        for key, interval in list(state.items()):
+            remainder = _decode_remainder_fact(key)
+            if remainder is not None and {remainder[0], remainder[2]} == {left_id, right_id} and interval.lower is not None:
+                state[_order_key(subject, _length_key(remainder[1]))] = Interval(interval.lower, None)
+
+    def _copy_relational_facts(self, state: State, source: int, target: int) -> None:
+        """`let x = y`: the order, remainder, index and nonzero facts of `y` hold of `x`."""
+        for key, interval in list(state.items()):
+            remainder = _decode_remainder_fact(key)
+            if remainder is not None:
+                if remainder[0] == source:
+                    state[_remainder_key(target, remainder[1], remainder[2])] = interval
+                continue
+            order = _decode_order_fact(key)
+            if order is not None:
+                if order[0] == source:
+                    state[_order_key(target, order[1])] = interval
+                continue
+            index_fact = _decode_index_fact(key)
+            if index_fact is not None and index_fact[0] == source:
+                state[_index_fact_key(target, index_fact[1])] = interval
+
+    # ---- element facts: what holds of every element of an array ----
+    #
+    # Facts about a value follow it into an array and back out: pushing a
+    # record whose `length` field satisfies `length <= src.length - i` makes
+    # that a fact of the element route `matches.*.length`; an element read
+    # (`matches[0]`, `loop m in matches`) gives its own routes the facts; a
+    # copy (`let matches = capture`) carries them; a push intersects (an
+    # element without the fact drops it); an empty array has every fact.
+
+    def _element_route(self, array_id: int, path: tuple[str, ...], loc: Span) -> int:
+        return self.registry.route_id(array_id, ('*', *path), 'int64', loc)
+
+    def _element_routes(self, array_id: int) -> list[int]:
+        return self.registry.routes_under(array_id, ('*',))
+
+    def _element_route_of(self, node: hir.AST) -> int | None:
+        """The element route a read denotes: `xs[k].f` is `xs.*.f`, `xs[k]` is `xs.*`."""
+        path: list[str] = []
+        current = _strip_casts(node)
+        while isinstance(current, hir.MemberAccess):
+            path.append(current.name)
+            current = _strip_casts(current.value)
+        if not isinstance(current, hir.Index):
+            return None
+        array_id = _runtime_array_id(current.array, self.registry)
+        if array_id is None:
+            return None
+        route = self.registry.route_ids.get((array_id, ('*', *reversed(path))))
+        return route
+
+    def _value_fact_sources(self, value: hir.AST) -> list[tuple[tuple[str, ...], int]]:
+        """The fact-bearing parts of a value about to be stored: `(path, id)` — a
+        record literal's binding-valued fields, a binding's routes, the binding itself."""
+        value = _strip_casts(value)
+        if isinstance(value, hir.ObjectLiteral):
+            sources = []
+            for item in value.fields:
+                field_id = self._binding_id(item.value)
+                if field_id is not None and field_id >= 0:
+                    sources.append(((item.name,), field_id))
+                    for route in self.registry.routes_under(field_id):
+                        sources.append(((item.name, *self.registry.route_paths[route]), route))
+            return sources
+        source = self._binding_id(value)
+        if source is None:
+            source = self._element_route_of(value)
+        if source is None or source < 0:
+            return []
+        sources = [((), source)]
+        if isinstance(value, hir.ExpressedIdentifier):
+            for route in self.registry.routes_under(source):
+                sources.append((self.registry.route_paths[route], route))
+        return sources
+
+    def _facts_of(self, state: State, subject: int) -> dict[int, Interval]:
+        """The relational facts whose subject is `subject`, keyed as they would be for subject 0."""
+        facts: dict[int, Interval] = {}
+        for key, interval in state.items():
+            remainder = _decode_remainder_fact(key)
+            if remainder is not None:
+                if remainder[0] == subject:
+                    facts[_remainder_key(0, remainder[1], remainder[2])] = interval
+                continue
+            order = _decode_order_fact(key)
+            if order is not None:
+                if order[0] == subject:
+                    facts[_order_key(0, order[1])] = interval
+                continue
+            index_fact = _decode_index_fact(key)
+            if index_fact is not None and index_fact[0] == subject:
+                facts[_index_fact_key(0, index_fact[1])] = interval
+        return facts
+
+    @staticmethod
+    def _rekey(key: int, subject: int) -> int:
+        remainder = _decode_remainder_fact(key)
+        if remainder is not None:
+            return _remainder_key(subject, remainder[1], remainder[2])
+        order = _decode_order_fact(key)
+        if order is not None:
+            return _order_key(subject, order[1])
+        index_fact = _decode_index_fact(key)
+        assert index_fact is not None
+        return _index_fact_key(subject, index_fact[1])
+
+    def _store_element(self, state: State, array_id: int, value: hir.AST, loc: Span) -> None:
+        """An element joins the array: its facts become (or narrow) the element facts."""
+        empty = state.get(_length_key(array_id)) == Interval.exact(0)
+        stored: dict[int, dict[int, Interval]] = {}
+        for path, source in self._value_fact_sources(value):
+            stored[self._element_route(array_id, path, loc)] = self._facts_of(state, source)
+        for route in self._element_routes(array_id):
+            existing = self._facts_of(state, route)
+            incoming = stored.get(route, {})
+            for key, interval in existing.items():
+                if key in incoming:
+                    state[self._rekey(key, route)] = interval.union(incoming[key])
+                elif not empty:
+                    del state[self._rekey(key, route)]
+        if empty:
+            for route, facts in stored.items():
+                for key, interval in facts.items():
+                    state[self._rekey(key, route)] = interval
+
+    def _read_element(self, state: State, array_id: int, target: int, loc: Span) -> None:
+        """`let m = xs[k]`, `loop m in xs`: the element facts hold of `m` and its routes."""
+        for route in self._element_routes(array_id):
+            path = self.registry.route_paths[route][1:]
+            subject = target if not path else self.registry.route_id(target, path, 'int64', loc)
+            for key, interval in self._facts_of(state, route).items():
+                state[self._rekey(key, subject)] = interval
+
+    def _copy_element_facts(self, state: State, source: int, target: int, loc: Span) -> None:
+        """`let matches = capture`: the element facts of one array hold of the other."""
+        for route in self._element_routes(source):
+            path = self.registry.route_paths[route]
+            mirrored = self.registry.route_id(target, path, 'int64', loc)
+            for key, interval in self._facts_of(state, route).items():
+                state[self._rekey(key, mirrored)] = interval
+
+    def _vacuous(self, state: State, key: int) -> bool:
+        """Whether an element fact holds of `state` because the array is empty there."""
+        remainder = _decode_remainder_fact(key)
+        subject = remainder[0] if remainder is not None else None
+        if subject is None:
+            order = _decode_order_fact(key)
+            if order is not None:
+                subject = order[0]
+            else:
+                index_fact = _decode_index_fact(key)
+                subject = index_fact[0] if index_fact is not None else None
+        if subject is None or subject < 0:
+            return False
+        binding = self.registry.by_id.get(subject)
+        if binding is None or binding.route_root is None or not self.registry.route_paths.get(subject, ()):
+            return False
+        if self.registry.route_paths[subject][0] != '*':
+            return False
+        return state.get(_length_key(binding.route_root)) == Interval.exact(0)
+
     def _length_offset_index(self, index: hir.AST, array_id: int) -> int | None:
         """`k` when the index is `xs.length - k` for the same sequence with a constant `k >= 1`.
 
@@ -2319,6 +2732,11 @@ class _BoundsValidator:
                     """`endpoint + delta` lies in `[-1 or 0, limit)` for every value, or an index fact bounds it."""
                     if endpoint is None:
                         return True
+                    required_gap = delta if limit == minimum + 1 else 1 + delta
+                    layout = ty.fixed_integer_layout(ty.strip_refinement(endpoint.type))
+                    unsigned = layout is not None and not layout[1]
+                    if (unsigned or (interval is not None and interval.lower is not None and interval.lower + delta >= (0 if delta >= 0 else -1))) and self._bounded_by_length(endpoint, string_id, required_gap, state):
+                        return True   # `i + length` under `length <= src.length - i`, a refined call's result, …
                     if interval is None or interval.lower is None or interval.lower + delta < (0 if delta >= 0 else -1):
                         return False
                     if interval.upper is not None and interval.upper + delta < limit:
@@ -2329,7 +2747,6 @@ class _BoundsValidator:
                     # an order fact against the length: `i <=? s.length` admits `i` as an
                     # exclusive end (`s[0..i)`) or a start; `i <? s.length` as an inclusive end
                     order = state.get(_order_key(binding, _length_key(string_id))) if binding is not None else None
-                    required_gap = delta if limit == minimum + 1 else 1 + delta
                     if order is not None and order.lower is not None and order.lower >= required_gap:
                         return True
                     # `s.length - k` (`end`, `end - 1`): below the length by construction,
@@ -2490,6 +2907,14 @@ class _BoundsValidator:
                 refined[_order_key(right_id, left_id)] = Interval(0, None)
         left_binding = self._binding_id(left)
         right_interval = self._eval(right, refined, validate=False)
+        if _is_inequality(name, truth):
+            # `n not=? text.length` (a failed `n =? text.length`) under `n <=? text.length`: `n <? text.length`
+            left_term, right_term = self._binding_id(left), self._binding_id(right)
+            if left_term is not None and right_term is not None and left_term != right_term:
+                for smaller, larger in ((left_term, right_term), (right_term, left_term)):
+                    order = refined.get(_order_key(smaller, larger))
+                    if order is not None and order.lower == 0:
+                        refined[_order_key(smaller, larger)] = Interval(1, order.upper)
         if _is_inequality(name, truth):
             # `x not=? 0` (or a failed `x =? 0`): a nonzero fact on the binding
             for side, other in ((left, right), (right, left)):
@@ -2682,31 +3107,36 @@ class _BoundsValidator:
         else:
             state[binding_id] = interval
 
-    @staticmethod
-    def _join_states(states: list[State]) -> State:
+    def _join_states(self, states: list[State]) -> State:
         if not states:
             return {}
         common = set(states[0])
         for state in states[1:]:
             common &= state.keys()
+        # an element fact missing from a state where the array is empty holds there vacuously
+        for key in set().union(*(state.keys() for state in states)) - common:
+            if all(key in state or self._vacuous(state, key) for state in states):
+                common.add(key)
         return {
             binding_id: _union_intervals(
-                [state[binding_id] for state in states]
+                [state[binding_id] for state in states if binding_id in state]
             )
             for binding_id in common
         }
 
-    @staticmethod
-    def _narrow_states(head: State, candidate: State) -> State:
+    def _narrow_states(self, head: State, candidate: State) -> State:
         """The head tightened by one more pass of the body (keys the pass lost are dropped)."""
         return {
-            key: head[key].intersect(candidate[key])
-            for key in head.keys() & candidate.keys()
+            key: head[key].intersect(candidate[key]) if key in candidate else head[key]
+            for key in head.keys() & (candidate.keys() | {key for key in head if self._vacuous(candidate, key)})
         }
 
     def _widen_states(self, previous: State, current: State) -> State:
         common = previous.keys() & current.keys()
         widened: State = {}
+        for key in current.keys() - common:
+            if self._vacuous(previous, key):
+                widened[key] = current[key]   # the fact of an array that was still empty before
         for binding_id in common:
             interval = previous[binding_id].widen(current[binding_id])
             if _is_length_key(binding_id):

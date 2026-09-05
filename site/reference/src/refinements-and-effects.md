@@ -10,7 +10,7 @@ A refinement combines a base type with facts every value of that type satisfies.
 array<int64 length=3>
 ```
 
-A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition compares against an integer literal or a fixed-width type's `min`/`max` (`uint64.max`), and may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
+A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition compares against an integer literal, a fixed-width type's `min`/`max` (`uint64.max`), or — as an upper bound on a result — the length of one of the function's parameters (`:>uint64<n => n <=? src.length>`, see [refined results](#refined-results-and-field-invariants)), and may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
 
 <!-- dewy-example: compiler -->
 
@@ -59,6 +59,44 @@ let main = ():>int64 => percent(1 4) + share(3 4)   # 25 + 75
 ### Refined Results and Field Invariants
 
 A result may be refined — `let positive = (n:int64):>int64<i => i >=? 1> => …` — in which case every `return` (and the body's value) is an obligation, and every call is a fact: `n // positive(n)` is proven, and `let g = positive(n)` carries the fact on `g`.
+
+A result may also be bounded by a parameter's length: `(src:string):>uint64<n => n <=? src.length>` (or `<?`) promises that the result never passes the end of `src`. The function proves it at every return from what it knows of `src` — `return i` under `i <? src.length`, `return i + 1` under the same, `return src.length`, `return n - 1` after `n =? src.length` — and a call turns it into a fact about the argument: `let n = f(text)` gives `n <=? text.length`, so `text[0..n)` proves; `let length = f(src[i..])` gives `length <=? src.length - i`, so `src[i..i+length)` proves. That last fact follows the value where it goes — into a record field, an array of records, through `.sort`, out of `matches[0]` and an unpack — until `i`, `src`, or the value is reassigned (an element that does not satisfy it drops the fact from the array). A function type may carry the promise for its implementations: with `eatfn = (src:nonempty):>uint64<n => n <=? src.length> | none`, a `type of Token & [eat = (src:nonempty):>uint64? => …]` implementing the slot `eat:eatfn` has the promise as its own contract (its returns prove it), and a `k.eat(src[i..])` through a `type<Token>` value has it as a fact. The promise is about the argument, not a name: a function whose own parameter is `src` cannot discharge `n <=? src.length` with `other(text)`, however `other` names its parameter.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let nonempty:type = string<length >? 0>
+let eatfn:type = (src:nonempty):>uint64< n => n <=? src.length > | none
+let Tok:type = $abstract type of any & [eat:eatfn]
+let Spaces = type of Tok & [
+    eat = (src:nonempty):>uint64? => {
+        if src[0] not=? ' ' return none
+        loop i in 0..uint64.max and i <? src.length { if src[i] not=? ' ' return i }
+        return src.length
+    }
+]
+let Word = type of Tok & [
+    eat = (src:nonempty):>uint64? => {
+        if src[0] =? ' ' return none
+        loop i in 0..uint64.max and i <? src.length { if src[i] =? ' ' return i }
+        return src.length
+    }
+]
+let tokenize = (src:string):>array<string> => {
+    let out:array<string> = []
+    let kinds:array<type<Tok>> = [Spaces Word]
+    let i:uint64 = 0
+    loop i <? src.length {
+        matches = [loop k in kinds { length = k.eat(src[i..])  if length isnt? exception [length=length k=k] }]
+        matches.sort(key=m=>m.length reverse=true)
+        if matches.length =? 0 break
+        [length k] = matches[0]
+        out.push(src[i..i+length))          # proven: length <=? src.length - i
+        i += length
+    }
+    return out
+}
+```
 
 A field may declare an invariant: `let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]`. It is proven wherever a `Ratio` is made — `Ratio(1 2)`, a literal, or a plain object flowing into the type — and wherever the field is stored (`r.bottom = z` needs `z >? 0`), and it is assumed wherever the field is read, so `r.top // r.bottom` is proven for any `Ratio`. The prelude's `rational<int64>` (`Rational`) declares `denominator:int64<denominator >? 0>` this way.
 

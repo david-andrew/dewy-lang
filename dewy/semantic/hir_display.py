@@ -24,7 +24,7 @@ def type_to_dewy(t: ty.Type) -> str:
         return f'{t.numerator}/{t.denominator}'
     if isinstance(t, ty.RefinedType):
         conditions = ' '.join(
-            (f'i => i {p.op.replace("not=?", "not =?")} {p.value}' if p.subject == 'self' else f'{p.subject} {p.op.replace("not=?", "not =?")} {p.value}')
+            (f'i => i {p.op.replace("not=?", "not =?")} {p.bound_text}' if p.subject == 'self' else f'{p.subject} {p.op.replace("not=?", "not =?")} {p.bound_text}')
             for p in t.propositions
         )
         base = type_to_dewy(t.base)
