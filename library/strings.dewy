@@ -3,23 +3,21 @@
 # zero-argument ones, `text.trim`, into calls), so these read as methods.
 # Positions and lengths are in graphemes, like indexing.
 
-let _string_startswith = (text:string prefix:string):>bool => {
-    let m:int64 = prefix.length
-    if m =? 0 { return true }
-    if m >? text.length { return false }
-    let last:int64 = m - 1
-    if last <? text.length and last >=? 0 { return text[0..last] =? prefix }
-    return false
+# `startswith` and `endswith` are predicates: a `true` result establishes the
+# fact that the prefix (suffix) fits in the text — `prefix.length <=? text.length`
+# — so `if s.startswith("#{") { i += 2 }` keeps `i` within `s`.
+let _string_startswith = (text:string prefix:string):> true & <prefix.length <=? text.length> | false => {
+    if prefix.length =? 0 { return true }
+    if prefix.length >? text.length { return false }
+    let last:uint64 = prefix.length - 1
+    return text[0..last] =? prefix
 }
 
-let _string_endswith = (text:string suffix:string):>bool => {
-    let m:int64 = suffix.length
-    if m =? 0 { return true }
-    if m >? text.length { return false }
-    let start:int64 = text.length - m
-    let last:int64 = text.length - 1
-    if start >=? 0 and start <=? last and last <? text.length { return text[start..last] =? suffix }
-    return false
+let _string_endswith = (text:string suffix:string):> true & <suffix.length <=? text.length> | false => {
+    if suffix.length =? 0 { return true }
+    if suffix.length >? text.length { return false }
+    let start:uint64 = text.length - suffix.length
+    return text[start..] =? suffix
 }
 
 # The first position where `needle` occurs, or `none`.

@@ -28,11 +28,15 @@ def test_an_unordered_difference_is_still_unproven() -> None:
 
 
 def test_the_fact_drops_when_a_term_is_assigned() -> None:
+    # `i += c` keeps the fact with its gap moved (`i <? src.length` then `i += 1` is `i <=? src.length`),
+    # and drops it once the gap would go negative
+    stepped = (
+        'let f = (src:string):>uint64 => {\n    i:int64 = 0\n    total:uint64 = 0\n    loop i <? src.length {\n'
+        '        i += STEP\n        let rest:uint64 = src.length - i\n        total += rest\n    }\n    return total\n}'
+    )
+    _check(stepped.replace('STEP', '1'))
     with pytest.raises(UserError, match='cannot prove this integer fits `uint64`'):
-        _check(
-            'let f = (src:string):>uint64 => {\n    i:int64 = 0\n    total:uint64 = 0\n    loop i <? src.length {\n'
-            '        i += 1\n        let rest:uint64 = src.length - i\n        total += rest\n    }\n    return total\n}'
-        )
+        _check(stepped.replace('STEP', '2'))
     with pytest.raises(UserError, match='cannot prove this integer fits `uint64`'):
         _check('let f = (a:int64 b:int64):>uint64 => {\n    if 0 <=? a <=? b { a = b + 1 }\n    let w:uint64 = b - a\n    return w\n}')
 

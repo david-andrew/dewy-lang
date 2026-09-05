@@ -140,6 +140,7 @@ LOWERED_CASES = [
     ('union_equality.dewy', 42),
     ('unpacking.dewy', 42),
     ('length_terms.dewy', 42),
+    ('type_facts.dewy', 42),
     ('optional_sugar.dewy', 42),
     ('union_recursive.dewy', 42),
     ('string_join_decode.dewy', 42),

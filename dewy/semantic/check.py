@@ -3220,6 +3220,37 @@ def _length_bound_fact(
     return None
 
 
+def _strip_obligations(node: hir.AST) -> hir.AST:
+    while isinstance(node, (hir.Obligation, hir.ValueCast, hir.RepresentationCast)):
+        node = node.value if isinstance(node, hir.Obligation) else node.expr
+    return node
+
+
+def _call_result_refinements(node: hir.AST) -> list[ty.RefinedType]:
+    """The refined members of a call's result type (`true & <…> | false`, `uint64<…> | none`)."""
+    function_type = node.func.type if isinstance(node, hir.FunctionCall) else None
+    if isinstance(function_type, ty.OverloadType) and isinstance(node, hir.FunctionCall) and node.selected_method_index is not None:
+        function_type = function_type.methods[node.selected_method_index]
+    if not isinstance(function_type, ty.FunctionType):
+        return []
+    return _refined_members(function_type.ret)
+
+
+def _call_argument(node: hir.FunctionCall, name: str) -> hir.AST | None:
+    """The argument a call passes for the parameter `name`."""
+    function_type = node.func.type
+    if isinstance(function_type, ty.OverloadType) and node.selected_method_index is not None:
+        function_type = function_type.methods[node.selected_method_index]
+    if not isinstance(function_type, ty.FunctionType):
+        return None
+    if name in node.kw_args:
+        return node.kw_args[name]
+    for index, param in enumerate(function_type.pos_or_kw):
+        if param.name == name:
+            return node.pos_args[index] if index < len(node.pos_args) else None
+    return None
+
+
 def _refine_condition_context(
     ctx: Context,
     condition: hir.AST,
@@ -3239,6 +3270,24 @@ def _refine_condition_context(
                 position=condition.position if getattr(condition, 'hoisted', False) else None,
             )
             return refined
+    predicate_call = _strip_obligations(condition)
+    if isinstance(predicate_call, hir.FunctionCall) and _call_result_refinements(predicate_call):
+        # `if is_word(tok)`: the type facts the call's result establishes in this arm, of the arguments
+        for refined in _call_result_refinements(predicate_call):
+            for proposition in refined.propositions:
+                if proposition.type_ is None or proposition.param is None or proposition.when not in (truth, None):
+                    continue
+                argument = _call_argument(predicate_call, proposition.param)
+                argument = _strip_obligations(argument) if argument is not None else None
+                fact_id = None
+                if isinstance(argument, hir.ExpressedIdentifier) and argument.binding_id is not None:
+                    fact_id = argument.binding_id
+                elif isinstance(argument, hir.MemberAccess):
+                    fact_id = sb.array_route_id(argument, ctx.binding_registry)
+                if fact_id is not None:
+                    current = refinements.get(fact_id, argument.type)
+                    refinements[fact_id] = _refine_type_test(current, proposition.type_, matches=proposition.op == 'is?', ctx=ctx)
+        return replace(ctx, refinements=refinements, key_facts=key_facts)
     if isinstance(condition, hir.TypeTest):
         value = condition.value
         fact_id: int | None = None
@@ -11659,6 +11708,12 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # check against the `:>` annotation if there was one, otherwise adopt the resolved type
     if rettype == ty.INFERRED_TYPE:
         rettype = resolved_ret
+        if not catcher.returns and resolved_ret == 'bool':
+            # `(tok:Token) => tok is? Word`: a body that is a proposition about the
+            # parameters is a predicate — its result type says what each arm establishes
+            predicate = _inferred_predicate(body, {param.binding_id: param.name for param in [*pos_or_kw_args, *kw_only_args] if param.binding_id is not None}, ctx=ctx)
+            if predicate is not None:
+                rettype = predicate
     else:
         if rettype == ty.VOID_TYPE or resolved_ret == ty.VOID_TYPE:
             ok = rettype == resolved_ret
@@ -11678,6 +11733,36 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     arrow = binop.op.loc
     written = 0 <= arrow.start < arrow.stop <= len(ctx.srcfile.body) and ctx.srcfile.body[arrow.start:arrow.stop] == '=>'
     return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile if written else None)
+
+def _inferred_predicate(body: hir.AST, params: dict[int, str], *, ctx: Context) -> ty.Type | None:
+    """The predicate type of a boolean body that is one proposition about the
+    parameters — a type test, or a comparison of lengths — else None."""
+    node = body
+    while isinstance(node, hir.Block) and len(node.items) == 1:
+        node = node.items[0]
+    node = _strip_obligations(node)
+    fact: ty.Proposition | None = None
+    if isinstance(node, hir.TypeTest) and isinstance(node.value, hir.ExpressedIdentifier) and node.value.binding_id in params:
+        fact = ty.Proposition(f'@{params[node.value.binding_id]}', 'isnt?' if node.negated else 'is?', 0, type_=node.test_type, subject_id=node.value.binding_id)
+    elif isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and len(node.pos_args) == 2:
+        op = {'__lt__': '<?', '__le__': '<=?', '__gt__': '>?', '__ge__': '>=?', '__eq__': '=?', '__ne__': 'not=?'}.get(node.func.name)
+        left, right = (_strip_obligations(argument) for argument in node.pos_args)
+
+        def measured_param(side: hir.AST) -> int | None:
+            sequence = side.array if isinstance(side, hir.ArrayLength) else side.string if isinstance(side, hir.StringLength) else None
+            return sequence.binding_id if isinstance(sequence, hir.ExpressedIdentifier) and sequence.binding_id in params else None
+
+        left_param, right_param = measured_param(left), measured_param(right)
+        if op in ('<?', '<=?') and left_param is not None and right_param is not None:
+            fact = ty.Proposition(f'@{params[left_param]}', op, 0, of='length', term=params[right_param], term_id=right_param, subject_id=left_param)
+        elif op in ('>?', '>=?') and left_param is not None and right_param is not None:
+            fact = ty.Proposition(f'@{params[right_param]}', {'>?': '<?', '>=?': '<=?'}[op], 0, of='length', term=params[left_param], term_id=left_param, subject_id=right_param)
+        elif op is not None and left_param is not None and (constant := _constant_integer(right, ctx=ctx)) is not None:
+            fact = ty.Proposition(f'@{params[left_param]}', op, constant, of='length', subject_id=left_param)
+    if fact is None:
+        return None
+    return _refined('bool', [replace(fact, when=True), replace(fact.negated(), when=False)])
+
 
 def _refined_members(type_: ty.Type) -> list[ty.RefinedType]:
     """The refined types a result type is or contains (`uint64<…> | none`)."""
@@ -11739,10 +11824,18 @@ def _resolve_result_terms(rettype: ty.Type, params: dict[str, int], *, ctx: Cont
                 if proposition.term not in params:
                     user_error(
                         ctx.srcfile,
-                        'refinement names a length that is not a parameter',
-                        Pointer(span=loc, message=f'`{proposition.term}.length` — a result refinement may only compare against the function\'s own parameters'),
+                        'fact names a length that is not a parameter',
+                        Pointer(span=loc, message=f'`{proposition.term}.length` — a result\'s facts may only speak of the function\'s own parameters'),
                     )
                 proposition = replace(proposition, term_id=params[proposition.term])
+            if proposition.param is not None:
+                if proposition.param not in params:
+                    user_error(
+                        ctx.srcfile,
+                        'fact names something that is not a parameter',
+                        Pointer(span=loc, message=f'`{proposition.param}` — a result\'s facts may only speak of the function\'s own parameters'),
+                    )
+                proposition = replace(proposition, subject_id=params[proposition.param])
             propositions.append(proposition)
         return ty.RefinedType(refined.base, tuple(propositions))
 
@@ -12014,42 +12107,44 @@ def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx
     def identifier(node: p0.AST) -> str | None:
         return node.item.name if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier) else None
 
-    def subject_of(node: p0.AST) -> str | None:
-        """The proposition subject this side spells, or None."""
+    def subject_of(node: p0.AST) -> tuple[str, str] | None:
+        """The proposition subject this side spells, `(subject, of)`, or None."""
         name = identifier(node)
         if name is not None:
             if name == subject_name:
-                return subject
+                return subject, 'value'
             if fields and name != 'length':
-                return f'.{name}'
+                return f'.{name}', 'value'
             return None
-        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == '.' and identifier(node.left) == subject_name:
-            member = identifier(node.right)
-            if member is None:
+        if isinstance(node, p0.BinOp) and _operator_symbol(node.op) == '.':
+            owner, member = identifier(node.left), identifier(node.right)
+            if owner is None or member is None:
                 return None
-            return 'length' if member == 'length' else f'.{member}'
+            if owner == subject_name:
+                return ('length', 'value') if member == 'length' else (f'.{member}', 'value')
+            if fields and member == 'length':
+                # `prefix.length`: a field's length, or a parameter's (bound afterwards)
+                return f'.{owner}', 'length'
         return None
 
-    def bound(node: p0.AST, op: str) -> ty.Proposition:
+    def bound(node: p0.AST, op: str, placeholder: tuple[str, str]) -> ty.Proposition:
+        subject_placeholder, of = placeholder
         value = _refinement_bound_ast(node)
         if value is not None:
-            return ty.Proposition(subject_placeholder, op, value)
+            return ty.Proposition(subject_placeholder, op, value, of=of)
         term = _refinement_term_ast(node)
         if term is not None and term != subject_name:
             if op not in ('<?', '<=?'):
                 not_implemented(ctx.srcfile, node.loc, 'a length term as a lower bound or an equality (`>=? src.length`)')
-            return ty.Proposition(subject_placeholder, op, 0, term=term)
+            return ty.Proposition(subject_placeholder, op, 0, of=of, term=term)
         not_implemented(ctx.srcfile, node.loc, 'refinement conditions beyond integer literals, fixed-width `min`/`max`, and a binding\'s `.length`')
 
-    subject_placeholder = ''
     left_subject = subject_of(ast.left)
     if left_subject is not None:
-        subject_placeholder = left_subject
-        return bound(ast.right, op)
+        return bound(ast.right, op, left_subject)
     right_subject = subject_of(ast.right)
     if right_subject is not None:
-        subject_placeholder = right_subject
-        return bound(ast.left, {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op))
+        return bound(ast.left, {'>?': '<?', '<?': '>?', '>=?': '<=?', '<=?': '>=?'}.get(op, op), right_subject)
     return None
 
 
@@ -12202,6 +12297,13 @@ def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | Non
         if proposition is None:
             not_implemented(ctx.srcfile, item.right.loc, 'this refinement proposition')
         return proposition
+    if isinstance(item, p0.BinOp) and _operator_symbol(item.op) in ('is?', 'isnt?'):
+        # `tok is? Word`: a type fact about a field of the value or a parameter
+        name = item.left.item.name if isinstance(item.left, p0.Atom) and isinstance(item.left.item, t1.Identifier) else None
+        if name is None:
+            not_implemented(ctx.srcfile, item.left.loc, 'a type fact about anything but a name')
+        subject = 'self' if name == ctx.refinement_subject else f'.{name}'
+        return ty.Proposition(subject, _operator_symbol(item.op), 0, type_=ast_to_type(item.right, ctx=ctx))
     if isinstance(item, p0.BinOp) and (
         isinstance(item.op, t2.InvertedComparisonOp)
         or (isinstance(item.op, t1.Operator) and item.op.symbol in _REFINEMENT_COMPARISONS)
@@ -12220,8 +12322,36 @@ def _refinement_condition(item: p0.AST, *, ctx: Context) -> ty.Proposition | Non
     return None
 
 
+def _bind_fact_subjects(base: ty.Type, propositions: list[ty.Proposition], *, loc: Span, ctx: Context) -> list[ty.Proposition]:
+    """Resolve each fact's subject against the type it refines: a name that is
+    a field of the value speaks of the field; any other name speaks of a
+    parameter (`prefix.length <=? src.length`, `tok is? Word`), resolved
+    where the function literal binds its parameters. Facts about the value
+    itself must apply to the type (`length` needs a sequence, a comparison
+    an integer)."""
+    bound: list[ty.Proposition] = []
+    for proposition in propositions:
+        if (field_name := proposition.field) is not None and '.' not in field_name and (proposition.of == 'length' or proposition.type_ is not None):
+            # (a fact comparing a parameter's *value* is not supported yet, so a
+            # bare name compared as a value stays a field — and errors as one)
+            unfolded = ty.unfold(_union_object_member(ty.strip_refinement(base)))
+            if not (isinstance(unfolded, ty.ObjectType) and unfolded.field(field_name) is not None):
+                bound.append(replace(proposition, subject=f'@{field_name}'))
+                continue
+        bound.append(proposition)
+    _check_refinement_subjects(base, bound, loc=loc, ctx=ctx)
+    return bound
+
+
 def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition], *, loc: Span, ctx: Context) -> None:
     for proposition in propositions:
+        if proposition.param is not None:
+            if proposition.type_ is not None or proposition.of == 'length' or proposition.term is not None:
+                continue
+            not_implemented(ctx.srcfile, loc, f'a fact comparing the value of `{proposition.param}` (facts about parameters are type tests and length bounds so far)')
+        if proposition.type_ is not None:
+            if proposition.subject == 'self':
+                not_implemented(ctx.srcfile, loc, 'a type fact about the value itself (write the type)')
         if (field_name := proposition.field) is not None:
             current: ty.Type = base
             field: ty.ObjectField | None = None
@@ -12236,6 +12366,8 @@ def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition]
                     )
                 current = field.type
             assert field is not None
+            if proposition.type_ is not None:
+                continue
             if proposition.of == 'length':
                 if not (field.type == 'array' or field.type == 'string' or isinstance(field.type, (ty.ArrayType, ty.StringType))):
                     type_error(
@@ -12327,6 +12459,8 @@ def _refined(base: ty.Type, propositions: list[ty.Proposition]) -> ty.Type:
 
 def _describe_proposition(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
+    if proposition.param is not None:
+        return f'{proposition.subject_text} {op} {proposition.bound_text}'
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
     if proposition.field is not None and proposition.of == 'length':
         subject = f'{proposition.field}.length'
@@ -12345,6 +12479,43 @@ def _carries_obligation(node: hir.AST, refined: ty.RefinedType) -> bool:
     return False
 
 
+def _prove_type_fact(node: hir.AST, proposition: ty.Proposition, *, ctx: Context) -> None:
+    """`tok is? Word` promised of a parameter: at a return, the parameter must
+    be narrowed to (or away from) the type wherever the returned boolean is
+    the promised arm — in the context refined by the returned expression
+    itself (`return tok is? Word`, `return true` under `if tok is? Word`)."""
+    assert proposition.type_ is not None and proposition.subject_id is not None
+    returned = _strip_obligations(node)
+    for arm in ((proposition.when,) if proposition.when is not None else (None,)):
+        if arm is not None and isinstance(returned, hir.Bool) and returned.value != arm:
+            continue   # `return false` says nothing about the `true` arm
+        if (
+            arm is not None
+            and isinstance(returned, hir.TypeTest)
+            and isinstance(returned.value, hir.ExpressedIdentifier)
+            and returned.value.binding_id == proposition.subject_id
+            and ty.unfold(returned.test_type) == ty.unfold(proposition.type_)
+            and ((proposition.op == 'isnt?') == returned.negated) == arm
+        ):
+            continue   # the returned test is the fact itself (`return tok is? Word`)
+        refined_ctx = ctx if arm is None else _refine_condition_context(ctx, node, truth=arm)
+        current = refined_ctx.refinements.get(proposition.subject_id)
+        if current is None:
+            binding = ctx.binding_registry.by_id.get(proposition.subject_id)
+            current = binding.type if binding is not None else None
+        holds = current is not None and (
+            ctx.type_system.is_subtype(current, proposition.type_) if proposition.op == 'is?'
+            else _disjoint_types(current, proposition.type_, ctx=ctx)
+        )
+        if not holds:
+            user_error(
+                ctx.srcfile,
+                'cannot prove type fact',
+                Pointer(span=node.loc, message=f'`{_describe_proposition(proposition)}` is promised {"when this is `" + str(arm).lower() + "`" if arm is not None else "here"}, but `{proposition.param}` is `{type_to_dewy(current) if current is not None else "?"}`'),
+                hint='return the test itself (`return tok is? Word`), or return under a guard that narrows the parameter',
+            )
+
+
 def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) -> hir.AST:
     """Prove each proposition from compile-time facts, or report a refuted one.
 
@@ -12354,10 +12525,15 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
     """
     if _carries_obligation(node, refined):
         return node  # already deferred once (arguments are checked at parsing and again at dispatch; an `if` per arm)
+    if node.type == ty.BOTTOM_TYPE:
+        return node  # a `return`/`break` in value position produces nothing to prove about (its own value was checked)
     pending: list[ty.Proposition] = []
     for proposition in refined.propositions:
         fact: int | None
-        if proposition.term is not None:
+        if proposition.type_ is not None and proposition.param is not None:
+            _prove_type_fact(node, proposition, ctx=ctx)   # decided here: the checker holds the narrowings
+            continue
+        if proposition.term is not None or proposition.param is not None:
             pending.append(proposition)   # a bound by a length: the analysis's facts decide it
             continue
         if (field_name := proposition.field) is not None:
@@ -12455,8 +12631,79 @@ def _metatype(ast: p0.AST, *, ctx: Context) -> ty.MetaType | None:
     return ty.MetaType(family)
 
 
+def _fact_block(block: p0.Block, *, ctx: Context) -> list[ty.Proposition]:
+    """The facts of a bare `<…>` block: every entry must be a condition."""
+    facts: list[ty.Proposition] = []
+    for item in block.inner:
+        found = _refinement_conditions(item, ctx=ctx)
+        if found is None:
+            user_error(ctx.srcfile, 'not a fact', Pointer(span=item.loc, message='a fact block holds conditions (`prefix.length <=? src.length`, `tok is? Word`, `i => i >? 0`), not types'))
+        facts.extend(found)
+    return facts
+
+
+def _with_facts(base_ast: p0.AST, block: p0.Block, *, ctx: Context) -> ty.Type:
+    """`T & <facts>`: `T<facts>` without type arguments, distributing over a union."""
+    facts = _fact_block(block, ctx=ctx)
+    base = ast_to_type(base_ast, ctx=ctx)
+    if isinstance(base, ty.TypeOr):
+        return ty.union(*(
+            _refined(member, _bind_fact_subjects(ty.strip_refinement(member), facts, loc=block.loc, ctx=ctx))
+            for member in base.items
+        ))
+    return _refined(base, _bind_fact_subjects(ty.strip_refinement(base), facts, loc=block.loc, ctx=ctx))
+
+
+def _bool_arm(ast: p0.AST, *, ctx: Context) -> tuple[bool, list[ty.Proposition]] | None:
+    """`true`, `false`, `true & <facts>`, `false & <facts>` in type position: the arm and its facts."""
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Bool):
+        return ast.item.value, []
+    if (
+        isinstance(ast, p0.BinOp)
+        and _operator_symbol(ast.op) in ('&', 'and')
+        and isinstance(ast.right, p0.Block)
+        and ast.right.kind == '<>'
+        and (arm := _bool_arm(ast.left, ctx=ctx)) is not None
+    ):
+        return arm[0], [*arm[1], *_bind_fact_subjects('bool', _fact_block(ast.right, ctx=ctx), loc=ast.right.loc, ctx=ctx)]
+    return None
+
+
+def _bool_arms_type(ast: p0.BinOp, *, ctx: Context) -> ty.Type:
+    """`true & <facts> | false & <facts>` (either arm may be bare): the boolean
+    type carrying what each arm establishes."""
+    arms = [_bool_arm(ast.left, ctx=ctx), _bool_arm(ast.right, ctx=ctx)]
+    for side, arm in zip((ast.left, ast.right), arms):
+        if arm is None:
+            type_error(ctx.srcfile, 'a boolean fact type has a `true` arm and a `false` arm', Pointer(span=side.loc, message='expected `true`, `false`, or one of them `& <facts>`'))
+    if arms[0][0] == arms[1][0]:   # type: ignore[index]
+        type_error(ctx.srcfile, 'a boolean fact type has a `true` arm and a `false` arm', Pointer(span=ast.loc, message='both arms are the same'))
+    facts = [replace(p, when=truth) for truth, arm_facts in arms for p in arm_facts]   # type: ignore[misc]
+    return _refined('bool', facts)
+
+
+def _proposition_type(ast: p0.AST, *, ctx: Context) -> ty.Type | None:
+    """A proposition in type position (`:> tok is? Word`): the type of its truth
+    value — `true & <fact> | false & <negated fact>`."""
+    if not (isinstance(ast, p0.BinOp) and (_operator_symbol(ast.op) in ('is?', 'isnt?') or isinstance(ast.op, t2.InvertedComparisonOp) or (isinstance(ast.op, t1.Operator) and ast.op.symbol in _REFINEMENT_COMPARISONS))):
+        return None
+    found = _refinement_conditions(ast, ctx=ctx)
+    if not found:
+        return None
+    facts = _bind_fact_subjects('bool', found, loc=ast.loc, ctx=ctx)
+    if any(p.param is None for p in facts):
+        type_error(ctx.srcfile, 'a proposition as a type speaks of parameters', Pointer(span=ast.loc, message='name a parameter (`tok is? Word`, `prefix.length <=? src.length`)'))
+    if len(facts) != 1:
+        not_implemented(ctx.srcfile, ast.loc, 'a compound proposition as a type (write the arms: `true & <…> | false & <…>`)')
+    fact = facts[0]
+    return _refined('bool', [replace(fact, when=True), replace(fact.negated(), when=False)])
+
+
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
+    proposition = _proposition_type(ast, ctx=ctx)
+    if proposition is not None:
+        return proposition
     metatype = _metatype(ast, ctx=ctx)
     if metatype is not None:
         return metatype
@@ -12497,10 +12744,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                     # refines that member — the literal member has no fields
                     member = _union_object_member(base)
                     if member is not base:
-                        _check_refinement_subjects(member, propositions, loc=ast.loc, ctx=ctx)
-                        return _refined(member, propositions)
-                _check_refinement_subjects(base, propositions, loc=ast.loc, ctx=ctx)
-                return _refined(alias_value, propositions)
+                        return _refined(member, _bind_fact_subjects(member, propositions, loc=ast.loc, ctx=ctx))
+                return _refined(alias_value, _bind_fact_subjects(base, propositions, loc=ast.loc, ctx=ctx))
             type_error(
                 ctx.srcfile,
                 'type alias is not generic',
@@ -12746,8 +12991,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 for item in items
                 for proposition in (_refinement_conditions(item, ctx=ctx) or [])
             ]
-            _check_refinement_subjects(ty.strip_refinement(base), propositions, loc=ast.loc, ctx=ctx)
-            return _refined(base, propositions)
+            return _refined(base, _bind_fact_subjects(ty.strip_refinement(base), propositions, loc=ast.loc, ctx=ctx))
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
@@ -12852,6 +13096,10 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 ),
             )
         
+        case p0.BinOp(op=t1.Operator(symbol='or'|'|')) if _bool_arm(ast.left, ctx=ctx) is not None or _bool_arm(ast.right, ctx=ctx) is not None:
+            # `true & <facts> | false & <facts>`: what a boolean result establishes in each arm
+            return _bool_arms_type(ast, ctx=ctx)
+
         case p0.BinOp(op=t1.Operator(symbol='or'|'|')):
             left = ast_to_type(ast.left, ctx=ctx)
             right = ast_to_type(ast.right, ctx=ctx)
@@ -12865,6 +13113,10 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 union = ty.TypeOr([left, right])
             return _canonical_union(union, ctx=ctx)
         
+        case p0.BinOp(op=t1.Operator(symbol='and'|'&')) if isinstance(ast.right, p0.Block) and ast.right.kind == '<>' and ast.right.base is None:
+            # `T & <facts>`: the facts intersected with the type, member by member of a union
+            return _with_facts(ast.left, ast.right, ctx=ctx)
+
         case p0.BinOp(op=t1.Operator(symbol='and'|'&')):
             left = ast_to_type(ast.left, ctx=ctx)
             right = ast_to_type(ast.right, ctx=ctx)

@@ -40,6 +40,29 @@ Conditions and parameters are told apart by their shape: a lambda, a `?`-compari
 
 Checking a value against a refined type has three outcomes: **proven** (a literal or known fact establishes the condition, with no runtime cost), **refuted** (`score:Positive = -3` is an error), and **unknown**, which is reported as unproven rather than false. The binding then carries the base type plus the proven facts, so `values[0]` needs no runtime check.
 
+Each condition is a *fact*, and a block of facts is a type of its own that `&` combines with any type: `int & <i => i >? 0>` is `Positive` again, and `(int64 | uint64) & <i => i >? 0>` refines both members. That is how a function states what it establishes about its *inputs*. A boolean result says it per arm — `startswith` is declared `(text:string prefix:string):> true & <prefix.length <=? text.length> | false` — and a proposition as the result type is a *type predicate*, `true` when it holds and `false` when it doesn't:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Token:type = $abstract type of any & [text:string]
+let Word = type of Token & []
+let is_word = (tok:Token) => tok is? Word          # inferred: `:> tok is? Word`
+
+let name_of = (tok:Token):>string => {
+    if is_word(tok) { let w:Word = tok  return w.text }   # `tok` is a Word here
+    return "?"
+}
+
+let skip_marker = (src:string i:uint64):>uint64<n => n <=? src.length> | none => {
+    if i >=? src.length return none
+    if src[i..].startswith("[[") { return i + 2 }  # the fact keeps `i + 2` within `src`
+    return i
+}
+```
+
+The function proves its facts at every `return` (`return tok is? Word` is its own proof; `return true` needs `tok` narrowed to `Word` at that point), and every caller gets them where the result is known.
+
 ## Facts from Ordinary Control Flow
 
 Dewy should infer common refinements from the code programmers already write:

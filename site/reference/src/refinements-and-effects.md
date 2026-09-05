@@ -10,7 +10,7 @@ A refinement combines a base type with facts every value of that type satisfies.
 array<int64 length=3>
 ```
 
-A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition compares against an integer literal, a fixed-width type's `min`/`max` (`uint64.max`), or — as an upper bound on a result — the length of one of the function's parameters (`:>uint64<n => n <=? src.length>`, see [refined results](#refined-results-and-field-invariants)), and may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
+A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition — a *fact* — compares against an integer literal, a fixed-width type's `min`/`max` (`uint64.max`), or — as an upper bound on a result — the length of one of the function's parameters (`:>uint64<n => n <=? src.length>`, see [refined results](#refined-results-and-field-invariants) and [type facts](#type-facts)), and may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
 
 <!-- dewy-example: compiler -->
 
@@ -114,6 +114,60 @@ let main = ():>int64 => {
 ```
 
 Facts about an object's integer field (`if r.bottom >? 0 { r.top // r.bottom }`) are tracked by member route, like array lengths, until the field or its object is reassigned; and a loop over an array or dictionary literal of constants that is never mutated bounds the loop variable by those constants.
+
+### Type Facts
+
+A *fact* is one condition of a refinement: `length >? 0`, `i => i <=? src.length`, `bottom >? 0`, `tok is? Word`. A block of them, `<facts>`, is a type in its own right — the values the facts hold of — and `T & <facts>` intersects it with `T`, distributing over a union member by member. `T<facts>` is the same thing spelled as a parameterize block (which can also take type arguments; `& <…>` takes facts only). Inside a fact block a name resolves to a member of the value when the value has one (`length`, a field), and otherwise to a binding in scope — in a result type, the function's parameters. So a result may carry facts about the *parameters*: what the function establishes about its inputs by the time it returns.
+
+A boolean result states its facts per arm:
+
+```dewy
+let has_prefix = (src:string prefix:string):> true & <prefix.length <=? src.length> | false => {
+    if prefix.length =? 0 return true
+    if prefix.length >? src.length return false     # the guard is the proof of the `true` arm
+    let last:uint64 = prefix.length - 1
+    return src[0..last] =? prefix
+}
+```
+
+A `true` result establishes `prefix.length <=? src.length`; the bare `false` arm promises nothing. Every `return` in the body is an obligation for the arm it returns — `return true` must prove the fact, from a guard (`if prefix.length >? src.length return false` before it) or the facts of the value returned — and a call is that fact wherever the result is known: `if src[i..].startswith("[[") { i += 2 }` keeps `i` within `src`, because a true `startswith` establishes `prefix.length <=? text.length` and the argument was the tail `src[i..]`. The prelude's `startswith` and `endswith` are declared this way. A proposition in type position is the type of its truth value, both arms at once — a type predicate:
+
+```dewy
+let is_word = (tok:Token):> tok is? Word => tok is? Word
+```
+
+`if is_word(t)` narrows `t` to `Word` and the else branch away from it, exactly as `if t is? Word` does; the body must return precisely that truth value (`return tok is? Word` is its own proof; `return true` needs `tok` narrowed to `Word` where it stands). An expression-bodied function whose body is one such proposition about its parameters — a type test, or a comparison of lengths — is inferred to be a predicate, so `let is_word = (tok:Token) => tok is? Word` is the same declaration; `:>bool` opts out.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let Tok:type = $abstract type of any & [text:string]
+let Word = type of Tok & []
+let is_word = (tok:Tok) => tok is? Word
+
+# the offset past a `[[ … ]]` block, within the source — no guard: `startswith` proves the steps
+let eat_block = (src:string):>uint64<n => n <=? src.length> | none => {
+    if not src.startswith("[[") return none
+    let depth:int64 = 0
+    let i:uint64 = 0
+    loop i <? src.length {
+        if src[i..].startswith("[[") { depth += 1  i += 2 }
+        else if src[i..].startswith("]]") { depth -= 1  i += 2 }
+        else { i += 1 }
+        if depth =? 0 return i
+    }
+    return none
+}
+
+let main = ():>int64 => {
+    let t:Tok = Word[text="hi"]
+    let n = eat_block("[[a[[b]]c]] rest")
+    if is_word(t) and n is? uint64 { let w:Word = t  return (n transmute int64) - 11 }   # 0
+    return 1
+}
+```
+
+The facts a result may state about a parameter are type tests (`tok is? Word`, `tok isnt? Word`) and length bounds (`prefix.length <=? src.length`, `<?`, or against a number); the value's own facts are as before. What a caller learns follows the argument: a fact about a parameter's length becomes a fact about the argument's length, about `src.length - i` for a tail `src[i..]`, or a bound on a known length. Facts are never assumed from a type: a function type that states them (a slot `eat:eatfn`) makes them the contract of every implementation.
 
 ## Prototyping Without the Proofs
 

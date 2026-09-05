@@ -57,7 +57,7 @@ def test_a_promise_is_about_the_argument_not_a_name() -> None:
 
 def test_a_term_must_name_a_parameter_and_be_an_upper_bound() -> None:
     from dewy.semantic.errors import NotImplementedYet
-    with pytest.raises(UserError, match='refinement names a length that is not a parameter'):
+    with pytest.raises(UserError, match='fact names a length that is not a parameter'):
         _check('let f = (src:string):>uint64<n => n <=? text.length> => src.length\n')
     with pytest.raises(NotImplementedYet):
         _check('let f = (src:string):>uint64<n => n >=? src.length> => src.length\n')

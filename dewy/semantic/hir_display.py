@@ -23,14 +23,7 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.RationalLiteralType):
         return f'{t.numerator}/{t.denominator}'
     if isinstance(t, ty.RefinedType):
-        conditions = ' '.join(
-            (f'i => i {p.op.replace("not=?", "not =?")} {p.bound_text}' if p.subject == 'self' else f'{p.subject} {p.op.replace("not=?", "not =?")} {p.bound_text}')
-            for p in t.propositions
-        )
-        base = type_to_dewy(t.base)
-        if base.endswith('>'):
-            return f'{base[:-1]} {conditions}>'
-        return f'{base}<{conditions}>'
+        return _refined_type_to_dewy(t)
     if isinstance(t, ty.IntegerLiteralType):
         return str(t.value)
     if isinstance(t, ty.StringLiteralType):
@@ -96,6 +89,34 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.SequenceType):
         return f'<{" ".join(type_to_dewy(x) for x in t.items)}>'
     raise TypeError(f'unexpected type for type_to_dewy: {t!r}')
+
+
+def _fact_to_dewy(p: ty.Proposition) -> str:
+    op = p.op.replace('not=?', 'not =?')
+    if p.subject == 'self':
+        return f'i => i {op} {p.bound_text}'
+    return f'{p.subject_text} {op} {p.bound_text}'
+
+
+def _refined_type_to_dewy(t: ty.RefinedType) -> str:
+    """`T<facts>` for facts about the value; `true & <…> | false & <…>` for a
+    boolean's arms; `T & <facts>` for facts about parameters."""
+    arms = {p.when for p in t.propositions}
+    if t.base == 'bool' and arms - {None}:
+        parts = []
+        for arm in (True, False):
+            facts = ' '.join(_fact_to_dewy(p) for p in t.propositions if p.when in (arm, None))
+            parts.append(f'{"true" if arm else "false"} & <{facts}>' if facts else ('true' if arm else 'false'))
+        return ' | '.join(parts)
+    about_value = [p for p in t.propositions if p.param is None]
+    about_params = [p for p in t.propositions if p.param is not None]
+    base = type_to_dewy(t.base)
+    if about_value:
+        conditions = ' '.join(_fact_to_dewy(p) for p in about_value)
+        base = f'{base[:-1]} {conditions}>' if base.endswith('>') else f'{base}<{conditions}>'
+    if about_params:
+        base = f'{base} & <{" ".join(_fact_to_dewy(p) for p in about_params)}>'
+    return base
 
 
 def type_alias_value_to_dewy(value: ty.TypeAliasValue) -> str:

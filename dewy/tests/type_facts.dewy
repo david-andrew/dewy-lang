@@ -1,0 +1,59 @@
+# Type facts: what a result establishes about the parameters.
+#
+# A boolean result may declare, per arm, the facts a caller may assume:
+# `true & <prefix.length <=? src.length> | false` (the `false` arm promises
+# nothing). A proposition in type position, `:> tok is? Word`, is the type
+# of its truth value — both arms, like a type predicate. An expression-bodied
+# function whose body is such a proposition is inferred to be one. The
+# prelude's `startswith`/`endswith` are declared this way, so a true
+# `s.startswith("[[")` proves `i += 2` stays within `s`.
+let Tok:type = $abstract type of any & [text:string]
+let Word = type of Tok & []
+let Space = type of Tok & []
+
+let is_word = (tok:Tok):> tok is? Word => tok is? Word    # declared
+let is_space = (tok:Tok) => tok is? Space                  # inferred
+
+let has_prefix = (src:string prefix:string):> true & <prefix.length <=? src.length> | false => {
+    if prefix.length =? 0 return true
+    if prefix.length >? src.length return false            # the guard is the proof
+    let last:uint64 = prefix.length - 1
+    return src[0..last] =? prefix
+}
+
+let opener = "[["
+let closer = "]]"
+
+# the tokenizer's block comment: the offset past its closer, within the source
+let eat_block = (src:string):>uint64<n => n <=? src.length> | none => {
+    if not src.startswith(opener) return none
+    let depth:int64 = 0
+    let i:uint64 = 0
+    loop i <? src.length {
+        if src[i..].startswith(opener) { depth += 1  i += 2 }        # startswith: src.length - i >= 2
+        else if src[i..end].startswith(closer) { depth -= 1  i += 2 }
+        else { i += 1 }
+        if depth =? 0 return i                                       # i <= src.length on every path
+    }
+    return none
+}
+
+let describe = (tok:Tok):>string => {
+    if is_word(tok) { let w:Word = tok  return w.text }               # narrowed to Word
+    if is_space(tok) { let s:Space = tok  return "space" }
+    return "?"
+}
+
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let toks:array<Tok> = [Word[text="hi"] Space[text=" "]]
+    if describe(toks[0]) =? "hi" and describe(toks[1]) =? "space" { checks += 1 }
+    let n = eat_block("[[a[[b]]c]] rest")
+    if n is? uint64 and n =? 11 { checks += 2 }
+    let text = "hello world"
+    let word = "hello"
+    if has_prefix(text word) { let head = text[0..word.length)  if head =? "hello" { checks += 4 } }
+    if text.endswith("world") { let tail = text[(text.length - 5)..]  if tail =? "world" { checks += 8 } }
+    if checks =? 15 { return 42 }
+    return checks
+}

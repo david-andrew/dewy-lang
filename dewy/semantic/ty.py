@@ -283,6 +283,7 @@ class ObjectType:
             Proposition(f'.{f.name}', p.op, p.value, term=p.term, term_id=p.term_id)
             for f in self.fields
             for p in f.refinement
+            if p.param is None and p.type_ is None
         ]
 
     def field(self, name: str) -> ObjectField | None:
@@ -666,11 +667,42 @@ class Proposition:
     """The binding the term names, once resolved (a function literal resolves
     its result refinement's terms to its parameters); not part of identity,
     so a slot's contract and its implementation's agree."""
+    type_: 'TypeExpr | None' = None
+    """For `is?`/`isnt?` facts: the type tested."""
+    when: bool | None = None
+    """A fact a boolean result establishes only in one arm: True for
+    `true & <…>`, False for `false & <…>`; None for a fact that holds
+    unconditionally (of the value, or of the parameters at every return)."""
+    subject_id: int | None = field(default=None, compare=False, hash=False)
+    """The binding a parameter subject (`@name`) resolves to, once known."""
+
+    @property
+    def param(self) -> str | None:
+        """The parameter (or in-scope binding) a fact is about, else None: the
+        subject `@prefix` of `prefix.length <=? src.length` in a result type."""
+        return self.subject[1:] if self.subject.startswith('@') else None
 
     @property
     def bound_text(self) -> str:
-        """The bound as written: the number, or `src.length`."""
+        """The bound as written: the number, `src.length`, or a tested type."""
+        if self.type_ is not None:
+            from .hir_display import type_to_dewy
+            return type_to_dewy(self.type_)
         return f'{self.term}.length' if self.term is not None else str(self.value)
+
+    @property
+    def subject_text(self) -> str:
+        """The subject as written in a fact block: `prefix.length`, `bottom`, `length`, or `i` for the value."""
+        if self.param is not None:
+            return f'{self.param}.length' if self.of == 'length' else self.param
+        if self.field is not None:
+            return f'{self.field}.length' if self.of == 'length' else self.field
+        return 'length' if self.subject == 'length' else 'i'
+
+    def negated(self) -> 'Proposition':
+        """The fact that holds when this one does not (`is?` ↔ `isnt?`, `<=?` ↔ `>?`)."""
+        flipped = {'is?': 'isnt?', 'isnt?': 'is?', '=?': 'not=?', 'not=?': '=?', '<?': '>=?', '>=?': '<?', '<=?': '>?', '>?': '<=?'}[self.op]
+        return Proposition(self.subject, flipped, self.value, self.of, self.term, self.term_id, self.type_, None if self.when is None else not self.when, self.subject_id)
 
     @property
     def field(self) -> str | None:
@@ -683,7 +715,7 @@ class Proposition:
         return self.subject == 'length' or (self.field is not None and self.of == 'length')
 
     def holds(self, fact: int) -> bool:
-        if self.term is not None:
+        if self.term is not None or self.type_ is not None:
             raise ValueError('INTERNAL ERROR: a term proposition is not decided by a constant')
         match self.op:
             case '>?': return fact > self.value
@@ -696,7 +728,7 @@ class Proposition:
 
     def lower_bound(self) -> int | None:
         """The minimum value this proposition guarantees, if it is a lower bound."""
-        if self.term is not None:
+        if self.term is not None or self.type_ is not None or self.param is not None:
             return None
         if self.op == '>?':
             return self.value + 1
@@ -705,7 +737,7 @@ class Proposition:
         return None
 
     def upper_bound(self) -> int | None:
-        if self.term is not None:
+        if self.term is not None or self.type_ is not None or self.param is not None:
             return None
         if self.op == '<?':
             return self.value - 1

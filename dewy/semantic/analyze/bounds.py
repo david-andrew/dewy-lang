@@ -217,6 +217,8 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
 
 def _describe_proposition_text(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
+    if proposition.param is not None:
+        return f'{proposition.subject_text} {op} {proposition.bound_text}'
     subject = proposition.field or ('value' if proposition.subject == 'self' else 'length')
     if proposition.field is not None and proposition.of == 'length':
         subject = f'{proposition.field}.length'
@@ -319,7 +321,7 @@ _REMAINDER_SHIFT = 21
 
 
 def _remainder_key(subject: int, sequence_id: int, offset_id: int) -> int:
-    return -(_REMAINDER_BASE + (subject << (2 * _REMAINDER_SHIFT)) + (sequence_id << _REMAINDER_SHIFT) + offset_id)
+    return -(_REMAINDER_BASE + (_order_term(subject) << (2 * _REMAINDER_SHIFT)) + (sequence_id << _REMAINDER_SHIFT) + offset_id)
 
 
 def _decode_remainder_fact(key: int) -> tuple[int, int, int] | None:
@@ -328,7 +330,8 @@ def _decode_remainder_fact(key: int) -> tuple[int, int, int] | None:
         return None
     raw = -key - _REMAINDER_BASE
     mask = (1 << _REMAINDER_SHIFT) - 1
-    return raw >> (2 * _REMAINDER_SHIFT), (raw >> _REMAINDER_SHIFT) & mask, raw & mask
+    subject = raw >> (2 * _REMAINDER_SHIFT)
+    return (subject if subject < _LENGTH_TERM else _LENGTH_TERM - subject), (raw >> _REMAINDER_SHIFT) & mask, raw & mask
 
 
 def _is_runtime_string(type_: ty.Type) -> bool:
@@ -741,7 +744,9 @@ class _BoundsValidator:
             elif node.op != '=':
                 value = None
             self._set_interval(current, binding_id, value)
+            shifted = self._shifted_facts(current, binding_id, node) if node.op in ('+=', '-=') else {}
             _drop_index_facts(current, index_id=binding_id)
+            current.update(shifted)   # `i += 2` under `src.length - i >= 2`: `i <= src.length`
             if (isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None) or _is_runtime_string(node.target.type):
                 # Whole-sequence replacement: nothing is known about the new length.
                 current.pop(_length_key(binding_id), None)
@@ -850,6 +855,22 @@ class _BoundsValidator:
     def _validate_obligation(self, node: hir.Obligation, interval: Interval | None, state: State) -> None:
         """A refinement the checker could not decide: prove each proposition from facts."""
         for proposition in node.refined.propositions:
+            if proposition.when is not None:
+                # a fact of one arm of a boolean result: it must hold wherever the
+                # returned expression is that arm — vacuously when it cannot be
+                arm_state = self._refine(state, _strip_casts(node.value), truth=proposition.when)
+                if arm_state is None:
+                    continue
+                verdict = self._proposition_verdict(proposition, node.value, interval, arm_state)
+                if verdict is True:
+                    continue
+                self._proof_failure(node, 'obligation', Error(
+                    srcfile=self.srcfile,
+                    title='refinement refuted' if verdict is False else 'cannot prove fact',
+                    pointer_messages=[Pointer(span=node.value.loc, message=f'`{_describe_proposition_text(proposition)}` is promised when this is `{str(proposition.when).lower()}`, and nothing here establishes it')],
+                    hint='return under a guard that establishes the fact (`if prefix.length >? src.length return false` before `return true`)',
+                ))
+                return
             verdict = self._proposition_verdict(proposition, node.value, interval, state)
             if verdict is True:
                 if proposition.op in ('<?', '<=?') and (proposition.subject == 'length' or proposition.of == 'length'):
@@ -949,6 +970,19 @@ class _BoundsValidator:
 
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
+        if proposition.param is not None:
+            # a fact about a parameter (`prefix.length <=? src.length`): its own facts decide it
+            if proposition.subject_id is None:
+                return None
+            subject = _length_key(proposition.subject_id) if proposition.of == 'length' else proposition.subject_id
+            if proposition.term is not None:
+                if proposition.term_id is None:
+                    return None
+                gap = 1 if proposition.op == '<?' else 0
+                return True if self._id_bounded_by_length(subject, proposition.term_id, gap, state) else None
+            subject_interval = _known_interval(state, subject, self.max_length) if proposition.of == 'length' else self._binding_interval(state, subject)
+            name = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}.get(proposition.op)
+            return self._decide_comparison(name, subject_interval, Interval.exact(proposition.value)) if name is not None else None
         if proposition.term is not None:
             # `n <=? src.length`: the subject is bounded by that parameter's length
             if proposition.term_id is None:
@@ -1876,6 +1910,8 @@ class _BoundsValidator:
             ):
                 for binding_id in self.mutable_globals:
                     state.pop(binding_id, None)
+            if _call_result_refinements(node):
+                self._apply_call_facts(state, node, None)   # what the result promises of the arguments unconditionally
             result: Interval | None = None
             arithmetic = False
             if name == '__unary_sub__' and len(arguments) == 1:
@@ -2272,20 +2308,8 @@ class _BoundsValidator:
         subject = self._binding_id(node)
         if subject is None:
             subject = self._element_route_of(node)
-        if subject is not None:
-            if subject < 0:
-                if subject == _length_key(sequence_id) and gap <= 0:
-                    return True   # the length itself
-            else:
-                order = state.get(_order_key(subject, _length_key(sequence_id)))
-                if order is not None and order.lower is not None and order.lower >= gap:
-                    return True
-                if gap <= 1 and _index_fact_key(subject, sequence_id) in state:
-                    return True
-                for key, interval in state.items():
-                    remainder = _decode_remainder_fact(key)
-                    if remainder is not None and remainder[0] == subject and remainder[1] == sequence_id and interval.lower is not None and interval.lower >= gap:
-                        return True   # `length <= src.length - i` bounds `length` by `src.length` too (`i >= 0`)
+        if subject is not None and self._id_bounded_by_length(subject, sequence_id, gap, state):
+            return True
         offset = self._length_offset_index(node, sequence_id)
         if offset is not None and offset >= gap:
             return True
@@ -2316,6 +2340,28 @@ class _BoundsValidator:
                 return True
         return False
 
+    def _id_bounded_by_length(self, subject: int, sequence_id: int, gap: int, state: State) -> bool:
+        """`sequence.length - subject >= gap` for a term the facts name: a binding,
+        a route, or a length key (`prefix.length <=? src.length`)."""
+        if subject == _length_key(sequence_id):
+            return gap <= 0   # the length itself
+        order = state.get(_order_key(subject, _length_key(sequence_id)))
+        if order is not None and order.lower is not None and order.lower >= gap:
+            return True
+        if subject >= 0 and gap <= 1 and _index_fact_key(subject, sequence_id) in state:
+            return True
+        if subject < 0:
+            # a length: under the sequence's proven minimum
+            known = _known_interval(state, subject, self.max_length)
+            minimum = state.get(_length_key(sequence_id), self._length_default()).lower or 0
+            if known.upper is not None and known.upper <= minimum - gap:
+                return True
+        for key, interval in state.items():
+            remainder = _decode_remainder_fact(key)
+            if remainder is not None and remainder[0] == subject and remainder[1] == sequence_id and interval.lower is not None and interval.lower >= gap:
+                return True   # `length <= src.length - i` bounds `length` by `src.length` too (`i >= 0`)
+        return False
+
     def _nonnegative(self, binding_id: int, state: State) -> bool:
         interval = self._binding_interval(state, binding_id)
         return interval.lower is not None and interval.lower >= 0
@@ -2339,12 +2385,31 @@ class _BoundsValidator:
                 if sequence_id is not None:
                     facts.append((sequence_id, None, gap))
                     continue
-                if isinstance(argument, hir.StringSlice) and argument.range.right is None and argument.range.left is not None and (argument.range.bounds or '[]')[0] == '[':
-                    sequence_id = _runtime_array_id(argument.string, self.registry)
-                    offset_id = self._binding_id(argument.range.left)
-                    if sequence_id is not None and offset_id is not None and offset_id >= 0:
-                        facts.append((sequence_id, offset_id, gap))
+                tail = self._tail_of(argument)
+                if tail is not None:
+                    facts.append((tail[0], tail[1], gap))
         return facts
+
+    def _tail_of(self, node: hir.AST) -> tuple[int, int] | None:
+        """`src[i..]`, `src[i..end]`, `src[i..src.length)`: the sequence and the
+        offset binding of a slice running to the end, if that is what it is."""
+        node = _strip_casts(node)
+        if not isinstance(node, hir.StringSlice) or node.range.left is None:
+            return None
+        bounds = node.range.bounds or '[]'
+        if bounds[0] != '[':
+            return None
+        sequence_id = _runtime_array_id(node.string, self.registry)
+        offset_id = self._binding_id(node.range.left)
+        if sequence_id is None or offset_id is None or offset_id < 0:
+            return None
+        right = node.range.right
+        to_the_end = (
+            right is None
+            or (bounds[1] == ']' and self._length_offset_index(right, sequence_id) == 1)
+            or (bounds[1] == ')' and _sequence_of(right) is not None and _runtime_array_id(_sequence_of(right), self.registry) == sequence_id)   # type: ignore[arg-type]
+        )
+        return (sequence_id, offset_id) if to_the_end else None
 
     def _seed_call_term_facts(self, subject: int, value: hir.AST, state: State) -> None:
         """`let length = eat(src[i..])`: the call's promise as facts on the binding."""
@@ -2394,10 +2459,112 @@ class _BoundsValidator:
             if read_from is not None:
                 self._read_element(state, read_from, subject, loc)
 
+    def _apply_call_facts(self, state: State, call: hir.AST, truth: bool | None) -> State | None:
+        """The facts a call's result promises of its arguments: those of the arm
+        `truth` (a boolean predicate), or the unconditional ones (`truth` None).
+        `prefix.length <=? src.length` with the arguments substituted becomes a
+        length bound, an order fact between lengths, or — for a tail argument
+        `src[i..]` — a fact about `src.length - i`."""
+        for refined in _call_result_refinements(call):
+            for proposition in refined.propositions:
+                if proposition.param is None or proposition.type_ is not None or proposition.when not in (truth, None):
+                    continue
+                if proposition.of != 'length':
+                    continue
+                subject_argument = _call_argument(call, proposition.param)
+                if subject_argument is None:
+                    continue
+                subject_argument = _strip_casts(subject_argument)
+                subject_length = self._length_interval(subject_argument, state)
+                subject_id = _runtime_array_id(subject_argument, self.registry)
+                gap = 1 if proposition.op == '<?' else 0
+                if proposition.term is not None:
+                    bound_argument = _call_argument(call, proposition.term)
+                    if bound_argument is None:
+                        continue
+                    bound_argument = _strip_casts(bound_argument)
+                    bound_id = _runtime_array_id(bound_argument, self.registry)
+                    tail = self._tail_of(bound_argument) if bound_id is None else None
+                    if proposition.op not in ('<?', '<=?'):
+                        continue
+                    if subject_length is not None and subject_length.lower is not None and subject_id is None:
+                        # a known-length subject: the bound's length is at least that (plus the gap)
+                        needed = subject_length.lower + gap
+                        if bound_id is not None:
+                            key = _length_key(bound_id)
+                            state[key] = _known_interval(state, key, self.max_length).intersect(Interval(needed, None))
+                        elif tail is not None:
+                            key = _order_key(tail[1], _length_key(tail[0]))
+                            previous = state.get(key)
+                            state[key] = Interval(needed if previous is None or previous.lower is None else max(previous.lower, needed), None)
+                    elif subject_id is not None:
+                        if bound_id is not None:
+                            state[_order_key(_length_key(subject_id), _length_key(bound_id))] = Interval(gap, None)
+                        elif tail is not None:
+                            state[_remainder_key(_length_key(subject_id), tail[0], tail[1])] = Interval(gap, None)
+                elif subject_id is not None:
+                    name = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}.get(proposition.op)
+                    constraint = self._comparison_constraint(name, Interval.exact(proposition.value), True) if name is not None else None
+                    if constraint is not None:
+                        key = _length_key(subject_id)
+                        state[key] = _known_interval(state, key, self.max_length).intersect(constraint)
+        return state
+
+    def _shifted_facts(self, state: State, term: int, node: hir.Assign) -> dict[int, Interval]:
+        """The order and remainder facts on `term` after `term += c` / `term -= c`,
+        each gap moved by the constant (dropped when it would go negative)."""
+        constant = self._constant_expr(node.value, set())
+        if constant is None or constant.lower is None or constant.lower != constant.upper:
+            return {}
+        shift = constant.lower if node.op == '+=' else -constant.lower
+        shifted: dict[int, Interval] = {}
+        for key, interval in state.items():
+            if interval.lower is None:
+                continue
+            order = _decode_order_fact(key)
+            if order is not None and order[0] == term and interval.lower - shift >= 0:
+                shifted[key] = Interval(interval.lower - shift, None)
+                continue
+            remainder = _decode_remainder_fact(key)
+            if remainder is not None and remainder[2] == term and interval.lower - shift >= 0:
+                shifted[key] = Interval(interval.lower - shift, None)
+        return shifted
+
     def _seed_sum_facts(self, subject: int, value: hir.AST, state: State) -> None:
-        """`let stop = i + length` under `length <= src.length - i`: `stop <= src.length`."""
+        """`let stop = i + length` under `length <= src.length - i`: `stop <= src.length`;
+        `let last = prefix.length - 1`: what bounds `prefix.length` bounds `last` by one more."""
         value = _strip_casts(value)
-        if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier) and value.func.name == '__add__' and len(value.pos_args) == 2):
+        if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier) and value.func.name in ('__add__', '__sub__') and len(value.pos_args) == 2):
+            return
+        for term_node, constant_node, sign in ((value.pos_args[0], value.pos_args[1], 1), *(((value.pos_args[1], value.pos_args[0], 1),) if value.func.name == '__add__' else ())):
+            constant = self._constant_expr(constant_node, set())
+            term = self._binding_id(term_node)
+            if term is None or constant is None or constant.lower is None or constant.lower != constant.upper:
+                continue
+            shift = constant.lower if value.func.name == '__add__' else -constant.lower   # subject = term + shift
+            for key, interval in list(state.items()):
+                if interval.lower is None:
+                    continue
+                order = _decode_order_fact(key)
+                if order is not None and order[0] == term and order[1] != term:
+                    if interval.lower - shift >= 0:
+                        state[_order_key(subject, order[1])] = Interval(interval.lower - shift, None)
+                    continue
+                remainder = _decode_remainder_fact(key)
+                if remainder is not None and remainder[0] == term and interval.lower - shift >= 0:
+                    state[_remainder_key(subject, remainder[1], remainder[2])] = Interval(interval.lower - shift, None)
+            return
+        if value.func.name == '__sub__':
+            # `let start = text.length - suffix.length` under `suffix.length <= text.length`
+            # and `suffix.length >= k`: `start <= text.length - k`
+            measured = _sequence_of(value.pos_args[0])
+            sequence_id = _runtime_array_id(measured, self.registry) if measured is not None else None
+            taken = self._binding_id(value.pos_args[1])
+            if sequence_id is not None and taken is not None:
+                bounded = self._id_bounded_by_length(taken, sequence_id, 0, state)   # no wrap: the subtrahend is within the length
+                taken_interval = _known_interval(state, taken, self.max_length) if taken < 0 else self._binding_interval(state, taken)
+                if bounded and taken_interval.lower is not None and taken_interval.lower >= 0:
+                    state[_order_key(subject, _length_key(sequence_id))] = Interval(taken_interval.lower, None)
             return
         left_id, right_id = self._binding_id(value.pos_args[0]), self._binding_id(value.pos_args[1])
         if left_id is None or right_id is None or left_id < 0 or right_id < 0:
@@ -2851,6 +3018,9 @@ class _BoundsValidator:
                     self._refine_after(refined, condition.left, condition.right, right_truth=True),
                 )
             return refined
+        if isinstance(_strip_casts(condition), hir.FunctionCall) and _call_result_refinements(condition):
+            # `if has_prefix(src[i..] opener)`: what the predicate promises of its arguments in this arm
+            return self._apply_call_facts(refined, condition, truth)
         if not (
             isinstance(condition, hir.FunctionCall)
             and isinstance(condition.func, hir.ExpressedIdentifier)
