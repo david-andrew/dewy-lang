@@ -911,6 +911,8 @@ FIXED_INTEGER_TYPES = frozenset(_fixed_integer_widths)
 def optional_payload(type_: Type) -> TypeExpr | None:
     """Return the sole non-none member of ``T | none``."""
 
+    if isinstance(type_, TypeOr):
+        type_ = strip_result_refinement(type_)   # a refined `none` member (`none & <facts>`) is `none` at runtime
     if not isinstance(type_, TypeOr) or 'none' not in type_.items:
         return None
     payloads = [item for item in type_.items if item != 'none']

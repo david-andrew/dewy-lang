@@ -102,6 +102,8 @@ def _refined_type_to_dewy(t: ty.RefinedType) -> str:
     """`T<facts>` for facts about the value; `true & <…> | false & <…>` for a
     boolean's arms; `T & <facts>` for facts about parameters."""
     arms = {p.when for p in t.propositions}
+    if t.base == 'void':
+        return f'<{" ".join(_fact_to_dewy(p) for p in t.propositions)}>'
     if t.base == 'bool' and arms - {None}:
         parts = []
         for arm in (True, False):

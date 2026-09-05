@@ -644,6 +644,10 @@ class _BoundsValidator:
         # bindings declared with a refinement (`let d:bigint<sign =? 1>`, refined
         # parameters): their facts are re-established after every assignment
         self.declared_refinements: dict[int, ty.RefinedType] = {}
+        # bindings holding a call's result whose union members carry facts about
+        # the call's parameters: narrowing to one member establishes its facts
+        self.member_facts: dict[int, hir.FunctionCall] = {}
+        self.type_system = ty.TypeSystem()
         self.srcfile = srcfile
         self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
@@ -724,6 +728,10 @@ class _BoundsValidator:
             if node.binding_id is not None:
                 self._set_interval(current, node.binding_id, interval)
                 self._seed_value_facts(node.binding_id, node.expr, current, node.loc)
+                call = _strip_casts(node.expr)
+                called = _call_function_type(call)
+                if isinstance(call, hir.FunctionCall) and called is not None and isinstance(called.ret, ty.TypeOr) and any(p.param is not None for member in called.ret.items if isinstance(member, ty.RefinedType) for p in member.propositions):
+                    self.member_facts[node.binding_id] = call
             return current
         if isinstance(node, hir.Assign):
             value = self._eval(node.value, current, validate=validate)
@@ -747,6 +755,7 @@ class _BoundsValidator:
             elif node.op != '=':
                 value = None
             self._set_interval(current, binding_id, value)
+            self.member_facts.pop(binding_id, None)
             shifted = self._shifted_facts(current, binding_id, node) if node.op in ('+=', '-=') else {}
             _drop_index_facts(current, index_id=binding_id)
             current.update(shifted)   # `i += 2` under `src.length - i >= 2`: `i <= src.length`
@@ -1963,8 +1972,9 @@ class _BoundsValidator:
             ):
                 for binding_id in self.mutable_globals:
                     state.pop(binding_id, None)
-            if _call_result_refinements(node):
-                self._apply_call_facts(state, node, None)   # what the result promises of the arguments unconditionally
+            called = _call_function_type(node)
+            if called is not None and isinstance(called.ret, ty.RefinedType):
+                self._apply_call_facts(state, node, None)   # what a single result promises of the arguments unconditionally
             result: Interval | None = None
             arithmetic = False
             if name == '__unary_sub__' and len(arguments) == 1:
@@ -2607,7 +2617,7 @@ class _BoundsValidator:
             if read_from is not None:
                 self._read_element(state, read_from, subject, loc)
 
-    def _apply_call_facts(self, state: State, call: hir.AST, truth: bool | None) -> State | None:
+    def _apply_call_facts(self, state: State, call: hir.AST, truth: bool | None, member: ty.RefinedType | None = None) -> State | None:
         """The facts a call's result promises of its arguments: those of the arm
         `truth` (a boolean predicate), or the unconditional ones (`truth` None).
         Each fact is about a parameter's length or value, compared with a
@@ -2615,14 +2625,23 @@ class _BoundsValidator:
         arguments gives an interval, an order fact between two terms, or — for
         a slice argument `src[i..]` / `src[i..j)` — a remainder fact."""
         comparison_names = {'>?': '__gt__', '>=?': '__ge__', '<?': '__lt__', '<=?': '__le__', '=?': '__eq__', 'not=?': '__ne__'}
-        for refined in _call_result_refinements(call):
+        for refined in ([member] if member is not None else _call_result_refinements(call)):
             for proposition in refined.propositions:
                 if proposition.param is None or proposition.type_ is not None or proposition.when not in (truth, None):
                     continue
                 subject_argument = _call_argument(call, proposition.param)
                 if subject_argument is None:
                     continue
+                if isinstance(subject_argument, hir.Place):
+                    subject_argument = subject_argument.target   # `ensure(@xs)`: the fact is about the caller's binding
                 subject_argument = _strip_casts(subject_argument)
+                if subject_argument.type == 'bool' and proposition.of == 'value' and proposition.op == '=?' and proposition.term is None and proposition.value in (0, 1):
+                    # `require(ok)` with `ok =? true`: the argument's condition held
+                    refined = self._refine(state, subject_argument, truth=proposition.value == 1)
+                    if refined is not None:
+                        state.clear()
+                        state.update(refined)
+                    continue
                 if proposition.of == 'length':
                     subject_id = _runtime_array_id(subject_argument, self.registry)
                     subject_term = _length_key(subject_id) if subject_id is not None else None
@@ -3211,6 +3230,35 @@ class _BoundsValidator:
         if isinstance(_strip_casts(condition), hir.FunctionCall) and _call_result_refinements(condition):
             # `if has_prefix(src[i..] opener)`: what the predicate promises of its arguments in this arm
             return self._apply_call_facts(refined, condition, truth)
+        bare = _strip_casts(condition)
+        if isinstance(bare, hir.TypeTest) and isinstance(_strip_casts(bare.value), hir.ExpressedIdentifier):
+            tested = _strip_casts(bare.value)
+            remembered = self.member_facts.get(tested.binding_id) if tested.binding_id is not None else None
+            if remembered is not None:
+                called = _call_function_type(remembered)
+                if called is not None and isinstance(called.ret, ty.TypeOr):
+                    matches = truth != bare.negated
+                    survivors = []
+                    for item in called.ret.items:
+                        base = ty.strip_refinement(item)
+                        inside = self.type_system.is_subtype(base, bare.test_type)
+                        overlapping = not inside and self.type_system.is_subtype(bare.test_type, base)
+                        if inside == matches or overlapping:
+                            survivors.append(item)
+                    if len(survivors) == 1 and isinstance(survivors[0], ty.RefinedType):
+                        self._apply_call_facts(refined, remembered, None, member=survivors[0])
+            return refined
+        if isinstance(bare, hir.ExpressedIdentifier) and bare.type == 'bool' and bare.binding_id is not None:
+            # a boolean binding as the condition: it is `true` (`1`) or `false` (`0`) here
+            current = refined.get(bare.binding_id)
+            wanted = Interval.exact(1 if truth else 0)
+            narrowed = wanted if current is None else current.intersect(wanted)
+            if narrowed.is_empty:
+                return None
+            refined[bare.binding_id] = narrowed
+            return refined
+        if isinstance(bare, hir.FunctionCall) and isinstance(bare.func, hir.ExpressedIdentifier) and bare.func.name == '__not__' and len(bare.pos_args) == 1:
+            return self._refine(refined, bare.pos_args[0], truth=not truth)
         if not (
             isinstance(condition, hir.FunctionCall)
             and isinstance(condition.func, hir.ExpressedIdentifier)

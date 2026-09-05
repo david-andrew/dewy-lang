@@ -197,3 +197,85 @@ let f = (text:string i:uint64 j:uint64):>uint64 => {
         _check(program.replace('=> src.length + 2', '=> src.length - 1'))
     with pytest.raises(UserError, match='string slice is not proven in bounds'):
         _check(program.replace('let piece = text[i..i+k)', 'let piece = text[i..i+k+2)'))   # `i + k + 1 <= j + 1 <= text.length` would still hold
+
+
+def test_a_result_of_only_facts_is_a_procedure_that_establishes_them() -> None:
+    # `:> <facts>`: no value; owed at every return and at the end of the body; the caller
+    # gets them after the call — a library `require`, an in-place `ensure`, a type guard
+    program = '''let require = (ok:bool msg:string):> <ok =? true> => { if not ok { printl"{msg}"  exit(1) } }
+let ensure_nonempty = (@xs:array<int64>):> <xs.length >? 0> => { if xs.length =? 0 { xs.push(0) } }
+let Tok:type = $abstract type of any & [text:string]
+let Word = type of Tok & []
+let must_be_word = (tok:Tok):> <tok is? Word> => { if tok isnt? Word { exit(2) } }
+let main = ():>int64 => {
+    let xs:array<int64> = []
+    ensure_nonempty(@xs)
+    let first = xs[0]
+    let i:uint64 = 3
+    let text = "hello"
+    require(i <? text.length "i out of range")
+    let c = text[i]
+    let t:Tok = Word[text="hi"]
+    must_be_word(t)
+    let w:Word = t
+    return 0
+}
+'''
+    _check(program)
+    with pytest.raises(UserError, match='cannot prove refinement'):  # `require` that does not exit on failure
+        _check(program.replace('{ if not ok { printl"{msg}"  exit(1) } }', '{ printl"{msg}" }'))
+    with pytest.raises(UserError, match='cannot prove refinement'):  # `ensure` that does not ensure
+        _check(program.replace('{ if xs.length =? 0 { xs.push(0) } }', '{ }'))
+    with pytest.raises(UserError, match='cannot prove type fact'):   # a guard that does not guard
+        _check(program.replace('{ if tok isnt? Word { exit(2) } }', '{ }'))
+    with pytest.raises(UserError, match='a fact block as a result speaks of the parameters'):
+        _check('let f = (n:int64):> <i => i >? 0> => { }\n')
+
+
+def test_facts_on_a_union_member_apply_where_the_result_is_narrowed_to_it() -> None:
+    program = '''let Tok:type = $abstract type of any & [text:string]
+let Word = type of Tok & []
+let Ok = type of any & []
+let Trouble = type of error & [why:string]
+let check = (tok:Tok src:string n:uint64):> Ok & <tok is? Word n <=? src.length> | Trouble => {
+    if tok isnt? Word return Trouble[why="not a word"]
+    if n >? src.length return Trouble[why="too long"]
+    return Ok
+}
+let main = ():>int64 => {
+    let t:Tok = Word[text="hi"]
+    let text = "hello world"
+    let n:uint64 = 4
+    let r = check(t text n)
+    if r isnt? exception { let w:Word = t  let head = text[0..n) }
+    return 0
+}
+'''
+    _check(program)
+    with pytest.raises(UserError, match='cannot prove refinement'):   # `return Ok` without the length guard
+        _check(program.replace('    if n >? src.length return Trouble[why="too long"]\n', ''))
+    with pytest.raises(UserError, match='cannot prove type fact'):
+        _check(program.replace('    if tok isnt? Word return Trouble[why="not a word"]\n', ''))
+    with pytest.raises(TypeCheckError, match='type mismatch'):        # reassigned: the remembered call no longer speaks for `r`
+        _check(program.replace('    if r isnt? exception', '    r = Trouble[why="later"]\n    if r isnt? exception'))
+
+
+def test_an_error_object_is_an_exception_for_a_type_test() -> None:
+    # `if r isnt? exception` on `Ok | Trouble` used to be decided true at compile time (the arm always taken)
+    program = '''let Ok = type of any & []
+let Trouble = type of error & [why:string]
+let check = (n:int64):> Ok | Trouble => if n >? 0 Ok else Trouble[why="bad"]
+let main = ():>int64 => { let r = check(-1)  if r isnt? exception { return 1 }  return 0 }
+'''
+    root = check.typecheck_and_resolve(SrcFile(None, program), include_prelude=True)
+    from dewy.semantic import hir
+    main_body = next(item for item in root.items if getattr(item, 'name', None) == 'main').expr.body
+    assert any(isinstance(item, hir.Flow) for item in main_body.items)   # a real test, not a folded arm
+
+
+def test_a_bare_fact_block_is_not_a_type_elsewhere() -> None:
+    with pytest.raises(UserError, match='a fact block is not a type by itself') as caught:
+        _check('let f = (n:<n >? 0>):>int64 => 1\n')
+    assert 'T & <n >? 0>' in str(caught.value) and ':> <n >? 0>' in str(caught.value)
+    with pytest.raises(UserError, match='a fact block is not a type by itself'):
+        _check('let main = ():>int64 => { let n:<length >? 0> = "a"  return 0 }\n')

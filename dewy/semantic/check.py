@@ -25,6 +25,9 @@ class Catcher:
     E.g. top level return is illegal because there is nothing to catch it. Inside a function body return is valid"""
     returns: list[tuple[Span, ty.Type]] = field(default_factory=list)
     expected: ty.Type | None = None  # the boundary's annotated `:>` type, checked at each return site
+    void_facts: ty.RefinedType | None = None
+    """`:> <facts>`: what a function that returns nothing establishes about its
+    parameters — owed at every bare `return` and at the end of the body."""
 
 
 @dataclass(eq=False)
@@ -64,6 +67,11 @@ class Context:
     length_bounds: dict[int, int] = field(default_factory=dict)  # proven minimum lengths of runtime-length arrays
     key_facts: dict[tuple[int, tuple[str, object]], tuple[str | None, int | None]] = field(default_factory=dict)
     """Proven dictionary keys: (dictionary route id, key identity) -> (position local, literal entry index)."""
+    member_facts: dict[int, hir.FunctionCall] = field(default_factory=dict)
+    """Bindings holding a call's result whose union members carry facts about
+    the call's parameters (`none & <tok is? Word> | Error`): narrowing the
+    binding to one member establishes that member's facts. Shared across
+    contexts (an entry never changes); dropped when the binding is assigned."""
     type_alias_asts: dict[int, p0.AST] = field(default_factory=dict)
     resolving_type_aliases: set[int] = field(default_factory=set)
     named_types: dict[int, ty.NamedType] = field(default_factory=dict)  # recursive alias references, by alias binding id
@@ -1493,6 +1501,8 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
             )
             if grown_annotation is not None and declaration.binding_id is not None:
                 ctx.refinements[declaration.binding_id] = expr.type
+            if declaration.binding_id is not None:
+                _remember_member_facts(declaration.binding_id, expr, ctx=ctx)
             return declaration
         
         case [
@@ -1663,6 +1673,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     if target.binding_id is not None:
         ctx.refinements.pop(target.binding_id, None)
         ctx.refinements.pop(_exclusion_key(target.binding_id), None)
+        ctx.member_facts.pop(target.binding_id, None)
         ctx.length_bounds.pop(target.binding_id, None)
         _invalidate_routes(target.binding_id, ctx=ctx)
         _drop_key_facts(ctx, dictionary_id=target.binding_id)
@@ -2157,6 +2168,8 @@ def tcr_return(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
     # carried to the catcher is the value's type, or `void` for a bare return
     if len(ast.parts) == 1:
         ctx.catcher.returns.append((kw_loc, ty.VOID_TYPE))
+        if ctx.catcher.void_facts is not None:
+            return hir.Block(kw_loc, ty.BOTTOM_TYPE, [_void_obligation(kw_loc, ctx.catcher.void_facts, ctx=ctx), hir.Return(kw_loc, ty.BOTTOM_TYPE)], False)
         return hir.Return(kw_loc, ty.BOTTOM_TYPE)
     # the returned value's expected type is the boundary's annotation, not whatever
     # expected type the return expression itself sat in (a return never produces a value there)
@@ -2165,6 +2178,22 @@ def tcr_return(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
         item = check_against(item, ctx.catcher.expected, ctx=ctx)
     ctx.catcher.returns.append((kw_loc, item.type))
     return hir.Return(kw_loc, ty.BOTTOM_TYPE, item)
+
+
+def _void_obligation(loc: Span, facts: ty.RefinedType, *, ctx: Context) -> hir.AST:
+    """The facts a `:> <facts>` function owes where it returns: type facts are
+    decided here from the narrowings in force; the rest is an obligation on
+    nothing for the analysis."""
+    nothing = hir.Void(loc, ty.VOID_TYPE)
+    pending = []
+    for proposition in facts.propositions:
+        if proposition.type_ is not None and proposition.subject_id is not None:
+            _prove_type_fact(nothing, proposition, ctx=ctx)
+        else:
+            pending.append(proposition)
+    if not pending:
+        return nothing
+    return hir.Obligation(loc, ty.VOID_TYPE, nothing, ty.RefinedType(ty.VOID_TYPE, tuple(pending)), ' and '.join(_describe_proposition(p) for p in pending))
 
 
 def tcr_or_throw(ast: p0.Postfix, *, ctx: Context) -> hir.AST:
@@ -3131,6 +3160,9 @@ def _disjoint_types(a: ty.TypeExpr, b: ty.TypeExpr, *, ctx: Context) -> bool:
         x, y = ty.unfold(ty.strip_refinement(x)), ty.unfold(ty.strip_refinement(y))
         if isinstance(x, ty.ObjectType) and isinstance(y, ty.ObjectType):
             return not (ctx.type_system.is_subtype(x, y) or ctx.type_system.is_subtype(y, x))
+        for object_type, name in ((x, y), (y, x)):
+            if isinstance(object_type, ty.ObjectType) and isinstance(name, str) and ctx.type_system.is_subtype(object_type, name):
+                return False   # an error object *is* an `exception`
         if isinstance(x, ty.ObjectType) or isinstance(y, ty.ObjectType):
             return True
         return ctx.type_system.is_empty(ty.intersect(x, y))
@@ -3348,6 +3380,21 @@ def _refine_condition_context(
             )
             if truth == condition.negated:
                 _record_exclusion(refinements, fact_id, condition.test_type)   # `isnt? Word` held: a Tok that is not a Word
+            remembered = ctx.member_facts.get(fact_id)
+            if remembered is not None:
+                # `let r = parse(@doc)` then `if r isnt? exception`: the surviving member's facts about the arguments
+                function_type = _call_function_type(remembered)
+                member = _surviving_member(function_type, condition.test_type, truth != condition.negated, ctx=ctx) if function_type is not None else None
+                for proposition in (member.propositions if member is not None else ()):
+                    if proposition.type_ is None or proposition.param is None:
+                        continue
+                    argument = _call_argument(remembered, proposition.param)
+                    argument = _strip_obligations(argument.target if isinstance(argument, hir.Place) else argument) if argument is not None else None
+                    target_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) else sb.array_route_id(argument, ctx.binding_registry) if isinstance(argument, hir.MemberAccess) else None
+                    if target_id is not None:
+                        refinements[target_id] = _refine_type_test(refinements.get(target_id, argument.type), proposition.type_, matches=proposition.op == 'is?', ctx=ctx)
+                        if proposition.op == 'isnt?':
+                            _record_exclusion(refinements, target_id, proposition.type_)
         return replace(ctx, refinements=refinements, key_facts=key_facts)
     length_fact = _length_bound_fact(condition, truth, ctx=ctx)
     if length_fact is not None:
@@ -11594,6 +11641,13 @@ def typefunc_from_hir_params(
     return ty.FunctionType(pos, kw, rest_name, ret)
 
 
+def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | None:
+    """`:> <facts>` — a result that is no value, only facts about the parameters."""
+    if isinstance(ast, p0.Block) and ast.kind == '<>' and ast.base is None and ast.inner and all(_refinement_conditions(item, ctx=ctx) is not None for item in ast.inner):
+        return ty.RefinedType(ty.VOID_TYPE, tuple(_bind_fact_subjects(ty.VOID_TYPE, _fact_block(ast, ctx=ctx), loc=ast.loc, ctx=ctx)))
+    return None   # `:> <(x:int64):>int64>` is a type in a type block, as before
+
+
 def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     """FunctionType for a function literal whose params and return type are fully annotated, else None.
 
@@ -11605,7 +11659,8 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     signature = fn_ast.left
     if not (isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>'):
         return None
-    rettype = _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
+    void_facts = _void_facts_annotation(signature.right, ctx=ctx)
+    rettype = void_facts if void_facts is not None else _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature.left, ctx=ctx)
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
@@ -11653,8 +11708,13 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     rettype_loc: Span | None = None
     
     # if the return type was annotated, capture it
+    void_facts: ty.RefinedType | None = None
     if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
-        rettype = _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
+        void_facts = _void_facts_annotation(signature.right, ctx=ctx)
+        if void_facts is not None:
+            rettype = ty.VOID_TYPE   # `:> <facts>`: no value; the facts hold of the parameters at every return
+        else:
+            rettype = _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
         rettype_loc = signature.right.loc
         signature = signature.left
     
@@ -11692,11 +11752,20 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     rettype = _adopt_result_refinement(rettype, expected, pos_or_kw_args, ctx=ctx, loc=rettype_loc or binop.loc)
     param_ids = {param.name: param.binding_id for param in [*pos_or_kw_args, *kw_only_args] if param.binding_id is not None}
     rettype = _resolve_result_terms(rettype, param_ids, ctx=ctx, loc=rettype_loc or binop.loc)
+    if void_facts is None and isinstance(expected, ty.FunctionType) and isinstance(expected.ret, ty.RefinedType) and expected.ret.base == ty.VOID_TYPE and rettype in (ty.INFERRED_TYPE, ty.VOID_TYPE):
+        void_facts = expected.ret   # a slot `:> <facts>`: the implementation owes them
+    if void_facts is not None:
+        resolved_void = _resolve_result_terms(void_facts, param_ids, ctx=ctx, loc=rettype_loc or binop.loc)
+        assert isinstance(resolved_void, ty.RefinedType)
+        void_facts = resolved_void
+        for proposition in void_facts.propositions:
+            if proposition.param is None:
+                user_error(ctx.srcfile, 'a fact block as a result speaks of the parameters', Pointer(span=rettype_loc or binop.loc, message=f'`{_describe_proposition(proposition)}` is about a value, and this function returns none'))
     # a parameter's facts may name its siblings (`(src:string n:uint64<v => v <=? src.length>)`)
     pos_or_kw_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in pos_or_kw_args]
     kw_only_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in kw_only_args]
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
-    catcher = Catcher(expected=annotated)
+    catcher = Catcher(expected=annotated, void_facts=void_facts)
     function_boundary_labels = dict(ctx.function_boundary_labels)
     for label_scope in ctx.label_scopes:
         function_boundary_labels.update(label_scope.labels)
@@ -11775,7 +11844,15 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
                 Pointer(span=rettype_loc, message=f'declared to return `{type_to_dewy(rettype)}`'),
                 Pointer(span=body.loc, message=f'but the body produces `{type_to_dewy(resolved_ret) if resolved_ret != ty.VOID_TYPE else "void"}`'))
 
+    if void_facts is not None:
+        if rettype != ty.VOID_TYPE:
+            user_error(ctx.srcfile, 'a fact block as a result returns nothing', Pointer(span=rettype_loc or binop.loc, message=f'but the body produces `{type_to_dewy(rettype)}`'), hint='return the value with its facts (`T & <…>`), or return nothing')
+        if body.type != ty.BOTTOM_TYPE:
+            # the end of the body is a return too: the facts are owed there
+            body = hir.Block(body.loc, ty.VOID_TYPE, [body, _void_obligation(Span(body.loc.stop - 1, body.loc.stop), void_facts, ctx=inner_ctx)], False)
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+    if void_facts is not None:
+        ftype = replace(ftype, ret=void_facts)   # the promise travels with the function type; the value is still nothing
 
     # the literal's file, for debug positions — when it was written there: a
     # literal synthesized by the compiler (a dispatcher, a formatter, a
@@ -12276,10 +12353,13 @@ def _refinement_term_ast(node: p0.AST) -> str | None:
 
 
 def _refinement_bound_ast(node: p0.AST) -> int | None:
-    """A refinement bound: an integer literal, or a fixed-width type's `min`/`max` (`uint64.max`)."""
+    """A refinement bound: an integer literal, a fixed-width type's `min`/`max`
+    (`uint64.max`), or `true`/`false` (1/0) for a boolean parameter (`ok =? true`)."""
     literal = _literal_integer_ast(node)
     if literal is not None:
         return literal
+    if isinstance(node, p0.Atom) and isinstance(node.item, t1.Bool):
+        return 1 if node.item.value else 0
     if (
         isinstance(node, p0.BinOp)
         and _operator_symbol(node.op) == '.'
@@ -12443,7 +12523,7 @@ def _bind_fact_subjects(base: ty.Type, propositions: list[ty.Proposition], *, lo
     an integer)."""
     bound: list[ty.Proposition] = []
     for proposition in propositions:
-        if (field_name := proposition.field) is not None and '.' not in field_name and (proposition.of == 'length' or proposition.type_ is not None or base == 'bool' or proposition.term is not None):
+        if (field_name := proposition.field) is not None and '.' not in field_name and (proposition.of == 'length' or proposition.type_ is not None or base in ('bool', 'void', 'none') or proposition.term is not None):
             # (a bare name compared as a value on a non-boolean type stays a
             # field — `Ratio<width >? 0>` errors as a missing field, not as a
             # parameter; on `true & <n >? 0>` there are no fields to mean)
@@ -12460,6 +12540,8 @@ def _check_refinement_subjects(base: ty.Type, propositions: list[ty.Proposition]
     for proposition in propositions:
         if proposition.param is not None:
             continue   # about a parameter: resolved and checked where the function binds its parameters
+        if base == ty.VOID_TYPE:
+            user_error(ctx.srcfile, 'a fact block as a result speaks of the parameters', Pointer(span=loc, message=f'`{_describe_proposition(proposition)}` is about a value, and this function returns none'), hint='name a parameter (`src.length >? 0`, `tok is? Word`), or return the value with its facts (`T & <…>`)')
         if proposition.type_ is not None:
             if proposition.subject == 'self':
                 not_implemented(ctx.srcfile, loc, 'a type fact about the value itself (write the type)')
@@ -12826,6 +12908,15 @@ def _proposition_type(ast: p0.AST, *, ctx: Context) -> ty.Type | None:
 
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """convert an AST from a position that is expected to be a type into a type"""
+    if isinstance(ast, p0.Block) and ast.kind == '<>' and ast.base is None and ast.inner and all(_refinement_conditions(item, ctx=ctx) is not None for item in ast.inner):
+        # a bare fact block where a value type is wanted
+        facts = ' '.join(' '.join(ctx.srcfile.body[item.loc.start:item.loc.stop].split()) for item in ast.inner)
+        user_error(
+            ctx.srcfile,
+            'a fact block is not a type by itself',
+            Pointer(span=ast.loc, message='these are facts; the type they refine is missing'),
+            hint=f'write the type with its facts, `T & <{facts}>` (or `T<{facts}>`); only a result may be facts alone, `:> <{facts}>`, meaning the function returns nothing and establishes them',
+        )
     proposition = _proposition_type(ast, ctx=ctx)
     if proposition is not None:
         return proposition
@@ -14590,7 +14681,77 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         )
     if isinstance(left, hir.DictMethod):
         return _dict_method_call(left, call, ctx=ctx)
+    _establish_call_facts(call, ctx=ctx)
     return call
+
+
+def _remember_member_facts(binding_id: int, expr: hir.AST, *, ctx: Context) -> None:
+    """`let r = f(…)` where `f`'s result members carry parameter facts: remember the call for `r`."""
+    call = _strip_obligations(expr)
+    if not isinstance(call, hir.FunctionCall):
+        return
+    function_type = _call_function_type(call)
+    if function_type is None or not isinstance(function_type.ret, ty.TypeOr):
+        return
+    if any(p.param is not None for member in _refined_members(function_type.ret) for p in member.propositions):
+        ctx.member_facts[binding_id] = call
+
+
+def _surviving_member(function_type: ty.FunctionType, test: ty.TypeExpr, matches: bool, *, ctx: Context) -> ty.RefinedType | None:
+    """The one refined member of a union result a type test leaves possible, if exactly one member survives."""
+    assert isinstance(function_type.ret, ty.TypeOr)
+    survivors = []
+    for member in function_type.ret.items:
+        base = ty.strip_refinement(member)
+        inside = ctx.type_system.is_subtype(base, test)
+        if inside == matches or (not inside and not _disjoint_types(base, test, ctx=ctx)):
+            survivors.append(member)
+    if len(survivors) == 1 and isinstance(survivors[0], ty.RefinedType):
+        return survivors[0]
+    return None
+
+
+def _establish_call_facts(call: hir.FunctionCall, *, ctx: Context) -> None:
+    """A call whose result unconditionally states facts about its parameters
+    (`:> <facts>`, or a single refined result) establishes them for the code
+    after it — like `$runtime_assert`: a boolean parameter promised `=? true`
+    refines the continuation by the argument's condition (`require(t is? Word)`),
+    and a type fact narrows a binding argument."""
+    function_type = _call_function_type(call)
+    if function_type is None or not isinstance(function_type.ret, ty.RefinedType):
+        return   # a union result's facts apply where the result is narrowed to a member
+    held = ctx
+    for proposition in function_type.ret.propositions:
+        if proposition.param is None or proposition.when is not None:
+            continue
+        argument = _call_argument(call, proposition.param)
+        if argument is None:
+            continue
+        argument = _strip_obligations(argument.target if isinstance(argument, hir.Place) else argument)
+        if proposition.type_ is not None:
+            fact_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) else sb.array_route_id(argument, ctx.binding_registry) if isinstance(argument, hir.MemberAccess) else None
+            if fact_id is not None:
+                refinements = dict(held.refinements)
+                refinements[fact_id] = _refine_type_test(refinements.get(fact_id, argument.type), proposition.type_, matches=proposition.op == 'is?', ctx=ctx)
+                if proposition.op == 'isnt?':
+                    _record_exclusion(refinements, fact_id, proposition.type_)
+                held = replace(held, refinements=refinements)
+        elif argument.type == 'bool' and proposition.of == 'value' and proposition.op == '=?' and proposition.term is None and proposition.value in (0, 1):
+            held = _refine_condition_context(held, argument, truth=proposition.value == 1)
+    if held is not ctx:
+        ctx.refinements.clear()
+        ctx.refinements.update(held.refinements)
+        ctx.length_bounds.clear()
+        ctx.length_bounds.update(held.length_bounds)
+        ctx.key_facts.clear()
+        ctx.key_facts.update(held.key_facts)
+
+
+def _call_function_type(node: hir.FunctionCall) -> ty.FunctionType | None:
+    function_type = node.func.type
+    if isinstance(function_type, ty.OverloadType) and node.selected_method_index is not None:
+        function_type = function_type.methods[node.selected_method_index]
+    return function_type if isinstance(function_type, ty.FunctionType) else None
 
 
 def _validate_sort_key(call: hir.FunctionCall, *, ctx: Context) -> None:
