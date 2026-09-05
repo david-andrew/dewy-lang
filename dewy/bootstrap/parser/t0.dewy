@@ -225,10 +225,15 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
         printl"matched tokens: {matches}"
         if matches.length >? 1 err"TODO: handling multiple matches not handled yet: {matches}"
         if matches.length =? 0 err"TODO: no tokens matched this round"
-        # [length token_cls] = matches[0]
+        [length token_cls] = matches[0]
+        token = token_cls[src[i..i+length] Span[i i+length] tokens.length]
+        printl"matched token {token}"
+        tokens.push(token)
+        i+=length
+
         # printl"allowed tokens: {allowed_tokens}"
         # $breakpoint
-        i+=1
+        # i+=1
     }
 
     return tokens

@@ -54,15 +54,16 @@ The debug build is a separate artifact (`<name>.debug` beside the ordinary binar
 
 ## In an editor
 
-Cursor, VS Code, and VSCodium debug Dewy through their stock native-debugger extensions — CodeLLDB (`lldb`, on Open VSX too) or C/C++ (`cppdbg`, gdb) — since the program carries DWARF for its Dewy source and the `dewy_lldb.py` / `dewy_gdb.py` scripts give the Variables pane, hovers, and the Debug Console Dewy values. The Dewy extension registers `.dewy` files for gutter breakpoints and offers the two launch configurations under "Add Configuration…"; written out, with a task that builds the debug executable first (`dewy debug --build file.dewy` prints its path, `__dewycache__/<path>/<name>.debug`, and launches nothing):
+Cursor, VS Code, and VSCodium debug Dewy through their stock native-debugger extensions — CodeLLDB (`lldb`, on Open VSX too) or C/C++ (`cppdbg`, gdb) — since the program carries DWARF for its Dewy source and the `dewy_lldb.py` / `dewy_gdb.py` scripts give the Variables pane, hovers, and the Debug Console Dewy values. The Dewy extension registers `.dewy` files for gutter breakpoints and offers two launch configurations under "Add Configuration…", both running the file in the active editor: **Dewy: debug current file**, and **Dewy: debug current file with arguments**, which asks for the program's command line each run (the prompt offers the last one again, and the extension splits the line like a shell — quotes for a path with a space — into the debugger's argument list; this is the way to run the bootstrap tokenizer on a file). Written out, with a task that builds the debug executable first (`dewy debug --build file.dewy` prints its path, `__dewycache__/<path>/<name>.debug`, and launches nothing):
 
 ```json
 // launch.json
 {
-    "name": "Dewy: debug current file (lldb)",
+    "name": "Dewy: debug current file with arguments",
     "type": "lldb",
     "request": "launch",
     "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
+    "args": "${command:dewy.programArguments}",
     "cwd": "${workspaceFolder}",
     "preLaunchTask": "dewy: build debug",
     "initCommands": ["command script import ~/.dewy/runtime/tools/dewy_lldb.py"],
@@ -79,7 +80,7 @@ Cursor, VS Code, and VSCodium debug Dewy through their stock native-debugger ext
 }
 ```
 
-A program that takes arguments — the tokenizer wants the file to tokenize — gets them from `"args"`: a fixed list (`"args": ["tests/sample.dewy"]`), or, in the CodeLLDB form, a prompt each run through a launch input (`"args": "${input:programArguments}"` with an `inputs` entry of type `promptString`; CodeLLDB splits the string like a shell). The repository's `launch.json` has both — **Dewy: debug current file with arguments (lldb)** asks for the command line. For the other common shape, a program whose argument is *the file you are looking at* (the bootstrap tokenizer on a source file), **Dewy: debug a program on current file (lldb)** runs `__dewycache__/debug-target` with `"args": ["${file}"]`; its build task asks which `.dewy` program to build there (`dewy debug --build --as __dewycache__/debug-target <program>`; the prompt defaults to `t0.dewy`, so Enter keeps it), so breakpoints in `t0.dewy` plus a `.dewy` file in the active editor is the whole setup, and any other program is a different answer to the same prompt.
+`${command:dewy.programArguments}` is the extension's prompt (a `${command:…}` can only yield a string, which is why the extension, not the debugger, does the splitting); `"args": []` (or a fixed list, `"args": ["tests/sample.dewy"]`) is the configuration without one.
 
 The gdb form is the same with `"type": "cppdbg"`, `"MIMode": "gdb"`, and `"setupCommands": [{ "text": "source ~/.dewy/runtime/tools/dewy_gdb.py" }]`. (CodeLLDB is the one exercised by the compiler's own tests, through its debug adapter.) In a checkout of the compiler the scripts are `${workspaceFolder}/tools/…` and the command `python -m dewy` (the repository's own `.vscode/launch.json` is exactly this). Gutter breakpoints, stepping, the call stack, and the Variables pane then behave as for any native program, with Dewy names, lines, and values; a `$breakpoint` in the program pauses the editor on its line. The `>>>` prompt of a program run *without* a debugger belongs to the terminal, not the editor.
 

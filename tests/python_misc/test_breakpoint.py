@@ -231,24 +231,19 @@ def test_the_editor_configurations_agree_on_paths_and_scripts() -> None:
     task_labels = {task['label'] for task in tasks['tasks']}
     program = '${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug'
     by_name = {configuration['name']: configuration for configuration in workspace['configurations']}
-    for name, configuration in by_name.items():
-        assert configuration['preLaunchTask'] in task_labels
-        if 'a program on current file' in name:
-            # the build task asks which program and places it at a fixed name; the editor's file is its argument
-            assert configuration['program'] == '${workspaceFolder}/__dewycache__/debug-target' and configuration['args'] == ['${file}']
-            task = next(task for task in tasks['tasks'] if task['label'] == configuration['preLaunchTask'])
-            assert task['args'][-3:] == ['--as', '__dewycache__/debug-target', '${input:debugProgram}']
-            assert any(entry['id'] == 'debugProgram' and entry['default'].endswith('t0.dewy') for entry in tasks['inputs'])
-        else:
-            assert configuration['program'] == program
-    assert by_name['Dewy: debug current file with arguments (lldb)']['args'] == '${input:programArguments}'   # CodeLLDB splits a string like a shell
-    assert any(entry['id'] == 'programArguments' for entry in workspace['inputs'])
+    for configuration in by_name.values():
+        assert configuration['preLaunchTask'] in task_labels and configuration['program'] == program
+    assert by_name['Dewy: debug current file']['args'] == []
+    assert by_name['Dewy: debug current file with arguments']['args'] == '${command:dewy.programArguments}'   # the extension's prompt; CodeLLDB splits a string like a shell
     assert all('dewy_lldb.py' in command for configuration in by_name.values() if configuration['type'] == 'lldb' for command in configuration['initCommands'])
     assert any('dewy_gdb.py' in command['text'] for command in by_name['Dewy: debug current file (gdb)']['setupCommands'])
     extension = json.loads((repo / 'dewy' / 'vscode-dewy' / 'package.json').read_text())
     assert {'language': 'dewy'} in extension['contributes']['breakpoints']
     snippets = extension['contributes']['debuggers'][0]['configurationSnippets']
-    assert {snippet['body']['type'] for snippet in snippets} == {'lldb', 'cppdbg'}
+    assert [snippet['body']['name'] for snippet in snippets] == ['Dewy: debug current file', 'Dewy: debug current file with arguments']
     for snippet in snippets:
-        assert snippet['body']['program'] == '^"' + program.replace('${', '\\${') + '"'
+        assert snippet['body']['type'] == 'lldb' and snippet['body']['program'] == '^"' + program.replace('${', '\\${') + '"'
         assert snippet['body']['preLaunchTask'] in task_labels
+    assert snippets[1]['body']['args'] == '^"\\${command:dewy.programArguments}"'
+    assert any(command['command'] == 'dewy.programArguments' for command in extension['contributes']['commands']) and extension['main'] == './extension.js'
+    assert "registerCommand('dewy.programArguments'" in (repo / 'dewy' / 'vscode-dewy' / 'extension.js').read_text()

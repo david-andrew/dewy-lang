@@ -113,7 +113,7 @@ def _launch_configuration(name: str, substitutions: dict[str, str]) -> dict:
 
     def substitute(value):
         if isinstance(value, str):
-            return re.sub(r'\$\{(\w+)\}', lambda match: substitutions[match.group(1)], value)
+            return re.sub(r'\$\{(?:command:)?([\w.]+)\}', lambda match: substitutions[match.group(1)], value)
         if isinstance(value, list):
             return [substitute(item) for item in value]
         return value
@@ -134,7 +134,7 @@ def test_the_editor_session_shows_dewy_frames_values_and_breakpoints(tmp_path: P
     udewy_path.parent.mkdir(parents=True)
     udewy_path.write_text(codegen(SrcFile.from_path(source), debug_values=True))
     assert entry_point(udewy_path, [], EntryPointOptions(compile_only=True)) == 0
-    configuration = _launch_configuration('Dewy: debug current file (lldb)', {
+    configuration = _launch_configuration('Dewy: debug current file', {
         'workspaceFolder': str(workspace), 'relativeFileDirname': 'src', 'fileBasenameNoExtension': 'session',
     })
     configuration['initCommands'] = [command.replace(str(workspace) + '/tools', str(repo / 'tools')) for command in configuration['initCommands']]
@@ -190,29 +190,46 @@ def _task_command(label: str, substitutions: dict[str, str]) -> list[str]:
     text = re.sub(r'^\s*//.*$', '', (repo / '.vscode' / 'tasks.json').read_text(), flags=re.M)
     tasks = json.loads(text)
     task = next(entry for entry in tasks['tasks'] if entry['label'] == label)
-    inputs = {entry['id']: entry['default'] for entry in tasks.get('inputs', [])}
-
     def substitute(value: str) -> str:
-        return re.sub(r'\$\{(?:input:)?(\w+)\}', lambda match: substitutions.get(match.group(1), inputs.get(match.group(1), match.group(0))), value)
+        return re.sub(r'\$\{(\w+)\}', lambda match: substitutions[match.group(1)], value)
 
     return [substitute(task['command']), *(substitute(argument) for argument in task['args'])]
 
 
-@pytest.mark.skipif(which('as') is None or which('ld') is None or _codelldb() is None, reason='needs the x86_64 toolchain and the CodeLLDB extension')
-def test_a_program_debugged_on_the_editors_file(tmp_path: Path) -> None:
-    """`Dewy: debug a program on current file`: the build task's prompt defaults to
-    the bootstrap tokenizer, which then runs on the file in the active editor."""
+def _split_like_the_extension(line: str) -> list[str]:
+    """What the dewy extension's debug-configuration resolver does to a string
+    `args` (the `${command:dewy.programArguments}` prompt's answer) before the
+    debugger sees it: its own shell-style split, run here under node."""
+    script = "process.stdout.write(JSON.stringify(require(process.argv[1]).splitArguments(process.argv[2])))"
+    completed = subprocess.run(['node', '-e', script, str(repo / 'dewy' / 'vscode-dewy' / 'extension.js'), line], capture_output=True, text=True, check=True)
+    return json.loads(completed.stdout)
+
+
+@pytest.mark.skipif(which('node') is None, reason='needs node')
+def test_the_extension_splits_arguments_like_a_shell() -> None:
+    import shlex
+    for line in ['/tmp/a.dewy', 'a  "b c" d\\ e', """x 'y z' "q\\"r\"""", '', '  ']:
+        assert _split_like_the_extension(line) == shlex.split(line)
+
+
+@pytest.mark.skipif(which('as') is None or which('ld') is None or which('node') is None or _codelldb() is None, reason='needs the x86_64 toolchain, node, and the CodeLLDB extension')
+def test_the_current_file_with_typed_arguments(tmp_path: Path) -> None:
+    """`Dewy: debug current file with arguments`: the bootstrap tokenizer open in
+    the editor, the file to tokenize typed at the extension's prompt."""
     adapter, liblldb = _codelldb()   # type: ignore[misc]
-    tokenized = tmp_path / 'one_comment.dewy'
+    t0 = repo / 'dewy' / 'bootstrap' / 'parser' / 't0.dewy'
+    tokenized = tmp_path / 'one comment.dewy'
     tokenized.write_text('# just a comment\n')
-    command = _task_command('dewy: build debug target', {'workspaceFolder': str(repo)})
+    command = _task_command('dewy: build debug', {'workspaceFolder': str(repo), 'file': str(t0)})
     command[0] = sys.executable if command[0] == 'python' else command[0]
-    assert command[-1] == 'dewy/bootstrap/parser/t0.dewy'                                 # the prompt's default
     built = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=600, env={**os.environ, 'PYTHONPATH': str(repo)})
     assert built.returncode == 0, built.stderr
-    configuration = _launch_configuration('Dewy: debug a program on current file (lldb)', {'workspaceFolder': str(repo), 'file': str(tokenized)})
-    assert Path(configuration['program']).is_file() and configuration['args'] == [str(tokenized)]
-    t0 = repo / 'dewy' / 'bootstrap' / 'parser' / 't0.dewy'
+    configuration = _launch_configuration('Dewy: debug current file with arguments', {
+        'workspaceFolder': str(repo), 'relativeFileDirname': 'dewy/bootstrap/parser', 'fileBasenameNoExtension': 't0',
+        'dewy.programArguments': f'"{tokenized}"'})                                        # typed with quotes: the path has a space
+    assert Path(configuration['program']) == Path(built.stdout.strip().splitlines()[-1]).resolve()
+    configuration['args'] = _split_like_the_extension(configuration['args'])
+    assert configuration['args'] == [str(tokenized)]
     line = next(number for number, text in enumerate(t0.read_text().splitlines(), 1) if text.strip().startswith('matches.sort('))
     session = _Session(adapter, liblldb)
     try:

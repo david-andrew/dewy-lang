@@ -1,17 +1,23 @@
 {
   "name": "dewy",
   "displayName": "dewy",
-  "description": "Syntax highlighting for the Dewy programming language",
-  "version": "0.1.7",
+  "description": "Syntax highlighting and debugging for the Dewy programming language",
+  "version": "0.1.8",
   "publisher": "RedFoxLabs",
   "engines": {
     "vscode": "^1.75.0"
   },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onDebugResolve:lldb",
+    "onDebugResolve:cppdbg"
+  ],
   "categories": [
     "Programming Languages"
   ],
   "icon": "images/dewy_logo_128x128.png",
   "files": [
+    "extension.js",
     "language-configuration.json",
     "syntaxes/dewy.tmLanguage.json",
     "images/dewy_logo_128x128.png",
@@ -59,41 +65,60 @@
         "label": "Dewy",
         "configurationSnippets": [
           {
-            "label": "Dewy: debug current file (lldb)",
+            "label": "Dewy: debug current file",
             "description": "Build the active .dewy file with `dewy debug --build` and run it under CodeLLDB with Dewy values",
             "body": {
-              "name": "Dewy: debug current file (lldb)",
+              "name": "Dewy: debug current file",
               "type": "lldb",
               "request": "launch",
               "program": "^\"\\${workspaceFolder}/__dewycache__/\\${relativeFileDirname}/\\${fileBasenameNoExtension}.debug\"",
               "args": [],
               "cwd": "^\"\\${workspaceFolder}\"",
               "preLaunchTask": "dewy: build debug",
-              "initCommands": ["command script import ${1:~/.dewy/runtime/tools}/dewy_lldb.py"],
-              "sourceLanguages": ["c"]
+              "initCommands": [
+                "command script import ${1:~/.dewy/runtime/tools}/dewy_lldb.py"
+              ],
+              "sourceLanguages": [
+                "c"
+              ]
             }
           },
           {
-            "label": "Dewy: debug current file (gdb)",
-            "description": "Build the active .dewy file with `dewy debug --build` and run it under gdb (C/C++ extension) with Dewy values",
+            "label": "Dewy: debug current file with arguments",
+            "description": "The same, asking for the command line each run",
             "body": {
-              "name": "Dewy: debug current file (gdb)",
-              "type": "cppdbg",
+              "name": "Dewy: debug current file with arguments",
+              "type": "lldb",
               "request": "launch",
               "program": "^\"\\${workspaceFolder}/__dewycache__/\\${relativeFileDirname}/\\${fileBasenameNoExtension}.debug\"",
-              "args": [],
+              "args": "^\"\\${command:dewy.programArguments}\"",
               "cwd": "^\"\\${workspaceFolder}\"",
               "preLaunchTask": "dewy: build debug",
-              "MIMode": "gdb",
-              "setupCommands": [
-                { "text": "source ${1:~/.dewy/runtime/tools}/dewy_gdb.py", "description": "Dewy value printers", "ignoreFailures": false },
-                { "text": "-enable-pretty-printing", "ignoreFailures": true }
+              "initCommands": [
+                "command script import ${1:~/.dewy/runtime/tools}/dewy_lldb.py"
+              ],
+              "sourceLanguages": [
+                "c"
               ]
             }
           }
         ]
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "dewy.programArguments",
+        "title": "Dewy: Program Arguments"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "dewy.programArguments",
+          "when": "false"
+        }
+      ]
+    }
   },
   "license": "GPL-3.0",
   "repository": {

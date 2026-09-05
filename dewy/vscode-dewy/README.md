@@ -36,7 +36,7 @@ The identifier character classes in the grammar are generated from the compiler'
 
 ## Debugging
 
-The extension lets you set breakpoints in `.dewy` files (click the gutter). The debugging itself is done by the stock native debugger extensions — [CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb) (`lldb`; also on Open VSX for Cursor and VSCodium) or C/C++ (`cppdbg`, gdb) — because the Dewy compiler emits DWARF for its source, and its `tools/dewy_lldb.py` / `tools/dewy_gdb.py` scripts show values the Dewy way in the Variables pane, hovers, and the Debug Console. "Add Configuration…" in `launch.json` offers **Dewy: debug current file (lldb)** and **(gdb)**; each builds the active file with `dewy debug --build` (a `tasks.json` task named `dewy: build debug`) and launches `__dewycache__/<path>/<name>.debug`. Fill in where the scripts live: `tools/` of a checkout, or `~/.dewy/runtime/tools` of an installation. The task:
+The extension lets you set breakpoints in `.dewy` files (click the gutter). The debugging itself is done by the stock [CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb) extension (`lldb`; also on Open VSX for Cursor and VSCodium) — the Dewy compiler emits DWARF for its source, and its `tools/dewy_lldb.py` script shows values the Dewy way in the Variables pane, hovers, and the Debug Console. "Add Configuration…" in `launch.json` offers **Dewy: debug current file** and **Dewy: debug current file with arguments** (the latter asks for the program's command line each run, offering the last one again, and splits it like a shell). Both build the active file with `dewy debug --build` (a `tasks.json` task named `dewy: build debug`) and launch `__dewycache__/<path>/<name>.debug`. Fill in where the script lives: `tools/` of a checkout, or `~/.dewy/runtime/tools` of an installation. The task:
 
 ```json
 {
@@ -49,7 +49,7 @@ The extension lets you set breakpoints in `.dewy` files (click the gutter). The 
 }
 ```
 
-See the Reference's [Debugging](https://dewy-lang.org/reference/debugging.html) page for the details, and for the terminal experience (`dewy debug`, `$breakpoint`).
+See the Reference's [Debugging](https://dewy-lang.org/reference/debugging.html) page for the details, the gdb (C/C++ extension) form, and the terminal experience (`dewy debug`, `$breakpoint`).
 
 ## Limitations and roadmap
 

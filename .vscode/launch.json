@@ -9,7 +9,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Dewy: debug current file (lldb)",
+            "name": "Dewy: debug current file",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
@@ -20,28 +20,15 @@
             "sourceLanguages": ["c"]
         },
         {
-            // asks for the command line each time; CodeLLDB splits the string like a shell
-            "name": "Dewy: debug current file with arguments (lldb)",
+            // asks for the command line each run (the dewy extension's prompt,
+            // which offers the last one again); CodeLLDB splits it like a shell
+            "name": "Dewy: debug current file with arguments",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
-            "args": "${input:programArguments}",
+            "args": "${command:dewy.programArguments}",
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "dewy: build debug",
-            "initCommands": ["command script import ${workspaceFolder}/tools/dewy_lldb.py"],
-            "sourceLanguages": ["c"]
-        },
-        {
-            // a program whose argument is the file in the active editor (the
-            // bootstrap tokenizer on a source file): the build task asks which
-            // program (Enter keeps t0) and places it at a fixed name
-            "name": "Dewy: debug a program on current file (lldb)",
-            "type": "lldb",
-            "request": "launch",
-            "program": "${workspaceFolder}/__dewycache__/debug-target",
-            "args": ["${file}"],
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "dewy: build debug target",
             "initCommands": ["command script import ${workspaceFolder}/tools/dewy_lldb.py"],
             "sourceLanguages": ["c"]
         },
@@ -58,14 +45,6 @@
                 { "text": "source ${workspaceFolder}/tools/dewy_gdb.py", "description": "Dewy value printers", "ignoreFailures": false },
                 { "text": "-enable-pretty-printing", "ignoreFailures": true }
             ]
-        }
-    ],
-    "inputs": [
-        {
-            "id": "programArguments",
-            "type": "promptString",
-            "description": "Command-line arguments for the program (split like a shell)",
-            "default": ""
         }
     ]
 }
