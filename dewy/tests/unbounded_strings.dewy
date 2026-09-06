@@ -1,0 +1,30 @@
+# A returned string whose size has no compile-time bound — built from a field,
+# a slice of a field, a call's result — is allocated in the caller's frame
+# region (the callee gets a bare descriptor carrying the region and fills it),
+# so it lives as long as the caller's frame, like any string built there.
+let Tok:type = type of any & [src:string start:uint64 stop:uint64
+    __as__ = ():>string => if stop >? start and stop <=? src.length "<'{src[start..stop)}'>" else "<>"
+]
+let describe = (t:Tok):>string => "{t} at {t.start}"          # a call's unbounded result, returned again
+let shout = (word:string):>string => "{word}!"                # bounded (a parameter's length): the old path
+let main = ():>int64 => {
+    let checks:int64 = 0
+    let text = "hello world"
+    let t = Tok[text 6 11]
+    let shown = "{t}"
+    if shown =? "<'world'>" { checks += 1 }
+    let d = describe(t)
+    if d =? "<'world'> at 6" { checks += 2 }
+    let empty = "{Tok[text 3 3]}"
+    if empty =? "<>" { checks += 4 }
+    let parts:array<string> = []
+    let i:uint64 = 0
+    loop i <? 3 {
+        let piece = describe(Tok[text i i+2])                  # built in the loop, kept past it
+        parts.push(piece)
+        i += 1
+    }
+    if parts.length =? 3 and parts[2] =? "<'ll'> at 2" and shout("hey") =? "hey!" { checks += 8 }
+    if checks =? 15 { return 42 }
+    return checks
+}

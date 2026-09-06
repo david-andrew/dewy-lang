@@ -123,7 +123,7 @@ let Token:type = $abstract type of any & [
     idx:uint64
     eat:eatfn
     action_on_eat:actionfn?=none
-    __as__ = ():>string => if loc.stop >? loc.start and loc.stop <? src.length 
+    __as__ = ():>string => if loc.stop >? loc.start and loc.stop <=? src.length 
         "<{typename} '{src[loc.start..loc.stop]}'>"
     else
         "<{typename}>"

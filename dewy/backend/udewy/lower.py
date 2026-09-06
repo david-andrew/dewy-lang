@@ -222,6 +222,11 @@ class _Lowerer(
         self.current_dynamic_array_result: ty.ArrayType | None = None
         self.string_result_bounds: dict[int, StringResultBound | None] = {}
         self.string_result_needs_dest: set[int] = set()
+        # functions whose string result has no compile-time size bound: the caller
+        # passes a bare descriptor carrying its frame region in the data word, and
+        # the callee allocates the exact bytes there (`_finish_region_string_call`)
+        self.string_result_region_mode: set[int] = set()
+        self.current_string_result_in_region = False
         self.string_result_call_targets: dict[int, _FunctionDef] = {}
         # Side tables above are keyed by ``id(node)``. CPython reuses the id
         # of a freed object, so every node registered as a key must stay
@@ -859,6 +864,7 @@ class _Lowerer(
         previous_object_result = self.current_object_result
         previous_array_result = self.current_array_result
         previous_string_result = self.current_string_result
+        previous_string_result_in_region = self.current_string_result_in_region
         previous_union_result = self.current_union_result
         previous_dynamic_array_result = self.current_dynamic_array_result
         previous_place_parameter_cells = self.current_place_parameter_cells
@@ -870,6 +876,7 @@ class _Lowerer(
         self.current_object_result = object_result_target
         self.current_array_result = array_result_target
         self.current_string_result = string_result_target
+        self.current_string_result_in_region = id(function) in self.string_result_region_mode
         self.current_union_result = union_result_target
         self.current_dynamic_array_result = dynamic_array_result
         self.current_place_parameter_cells = place_parameter_cells
@@ -914,6 +921,7 @@ class _Lowerer(
         self.current_object_result = previous_object_result
         self.current_array_result = previous_array_result
         self.current_string_result = previous_string_result
+        self.current_string_result_in_region = previous_string_result_in_region
         self.current_union_result = previous_union_result
         self.current_dynamic_array_result = previous_dynamic_array_result
         self.current_place_parameter_cells = previous_place_parameter_cells

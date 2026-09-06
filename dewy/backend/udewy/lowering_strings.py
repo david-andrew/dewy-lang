@@ -1114,10 +1114,9 @@ class _StringLowering:
         ):
             self.string_result_needs_dest.add(key)
             if bound is None:
-                self._target_error(
-                    literal,
-                    'a returned string whose size cannot be bounded at compile time',
-                )
+                # no capacity formula (a field's string, a slice of one): the result
+                # is built in the caller's frame region instead of a pre-sized block
+                self.string_result_region_mode.add(key)
         self.string_result_bounds[key] = bound
         return bound
 
@@ -1419,6 +1418,35 @@ class _StringLowering:
             hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
         ]
 
+    def _finish_region_string_call(
+        self,
+        node: hir.FunctionCall,
+        func: hir.AST,
+        pos_args: list[hir.AST],
+        kw_args: dict[str, hir.AST],
+        prelude: list[hir.AST],
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """A string result with no size bound: the caller passes a bare descriptor
+        whose data word holds its frame region; the callee allocates the exact
+        bytes and boundaries there and fills the descriptor. The string lives as
+        long as the caller's frame, like any string built in that frame."""
+        loc = node.loc
+        if self.lowering_module_startup or self.current_literal is None or not self._has_arena():
+            self._target_error(node, 'a string result whose size cannot be bounded at compile time, outside a function')
+        result = self._new_string_temp(loc, node.type, 'result_block')
+        result_word = replace(result, type='int64')
+        prelude.extend([
+            hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, 'int64', self._intrinsic_call('__alloca__', [self._int64_literal(loc, STRING_DESCRIPTOR_SIZE)], 'int64', loc)),
+            self._store_i64_field(result_word, STRING_DATA_OFFSET, self._frame_region(loc), loc),   # the region to build in (the callee overwrites it with the data pointer)
+            self._store_i64_field(result_word, STRING_BOUNDARIES_OFFSET, self._int64_literal(loc, 0), loc),
+            self._store_i64_field(result_word, STRING_BYTE_LENGTH_OFFSET, self._int64_literal(loc, 0), loc),
+            self._store_i64_field(result_word, STRING_GRAPHEME_LENGTH_OFFSET, self._int64_literal(loc, 0), loc),
+            self._store_i64_field(result_word, STRING_START_OFFSET, self._int64_literal(loc, 0), loc),
+            self._store_i64_field(result_word, STRING_OWNER_OFFSET, self._int64_literal(loc, 0), loc),
+            replace(node, type=ty.VOID_TYPE, func=func, pos_args=[*pos_args, result_word], kw_args=kw_args),
+        ])
+        return prelude, result
+
     def _finish_string_call(
         self,
         node: hir.FunctionCall,
@@ -1436,6 +1464,8 @@ class _StringLowering:
         callee can materialize through them.
         """
         loc = node.loc
+        if id(function) in self.string_result_region_mode:
+            return self._finish_region_string_call(node, func, pos_args, kw_args, prelude)
         bound = self.string_result_bounds.get(id(function))
         if bound is None:
             self._target_error(
@@ -3715,10 +3745,19 @@ class _StringLowering:
                 assign(total, self._int64_binary('__add__', total, length, loc))
             )
         dest_word = replace(dest, type='int64') if dest is not None else None
+        region_dest = dest_word is not None and self.current_string_result_in_region
+        dest_region = declare('result_region', 'int64', self._load_i64_field(dest_word, STRING_DATA_OFFSET, loc)) if region_dest else None
+
+        def region_bytes(size: hir.AST) -> hir.AST:
+            assert dest_region is not None
+            return self._region_call('_region_alloc', [dest_region, size], loc, 'int64')
+
         data = declare(
             'data',
             'int64',
-            self._load_i64_field(dest_word, STRING_DATA_OFFSET, loc)
+            region_bytes(self._int64_binary('__add__', total, self._int64_literal(loc, 1), loc))
+            if region_dest
+            else self._load_i64_field(dest_word, STRING_DATA_OFFSET, loc)
             if dest_word is not None
             else self._intrinsic_call(
                 allocator,
@@ -3797,7 +3836,9 @@ class _StringLowering:
         boundaries = declare(
             'boundaries',
             'int64',
-            self._load_i64_field(dest_word, STRING_BOUNDARIES_OFFSET, loc)
+            region_bytes(self._int64_binary('__mul__', self._int64_binary('__add__', total, self._int64_literal(loc, 1), loc), self._int64_literal(loc, 4), loc))
+            if region_dest
+            else self._load_i64_field(dest_word, STRING_BOUNDARIES_OFFSET, loc)
             if dest_word is not None
             else self._intrinsic_call(
                 allocator,
@@ -3825,6 +3866,11 @@ class _StringLowering:
         )
         statements.extend(segmentation)
         if dest is not None and dest_word is not None:
+            if region_dest:
+                statements.extend([
+                    self._store_i64_field(dest_word, STRING_DATA_OFFSET, data, loc),
+                    self._store_i64_field(dest_word, STRING_BOUNDARIES_OFFSET, boundaries, loc),
+                ])
             statements.extend([
                 self._store_i64_field(
                     dest_word, STRING_BYTE_LENGTH_OFFSET, total, loc
