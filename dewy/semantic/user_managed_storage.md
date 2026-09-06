@@ -73,6 +73,8 @@ Exact signatures are intentionally omitted until lifetime-bearing places and rea
 
 A single-threaded `Rc<T>` only needs ordinary integer counter operations. A cross-thread `Arc<T>` additionally needs atomic read/modify/write operations, selected memory-order guarantees, and a type/effect rule describing which payloads and handles may cross concurrent boundaries. Those are independent extensions: lack of atomics should not block a useful single-threaded `Rc`.
 
+The intended concurrency contract — `Send` / `Sync` as structural type properties, `Arc` / `Mutex` as handle types, scoped fork-join as the default, and what Dewy should do beyond Rust — is recorded in [`safety_and_concurrency.md`](safety_and_concurrency.md).
+
 ## Reference-counted control block
 
 A library implementation would conceptually allocate a control block shaped like:
@@ -105,7 +107,7 @@ Reference-counted cycles are not collected by this mechanism. `Weak<T>` is there
 3. Implement a minimal owning `Box<T>`-like library type to validate initialization, movement, aggregate fields, returns, and all cleanup paths.
 4. Add lifetime-bounded read-only payload places and unique mutable access.
 5. Implement `Rc<T>` and `Weak<T>` in the library as the proof that the substrate is sufficient.
-6. Add atomics and concurrency contracts before attempting `Arc<T>`.
+6. Add atomics and concurrency contracts before attempting `Arc<T>` (see [`safety_and_concurrency.md`](safety_and_concurrency.md)).
 
 This order keeps the compiler's default arena-oriented roadmap intact. User-managed storage is an opt-in facility for lifetimes and sharing patterns that the default strategy cannot express cleanly, not a fallback applied to every dynamic value.
 
@@ -118,3 +120,4 @@ This order keeps the compiler's default arena-oriented roadmap intact. User-mana
 - The typed allocation-capability representation and how much layout reflection safe generic code may use.
 - The policy for allocation failure and reference-count overflow.
 - How resource-bearing values participate in compile-time evaluation and static storage.
+- Concurrency questions (Send/Sync spelling, scoped places into parent data, cancellation, refined mutex unlock) live in [`safety_and_concurrency.md`](safety_and_concurrency.md).
