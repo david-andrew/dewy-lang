@@ -1,0 +1,620 @@
+# All gameplay is integer udewy. Positions/velocities use 8 fractional bits.
+# No platform dependencies: step(keys) advances exactly one 1/60-second tick.
+const FP:int = 256
+const EN:int = 48
+const ES:int = 96
+const BN:int = 160
+const BS:int = 64
+const PN:int = 256
+const PS:int = 56
+const GN:int = 64
+const GS:int = 32
+const TITLE:int = 0
+const PLAY:int = 1
+const UPGRADE:int = 2
+const PAUSE:int = 3
+const DEAD:int = 4
+const WIN:int = 5
+let hazards:int = __static_alloca__(384)
+let enemies:int = __static_alloca__(4608)
+let bullets:int = __static_alloca__(10240)
+let particles:int = __static_alloca__(14336)
+let gems:int = __static_alloca__(2048)
+let mode:int = 0
+let tick:int = 0
+let run_ticks:int = 0
+let seed:int = 7251
+let px:int = 61440
+let py:int = 46592
+let vx:int = 0
+let vy:int = 0
+let face_x:int = 256
+let face_y:int = 0
+let hp:int = 6
+let max_hp:int = 6
+let invuln:int = 0
+let hurt_flash:int = 0
+let dash:int = 0
+let dash_cd:int = 0
+let dash_buffer:int = 0
+let nova_buffer:int = 0
+let dash_serial:int = 0
+let dash_dx:int = 0
+let dash_dy:int = 0
+let fire_cd:int = 0
+let muzzle:int = 0
+let energy:int = 0
+let pulse:int = 0
+let shake:int = 0
+let hitstop:int = 0
+let wave:int = 0
+let spawned:int = 0
+let quota:int = 0
+let spawn_cd:int = 0
+let alive:int = 0
+let wave_wait:int = 0
+let banner:int = 0
+let kills:int = 0
+let score:int = 0
+let best:int = 0
+let combo:int = 0
+let combo_time:int = 0
+let power:int = 0
+let haste:int = 0
+let flow:int = 0
+let choice:int = 0
+let previous_keys:int = 0
+let sounds:int = 0
+let muted:int = 0
+let death_time:int = 0
+let aim_target:int = -1
+
+let has = (bits:int mask:int):>int => { return (bits and mask) not=? 0 }
+let abs = (x:int):>int => { if x <? 0 { return -x } return x }
+let min = (a:int b:int):>int => { if a <? b { return a } return b }
+let max = (a:int b:int):>int => { if a >? b { return a } return b }
+let clamp = (v:int a:int b:int):>int => { return min(max(v a) b) }
+let sqrt = (n:int):>int => {
+    if n <=? 0 { return 0 }
+    let x:int = n
+    let y:int = (x + 1) // 2
+    loop y <? x { x = y y = (x + n // x) // 2 }
+    return x
+}
+let sin = (a:int):>int => {
+    a = a and 1023
+    let sign:int = 1
+    if a >=? 512 { a -= 512 sign = -1 }
+    return sign * (4 * a * (512 - a) * 256) // (327680 - a * (512 - a))
+}
+let cos = (a:int):>int => { return sin(a + 256) }
+let rand = (n:int):>int => {
+    seed = (seed * 1664525 + 1013904223) and 0x7fffffff
+    return seed % n
+}
+let get = (p:int f:int):>int => { return __load__(p + f * 8) }
+let put = (p:int f:int v:int):>void => { __store__(v p + f * 8) return void
+}
+let clear = (p:int n:int):>void => {
+    let i:int = 0
+    loop i <? n { __store__(0 p + i) i += 8 }
+    return void
+}
+let distance = (x:int y:int a:int b:int):>int => {
+    let dx:int = (x - a) // FP
+    let dy:int = (y - b) // FP
+    return dx * dx + dy * dy
+}
+let sfx = (kind:int):>void => { sounds = sounds or (1 << kind) return void
+}
+
+# Particle record: life, x, y, vx, vy, palette index, original life.
+let spark = (x:int y:int dx:int dy:int life:int color:int):>void => {
+    let i:int = 0
+    loop i <? PN {
+        let p:int = particles + i * PS
+        if get(p 0) =? 0 {
+            put(p 0 life) put(p 1 x) put(p 2 y)
+            put(p 3 dx) put(p 4 dy) put(p 5 color) put(p 6 life)
+            return void
+        }
+        i += 1
+    }
+    return void
+}
+let burst = (x:int y:int n:int color:int force:int):>void => {
+    let i:int = 0
+    loop i <? n {
+        let a:int = rand(1024)
+        let speed:int = 40 + rand(force)
+        spark(x y cos(a) * speed // FP sin(a) * speed // FP 14 + rand(22) color)
+        i += 1
+    }
+    return void
+}
+let effects_step = ():>void => {
+    let i:int = 0
+    loop i <? PN {
+        let p:int = particles + i * PS
+        if get(p 0) >? 0 {
+            put(p 0 get(p 0) - 1)
+            put(p 1 get(p 1) + get(p 3)) put(p 2 get(p 2) + get(p 4))
+            put(p 3 get(p 3) * 94 // 100) put(p 4 get(p 4) * 94 // 100)
+        }
+        i += 1
+    }
+    if shake >? 0 { shake -= 1 }
+    if hurt_flash >? 0 { hurt_flash -= 1 }
+    if pulse >? 0 { pulse -= 1 }
+    if muzzle >? 0 { muzzle -= 1 }
+    return void
+}
+
+# Enemy: kind, hp, x, y, vx, vy, age, cooldown, flash, dash serial, spawn timer, max hp.
+let spawn_enemy = (kind:int x:int y:int):>int => {
+    let i:int = 0
+    loop i <? EN {
+        let e:int = enemies + i * ES
+        if get(e 0) =? 0 {
+            clear(e ES)
+            let health:int = 18
+            if kind =? 2 { health = 24 }
+            if kind =? 3 { health = 36 }
+            if kind =? 4 { health = 65 }
+            if kind =? 5 { health = 1000 }
+            put(e 0 kind) put(e 1 health) put(e 11 health)
+            put(e 2 x * FP) put(e 3 y * FP)
+            put(e 7 100 + rand(50)) put(e 10 55)
+            alive += 1
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+# Bullet: active, x, y, vx, vy, ttl, damage, owner (0 player, 1 hostile).
+let projectile = (x:int y:int dx:int dy:int speed:int damage:int owner:int):>void => {
+    let n:int = max(1 sqrt(dx * dx + dy * dy))
+    let i:int = 0
+    loop i <? BN {
+        let b:int = bullets + i * BS
+        if get(b 0) =? 0 {
+            put(b 0 1) put(b 1 x) put(b 2 y)
+            put(b 3 dx * speed // n) put(b 4 dy * speed // n)
+            put(b 5 170) put(b 6 damage) put(b 7 owner)
+            return void
+        }
+        i += 1
+    }
+    return void
+}
+let drop = (x:int y:int kind:int):>void => {
+    let i:int = 0
+    loop i <? GN {
+        let g:int = gems + i * GS
+        if get(g 0) =? 0 {
+            put(g 0 kind) put(g 1 x) put(g 2 y) put(g 3 900)
+            return void
+        }
+        i += 1
+    }
+    energy = min(100 energy + 6)
+    return void
+}
+let damage_enemy = (e:int amount:int):>void => {
+    if mode not=? PLAY { return void }
+    if get(e 0) =? 0 { return void }
+    put(e 1 get(e 1) - amount)
+    put(e 8 6)
+    burst(get(e 2) get(e 3) 5 1 420)
+    sfx(1)
+    if get(e 1) <=? 0 {
+        let kind:int = get(e 0)
+        put(e 0 0) alive -= 1 kills += 1
+        combo = min(8 combo + 1) combo_time = 180
+        score += (50 + kind * 25) * max(1 combo)
+        if dash >? 0 { dash_cd = max(0 dash_cd - 12) }
+        burst(get(e 2) get(e 3) 20 2 950)
+        drop(get(e 2) get(e 3) 1)
+        if kills % 9 =? 0 { drop(get(e 2) + 5 * FP get(e 3) 2) }
+        shake = max(shake 5) hitstop = 2 sfx(2)
+        if kind =? 5 {
+            mode = WIN death_time = 0 shake = 24 pulse = 45
+            score += hp * 1000
+            best = max(best score)
+            sfx(7)
+            burst(get(e 2) get(e 3) 90 1 2400)
+        }
+    }
+    return void
+}
+let hurt = ():>void => {
+    if (invuln >? 0) or (dash >? 0) or (mode not=? PLAY) { return void }
+    hp -= 1 invuln = 65 hurt_flash = 16 shake = 13 hitstop = 5
+    combo = 0 combo_time = 0
+    burst(px py 28 3 1200) sfx(3)
+    if hp <=? 0 {
+        mode = DEAD death_time = 0
+        best = max(best score)
+        burst(px py 45 1 1800)
+    }
+    return void
+}
+let start_wave = ():>void => {
+    wave += 1 spawned = 0 wave_wait = 0 spawn_cd = 80 banner = 150
+    quota = 10 + wave * 4
+    clear(bullets BN * BS) clear(hazards 384)
+    if wave =? 5 {
+        quota = 1
+        spawn_enemy(5 240 94)
+        spawned = 1
+    }
+    sfx(6)
+    return void
+}
+let new_game = ():>void => {
+    clear(enemies EN * ES) clear(bullets BN * BS)
+    clear(particles PN * PS) clear(gems GN * GS) clear(hazards 384)
+    mode = PLAY tick = 0 run_ticks = 0 seed = 7251
+    px = 240 * FP py = 183 * FP vx = 0 vy = 0
+    face_x = FP face_y = 0 hp = 6 max_hp = 6
+    dash_buffer = 0 nova_buffer = 0 hurt_flash = 0
+    invuln = 50 dash = 0 dash_cd = 0 dash_serial = 0 fire_cd = 0
+    energy = 35 pulse = 0 shake = 0 hitstop = 0 wave = 0 alive = 0
+    kills = 0 score = 0 combo = 0 combo_time = 0
+    power = 0 haste = 0 flow = 0 aim_target = -1 death_time = 0
+    start_wave()
+    return void
+}
+let take_upgrade = (which:int):>void => {
+    if which =? 0 { power += 1 }
+    if which =? 1 { haste += 1 }
+    if which =? 2 { flow += 1 max_hp += 1 }
+    hp = min(max_hp hp + 2)
+    energy = min(100 energy + 25)
+    mode = PLAY invuln = 90
+    start_wave()
+    return void
+}
+let find_target = (x:int y:int):>int => {
+    let nearest:int = -1
+    let d:int = 999999
+    let i:int = 0
+    loop i <? EN {
+        let e:int = enemies + i * ES
+        if (get(e 0) >? 0) and (get(e 10) =? 0) {
+            let dd:int = distance(x y get(e 2) get(e 3))
+            if dd <? d { d = dd nearest = i }
+        }
+        i += 1
+    }
+    return nearest
+}
+let player_step = (keys:int pressed:int):>void => {
+    let dx:int = 0
+    let dy:int = 0
+    if has(keys 1) { dy -= FP }
+    if has(keys 2) { dy += FP }
+    if has(keys 4) { dx -= FP }
+    if has(keys 8) { dx += FP }
+    if (dx not=? 0) and (dy not=? 0) { dx = dx * 181 // FP dy = dy * 181 // FP }
+    if (dx not=? 0) or (dy not=? 0) { face_x = dx face_y = dy }
+    if invuln >? 0 { invuln -= 1 }
+    if dash_cd >? 0 { dash_cd -= 1 }
+    if fire_cd >? 0 { fire_cd -= 1 }
+    if (dash_buffer >? 0) and (dash_cd =? 0) {
+        dash_buffer = 0
+        invuln = max(invuln 14)
+        dash = 12 dash_cd = max(34 78 - flow * 10) dash_serial += 1
+        dash_dx = face_x * 7 dash_dy = face_y * 7
+        shake = 3 sfx(4)
+    }
+    if dash >? 0 {
+        dash -= 1 vx = dash_dx vy = dash_dy
+        burst(px py 3 1 150)
+        let i:int = 0
+        loop i <? EN {
+            let e:int = enemies + i * ES
+            if (get(e 0) >? 0) and (get(e 10) =? 0) and (get(e 9) not=? dash_serial) {
+                if distance(px py get(e 2) get(e 3)) <? 400 {
+                    put(e 9 dash_serial)
+                    damage_enemy(e 32 + flow * 12)
+                    energy = min(100 energy + 4)
+                    invuln = max(invuln 14)
+                }
+            }
+            i += 1
+        }
+    } else {
+        vx += (dx * 430 // FP - vx) * 3 // 8
+        vy += (dy * 430 // FP - vy) * 3 // 8
+    }
+    px = clamp(px + vx 49 * FP 431 * FP)
+    py = clamp(py + vy 72 * FP 228 * FP)
+    if (nova_buffer >? 0) and (energy >=? 100) {
+        nova_buffer = 0
+        energy = 0 pulse = 32 shake = 14 hitstop = 3 sfx(5)
+        clear(bullets BN * BS) clear(hazards 384)
+        let i:int = 0
+        loop i <? EN {
+            let e:int = enemies + i * ES
+            if (get(e 0) >? 0) and (get(e 10) =? 0) { damage_enemy(e 48 + power * 8) }
+            i += 1
+        }
+        burst(px py 65 1 2300)
+    }
+    aim_target = find_target(px py)
+    if has(keys 16) and (fire_cd =? 0) and (aim_target >=? 0) {
+        let e:int = enemies + aim_target * ES
+        let tx:int = get(e 2) - px
+        let ty:int = get(e 3) - py
+        projectile(px py - 5 * FP tx ty 1400 10 + power * 5 0)
+        if power >=? 2 {
+            projectile(px py - 5 * FP tx - ty // 5 ty + tx // 5 1400 6 + power * 2 0)
+            projectile(px py - 5 * FP tx + ty // 5 ty - tx // 5 1400 6 + power * 2 0)
+        }
+        fire_cd = max(7 19 - haste * 3) muzzle = 5 sfx(0)
+    }
+    return void
+}
+let enemy_step = ():>void => {
+    let i:int = 0
+    loop i <? EN {
+        let e:int = enemies + i * ES
+        let kind:int = get(e 0)
+        if kind >? 0 {
+            if get(e 10) >? 0 { put(e 10 get(e 10) - 1) i += 1 continue }
+            if get(e 8) >? 0 { put(e 8 get(e 8) - 1) }
+            put(e 6 get(e 6) + 1)
+            put(e 7 get(e 7) - 1)
+            let x:int = get(e 2)
+            let y:int = get(e 3)
+            let dx:int = (px - x) // FP
+            let dy:int = (py - y) // FP
+            let dist:int = max(1 sqrt(dx * dx + dy * dy))
+            let speed:int = 190 + wave * 12
+            if kind =? 2 {
+                speed = 85
+                if dist <? 85 { speed = -80 }
+                if get(e 7) <=? 0 {
+                    projectile(x y dx dy 430 1 1)
+                    put(e 7 115 - wave * 5) sfx(8)
+                }
+            }
+            if kind =? 3 {
+                let phase:int = get(e 6) % 150
+                speed = 85
+                if (phase >=? 75) and (phase <? 108) { speed = 0 }
+                if phase =? 107 { put(e 4 dx * 1050 // dist) put(e 5 dy * 1050 // dist) }
+                if (phase >=? 108) and (phase <? 128) {
+                    x += get(e 4) y += get(e 5) speed = 0
+                    if phase % 3 =? 0 { spark(x y 0 0 14 3) }
+                }
+            }
+            if kind =? 4 {
+                speed = 85
+                if (get(e 7) <=? 0) and (dist <? 95) {
+                    ground_strike(px // FP py // FP)
+                    put(e 7 170)
+                }
+            }
+            if kind =? 5 {
+                speed = 0
+                x += (240 * FP + sin(get(e 6)) * 112 - x) // 35
+                y += (104 * FP + sin(get(e 6) * 2) * 24 - y) // 35
+                if get(e 6) % 100 =? 70 {
+                    ground_strike(px // FP py // FP)
+                    ground_strike(clamp((px + vx * 25) // FP 65 415) clamp((py + vy * 25) // FP 85 215))
+                }
+                let period:int = 160
+                if get(e 1) <? get(e 11) // 2 { period = 115 }
+                if get(e 7) <=? 0 {
+                    let a:int = 0
+                    let offset:int = get(e 6) * 3
+                    loop a <? 12 {
+                        projectile(x y cos(a * 1024 // 12 + offset) sin(a * 1024 // 12 + offset) 300 + wave * 12 1 1)
+                        a += 1
+                    }
+                    projectile(x y dx dy 580 1 1)
+                    projectile(x y dx - dy // 3 dy + dx // 3 520 1 1)
+                    projectile(x y dx + dy // 3 dy - dx // 3 520 1 1)
+                    put(e 7 period) sfx(8)
+                    if (alive <? 7) and (get(e 1) <? get(e 11) * 3 // 4) {
+                        spawn_enemy(1 68 110 + rand(95))
+                        spawn_enemy(3 412 110 + rand(95))
+                    }
+                }
+            }
+            x += dx * speed // dist y += dy * speed // dist
+            # Soft separation keeps hordes readable and avoids stacks of damage.
+            if kind not=? 5 {
+                let j:int = 0
+                loop j <? i {
+                    let other:int = enemies + j * ES
+                    if (get(other 0) >? 0) and (get(other 10) =? 0) {
+                        let ox:int = (x - get(other 2)) // FP
+                        let oy:int = (y - get(other 3)) // FP
+                        if ox * ox + oy * oy <? 196 {
+                            x += ox * 5 y += oy * 5
+                        }
+                    }
+                    j += 1
+                }
+            }
+            put(e 2 clamp(x 46 * FP 434 * FP)) put(e 3 clamp(y 68 * FP 230 * FP))
+            let radius:int = 12
+            if kind =? 5 { radius = 23 }
+            if distance(px py x y) <? radius * radius { hurt() }
+        }
+        i += 1
+    }
+    return void
+}
+let bullets_step = ():>void => {
+    let i:int = 0
+    loop i <? BN {
+        let b:int = bullets + i * BS
+        if get(b 0) {
+            let x:int = get(b 1) + get(b 3)
+            let y:int = get(b 2) + get(b 4)
+            put(b 1 x) put(b 2 y) put(b 5 get(b 5) - 1)
+            if (x <? 35 * FP) or (x >? 445 * FP) or (y <? 54 * FP) or (y >? 238 * FP) or (get(b 5) <=? 0) { put(b 0 0) }
+            if get(b 0) {
+                if get(b 7) =? 0 {
+                    let j:int = 0
+                    loop j <? EN {
+                        let e:int = enemies + j * ES
+                        if (get(e 0) >? 0) and (get(e 10) =? 0) {
+                            let radius:int = 11
+                            if get(e 0) =? 5 { radius = 24 }
+                            if distance(x y get(e 2) get(e 3) - 4 * FP) <? radius * radius {
+                                damage_enemy(e get(b 6)) put(b 0 0) break
+                            }
+                        }
+                        j += 1
+                    }
+                } else {
+                    if distance(x y px py - 4 * FP) <? 64 {
+                        if dash =? 0 { hurt() }
+                        put(b 0 0)
+                    }
+                }
+            }
+        }
+        i += 1
+    }
+    return void
+}
+let gems_step = ():>void => {
+    let i:int = 0
+    loop i <? GN {
+        let g:int = gems + i * GS
+        if get(g 0) {
+            let dx:int = px - get(g 1)
+            let dy:int = py - get(g 2)
+            let d:int = distance(px py get(g 1) get(g 2))
+            if (d <? 2600) or (wave_wait >? 0) {
+                put(g 1 get(g 1) + dx // 9) put(g 2 get(g 2) + dy // 9)
+            }
+            if d <? 100 {
+                if get(g 0) =? 1 { energy = min(100 energy + 8) score += 15 }
+                if get(g 0) =? 2 { hp = min(max_hp hp + 1) }
+                put(g 0 0) sfx(9)
+            }
+            put(g 3 get(g 3) - 1)
+            if get(g 3) <=? 0 { put(g 0 0) }
+        }
+        i += 1
+    }
+    return void
+}
+let waves_step = ():>void => {
+    if banner >? 0 { banner -= 1 }
+    if wave >=? 5 { return void }
+    if spawned <? quota {
+        spawn_cd -= 1
+        if (spawn_cd <=? 0) and (alive <? 11) {
+            let side:int = spawned % 4
+            let x:int = 62
+            let y:int = 91 + rand(121)
+            if side =? 1 { x = 418 }
+            if side =? 2 { x = 105 + rand(270) y = 74 }
+            if side =? 3 { x = 105 + rand(270) y = 225 }
+            let kind:int = 1
+            if (wave >=? 2) and (spawned % 3 =? 1) { kind = 2 }
+            if (wave >=? 3) and (spawned % 4 =? 2) { kind = 3 }
+            if (wave >=? 4) and (spawned % 5 =? 3) { kind = 4 }
+            spawn_enemy(kind x y)
+            spawned += 1 spawn_cd = 75 - wave * 9
+        }
+    } else {
+        if alive =? 0 {
+            wave_wait += 1
+            if wave_wait =? 1 { sfx(6) }
+            if wave_wait >? 100 { mode = UPGRADE choice = 0 clear(bullets BN * BS) }
+        }
+    }
+    return void
+}
+let step = (keys:int):>void => {
+    let pressed:int = keys and (not previous_keys)
+    previous_keys = keys
+    if has(pressed 4096) { muted = 1 - muted }
+    if mode =? TITLE {
+        tick += 1
+        if has(pressed 128 or 16 or 32) { new_game() }
+        return void
+    }
+    if mode =? PAUSE {
+        if has(pressed 256 or 128) { mode = PLAY }
+        return void
+    }
+    if mode =? UPGRADE {
+        if has(pressed 4 or 1) { choice = (choice + 2) % 3 sfx(9) }
+        if has(pressed 8 or 2) { choice = (choice + 1) % 3 sfx(9) }
+        if has(pressed 512) { take_upgrade(0) }
+        if has(pressed 1024) { take_upgrade(1) }
+        if has(pressed 2048) { take_upgrade(2) }
+        if (mode =? UPGRADE) and has(pressed 128) { take_upgrade(choice) }
+        return void
+    }
+    if (mode =? DEAD) or (mode =? WIN) {
+        tick += 1 death_time += 1 effects_step()
+        if (death_time >? 70) and has(pressed 128) { new_game() }
+        return void
+    }
+    if has(pressed 256) { mode = PAUSE return void }
+    tick += 1 run_ticks += 1
+    if has(pressed 32) { dash_buffer = 8 }
+    if has(pressed 64) { nova_buffer = 8 }
+    effects_step()
+    if hitstop >? 0 { hitstop -= 1 return void }
+    if combo_time >? 0 { combo_time -= 1 } else { combo = 0 }
+    player_step(keys pressed)
+    dash_buffer = max(0 dash_buffer - 1) nova_buffer = max(0 nova_buffer - 1)
+    if mode not=? PLAY { return void }
+    enemy_step()
+    if mode not=? PLAY { return void }
+    bullets_step()
+    if mode not=? PLAY { return void }
+    hazards_step()
+    if mode not=? PLAY { return void }
+    gems_step() waves_step()
+    return void
+}
+
+# A ground attack is harmless for 56 ticks, then active for 14. All damage
+# obeys the same dash/hurt invulnerability as contact and projectiles.
+let ground_strike = (x:int y:int):>void => {
+    let i:int = 0
+    loop i <? 12 {
+        let h:int = hazards + i * 32
+        if get(h 0) =? 0 {
+            put(h 0 70) put(h 1 x) put(h 2 y)
+            return void
+        }
+        i += 1
+    }
+    return void
+}
+let hazards_step = ():>void => {
+    let i:int = 0
+    loop i <? 12 {
+        let h:int = hazards + i * 32
+        let t:int = get(h 0)
+        if t >? 0 {
+            put(h 0 t - 1)
+            if t =? 14 {
+                burst(get(h 1) * FP get(h 2) * FP 18 3 1100)
+                sfx(8)
+            }
+            # Match the warning's foreshortened ellipse; its outline fully
+            # contains the damaging area, including at its top/bottom edges.
+            let dx:int = px // FP - get(h 1)
+            let dy:int = (py // FP - get(h 2)) * 4 // 3
+            if (t <=? 14) and (dx * dx + dy * dy <? 484) { hurt() }
+        }
+        i += 1
+    }
+    return void
+}

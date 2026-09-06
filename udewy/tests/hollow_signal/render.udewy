@@ -1,0 +1,944 @@
+import p"./font.udewy"
+# Bespoke pixel artwork, rasterized in udewy into an identical RGBA framebuffer
+# on every target. The expensive architecture/texture pass is baked once.
+const W:int = 480
+const H:int = 270
+const INK:int = 0x0a1520
+const SHADOW:int = 0x101f29
+const SLATE:int = 0x243b43
+const STONE:int = 0x39545b
+const EDGE:int = 0x59716e
+const MIST:int = 0x9eaaa0
+const WHITE:int = 0xf5e9c7
+const GOLD:int = 0xe6b86b
+const RUST:int = 0x9d5d4c
+const TEAL:int = 0x60dfcc
+const RED:int = 0xf47c77
+let canvas:int = 0
+let backdrop:int = __static_alloca__(518400)
+let ox:int = 0
+let oy:int = 0
+let palette:int = __static_words__(0x000000 0x0a1520 0x263744 0x395568 0x607e88 0xb4c7c0 0xf5e9c7 0xe6b86b 0x9d5d4c 0x633c40 0x60dfcc 0x248d92 0xf47c77 0xa74762 0x453d60 0x84729a)
+let rgba = (c:int):>int => { return 0xff000000 or ((c and 255) << 16) or (c and 65280) or ((c >> 16) and 255) }
+let mix = (a:int b:int t:int):>int => {
+    let r:int = ((a >> 16) * (256 - t) + (b >> 16) * t) // 256
+    let g:int = (((a >> 8) and 255) * (256 - t) + ((b >> 8) and 255) * t) // 256
+    let bl:int = ((a and 255) * (256 - t) + (b and 255) * t) // 256
+    return (r << 16) or (g << 8) or bl
+}
+let pixel = (x:int y:int c:int):>void => {
+    x += ox y += oy
+    if (x >=? 0) and (x <? W) and (y >=? 0) and (y <? H) {
+        __store_u32__(rgba(c) canvas + (y * W + x) * 4)
+    }
+    return void
+}
+let rect = (x:int y:int w:int h:int c:int):>void => {
+    x += ox y += oy
+    let right:int = min(W x + w)
+    let bottom:int = min(H y + h)
+    x = max(0 x) y = max(0 y)
+    let color:int = rgba(c)
+    loop y <? bottom {
+        let p:int = canvas + (y * W + x) * 4
+        let end:int = canvas + (y * W + right) * 4
+        loop p <? end { __store_u32__(color p) p += 4 }
+        y += 1
+    }
+    return void
+}
+let line = (x:int y:int x2:int y2:int c:int):>void => {
+    let dx:int = abs(x2 - x)
+    let dy:int = -abs(y2 - y)
+    let sx:int = 1
+    let sy:int = 1
+    if x >? x2 { sx = -1 }
+    if y >? y2 { sy = -1 }
+    let err:int = dx + dy
+    loop true {
+        pixel(x y c)
+        if (x =? x2) and (y =? y2) { break }
+        let e:int = 2 * err
+        if e >=? dy { err += dy x += sx }
+        if e <=? dx { err += dx y += sy }
+    }
+    return void
+}
+let ellipse = (x:int y:int rx:int ry:int c:int):>void => {
+    let row:int = -ry
+    loop row <=? ry {
+        let width:int = sqrt(max(0 ry * ry - row * row) * rx * rx) // max(1 ry)
+        rect(x - width y + row width * 2 + 1 1 c)
+        row += 1
+    }
+    return void
+}
+let ring = (x:int y:int rx:int ry:int c:int):>void => {
+    let a:int = 0
+    let lx:int = x + rx
+    let ly:int = y
+    loop a <=? 1024 {
+        let nx:int = x + cos(a) * rx // FP
+        let ny:int = y + sin(a) * ry // FP
+        line(lx ly nx ny c)
+        lx = nx ly = ny a += 16
+    }
+    return void
+}
+let diamond = (x:int y:int r:int c:int):>void => {
+    let i:int = -r
+    loop i <=? r { rect(x - r + abs(i) y + i (r - abs(i)) * 2 + 1 1 c) i += 1 }
+    return void
+}
+let outline = (x:int y:int w:int h:int c:int):>void => {
+    rect(x y w 1 c) rect(x y + h - 1 w 1 c)
+    rect(x y 1 h c) rect(x + w - 1 y 1 h c)
+    return void
+}
+let text = (s:int x:int y:int scale:int c:int):>void => {
+    let i:int = 0
+    loop i <? __load__(s - 8) {
+        let row:int = 0
+        loop row <? 7 {
+            let bits:int = glyph_row(__load_u8__(s + i) row)
+            let col:int = 0
+            loop col <? 5 {
+                if has(bits 1 << (4 - col)) { rect(x + (i * 6 + col) * scale y + row * scale scale scale c) }
+                col += 1
+            }
+            row += 1
+        }
+        i += 1
+    }
+    return void
+}
+let center = (s:int y:int scale:int c:int):>void => {
+    text(s (W - (__load__(s - 8) * 6 - 1) * scale) // 2 y scale c)
+    return void
+}
+let number = (n:int x:int y:int scale:int c:int):>void => {
+    let buf:int = __static_alloca__(32)
+    let end:int = buf + 31
+    let p:int = end
+    loop true {
+        p -= 1 __store_u8__(48 + n % 10 p) n = n // 10
+        if n =? 0 { break }
+    }
+    let i:int = 0
+    loop p + i <? end {
+        let row:int = 0
+        loop row <? 7 {
+            let bits:int = glyph_row(__load_u8__(p + i) row)
+            let col:int = 0
+            loop col <? 5 {
+                if has(bits 1 << (4 - col)) { rect(x + (i * 6 + col) * scale y + row * scale scale scale c) }
+                col += 1
+            }
+            row += 1
+        }
+        i += 1
+    }
+    return void
+}
+let hash = (x:int y:int):>int => { return ((x * 374761393 + y * 668265263) xor ((x + y * 17) * 1274126177)) and 0x7fffffff }
+let glow = (x:int y:int r:int c:int):>void => {
+    # Sparse ordered dither halos preserve a deliberate, crisp pixel aesthetic.
+    let yy:int = -r
+    loop yy <=? r {
+        let xx:int = -r
+        loop xx <=? r {
+            let d:int = xx * xx + yy * yy
+            if (d <? r * r) and (((xx + yy * 3) and 7) =? 0) { pixel(x + xx y + yy mix(INK c 55)) }
+            xx += 1
+        }
+        yy += 1
+    }
+    return void
+}
+let column = (x:int y:int height:int):>void => {
+    ellipse(x + 5 y + 3 17 5 0x142930)
+    rect(x - 10 y - height 20 height 0x263f48)
+    rect(x - 8 y - height 4 height 0x4a6265)
+    rect(x + 5 y - height 3 height 0x172d38)
+    rect(x - 3 y - height 2 height 0x334d55)
+    let i:int = 7
+    loop i <? height {
+        line(x - 9 y - i x + 9 y - i - 1 0x1c323c)
+        pixel(x - 7 y - i - 1 EDGE) i += 11
+    }
+    rect(x - 13 y - height - 4 26 5 STONE)
+    rect(x - 12 y - height - 4 23 1 EDGE)
+    rect(x - 13 y - 2 26 4 STONE)
+    rect(x - 15 y + 2 30 4 SLATE)
+    rect(x - 14 y + 2 28 1 EDGE)
+    line(x - 1 y - height + 6 x + 2 y - height + 13 INK)
+    line(x + 2 y - height + 13 x - 1 y - height + 20 INK)
+    return void
+}
+let grass = (x:int y:int k:int):>void => {
+    let i:int = 0
+    loop i <? 7 {
+        let h:int = 3 + hash(x + i y) % 9
+        line(x + i - 3 y x + i - 5 + i // 2 y - h k)
+        i += 1
+    }
+    return void
+}
+let tree = (x:int y:int side:int):>void => {
+    let c:int = 0x192b34
+    line(x y x + side * 6 y - 32 c) line(x + 1 y x + side * 7 y - 32 c)
+    line(x + side * 6 y - 32 x + side * 2 y - 56 c)
+    line(x + side * 4 y - 23 x - side * 14 y - 37 c)
+    line(x - side * 14 y - 37 x - side * 19 y - 52 c)
+    line(x - side * 10 y - 34 x - side * 26 y - 34 c)
+    line(x + side * 5 y - 40 x + side * 24 y - 53 c)
+    line(x + side * 24 y - 53 x + side * 27 y - 67 c)
+    line(x + side * 24 y - 53 x + side * 35 y - 51 c)
+    return void
+}
+let bake_scene = ():>void => {
+    canvas = backdrop ox = 0 oy = 0
+    let y:int = 0
+    loop y <? H {
+        let c:int = mix(0x0c1729 0x27434a y * 150 // H)
+        rect(0 y W 1 c)
+        let x:int = 0
+        loop x <? W {
+            let h:int = hash(x y)
+            if h % 41 =? 0 { pixel(x y mix(c 0x749494 18)) }
+            x += 1
+        }
+        y += 1
+    }
+    # Distant silhouettes and fine fog bands.
+    let i:int = 0
+    loop i <? 24 {
+        let x:int = i * 23 - 10
+        let h:int = 12 + hash(i 7) % 40
+        rect(x 64 - h 14 h 0x101d2c)
+        rect(x - 2 61 - h 18 3 0x142431)
+        if i % 3 =? 0 { rect(x + 5 53 - h 3 12 0x101d2c) }
+        i += 1
+    }
+    rect(0 61 W 1 0x344e55)
+    # Water surrounding the elevated plaza.
+    i = 0
+    loop i <? 340 {
+        let x:int = hash(i 71) % W
+        let yy:int = 67 + hash(i 93) % 200
+        line(x yy x + 2 + hash(i 12) % 15 yy 0x2a424b)
+        i += 1
+    }
+    # Raised octagonal stone island, retaining wall, and steps.
+    y = 63
+    loop y <? 247 {
+        let inset:int = max(0 83 - y) + max(0 y - 227)
+        rect(32 + inset y 416 - inset * 2 1 0x152b35)
+        y += 1
+    }
+    y = 62
+    loop y <? 237 {
+        let inset:int = max(0 82 - y) + max(0 y - 219)
+        rect(32 + inset y 416 - inset * 2 1 0x30474c)
+        y += 1
+    }
+    # Hand-weathered blocks. The deterministic texture never shimmers.
+    y = 66
+    loop y <? 234 {
+        let inset:int = max(0 84 - y) + max(0 y - 218)
+        let x:int = 36 + inset
+        loop x <? 444 - inset {
+            let row:int = (y - 64) // 16
+            let col:int = (x + (row % 2) * 16) // 32
+            let h:int = hash(col row)
+            let c:int = mix(0x293f45 0x405652 h % 130)
+            if ((y - 64) % 16 =? 0) or ((x + (row % 2) * 16) % 32 =? 0) { c = 0x20373e }
+            if (y - 64) % 16 =? 1 { c = 0x455c59 }
+            if hash(x y) % 23 =? 0 { c = mix(c 0x718071 36) }
+            if hash(x y) % 149 =? 0 { c = 0x223b40 }
+            pixel(x y c) x += 1
+        }
+        y += 1
+    }
+    line(52 62 428 62 EDGE) line(33 82 33 218 EDGE)
+    line(447 82 447 218 EDGE) line(52 236 428 236 EDGE)
+    line(52 62 33 82 EDGE) line(428 62 447 82 EDGE)
+    line(33 218 52 236 EDGE) line(447 218 428 236 EDGE)
+    i = 0
+    loop i <? 4 {
+        rect(211 - i * 3 237 + i * 3 58 + i * 6 3 0x253b42)
+        rect(211 - i * 3 237 + i * 3 58 + i * 6 1 STONE) i += 1
+    }
+    # The observatory's engraved brass astrolabe.
+    ellipse(240 150 111 69 0x2b4449)
+    ring(240 150 110 69 0x50605a) ring(240 150 106 66 0x1c363d)
+    ring(240 150 101 63 0x777562) ring(240 150 100 62 0x48564e)
+    ring(240 150 83 52 0x596454) ring(240 150 81 50 0x1e383e)
+    ring(240 150 40 25 0x657467) ring(240 150 37 23 0x19353d)
+    i = 0
+    loop i <? 32 {
+        let a:int = i * 32
+        line(240 + cos(a) * 92 // FP 150 + sin(a) * 57 // FP 240 + cos(a) * 100 // FP 150 + sin(a) * 62 // FP 0x82816a)
+        if i % 4 =? 0 {
+            line(240 + cos(a) * 42 // FP 150 + sin(a) * 26 // FP 240 + cos(a) * 78 // FP 150 + sin(a) * 48 // FP 0x536459)
+            diamond(240 + cos(a) * 110 // FP 150 + sin(a) * 69 // FP 3 GOLD)
+        }
+        i += 1
+    }
+    # Fractures, scattered tiles, and vegetation around the outer wall.
+    i = 0
+    loop i <? 55 {
+        let x:int = 48 + hash(i 91) % 384
+        let yy:int = 70 + hash(i 93) % 156
+        if abs(x - 240) >? 120 {
+            line(x yy x + 3 yy + 3 0x19353a)
+            line(x + 3 yy + 3 x + 8 yy + 2 0x19353a)
+            pixel(x + 2 yy + 4 0x506158)
+        }
+        i += 1
+    }
+    i = 0
+    loop i <? 32 {
+        let x:int = 44 + hash(i 233) % 392
+        let yy:int = 70
+        if i % 2 =? 0 { yy = 234 }
+        grass(x yy 0x476157)
+        if i % 4 =? 0 { grass(x + 3 yy 0x69816b) }
+        i += 1
+    }
+    tree(23 168 1) tree(459 186 (-1))
+    column(58 88 45) column(422 88 45)
+    column(97 65 23) column(383 65 30)
+    # Broken flagstones and fallen masonry.
+    rect(76 75 18 4 SLATE) rect(78 73 15 3 EDGE)
+    rect(397 75 11 5 SLATE) rect(398 74 9 1 MIST)
+    canvas = backend_framebuffer()
+    return void
+}
+let sprite = (data:int width:int height:int x:int y:int flip:int flash:int):>void => {
+    let row:int = 0
+    loop row <? height {
+        let col:int = 0
+        loop col <? width {
+            let ch:int = __load_u8__(data + row * width + col)
+            if ch not=? 46 {
+                let idx:int = ch - 48
+                if ch >=? 65 { idx = ch - 65 + 10 }
+                let c:int = __load__(palette + idx * 8)
+                if flash { c = WHITE }
+                let xx:int = col
+                if flip { xx = width - 1 - col }
+                pixel(x + xx y + row c)
+            }
+            col += 1
+        }
+        row += 1
+    }
+    return void
+}
+
+const keeper_w:int = 15
+const keeper_h:int = 20
+let keeper_art:int = "\
+......777......\
+.....78687.....\
+.....86668.....\
+....155551.....\
+....156661.....\
+.....1AA1......\
+....334433.....\
+...34454333....\
+..3445543333...\
+..134454331.7..\
+..113444311767.\
+...113331..7A7.\
+....23332...7..\
+...2333332.....\
+..233443332....\
+..233433332....\
+...333.333.....\
+....21.12......\
+....51.15......\
+...111.111....."
+
+const wraith_w:int = 15
+const wraith_h:int = 17
+let wraith_art:int = "\
+......DDD......\
+.....DCCCD.....\
+....DCC9CCD....\
+....9C999C9....\
+...19C6C6C91...\
+....99CCC99....\
+.....19991.....\
+....D99899D....\
+...D9888999D...\
+..DD9888999DD..\
+..D198889991D..\
+...198889991...\
+...199889991...\
+....9999999....\
+...99.999.99...\
+...9...9...9...\
+..9........9..."
+
+const watcher_w:int = 15
+const watcher_h:int = 16
+let watcher_art:int = "\
+.......7.......\
+......787......\
+.....78C87.....\
+....788C887....\
+...789999987...\
+..789C66C9987..\
+...789CC9987...\
+....7899987....\
+.....79997.....\
+....BBAAABB....\
+...BBBABABBB...\
+..B1BBABABB1B..\
+....BBBBBBB....\
+.....BB.BB.....\
+....BB...BB....\
+...B.......B..."
+
+const charger_w:int = 15
+const charger_h:int = 17
+let charger_art:int = "\
+...C.......C...\
+...9C.....C9...\
+....9C999C9....\
+....9CCCCC9....\
+.....C6C6C.....\
+.....99C99.....\
+....8999998....\
+...899888998...\
+..89988888998..\
+..C998888899C..\
+..C199888991C..\
+...19988991....\
+...11999911....\
+....999999.....\
+....99.99......\
+...991.199.....\
+..911...119...."
+
+const brute_w:int = 17
+const brute_h:int = 19
+let brute_art:int = "\
+......77777......\
+.....7888887.....\
+....789999987....\
+....79C6C6C97....\
+.....7999997.....\
+...77887788777...\
+..7844888844487..\
+.784445885444487.\
+.784444884444487.\
+.784477777744487.\
+.178478887844781.\
+.178478787844781.\
+..174788878471...\
+...178888871.....\
+...177777771.....\
+....8888888......\
+....88...88......\
+...881...188.....\
+..1111...1111...."
+
+let beacon = (x:int y:int):>void => {
+    ellipse(x y + 5 22 8 0x182e35)
+    ellipse(x y 17 7 STONE)
+    ring(x y 17 7 EDGE)
+    rect(x - 10 y - 6 20 7 SLATE)
+    ellipse(x y - 6 10 4 0x829080)
+    rect(x - 6 y - 17 12 12 0x274950)
+    rect(x - 5 y - 17 2 12 0x5b8c88)
+    let bob:int = sin(tick * 9) * 2 // FP
+    glow(x y - 29 + bob 25 TEAL)
+    diamond(x y - 28 + bob 8 0x248d92)
+    diamond(x y - 30 + bob 6 TEAL)
+    line(x y - 36 + bob x + 3 y - 30 + bob WHITE)
+    line(x y - 24 + bob x y - 19 TEAL)
+    let i:int = 0
+    loop i <? 3 {
+        let a:int = tick * 4 + i * 341
+        diamond(x + cos(a) * 17 // FP y - 28 + sin(a) * 5 // FP 2 GOLD)
+        i += 1
+    }
+    return void
+}
+let boss_art = (x:int y:int e:int):>void => {
+    let bob:int = sin(tick * 7) * 3 // FP
+    ellipse(x y + 3 27 9 0x152b32)
+    y += bob
+    let flash:int = get(e 8)
+    let c:int = 0xa74762
+    if flash { c = WHITE }
+    # Layered cloak and articulated bronze halo.
+    let i:int = 0
+    loop i <? 7 {
+        let xx:int = x - 24 + i * 8
+        let sway:int = sin(tick * 11 + i * 170) * 4 // FP
+        line(x y - 24 xx + sway y + 5 + i % 3 * 3 0x453747)
+        line(x + 1 y - 24 xx + sway + 1 y + 5 + i % 3 * 3 c)
+        line(xx + sway y xx + sway - 3 y + 10 0x623c50)
+        i += 1
+    }
+    ring(x y - 24 28 24 GOLD)
+    ring(x y - 24 25 21 RUST)
+    i = 0
+    loop i <? 8 {
+        let a:int = i * 128 + tick * 2
+        diamond(x + cos(a) * 28 // FP y - 24 + sin(a) * 24 // FP 3 GOLD)
+        i += 1
+    }
+    diamond(x y - 24 20 INK)
+    diamond(x y - 24 18 c)
+    diamond(x y - 25 14 0x633c40)
+    ellipse(x y - 26 13 6 GOLD)
+    ellipse(x y - 26 10 4 WHITE)
+    ellipse(x + sin(tick * 4) * 3 // FP y - 26 3 5 RED)
+    rect(x - 1 + sin(tick * 4) * 3 // FP y - 30 2 8 INK)
+    diamond(x y - 43 4 GOLD)
+    if get(e 7) <? 45 {
+        ring(x y - 24 32 + get(e 7) // 3 28 + get(e 7) // 3 RED)
+        line(x - 8 y - 55 x y - 61 RED) line(x y - 61 x + 8 y - 55 RED)
+    }
+    return void
+}
+let draw_enemy = (e:int):>void => {
+    let kind:int = get(e 0)
+    if kind =? 0 { return void }
+    let x:int = get(e 2) // FP
+    let y:int = get(e 3) // FP
+    if get(e 10) >? 0 {
+        let t:int = get(e 10)
+        ring(x y 10 + t // 4 5 + t // 8 RUST)
+        ring(x y 9 5 RED)
+        line(x - 4 y - 17 x + 4 y - 17 RED)
+        line(x y - 21 x y - 13 GOLD)
+        return void
+    }
+    if kind =? 5 { boss_art(x y e) return void }
+    ellipse(x y + 1 9 3 0x172f35)
+    let bob:int = sin(tick * 12 + kind * 63) // 128
+    let flash:int = get(e 8)
+    if kind =? 1 { sprite(wraith_art wraith_w wraith_h x - 7 y - 16 + bob 0 flash) }
+    if kind =? 2 {
+        sprite(watcher_art watcher_w watcher_h x - 7 y - 20 + bob 0 flash)
+        if get(e 7) <? 30 {
+            ring(x y - 14 11 9 RED)
+            pixel(x y - 14 WHITE)
+        }
+    }
+    if kind =? 3 {
+        sprite(charger_art charger_w charger_h x - 7 y - 17 0 flash)
+        let phase:int = get(e 6) % 150
+        if (phase >=? 75) and (phase <? 108) {
+            let dx:int = (px // FP - x)
+            let dy:int = (py // FP - y)
+            let d:int = max(1 sqrt(dx * dx + dy * dy))
+            let j:int = 16
+            loop j <? 85 {
+                line(x + dx * j // d y + dy * j // d x + dx * (j + 3) // d y + dy * (j + 3) // d RED)
+                j += 8
+            }
+            text("!" x - 2 y - 28 1 GOLD)
+        }
+    }
+    if kind =? 4 { sprite(brute_art brute_w brute_h x - 8 y - 19 0 flash) }
+    if get(e 1) <? get(e 11) {
+        rect(x - 9 y - 25 18 2 INK)
+        rect(x - 9 y - 25 18 * get(e 1) // get(e 11) 1 RED)
+    }
+    return void
+}
+let draw_player = ():>void => {
+    let x:int = px // FP
+    let y:int = py // FP
+    if mode =? DEAD { return void }
+    ellipse(x y + 1 9 3 0x122a31)
+    if dash >? 0 {
+        line(x y - 8 x - dash_dx * 4 // FP y - 8 - dash_dy * 4 // FP TEAL)
+        line(x y - 4 x - dash_dx * 3 // FP y - 4 - dash_dy * 3 // FP 0x248d92)
+    }
+    let bob:int = 0
+    if abs(vx) + abs(vy) >? 80 { bob = tick // 7 % 2 }
+    if (invuln =? 0) or (tick % 6 <? 4) {
+        sprite(keeper_art keeper_w keeper_h x - 7 y - 20 + bob face_x <? 0 dash >? 0)
+    }
+    if muzzle >? 0 {
+        diamond(x + 10 y - 10 4 WHITE)
+        line(x + 5 y - 10 x + 15 y - 10 GOLD)
+        line(x + 10 y - 15 x + 10 y - 5 GOLD)
+    }
+    if energy >=? 100 {
+        ring(x y + 1 12 5 TEAL)
+        if tick % 60 <? 40 { text("E" x - 2 y - 31 1 TEAL) }
+    }
+    if aim_target >=? 0 {
+        let e:int = enemies + aim_target * ES
+        if get(e 0) {
+            let ex:int = get(e 2) // FP
+            let ey:int = get(e 3) // FP - 8
+            line(ex - 12 ey - 5 ex - 12 ey - 9 MIST)
+            line(ex - 12 ey - 9 ex - 8 ey - 9 MIST)
+            line(ex + 12 ey + 5 ex + 12 ey + 9 MIST)
+            line(ex + 12 ey + 9 ex + 8 ey + 9 MIST)
+        }
+    }
+    return void
+}
+let scenery_live = ():>void => {
+    # Slow ripples and suspended spores bring the static masonry to life.
+    let i:int = 0
+    loop i <? 38 {
+        let x:int = (hash(i 51) % 480 + tick // (3 + i % 4)) % 480
+        let y:int = 45 + hash(i 32) % 210
+        if (x <? 30) or (x >? 450) {
+            line(x y x + 5 + i % 7 y 0x42616a)
+        }
+        i += 1
+    }
+    i = 0
+    loop i <? 28 {
+        let x:int = (hash(i 17) % 480 + tick // 5) % 480
+        let y:int = 56 + (hash(i 16) % 183 + sin(tick * 2 + i * 78) * 8 // FP)
+        let c:int = 0x759281
+        if i % 4 =? 0 { c = 0xb1b69a }
+        pixel(x y c)
+        i += 1
+    }
+    return void
+}
+let draw_world = ():>void => {
+    canvas = backend_framebuffer() ox = 0 oy = 0
+    let sx:int = 0
+    let sy:int = 0
+    if shake >? 0 { sx = sin(tick * 411) * min(5 shake // 2) // FP sy = cos(tick * 371) * min(3 shake // 3) // FP }
+    # Copy in 64-bit pairs, including camera displacement. Clear exposed margins.
+    rect(0 0 W H INK)
+    let y:int = max(0 sy)
+    loop y <? min(H H + sy) {
+        let x:int = max(0 sx)
+        let end:int = min(W W + sx)
+        loop x + 1 <? end {
+            __store__(__load__(backdrop + ((y - sy) * W + x - sx) * 4) canvas + (y * W + x) * 4)
+            x += 2
+        }
+        if x <? end { __store_u32__(__load_u32__(backdrop + ((y - sy) * W + x - sx) * 4) canvas + (y * W + x) * 4) }
+        y += 1
+    }
+    ox = sx oy = sy
+    scenery_live()
+    let hi:int = 0
+    loop hi <? 12 {
+        let h:int = hazards + hi * 32
+        let t:int = get(h 0)
+        if t >? 0 {
+            let x:int = get(h 1)
+            let yy:int = get(h 2)
+            ring(x yy 24 18 RED)
+            if t >? 14 {
+                ring(x yy (70 - t) * 24 // 56 (70 - t) * 18 // 56 RUST)
+                line(x - 4 yy x + 4 yy RED) line(x yy - 4 x yy + 4 RED)
+            } else {
+                ellipse(x yy 23 17 0x633c40)
+                ring(x yy 22 16 GOLD)
+                let j:int = 0
+                loop j <? 7 {
+                    let xx:int = x - 15 + j * 5
+                    line(xx yy + 4 xx yy - 8 - hash(j tick) % 22 RED)
+                    line(xx + 1 yy + 4 xx + 1 yy - 8 - hash(j tick) % 16 GOLD)
+                    j += 1
+                }
+            }
+        }
+        hi += 1
+    }
+    let i:int = 0
+    loop i <? GN {
+        let g:int = gems + i * GS
+        if get(g 0) {
+            let x:int = get(g 1) // FP
+            let yy:int = get(g 2) // FP
+            ellipse(x yy + 2 4 2 0x172f35)
+            yy -= 3 + sin(tick * 12 + i * 64) // 128
+            if get(g 0) =? 1 { diamond(x yy 3 0x248d92) diamond(x yy - 1 2 TEAL) pixel(x yy - 2 WHITE) }
+            if get(g 0) =? 2 { rect(x - 3 yy - 1 7 3 RED) rect(x - 1 yy - 3 3 7 RED) pixel(x yy - 2 WHITE) }
+        }
+        i += 1
+    }
+    # Painter ordering of actors and the center plinth, by their feet.
+    let row:int = 65
+    loop row <=? 232 {
+        if row =? 148 { beacon(240 148) }
+        i = 0
+        loop i <? EN {
+            let e:int = enemies + i * ES
+            if (get(e 0) >? 0) and (get(e 3) // FP =? row) { draw_enemy(e) }
+            i += 1
+        }
+        if py // FP =? row { draw_player() }
+        row += 1
+    }
+    i = 0
+    loop i <? BN {
+        let b:int = bullets + i * BS
+        if get(b 0) {
+            let x:int = get(b 1) // FP
+            let yy:int = get(b 2) // FP
+            if get(b 7) =? 0 {
+                line(x yy x - get(b 3) * 3 // FP yy - get(b 4) * 3 // FP 0x248d92)
+                line(x yy x - get(b 3) // FP yy - get(b 4) // FP TEAL)
+                diamond(x yy 2 WHITE)
+            } else {
+                diamond(x yy 5 INK) diamond(x yy 4 RED) diamond(x yy 2 GOLD) pixel(x yy WHITE)
+            }
+        }
+        i += 1
+    }
+    i = 0
+    loop i <? PN {
+        let p:int = particles + i * PS
+        if get(p 0) >? 0 {
+            let c:int = TEAL
+            if get(p 5) =? 2 { c = GOLD }
+            if get(p 5) =? 3 { c = RED }
+            if get(p 0) >? get(p 6) * 2 // 3 { c = WHITE }
+            let x:int = get(p 1) // FP
+            let yy:int = get(p 2) // FP
+            if get(p 0) >? 15 { line(x yy x - get(p 3) * 2 // FP yy - get(p 4) * 2 // FP c) }
+            else { pixel(x yy c) }
+        }
+        i += 1
+    }
+    if pulse >? 0 {
+        let r:int = (33 - min(32 pulse)) * 13
+        ring(px // FP py // FP r r * 2 // 3 TEAL)
+        ring(px // FP py // FP r + 4 (r + 4) * 2 // 3 WHITE)
+    }
+    column(48 245 27) column(432 245 32)
+    grass(72 246 0x597567) grass(407 245 0x597567)
+    ox = 0 oy = 0
+    if (hurt_flash >? 0) and (mode =? PLAY) { outline(1 1 W - 2 H - 2 RUST) outline(3 3 W - 6 H - 6 RED) }
+    return void
+}
+let panel = (x:int y:int w:int h:int):>void => {
+    rect(x + 3 y + 4 w h 0x070e18)
+    rect(x y w h 0x10222d)
+    outline(x y w h 0x465956)
+    outline(x + 3 y + 3 w - 6 h - 6 0x243c44)
+    rect(x y 8 1 GOLD) rect(x y 1 8 GOLD)
+    rect(x + w - 8 y + h - 1 8 1 GOLD) rect(x + w - 1 y + h - 8 1 8 GOLD)
+    return void
+}
+let hud = ():>void => {
+    rect(0 0 W 35 0x0a1723)
+    rect(0 34 W 1 0x52625a)
+    diamond(16 16 5 GOLD)
+    text("HOLLOW SIGNAL" 29 9 1 WHITE)
+    text("THE TIDAL OBSERVATORY" 29 22 1 EDGE)
+    let i:int = 0
+    loop i <? max_hp {
+        let c:int = 0x2b424b
+        if i <? hp { c = RED }
+        rect(182 + i * 9 11 6 8 c)
+        pixel(182 + i * 9 11 INK) pixel(187 + i * 9 11 INK)
+        if i <? hp { rect(183 + i * 9 12 2 2 0xf8b7a0) }
+        i += 1
+    }
+    text("VITAL" 182 24 1 EDGE)
+    text("SCORE" 295 9 1 EDGE) number(score 332 9 1 WHITE)
+    text("TIDE" 402 9 1 GOLD) number(wave 438 9 1 WHITE) text("/5" 444 9 1 EDGE)
+    if combo >? 1 { text("CHAIN" 295 22 1 GOLD) number(combo 331 22 1 GOLD) text("X" 338 22 1 GOLD) rect(354 24 combo_time * 35 // 180 2 GOLD) }
+    else { text("KEEP THE LIGHT ALIVE" 295 22 1 EDGE) }
+    rect(0 253 W 17 0x0a1723) rect(0 252 W 1 0x384e51)
+    text("J" 12 259 1 GOLD) text("LANTERN" 23 259 1 MIST)
+    text("SPACE" 79 259 1 GOLD) text("DASH" 115 259 1 MIST)
+    rect(146 260 40 4 0x29404a)
+    rect(146 260 (max(34 78 - flow * 10) - dash_cd) * 40 // max(34 78 - flow * 10) 4 TEAL)
+    text("E" 205 259 1 GOLD) text("NOVA" 216 259 1 MIST)
+    rect(247 260 53 4 0x29404a) rect(247 260 energy * 53 // 100 4 TEAL)
+    if energy >=? 100 { text("READY" 305 259 1 TEAL) }
+    text("ESC PAUSE" 360 259 1 EDGE)
+    if muted { text("M OFF" 426 259 1 RUST) } else { text("M ON" 432 259 1 EDGE) }
+    if (banner >? 0) and (mode =? PLAY) {
+        if wave =? 1 { center("I  /  THE SHORES REMEMBER" 43 1 GOLD) }
+        if wave =? 2 { center("II  /  EYES IN THE MIST" 43 1 GOLD) }
+        if wave =? 3 { center("III  /  THE HUNGER BELOW" 43 1 GOLD) }
+        if wave =? 4 { center("IV  /  A PROCESSION OF ASH" 43 1 GOLD) }
+        if wave =? 5 { center("V  /  THE KEEPER OF THE TIDE" 43 1 RED) }
+    }
+    if (wave =? 1) and (run_ticks <? 510) {
+        center("HOLD J TO FIRE - SPACE DASHES THROUGH ENEMIES" 239 1 WHITE)
+    }
+    if wave_wait >? 0 { center("TIDE DISPELLED" 105 2 WHITE) center("GATHERING THE LAST EMBERS" 127 1 GOLD) }
+    if (wave =? 5) and (mode =? PLAY) {
+        let e:int = enemies
+        if get(e 0) =? 5 {
+            rect(155 57 170 4 INK) rect(156 58 get(e 1) * 168 // get(e 11) 2 RED)
+        }
+    }
+    return void
+}
+let title_screen = ():>void => {
+    # A bespoke title composition: typographic left page, lighthouse on the right.
+    rect(0 0 268 H 0x0c1926)
+    let i:int = 0
+    loop i <? 90 {
+        pixel(hash(i 12) % 260 hash(i 15) % H 0x1b303b)
+        i += 1
+    }
+    line(23 26 80 26 GOLD) diamond(88 26 3 GOLD)
+    text("A LANTERN AGAINST THE TIDE" 24 39 1 MIST)
+    text("HOLLOW" 22 61 5 WHITE)
+    text("SIGNAL" 24 103 5 GOLD)
+    text("THE LAST LIGHT IS YOURS TO KEEP." 25 155 1 MIST)
+    text("FIVE TIDES. ONE FORGOTTEN GOD." 25 169 1 EDGE)
+    panel(24 193 211 27)
+    text("ENTER  /  TAKE THE LANTERN" 38 203 1 WHITE)
+    text("WASD MOVE   J FIRE   SPACE DASH" 25 234 1 MIST)
+    text("E NOVA   M AUDIO" 25 248 1 EDGE)
+    # Monumental silhouette behind the animated crystal.
+    let yy:int = 0
+    loop yy <? H {
+        rect(268 yy 212 1 mix(0x0c1926 0x28434c yy * 180 // H))
+        yy += 1
+    }
+    ellipse(416 48 21 21 0x617e80)
+    ellipse(409 43 21 21 0x142733)
+    i = 0
+    loop i <? 65 {
+        let xx:int = 276 + hash(i 64) % 200
+        let sy:int = 18 + hash(i 65) % 145
+        pixel(xx sy 0x607e88)
+        i += 1
+    }
+    i = 0
+    loop i <? 12 {
+        let xx:int = 278 + i * 20
+        let h:int = 9 + hash(i 54) % 23
+        rect(xx 181 - h 15 h 0x162b37)
+        rect(xx + 4 174 - h 7 8 0x162b37)
+        i += 1
+    }
+    rect(268 183 212 87 0x132b37)
+    i = 0
+    loop i <? 95 {
+        let xx:int = 272 + hash(i 22) % 206
+        let sy:int = 187 + hash(i 44) % 80
+        let shift:int = sin(tick * 2 + i * 45) * 3 // FP
+        line(xx + shift sy xx + shift + 4 + i % 13 sy 0x2c4751)
+        i += 1
+    }
+    # Lantern light catches the water and the edges of a ruined causeway.
+    i = 0
+    loop i <? 18 {
+        let width:int = 4 + i // 2
+        let shift:int = sin(tick * 4 + i * 39) * 3 // FP
+        line(362 - width + shift 200 + i * 4 362 + width + shift 200 + i * 4 0x427371)
+        i += 1
+    }
+    ellipse(362 239 48 10 SLATE)
+    ring(362 238 48 10 EDGE)
+    ellipse(367 227 64 15 0x152a33)
+    rect(334 121 56 108 0x142b36)
+    rect(337 124 9 102 0x3a5258)
+    rect(379 124 8 104 0x0c202d)
+    rect(347 125 29 96 0x233d46)
+    i = 0
+    loop i <? 8 {
+        line(335 130 + i * 12 389 129 + i * 12 0x102832)
+        line(337 131 + i * 12 347 131 + i * 12 0x526864)
+        i += 1
+    }
+    rect(327 218 70 6 STONE) rect(321 224 82 6 SLATE)
+    rect(329 118 66 7 STONE) rect(331 117 62 2 GOLD)
+    rect(333 78 5 39 STONE) rect(386 78 5 39 SLATE)
+    line(330 78 394 78 GOLD)
+    line(330 78 362 53 STONE) line(394 78 362 53 SLATE)
+    line(336 74 362 55 EDGE)
+    rect(361 41 2 16 GOLD) diamond(362 39 3 GOLD)
+    let bob:int = sin(tick * 7) * 3 // FP
+    glow(362 97 34 TEAL)
+    diamond(362 96 + bob 12 0x248d92)
+    diamond(362 93 + bob 8 TEAL)
+    line(362 84 + bob 366 92 + bob WHITE)
+    line(362 106 + bob 362 115 TEAL)
+    ring(362 99 25 7 0x6d8f87)
+    let a:int = tick * 3
+    diamond(362 + cos(a) * 25 // FP 99 + sin(a) * 7 // FP 3 GOLD)
+    rect(357 153 12 28 INK) rect(359 155 2 22 0x31505a)
+    grass(335 225 0x4c6c60) grass(391 233 0x617c69)
+    text("01 / THE OBSERVATORY" 300 249 1 EDGE)
+    text("MADE OF LIGHT. WRITTEN IN UDEWY." 286 13 1 EDGE)
+    return void
+}
+let upgrade_screen = ():>void => {
+    panel(20 64 440 170)
+    center("THE LIGHT GROWS" 78 2 WHITE)
+    center("CHOOSE A GIFT  /  RESTORE TWO VITAL" 100 1 GOLD)
+    let i:int = 0
+    loop i <? 3 {
+        let x:int = 32 + i * 141
+        let c:int = STONE
+        if choice =? i { c = GOLD rect(x 119 134 79 0x263b40) }
+        outline(x 119 134 79 c)
+        number(i + 1 x + 9 128 1 c)
+        if i =? 0 {
+            diamond(x + 66 134 6 TEAL)
+            text("PRISM" x + 49 148 1 WHITE)
+            text("+5 SHOT DAMAGE" x + 15 165 1 MIST)
+            text("TIER 2: TRIPLE SHOT" x + 12 181 1 EDGE)
+        }
+        if i =? 1 {
+            line(x + 56 138 x + 72 128 GOLD) line(x + 60 141 x + 76 131 GOLD)
+            text("QUICKWICK" x + 40 148 1 WHITE)
+            text("FASTER LANTERN" x + 21 165 1 MIST)
+            text("STACKS EACH TIDE" x + 21 181 1 EDGE)
+        }
+        if i =? 2 {
+            ring(x + 66 134 8 5 TEAL)
+            text("UNDERTOW" x + 43 148 1 WHITE)
+            text("STRONGER, QUICKER DASH" x + 4 165 1 MIST)
+            text("+1 MAXIMUM VITAL" x + 21 181 1 EDGE)
+        }
+        i += 1
+    }
+    center("1 / 2 / 3 TO CHOOSE   OR   ARROWS + ENTER" 213 1 GOLD)
+    return void
+}
+let render = ():>void => {
+    draw_world()
+    if mode =? TITLE { title_screen() return void }
+    hud()
+    if mode =? UPGRADE { upgrade_screen() }
+    if mode =? PAUSE {
+        panel(94 77 292 136)
+        center("THE TIDE CAN WAIT" 92 2 WHITE)
+        center("WASD / ARROWS  MOVE" 119 1 MIST)
+        center("HOLD J  LANTERN / AUTO-AIM" 133 1 MIST)
+        center("SPACE / K  DASH THROUGH ENEMIES" 147 1 MIST)
+        center("E  NOVA WHEN CHARGED   M  AUDIO" 161 1 MIST)
+        center("ENTER / ESC  RESUME" 190 1 GOLD)
+    }
+    if (mode =? DEAD) or (mode =? WIN) {
+        panel(77 72 326 157)
+        if mode =? DEAD {
+            center("THE LIGHT FADES" 89 2 WHITE)
+            center("THE SEA WILL REMEMBER YOUR NAME." 113 1 MIST)
+        } else {
+            center("DAWN, AT LAST" 89 2 GOLD)
+            center("EVEN FORGOTTEN GODS CAN LEARN TO REST." 113 1 MIST)
+        }
+        text("SCORE" 111 139 1 EDGE) number(score 163 136 2 WHITE)
+        text("BEST" 286 139 1 EDGE) number(best 321 139 1 GOLD)
+        text("TIDE" 111 162 1 EDGE) number(wave 148 162 1 WHITE)
+        text("FALLEN" 190 162 1 EDGE) number(kills 238 162 1 WHITE)
+        text("SECONDS" 283 162 1 EDGE) number(run_ticks // 60 335 162 1 WHITE)
+        if death_time >? 70 { center("ENTER  /  CARRY THE LIGHT AGAIN" 199 1 GOLD) }
+    }
+    return void
+}

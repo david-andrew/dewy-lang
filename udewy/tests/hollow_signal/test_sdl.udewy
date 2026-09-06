@@ -1,0 +1,41 @@
+# Real SDL/OpenGL integration smoke test; opens a window, runs, resizes, quits.
+$supported_targets = ["x86_64"]
+import p"./platform_sdl.udewy"
+import p"./core.udewy"
+import p"./render.udewy"
+import p"./audio.udewy"
+let SDL_SetWindowSize = (window:int w:int h:int):>int => extern
+let SDL_PushEvent = (event:int):>int => extern
+let glGetError = ():>int => extern
+let glGetIntegerv = (name:int params:int):>void => extern
+let main = ():>int => {
+    let rc:int = backend_init("Hollow Signal / SDL verification\0")
+    if rc not=? 0 { return rc }
+    bake_scene() new_game()
+    let i:int = 0
+    loop i <? 180 {
+        backend_poll()
+        let keys:int = 16
+        if i <? 60 { keys = keys or 8 }
+        if i >? 100 { keys = keys or 4 }
+        if i =? 110 { keys = keys or 32 }
+        step(keys) audio_update() render() backend_present()
+        if i =? 90 { SDL_SetWindowSize(bk_window 900 700) }
+        i += 1
+    }
+    let error:int = glGetError()
+    let viewport:int = __static_alloca__(16)
+    glGetIntegerv(0x0BA2 viewport)
+    let width:int = __load_u32__(viewport + 8)
+    let height:int = __load_u32__(viewport + 12)
+    let event:int = __static_alloca__(128)
+    clear(event 128) __store_u32__(SDL_EVENT_QUIT event)
+    SDL_PushEvent(event) backend_poll()
+    let stopped:int = running =? 0
+    backend_shutdown()
+    if error not=? 0 { return 20 }
+    if abs(width * 270 - height * 480) >? 480 { return 21 }
+    if stopped =? 0 { return 22 }
+    if (kills =? 0) or (dash_serial =? 0) { return 23 }
+    return 0
+}

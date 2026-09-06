@@ -1,0 +1,36 @@
+# Real elapsed time feeds a fixed 60 Hz simulation on 60/120/144 Hz displays.
+# Long stalls pause play, and bounded catch-up prevents a spiral of death.
+let last_time:int = 0
+let accumulator:int = 0
+let latched_keys:int = 0
+let last_polled:int = 0
+let initialize = ():>void => {
+    bake_scene()
+    last_time = time_ms()
+    render()
+    backend_present()
+    return void
+}
+let frame_step = ():>void => {
+    backend_poll()
+    let now:int = time_ms()
+    let elapsed:int = max(0 now - last_time)
+    last_time = now
+    if elapsed >? 250 {
+        if mode =? PLAY { mode = PAUSE }
+        elapsed = 0
+    }
+    let keys:int = platform_keys()
+    latched_keys = latched_keys or (keys and (not last_polled))
+    last_polled = keys
+    accumulator += min(100 elapsed) * 60
+    loop accumulator >=? 1000 {
+        step(keys or latched_keys)
+        latched_keys = 0
+        accumulator -= 1000
+    }
+    audio_update()
+    render()
+    backend_present()
+    return void
+}

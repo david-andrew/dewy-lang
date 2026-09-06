@@ -1,0 +1,154 @@
+# Meaningful deterministic checks, including an unassisted full campaign.
+# python -m udewy udewy/tests/hollow_signal/test_core.udewy
+import p"../../stdlib/stdlib.udewy"
+import p"./core.udewy"
+let failures:int = 0
+let check = (label:int ok:int):>void => {
+    if ok { print("PASS ") } else { print("FAIL ") failures += 1 }
+    printl(label)
+    return void
+}
+let advance = (n:int keys:int):>void => {
+    let i:int = 0
+    loop i <? n { step(keys) i += 1 }
+    return void
+}
+let count_bullets = (owner:int):>int => {
+    let n:int = 0
+    let i:int = 0
+    loop i <? BN {
+        let b:int = bullets + i * BS
+        if (get(b 0) >? 0) and (get(b 7) =? owner) { n += 1 }
+        i += 1
+    }
+    return n
+}
+# A plain kiting pilot. It uses only the same input bits as a player, with no
+# health edits, damage cheats, skipped encounters, or enemy state manipulation.
+let pilot = (strategy:int):>int => {
+    let tx:int = 240 + cos(run_ticks * 2) * 135 // FP
+    let ty:int = 150 + sin(run_ticks * 2) * 62 // FP
+    let keys:int = 16
+    if px // FP <? tx - 3 { keys = keys or 8 }
+    if px // FP >? tx + 3 { keys = keys or 4 }
+    if py // FP <? ty - 3 { keys = keys or 2 }
+    if py // FP >? ty + 3 { keys = keys or 1 }
+    if energy >=? 100 { keys = keys or 64 }
+    # Evade a nearby threat with a dash, keeping normal cooldowns.
+    let i:int = 0
+    let danger:int = 0
+    loop i <? EN {
+        let e:int = enemies + i * ES
+        if (get(e 0) >? 0) and (get(e 10) =? 0) and (distance(px py get(e 2) get(e 3)) <? 576) { danger = 1 }
+        i += 1
+    }
+    i = 0
+    loop i <? BN {
+        let b:int = bullets + i * BS
+        if (get(b 0) >? 0) and (get(b 7) =? 1) and (distance(px py get(b 1) get(b 2)) <? 324) { danger = 1 }
+        i += 1
+    }
+    if (danger =? 1) and (dash_cd =? 0) { keys = keys or 32 }
+    if mode =? UPGRADE {
+        if strategy =? 0 { return 512 }
+        if strategy =? 1 { return 1024 }
+        return 2048
+    }
+    return keys
+}
+let main = ():>int => {
+    new_game() previous_keys = 0
+    let x:int = px
+    advance(10 8)
+    check("directional input does not trigger pause, mute, or dash" (px >? x) and (mode =? PLAY) and (dash_cd =? 0) and (muted =? 0))
+    check("right movement does not also move vertically" py =? 183 * FP)
+    step(0) step(256)
+    let t:int = run_ticks
+    advance(20 0)
+    check("pause freezes simulation" (mode =? PAUSE) and (run_ticks =? t))
+    step(128) step(0)
+    check("resume restores play" mode =? PLAY)
+    step(4096) advance(10 4096)
+    check("mute toggles once per press" muted =? 1)
+    step(0) step(4096) step(0)
+
+    new_game() clear(enemies EN * ES) alive = 0 invuln = 0
+    let id:int = spawn_enemy(4 251 183)
+    let e:int = enemies + id * ES
+    put(e 10 0)
+    step(32)
+    check("dash damages enemies" get(e 1) =? 33)
+    check("dash grants invulnerability" hp =? 6)
+    let h:int = get(e 1)
+    advance(8 32)
+    check("one dash hits a target only once" get(e 1) =? h)
+    check("held dash does not retrigger" dash_serial =? 1)
+
+    new_game() clear(enemies EN * ES) alive = 0
+    id = spawn_enemy(1 300 183) e = enemies + id * ES
+    put(e 10 0)
+    advance(50 16)
+    check("lantern projectiles collide and kill" (kills >? 0) and (score >? 0))
+    check("no hostile shots in first encounter" count_bullets(1) =? 0)
+
+    new_game() clear(enemies EN * ES) alive = 0
+    id = spawn_enemy(4 100 100) e = enemies + id * ES put(e 10 0)
+    projectile(px py 1 0 400 1 1)
+    energy = 100 step(64)
+    check("nova consumes charge and clears hostile projectiles" (energy =? 0) and (count_bullets(1) =? 0))
+    check("nova damages distant enemies" get(e 1) =? 17)
+
+    new_game() mode = UPGRADE previous_keys = 0 hp = 3
+    step(2048)
+    check("upgrade grants max health and advances one tide" (flow =? 1) and (max_hp =? 7) and (hp =? 5) and (wave =? 2))
+    advance(4 2048)
+    check("held upgrade choice cannot skip encounters" wave =? 2)
+
+    new_game() invuln = 0
+    hurt() hurt()
+    check("hurt invulnerability prevents stacked damage" hp =? 5)
+    hp = 1 invuln = 0 hurt()
+    check("lethal damage enters death screen" mode =? DEAD)
+    advance(75 0) step(128)
+    check("restart resets run state" (mode =? PLAY) and (hp =? 6) and (wave =? 1) and (kills =? 0))
+
+    new_game() clear(enemies EN * ES) alive = 0 wave = 4 start_wave()
+    e = enemies put(e 10 0) put(e 7 0) enemy_step()
+    check("boss fires telegraphed radial and aimed patterns" count_bullets(1) =? 15)
+    damage_enemy(e 1000)
+    check("boss death wins and records score" (mode =? WIN) and (best >=? score))
+    let final_score:int = score
+    id = spawn_enemy(1 100 100) damage_enemy(enemies + id * ES 100)
+    check("combat cannot change the result after victory" score =? final_score)
+
+    new_game() spawned = quota clear(enemies EN * ES) alive = 0
+    advance(103 0)
+    check("cleared tide reaches upgrade screen" mode =? UPGRADE)
+
+    new_game() invuln = 0
+    ground_strike(px // FP py // FP)
+    let n:int = 0
+    loop n <? 56 { hazards_step() n += 1 }
+    check("ground warnings cannot damage the player" hp =? 6)
+    hazards_step()
+    check("ground strike damages only after warning expires" hp =? 5)
+    new_game() invuln = 0 dash = 5
+    ground_strike(px // FP py // FP) put(hazards 0 14) hazards_step()
+    check("dash avoids erupting ground attacks" hp =? 6)
+
+    let strategy:int = 0
+    loop strategy <? 3 {
+        new_game() previous_keys = 0
+        let f:int = 0
+        loop (f <? 24000) and (mode not=? DEAD) and (mode not=? WIN) {
+            step(pilot(strategy)) f += 1
+        }
+        print("campaign strategy ") print_int(strategy)
+        print(" / tide ") print_int(wave) print(" / hp ") print_int(hp)
+        print(" / seconds ") print_int(run_ticks // 60) print(" / score ") print_int(score) printl("")
+        check("full campaign completes through ordinary controls" mode =? WIN)
+        strategy += 1
+    }
+    print("failures: ") print_int(failures) printl("")
+    return failures
+}

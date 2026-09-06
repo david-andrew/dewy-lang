@@ -1,0 +1,45 @@
+# Browser adapter: stock canvas host, keyboard edges, queued mono PCM.
+$supported_targets = ["wasm32"]
+
+# The host owns [262144, 780544) for a 480x270 RGBA framebuffer. Reserve this
+# BEFORE game statics so the large scene cache cannot alias the host's pixels.
+# No game data is stored in this unused reservation.
+let canvas_host_reservation:int = __static_alloca__(786432)
+const SCREEN_W:int = 480
+const SCREEN_H:int = 270
+let bk_fb:int = 0
+let running:int = 1
+let key_held = (s:int):>int => {
+    # Retain taps that begin and end between animation frames.
+    return __key_down__(s __load__(s - 8)) or __key_pressed__(s __load__(s - 8))
+}
+let backend_init = (title:int):>int => {
+    bk_fb = __canvas_init__(SCREEN_W SCREEN_H)
+    __canvas_set_aspect_lock__(1)
+    __audio_queue_init__(22050 1)
+    return 0
+}
+let backend_poll = ():>void => { return void }
+let backend_framebuffer = ():>int => { return bk_fb }
+let backend_present = ():>void => { __canvas_present__() return void }
+let time_ms = ():>int => { return __host_time__() }
+let audio_push_s16 = (ptr:int n:int):>void => { __audio_queue_push__(ptr n) return void }
+let audio_queued_bytes = ():>int => { return __audio_queue_size__() }
+
+let platform_keys = ():>int => {
+    let k:int = 0
+    if key_held("KeyW") or key_held("ArrowUp") { k = k or 1 }
+    if key_held("KeyS") or key_held("ArrowDown") { k = k or 2 }
+    if key_held("KeyA") or key_held("ArrowLeft") { k = k or 4 }
+    if key_held("KeyD") or key_held("ArrowRight") { k = k or 8 }
+    if key_held("KeyJ") { k = k or 16 }
+    if key_held("Space") or key_held("KeyK") { k = k or 32 }
+    if key_held("KeyE") { k = k or 64 }
+    if key_held("Enter") { k = k or 128 }
+    if key_held("Escape") or key_held("KeyP") { k = k or 256 }
+    if key_held("Digit1") { k = k or 512 }
+    if key_held("Digit2") { k = k or 1024 }
+    if key_held("Digit3") { k = k or 2048 }
+    if key_held("KeyM") { k = k or 4096 }
+    return k
+}

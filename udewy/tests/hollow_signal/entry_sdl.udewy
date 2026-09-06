@@ -1,0 +1,13 @@
+import p"./platform_sdl.udewy"
+import p"./core.udewy"
+import p"./render.udewy"
+import p"./audio.udewy"
+import p"./frame.udewy"
+let main = ():>int => {
+    let rc:int = backend_init("Hollow Signal\0")
+    if rc not=? 0 { return rc }
+    initialize()
+    loop running { frame_step() }
+    backend_shutdown()
+    return 0
+}

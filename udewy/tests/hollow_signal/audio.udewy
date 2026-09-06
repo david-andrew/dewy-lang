@@ -1,0 +1,107 @@
+# A small polyphonic synthesizer. Original D-minor ostinato, bass, pads and
+# percussion, plus eight independent effects voices. Signed 16-bit mono PCM.
+let voices:int = __static_alloca__(384)
+let audio_clock:int = 0
+let audio_noise:int = 9137
+let notes:int = __static_words__(294 440 587 440 349 440 698 440 262 349 523 349 262 392 523 392)
+let roots:int = __static_words__(73 87 65 98)
+let arp_phase:int = 0
+let bass_phase:int = 0
+let pad_phase:int = 0
+let kick_phase:int = 0
+let music_step:int = -1
+let audio_buffer:int = __static_alloca__(1024)
+let tri = (p:int):>int => {
+    p = p and 65535
+    if p <? 32768 { return p * 2 - 32768 }
+    return 98303 - p * 2
+}
+let voice_start = (kind:int):>void => {
+    let slot:int = 0
+    let least:int = 999999
+    let i:int = 0
+    loop i <? 8 {
+        let p:int = voices + i * 48
+        if get(p 0) <? least { slot = i least = get(p 0) }
+        i += 1
+    }
+    let p:int = voices + slot * 48
+    let life:int = 2200
+    let hz:int = 600
+    if kind =? 0 { life = 1200 hz = 900 }
+    if kind =? 1 { life = 650 hz = 260 }
+    if kind =? 2 { life = 3200 hz = 180 }
+    if kind =? 3 { life = 5500 hz = 95 }
+    if kind =? 4 { life = 2900 hz = 460 }
+    if kind =? 5 { life = 9500 hz = 130 }
+    if kind =? 6 { life = 8000 hz = 587 }
+    if kind =? 7 { life = 20000 hz = 440 }
+    if kind =? 8 { life = 1700 hz = 190 }
+    if kind =? 9 { life = 2400 hz = 1175 }
+    put(p 0 life) put(p 1 0) put(p 2 hz) put(p 3 kind) put(p 4 life)
+    return void
+}
+let audio_update = ():>void => {
+    let k:int = 0
+    loop k <? 10 {
+        if has(sounds 1 << k) { voice_start(k) }
+        k += 1
+    }
+    sounds = 0
+    let chunks:int = 0
+    # Bound work if an audio device is absent. Queue stays around 45-70 ms.
+    loop (audio_queued_bytes() <? 2048) and (chunks <? 3) {
+        let i:int = 0
+        loop i <? 512 {
+            let step:int = audio_clock // 2953
+            let beat:int = audio_clock % 2953
+            let chord:int = (step // 16) % 4
+            let note:int = __load__(notes + ((step % 4) + chord * 4) * 8)
+            let root:int = __load__(roots + chord * 8)
+            if step not=? music_step { arp_phase = 0 music_step = step }
+            arp_phase += note * 65536 // 22050
+            bass_phase += root * 65536 // 22050
+            pad_phase += root * 2 * 65536 // 22050
+            let sample:int = tri(arp_phase) * (2953 - beat) // 2953 // 37
+            sample += tri(bass_phase) // 58 + tri(pad_phase) // 110
+            audio_noise = (audio_noise * 1103515245 + 12345) and 0x7fffffff
+            let noise:int = (audio_noise and 65535) - 32768
+            if mode =? PLAY {
+                let drum:int = audio_clock % 11812
+                if drum <? 2600 {
+                    kick_phase += (45 + (2600 - drum) // 24) * 65536 // 22050
+                    sample += sin(kick_phase >> 6) * (2600 - drum) // 430
+                }
+                if (step % 2 =? 1) and (beat <? 600) { sample += noise * (600 - beat) // 600 // 70 }
+                if (step % 8 =? 4) and (beat <? 1700) { sample += noise * (1700 - beat) // 1700 // 30 }
+            } else { sample = sample * 2 // 3 }
+            let j:int = 0
+            loop j <? 8 {
+                let p:int = voices + j * 48
+                let life:int = get(p 0)
+                if life >? 0 {
+                    let kind:int = get(p 3)
+                    let duration:int = get(p 4)
+                    let hz:int = get(p 2)
+                    if kind <=? 5 { hz = hz * (life + duration) // (duration * 2) }
+                    if kind =? 9 { hz += (duration - life) // 8 }
+                    let phase:int = get(p 1) + hz * 65536 // 22050
+                    put(p 1 phase) put(p 0 life - 1)
+                    let v:int = tri(phase) // 9
+                    if (kind =? 2) or (kind =? 3) or (kind =? 4) or (kind =? 5) { v = (v + noise // 12) // 2 }
+                    if (kind =? 6) or (kind =? 7) { v = (tri(phase) + tri(phase * 3 // 2)) // 26 }
+                    if kind =? 0 { v = v // 2 }
+                    sample += v * life // duration * min(90 duration - life) // 90
+                }
+                j += 1
+            }
+            sample = clamp(sample (-24000) 24000)
+            if muted { sample = 0 }
+            __store_u16__(sample and 65535 audio_buffer + i * 2)
+            audio_clock += 1 i += 1
+        }
+        audio_push_s16(audio_buffer 1024)
+        chunks += 1
+    }
+    return void
+}

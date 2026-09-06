@@ -1,0 +1,40 @@
+# Refresh-rate independence and input buffering, with a controllable host clock.
+import p"../../stdlib/stdlib.udewy"
+import p"./core.udewy"
+import p"./frame.udewy"
+let clock:int = 0
+let test_keys:int = 0
+let time_ms = ():>int => { return clock }
+let backend_poll = ():>void => { return void }
+let platform_keys = ():>int => { return test_keys }
+let audio_update = ():>void => { return void }
+let render = ():>void => { return void }
+let bake_scene = ():>void => { return void }
+let backend_present = ():>void => { return void }
+let fails:int = 0
+let check_frame = (label:int ok:int):>void => {
+    if ok { print("PASS ") } else { print("FAIL ") fails += 1 }
+    printl(label)
+    return void
+}
+let simulate = (hz:int):>int => {
+    new_game() clock = 0 last_time = 0 accumulator = 0 test_keys = 0
+    let i:int = 1
+    loop i <=? hz { clock = i * 1000 // hz frame_step() i += 1 }
+    return run_ticks
+}
+let main = ():>int => {
+    check_frame("60 Hz host advances sixty simulation ticks" simulate(60) =? 60)
+    check_frame("144 Hz host advances sixty simulation ticks" simulate(144) =? 60)
+    check_frame("30 Hz host advances sixty simulation ticks" simulate(30) =? 60)
+    new_game() clock = 0 last_time = 0 accumulator = 0 previous_keys = 0 last_polled = 0 latched_keys = 0
+    test_keys = 32 clock = 3 frame_step()
+    test_keys = 0 clock = 17 frame_step()
+    check_frame("sub-frame dash press survives until next tick" dash_serial =? 1)
+    new_game() previous_keys = 0 hitstop = 3
+    step(32) step(0) step(0) step(0)
+    check_frame("hit-stop buffers a dash press" dash_serial =? 1)
+    clock = 500 frame_step()
+    check_frame("long host stall pauses instead of fast-forwarding danger" mode =? PAUSE)
+    return fails
+}

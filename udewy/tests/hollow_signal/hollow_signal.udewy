@@ -1,0 +1,7 @@
+# Hollow Signal - a complete dual-target arena action game.
+# python -m udewy udewy/tests/hollow_signal/hollow_signal.udewy
+# python -m udewy --target wasm32 udewy/tests/hollow_signal/hollow_signal.udewy
+$supported_targets = ["x86_64" "c" "wasm32"]
+if $target =? "x86_64" { import p"./entry_sdl.udewy" }
+if $target =? "c" { import p"./entry_sdl.udewy" }
+if $target =? "wasm32" { import p"./entry_wasm.udewy" }
