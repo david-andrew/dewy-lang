@@ -132,6 +132,9 @@ let Token:type = $abstract type of any & [
 
 # TODO: move into reporting.dewy
 let TokenError = type of error & Report
+let Warning = type of Report & [
+    severity='warning'
+]
 
 
 
@@ -141,15 +144,36 @@ let TokenError = type of error & Report
 
 # TODO: want a warning if there is a lone \r not followed by \n
 Whitespace = type of Token & [
-    eat = (src:nonemptystring ctx:Context):>uint64? => {
-        doc"""white space is any sequence of whitespace characters"""
+    # eat = (src:nonemptystring ctx:Context):>uint64? => {
+    #     doc"""white space is any sequence of whitespace characters"""
 
-        #TODO: insert check for \r without \n. probably also restructure to match python version?
-        if src[0] not in? whitespace return none
-        loop i in 0..uint64.max and i <? src.length {  
-            if src[i] not in? whitespace return i
+    #     #TODO: insert check for \r without \n. probably also restructure to match python version?
+    #     if src[0] not in? whitespace return none
+    #     loop i in 0..uint64.max and i <? src.length {  
+    #         if src[i] not in? whitespace return i
+    #     }
+    #     return src.length
+    # }
+    eat = (src:nonemptystring ctx:Context):> uint64? => {
+        doc"""white space is any sequence of whitespace characters"""
+        i = 0
+        loop i <? src.length and src[i] in? whitespace {
+            if src[i] =? '\r' and not src[i+1..].startswith('\n') {
+                warning_lone_carriage_return(src i ctx) # just emit a warning
+            }
+            i += 1
         }
-        return src.length
+        return if i >? 0 i else none
+    }
+    
+    warning_lone_carriage_return = (src:nonemptystring i:uint64<(<?src.length)> ctx:Context):>void => {
+        warning = Warning[
+            # srcfile=ctx.srcfile
+            title="Lone carriage return"
+            pointers=[Pointer[span=Span[i i+1] message="\\r without \\n"]]  #TODO: test if we can remove `Pointer` since it's completely structural
+            hint="\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
+        ]
+        warning.render(ctx.srcfile)
     }
 
 ]

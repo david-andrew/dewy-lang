@@ -6145,15 +6145,21 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                 if existing_index is None:
                     fields.append(field_)
                     continue
-                # strengthening an inherited field (`type of Report & [severity='error']`):
-                # the type must still fit, and the new default replaces the old
+                # an inherited field given again (`type of Report & [severity='error']`):
+                # the type must still fit. Written as a bare default, the field keeps
+                # its inherited type and only the default changes — so a `Warning`
+                # is still a `Report` (the structural relation needs the same
+                # field types); an explicit annotation narrows the field instead
                 if not ctx.type_system.is_subtype(field_.type, fields[existing_index].type):
                     user_error(
                         ctx.srcfile,
                         f'minted type `{binding.name}` weakens field `{field_.name}`',
                         Pointer(span=rhs.loc, message=f'`{type_to_dewy(field_.type)}` does not fit the inherited `{type_to_dewy(fields[existing_index].type)}`'),
                     )
-                fields[existing_index] = field_
+                if field_.name in _default_only_fields(rhs) and field_.default is not None:
+                    fields[existing_index] = replace(fields[existing_index], default=field_.default)
+                else:
+                    fields[existing_index] = field_
             for method in item.methods:
                 slot = next((index for index, existing in enumerate(fields) if existing.name == method.name), None)
                 if slot is not None and isinstance(fields[slot].type, ty.FunctionType):
@@ -6198,6 +6204,28 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     else:
         ty.USER_ABSTRACT_BRANDS.discard(name)
     return minted
+
+
+def _place_fits(actual: ty.Type, required: ty.Type) -> bool:
+    """A place of a minted child may stand where a place of its parent (or of the
+    structure it carries) is required: the parent's fields sit at the same
+    offsets with the same types, so every store the callee can make is one the
+    child's layout accepts; the child's own fields are simply not visible."""
+    actual, required = ty.unfold(ty.strip_refinement(actual)), ty.unfold(ty.strip_refinement(required))
+    return isinstance(actual, ty.ObjectType) and isinstance(required, ty.ObjectType) and (
+        ty.user_brand_descends(actual, required) or ty.user_brand_carries(actual, required)
+    )
+
+
+def _default_only_fields(rhs: p0.AST) -> set[str]:
+    """The fields an intersection's object literals give as `name = value` with no annotation."""
+    names: set[str] = set()
+    for operand in _intersection_operands(rhs):
+        if isinstance(operand, p0.Block) and operand.kind == '[]':
+            for item in operand.inner:
+                if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == '=' and isinstance(item.left, p0.Atom) and isinstance(item.left.item, t1.Identifier):
+                    names.add(item.left.item.name)
+    return names
 
 
 def _slot_forwarder(literal: p0.BinOp, alias: str, method: str, *, ctx: Context) -> p0.AST:
@@ -13806,7 +13834,7 @@ def _validate_place_call_arguments(
             )
         if place is None:
             continue
-        if place.target.type != parameter.type:
+        if place.target.type != parameter.type and not _place_fits(place.target.type, parameter.type):
             type_error(
                 ctx.srcfile,
                 'place parameter types are invariant',

@@ -309,3 +309,28 @@ let slice = (loc:Span src:string):>string => if loc.start <? loc.stop <=? src.le
 '''
     lowered = codegen(SrcFile(None, program), debug_locations=False)
     assert lowered.count('__dewy_chain_') >= 2 and 'inside' in lowered   # `mid` binds its interior once; `inside` needs no local
+
+
+def test_a_minted_child_with_a_bare_default_stays_a_structural_parent() -> None:
+    # `Warning = type of Report & [severity="warning"]`: the default changes, the field's
+    # type does not, so a Warning is a Report — and its place fits Report's mutating methods
+    program = '''let Report:type = [
+    severity:string
+    title:string
+    notes:array<string> = []
+    note = (text:string) => { notes.push(text) }
+    describe = ():>string => "{severity}: {title}"
+]
+let Warning = type of Report & [severity="warning"]
+let Custom = type of Report & [severity:'custom' = "custom"]      # an annotation narrows: a Custom is not a Report
+let main = ():>int64 => {
+    let w = Warning[title="careful"]
+    let r:Report = w
+    w.note("first")
+    if w.describe =? "warning: careful" and w.notes.length =? 1 { return 42 }
+    return 0
+}
+'''
+    _check(program)
+    with pytest.raises(TypeCheckError, match='type mismatch'):
+        _check(program.replace('    let r:Report = w\n', '    let c = Custom[title="t"]\n    let r:Report = c\n'))
