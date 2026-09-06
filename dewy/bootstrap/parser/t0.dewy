@@ -130,10 +130,21 @@ let Token:type = $abstract type of any & [
 
 ]
 
+# TODO: move into reporting.dewy
 let TokenError = type of error & Report
 
+
+
+##### TOKEN CLASSES: WHITESPACE AND COMMENTS #####
+# Tokens that consume layout-only characters or comments. These are valid in
+# general body contexts and usually don't affect the context stack.
+
+# TODO: want a warning if there is a lone \r not followed by \n
 Whitespace = type of Token & [
     eat = (src:nonemptystring ctx:Context):>uint64? => {
+        doc"""white space is any sequence of whitespace characters"""
+
+        #TODO: insert check for \r without \n. probably also restructure to match python version?
         if src[0] not in? whitespace return none
         loop i in 0..uint64.max and i <? src.length {  
             if src[i] not in? whitespace return i
@@ -182,6 +193,37 @@ BlockComment = type of Token & [
 
 
 
+##### TOKEN CLASSES: IDENTIFIERS AND SYMBOLIC OPERATORS #####
+# Identifier-like things: plain identifiers and variants such as hashtags.
+
+Identifier = type of Token & [
+    eat = (src:nonemptystring ctx:Context):> uint64? => {
+        doc"""
+        Identifiers:
+        - may not start with a number
+        - may not be an operator (handled by longest match + token precedence)
+        - may contain decorator characters (superscripts/subscripts) anywhere (but must include at least one start character)
+        """
+        i = 0
+        
+        # Skip leading decorator characters
+        loop i <? src.length and src[i] in? decoration_characters { i += 1 }
+        
+        # Must have at least one start character
+        if i >=? src.length or src[i] not in? start_characters { return none }
+        
+        # Consume the start character
+        i += 1
+        
+        # Continue consuming continue_characters or decorator characters
+        loop i <? src.length and (src[i] in? continue_characters or src[i] in? decoration_characters) { i += 1 }
+        
+        return i
+    }
+]
+
+
+
 
 # what tokens are allowed in what contexts
 contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
@@ -189,6 +231,7 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler imp
         Whitespace
         LineComment
         BlockComment
+        Identifier
     ]
     <StringBody> => []
     <RawStringBody> => []
@@ -198,11 +241,13 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler imp
         Whitespace
         LineComment
         BlockComment
+        Identifier
     ]
     <TypeBody> => [
         Whitespace
         LineComment
         BlockComment
+        Identifier
     ]
 }
 
@@ -233,7 +278,7 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
         matches = [loop m in matches if m.length =? longest_match_length m else break]
         printl"matched tokens: {matches}"
         if matches.length >? 1 err"TODO: handling multiple matches not handled yet: {matches}"
-        if matches.length =? 0 err"TODO: no tokens matched this round"
+        if matches.length =? 0 err"TODO: no tokens matched this round. remaining src:\n```dewy\n{src[i..]}\n```"
         [length token_cls] = matches[0]
         token = token_cls[src Span[i i+length] tokens.length]
         printl"matched token {token}"
