@@ -298,3 +298,14 @@ def test_disagreeing_arms_point_at_the_value_and_suggest_a_semicolon() -> None:
     with pytest.raises(UserError, match='conditional branches disagree') as caught:
         _check('let f = (xs:array<int64>):>int64 => {\n    if xs.length >? 3 { xs.pop } else { xs.push(1) }\n    return 0\n}\n')
     assert 'this arm ends by expressing' in str(caught.value) and 'xs.pop;' in str(caught.value)
+
+
+def test_a_comparison_chain_evaluates_its_interior_once_anywhere() -> None:
+    from dewy.backend.udewy import codegen
+    program = '''let Span:type = [start:uint64 stop:uint64]
+let inside = (loc:Span src:string):>bool => loc.start <? loc.stop <=? src.length          # member routes reused as written
+let mid = (xs:array<int64>):>bool => 0 <? xs.length - 1 <? 10                            # an expression bound in front of the chain
+let slice = (loc:Span src:string):>string => if loc.start <? loc.stop <=? src.length src[loc.start..loc.stop) else ""
+'''
+    lowered = codegen(SrcFile(None, program), debug_locations=False)
+    assert lowered.count('__dewy_chain_') >= 2 and 'inside' in lowered   # `mid` binds its interior once; `inside` needs no local

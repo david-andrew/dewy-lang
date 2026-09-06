@@ -10905,19 +10905,18 @@ def _comparison_chain(binop: p0.BinOp, *, ctx: Context, expected: ty.Type | None
             ],
             hint='a chain reads one way (`0 <? x <? 10`, `10 >? x >=? 0`); write the other comparison with `and`',
         )
-    # interior operands are evaluated once: a name or literal is reused as
-    # written, anything else is bound to a hidden local before the statement
+    # interior operands are evaluated once: a name, a literal, or a route of
+    # member reads (`loc.stop`, `src.length` — no effects, and the same term
+    # for the facts on both sides) is reused as written; anything else is
+    # bound to a hidden local — before the statement when there is one, else
+    # in front of the chain itself (an expression-bodied function)
+    prelude: list[hir.AST] = []
     for index in range(1, len(operands) - 1):
         operand = operands[index]
         if isinstance(operand, p0.Atom) and isinstance(operand.item, (t1.Identifier, t1.String, t1.Integer)):
             continue
-        if ctx.hoisted is None:
-            user_error(
-                ctx.srcfile,
-                'chained comparison needs a bound interior operand here',
-                Pointer(span=operand.loc, message='this operand is used by two comparisons, so it must be evaluated once'),
-                hint='bind it first (`let mid = ...`) and chain on the name',
-            )
+        if _is_member_route(operand):
+            continue
         value = typecheck_and_resolve_inner(operand, ctx=ctx)
         require_valued(value.type, ctx.srcfile, value.loc, 'comparison operand')
         name = f'__dewy_chain_{ctx.binding_registry.next_id}'
@@ -10927,7 +10926,10 @@ def _comparison_chain(binop: p0.BinOp, *, ctx: Context, expected: ty.Type | None
         binding.declaration = declaration
         ctx.declarations[name] = value.type
         ctx.binding_scopes[name] = binding
-        ctx.hoisted.append(declaration)
+        if ctx.hoisted is not None:
+            ctx.hoisted.append(declaration)
+        else:
+            prelude.append(declaration)
         operands[index] = p0.Atom(operand.loc, t1.Identifier(operand.loc, name))
     conjunction: p0.AST | None = None
     for index, op in enumerate(ops):
@@ -10939,7 +10941,17 @@ def _comparison_chain(binop: p0.BinOp, *, ctx: Context, expected: ty.Type | None
             comparison,
         )
     assert conjunction is not None
-    return typecheck_and_resolve_inner(conjunction, ctx=ctx, expected=expected)
+    checked = typecheck_and_resolve_inner(conjunction, ctx=ctx, expected=expected)
+    if prelude:
+        return hir.Block(checked.loc, checked.type, [*prelude, checked], False)   # statements, then the value
+    return checked
+
+
+def _is_member_route(ast: p0.AST) -> bool:
+    """`a.b.c`: member reads rooted at a name — evaluated as often as needed without effects."""
+    while isinstance(ast, p0.BinOp) and _operator_symbol(ast.op) == '.' and isinstance(ast.right, p0.Atom) and isinstance(ast.right.item, t1.Identifier):
+        ast = ast.left
+    return isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier)
 
 
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:

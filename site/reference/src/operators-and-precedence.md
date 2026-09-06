@@ -89,7 +89,7 @@ Word-`not` sits just above `and`, below the comparisons — the same symbol/word
 
 ## Chained Comparisons
 
-`a <? b <? c` is a chain: consecutive comparisons joined by `and`, each interior operand evaluated once (`0 <? x <? 10` is `0 <? x and x <? 10`; `0 <=? f(x) <? n` calls `f` once). A chain is one monotonic statement: its operators are rising (`<?`, `<=?`) or falling (`>?`, `>=?`), and `=?` may appear in either without changing direction. Mixing directions is an error, and `not =?`, `is?`, `isnt?`, and `in?` do not chain — write `and`. Parenthesizing the left comparison (`(a <? b) =? c`) compares its boolean instead.
+`a <? b <? c` is a chain: consecutive comparisons joined by `and`, each interior operand evaluated once (`0 <? x <? 10` is `0 <? x and x <? 10`; `0 <=? f(x) <? n` calls `f` once — a hidden local holds the value, in front of the statement or, in an expression-bodied function, in front of the chain; a name, a literal, or a route of member reads such as `loc.stop` or `src.length` is simply reused, so the facts a chain establishes are about that term). A chain is one monotonic statement: its operators are rising (`<?`, `<=?`) or falling (`>?`, `>=?`), and `=?` may appear in either without changing direction. Mixing directions is an error, and `not =?`, `is?`, `isnt?`, and `in?` do not chain — write `and`. Parenthesizing the left comparison (`(a <? b) =? c`) compares its boolean instead.
 
 <!-- dewy-example: compiler -->
 ```dewy
