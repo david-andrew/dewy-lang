@@ -114,7 +114,7 @@ let Pop = type of any
 # ConextAction:type = Push | Pop | none
 
 let nonemptystring:type = string<length >? 0>
-let eatfn:type = (src:nonemptystring ctx:Context):>uint64? | TokenError
+let eatfn:type = (src:nonemptystring ctx:Context):>uint64 & < i=>i<=?src.length > | none | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
