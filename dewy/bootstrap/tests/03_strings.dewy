@@ -1,0 +1,40 @@
+# plain strings: single or double quotes, any odd number of them
+let a = "double"
+let b = 'single'
+let c = """triple "quotes" inside are fine"""
+let d = '''and here ''too'' '''
+let e = ""
+let f = "line one
+line two"                      # strings may span lines
+# escapes
+let g = "tab\there\nnewline\r\\backslash \"quote\" \'apostrophe\'"
+let h = "unicode \u00e9 and \U0001F600 and null \0 bell \a"
+let i = "a brace that is not interpolation: \{ and a plain \} and a \q which is just q"
+let j = "continued \
+on the next line"              # backslash-newline joins lines
+# interpolation: `{expr}` inside a plain string
+let name = "world"
+let k = "hello {name}!"
+let l = "sum: {1 + 2}, nested: {"inner {name}"}, a block: {[1 2 3]}"
+let m = "{name}{name}{{name}}"  # braces inside the interpolation are code
+# raw strings: no escapes, no interpolation
+let n = r"C:\path\{not interpolated}\n"
+let o = r'single raw \'
+let p = r"""raw triple " quote"""
+# template strings: `${expr}` interpolates, `{` is literal
+let q = t"template {literal braces} and ${name} interpolated"
+let r = t'single ${1 + 1}'
+# based strings: digits of a base, whitespace and underscores ignored
+let s = 0x"ff 00 ab_cd"
+let t = 0b"1010 1111"
+let u = 0g"SGVsbG8="
+# heredocs: an arbitrary delimiter between the quotes, closed by the delimiter alone
+let v = $"END"
+anything goes here, including " and ' and {braces}
+until the delimiter
+END
+let w = $r'STOP'raw heredoc \n stays raw
+STOP
+let x = $t"DONE"template heredoc ${name} but {not this}
+DONE
+let y = $"<>"a symbolic delimiter<>

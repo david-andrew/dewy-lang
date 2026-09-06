@@ -1,0 +1,65 @@
+# every operator spelling the tokenizer knows, in expressions
+let a = 1 + 2 - 3 * 4 / 5 // 6 % 7 ^ 8
+let b = -a + +a
+let c = 1 \ 2                   # left division
+let d = a =? b or a not=? b or a >? b or a <? b or a >=? b or a <=? b
+let e = a not >? b and a not <=? b
+let f = a in? [1 2 3] and a not in? [4 5]
+let g = a is? int64 and a isnt? string
+let i = a | b & c
+let j = a and b or c xor d nand e nor f xnor g
+let k = not a
+let l = ~a
+let m = a << 1 >> 2 <<< 3 >>> 4 <<! 5 !>> 6
+let n = a |> f |> g
+let o = h <| g <| f
+let p = a -> b
+let q = a <-> b
+let r = a .. b
+let s = a ... b
+let t = a, b, c
+let u = a:b
+let v = a::b
+let w = a := b
+let x = (a):>b
+let y = a => b
+let z = a.b.c
+let aa = a?                     # postfix
+let ab = a`                     # backtick operator
+let ac = @a                     # place
+let ad = $a                     # a metatag
+let ae = a as int64 transmute uint64
+let af = f(a) or_throw
+let ag = a of b                 # `of` in a generic bound
+let ah = type of A & [x:int64]
+let ai = ∞
+let aj = ∅
+# combined assignment
+a += 1
+a -= 1
+a *= 2
+a /= 2
+a //= 2
+a %= 2
+a ^= 2
+a |= 1
+a &= 1
+a <<= 1
+a >>= 1
+# broadcast operators
+let ak = xs .+ ys
+let al = xs .* 2
+let am = .-xs
+# operator functions and partial operators
+let an = (+)
+let ao = (<=?)
+let ap = (<? 10)
+let aq = (.length)
+let ar = (in? 1..3)
+let as_ = (not in? whitespace)
+let at = (* 2)
+# the `$` placeholder
+let au = $ >? 10
+# semicolons suppress values
+a;
+f(a);

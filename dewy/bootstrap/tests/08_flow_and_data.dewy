@@ -1,0 +1,49 @@
+# a realistic small program: every flow form and container operation
+let words:array<string> = ["b" "a" "c"]
+words.sort
+words.push("d")
+let last = words.pop
+let counts = ['a' -> 1 'b' -> 2]
+let seen = set["x" "y"]
+let [first second] = words
+[first second] = [second first]
+let [k v] = counts.entries[0]
+let squares = [loop i in 1..5 i^2]
+let evens = [loop i in 0..10 if i % 2 =? 0 i]
+let table = [loop k in words k -> k.length]
+let nested = [loop i in 0..3 [loop j in 0..3 i * j]]
+loop i in 0..10 {
+    if i =? 4 { continue }
+    if i =? 8 { break }
+    printl"i = {i}"
+}
+let i:uint64 = 0
+loop i <? words.length {
+    let w = words[i]
+    if w.startswith("a") { printl"starts with a: {w}" }
+    else if w.length >? 1 { printl"long: {w}" }
+    else { printl"{w}" }
+    i += 1
+}
+let describe = (v:int64 | string | none):>string => match v {
+    <int64> => "int {v}"
+    <string> => "string {v}"
+    none => "nothing"
+}
+let value = if words.length >? 2 words[2] else "?"
+let total = loop i in 0..3 i        # a loop expression
+let found = loop w in words { if w =? "c" break w }
+let label = match total { 0 => "zero"  1 => "one"  _ => "many" }
+let chained = 0 <? i <? 10 and i not=? 5
+let opt:int64 | none = none
+if opt is? none { printl"none" }
+if opt =? 3 { printl"three" }
+let text = "hello world"
+let head = text[0..5)
+let tail = text[6..]
+let every = text[..]
+let bytes = text as array<uint8>
+let n = text.length
+let m = "{text} has {n} graphemes"
+printl(m)
+printl"{m}"

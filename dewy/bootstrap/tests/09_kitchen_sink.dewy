@@ -1,0 +1,109 @@
+doc"""
+A module docstring: every construct the earlier files introduce, together,
+the way a real module mixes them. The bootstrap tokenizer should produce the
+same token stream as the Python one for this file.
+"""
+from p'../../../library/reporting.dewy' import Report, SrcFile
+import units
+
+#{ A tokenizer sketch: a family of token types, each with an `eat` that
+   returns how far it matched, and a driver that takes the longest match. }#
+let nonempty:type = string<length >? 0>
+let eatfn:type = (src:nonempty ctx:Context):>uint64< n => n <=? src.length > | none | TokenError
+let Context:type = $abstract type of any & []
+let Root = type of Context & []
+let TokenError = type of error & Report
+
+let Token:type = $abstract type of any & [
+    src:string
+    loc:Span
+    idx:uint64
+    eat:eatfn
+    action_on_eat:(ctx:Context):>Context | none = none
+    __as__ = ():>string => if loc.start <? loc.stop <=? src.length
+        "<{typename} '{src[loc.start..loc.stop)}'>"
+    else
+        "<{typename}>"
+]
+
+const whitespace = set[' ' '\t' '\n' '\r']
+const line_comment_start:'#' = '#'
+const block_comment_start:'#\{' = '#\{'
+const block_comment_end:'\}#' = '\}#'
+
+let Whitespace = type of Token & [
+    eat = (src:nonempty ctx:Context):>uint64? => {
+        if src[0] not in? whitespace return none
+        loop i in 0..uint64.max and i <? src.length {
+            if src[i] not in? whitespace return i
+        }
+        return src.length
+    }
+]
+
+let LineComment = type of Token & [
+    eat = (src:nonempty ctx:Context):>uint64? => {
+        if not src.startswith(line_comment_start) return none
+        if src.startswith(block_comment_start) return none   # `#{` opens a block comment
+        loop i in 0..uint64.max and i <? src.length {
+            if src[i] =? '\n' return i + 1
+        }
+        return src.length
+    }
+]
+
+let BlockComment = type of Token & [
+    eat = (src:nonempty ctx:Context):>uint64? | TokenError => {
+        if not src.startswith(block_comment_start) return none
+        openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
+        i:uint64 = block_comment_start.length
+        loop i <? src.length {
+            if src[i..].startswith(block_comment_start) {
+                openers.push(Span[i i+block_comment_start.length])
+                i += block_comment_start.length
+            } else if src[i..].startswith(block_comment_end) {
+                i += block_comment_end.length
+                if openers.length =? 1 return i
+                openers.pop;
+            } else { i += 1 }
+        }
+        return TokenError[why="missing closer for block comment"]
+    }
+]
+
+let contextmap = (ctx:Context):>array<type<Token>> => match ctx {
+    <Root> => [Whitespace LineComment BlockComment]
+    _ => []
+}
+
+let tokenize = (src:string):>array<Token> => {
+    let ctx_stack:array<Context length>?0> = [Root[]]
+    let tokens:array<Token> = []
+    let i:uint64 = 0
+    loop i <? src.length {
+        let ctx = ctx_stack[end]
+        let matches = [
+            loop token_cls in contextmap(ctx) {
+                let length = token_cls.eat(src[i..] ctx)
+                if length isnt? exception [length=length token_cls=token_cls]
+            }
+        ]
+        matches.sort(key=(.length) reverse=true)
+        if matches.length =? 0 { printl"no token matched at {i}"  exit(1) }
+        [length token_cls] = matches[0]
+        let token = token_cls[src Span[i i+length] tokens.length]
+        tokens.push(token)
+        i += length
+    }
+    return tokens
+}
+
+main = (argv:array<string>):>int64 => {
+    if argv.length <? 2 { printl"usage: tokenize <file>"  return 2 }
+    let path = p(argv[1])
+    let src = match path.read_text { s:string => s  _ => { printl"cannot read {path}"  return 1 } }
+    let tokens = tokenize(src)
+    printl"{tokens.length} tokens: {tokens}"
+    $assert tokens.length >=? 0, "never negative"
+    return 0
+}

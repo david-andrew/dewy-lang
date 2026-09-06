@@ -1,0 +1,37 @@
+# keywords that shape syntax
+let a = 1
+const b = 2
+local_const c = 3
+overload_only d = 4
+import foo
+from bar import baz, qux
+from p'../lib/thing.dewy' import (one two three)
+if a =? 1 printl"one"
+if a =? 1 { printl"one" } else if a =? 2 { printl"two" } else { printl"other" }
+loop i in 0..10 { printl"{i}" }
+loop a <? 10 a += 1
+loop { break }
+loop i in xs { if i =? 3 continue  printl"{i}" }
+match a {
+    1 => printl"one"
+    <int64> => printl"an int"
+    x => printl"{x}"
+    _ => printl"anything"
+}
+let f = () => { return 1 }
+let g = () => { yield 1  yield 2 }
+# metatags and directives
+$assert a =? 1
+$assert a =? 1, "with a message"
+$runtime_assert a >? 0
+$expect a =? 1
+$fail
+$fail "with a message"
+$breakpoint
+$prototype
+$prototype_warnings = false
+$test
+let t = () => { $expect 1 =? 1 }
+if $target in? ["x86_64" "arm"] { printl"native" }
+let T:type = $abstract type of any & [x:int64]
+let u = $undefined_metatag_is_still_a_token

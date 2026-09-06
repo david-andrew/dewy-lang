@@ -124,7 +124,7 @@ let Token:type = $abstract type of any & [
     eat:eatfn
     action_on_eat:actionfn?=none
     __as__ = ():>string => if loc.start <? loc.stop <=? src.length
-        "<{typename} '{src[loc.start..loc.stop)}'>"
+        "<{typename} {_quoted(src[loc.start..loc.stop))}>"
     else
         "<{typename}>"
 

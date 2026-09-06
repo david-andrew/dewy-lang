@@ -1,0 +1,51 @@
+# function literals
+let f = () => 1
+let g = (x) => x
+let h = (x:int64) => x + 1
+let i = (x:int64 y:int64):>int64 => x + y
+let j = (x:int64 y:int64=2):>int64 => x * y
+let k = (x:int64 ...rest:array<int64>):>int64 => x
+let l = (x:int64 @place:array<int64>):>void => { place.push(x) }
+let m = (value:int64 ... amount:int64):>int64 => value + amount   # keyword-only after a bare `...`
+let m2 = (<hidden:int64> shown:int64) => hidden + shown          # position-only in `<>`
+let n = <T>(xs:array<T>):>T | none => if xs.length >? 0 xs[0] else none
+let o = <T of number U>(a:T b:U):>T => a
+let p = (a:int64):>int64<i => i >? 0> => a
+let q = (src:string):>uint64<n => n <=? src.length> => src.length
+let r = (src:string prefix:string):> true & <prefix.length <=? src.length> | false => false
+let s = (tok:Token):> tok is? Word => tok is? Word
+let t = (@xs:array<int64>):> <xs.length >? 0> => { }
+# calls
+let u = f()
+let v = i(1 2)
+let w = i(x=1 y=2)
+let x = i 1 2             # juxtaposition call
+let y = @i(1)             # partial evaluation
+let z = xs.sort(key=(.length) reverse=true)
+# types
+let Point:type = [x:int64 y:int64]
+let Named = type of any & [name:string]
+let Child = type of Named & [age:int64]
+let Abstract:type = $abstract type of any & [eat:eatfn]
+let Union:type = int64 | string | none
+let Inter:type = Point & [z:int64]
+let Neg:type = int64 & ~0
+let generic = <T>(xs:array<T>):>array<T> => xs
+let Fn:type = (x:int64):>int64
+let Positive = int64<i => i >? 0>
+let NonEmpty = array<length >? 0>
+let Digit = uint64<(in? 0..9)>
+let Err = type of error & [why:string]
+let Meta = type<Named>
+let Opt = int64?
+let Nested = array<array<dict<string set<int64>>>>
+# objects
+let pt = Point[1 2]
+let pt2 = Point[x=1 y=2]
+let anon = [x=1 y=2]
+let pt3 = Point(1 2)
+let obj = [
+    value:int64 = 0
+    increment = () => { value += 1 }
+    __as__ = ():>string => "obj({value})"
+]
