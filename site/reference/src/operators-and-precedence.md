@@ -99,9 +99,9 @@ $assert 10 >? x >=? 0
 $assert 0 <? x =? 5 <=? 5
 ```
 
-## Operator Sections
+## Partial Operators
 
-A binary operator with only its right operand, in parentheses, is a one-parameter function of the missing left operand: `(<? n)` is `i => i <? n`, `(in? 1..3)` is `i => i in? 1..3`, `(.length)` is `x => x.length`, `(as string)` is `x => x as string`. Only the left-missing form exists, and only for operators that have no prefix form — the comparisons and tests (`=?`, `not =?`, `<?`, `>?`, `<=?`, `>=?`, `is?`, `isnt?`, `in?`, `not in?`), `.`, `as`, `transmute`, `^`, `%`, and `\` — so `(- 1)` remains negative one. The operand is everything to the closing parenthesis (`(<? a + b)` is `i => i <? a + b`). A section is an ordinary function value: it is typed like an unannotated lambda, from the function type it is checked against (a sort key, a slot, an annotation — whose parameter name it takes), and it is a [fact](refinements-and-effects.md#type-facts) wherever a lambda is: `uint64<(<? src.length)>`.
+A binary operator applied to only its right operand, in parentheses, is a *partial operator*: a one-parameter function of the missing left operand. `(<? n)` is `i => i <? n`, `(* 2)` is `i => i * 2`, `(in? 1..3)` is `i => i in? 1..3`, `(.length)` is `x => x.length`, `(as string)` is `x => x as string`. Only that form exists, and only for operators that have no prefix form — the comparisons and tests (`=?`, `not =?`, `<?`, `>?`, `<=?`, `>=?`, `is?`, `isnt?`, `in?`, `not in?`), `.`, `as`, `transmute`, `*`, `/`, `//`, `^`, `%`, and `\` — so `(- 1)` remains negative one and `(+ 1)` is just one. (`*`, `/`, and `//` have no prefix form; `x ^/ 2` for a root is an opchain compound, its own operator.) The operand is everything to the closing parenthesis (`(<? a + b)` is `i => i <? a + b`). A partial operator is an ordinary function value: it is typed like an unannotated lambda, from the function type it is checked against (a sort key, a slot, an annotation — whose parameter name it takes), and it is a [fact](refinements-and-effects.md#type-facts) wherever a lambda is: `uint64<(<? src.length)>`.
 
 <!-- dewy-example: compiler -->
 ```dewy

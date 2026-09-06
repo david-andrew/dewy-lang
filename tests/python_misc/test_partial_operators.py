@@ -1,6 +1,6 @@
-"""Operator sections: `(<? n)` is the function `i => i <? n` — the left-missing form
-only, for operators with no prefix form — usable wherever a one-parameter function
-is, including as a fact (`uint64<(<? src.length)>`, `uint64<(in? 1..3)>`)."""
+"""Partial operators: `(<? n)` is the function `i => i <? n` — an operator applied to
+only its right operand, for operators with no prefix form — usable wherever a
+one-parameter function is, including as a fact (`uint64<(<? src.length)>`, `uint64<(in? 1..3)>`)."""
 import pytest
 
 from dewy.parser import p0, t1, t2
@@ -21,13 +21,13 @@ def _parsed(source: str) -> p0.AST:
 def _is_lambda(ast: p0.AST) -> bool:
     while isinstance(ast, p0.Block) and ast.kind == '()' and len(ast.inner) == 1:
         ast = ast.inner[0]
-    return isinstance(ast, p0.BinOp) and isinstance(ast.op, t1.Operator) and ast.op.symbol == '=>' and isinstance(ast.left, p0.Atom) and ast.left.item.name == t2.SECTION_PARAMETER
+    return isinstance(ast, p0.BinOp) and isinstance(ast.op, t1.Operator) and ast.op.symbol == '=>' and isinstance(ast.left, p0.Atom) and ast.left.item.name == t2.PARTIAL_OPERATOR_PARAMETER
 
 
-def test_a_section_parses_as_a_hidden_parameter_lambda() -> None:
-    for source in ['(<? 10)', '(=? 0)', '(in? 1..3)', '(is? Word)', '(not in? whitespace)', '(.length)', '(as string)', '(% 3)', '(^ 2)', '(<? a + b)']:
+def test_a_partial_operator_parses_as_a_hidden_parameter_lambda() -> None:
+    for source in ['(<? 10)', '(=? 0)', '(in? 1..3)', '(is? Word)', '(not in? whitespace)', '(.length)', '(as string)', '(* 2)', '(/ 2)', '(// 2)', '(% 3)', '(^ 2)', '(<? a + b)']:
         assert _is_lambda(_parsed(source + '\n')), source
-    # operators with a prefix form are not sections (`(- 1)` is negative one), nor is `(op)` alone or a plain group
+    # operators with a prefix form are not partial operators (`(- 1)` is negative one), nor is `(op)` alone or a plain group
     for source in ['(- 1)', '(+ 1)', '(not x)', '(~x)', '(<?)', '(x <? 10)']:
         assert not _is_lambda(_parsed(source + '\n')), source
     negative = _parsed('(- 1)\n')
@@ -36,7 +36,7 @@ def test_a_section_parses_as_a_hidden_parameter_lambda() -> None:
     assert isinstance(negative, p0.Prefix)
 
 
-def test_sections_are_function_values_typed_by_their_context() -> None:
+def test_partial_operators_are_function_values_typed_by_their_context() -> None:
     program = '''let main = ():>int64 => {
     let small:<(x:int64):>bool> = (<? 10)          # takes the slot's parameter name
     let xs:array<int64> = [3 12 7 20]
@@ -44,7 +44,9 @@ def test_sections_are_function_values_typed_by_their_context() -> None:
     loop x in xs { if small(x) { n += 1 } }
     let names:array<string> = ["bb" "a" "ccc"]
     names.sort(key=(.length))                       # a direct call of the literal, like `(s) => s.length`
-    return n
+    let doubled:<(v:int64):>int64> = (* 2)
+    let halves:<(v:int64):>int64> = (// 2)
+    return n + doubled(1) + halves(4)
 }
 '''
     _check(program)
@@ -52,7 +54,7 @@ def test_sections_are_function_values_typed_by_their_context() -> None:
         _check('let small = (<? 10)\n')
 
 
-def test_sections_and_ranges_are_facts() -> None:
+def test_partial_operators_and_ranges_are_facts() -> None:
     program = '''let main = ():>int64 => {
     let text = "hello"
     let k:uint64<(<? text.length)> = 3

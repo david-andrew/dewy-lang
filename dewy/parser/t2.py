@@ -256,7 +256,7 @@ binary_ops: set[str] = {
 }
 prefix_ops: set[str] = {
     '@', '~', 'not', '`',
-    '+', '-', '*', '/', '//',
+    '+', '-',   # `*`, `/`, `//` have no prefix form: `(* 2)` is a partial operator; `x^/2` is an opchain compound (design, not yet built)
     'type of',   # one token (see `make_type_of_operators`): minting is a prefix, bound-`of` stays infix
 }
 
@@ -598,25 +598,25 @@ def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-# Operators that may be *sectioned*: `(<? n)` is the function `i => i <? n`, the
-# parenthesised operand supplying the right side. Only the left-missing form,
-# and only operators with no prefix form (`(- 1)` is negation, not a section);
-# the inverted comparisons (`(not in? whitespace)`) count too.
-SECTION_OPERATORS = {'=?', '<?', '>?', '<=?', '>=?', 'is?', 'isnt?', 'in?', '.', 'as', 'transmute', '^', '%', '\\'}
-SECTION_PARAMETER = '__dewy_section'
+# *Partial operators*: a binary operator applied to only its right operand, in
+# parentheses, is a lambda of the missing left one — `(<? n)` is `i => i <? n`.
+# Only that form, and only for operators with no prefix form (`(- 1)` is
+# negation); the inverted comparisons (`(not in? whitespace)`) count too.
+PARTIAL_OPERATORS = {'=?', '<?', '>?', '<=?', '>=?', 'is?', 'isnt?', 'in?', '.', 'as', 'transmute', '*', '/', '//', '^', '%', '\\'}
+PARTIAL_OPERATOR_PARAMETER = '__dewy_partial'
 
 
-def make_sections(tokens: list[t1.Token]) -> None:
+def make_partial_operators(tokens: list[t1.Token]) -> None:
     """`(op operand)` becomes the lambda `(_ => _ op operand)`, spelled out in tokens."""
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, make_sections)
+        recurse_into(token, make_partial_operators)
         if isinstance(token, t1.Block) and token.kind == '()' and len(token.inner) >= 2:
             op = token.inner[0]
-            sectioned = (isinstance(op, t1.Operator) and op.symbol in SECTION_OPERATORS) or isinstance(op, InvertedComparisonOp)
-            if sectioned and not isinstance(token.inner[1], t1.Semicolon):
-                parameter = lambda: t1.Identifier(op.loc, SECTION_PARAMETER)
+            partial = (isinstance(op, t1.Operator) and op.symbol in PARTIAL_OPERATORS) or isinstance(op, InvertedComparisonOp)
+            if partial and not isinstance(token.inner[1], t1.Semicolon):
+                parameter = lambda: t1.Identifier(op.loc, PARTIAL_OPERATOR_PARAMETER)
                 token.inner[:1] = [parameter(), t1.Operator(op.loc, '=>'), parameter(), op]
         i += 1
 
@@ -1161,8 +1161,8 @@ def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
     make_broadcast_operators(tokens)
     # convert any combined assignment operators (e.g. += -= etc.) into a single token
     make_combined_assignment_operators(tokens)
-    # `(<? n)`, `(.length)`, `(in? 1..3)`: a sectioned operator is a one-parameter lambda
-    make_sections(tokens)
+    # `(<? n)`, `(.length)`, `(* 2)`: a partial operator is a one-parameter lambda
+    make_partial_operators(tokens)
     # convert any (op) into an identifier token for that operator (e.g. (+=) -> +=)
     make_op_functions(tokens)
     # convert any `$` identifiers into placeholder tokens

@@ -8716,7 +8716,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         )
 
     if block.kind == '()' and len(block.inner) == 1 and isinstance(block.inner[0], p0.BinOp) and _operator_symbol(block.inner[0].op) == '=>' and _generic_function_parts(block.inner[0]) is None:
-        # `(i => i <? n)`, a section `(<? n)`: the parentheses are transparent — the
+        # `(i => i <? n)`, a partial operator `(<? n)`: the parentheses are transparent — the
         # literal itself, so it is called directly and typed against its context
         return tcr_function_literal(block.inner[0], ctx=ctx, expected=expected)
 
@@ -11727,15 +11727,15 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature, ctx=ctx)
     pos_or_kw_args, kw_only_args = _contextual_parameter_types(pos_or_kw_args, kw_only_args, expected)
     body_ast = binop.right
-    if pos_or_kw_args and pos_or_kw_args[0].name == t2.SECTION_PARAMETER:
-        # `(<? n)`: the section's parameter takes the name of the slot it fills (a
-        # slot's parameter names are part of its contract), else stays hidden
+    if pos_or_kw_args and pos_or_kw_args[0].name == t2.PARTIAL_OPERATOR_PARAMETER:
+        # `(<? n)`: a partial operator's parameter takes the name of the slot it
+        # fills (a slot's parameter names are part of its contract), else stays hidden
         slot = ty.strip_refinement(expected) if expected is not None else None
         slot_name = slot.pos_or_kw[0].name if isinstance(slot, ty.FunctionType) and slot.pos_or_kw and slot.pos_or_kw[0].name else None
         other_names = {param.name for param in [*pos_or_kw_args[1:], *kw_only_args]} | ({rest_args.name} if rest_args is not None else set())
         if slot_name is not None and slot_name not in other_names and slot_name not in _local_names(body_ast):
             pos_or_kw_args[0] = replace(pos_or_kw_args[0], name=slot_name)
-            body_ast = _rename_identifier(body_ast, t2.SECTION_PARAMETER, slot_name)
+            body_ast = _rename_identifier(body_ast, t2.PARTIAL_OPERATOR_PARAMETER, slot_name)
 
     # insert the arguments from the signature into the body, and install a fresh catcher
     # for this function's returns
@@ -12042,7 +12042,7 @@ def _resolve_result_terms(rettype: ty.Type, params: dict[str, int], *, ctx: Cont
 
 
 def _rename_identifier(ast: p0.AST, old: str, new: str) -> p0.AST:
-    """The syntax with every bare identifier `old` spelled `new` (a section's hidden parameter)."""
+    """The syntax with every bare identifier `old` spelled `new` (a partial operator's hidden parameter)."""
     if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier) and ast.item.name == old:
         return replace(ast, item=replace(ast.item, name=new))
     if not isinstance(ast, p0.AST):
@@ -12468,7 +12468,7 @@ def _refinement_conditions(item: p0.AST, *, ctx: Context) -> list[ty.Proposition
     """All the propositions of one parameterize-block entry (`n >? 0 and n <? 10` is two,
     as is the chain `0 <? n <? 10`), or None."""
     while isinstance(item, p0.Block) and item.kind == '()' and len(item.inner) == 1:
-        item = item.inner[0]   # `(<? n)`: a section is a parenthesised lambda
+        item = item.inner[0]   # `(<? n)`: a partial operator is a parenthesised lambda
     membership = _membership_conditions(item, ctx=ctx)
     if membership is not None:
         return membership

@@ -130,7 +130,6 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.postfix, ['?']),
     (Associativity.right,  ['^']),
     (Associativity.left, [t2.MultiplyJuxtapose]),  # x(y) (x)y
-    (Associativity.prefix, ['*', '/', '//']),
     (Associativity.left, ['*', '/', '//', '%', '\\']),
     (Associativity.prefix, ['+', '-']),
     (Associativity.left, ['+', '-']),
