@@ -279,3 +279,22 @@ def test_a_bare_fact_block_is_not_a_type_elsewhere() -> None:
     assert 'T & <n >? 0>' in str(caught.value) and ':> <n >? 0>' in str(caught.value)
     with pytest.raises(UserError, match='a fact block is not a type by itself'):
         _check('let main = ():>int64 => { let n:<length >? 0> = "a"  return 0 }\n')
+
+
+def test_a_growable_array_may_carry_a_length_invariant_that_shrinking_must_keep() -> None:
+    program = '''let f = ():>int64 => {
+    let ys:array<int64 length>=?1> = [1]        # growable (`array<T>`), with a fact that must survive every pop
+    ys.push(2)
+    if ys.length >? 1 { ys.pop; }
+    return ys.length
+}
+'''
+    _check(program)   # was: "exact-length arrays cannot change length" — the refinement hid the growable array
+    with pytest.raises(UserError, match='cannot prove the array keeps its declared length'):
+        _check(program.replace('    if ys.length >? 1 { ys.pop; }\n', '    ys.pop;\n    ys.pop;\n'))
+
+
+def test_disagreeing_arms_point_at_the_value_and_suggest_a_semicolon() -> None:
+    with pytest.raises(UserError, match='conditional branches disagree') as caught:
+        _check('let f = (xs:array<int64>):>int64 => {\n    if xs.length >? 3 { xs.pop } else { xs.push(1) }\n    return 0\n}\n')
+    assert 'this arm ends by expressing' in str(caught.value) and 'xs.pop;' in str(caught.value)

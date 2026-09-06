@@ -853,6 +853,27 @@ class _BoundsValidator:
                 return Interval(lower, upper)
         return interval
 
+    def _validate_length_invariant(self, node: hir.FunctionCall, array_id: int, after: Interval, state: State) -> None:
+        """A binding declared `array<T length >=? k>` keeps its invariant through
+        `pop`/`truncate`/`clear`: the length afterwards must be proven at least `k`
+        (`if xs.length =? 1 return …` before `xs.pop` is the usual proof)."""
+        declared = self.declared_refinements.get(array_id)
+        if declared is None:
+            return
+        required = _length_propositions_interval(declared.propositions)
+        if required is None or required.lower is None:
+            return
+        if after.lower is not None and after.lower >= required.lower:
+            return
+        method = node.func.name if isinstance(node.func, hir.ArrayMethod) else 'this'
+        self._proof_failure(node, 'obligation', Error(
+            srcfile=self.srcfile,
+            title='cannot prove the array keeps its declared length',
+            pointer_messages=[Pointer(span=node.loc, message=f'`{method}` may leave fewer than {required.lower} elements; the binding is declared `{type_to_dewy(declared)}`')],
+            notes=[f'the length afterwards {self._describe_interval(after, array=True)}'],
+            hint=f'guard it (`if xs.length >? {required.lower} {{ xs.{method} }}`), or declare the binding without the length fact',
+        ))
+
     def _validate_divisor(self, divisor: hir.AST, interval: Interval | None, state: State) -> None:
         """`//` and `%` need a divisor proven nonzero (Python raises; Dewy proves)."""
         if self._nonzero_proven(divisor, interval, state):
@@ -1942,6 +1963,8 @@ class _BoundsValidator:
                 elif name == 'clear':
                     state[key] = Interval.exact(0)
                     _drop_index_facts(state, array_id=array_id)
+                if validate and name in {'pop', 'truncate', 'clear'}:
+                    self._validate_length_invariant(node, array_id, state[key], state)
             return None
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
             # `[loop … value]`: the capture's push — the element's facts join the array's

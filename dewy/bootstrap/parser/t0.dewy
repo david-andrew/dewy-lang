@@ -166,11 +166,9 @@ BlockComment = type of Token & [
             else if src[i..].startswith(block_comment_end) {
                 i+=block_comment_end.length
                 if openers.length =? 1 return i
-                openers.pop
+                openers.pop;
             } #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
             else { i += 1 }
-    
-            if stack =? 0 return i# transmute uint64
         }
     
         err"need to return an error report here. missing closer for block comment"

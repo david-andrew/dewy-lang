@@ -3023,10 +3023,18 @@ def _flow_value_type(
     has_void = any(result == ty.VOID_TYPE for result in continuing)
     has_value = any(result != ty.VOID_TYPE for result in continuing)
     if has_void and has_value:
+        # point at the values themselves: usually one arm ends in something like
+        # `xs.pop` whose result was not meant to be the conditional's value
+        pointers = [Pointer(span=loc, message='some continuing branches produce values and others do not')]
+        for body in bodies:
+            if body.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+                last = body.items[-1] if isinstance(body, hir.Block) and body.items else body
+                pointers.append(Pointer(span=last.loc, message=f'this arm ends by expressing `{type_to_dewy(body.type)}`'))
         user_error(
             ctx.srcfile,
             'conditional branches disagree on whether they produce a value',
-            Pointer(span=loc, message='some continuing branches produce values and others do not'),
+            *pointers,
+            hint='if the value is not meant to be used, end the arm with `;` (`xs.pop;`); otherwise give every arm a value',
         )
     if has_void:
         return ty.VOID_TYPE
@@ -7881,6 +7889,7 @@ def _tcr_array_method(
         if binding.declaration is not None and binding.declaration.annotation is not None
         else binding.type
     )
+    declared = ty.strip_refinement(declared)   # `openers:array<Span length >=? 1>` is a growable array with a length invariant
     if not isinstance(declared, ty.ArrayType) or declared.length is not None:
         user_error(
             ctx.srcfile,
