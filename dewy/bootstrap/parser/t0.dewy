@@ -114,7 +114,7 @@ let Pop = type of any
 # ConextAction:type = Push | Pop | none
 
 let nonemptystring:type = string<length >? 0>
-let eatfn:type = (src:nonemptystring ctx:Context):>uint64 & < i=>i<=?src.length > | none | TokenError
+let eatfn:type = (src:nonemptystring ctx:Context):>uint64 & <(<=?src.length)> | none | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
@@ -219,7 +219,7 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
                     [length=length token_cls=token_cls]
             }
         ]
-        matches.sort(key=m=>m.length reverse=true)
+        matches.sort(key=(.length) reverse=true)
         longest_match_length = if matches.length >? 0 matches[0].length else 0
         matches = [loop m in matches if m.length =? longest_match_length m else break]
         printl"matched tokens: {matches}"

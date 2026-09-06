@@ -41,6 +41,25 @@ worker.callback(5).status        # call callback normally, then read its result
 
 The parentheses around `@worker.callback` terminate the selection chain. This uses ordinary grouping rather than a separate “call this handle” operator.
 
+## Operator Sections
+
+A binary operator missing its left operand, in parentheses, is a function of that operand — the shorthand for the one-line lambdas that facts and sort keys keep asking for:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let main = ():>int64 => {
+    let names:array<string> = ["bb" "a" "ccc"]
+    names.sort(key=(.length))                    # (s) => s.length
+    let text = "hello"
+    let k:uint64<(<? text.length)> = 3           # uint64<i => i <? text.length>
+    let digit:uint64<(in? 0..9)> = 7
+    return 0
+}
+```
+
+Only the left-missing form, and only for operators that have no prefix form (`(- 1)` is still negative one): the comparisons and tests, `.`, `as`, `transmute`, `^`, `%`, `\`. A section is typed exactly like an unannotated lambda — from the function type it is used against.
+
 ## Partial Evaluation
 
 A function handle can bind some arguments now and leave the rest open:

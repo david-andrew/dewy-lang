@@ -99,6 +99,24 @@ $assert 10 >? x >=? 0
 $assert 0 <? x =? 5 <=? 5
 ```
 
+## Operator Sections
+
+A binary operator with only its right operand, in parentheses, is a one-parameter function of the missing left operand: `(<? n)` is `i => i <? n`, `(in? 1..3)` is `i => i in? 1..3`, `(.length)` is `x => x.length`, `(as string)` is `x => x as string`. Only the left-missing form exists, and only for operators that have no prefix form — the comparisons and tests (`=?`, `not =?`, `<?`, `>?`, `<=?`, `>=?`, `is?`, `isnt?`, `in?`, `not in?`), `.`, `as`, `transmute`, `^`, `%`, and `\` — so `(- 1)` remains negative one. The operand is everything to the closing parenthesis (`(<? a + b)` is `i => i <? a + b`). A section is an ordinary function value: it is typed like an unannotated lambda, from the function type it is checked against (a sort key, a slot, an annotation — whose parameter name it takes), and it is a [fact](refinements-and-effects.md#type-facts) wherever a lambda is: `uint64<(<? src.length)>`.
+
+<!-- dewy-example: compiler -->
+```dewy
+let main = ():>int64 => {
+    let names:array<string> = ["bb" "a" "ccc"]
+    names.sort(key=(.length))
+    let small:<(x:int64):>bool> = (<? 10)
+    let text = "hello"
+    let k:uint64<(<? text.length)> = 3
+    let digit:uint64<(in? 0..9)> = 7
+    if small(3) and names[0] =? "a" { return 0 }
+    return 1
+}
+```
+
 ## `type of`, `as`, and `or_throw`
 
 `type of` is a prefix that binds above `&` and `|`, so `type of Parent & Structure` mints the parent and then strengthens it — `(type of Parent) & Structure` without the parentheses; a generic bound `<T of A & B>` uses the infix `of`, which stays loose, so the bound is the whole right-hand side.

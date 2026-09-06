@@ -8715,6 +8715,11 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             ast_to_type(block.inner[0], ctx=ctx),
         )
 
+    if block.kind == '()' and len(block.inner) == 1 and isinstance(block.inner[0], p0.BinOp) and _operator_symbol(block.inner[0].op) == '=>' and _generic_function_parts(block.inner[0]) is None:
+        # `(i => i <? n)`, a section `(<? n)`: the parentheses are transparent — the
+        # literal itself, so it is called directly and typed against its context
+        return tcr_function_literal(block.inner[0], ctx=ctx, expected=expected)
+
     # open a new scope if the block is a scoped block
     type_block = False
     if block.kind == '{}':
@@ -11721,6 +11726,16 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # collect function signature parameters
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature, ctx=ctx)
     pos_or_kw_args, kw_only_args = _contextual_parameter_types(pos_or_kw_args, kw_only_args, expected)
+    body_ast = binop.right
+    if pos_or_kw_args and pos_or_kw_args[0].name == t2.SECTION_PARAMETER:
+        # `(<? n)`: the section's parameter takes the name of the slot it fills (a
+        # slot's parameter names are part of its contract), else stays hidden
+        slot = ty.strip_refinement(expected) if expected is not None else None
+        slot_name = slot.pos_or_kw[0].name if isinstance(slot, ty.FunctionType) and slot.pos_or_kw and slot.pos_or_kw[0].name else None
+        other_names = {param.name for param in [*pos_or_kw_args[1:], *kw_only_args]} | ({rest_args.name} if rest_args is not None else set())
+        if slot_name is not None and slot_name not in other_names and slot_name not in _local_names(body_ast):
+            pos_or_kw_args[0] = replace(pos_or_kw_args[0], name=slot_name)
+            body_ast = _rename_identifier(body_ast, t2.SECTION_PARAMETER, slot_name)
 
     # insert the arguments from the signature into the body, and install a fresh catcher
     # for this function's returns
@@ -11782,7 +11797,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         key_facts=_const_key_facts(ctx),
         function_scope_depth=len(inner_bindings.maps),
     )
-    body = typecheck_and_resolve_inner(binop.right, ctx=inner_ctx, expected=annotated)
+    body = typecheck_and_resolve_inner(body_ast, ctx=inner_ctx, expected=annotated)
 
     # resolve the return type from the caught returns and the fall-through value
     if not catcher.returns:
@@ -12024,6 +12039,21 @@ def _resolve_result_terms(rettype: ty.Type, params: dict[str, int], *, ctx: Cont
         return ty.RefinedType(refined.base, tuple(propositions))
 
     return _map_result_type(rettype, resolved)
+
+
+def _rename_identifier(ast: p0.AST, old: str, new: str) -> p0.AST:
+    """The syntax with every bare identifier `old` spelled `new` (a section's hidden parameter)."""
+    if isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier) and ast.item.name == old:
+        return replace(ast, item=replace(ast.item, name=new))
+    if not isinstance(ast, p0.AST):
+        return ast
+    changes = {}
+    for name, value in vars(ast).items():
+        if isinstance(value, p0.AST):
+            changes[name] = _rename_identifier(value, old, new)
+        elif isinstance(value, list) and any(isinstance(item, p0.AST) for item in value):
+            changes[name] = [_rename_identifier(item, old, new) if isinstance(item, p0.AST) else item for item in value]
+    return replace(ast, **changes) if changes else ast
 
 
 def _contextual_parameter_types(
@@ -12392,9 +12422,56 @@ def _refinement_comparison_chain(ast: p0.AST) -> list[p0.BinOp] | None:
     ]
 
 
+def _membership_conditions(item: p0.AST, *, ctx: Context) -> list[ty.Proposition] | None:
+    """`i => i in? 10..20` (or `length in? [1..8)`, `n in? 0..9` on the declared name): a
+    range of integer literals is its two bounds; None when the entry is not a membership."""
+    subject_name, subject = None, None
+    if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == '=>' and isinstance(item.left, p0.Atom) and isinstance(item.left.item, t1.Identifier):
+        subject_name, subject, item = item.left.item.name, 'self', item.right
+    if not (isinstance(item, p0.BinOp) and _operator_symbol(item.op) in ('in?',)) and not (isinstance(item, p0.BinOp) and isinstance(item.op, t2.InvertedComparisonOp) and item.op.op == 'in?'):
+        return None
+    if isinstance(item.op, t2.InvertedComparisonOp):
+        not_implemented(ctx.srcfile, item.loc, 'a `not in?` fact (write the two comparisons)')
+    left = item.left
+    if subject is None:
+        name = left.item.name if isinstance(left, p0.Atom) and isinstance(left.item, t1.Identifier) else None
+        if name is None:
+            return None
+        subject = 'length' if name == 'length' else 'self' if name == ctx.refinement_subject else f'.{name}'
+    elif not (isinstance(left, p0.Atom) and isinstance(left.item, t1.Identifier) and left.item.name == subject_name):
+        return None
+    bounds = _range_literal_bounds(item.right)
+    if bounds is None:
+        not_implemented(ctx.srcfile, item.right.loc, 'membership in anything but a range of integer literals (`in? 10..20`, `in? [0..n)` with a constant `n`)')
+    low, high = bounds
+    return [ty.Proposition(subject, '>=?', low), ty.Proposition(subject, '<=?', high)]
+
+
+def _range_literal_bounds(node: p0.AST) -> tuple[int, int] | None:
+    """The inclusive integer bounds of a literal range `a..b`, `[a..b)`, `(a..b]`, `(a..b)`."""
+    kind = '[]'
+    if isinstance(node, p0.Block) and node.kind in ('[]', '[)', '(]', '()') and len(node.inner) == 1:
+        kind, node = node.kind, node.inner[0]
+    if not (isinstance(node, p0.Flat) and isinstance(node.op, t2.RangeJuxtapose) and len(node.items) == 3):
+        return None
+    low, high = _refinement_bound_ast(node.items[0]), _refinement_bound_ast(node.items[2])
+    if low is None or high is None:
+        return None
+    if kind[0] == '(':
+        low += 1
+    if kind[1] == ')':
+        high -= 1
+    return low, high
+
+
 def _refinement_conditions(item: p0.AST, *, ctx: Context) -> list[ty.Proposition] | None:
     """All the propositions of one parameterize-block entry (`n >? 0 and n <? 10` is two,
     as is the chain `0 <? n <? 10`), or None."""
+    while isinstance(item, p0.Block) and item.kind == '()' and len(item.inner) == 1:
+        item = item.inner[0]   # `(<? n)`: a section is a parenthesised lambda
+    membership = _membership_conditions(item, ctx=ctx)
+    if membership is not None:
+        return membership
     chain = _refinement_comparison_chain(item)
     if chain is not None:
         _validate_refinement_chain(chain, ctx=ctx)
