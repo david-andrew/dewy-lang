@@ -4,8 +4,7 @@ Tokenizer Framework
 (TBD attempt to simplify over the )
 """
 
-from p'../../../library/reporting.dewy' import Report, SrcFile #, Error, Warning, Info, Hint
-from p'../../../library/linux/system.dewy' import _exit
+from reporting import Report, SrcFile #, Error, Warning, Info, Hint
 
 
 
@@ -156,14 +155,22 @@ LineComment = type of Token & [
 BlockComment = type of Token & [
     eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
         if not src.startswith(block_comment_start) return none
-        stack = 1
-        i:int64 = 0
-        loop i <? src.length {  #TODO: compielr improvements, should be able to do this comparison between int64 and uint64..  also why is length int64 instead of uint64? it can never be negative...
-            if src[i..end].startswith(block_comment_start) {stack += 1 i+=block_comment_start.length}  #TODO: compiler fixes: if this is wrapped in `()` instead of `{}`, there is a syntax error in the lowered udewy
-            else if src[i..end].startswith(block_comment_end) {stack -= 1 i+=block_comment_end.length} #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
+        openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
+        i:uint64 = block_comment_start.length
+
+        loop i <? src.length {
+            if src[i..].startswith(block_comment_start) {
+                openers.push(Span[i i+block_comment_start.length])
+                i+=block_comment_start.length
+            }  #TODO: compiler fixes: if this is wrapped in `()` instead of `{}`, there is a syntax error in the lowered udewy
+            else if src[i..].startswith(block_comment_end) {
+                i+=block_comment_end.length
+                if openers.length =? 1 return i
+                openers.pop
+            } #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
             else { i += 1 }
     
-            if stack =? 0 return i transmute uint64
+            if stack =? 0 return i# transmute uint64
         }
     
         err"need to return an error report here. missing closer for block comment"
@@ -179,7 +186,7 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler imp
     <Root> => [
         Whitespace
         LineComment
-        # BlockComment
+        BlockComment
     ]
     <StringBody> => []
     <RawStringBody> => []
@@ -188,12 +195,12 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler imp
     <BlockBody> => [
         Whitespace
         LineComment
-        # BlockComment
+        BlockComment
     ]
     <TypeBody> => [
         Whitespace
         LineComment
-        # BlockComment
+        BlockComment
     ]
 }
 
@@ -211,7 +218,7 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
     loop i <? src.length {
         ctx = ctx_stack[end]
         allowed_tokens = contextmap(ctx)
-        printl"allowed_tokens: {allowed_tokens}"
+        printl"---------------------------------------------------\nallowed_tokens: {allowed_tokens}"
         matches = [
             loop token_cls in allowed_tokens {
                 length = token_cls.eat(src[i..] ctx)
@@ -230,10 +237,6 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
         printl"matched token {token}"
         tokens.push(token)
         i+=length
-
-        # printl"allowed tokens: {allowed_tokens}"
-        # $breakpoint
-        # i+=1
     }
 
     return tokens
@@ -256,7 +259,7 @@ main = (argv:array<string>):>uint64 => {
         path=path_arg.path
         body=match path_arg.read_text {
             s:string => s
-            _ => { printl"failed to read file {path_arg}" return 1 }
+            _ => err"failed to read file {path_arg}"
         }
         first_row=0
     ]
