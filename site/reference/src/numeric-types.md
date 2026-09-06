@@ -66,7 +66,9 @@ The runtime representation is a pair of `int64` parts; overflow beyond that rang
 
 ## Floating Point
 
-Dewy provides no floating-point arithmetic. Its targets are integer-only, and rationals and fixed-point supply exact and approximate fractions with predictable results. Floating-point types are reserved for a future host-interoperability role and imply no arithmetic or coercions.
+First-class IEEE floating-point types and arithmetic are planned. The initial focus is on making the numeric types people reach for without specialist mathematical or engineering knowledge work intuitively: integers, exact rationals, and fixed-point values. This sequencing does not limit the eventual numerical scope of Dewy; conventional scientific computing, including the kinds of array and tensor operations supported by NumPy and PyTorch, is an intended use case.
+
+Floating-point arithmetic is not implemented yet. It is expected to arrive alongside the full matrix math system, although that sequencing is tentative. Supported formats, conversions, mixed-type promotion, exceptional values, and numerical execution policies remain design work; floats are not restricted to host interoperability.
 
 ## Numeric Hierarchy
 

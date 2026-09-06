@@ -62,7 +62,7 @@ let y = x * 2 + 0.25
 
 `^` raises integers and rationals to integer powers: constant powers fold, a negative constant exponent yields a rational (`2^(-3)` is `1/8`), and a runtime exponent must be a constant or unsigned so that an integer result is sound.
 
-Dewy deliberately provides no floating-point arithmetic: the core targets are integer-only, and rationals and fixed-point cover exact and approximate fractions with predictable behavior. Floating-point types may return later purely for host interoperability.
+Dewy's initial focus is on intuitive everyday arithmetic with integers, exact rationals, and fixed-point values. First-class IEEE floating-point types and arithmetic are planned as well, tentatively alongside the full matrix math system, to support conventional scientific, array, and tensor computing. Floating-point arithmetic is not implemented yet; its eventual role extends beyond host interoperability.
 
 ## Booleans
 

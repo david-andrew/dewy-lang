@@ -18,7 +18,7 @@ The following principles organize the language and should be treated as normativ
 - Defaults are per-call fallbacks and do not remove their parameters from positional binding.
 - Types are compile-time values and use the ordinary expression grammar where practical.
 - Physical dimensions participate in types and may erase from runtime representations; every dimension has a canonical unit and other units are exact rational scales of it.
-- Integers are arbitrary precision (words when proven to fit, big integers otherwise, `bigint` on request), `/` yields exact rationals, `fixed` is the fixed-point domain, and there is no floating-point arithmetic.
+- Integers are arbitrary precision (words when proven to fit, big integers otherwise, `bigint` on request), `/` yields exact rationals, and `fixed` is the fixed-point domain. Intuitive everyday numeric types are the initial priority; first-class IEEE floating-point types and arithmetic are also part of the intended language.
 - Operations that would raise an exception in Python — indexing, dictionary lookup, `pop`, division by a literal zero — must be proven safe at compile time or use an explicit alternative (`get`, `default=`); non-failing behavior stays Python-shaped, and shared names (`length`, `pop`) mean the same thing on every container.
 - Dictionaries and sets are values with insertion-ordered iteration, proven-key lookups, and hash-table representations; a container may not be mutated by a loop that iterates it.
 - Every value has one owner and storage is released deterministically; placement (stack, static, arena) is a proof-gated optimization and never changes whether a program is valid.
@@ -39,6 +39,7 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - the exact liquid-refinement language, proof boundary, and `unsafe` obligations;
 - the general effect vocabulary and effect-polymorphic contracts;
 - multidimensional array shape syntax, broadcasting, and contiguous layout selection;
+- IEEE floating-point formats, conversions, promotion, and numerical execution policies; implementation is tentatively expected alongside the full matrix math system;
 - bidictionaries, container equality and ordering, compound container operators, and keys beyond words and strings;
 - the numeric hierarchy beyond integers, rationals, and fixed-point (reals, complex, quaternions);
 - the overloadable string-conversion protocol beyond built-in conversions;
