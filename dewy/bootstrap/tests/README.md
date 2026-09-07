@@ -10,7 +10,7 @@ same file is an input for every stage.
 | file | exercises |
 |---|---|
 | `00_comments.dewy` | line comments, nested block comments, a comment at EOF without a newline, `#{` inside a line comment |
-| `01_whitespace_and_identifiers.dewy` | spaces/tabs/newlines, identifier characters (ASCII, Greek, math letters, `_ ! °`), decorations anywhere (superscripts, subscripts, primes), case-insensitive booleans, names that look like keywords |
+| `01_whitespace_and_identifiers.dewy` | spaces/tabs/newlines, identifier characters (ASCII, Greek, math letters, `_ ! °`), decorations anywhere (superscripts, subscripts, primes), names that differ from keywords and booleans only by case (`True`, `Let`): ordinary identifiers |
 | `02_numbers.dewy` | integers with `_`, every numeric base prefix up to 16, reals, `e`/`p` exponents, units by juxtaposition, ranges incl. the stepped `1,3..10` and open bounds |
 | `03_strings.dewy` | quotes of odd length, escapes, `{}` interpolation, raw `r"…"`, template `t"…${}"`, based strings (`0x"…"`, base 64), heredocs (plain, raw, template, symbolic delimiter) |
 | `04_operators.dewy` | every operator spelling, inverted comparisons (`not =?`, `not in?`), shifts, combined assignment, broadcast `.+`, operator functions `(+)`, partial operators `(<? 10)`, the `$` placeholder, `;` |

@@ -1071,7 +1071,23 @@ class _BoundsValidator:
                 return None
             subject_node, _interval = self._subject_interval(proposition, value, interval, state)
             for direction, gap in directions[proposition.op]:
-                if proposition.term_of == 'length':
+                if proposition.term_of == 'length' and proposition.subject == 'length' and proposition.field is None:
+                    # the result's *length* against a parameter's (`:>string<v => v.length =? text.length>`):
+                    # the same sequence, a length fact, or a slice of the term's sequence
+                    sequence_id = _runtime_array_id(_strip_casts(subject_node), self.registry)
+                    if sequence_id is not None:
+                        smaller, larger = (_length_key(sequence_id), _length_key(proposition.term_id)) if direction == 'upper' else (_length_key(proposition.term_id), _length_key(sequence_id))
+                        held = self._ordered(smaller, larger, gap, state)
+                    else:
+                        # a slice of the term's own sequence is never longer than it
+                        sliced = _strip_casts(subject_node)
+                        source_id = _runtime_array_id(sliced.string, self.registry) if isinstance(sliced, hir.StringSlice) else None
+                        window = self._slice_bounds_of(subject_node)
+                        held = direction == 'upper' and gap <= 0 and (
+                            source_id == proposition.term_id
+                            or (window is not None and window[0] == _length_key(proposition.term_id))
+                        )
+                elif proposition.term_of == 'length':
                     held = self._bounded_by_length(subject_node, proposition.term_id, gap, state) if direction == 'upper' else self._lower_bounded_by_length(subject_node, proposition.term_id, gap, state)
                 else:
                     subject_id = self._binding_id(_strip_casts(subject_node))
@@ -2531,7 +2547,7 @@ class _BoundsValidator:
                 return True
         return False
 
-    def _ordered(self, smaller: int, larger: int, gap: int, state: State, depth: int = 1) -> bool:
+    def _ordered(self, smaller: int, larger: int, gap: int, state: State, depth: int = 2) -> bool:
         """`larger - smaller >= gap` for two terms the facts name (bindings, routes,
         length keys): an order fact, the intervals, a chain of order facts through
         one intermediate (`i <=? j` and `j <=? text.length`), or — when `larger` is
@@ -2614,10 +2630,18 @@ class _BoundsValidator:
         value term), and `offset` the start of a slice argument (`src[i..]`,
         `src[i..j)` — then `upper` is `j`). `'lower'`: the result is at least
         `upper + gap` (`n >=? src.length`; no slices)."""
+        return self._call_facts(node, 'self')
+
+    def _call_length_facts(self, node: hir.AST) -> list[tuple[int, int | None, int, str]]:
+        """The same, for what a call promises about its result's *length*
+        (`:>string<v => v.length =? text.length>`)."""
+        return self._call_facts(node, 'length')
+
+    def _call_facts(self, node: hir.AST, subject: str) -> list[tuple[int, int | None, int, str]]:
         facts: list[tuple[int, int | None, int, str]] = []
         for refined in _call_result_refinements(node):
             for proposition in refined.propositions:
-                if proposition.term is None or proposition.subject != 'self':
+                if proposition.term is None or proposition.subject != subject or proposition.field is not None:
                     continue
                 argument = _call_argument(node, proposition.term)
                 if argument is None:
@@ -2643,6 +2667,14 @@ class _BoundsValidator:
                 if window is not None:
                     upper, offset_id, adjust = window
                     facts.extend((upper, offset_id, gap - adjust, direction) for direction, gap in directions if direction == 'upper')
+                    continue
+                if isinstance(argument, hir.StringSlice) and argument.range.left is None and argument.range.right is not None:
+                    # a head slice `src[..n)`: its length is `n` (`n + 1` for `..n]`)
+                    end_id = self._binding_id(argument.range.right)
+                    bounds = argument.range.bounds or '[]'
+                    if end_id is not None and end_id >= 0 and bounds[1] in (')', ']'):
+                        extra = 1 if bounds[1] == ']' else 0
+                        facts.extend((end_id, None, gap - extra, direction) for direction, gap in directions if direction == 'upper')
         return facts
 
     def _slice_bounds_of(self, node: hir.AST) -> tuple[int, int, int] | None:
@@ -2691,15 +2723,16 @@ class _BoundsValidator:
                     # a sequence of known length: the promise is a plain bound
                     bound = Interval(None, known.upper - (1 if proposition.op == '<?' else 0))
                     state[subject] = self._binding_interval(state, subject).intersect(bound)
-        for upper, offset_id, gap, direction in self._call_term_facts(value):
-            if direction == 'lower':
-                state[_order_key(upper, subject)] = Interval(gap, None)   # `n >=? src.length`: `n - src.length >= gap`
-            elif offset_id is None:
-                state[_order_key(subject, upper)] = Interval(gap, None)
-            elif self._nonnegative(offset_id, state):
-                state[_remainder_key(subject, upper, offset_id)] = Interval(gap, None)
-                if gap >= 0:
-                    state[_order_key(subject, upper)] = Interval(gap, None)   # `n <= j - i <= j` since `i >= 0`
+        for key, facts in ((subject, self._call_term_facts(value)), (_length_key(subject), self._call_length_facts(value))):
+            for upper, offset_id, gap, direction in facts:
+                if direction == 'lower':
+                    state[_order_key(upper, key)] = Interval(gap, None)   # `n >=? src.length`: `n - src.length >= gap`
+                elif offset_id is None:
+                    state[_order_key(key, upper)] = Interval(gap, None)
+                elif self._nonnegative(offset_id, state):
+                    state[_remainder_key(key, upper, offset_id)] = Interval(gap, None)
+                    if gap >= 0:
+                        state[_order_key(key, upper)] = Interval(gap, None)   # `n <= j - i <= j` since `i >= 0`
 
     def _seed_value_facts(self, subject: int, value: hir.AST, state: State, loc: Span) -> None:
         """What a stored value says about its new binding: a refined call's
@@ -2707,6 +2740,19 @@ class _BoundsValidator:
         self._seed_call_term_facts(subject, value, state)
         self._seed_sum_facts(subject, value, state)
         stripped = _strip_casts(value)
+        if isinstance(stripped, hir.StringSlice):
+            # `let chunk = src[..n)`: the slice is never longer than its source,
+            # and a head slice's length is its end (`n`, or `n + 1` for `..n]`)
+            source_id = _runtime_array_id(stripped.string, self.registry)
+            if source_id is not None:
+                state[_order_key(_length_key(subject), _length_key(source_id))] = Interval(0, None)
+            bounds = stripped.range.bounds or '[]'
+            end_id = self._binding_id(stripped.range.right) if stripped.range.right is not None else None
+            if stripped.range.left is None and end_id is not None and end_id >= 0 and bounds[1] in (')', ']'):
+                extra = 1 if bounds[1] == ']' else 0
+                state[_order_key(end_id, _length_key(subject))] = Interval(extra, None)    # length - n >= extra
+                state[_order_key(_length_key(subject), end_id)] = Interval(-extra, None)   # n - length >= -extra
+            return
         measured = _sequence_of(stripped)
         if measured is not None:
             # `let n = src.length`: `n` is the length, in both directions

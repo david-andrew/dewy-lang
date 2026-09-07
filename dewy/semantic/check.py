@@ -15837,7 +15837,37 @@ def tcr_identifier(
         )
 
     user_error(ctx.srcfile, f'undefined identifier `{id.name}`',
-        Pointer(span=id.loc, message='not found in this scope'))
+        Pointer(span=id.loc, message='not found in this scope'),
+        hint=_spelling_hint(id, ctx=ctx))
+
+
+# spellings from other languages, and what Dewy writes instead
+_FOREIGN_SPELLINGS: dict[str, str] = {
+    'None': 'the absent value is `none`', 'null': 'the absent value is `none`', 'nil': 'the absent value is `none`', 'NULL': 'the absent value is `none`',
+    'elif': 'write `else if`', 'elsif': 'write `else if`',
+    'while': 'every loop is `loop`: `loop condition { … }`', 'for': 'every loop is `loop`: `loop x in xs { … }`',
+    'def': 'a function is a value: `let f = (params) => body`', 'fn': 'a function is a value: `let f = (params) => body`',
+    'func': 'a function is a value: `let f = (params) => body`', 'function': 'a function is a value: `let f = (params) => body`',
+    'var': 'declare with `let`', 'const': 'declare with `let` (or `const` for a compile-time constant)',
+}
+
+
+def _spelling_hint(id: t1.Identifier, *, ctx: Context) -> str | None:
+    """A hint for an undefined name that is a known spelling from elsewhere:
+    another language's (`True`, `None`, `elif`), a keyword or operator in the
+    wrong case (Dewy is case-sensitive), or an uppercase base prefix (`0X1f`)."""
+    name = id.name
+    folded = name.casefold()
+    if folded in t1.bool_identifiers or folded == 'none':
+        return f'Dewy is case-sensitive: write `{folded}`'
+    if folded in t1.keywords or folded in t1.word_operators:
+        return f'Dewy is case-sensitive: the keyword is `{folded}`'
+    if name in _FOREIGN_SPELLINGS:
+        return _FOREIGN_SPELLINGS[name]
+    body = ctx.srcfile.body
+    if id.loc.start > 0 and body[id.loc.start - 1] == '0' and name[0] in 'BTQSODZXURG' and name[1:].isalnum():
+        return f'base prefixes are lowercase: `0{name[0].lower()}{name[1:]}`'
+    return None
 
 
 

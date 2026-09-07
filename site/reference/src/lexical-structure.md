@@ -4,6 +4,10 @@
 
 Dewy source is Unicode text. Source-file suffixes are conventional and do not alter tokenization or semantic rules.
 
+## Case
+
+Dewy is case-sensitive. Keywords (`let`, `loop`, `if`), word operators (`and`, `or`, `not`, `in?`, `is?`), the booleans `true` and `false`, and symbols are matched exactly as written: `True`, `AND`, and `Loop` are ordinary identifiers, distinct from each other and from `true`, `and`, and `loop`. Case does not matter in two places, both where the strict reading would silently mean something else: inside a numeral, the alphabetic digits of a based integer (`0xff` and `0xFF`) and the exponent marker (`1e5` and `1E5`) may be written either way, while the base prefix itself is lowercase (`0x`, `0b`; `0X` is not a prefix); and the two string escapes that take digits, `\u`/`\U` (a scalar, `\u{1F600}`) and `\x`/`\X` (a hex byte escape, which Dewy rejects), are recognized in either case. Every other escape is lowercase (`\n`), and a backslash before any other character is that character itself (`\N` is `N`).
+
 ## Identifiers
 
 An identifier contains at least one base character. Decorations may appear before or after that base character, and decimal digits may follow it.

@@ -85,7 +85,7 @@ let main = ():>int64 => {
 }
 ```
 
-`text.casefold` is the Unicode full case folding (`CaseFolding.txt`, statuses C and F): the form for case-insensitive comparison, not a lowercase for display — `"Straße".casefold` is `"strasse"`, `"İ".casefold` is `"i̇"`. Compare `a.casefold =? b.casefold`, or test `head.casefold is? BasePrefix` (see [Unions and Narrowing](types-and-conversions.md#unions-and-narrowing)).
+`text.casefold` is the Unicode full case folding (`CaseFolding.txt`, statuses C and F): the form for case-insensitive comparison, not a lowercase for display — `"Straße".casefold` is `"strasse"`, `"İ".casefold` is `"i̇"`. Compare `a.casefold =? b.casefold`; a test like `head is? BasePrefix` narrows to the union member (see [Unions and Narrowing](types-and-conversions.md#unions-and-narrowing)).
 
 ## Joining and Building
 

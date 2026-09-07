@@ -129,8 +129,9 @@ def test_identifiers_may_follow_numbers() -> None:
 
 def test_number_patterns_match_the_literal_forms() -> None:
     based, decimal = (rule["match"] for rule in _repo("number")["patterns"])
-    for literal in ("0b101010", "0t1120", "0q222", "0s110", "0o52", "0d42", "0z36", "0x2a", "0xDEAD_BEEF", "0B1"):
+    for literal in ("0b101010", "0t1120", "0q222", "0s110", "0o52", "0d42", "0z36", "0x2a", "0xDEAD_BEEF"):
         assert fullmatch(based, literal), literal
+    assert not fullmatch(based, "0B1")   # base prefixes are lowercase; the digits after them are not
     for literal in ("42", "1_000_000", "9.8", "1.25e2", "5e-1", "0", "1e10"):
         assert fullmatch(decimal, literal), literal
     # A range `1..5` is two numbers around `..`, never `1.` and `.5`.

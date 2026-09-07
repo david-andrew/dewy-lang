@@ -62,7 +62,7 @@ start_characters = alpha | greek | math | misc # | latin | units
 continue_characters = start_characters | digits
 decoration_characters = superscripts | subscripts | misc_decorations | primes
 
-# note that the prefix is case insensitive, so call .casefold() when matching the prefix
+# base prefixes are lowercase only (`0x`, not `0X`); the digits after them are case-insensitive
 # numbers may have _ as a separator (if _ is not in the set of digits)
 BasePrefix: TypeAlias = Literal['0b', '0t', '0q', '0s', '0o', '0d', '0z', '0x', '0u', '0r', '0g']
 base_prefixes: set[BasePrefix] = set(BasePrefix.__args__)
@@ -440,7 +440,7 @@ class Symbol(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
-        chunk = src[:LEN_LONGEST_SYMBOL].casefold()
+        chunk = src[:LEN_LONGEST_SYMBOL]
         for op in symbols:
             if chunk.startswith(op):
                 return len(op)
@@ -651,14 +651,14 @@ class BasedBlockOpener(Token[GeneralBodyContexts]):
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if len(src) < 3:
             return None
-        if src[:2].casefold() not in base_radixes:
+        if src[:2] not in base_radixes:
             return None
         if not src[2] == '[':
             return None
         return 3
     
     def action_on_eat(self, ctx:GeneralBodyContexts):
-        self.base = self.src[:2].casefold()
+        self.base = self.src[:2]
         return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self, self.base))
 
 ##### TOKEN CLASSES: STRINGS AND STRING BODIES #####
@@ -1116,7 +1116,7 @@ class BasedStringQuoteOpener(Token[GeneralBodyContexts]):
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         if len(src) < 3:
             return None
-        if src[:2].casefold() not in base_radixes:
+        if src[:2] not in base_radixes:
             return None
         # eat an opening quote
         i = StringQuoteOpener.eat(src[2:], ctx)  # eat the quote without the r prefix
@@ -1124,7 +1124,7 @@ class BasedStringQuoteOpener(Token[GeneralBodyContexts]):
         return i + 2
 
     def action_on_eat(self, ctx:GeneralBodyContexts):
-        self.base = self.src[:2].casefold()
+        self.base = self.src[:2]
         return Push(BasedStringBody(ctx.srcfile, ctx.tokens_so_far, self, self.base))
 
 class BasedStringChars(Token[BasedStringBody]):
@@ -1147,11 +1147,11 @@ class Number(Token[GeneralBodyContexts]):
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        """a based number is a sequence of 1 or more digits, optionally preceded by a (case-insensitive) base prefix (up to base-16)"""
+        """a based number is a sequence of 1 or more digits, optionally preceded by a (lowercase) base prefix (up to base-16)"""
         
         # try a number with a base prefix
-        if src[:2].casefold() in base_prefixes:
-            base = src[:2].casefold()
+        if src[:2] in base_prefixes:
+            base = src[:2]
             digits = base_digits[base]
             if base_radixes[base] > MAX_NUMBER_BASE and len(src) > 2 and src[2] in digits: # skip if not a based number literal (e.g. based string)
                 Number.error_too_high_number_base(src, ctx, base)
@@ -1178,8 +1178,8 @@ class Number(Token[GeneralBodyContexts]):
         return i or None
     
     def action_on_eat(self, ctx:GeneralBodyContexts):
-        if self.src[:2].casefold() in base_digits:
-            self.prefix = self.src[:2].casefold()
+        if self.src[:2] in base_digits:
+            self.prefix = self.src[:2]
         else:
             self.prefix = ctx.default_base
 

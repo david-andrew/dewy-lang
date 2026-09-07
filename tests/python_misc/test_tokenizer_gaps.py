@@ -58,3 +58,27 @@ def test_minted_override_keeps_the_subtype_rule() -> None:
     _check("let Report = type of any & [severity='none']\nlet Err = type of Report & [severity='error']")
     with pytest.raises(UserError, match='weakens field'):
         _check("let A = type of any & [x:int8]\nlet B = type of A & [x:int64]")
+
+
+def test_foreign_spellings_get_a_hint() -> None:
+    """Dewy is case-sensitive: `True`, `AND`, `Let` are undefined names, and the
+    error says what to write; so do other languages' spellings (`None`,
+    `elif`) and an uppercase base prefix (`0X1f`)."""
+    import pytest
+    from dewy.reporting import SrcFile
+    from dewy.semantic import check
+    from dewy.semantic.errors import UserError
+
+    def hint_for(source: str) -> str:
+        with pytest.raises(UserError) as caught:
+            check.typecheck_and_resolve(SrcFile(None, source + '\nlet main = ():>int64 => 42\n'))
+        return caught.value.report.hint or ''
+
+    assert 'write `true`' in hint_for('let x = True')
+    assert 'write `none`' in hint_for('let x = NONE')
+    assert 'keyword is `and`' in hint_for('let x = 1 AND 2')
+    assert 'keyword is `let`' in hint_for('Let x = 1')
+    assert 'write `none`' in hint_for('let x = None')
+    assert 'else if' in hint_for('let x = elif')
+    assert '`0x1f`' in hint_for('let x = 0X1f')
+    assert hint_for('let x = fooBar') == ''

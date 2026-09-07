@@ -8,7 +8,7 @@ A literal introduces a value directly in source. Literal syntax may preserve mor
 
 ## Integers
 
-Decimal integers require no prefix. Integer numerals support the following bases and case-insensitive alphabetic digits:
+Decimal integers require no prefix. Integer numerals support the following bases; the prefix is lowercase (`0x`, never `0X`) and the alphabetic digits after it are case-insensitive:
 
 | Base | Prefix | Digits            |
 | ---: | :----: | ----------------- |

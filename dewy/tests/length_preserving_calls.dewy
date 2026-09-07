@@ -1,0 +1,27 @@
+# A call may promise its result's length in terms of an argument's:
+# `fold(text):>string<v => v.length =? text.length>`. With a head slice as the
+# argument (`fold(src[..n))`) the result's length is `n`; a slice is never
+# longer than its source; and `startswith` bounds the prefix by the text.
+# The chain `op.length <= chunk.length = chunksize <= src.length` then proves
+# the tokenizer's contract without a guard.
+let nonempty:type = string<length >? 0>
+let symbols:array<nonempty> = ["<=>" "+"]
+LEN = symbols[0].length
+let fold = (text:string):>string<v => v.length =? text.length> => text   # a stand-in for a grapheme-to-grapheme fold
+let eat = (src:nonempty):>uint64<(<=? src.length)> | none => {
+    chunksize = if src.length <? LEN src.length else LEN
+    chunk = fold(src[..chunksize))
+    loop op in symbols { if chunk.startswith(op) return op.length }
+    return none
+}
+let head = (s:string n:uint64):>string<v => v.length <=? s.length> => {
+    if n >? s.length return s
+    return s[..n)
+}
+let main = ():>int64 => {
+    let a = eat("<=>x")
+    let b = eat("+")
+    let c = eat("xyz")
+    if a is? uint64 and a =? 3 and b is? uint64 and b =? 1 and c is? none and head("hello" 2) =? "he" and head("hi" 9) =? "hi" return 42
+    return 1
+}

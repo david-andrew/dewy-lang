@@ -7,7 +7,7 @@ import pytest
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check
-from dewy.semantic.errors import UserError
+from dewy.semantic.errors import TypeCheckError, UserError
 
 repo = Path(__file__).resolve().parents[2]
 TOKENIZER = (repo / 'dewy' / 'tests' / 'length_terms.dewy').read_text()
@@ -113,3 +113,23 @@ def test_a_bound_value_conditional_keeps_its_arms_facts() -> None:
     )
     root = check.typecheck_and_resolve(SrcFile(None, source))
     assert root is not None
+
+
+def test_a_result_length_promised_in_terms_of_an_argument() -> None:
+    """`:>string<v => v.length =? text.length>` is proven by returning the text
+    itself (the same sequence) and used at a call with a head slice argument:
+    `fold(src[..n))` has length `n`, so a prefix of it is within `src`."""
+    source = (
+        'let fold = (text:string):>string<v => v.length =? text.length> => text\n'
+        'let cut = (src:string op:string n:uint64):>uint64<(<=? src.length)> | none => {\n'
+        '    if n >? src.length return none\n'
+        '    let chunk = fold(src[..n))\n'
+        '    if chunk.startswith(op) return op.length\n'
+        '    return none\n'
+        '}\n'
+        'let main = ():>int64 => { let r = cut("abc" "ab" 2)  if r is? uint64 { return r }  return 0 }\n'
+    )
+    root = check.typecheck_and_resolve(SrcFile(None, source))
+    assert root is not None
+    with pytest.raises((TypeCheckError, UserError), match='cannot prove refinement'):
+        check.typecheck_and_resolve(SrcFile(None, 'let f = (text:string):>string<v => v.length =? text.length> => "{text}!"\n'))

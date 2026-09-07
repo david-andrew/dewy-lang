@@ -341,7 +341,7 @@ class Identifier(Token):
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Identifier]|None:
         token = tokens[start]
-        if isinstance(token, t0.Identifier) and token.src.casefold() not in keywords and token.src.casefold() not in word_operators and token.src.casefold() not in bool_identifiers:
+        if isinstance(token, t0.Identifier) and token.src not in keywords and token.src not in word_operators and token.src not in bool_identifiers:
             return 1, Identifier(token.loc, token.src)
         elif isinstance(token, t0.Symbol) and token.src in symbolic_identifiers:
             return 1, Identifier(token.loc, token.src)
@@ -366,15 +366,15 @@ class Operator(Token):
         token = tokens[start]
 
         # non-symbolic operators
-        if isinstance(token, t0.Identifier) and token.src.casefold() in word_operators:
-            return 1, Operator(token.loc, token.src.casefold())
+        if isinstance(token, t0.Identifier) and token.src in word_operators:
+            return 1, Operator(token.loc, token.src)
 
         # all symbols that are not symbolic identifiers are operators
         if not isinstance(token, (t0.Symbol, t0.ShiftSymbol)) or token.src in symbolic_identifiers: 
             return None
         if token.src == ';':  # `;` operator is handled by Semicolon
             return None
-        return 1, Operator(token.loc, token.src.casefold())
+        return 1, Operator(token.loc, token.src)
             
 
 @dataclass
@@ -384,8 +384,8 @@ class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behave
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Keyword]|None:
         token = tokens[start]
-        if isinstance(token, t0.Identifier) and token.src.casefold() in keywords:
-            return 1, Keyword(token.loc, token.src.casefold())
+        if isinstance(token, t0.Identifier) and token.src in keywords:
+            return 1, Keyword(token.loc, token.src)
         return None
 
 @dataclass
@@ -404,8 +404,8 @@ class Bool(Token):
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Bool]|None:
         token = tokens[start]
-        if isinstance(token, t0.Identifier) and token.src.casefold() in bool_identifiers:
-            return 1, Bool(token.loc, token.src.casefold() == 'true')
+        if isinstance(token, t0.Identifier) and token.src in bool_identifiers:
+            return 1, Bool(token.loc, token.src == 'true')
         return None
 
 @dataclass

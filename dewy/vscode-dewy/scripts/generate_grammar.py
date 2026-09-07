@@ -34,8 +34,8 @@ NOT_BEFORE = f"(?<![{CONT}])"  # not glued to a preceding identifier character
 # identifier's own trailing digits never end a match, the rule is greedy.
 NOT_BEFORE_IDENT = f"(?<![{START}{DECOR}])"
 NOT_AFTER = f"(?![{CONT}])"
-BASE_PREFIX = "0[bBtTqQsSoOdDzZxXuUrRgG]"
-NUMBER_PREFIX = "0[bBtTqQsSoOdDzZxX]"  # numerals stop at base 16; higher bases are packed strings only
+BASE_PREFIX = "0[btqsodzxurg]"   # lowercase only: `0X` is not a prefix
+NUMBER_PREFIX = "0[btqsodzx]"  # numerals stop at base 16; higher bases are packed strings only
 DECIMAL_START = "(?:(?<=\\.\\.)|(?<!\\.))"  # allow a range endpoint after `..`, but not a leading-dot decimal
 
 

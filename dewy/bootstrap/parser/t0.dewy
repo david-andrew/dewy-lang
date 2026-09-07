@@ -310,7 +310,7 @@ Symbol = type of Token & [
         chunk = src[..chunksize).casefold()
         loop op in symbols {
             if chunk.startswith(op) {
-                return op.length
+                return min(op.length src.length)  # casefold can affect the length of src, so min required in case src was shorter than the op
             }
         }
         return none
