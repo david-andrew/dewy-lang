@@ -1,0 +1,25 @@
+# A nested object field copied from another object (`srcfile=ctx.srcfile`,
+# not a literal) into an object literal that escapes the frame: its strings
+# are copied for escape like the literal's own string fields, so the report
+# still reads its source once the frame that built it is reused.
+let Source:type = [path:string body:string]
+let Ctx:type = [source:Source count:int64 = 0]
+let Note:type = [source:Source title:string]
+let make = (n:uint64 @ctx:Ctx):>uint64? | Note => {
+    if n =? 0 return none
+    ctx.count += 1
+    return Note[source=ctx.source title="{n} things"]
+}
+let churn = (n:int64):>int64 => {
+    let out:array<string> = []
+    loop k in 0.. and k <? n { out.push("filler {k}") }
+    return out.length
+}
+let main = ():>int64 => {
+    let head = "let a = "
+    let ctx = Ctx(Source("x.dewy" "{head}1"))
+    let r = make(2 @ctx)
+    let last = churn(64)                       # reuse the frames `make` used
+    if r is? Note and r.source.body =? "let a = 1" and r.source.path =? "x.dewy" and r.title =? "2 things" and last =? 64 and ctx.count =? 1 return 42
+    return 1
+}

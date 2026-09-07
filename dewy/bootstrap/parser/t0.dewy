@@ -20,7 +20,7 @@ let err = (msg:string?=none) => {
 
 ##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
-
+const newline_chars = set['\n' '\r\n']
 const whitespace = set[' ' '\t' '\n' '\r\n' '\r']
 const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
 const line_comment_start:'#' = '#'
@@ -135,22 +135,23 @@ let TokenError = type of error & Error
 
 
 
+# 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', …
+ordinalize = (n:uint64):>string => {
+    if n % 100 >=? 10 and n % 100 <=? 13 return "{n}th"
+    last_digit = n % 10
+    if last_digit =? 1 return "{n}st"
+    if last_digit =? 2 return "{n}nd"
+    if last_digit =? 3 return "{n}rd"
+    return "{n}th"
+}
+
+
 ##### TOKEN CLASSES: WHITESPACE AND COMMENTS #####
 # Tokens that consume layout-only characters or comments. These are valid in
 # general body contexts and usually don't affect the context stack.
 
 # TODO: want a warning if there is a lone \r not followed by \n
 Whitespace = type of Token & [
-    # eat = (src:nonemptystring ctx:Context):>uint64? => {
-    #     doc"""white space is any sequence of whitespace characters"""
-
-    #     #TODO: insert check for \r without \n. probably also restructure to match python version?
-    #     if src[0] not in? whitespace return none
-    #     loop i in 0..uint64.max and i <? src.length {  
-    #         if src[i] not in? whitespace return i
-    #     }
-    #     return src.length
-    # }
     eat = (src:nonemptystring @ctx:Context):> uint64? => {
         doc"""white space is any sequence of whitespace characters"""
         i = 0
@@ -169,17 +170,19 @@ Whitespace = type of Token & [
             title="Lone carriage return"
             pointers=[Pointer[span=Span[i i+1] message="\\r without \\n"]]  #TODO: test if we can remove `Pointer` since it's completely structural
             hint="\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
-        ])   # spans relative to `src`: the tokenize loop shifts them
+        ])
     }
 
 ]
 
 LineComment = type of Token & [
     eat = (src:nonemptystring @ctx:Context):>uint64? => {
+        doc"""line comments are any sequence of characters after a # until the end of the line"""
         if not src.startswith(line_comment_start) return none
-        if src.startswith(block_comment_start) return none # don't match a block comment
+        if src.startswith(block_comment_start) return none # don't match a block comment\
+        # consume until the end of the line
         loop i in 0..uint64.max and i <? src.length {  
-            if src[i] =? '\n' return i + 1
+            if src[i] in? newline_chars return i + 1
         }
         return src.length
     }
@@ -189,24 +192,49 @@ LineComment = type of Token & [
 # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
 BlockComment = type of Token & [
     eat = (src:nonemptystring @ctx:Context):>uint64? | TokenError => {
+        # (doc)r"""
+        # Block comments are of the form #{ ... }# and can be nested.
+        # """
+        
         if not src.startswith(block_comment_start) return none
+        
         openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
         i:uint64 = block_comment_start.length
 
         loop i <? src.length {
+            printl"i={i}"
             if src[i..].startswith(block_comment_start) {
                 openers.push(Span[i i+block_comment_start.length])
                 i+=block_comment_start.length
-            }  #TODO: compiler fixes: if this is wrapped in `()` instead of `{}`, there is a syntax error in the lowered udewy
+            }
             else if src[i..].startswith(block_comment_end) {
                 i+=block_comment_end.length
                 if openers.length =? 1 return i
                 openers.pop;
-            } #TODO: compiler fixes: it complains when you do src[0..], even though that should just select to the end of the string...
+            }
             else { i += 1 }
         }
     
-        err"need to return an error report here. missing closer for block comment"
+        # error, unterminated block comment(s). Spans are relative to `src`: the tokenize loop shifts them
+        plural = if openers.length >? 1 "s" else ""
+        pointers:array<Pointer> = [
+            loop k in 0.. and k <? openers.length {
+                inside = if k >? 0 " (inside {ordinalize(k)})" else ""
+                Pointer[span=openers[k] message="{ordinalize(k+1)} unterminated block comment opened here{inside}"]
+            }
+        ]
+        unbound:array<Span> = [   # the text between one opener's end and the next one's start
+            loop k in 1.. and k <? openers.length
+                if openers[k].start >=? openers[k-1].stop
+                    Span[openers[k-1].stop openers[k].start]
+        ]
+        pointers.push(Pointer[span=Span[openers[end].stop src.length] spans=unbound message="Unbound block comment{plural}"])
+        return TokenError[
+            srcfile=ctx.srcfile
+            title="{openers.length} unterminated block comment{plural}"
+            pointers=pointers
+            hint="Did you forget {openers.length} closing `{block_comment_end}`?\nBlock comments start with `{block_comment_start}` and end with `{block_comment_end}` and can be nested"
+        ]
     }
 ]
 
@@ -246,7 +274,7 @@ Identifier = type of Token & [
 
 
 # what tokens are allowed in what contexts
-contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler improvements: want to just be able to use `Context` here rather than needing to make a separate union of each of the subkinds
+contextmap = (ctx:Context):>array<type<Token>> => match ctx {
     <Root> => [
         Whitespace
         LineComment

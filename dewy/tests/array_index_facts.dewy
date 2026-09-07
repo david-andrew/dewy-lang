@@ -16,9 +16,15 @@ let sum = (xs:array<int64>):>int64 => {
     }
     return total
 }
+# `xs[k - 1]` under `k <? xs.length`: the order fact carries the arithmetic
+let climb = (xs:array<int64>):>int64 => {
+    let acc:int64 = 0
+    loop k in 1.. and k <? xs.length { acc += xs[k] - xs[k-1] }
+    return acc
+}
 let main = ():>int64 => {
-    let xs = build(9)          # 0..8, sum 36
+    let xs = build(9)          # 0..8, sum 36; climb 8
     let third:int64 = 0
     if xs.length >? 2 { third = xs[2] }   # 2
-    return sum(xs) + third + xs.length - 5   # 36 + 2 + 9 - 5 = 42
+    return sum(xs) + third + xs.length - 5 + climb(xs) - 8   # 36 + 2 + 9 - 5 + 8 - 8 = 42
 }

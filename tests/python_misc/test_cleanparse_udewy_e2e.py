@@ -102,6 +102,7 @@ LOWERED_CASES = [
     ('object_element_blocks.dewy', 42),
     ('optional_enum_fields.dewy', 42),
     ('place_slots.dewy', 42),
+    ('nested_object_fields.dewy', 42),
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),

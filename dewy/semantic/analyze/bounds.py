@@ -3082,6 +3082,10 @@ class _BoundsValidator:
                 offset = self._length_offset_index(index, array_id)
                 if offset is not None and minimum_length >= offset:
                     return
+                # `xs[k - 1]` under `k <? xs.length`, `xs[i + 1]` under `i + 1 <? xs.length`,
+                # a call's refined result: what the order facts establish
+                if self._bounded_by_length(index, array_id, 1, state):
+                    return
         known = (
             'unknown'
             if interval is None

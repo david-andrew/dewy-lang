@@ -551,6 +551,13 @@ class _ObjectLowering:
                 elif self._is_string_valued(field_type):
                     # the object may outlive this frame (returned, pushed, stored)
                     prelude, value = self._escaping_string_value(field.value)
+                elif isinstance(field_type, ty.ObjectType):
+                    # a nested object copied from elsewhere (`srcfile=ctx.srcfile`): its
+                    # strings and arrays are copied for escape too, like the literal's own
+                    prelude, src = self._extract_object_pointer(field.value)
+                    statements.extend(prelude)
+                    statements.extend(self._object_copy(address, src, field_type, field.loc, arena=self._has_arena()))
+                    continue
                 else:
                     prelude, value = self._extract_expression(field.value)
                 statements.extend(prelude)
@@ -1254,6 +1261,11 @@ class _ObjectLowering:
                 )
             else:
                 value = self._value_load(source_address, field.type, loc)
+                if move is False and self._is_string_valued(field.type) and self._has_arena():
+                    # copied from an object that lives on (`srcfile=ctx.srcfile`): the
+                    # result gets its own string, since the source may be released first
+                    statements.extend(self._copy_string_element(value, dest_address, field.type, loc))
+                    return statements
                 statements.extend(
                     self._value_store(value, dest_address, field.type, loc)
                 )

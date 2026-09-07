@@ -78,9 +78,11 @@ let Pointer:type = [
     group:int64 = -1
 ]
 
+# a pointer's spans in source order (the message goes on the last one that has width)
 let _pointer_spans = (p:Pointer):>array<Span> => {
     let out:array<Span> = [p.span]
     loop s in p.spans { out.push(s) }
+    out.sort(key=s=>s.start)
     return out
 }
 
