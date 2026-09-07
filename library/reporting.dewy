@@ -294,6 +294,22 @@ let Report:type = [
     srcfile:SrcFile = SrcFile["input" ""]   # the source the pointers refer to (`render` may be given another)
     use_color:bool = true
 
+    # move every span by `by`: a report made against a slice of the source
+    # (`eat(src[i..])` in a tokenizer) becomes one against the whole source
+    shift = (by:uint64) => {
+        let moved:array<Pointer> = []
+        loop p in pointers {
+            let more:array<Span> = []
+            loop s in p.spans { more.push(Span[s.start + by s.stop + by]) }
+            moved.push(Pointer[span=Span[p.span.start + by p.span.stop + by] message=p.message spans=more placement=p.placement color=p.color group=p.group])
+        }
+        pointers.clear
+        loop m in moved { pointers.push(m) }
+        let dim_moved:array<Span> = []
+        loop s in dimmed { dim_moved.push(Span[s.start + by s.stop + by]) }
+        dimmed.clear
+        loop d in dim_moved { dimmed.push(d) }
+    }
     describe = (text:string) => { message = text }
     point = (start:uint64 stop:uint64 text:string) => { pointers.push(Pointer(Span(start stop) text)) }
     dim = (start:uint64 stop:uint64) => { dimmed.push(Span(start stop)) }

@@ -923,10 +923,15 @@ class _ObjectLowering:
             prelude, src = self._extract_object_pointer(node.value)
             return [*prelude, *self._object_copy(address, src, field_type, node.loc)]
         if isinstance(field_type, ty.ArrayType) and node.op == '=':
-            prelude, value = self._independent_array_value(
-                node.value,
-                field_type,
-            )
+            if field_type.length is None:
+                # the field outlives the frame: an owned local moves in at its
+                # last use (`pointers = moved`), anything else is cloned into the arena
+                prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field')
+            else:
+                prelude, value = self._independent_array_value(
+                    node.value,
+                    field_type,
+                )
             return [
                 *prelude,
                 *self._value_store(value, address, field_type, node.loc),

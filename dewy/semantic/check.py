@@ -6250,6 +6250,24 @@ def _default_only_fields(rhs: p0.AST) -> set[str]:
     return names
 
 
+def _place_parameter_names(params: p0.AST) -> set[str]:
+    """The names written `@name…` in a parameter list: forwarded as places."""
+    names: set[str] = set()
+    items = params.inner if isinstance(params, p0.Block) else [params]
+    for item in items:
+        if isinstance(item, p0.Prefix) and item.op.symbol == '@':
+            item = item.item
+        elif isinstance(item, p0.BinOp) and isinstance(item.left, p0.Prefix) and item.left.op.symbol == '@':
+            item = replace(item, left=item.left.item)
+        else:
+            continue
+        while isinstance(item, p0.BinOp):
+            item = item.left
+        if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
+            names.add(item.item.name)
+    return names
+
+
 def _slot_forwarder(literal: p0.BinOp, alias: str, method: str, *, ctx: Context) -> p0.AST:
     """A field's default forwarding to a static method: `(params) => Alias.method(params)`.
     A function stored in a field is called with the object first (a field literal
@@ -6258,7 +6276,8 @@ def _slot_forwarder(literal: p0.BinOp, alias: str, method: str, *, ctx: Context)
     params_ast, _result, _body = _function_literal_parts(literal)
     signature_text = ctx.srcfile.body[literal.left.loc.start:literal.left.loc.stop]   # the parameter list as written, its types with it
     names = [name for name in _parameter_names_in_order(params_ast)]
-    text = f'{signature_text} => {alias}.{method}({" ".join(names)})'
+    places = _place_parameter_names(params_ast)
+    text = f'{signature_text} => {alias}.{method}({" ".join(("@" if name in places else "") + name for name in names)})'
     parsed = p0.parse(SrcFile(None, ' ' * literal.loc.start + text + '\n'))
     forwarder = parsed.inner[0]
     assert isinstance(forwarder, p0.BinOp)
@@ -8297,8 +8316,8 @@ def _brand_dispatcher(family: ty.ObjectType, name: str, loc: Span, *, ctx: Conte
             f'`{missing[0]}` has no static `{name}`',
             Pointer(span=loc, message=f'every type under `{family.brand}` needs one to dispatch `{name}` through a type value'),
         )
-    params = ' '.join(f'{p.name or f"__dewy_p{i}"}:{type_to_dewy(p.type)}' for i, p in enumerate(signature.pos_or_kw))
-    args = ' '.join(p.name or f'__dewy_p{i}' for i, p in enumerate(signature.pos_or_kw))
+    params = ' '.join(f'{"@" if p.place else ""}{p.name or f"__dewy_p{i}"}:{type_to_dewy(p.type)}' for i, p in enumerate(signature.pos_or_kw))
+    args = ' '.join(f'{"@" if p.place else ""}{p.name or f"__dewy_p{i}"}' for i, p in enumerate(signature.pos_or_kw))   # a place parameter is forwarded as a place
     result = f':>{type_to_dewy(signature.ret)}' if signature.ret not in (ty.VOID_TYPE, ty.INFERRED_TYPE) else ''
     arms = '\n'.join(f'    <{brand}> => return {brand}.{name}({args})' for brand in brands)
     text = f'(__dewy_kind:type<{family.brand}> {params}){result} => {{ match __dewy_kind {{\n{arms}\n}} }}'
@@ -12165,6 +12184,12 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
     items = ast.inner if isinstance(ast, p0.Block) and ast.kind == '()' else [ast]
     args: list[ty.PosOrKwArg] = []
     for item in items:
+        # `@name:type`: a place parameter, spelled as in a literal
+        place = False
+        if isinstance(item, p0.Prefix) and item.op.symbol == '@':
+            place, item = True, item.item
+        elif isinstance(item, p0.BinOp) and isinstance(item.left, p0.Prefix) and item.left.op.symbol == '@':
+            place, item = True, replace(item, left=item.left.item)
         if (
             isinstance(item, p0.BinOp)
             and isinstance(item.op, t1.Operator)
@@ -12172,7 +12197,7 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
             and isinstance(item.left, p0.Atom)
             and isinstance(item.left.item, t1.Identifier)
         ):
-            args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name))))
+            args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name)), place=place))
         elif isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
             # Types and parameter names share the identifier syntax. A bare
             # identifier is therefore a parameter name with an unconstrained

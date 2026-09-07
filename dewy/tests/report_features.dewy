@@ -45,5 +45,9 @@ let main = ():>int64 => {
     overlap.render(one_line)
     let hint = Hint[srcfile=one_line title="hint" pointers=[Pointer[span=Span[0 0] message="start"] Pointer[span=Span[1 1] message="next"]]]
     hint.render(one_line)
+    # a report made against a slice of the source (`eat(src[i..])`), shifted to the whole source
+    let relative = Error[srcfile=one_line title="shifted" pointers=[Pointer[span=Span[0 5] message="total" spans=[Span[8 13]]]] dimmed=[Span[6 7]]]
+    relative.shift(4)
+    relative.render(one_line)
     return 42
 }

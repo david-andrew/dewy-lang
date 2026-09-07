@@ -289,6 +289,7 @@ def test_reporting_library_features_match_the_compiler_renderer(
             Pointer(span=Span(28, 31), message='tax'),
         ], dimmed=[Span(0, 3)], use_color=False)),
         str(Hint(srcfile=one_line, title='hint', pointer_messages=[Pointer(span=Span(0, 0), message='start'), Pointer(span=Span(1, 1), message='next')], use_color=False)),
+        str(Error(srcfile=one_line, title='shifted', pointer_messages=[Pointer(span=[Span(4, 9), Span(12, 17)], message='total')], dimmed=[Span(10, 11)], use_color=False)),
     ]) + '\n'
     udewy_path = tmp_path / 'report_features.udewy'
     udewy_path.write_text(codegen(SrcFile.from_path(fixtures / 'report_features.dewy')))

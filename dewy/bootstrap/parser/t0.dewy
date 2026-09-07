@@ -88,7 +88,7 @@ const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be ba
 
 
 # Tokenization Contexts
-Context = $abstract type of any & [srcfile:SrcFile previous:Token?]
+Context = $abstract type of any & [srcfile:SrcFile previous:Token? warnings:array<Report> = []]   # warnings an `eat` raises, with spans relative to its `src`; the tokenize loop shifts and prints them
 Root:type = type of Context & [default_base:BasePrefix=base10]
 StringBody:type = type of Context# & [opening_quote: StringQuoteOpener | RestOfFileStringQuote | HeredocStringOpener]
 RawStringBody:type = type of Context# & [opening_quote: RawStringQuoteOpener | RawHeredocStringOpener | RawRestOfFileStringQuote]
@@ -114,7 +114,7 @@ let Pop = type of any
 # ConextAction:type = Push | Pop | none
 
 let nonemptystring:type = string<length >? 0>
-let eatfn:type = (src:nonemptystring ctx:Context):>uint64 & <(<=?src.length)> | none | TokenError
+let eatfn:type = (src:nonemptystring @ctx:Context):>uint64 & <(<=?src.length)> | none | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
@@ -151,31 +151,31 @@ Whitespace = type of Token & [
     #     }
     #     return src.length
     # }
-    eat = (src:nonemptystring ctx:Context):> uint64? => {
+    eat = (src:nonemptystring @ctx:Context):> uint64? => {
         doc"""white space is any sequence of whitespace characters"""
         i = 0
         loop i <? src.length and src[i] in? whitespace {
             if src[i] =? '\r' { # dewy grapheme handling automatically merges \r\n into a single character
-                warning_lone_carriage_return(src i ctx) # just emit a warning
+                warning_lone_carriage_return(src i @ctx) # just emit a warning
             }
             i += 1
         }
         return if i >? 0 i else none
     }
     
-    warning_lone_carriage_return = (src:nonemptystring i:uint64 ctx:Context):>void => {
-        warning = Warning[
+    warning_lone_carriage_return = (src:nonemptystring i:uint64 @ctx:Context):>void => {
+        ctx.warnings.push(Warning[
+            srcfile=ctx.srcfile
             title="Lone carriage return"
             pointers=[Pointer[span=Span[i i+1] message="\\r without \\n"]]  #TODO: test if we can remove `Pointer` since it's completely structural
             hint="\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
-        ]
-        warning.render(ctx.srcfile)
+        ])   # spans relative to `src`: the tokenize loop shifts them
     }
 
 ]
 
 LineComment = type of Token & [
-    eat = (src:nonemptystring ctx:Context):>uint64? => {
+    eat = (src:nonemptystring @ctx:Context):>uint64? => {
         if not src.startswith(line_comment_start) return none
         if src.startswith(block_comment_start) return none # don't match a block comment
         loop i in 0..uint64.max and i <? src.length {  
@@ -188,7 +188,7 @@ LineComment = type of Token & [
 
 # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
 BlockComment = type of Token & [
-    eat = (src:nonemptystring ctx:Context):>uint64? | TokenError => {
+    eat = (src:nonemptystring @ctx:Context):>uint64? | TokenError => {
         if not src.startswith(block_comment_start) return none
         openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
         i:uint64 = block_comment_start.length
@@ -217,7 +217,7 @@ BlockComment = type of Token & [
 # Identifier-like things: plain identifiers and variants such as hashtags.
 
 Identifier = type of Token & [
-    eat = (src:nonemptystring ctx:Context):> uint64? => {
+    eat = (src:nonemptystring @ctx:Context):> uint64? => {
         doc"""
         Identifiers:
         - may not start with a number
@@ -273,7 +273,7 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx { #TODO compiler imp
 
 
 
-tokenize = (srcfile:SrcFile):>array<Token> => {
+tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
     ctx_stack:array<Context length>?0> = [  #TODO: what's the clean way to share tokens (unlike p0.py where tokens and tokens_so_far were separate views on the same thing. want to reduce the redundancy)
         Root[srcfile=srcfile previous=none]
     ]
@@ -288,11 +288,14 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
         printl"---------------------------------------------------\nallowed_tokens: {allowed_tokens}"
         matches = [
             loop token_cls in allowed_tokens {
-                length = token_cls.eat(src[i..] ctx)
+                length = token_cls.eat(src[i..] @ctx)
+                if length is? TokenError { length.shift(i)  return length }   # its spans were relative to `src[i..]`
                 if length isnt? exception
                     [length=length token_cls=token_cls]
             }
         ]
+        loop w in ctx.warnings { w.shift(i)  w.warn }
+        ctx.warnings.clear
         matches.sort(key=(.length) reverse=true)
         longest_match_length = if matches.length >? 0 matches[0].length else 0
         matches = [loop m in matches if m.length =? longest_match_length m else break]
@@ -328,14 +331,9 @@ main = (argv:array<string>):>uint64 => {
             s:string => s
             _ => err"failed to read file {path_arg}"
         }
-        first_row=0
     ]
     tokens = tokenize(srcfile)
-    if tokens is? TokenError {
-        # todo render the report
-        tokens.render(srcfile)
-        exit(1)
-    }
+    if tokens is? TokenError { tokens.fail } # exit with report
     printl"tokens={tokens}"
 
 

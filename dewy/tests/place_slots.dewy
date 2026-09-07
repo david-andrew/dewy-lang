@@ -1,0 +1,30 @@
+# A function type may spell a place parameter (`@ctx:Context`), so a slot
+# contract can hand its implementations a binding to write; a call through
+# the family's dispatcher (`token_cls.eat(src @ctx)`) forwards the place.
+let Ctx:type = [seen:array<string> = []]
+let eatfn:type = (src:string @ctx:Ctx):>uint64 | none
+let Tok:type = $abstract type of any & [eat:eatfn]
+let Word = type of Tok & [
+    eat = (src:string @ctx:Ctx):>uint64 | none => {
+        if src.length =? 0 return none
+        ctx.seen.push("word")
+        return src.length
+    }
+]
+let Space = type of Tok & [
+    eat = (src:string @ctx:Ctx):>uint64 | none => {
+        ctx.seen.push("space")
+        return none
+    }
+]
+let main = ():>int64 => {
+    let ctx = Ctx()
+    let kinds:array<type<Tok>> = [Word Space]
+    let total:uint64 = 0
+    loop k in kinds {
+        let n = k.eat("ab" @ctx)
+        if n is? uint64 { total += n }
+    }
+    if total =? 2 and ctx.seen.length =? 2 and ctx.seen[0] =? "word" and ctx.seen[1] =? "space" return 42
+    return 1
+}
