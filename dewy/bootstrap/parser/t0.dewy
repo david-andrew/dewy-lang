@@ -47,7 +47,7 @@ const start_characters = alpha | greek | math | misc # | latin | units
 const continue_characters = start_characters | digits
 const decoration_characters = superscripts | subscripts | misc_decorations | primes
 
-# note that the prefix is case insensitive, so call .casefold() when matching the prefix
+# note that the prefix is case sensitive
 # numbers may have _ as a separator (if _ is not in the set of digits)
 const BasePrefix:type = '0b' | '0t' | '0q' | '0s' | '0o' | '0d' | '0z' | '0x' | '0u' | '0r' | '0g'
 
@@ -90,7 +90,7 @@ const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be ba
 
 
 # Mostly operators, but also some special identifiers
-# Symbols are case-insensitive (mainly relevant for `in?`, `is?`, `isnt?`)
+# Symbols are case-sensitive
 symbols:array<nonemptystring> = [
     '~' '@' '$' '`'
     '?' ';'
@@ -306,11 +306,9 @@ Identifier = type of Token & [
 Symbol = type of Token & [
     eat = (src:nonemptystring @ctx:Context):> uint64? => {
         doc"""symbolic operators are any sequence of characters in the symbolic_operators set"""
-        chunksize = if src.length <? LEN_LONGEST_SYMBOL src.length else LEN_LONGEST_SYMBOL
-        chunk = src[..chunksize).casefold()
         loop op in symbols {
-            if chunk.startswith(op) {
-                return min(op.length src.length)  # casefold can affect the length of src, so min required in case src was shorter than the op
+            if src.startswith(op) {
+                return op.length
             }
         }
         return none
