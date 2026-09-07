@@ -93,3 +93,23 @@ let main = ():>int64 => {
 }
 '''
     assert 'scan' in codegen(SrcFile(None, program), debug_locations=False)   # checks, proves, and lowers
+
+
+def test_a_bound_value_conditional_keeps_its_arms_facts() -> None:
+    """`let c = if s.length <? k s.length else k` proves `s[..c)` like the
+    statement form does; a method body sees a module-level length's facts."""
+    source = (
+        'let symbols:array<string> = ["<=>" "+"]\n'
+        'LEN = symbols[0].length\n'
+        'let head = (s:string k:int64):>string => {\n'
+        '    if k <? 0 return ""\n'
+        '    let c = if s.length <? k s.length else k\n'
+        '    return s[..c)\n'
+        '}\n'
+        'let T:type = [n:int64\n'
+        '    cut = (s:string):>string => { let c = if s.length <? LEN s.length else LEN  return s[..c) }\n'
+        ']\n'
+        'let main = ():>int64 => { if head("hello" 3) =? "hel" and T(1).cut("hello") =? "hel" return 42  return 1 }\n'
+    )
+    root = check.typecheck_and_resolve(SrcFile(None, source))
+    assert root is not None

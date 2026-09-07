@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ...reporting import Error, Pointer, Span, SrcFile
 from ...targets import ADDRESS_BITS, max_length
@@ -472,6 +472,21 @@ def _strip_casts(node: hir.AST) -> hir.AST:
     return node
 
 
+def _value_flow_of(node: hir.AST) -> hir.Flow | None:
+    """A value conditional an expression is (through casts and a wrapping
+    block): `if p a else b` with a value type and no loop arms."""
+    node = _strip_casts(node)
+    while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+        node = _strip_casts(node.items[0])
+    if (
+        isinstance(node, hir.Flow)
+        and node.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)
+        and not any(isinstance(arm, hir.LoopArm) for arm in node.arms)
+    ):
+        return node
+    return None
+
+
 def _sequence_of(node: hir.AST) -> hir.AST | None:
     """The sequence a `.length` node measures (arrays and strings alike), through
     the cast a comparison with a fixed width wraps it in (`i:uint64 <? xs.length`)."""
@@ -670,7 +685,21 @@ class _BoundsValidator:
         }
 
     def validate(self, root: hir.Block) -> None:
-        self._analyze(root, {}, validate=True)
+        # module-level function bodies are analyzed after the module's own
+        # statements, in the module's final state: a method (a hidden function
+        # hoisted to the front of the module) then knows what the bindings it
+        # reads are (`LEN = symbols[0].length` is never negative). Only bindings
+        # that are never reassigned reach a body (`mutable_globals`), so the
+        # final state is the state at every point after their initialization.
+        self.root_items = {id(item) for item in root.items}
+        self.deferred_functions: list[hir.FunctionLiteral] = []
+        final: State = {}
+        for item in root.items:   # the root block's own walk, without its scope-end cleanup
+            final = self._analyze(item, final, validate=True)
+        deferred, self.deferred_functions = self.deferred_functions, []
+        self.root_items = set()
+        for function in deferred:
+            self._analyze_function(function, validate=True, enclosing=final)
 
     def _analyze(
         self,
@@ -693,6 +722,16 @@ class _BoundsValidator:
                     current.pop(binding_id, None)
             return current
         if isinstance(node, hir.Declare):
+            flow = _value_flow_of(node.expr)
+            if flow is not None and node.binding_id is not None:
+                return self._bind_conditional(node, flow, current, validate=validate)
+            if id(node) in getattr(self, 'root_items', ()) and isinstance(node.expr, (hir.FunctionLiteral, hir.OverloadedFunction)):
+                # a module-level function: its body is analyzed after the module's statements (see `validate`)
+                self.deferred_functions.extend(
+                    [node.expr] if isinstance(node.expr, hir.FunctionLiteral)
+                    else [alternate for alternate in node.expr.alternates if isinstance(alternate, hir.FunctionLiteral)]
+                )
+                return current
             interval = self._eval(node.expr, current, validate=validate)
             if node.binding_id is not None and node.binding_id not in self.assigned:
                 self._record_element_intervals(node.binding_id, _strip_casts(node.expr))
@@ -734,6 +773,9 @@ class _BoundsValidator:
                     self.member_facts[node.binding_id] = call
             return current
         if isinstance(node, hir.Assign):
+            flow = _value_flow_of(node.value) if node.op == '=' else None
+            if flow is not None and node.target.binding_id is not None:
+                return self._bind_conditional(node, flow, current, validate=validate)
             value = self._eval(node.value, current, validate=validate)
             binding_id = node.target.binding_id
             if binding_id is None:
@@ -1271,6 +1313,56 @@ class _BoundsValidator:
                 self._eval(param.value, state, validate=validate)
         self._seed_parameter_refinements(function, state)
         self._analyze(function.body, state, validate=validate)
+
+    def _bind_conditional(self, node: hir.Declare | hir.Assign, flow: hir.Flow, state: State, *, validate: bool) -> State:
+        """`let c = if p a else b` (or `c = …`) analyzed as the statement form
+        `if p { c = a } else { c = b }`: under each arm's condition the binding
+        takes that arm's value *with its facts* (`c = src.length` copies the
+        length's, `c = k` under a failed `src.length <? k` keeps `c <=? src.length`),
+        and the arms join as states — a value conditional evaluated as an
+        expression would keep only the union of the arms' intervals."""
+
+        def bind(body: hir.AST, arm_state: State) -> State:
+            current = dict(arm_state)
+            value = body
+            local_ids: set[int] = set()
+            if isinstance(body, hir.Block) and body.items:
+                local_ids = {item.binding_id for item in body.items if isinstance(item, hir.Declare) and item.binding_id is not None}
+                for item in body.items[:-1]:
+                    current = self._analyze(item, current, validate=validate)
+                value = body.items[-1]
+            if value.type == ty.BOTTOM_TYPE:
+                current = self._analyze(value, current, validate=validate)
+            else:
+                rebound = replace(node, expr=value) if isinstance(node, hir.Declare) else replace(node, value=value)
+                current = self._analyze(rebound, current, validate=validate)
+            for binding_id in local_ids:
+                current.pop(binding_id, None)
+            return current
+
+        remaining: State | None = dict(state)
+        exits: list[State] = []
+        for arm in flow.arms:
+            if remaining is None:
+                break
+            self._eval(arm.condition, remaining, validate=validate)
+            true_state = self._refine(remaining, arm.condition, truth=True)
+            if true_state is not None:
+                exit_state = bind(arm.body, true_state)
+                if arm.body.type != ty.BOTTOM_TYPE:
+                    exits.append(exit_state)
+            false_state = self._refine(remaining, arm.condition, truth=False)
+            if false_state is None:
+                remaining = None
+                break
+            remaining = false_state
+        if flow.default is not None and remaining is not None:
+            exit_state = bind(flow.default, remaining)
+            if flow.default.type != ty.BOTTOM_TYPE:
+                exits.append(exit_state)
+        elif flow.default is None and remaining is not None:
+            exits.append(remaining)
+        return dict(state) if not exits else self._join_states(exits)
 
     def _analyze_flow(
         self,

@@ -1,0 +1,29 @@
+# A bound value conditional keeps its arms' facts: `let c = if s.length <? k
+# s.length else k` is analyzed as the statement form, so `c <=? s.length`
+# holds on both paths and `s[..c)` proves. A module-level function or method
+# body is analyzed after the module's statements, so it knows what the
+# module's never-reassigned bindings are (`LEN` is a length: never negative).
+let nonempty:type = string<length >? 0>
+let symbols:array<nonempty> = ["<=>" "+"]
+symbols.sort(key=(.length) reverse=true)
+LEN = symbols[0].length
+let Tok:type = $abstract type of any & [text:string]
+let Sym = type of Tok & [
+    eat = (src:nonempty):>uint64? => {
+        chunksize = if src.length <? LEN src.length else LEN     # at most `src.length`, at least 0
+        chunk = src[..chunksize)
+        loop op in symbols { if chunk.startswith(op) return op.length }
+        return none
+    }
+]
+let head = (s:string k:int64):>string => {
+    if k <? 0 return ""
+    let c = if s.length <? k s.length else k
+    return s[..c)
+}
+let main = ():>int64 => {
+    let n = Sym.eat("<=>x")
+    let m = Sym.eat("+")
+    if n is? uint64 and n =? 3 and m is? uint64 and m =? 1 and head("hello" 3) =? "hel" and head("hi" 3) =? "hi" return 42
+    return 1
+}

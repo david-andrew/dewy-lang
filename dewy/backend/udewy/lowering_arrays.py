@@ -1317,6 +1317,7 @@ class _ArrayLowering:
 
     def _is_growable_element(self, element: ty.Type) -> bool:
         """Elements a growable (arena-backed) array may hold: words, string handles, objects, arrays, and optional cells (as handles)."""
+        element = ty.strip_refinement(element)   # `array<nonemptystring>`: the element is a string with a fact
         return self._is_word_element(element) or isinstance(element, (ty.ObjectType, ty.ArrayType)) or self._is_optional_element(element) or self._is_union_element(element)
 
     def _growable_element_value(

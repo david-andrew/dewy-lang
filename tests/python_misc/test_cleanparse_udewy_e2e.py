@@ -104,6 +104,7 @@ LOWERED_CASES = [
     ('place_slots.dewy', 42),
     ('nested_object_fields.dewy', 42),
     ('min_max_facts.dewy', 42),
+    ('conditional_value_facts.dewy', 42),
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),
