@@ -82,6 +82,39 @@ const base16 = '0x'
 const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be based strings or based arrays
 
 
+
+
+
+
+
+
+# Mostly operators, but also some special identifiers
+# Symbols are case-insensitive (mainly relevant for `in?`, `is?`, `isnt?`)
+symbols = [
+    '~' '@' '$' '`'
+    '?' ';'
+    '+' '-' '*' '/' '//' '%' '^'
+    '\\' # left divide e.g. given Ax=b x=A\b where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
+    '=?' '>?' '<?' '>=?' '<=?' 'in?' 'is?' 'isnt?' '<=>'
+    '|' '&' '??'
+    '=' '::' ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators e.g. docs)
+    '|>' '<|' '=>'
+    '->' '<->'
+    '.' '..' '...' ',' ':' ':>'
+    '∞' '∅'
+    # ⁂ ‰ ‱
+]
+symbols.sort(key=(.length) reverse=true)
+LEN_LONGEST_SYMBOL = symbols[0].length
+
+# shift operators are not allowed in type groups, so deal with them separately
+shift_operators = ['<<' '>>' '<<<' '>>>' '<<!' '!>>']
+shift_operators.sort(key=(.length) reverse=true)
+
+
+
+
+
 # Token Structs
 # StringQuoteOpener = type of any & [matching_quote:StringQuoteCloser?=none]
 # StringQuoteCloser = type of any & [matching_quote:StringQuoteOpener|RawStringQuoteOpener|TemplateStringQuoteOpener|BasedStringQuoteOpener|none=none]  # TODO compiler fixes: causes recursion limit overflow
@@ -192,9 +225,9 @@ LineComment = type of Token & [
 # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
 BlockComment = type of Token & [
     eat = (src:nonemptystring @ctx:Context):>uint64? | TokenError => {
-        # (doc)r"""
-        # Block comments are of the form #{ ... }# and can be nested.
-        # """
+        doc"""
+        Block comments are of the form #\{ ... \}# and can be nested.
+        """
         
         if not src.startswith(block_comment_start) return none
         
@@ -202,7 +235,6 @@ BlockComment = type of Token & [
         i:uint64 = block_comment_start.length
 
         loop i <? src.length {
-            printl"i={i}"
             if src[i..].startswith(block_comment_start) {
                 openers.push(Span[i i+block_comment_start.length])
                 i+=block_comment_start.length
@@ -271,6 +303,22 @@ Identifier = type of Token & [
 ]
 
 
+Symbol = type of Token & [
+    eat = (src:nonemptystring @ctx:Context):> uint64? => {
+        doc"""symbolic operators are any sequence of characters in the symbolic_operators set"""
+        chunksize = min(LEN_LONGEST_SYMBOL src.length)
+        chunk = src[..chunksize).casefold()
+        loop op in symbols {
+            if chunk.startswith(op) {
+                return op.length 
+            }
+        }
+        return none
+    }
+]
+
+
+
 
 
 # what tokens are allowed in what contexts
@@ -280,6 +328,7 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx {
         LineComment
         BlockComment
         Identifier
+        Symbol
     ]
     <StringBody> => []
     <RawStringBody> => []
@@ -290,12 +339,14 @@ contextmap = (ctx:Context):>array<type<Token>> => match ctx {
         LineComment
         BlockComment
         Identifier
+        Symbol
     ]
     <TypeBody> => [
         Whitespace
         LineComment
         BlockComment
         Identifier
+        Symbol
     ]
 }
 
@@ -316,10 +367,10 @@ tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
         printl"---------------------------------------------------\nallowed_tokens: {allowed_tokens}"
         matches = [
             loop token_cls in allowed_tokens {
-                length = token_cls.eat(src[i..] @ctx)
-                if length is? TokenError { length.shift(i)  return length }   # its spans were relative to `src[i..]`
-                if length isnt? exception
-                    [length=length token_cls=token_cls]
+                result = token_cls.eat(src[i..] @ctx)
+                if result is? TokenError { result.shift(i)  return result }   # its spans were relative to `src[i..]`
+                if result isnt? exception
+                    [length=result token_cls=token_cls]
             }
         ]
         loop w in ctx.warnings { w.shift(i)  w.warn }
