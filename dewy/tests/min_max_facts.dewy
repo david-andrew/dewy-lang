@@ -1,0 +1,18 @@
+# `min` and `max` are overload sets (`int64`, `uint64`) whose results carry
+# type facts: `min(k s.length)` is at most `s.length` (a length passed as a
+# value term names the length key), so a slice up to it needs no guard on
+# that side; `max(a b)` is at least either. Literals alone take `int64`; an
+# expected `uint64` picks that alternative.
+let head = (s:string k:int64):>string => {
+    let n = min(k s.length)              # at most `s.length`; the lower bound is the guard's
+    if n <? 0 return ""
+    return s[0..n)
+}
+let main = ():>int64 => {
+    let lo:int64 = min(-4 9)
+    let hi:uint64 = max(2 7)
+    let w:uint64 = 3
+    let both = max(w 9)
+    if head("hello" 3) =? "hel" and head("hi" 3) =? "hi" and head("x" (-1)) =? "" and lo =? -4 and hi =? 7 and both =? 9 return 42
+    return 1
+}

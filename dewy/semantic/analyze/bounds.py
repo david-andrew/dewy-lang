@@ -2536,6 +2536,12 @@ class _BoundsValidator:
                     term_id = self._binding_id(argument)
                     if term_id is not None and term_id >= 0:
                         facts.extend((term_id, None, gap, direction) for direction, gap in directions)
+                        continue
+                    # a length passed as the value (`min(k src.length)`): the term is the length key
+                    sequence = _sequence_of(argument)
+                    sequence_id = _runtime_array_id(sequence, self.registry) if sequence is not None else None
+                    if sequence_id is not None:
+                        facts.extend((_length_key(sequence_id), None, gap, direction) for direction, gap in directions)
                     continue
                 sequence_id = _runtime_array_id(argument, self.registry)
                 if sequence_id is not None:

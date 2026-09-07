@@ -14,6 +14,7 @@ let err = (msg:string?=none) => {
     exit(1)
 }
 
+let nonemptystring:type = string<length >? 0>
 
 
 
@@ -90,7 +91,7 @@ const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be ba
 
 # Mostly operators, but also some special identifiers
 # Symbols are case-insensitive (mainly relevant for `in?`, `is?`, `isnt?`)
-symbols = [
+symbols:array<nonemptystring> = [
     '~' '@' '$' '`'
     '?' ';'
     '+' '-' '*' '/' '//' '%' '^'
@@ -146,7 +147,6 @@ let Push = type of any & [ctx:Context]
 let Pop = type of any
 # ConextAction:type = Push | Pop | none
 
-let nonemptystring:type = string<length >? 0>
 let eatfn:type = (src:nonemptystring @ctx:Context):>uint64 & <(<=?src.length)> | none | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
@@ -306,11 +306,11 @@ Identifier = type of Token & [
 Symbol = type of Token & [
     eat = (src:nonemptystring @ctx:Context):> uint64? => {
         doc"""symbolic operators are any sequence of characters in the symbolic_operators set"""
-        chunksize = min(LEN_LONGEST_SYMBOL src.length)
+        chunksize = if src.length <? LEN_LONGEST_SYMBOL src.length else LEN_LONGEST_SYMBOL
         chunk = src[..chunksize).casefold()
         loop op in symbols {
             if chunk.startswith(op) {
-                return op.length 
+                return op.length
             }
         }
         return none

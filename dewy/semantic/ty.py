@@ -1988,6 +1988,19 @@ class TypeSystem:
         ]
         if len(winners) > 1:
             winners = self._prefer_exact_number_methods(winners, pos_types)
+        if len(winners) > 1 and expected_return is not None:
+            # a tie among widths (`min` on `int64` and `uint64`): the expected result decides (`let y:uint64 = max(2 7)`)
+            by_result = [(index, method) for index, method in winners if self.is_subtype(strip_refinement(method.ret), expected_return)]
+            if len(by_result) == 1:
+                winners = by_result
+        if len(winners) > 1:
+            # else integer literals take their default width, `int64`
+            by_default = [
+                (index, method) for index, method in winners
+                if all(not isinstance(t, IntegerLiteralType) or strip_refinement(p.type) == 'int64' for t, p in zip(pos_types, method.pos_or_kw))
+            ]
+            if len(by_default) == 1:
+                winners = by_default
         if len(winners) != 1:
             raise DispatchError(f'ambiguous call among {len(apps)} applicable methods')
         method_index, method = winners[0]

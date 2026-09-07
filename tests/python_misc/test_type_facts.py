@@ -354,3 +354,16 @@ def test_a_slot_contract_with_an_object_member_is_adopted() -> None:
     )
     root = check.typecheck_and_resolve(SrcFile(None, source))
     assert root is not None
+
+
+def test_a_refined_string_element_has_the_string_members() -> None:
+    """`xs[0].length` and `xs[0].startswith(…)` on an `array<string<length >? 0>>`:
+    the element is a string with a fact, not a type without members."""
+    source = (
+        'let nonempty:type = string<length >? 0>\n'
+        'let symbols:array<nonempty> = ["<=>" "+"]\n'
+        'let longest = symbols[0].length\n'
+        'let main = ():>int64 => { if symbols[0].startswith("<") and longest =? 3 return 42  return 1 }\n'
+    )
+    root = check.typecheck_and_resolve(SrcFile(None, source))
+    assert root is not None

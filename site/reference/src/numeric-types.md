@@ -78,7 +78,7 @@ The intended hierarchy places `int` below `rational`, both below `real` and `num
 
 Semantic type and storage representation are separate. A value with `int` semantics uses a 64-bit machine representation when compile-time range analysis proves every reachable value fits; the analysis validates every abstract-integer arithmetic result and every narrowing (an `int` meeting `int64`, printing, a fixed-width parameter). When the proof is unavailable, the compiler reports the obligation — the value is only known to lie in some interval — rather than silently choosing overflow; the program annotates a fixed width or narrows the value with a comparison.
 
-`min(a b)` and `max(a b)` are the smaller and larger of two `int64` values (other numeric types will get overloads).
+`min(a b)` and `max(a b)` are the smaller and larger of two values, for `int64` and `uint64` (a call on integer literals alone takes `int64`, unless the expected type says `uint64`). Their results carry [type facts](refinements-and-effects.md#type-facts): `min(k src.length)` is at most `k` and at most `src.length`, so `src[..min(k src.length))` slices without a guard; `max(a b)` is at least either.
 
 ## Meeting Another Width
 

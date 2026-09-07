@@ -76,3 +76,20 @@ def test_a_bare_default_fits_an_inherited_enum_field_by_its_literal() -> None:
     assert declared['e'].expr.type.fields[0].type == ty.TypeOr([ty.StringLiteralType('error'), ty.StringLiteralType('warning')])
     with pytest.raises((TypeCheckError, UserError), match='weakens field'):
         _declared("let Severity:type = 'error' | 'warning'\nlet Report:type = [severity:Severity]\nlet Odd = type of Report & [severity=\"loud\"]\n")
+
+
+def test_width_ties_resolve_by_expected_type_then_literal_default() -> None:
+    """An overload set on `int64` and `uint64` called on literals alone takes
+    `int64`; an expected `uint64` result picks that alternative; a `uint64`
+    argument selects it outright."""
+    source = (
+        'let pick = ((a:int64 b:int64):>int64 => a) & ((a:uint64 b:uint64):>uint64 => b)\n'
+        'let x = pick(2 7)\n'
+        'let y:uint64 = pick(2 7)\n'
+        'let w:uint64 = 3\n'
+        'let z = pick(w 9)\n'
+    )
+    root = check.typecheck_and_resolve(SrcFile(None, source))
+    declared = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    assert declared['x'].expr.type == 'int64'
+    assert declared['z'].expr.type == 'uint64'

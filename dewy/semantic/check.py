@@ -8131,6 +8131,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             return hir.DictMethod(binop.loc, signature, dictionary, name)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        value = _through_refinement(value)   # `xs[0].length` on an `array<nonemptystring>` element
         found_dict = _dict_value(value)
         if found_dict is not None:
             # the live entry count (removed entries stay as tombstones)
@@ -8162,6 +8163,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         value = source_place.target
     if isinstance(value.type, ty.NamedType):
         value = replace(value, type=ty.unfold(value.type))
+    value = _through_refinement(value)   # a refined string's methods are the string's
     if isinstance(value.type, ty.TypeOr) and source_place is None:
         forwarding = _forwarding_member_access(value, name, binop, ctx=ctx)
         if forwarding is not None:
@@ -15077,6 +15079,16 @@ def _array_method_index_argument(name: str, call: hir.FunctionCall) -> hir.AST |
     if name == 'truncate':
         return call.pos_args[0] if call.pos_args else call.kw_args.get('count')
     return None
+
+
+def _through_refinement(value: hir.AST) -> hir.AST:
+    """A refined string or array value (`string<length >? 0>`) read as its base
+    type: the members are the base's, the facts stay with the binding."""
+    if isinstance(value.type, ty.RefinedType):
+        plain = ty.strip_refinement(value.type)
+        if _is_string_type(plain) or isinstance(plain, ty.ArrayType):
+            return replace(value, type=plain)
+    return value
 
 
 def _is_string_type(type_: ty.Type) -> bool:

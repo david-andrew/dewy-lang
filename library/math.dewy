@@ -17,5 +17,10 @@ let _int_pow = (base:int64 exponent:int64):>int64 => {
 }
 
 # The smaller / larger of two integers.
-let min = (a:int64 b:int64):>int64 => if a <? b a else b
-let max = (a:int64 b:int64):>int64 => if a >? b a else b
+# the smaller / larger of two values, with what that says about the result:
+# `min(k src.length)` is at most `src.length` (and at most `k`), `max(a b)` at
+# least either — facts a slice or a refined binding can use
+let min = ((a:int64 b:int64):>int64<v => v <=? a and v <=? b> => if a <? b a else b)
+        & ((a:uint64 b:uint64):>uint64<v => v <=? a and v <=? b> => if a <? b a else b)
+let max = ((a:int64 b:int64):>int64<v => v >=? a and v >=? b> => if a >? b a else b)
+        & ((a:uint64 b:uint64):>uint64<v => v >=? a and v >=? b> => if a >? b a else b)
