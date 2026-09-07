@@ -10,7 +10,7 @@ from typing import Callable
 
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
-from .lowering_shared import MoveNote
+from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, MoveNote
 from ...semantic.hir_display import type_to_dewy
 
 
@@ -398,9 +398,26 @@ class _ObjectLowering:
             elif isinstance(field.type, ty.ObjectType):
                 statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc, arena=arena, move=move))
             elif isinstance(field.type, ty.ArrayType) and move and field.type.length is None:
-                # a dying source's arena array changes owner: the handle word moves
+                # a dying source's arena array changes owner: the handle word
+                # moves. A frame descriptor (a literal's `[]` default, an
+                # exact-length initializer) would dangle: that one is cloned
                 loaded = self._intrinsic_call('__load_i64__', [src_addr], 'int64', loc)
-                statements.append(self._intrinsic_call('__store_i64__', [loaded, dest_addr], ty.VOID_TYPE, loc))
+                handle = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'moved_field').name)
+                source = self._value_load(src_addr, field.type, loc)
+                prelude, copied = self._clone_array_value(replace(source, type='int64'), field.type, arena=True, move=True)   # its elements move too: the frame is dying
+                is_arena_block = self._typed_equality(
+                    self._int64_binary(
+                        '__mod__',
+                        self._int64_binary('__floordiv__', self._load_i64_field(handle, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc),
+                        self._int64_literal(loc, 2), loc,
+                    ),
+                    self._int64_literal(loc, 1), 'int64', loc,
+                )
+                statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', handle.name, 'int64', loaded))
+                statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                    loc, ty.VOID_TYPE, is_arena_block,
+                    hir.Block(loc, ty.VOID_TYPE, [self._intrinsic_call('__store_i64__', [handle, dest_addr], ty.VOID_TYPE, loc)], True),
+                )], hir.Block(loc, ty.VOID_TYPE, [*prelude, *self._value_store(copied, dest_addr, field.type, loc)], True)))
             elif isinstance(field.type, ty.ArrayType):
                 source = self._value_load(src_addr, field.type, loc)
                 prelude, copied = self._clone_array_value(

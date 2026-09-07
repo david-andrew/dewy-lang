@@ -916,7 +916,13 @@ def optional_payload(type_: Type) -> TypeExpr | None:
     if not isinstance(type_, TypeOr) or 'none' not in type_.items:
         return None
     payloads = [item for item in type_.items if item != 'none']
-    return payloads[0] if len(payloads) == 1 else None
+    if len(payloads) == 1:
+        return payloads[0]
+    if payloads and all(string_valued(item) for item in payloads):
+        # `'above' | 'below' | none`: the string literals are one string handle
+        # (as everywhere), so the payload is their union
+        return union(*payloads)
+    return None
 
 
 def optional(type_: TypeExpr) -> TypeExpr:

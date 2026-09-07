@@ -1,0 +1,32 @@
+# An optional enumeration field — `placement:Placement | none = none` where
+# `Placement = 'above' | 'below'` — is an optional cell holding one string
+# handle (a union of string literals is one handle everywhere), so a literal
+# stores into it, a narrowed read (`if given isnt? none`) yields the handle,
+# and it copies into other objects and arrays like any optional.
+let Placement:type = 'above' | 'below'
+let Color:type = 'red' | 'blue'
+let P:type = [message:string placement:Placement | none = none color:Color | none = none]
+let S:type = [message:string placement:Placement = "below" auto:bool = true color_name:Color | none = none]
+let build = (p:P):>array<S> => {
+    let out:array<S> = []
+    let placement:Placement = "below"
+    let auto:bool = true
+    let given = p.placement
+    if given isnt? none { placement = given  auto = false }
+    out.push(S[message=p.message placement=placement auto=auto color_name=p.color])
+    return out
+}
+let main = ():>int64 => {
+    let ps:array<P> = [P[message="a" placement="above" color="red"] P[message="b"]]
+    let n:int64 = 0
+    loop p in ps {
+        loop s in build(p) {
+            if s.placement =? "above" { n += 1 }
+            if s.auto { n += 10 }
+            let c = s.color_name
+            if c isnt? none { if c =? "red" { n += 100 } }
+        }
+    }
+    if n =? 111 return 42
+    return n
+}

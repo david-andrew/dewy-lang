@@ -70,6 +70,25 @@ def test_method_diagnostics() -> None:
         _declared('let main = ():>int64 => { let T:type = [x:int64 f = () => x]  return 0 }\n')
 
 
+def test_returning_a_field_expression_does_not_shadow_the_field() -> None:
+    """`return body.length` is not a declaration of `body`: the field stays a
+    member read (`self.body`) everywhere in the method, including the loop
+    guard before the return."""
+    source = (
+        'let S:type = [\n'
+        '    body:string\n'
+        '    count = ():>int64 => {\n'
+        '        let i:uint64 = 0\n'
+        '        loop i <? body.length { i += 1 }\n'
+        '        return body.length\n'
+        '    }\n'
+        ']\n'
+        'let main = ():>int64 => S("abc").count\n'
+    )
+    declared = _declared(source)
+    assert isinstance(declared['S__count'].expr, hir.FunctionLiteral)
+
+
 def test_constructor_overloads_dispatch_by_signature() -> None:
     source = (
         SPAN
@@ -90,3 +109,11 @@ def test_constructor_overloads_dispatch_by_signature() -> None:
 def test_methods_lower_and_run_through_codegen() -> None:
     emitted = codegen(SrcFile(None, SPAN + 'let main = ():>int64 => { let s = Span(1 3)  s.grow(2)  return s.width }\n'))
     assert 'Span__grow' in emitted and 'Span__width' in emitted
+
+
+def test_methods_on_an_annotated_bare_alias() -> None:
+    """`Root:type = type of Context & […]` without `let` is a module declaration
+    too: the methods it inherits compile (they used to be refused as
+    `declared inside a function`)."""
+    declared = _declared('Context = $abstract type of any & [n:int64 doubled = () => n * 2]\nRoot:type = type of Context & [extra:int64 = 1]\nlet main = ():>int64 => Root(21).doubled\n')
+    assert 'Context__doubled' in declared

@@ -113,9 +113,16 @@ class ModuleCompiler:
             state, nominal_types, validated = pickle.loads(cache_path.read_bytes())
         except Exception:
             return False   # a stale or corrupt entry: check the prelude and rewrite it
+        if not (isinstance(nominal_types, dict) and 'nominal' in nominal_types and 'brands' in nominal_types):
+            return False   # an entry from before the registries were stored: check the prelude and rewrite it
         for name in self._PRELUDE_STATE_FIELDS:
             setattr(self, name, state[name])
-        ty.USER_NOMINAL_TYPES.update(nominal_types)
+        # the brand registries a minted type lives in (`let Warning = type of Report & […]` in the prelude)
+        ty.USER_NOMINAL_TYPES.update(nominal_types['nominal'])
+        ty.USER_BRANDS.update(nominal_types['brands'])
+        ty.USER_BRAND_PARENTS.update(nominal_types['parents'])
+        ty.USER_BRAND_TYPES.update(nominal_types['types'])
+        ty.USER_ABSTRACT_BRANDS.update(nominal_types['abstract'])
         _validated_prelude_modules.update(validated)
         return True
 
@@ -131,7 +138,11 @@ class ModuleCompiler:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = cache_path.with_name(f'{cache_path.name}.{id(self)}.tmp')
-            tmp.write_bytes(pickle.dumps((state, dict(ty.USER_NOMINAL_TYPES), validated), protocol=pickle.HIGHEST_PROTOCOL))
+            registries = {
+                'nominal': dict(ty.USER_NOMINAL_TYPES), 'brands': set(ty.USER_BRANDS), 'parents': dict(ty.USER_BRAND_PARENTS),
+                'types': dict(ty.USER_BRAND_TYPES), 'abstract': set(ty.USER_ABSTRACT_BRANDS),
+            }
+            tmp.write_bytes(pickle.dumps((state, registries, validated), protocol=pickle.HIGHEST_PROTOCOL))
             tmp.replace(cache_path)
         except (OSError, pickle.PicklingError, TypeError, AttributeError):
             pass   # the cache is an optimization; a state that cannot be pickled is checked every time

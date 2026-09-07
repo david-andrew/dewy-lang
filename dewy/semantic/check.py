@@ -334,6 +334,8 @@ def _typecheck_module(
     seen_names: set[str] = set()
     for item in block.inner:
         declaration = _block_declaration_parts(item, seen_names, ctx=ctx)   # `let x = …` and a bare `x = …` alike
+        if declaration is None:
+            declaration = _annotated_type_alias_rhs(item)   # `Root:type = type of Context & […]`
         if declaration is not None:
             ctx.module_declared_names.add(declaration[0])
         unpacked = _unpack_declaration_targets(item)
@@ -3050,6 +3052,18 @@ def _flow_value_type(
         # 0`), as singleton unions are at every value boundary; string
         # singletons keep their union — `'A' | 'B'` is an enum value
         return 'int64'
+    literals = [value for value in values if isinstance(value, ty.IntegerLiteralType)]
+    words = [ty.strip_refinement(value) for value in values if not isinstance(value, ty.IntegerLiteralType)]
+    if literals and words and all(word == words[0] for word in words):
+        # a singleton beside one fixed width takes that width when it fits
+        # (`if previous isnt? none previous.stop else 0` is a `uint64`)
+        word = words[0]
+        layout = ty.fixed_integer_layout(word)
+        if layout is not None:
+            width, signed = layout
+            low, high = (-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else (0, (1 << width) - 1)
+            if all(low <= literal.value <= high for literal in literals):
+                return word
     return ty.union(*values)
 
 
@@ -5409,6 +5423,8 @@ def _declare_pending_methods(*, ctx: Context, for_type: ty.ObjectType | None = N
         if for_type is not None and object_type is not for_type:
             continue
         ctx.pending_methods.remove((alias, object_type))
+        if all(method.binding_id is not None for method in object_type.methods):
+            continue   # a minted child of a compiled parent (`Error = type of Report & […]`): nothing of its own to compile
         _declare_type_methods(alias, object_type, ctx=module_ctx)
 
 
@@ -5587,8 +5603,8 @@ def _read_only_reason(binding: sb.Binding | None) -> str | None:
 def _declaration_parts(
     item: p0.AST,
 ) -> tuple[str, p0.AST] | None:
-    if not isinstance(item, p0.KeywordExpr) or len(item.parts) != 2:
-        return None
+    if not _is_top_level_declare(item) or len(item.parts) != 2:
+        return None   # `return body.length` declares nothing
     expression = item.parts[1]
     if not isinstance(expression, p0.BinOp):
         return None
@@ -6150,13 +6166,19 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                 # its inherited type and only the default changes — so a `Warning`
                 # is still a `Report` (the structural relation needs the same
                 # field types); an explicit annotation narrows the field instead
-                if not ctx.type_system.is_subtype(field_.type, fields[existing_index].type):
+                bare_default = field_.name in _default_only_fields(rhs) and field_.default is not None
+                given_type = field_.type
+                if bare_default:
+                    # the default's own type (`'error'`, not the widened `string`) is what must fit
+                    assert isinstance(field_.default, p0.AST)
+                    given_type = typecheck_and_resolve_inner(field_.default, ctx=ctx, expected=fields[existing_index].type).type
+                if not ctx.type_system.is_subtype(given_type, fields[existing_index].type):
                     user_error(
                         ctx.srcfile,
                         f'minted type `{binding.name}` weakens field `{field_.name}`',
-                        Pointer(span=rhs.loc, message=f'`{type_to_dewy(field_.type)}` does not fit the inherited `{type_to_dewy(fields[existing_index].type)}`'),
+                        Pointer(span=rhs.loc, message=f'`{type_to_dewy(given_type)}` does not fit the inherited `{type_to_dewy(fields[existing_index].type)}`'),
                     )
-                if field_.name in _default_only_fields(rhs) and field_.default is not None:
+                if bare_default:
                     fields[existing_index] = replace(fields[existing_index], default=field_.default)
                 else:
                     fields[existing_index] = field_
@@ -12006,10 +12028,15 @@ def _adopt_result_refinement(rettype: ty.Type, expected: ty.Type | None, params:
         return rettype   # its own refinements: checked against the contract by the subtyping of the call site
     if ty.strip_refinement(contract) == rettype or (isinstance(contract, ty.TypeOr) and ty.union(*(ty.strip_refinement(item) for item in contract.items)) == rettype):
         return contract
-    contract_members = {ty.strip_refinement(member.base) if isinstance(member, ty.RefinedType) else member: member for member in (contract.items if isinstance(contract, ty.TypeOr) else [contract])}
+    # (a list of pairs: an object member such as `| TokenError` is not hashable)
+    contract_members = [(ty.strip_refinement(member.base) if isinstance(member, ty.RefinedType) else member, member) for member in (contract.items if isinstance(contract, ty.TypeOr) else [contract])]
+
+    def adopted(item: ty.TypeExpr) -> ty.TypeExpr:
+        return next((member for base, member in contract_members if base == item), item)
+
     if isinstance(rettype, ty.TypeOr):
-        return ty.union(*(contract_members.get(item, item) for item in rettype.items))
-    return contract_members.get(rettype, rettype)
+        return ty.union(*(adopted(item) for item in rettype.items))
+    return adopted(rettype)
 
 
 def _parameter_type_at_call(param_type: ty.Type, arguments: dict[str, hir.AST]) -> ty.Type:

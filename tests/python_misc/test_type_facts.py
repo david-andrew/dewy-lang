@@ -334,3 +334,23 @@ let main = ():>int64 => {
     _check(program)
     with pytest.raises(TypeCheckError, match='type mismatch'):
         _check(program.replace('    let r:Report = w\n', '    let c = Custom[title="t"]\n    let r:Report = c\n'))
+
+
+def test_a_slot_contract_with_an_object_member_is_adopted() -> None:
+    """`:>uint64 & <…> | none | TokenError` on a slot: the refined member is
+    adopted by the implementation's `uint64? | TokenError` result (an object
+    member is not hashable — this used to crash the checker)."""
+    source = (
+        'let TokenError = type of error & [title:string]\n'
+        'let eatfn:type = (src:string):>uint64 & <(<=? src.length)> | none | TokenError\n'
+        'let Tok:type = $abstract type of any & [eat:eatfn]\n'
+        'let Word = type of Tok & [\n'
+        '    eat = (src:string):>uint64? | TokenError => {\n'
+        '        if src.length =? 0 return TokenError[title="empty"]\n'
+        '        return src.length\n'
+        '    }\n'
+        ']\n'
+        'let main = ():>int64 => { let n = Word.eat("ab")  if n is? uint64 { return n }  return 0 }\n'
+    )
+    root = check.typecheck_and_resolve(SrcFile(None, source))
+    assert root is not None

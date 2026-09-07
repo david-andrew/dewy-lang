@@ -54,3 +54,25 @@ def test_singleton_union_words_reject_other_values() -> None:
         _declared('let s:-1|1 = 0\n')
     with pytest.raises((TypeCheckError, UserError), match='refuted'):
         _declared('let f = (s:-1|1):>-1|1 => 2\n')
+
+
+def test_a_singleton_branch_beside_a_fixed_width_takes_the_width() -> None:
+    """`if previous isnt? none previous.stop else 0` is a `uint64`, not `uint64 | 0`
+    (a literal that fits the width); one that does not fit keeps the union."""
+    declared = _declared('let T:type = [stop:uint64]\nlet f = (p:T?) => if p isnt? none p.stop else 0\nlet g = (p:T?) => if p isnt? none p.stop else -1\n')
+    assert declared['f'].expr.type.ret == 'uint64'
+    assert isinstance(declared['g'].expr.type.ret, ty.TypeOr)
+
+
+def test_a_bare_default_fits_an_inherited_enum_field_by_its_literal() -> None:
+    """`type of Report & [severity="error"]` keeps `severity:Severity`: the default's
+    literal type is what must fit, not the widened `string`."""
+    declared = _declared(
+        "let Severity:type = 'error' | 'warning'\n"
+        'let Report:type = [severity:Severity title:string = ""]\n'
+        'let Error = type of Report & [severity="error"]\n'
+        'let e = Error(title="t")\n'
+    )
+    assert declared['e'].expr.type.fields[0].type == ty.TypeOr([ty.StringLiteralType('error'), ty.StringLiteralType('warning')])
+    with pytest.raises((TypeCheckError, UserError), match='weakens field'):
+        _declared("let Severity:type = 'error' | 'warning'\nlet Report:type = [severity:Severity]\nlet Odd = type of Report & [severity=\"loud\"]\n")

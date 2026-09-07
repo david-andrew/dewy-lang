@@ -256,3 +256,42 @@ def test_reporting_library_matches_the_compiler_renderer(
     monkeypatch.chdir(tmp_path)
     assert entry_point(udewy_path, []) == 42
     assert capfd.readouterr().err == expected
+
+
+def test_reporting_library_features_match_the_compiler_renderer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Spans across lines (with a blank line inside), control characters as
+    glyphs, placements by hand, multi-line messages and help, a report with
+    no pointers, overlapping pointers demoted to notes, a pointer with
+    several spans, dimmed source, and adjacent zero-width pointers, each
+    rendered as `reporting.py` renders it (`dewy/tests/report_features.dewy`)."""
+    from dewy.reporting import Error, Hint, Info, Pointer, Span, Warning
+
+    src = SrcFile(None, 'let a = 1\rlet b = 2\n\nlet c = f(\n    x\n)\nlet d = g(1 2)\n')
+    one_line = SrcFile(None, 'let total = price * count + tax\nlet other = 1\n')
+    expected = '\n'.join([
+        str(Warning(srcfile=src, title='Lone carriage return', pointer_messages=[Pointer(span=Span(9, 10), message='\\r without \\n')], hint='remove it', use_color=False)),
+        '',
+        str(Error(srcfile=src, title='multi-line', message='a call across lines', pointer_messages=[
+            Pointer(span=Span(28, 44), message='the call\nsecond line of the message'),
+            Pointer(span=Span(36, 36), message='zero'),
+            Pointer(span=Span(11, 12), message='after', placement='above'),
+            Pointer(span=Span(14, 15), message='between', placement='above'),
+        ], notes=['n1', 'n2'], hint='h1\nh2', use_color=False)),
+        str(Info(srcfile=src, title='no pointers', message='just a message', notes=['note'], hint='help', use_color=False)),
+        str(Error(srcfile=one_line, title='overlap and multi-span', pointer_messages=[
+            Pointer(span=Span(12, 25), message='whole product'),
+            Pointer(span=Span(20, 25), message='inside (becomes a note)'),
+            Pointer(span=[Span(4, 9), Span(36, 41)], message='two places'),
+            Pointer(span=Span(28, 31), message='tax'),
+        ], dimmed=[Span(0, 3)], use_color=False)),
+        str(Hint(srcfile=one_line, title='hint', pointer_messages=[Pointer(span=Span(0, 0), message='start'), Pointer(span=Span(1, 1), message='next')], use_color=False)),
+    ]) + '\n'
+    udewy_path = tmp_path / 'report_features.udewy'
+    udewy_path.write_text(codegen(SrcFile.from_path(fixtures / 'report_features.dewy')))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(udewy_path, []) == 42
+    assert capfd.readouterr().err == expected

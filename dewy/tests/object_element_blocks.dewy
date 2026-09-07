@@ -1,0 +1,51 @@
+# Element objects of a runtime-length array are arena blocks, whatever they
+# were copied from: a literal `[p.span]` of a borrowed field, a loop
+# variable pushed on, a field with a default `[]` moved into the arena. The
+# array's release gives each back as a block, so a frame copy would corrupt
+# the arena; the values read back intact after the frames that made them
+# are gone.
+let Span:type = [start:int64 stop:int64]
+let Pointer:type = [span:Span message:string spans:array<Span> = []]
+let Segment:type = [message:string line:int64]
+
+let spans_of = (p:Pointer):>array<Span> => {
+    let out:array<Span> = [p.span]                 # a copy of a borrowed object, in the arena
+    loop s in p.spans { out.push(s) }              # a loop variable, likewise
+    return out
+}
+
+let segments_of = (p:Pointer):>array<Segment> => {
+    let out:array<Segment> = []
+    let count:int64 = 0
+    loop span in spans_of(p) { count += 1 }        # the call's array is released after the loop
+    if count >? 0 {
+        out.push(Segment[message=p.message line=count])
+        return out                                 # an early return copies `out` out
+    }
+    return out
+}
+
+let Report:type = [
+    pointers:array<Pointer> = []
+    point = (a:int64 b:int64 text:string) => { pointers.push(Pointer(Span(a b) text)) }   # `spans = []` is a frame descriptor until the push
+]
+
+let main = ():>int64 => {
+    let report = Report()
+    report.point(12 17 "first operand")
+    report.point(20 25 "second")
+    let checks:int64 = 0
+    let total:int64 = 0
+    loop p in report.pointers {
+        loop seg in segments_of(p) {
+            total += seg.line
+            if seg.message =? "first operand" { checks += 1 }
+            if seg.message =? "second" { checks += 2 }
+        }
+    }
+    let extra = Pointer(Span(1 2) "three" [Span(3 4) Span(5 6)])
+    loop s in spans_of(extra) { total += s.stop - s.start }
+    loop p in report.pointers { total += p.spans.length }   # still 0 each: the defaults survived their frame
+    if checks =? 3 and total =? 5 { return 42 }
+    return checks * 10 + total
+}

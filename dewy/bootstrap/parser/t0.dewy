@@ -20,7 +20,8 @@ let err = (msg:string?=none) => {
 
 ##### CHARACTER SETS AND USEFUL CONSTANTS #####
 
-const whitespace = set[' ' '\t' '\n' '\r']
+
+const whitespace = set[' ' '\t' '\n' '\r\n' '\r']
 const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
 const line_comment_start:'#' = '#'
 const block_comment_start: '#\{' = '#\{'
@@ -130,11 +131,7 @@ let Token:type = $abstract type of any & [
 
 ]
 
-# TODO: move into reporting.dewy
-let TokenError = type of error & Report
-let Warning = type of Report & [
-    severity='warning'
-]
+let TokenError = type of error & Error
 
 
 
@@ -158,7 +155,7 @@ Whitespace = type of Token & [
         doc"""white space is any sequence of whitespace characters"""
         i = 0
         loop i <? src.length and src[i] in? whitespace {
-            if src[i] =? '\r' and not src[i+1..].startswith('\n') {
+            if src[i] =? '\r' { # dewy grapheme handling automatically merges \r\n into a single character
                 warning_lone_carriage_return(src i ctx) # just emit a warning
             }
             i += 1
@@ -166,9 +163,8 @@ Whitespace = type of Token & [
         return if i >? 0 i else none
     }
     
-    warning_lone_carriage_return = (src:nonemptystring i:uint64<(<?src.length)> ctx:Context):>void => {
+    warning_lone_carriage_return = (src:nonemptystring i:uint64 ctx:Context):>void => {
         warning = Warning[
-            # srcfile=ctx.srcfile
             title="Lone carriage return"
             pointers=[Pointer[span=Span[i i+1] message="\\r without \\n"]]  #TODO: test if we can remove `Pointer` since it's completely structural
             hint="\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
@@ -302,7 +298,7 @@ tokenize = (srcfile:SrcFile):>array<Token> => {
         matches = [loop m in matches if m.length =? longest_match_length m else break]
         printl"matched tokens: {matches}"
         if matches.length >? 1 err"TODO: handling multiple matches not handled yet: {matches}"
-        if matches.length =? 0 err"TODO: no tokens matched this round. remaining src:\n```dewy\n{src[i..]}\n```"
+        if matches.length =? 0 err"TODO: no tokens matched this round. remaining src:\n```dewy\n{_quoted(src[i..])}\n```"
         [length token_cls] = matches[0]
         token = token_cls[src Span[i i+length] tokens.length]
         printl"matched token {token}"

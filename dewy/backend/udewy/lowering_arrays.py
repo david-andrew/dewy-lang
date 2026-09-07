@@ -2459,8 +2459,13 @@ class _ArrayLowering:
         if isinstance(element_type, ty.ArrayType):
             return self._independent_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
+            # an element object is an arena block (the array's release gives
+            # it back as one), whether a dying temporary whose members move or
+            # a copy of a borrowed value (`[p.span]`, `xs[i] = seg`)
             if isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral)):
-                return self._clone_object_value(node, element_type, arena=True, move=True)   # a dying temporary: its members move
+                return self._clone_object_value(node, element_type, arena=True, move=True)
+            if self._has_arena():
+                return self._clone_object_value(node, element_type, arena=True)
             return self._independent_object_value(node, element_type)
         if self._is_string_valued(element_type):
             return self._escaping_string_value(node)   # `xs[i] = "{…}"`: the array may outlive the frame

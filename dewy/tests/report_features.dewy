@@ -1,0 +1,49 @@
+# `library/reporting.dewy` against `dewy/reporting.py`, feature by feature:
+# a report built the way the compiler builds one (fields, with the source
+# on it), a span crossing lines with a blank line inside, a lone carriage
+# return drawn as a glyph, placements chosen by hand, a two-line message
+# and a two-line help, and an Info with no pointers. The test compares the
+# output with the Python renderer's.
+let main = ():>int64 => {
+    let src = SrcFile("input" "let a = 1\rlet b = 2\n\nlet c = f(\n    x\n)\nlet d = g(1 2)\n")
+    let warning = Warning[
+        srcfile=src
+        title="Lone carriage return"
+        pointers=[Pointer[span=Span[9 10] message="\\r without \\n"]]
+        hint="remove it"
+    ]
+    warning.warn
+    let error = Error[
+        srcfile=src
+        title="multi-line"
+        message="a call across lines"
+        pointers=[
+            Pointer[span=Span[28 44] message="the call\nsecond line of the message"]
+            Pointer[span=Span[36 36] message="zero"]
+            Pointer[span=Span[11 12] message="after" placement="above"]
+            Pointer[span=Span[14 15] message="between" placement="above"]
+        ]
+        notes=["n1" "n2"]
+        hint="h1\nh2"
+    ]
+    error.render(src)
+    let info = Info[title="no pointers" message="just a message" notes=["note"] hint="help"]
+    info.render(src)
+    # overlapping pointers become notes; a pointer with several spans; dimmed source; adjacent zero-width pointers
+    let one_line = SrcFile("input" "let total = price * count + tax\nlet other = 1\n")
+    let overlap = Error[
+        srcfile=one_line
+        title="overlap and multi-span"
+        pointers=[
+            Pointer[span=Span[12 25] message="whole product"]
+            Pointer[span=Span[20 25] message="inside (becomes a note)"]
+            Pointer[span=Span[4 9] message="two places" spans=[Span[36 41]]]
+            Pointer[span=Span[28 31] message="tax"]
+        ]
+        dimmed=[Span[0 3]]
+    ]
+    overlap.render(one_line)
+    let hint = Hint[srcfile=one_line title="hint" pointers=[Pointer[span=Span[0 0] message="start"] Pointer[span=Span[1 1] message="next"]]]
+    hint.render(one_line)
+    return 42
+}

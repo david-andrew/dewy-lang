@@ -325,6 +325,15 @@ class _StringLowering:
                 node,
                 f'conversion to `{type_to_dewy(target)}` from a runtime string',
             )
+        target_payload = ty.optional_payload(target) if isinstance(target, ty.TypeOr) else None
+        if (
+            target_payload is not None
+            and ty.string_valued(target_payload)
+            and ty.string_valued(source.type)
+            and ty.optional_payload(source.type) is None
+        ):
+            # `"above"` into `'above' | 'below' | none`: a present cell holding the handle
+            return self._materialize_optional(source, target_payload)
         if (
             isinstance(target, (ty.StringType, ty.StringLiteralType))
             or isinstance(target, str)
