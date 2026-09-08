@@ -82,3 +82,52 @@ def test_foreign_spellings_get_a_hint() -> None:
     assert 'else if' in hint_for('let x = elif')
     assert '`0x1f`' in hint_for('let x = 0X1f')
     assert hint_for('let x = fooBar') == ''
+
+
+def test_a_bare_return_ends_at_its_line() -> None:
+    """`return`/`yield` take a value only from their own line: `if c return` then
+    a statement on the next line returns nothing (the statement is not the
+    value); a value on the same line may continue onto later lines; `;` still
+    ends a bare return; `return` without a value at the end of a block stays bare."""
+    from dewy.reporting import SrcFile
+    from dewy.semantic import check, hir
+
+    def declared(source: str):
+        root = check.typecheck_and_resolve(SrcFile(None, source))
+        return {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+
+    def returns(fn):
+        found = []
+        def walk(node):
+            if isinstance(node, hir.Return):
+                found.append(node)
+            from dataclasses import fields, is_dataclass
+            if is_dataclass(node):
+                for f in fields(node):
+                    v = getattr(node, f.name)
+                    if isinstance(v, hir.AST): walk(v)
+                    elif isinstance(v, (list, tuple)):
+                        for i in v:
+                            if isinstance(i, hir.AST): walk(i)
+        walk(fn)
+        return found
+
+    source = (
+        'let count = (@n:int64 result:int64?):>void => {\n'
+        '    if result is? none return\n'
+        '    n += result\n'
+        '}\n'
+        'let spread = (a:int64 b:int64):>int64 => {\n'
+        '    return a +\n'
+        '        b\n'
+        '}\n'
+        'let semi = (@n:int64):>void => { if n >? 0 return;  n += 1 }\n'
+        'let main = ():>int64 => 42\n'
+    )
+    d = declared(source)
+    count_returns = returns(d['count'].expr)
+    assert len(count_returns) == 1 and count_returns[0].item is None      # bare: the next line is not its value
+    spread_returns = returns(d['spread'].expr)
+    assert len(spread_returns) == 1 and spread_returns[0].item is not None   # the value began on the keyword's line
+    semi_returns = returns(d['semi'].expr)
+    assert len(semi_returns) == 1 and semi_returns[0].item is None

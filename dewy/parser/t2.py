@@ -647,6 +647,14 @@ def make_placeholders(tokens: list[t1.Token]) -> None:
             tokens[i] = Placeholder(token.loc)
         i += 1
 
+def _line_break_between(left: t1.Token, right: t1.Token, ctx: Context) -> bool:
+    """Whether a newline separates two tokens: a `return`'s (or `yield`'s) value
+    must start on the keyword's line — the one place a line boundary is
+    structural, so `if done return` followed by a statement on the next line
+    does not return that statement's value."""
+    return '\n' in ctx.srcfile.body[left.loc.stop:right.loc.start]
+
+
 def is_stop_keyword(token: t1.Token, stop: set[str]) -> bool:
     """
     Return True if `token` is a keyword whose name is in `stop`.
@@ -1042,7 +1050,15 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
 
     i = start + 1
     if kw.name in {"return", "yield"}:
-        if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
+        if i + 1 < len(tokens) and isinstance(tokens[i], SemicolonJuxtapose) and isinstance(tokens[i + 1], t1.Semicolon):
+            return KeywordExpr(kw.loc, [kw]), i + 2   # `return;`: the semicolon (juxtaposed to the keyword) ends the bare return
+        if i < len(tokens) and isinstance(tokens[i], t1.Semicolon):
+            return KeywordExpr(kw.loc, [kw]), i + 1
+        if (
+            i >= len(tokens)
+            or is_stop_keyword(tokens[i], stop_keywords)
+            or _line_break_between(kw, tokens[i], ctx)   # `if done return` at a line end: nothing returned
+        ):
             return KeywordExpr(kw.loc, [kw]), i
         expr, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
         return KeywordExpr(Span(kw.loc.start, expr.items[-1].loc.stop), [kw, expr]), i

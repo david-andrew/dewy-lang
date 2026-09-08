@@ -31,7 +31,7 @@ first.. last   # no right endpoint
 first .. last  # no endpoints
 ```
 
-Newlines normally behave as whitespace. A construct may assign additional structural meaning to line boundaries only where its grammar explicitly says so.
+Newlines normally behave as whitespace. A construct may assign additional structural meaning to line boundaries only where its grammar explicitly says so. One does: `return` and `yield` take a value only from their own line, so at a line end they return nothing — `if done return` followed by a statement on the next line returns, and the statement is not the returned value. A value that needs several lines starts on the keyword's line (`return (` … `)`). A `;` ends a bare `return` on the same line.
 
 ## Comments
 
