@@ -381,3 +381,34 @@ def test_runtime_type_values_are_not_implemented() -> None:
 def test_empty_brackets_stay_unconstrained() -> None:
     with pytest.raises(TypeCheckError, match='empty array'):
         _check('let f = ():>int64 => { let values = [] return 0 }')
+
+
+def test_total_dictionaries() -> None:
+    """Totality over a finite key type: inferred from a covering literal, or
+    declared `totaldict<K V>` (a missing key is an error at the literal, and
+    `pop`/`clear` are refused); a partial `dict` is not proven, nor one that
+    lost a key; `totaldict` needs a finite key type."""
+    import pytest
+    from dewy.reporting import SrcFile
+    from dewy.semantic import check
+    from dewy.semantic.errors import TypeCheckError, UserError
+
+    def compile_(source: str):
+        return check.typecheck_and_resolve(SrcFile(None, source + '\nlet main = ():>int64 => 42\n'))
+
+    def fails(source: str, match: str) -> None:
+        with pytest.raises((UserError, TypeCheckError), match=match):
+            compile_(source)
+
+    K = "const K:type = 'a' | 'b'\n"
+    compile_(K + "const T:dict<K int64> = ['a' -> 1 'b' -> 2]\nlet f = (k:K):>int64 => T[k]\n")
+    compile_(K + "const T:totaldict<K int64> = ['b' -> 2 'a' -> 1]\nlet f = (k:K):>int64 => T[k]\nlet g = (t:totaldict<K int64> k:K):>int64 => t[k]\nlet h = ():>int64 => g(T 'a')\n")
+    fails(K + "const T:totaldict<K int64> = ['a' -> 1]\n", "missing keys")
+    fails(K + "let f = ():>int64 => { let t:totaldict<K int64> = ['a' -> 1 'b' -> 2]  t.pop('a');  return 1 }\n", "total dictionary")
+    fails(K + "const P:dict<K int64> = ['a' -> 1]\nlet f = (k:K):>int64 => P[k]\n", "not proven present")
+    fails(K + "let f = (k:K):>int64 => { let d:dict<K int64> = ['a' -> 1 'b' -> 2]  d.pop('a');  return d[k] }\n", "not proven present")
+    fails(K + "const P:dict<K int64> = ['a' -> 1]\nlet g = (t:totaldict<K int64>):>int64 => 1\nlet h = ():>int64 => g(P)\n", "every key")
+    fails("let g = (t:totaldict<string int64>):>int64 => 1\n", "finite key type")
+    # a capture over a total dictionary keyed by its keys is total; a copy keeps the keys; a filtered capture is not total
+    compile_(K + "const T:dict<K int64> = ['a' -> 1 'b' -> 2]\nconst D:dict<K int64> = [loop [k v] in T  k -> v * 2]\nlet f = (k:K):>int64 => { let c = D  return c[k] }\n")
+    fails(K + "const T:dict<K int64> = ['a' -> 1 'b' -> 2]\nconst D:dict<K int64> = [loop [k v] in T  if v >? 1  k -> v]\nlet f = (k:K):>int64 => D[k]\n", "not proven present")

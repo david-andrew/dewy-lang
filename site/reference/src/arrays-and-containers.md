@@ -71,6 +71,14 @@ loop [name score] in scores
 
 `d.get(key)` is the lookup that may miss, with type `V | none`. `d.get(key default)` yields `default` when the key is absent and has type `V`.
 
+A dictionary whose key type is *finite* — a union of literals such as `'0b' | '0o' | '0x'` — and whose literal has an entry for every value of it is *total*: `d[k]` is then proven for any `k` of the key type, not only for a constant key. Totality is inferred from the literal (a `const` keeps it everywhere; a `let` keeps it until a `pop` or `clear`), or declared with `totaldict<K V>`, which makes a missing entry an error at the literal (naming the missing keys) rather than at some later lookup, and refuses `pop` and `clear`, so the type is an invariant: a `totaldict<K V>` parameter proves `table[k]` without any fact at the call site. A total dictionary passes where a `totaldict` is expected; a `dict<K V>` that may be partial does not. `totaldict` needs a finite key type.
+
+```dewy
+const BasePrefix:type = '0b' | '0o' | '0x'
+const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]   # forgetting `'0x'` is an error here
+let radix_of = (base:BasePrefix):>int64 => RADIX[base]                       # proven: every `BasePrefix` is a key
+```
+
 ### Mutation
 
 `d[key] = value` replaces the value of an existing key in place or appends a new entry. `d[key] += value` (any compound operator) updates a *proven* key in place: it reads like `d[key]`, so an unproven key is the same compile error, and the counting idiom is `if word in? counts counts[word] += 1 else counts[word] = 1`. `d.pop(key)` removes a proven key and yields its value; `d.pop(key default=v)` removes the key if present and yields its value, else `v`, without a proof. `d.clear` removes every entry. `d.length` is the number of entries.

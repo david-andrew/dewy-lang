@@ -1,0 +1,30 @@
+# A dictionary over a finite key type (a union of literals) with an entry for
+# every value is *total*: `d[k]` is proven for any `k` of that type. Totality
+# is inferred from a literal that covers the key type, or declared with
+# `totaldict<K V>`, which makes a missing entry an error at the literal and
+# refuses `pop`/`clear`. A total dictionary passes where a `totaldict` is
+# expected; a `dict<K V>` that may be partial does not.
+const BasePrefix:type = '0b' | '0o' | '0x'
+let BaseInfo:type = [digits:string radix:int64]
+const BASE_SPECS:dict<BasePrefix BaseInfo> = [      # inferred total: every `BasePrefix` has an entry
+    '0b' -> ["01" 2]
+    '0o' -> ["01234567" 8]
+    '0x' -> ["0123456789abcdef" 16]
+]
+const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]
+let radix_of = (base:BasePrefix):>int64 => BASE_SPECS[base].radix
+let radix_from = (table:totaldict<BasePrefix int64> base:BasePrefix):>int64 => table[base]
+let digits_of = (base:BasePrefix):>string => {
+    let table:dict<BasePrefix string> = ['0x' -> "hex" '0b' -> "bin" '0o' -> "oct"]   # a local literal: total too
+    return table[base]
+}
+let main = ():>int64 => {
+    let local:totaldict<BasePrefix int64> = ['0x' -> 16 '0b' -> 2 '0o' -> 8]
+    local['0x'] = 17                                                        # stores keep every key
+    let total:int64 = 0
+    let bases:array<BasePrefix> = ['0b' '0o' '0x']
+    loop base in bases { total += radix_of(base) + radix_from(RADIX base) }   # 26 + 26
+    let copy = RADIX                                                        # a copy keeps the keys
+    if total =? 52 and radix_from(local '0x') =? 17 and digits_of('0o') =? "oct" and RADIX['0b'] =? 2 and radix_from(copy '0x') =? 16 return 42
+    return total
+}

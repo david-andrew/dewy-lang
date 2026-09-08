@@ -1,0 +1,403 @@
+doc"""
+Alternative t0 design sketch: narrow context -> probe -> select -> finish.
+
+Implements Whitespace, LineComment, BlockComment, Identifier, Symbol, Number.
+String/delimiter tokens and stack transitions are deliberately still ahead.
+The extra context variants describe dispatch, but this entry point stays Root.
+
+This is a design sketch, not a claim that the current compiler accepts every
+union/refinement below. In particular, common-field access through candidate
+unions and refinement propagation through stored results may need compiler work.
+No closures, generators, token-class registry, or context-dependent finish call.
+"""
+
+from reporting import SrcFile, Span, Pointer, Error, Warning
+
+let nonemptystring:type = string<length >? 0>
+let PositiveLength:type = uint64 & <(>?0)>
+let TokenError = type of error & Error
+
+# Character/base tables copied from t0.dewy so the sketch can stand alone.
+const newline_chars = set['\n' '\r\n']
+const whitespace = set[' ' '\t' '\n' '\r\n' '\r']
+const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
+const line_comment_start:'#' = '#'
+const block_comment_start: '#\{' = '#\{'
+const block_comment_end: '\}#' = '\}#'
+
+# TODO: The specific set of digits is open for debate. The following are proposed:
+# latin = set('ÆØÞßæøþẞ')
+# misc = set('‽¢£¥€§†‡※')
+# units = set('℃℉℥ℨ')
+# Also `ϕϖϗϰϱϴ`, perhaps just `ϕϴ` which would normalize to the greek versions
+const digits = set'0123456789'
+const alpha = set'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const greek = set'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω'
+const math = set'ℂℕℤℚℝℙℍ𝔼𝕊𝕋𝔽𝔾ℵℒ'
+const misc = set'_‾!°'
+const subscripts   = set'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ'                                  # these get normalized to the corresponding _N form, e.g. x₁ to x_1 (excluding ₊₋₌₍₎)
+const superscripts = set'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ'  # these get normalized to the corresponding ‾N form, e.g. ¹x to ‾1x (excluding ⁺⁻⁼⁽⁾)
+const misc_decorations = set'℠™©®'
+const primes = set'′″‴⁗'
+
+const start_characters = alpha | greek | math | misc # | latin | units
+const continue_characters = start_characters | digits
+const decoration_characters = superscripts | subscripts | misc_decorations | primes
+
+# note that the prefix is case sensitive
+# numbers may have _ as a separator (if _ is not in the set of digits)
+const BasePrefix:type = '0b' | '0t' | '0q' | '0s' | '0o' | '0d' | '0z' | '0x' | '0u' | '0r' | '0g'
+
+BaseInfo:type = [
+    digits:set<string> #length>?1 >  #TODO: compiler improvements: adding the length here didn't work
+    case_insensitive:bool
+    extra_chars:dict<string int8?>     # TODO compiler improvements: calling this `:dict<string int|undefined>` gave a pretty cryptic error when below I tried including empty dicts in the structure. "arrays require a fixed-width scalar or handle element type, got `int | undefined`". perhaps the error could highlight multiple places? but also general improvements to the error (e.g. hint to change `int` to some `intN`, etc.). and also just the ability to have `int` here in the first place, and it would figure out what it width it needs based on all the places that do provide something rather than failing on the ones that don't need it
+    radix:uint8
+]
+
+const BASE_SPECS: dict<BasePrefix BaseInfo> = [
+    '0b' -> [set'01' false [] 2]    # binary
+    '0t' -> [set'012' false ['T'->(-1)] 3]    # ternary (and also support balanced ternary with 'T')
+    '0q' -> [set'0123' false [] 4]    # quaternary
+    '0s' -> [set'012345' false [] 6]    # seximal
+    '0o' -> [set'01234567' false [] 8]    # octal
+    '0d' -> [set'0123456789' false [] 10]    # decimal
+    '0z' -> [set'0123456789XE' true [] 12]    # dozenal (case-insensitive)
+    '0x' -> [set'0123456789abcdef' true [] 16]    # hexadecimal (case-insensitive)
+    '0u' -> [set'0123456789abcdefghijklmnopqrstuv' true [] 32]    # base 32 (duotrigesimal) (case-insensitive)
+    '0r' -> [set'0123456789abcdefghijklmnopqrstuvwxyz' true [] 36]    # base 36 (hexatrigesimal) (case-insensitive)
+    '0g' -> [set'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' false ['-'->62 '_'->63 '='->none] 64]    # base 64 (tetrasexagesimal) (case-sensitive)
+]
+
+# const base_radixes: dict<BasePrefix int> = [
+#     loop [prefix info] in BASE_SPECS
+#         prefix -> info.digits.length
+# ]
+
+
+# commonly used bases
+const base10 = '0d'
+const base16 = '0x'
+const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be based strings or based arrays
+
+
+
+
+
+
+
+
+# Mostly operators, but also some special identifiers
+# Symbols are case-sensitive
+symbols:array<nonemptystring> = [
+    '~' '@' '$' '`'
+    '?' ';'
+    '+' '-' '*' '/' '//' '%' '^'
+    '\\' # left divide e.g. given Ax=b x=A\b where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
+    '=?' '>?' '<?' '>=?' '<=?' 'in?' 'is?' 'isnt?' '<=>'
+    '|' '&' '??'
+    '=' '::' ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators e.g. docs)
+    '|>' '<|' '=>'
+    '->' '<->'
+    '.' '..' '...' ',' ':' ':>'
+    '∞' '∅'
+    # ⁂ ‰ ‱
+]
+symbols.sort(key=(.length) reverse=true)
+LEN_LONGEST_SYMBOL = symbols[0].length
+
+
+# Context contains lexical state only. Source, cursor, output, and diagnostics
+# belong to the driver, rather than being duplicated in every stack frame.
+Root = type of any & [default_base:BasePrefix=base10]
+BlockBody = type of any & [default_base:BasePrefix=base10]
+TypeBody = type of any & [default_base:BasePrefix=base10]
+StringBody = type of any
+RawStringBody = type of any
+TemplateStringBody = type of any
+BasedStringBody = type of any & [base:BasePrefix]
+# Future body variants also need their opening delimiter/quote information.
+Context:type = Root | BlockBody | TypeBody | StringBody | RawStringBody | TemplateStringBody | BasedStringBody
+GeneralBodyContexts:type = Root | BlockBody | TypeBody
+WhitespaceOrCommentContexts:type = GeneralBodyContexts | BasedStringBody
+
+# Tokens are completed output values. No recognizer protocol on the base type,
+# and no Number temporarily lacking its required prefix.
+Token = $abstract type of any & [
+    src:string                 # whole source, as in t0.dewy; loc selects its text
+    loc:Span
+    idx:uint64
+    __as__ = ():>string => if loc.start <? loc.stop <=? src.length
+        "<{typename} {_quoted(src[loc.start..loc.stop))}>"
+    else "<{typename}>"
+]
+Whitespace = type of Token
+LineComment = type of Token
+BlockComment = type of Token
+Identifier = type of Token
+Symbol = type of Token
+Number = type of Token & [prefix:BasePrefix]
+
+# A match is a small construction recipe. Minted variants preserve identity
+# even when their fields are identical. No full tokens or contexts are built.
+MatchData:type = [length:PositiveLength]
+WhitespaceMatch = type of any & MatchData & [lone_crs:array<uint64>]
+LineCommentMatch = type of any & MatchData
+BlockCommentMatch = type of any & MatchData
+IdentifierMatch = type of any & MatchData
+SymbolMatch = type of any & MatchData
+NumberMatch = type of any & MatchData & [prefix:BasePrefix]
+Candidate:type = WhitespaceMatch | LineCommentMatch | BlockCommentMatch | IdentifierMatch | SymbolMatch | NumberMatch
+
+# Probe contracts:
+# - none means this recognizer does not apply; no continuation exists.
+# - a candidate contains everything finish needs from recognition.
+# - TokenError means malformed syntax that must not fall back to another token.
+# - every successful length is <= src.length (checked again by the driver;
+#   the candidate type above only preserves the source-independent positivity).
+# Probes do not mutate context, emit reports, or alter the output token list.
+# All diagnostic spans are relative to the probed suffix.
+
+probe_whitespace = (src:nonemptystring):>WhitespaceMatch? => {
+    i:uint64 = 0
+    lone_crs:array<uint64> = []
+    loop i <? src.length and src[i] in? whitespace {
+        if src[i] =? '\r' lone_crs.push(i)
+        i += 1
+    }
+    if i =? 0 return none
+    return WhitespaceMatch[length=i lone_crs=lone_crs]
+}
+
+probe_line_comment = (src:nonemptystring):>LineCommentMatch? => {
+    if not src.startswith(line_comment_start) return none
+    if src.startswith(block_comment_start) return none
+    loop i in 0.. and i <? src.length {
+        if src[i] in? newline_chars return LineCommentMatch[length=i+1]
+    }
+    return LineCommentMatch[length=src.length]
+}
+
+probe_block_comment = (src:nonemptystring srcfile:SrcFile):>BlockCommentMatch? | TokenError => {
+    if not src.startswith(block_comment_start) return none
+    openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
+    i:uint64 = block_comment_start.length
+    loop i <? src.length {
+        if src[i..].startswith(block_comment_start) {
+            openers.push(Span[i i+block_comment_start.length])
+            i += block_comment_start.length
+        }
+        else if src[i..].startswith(block_comment_end) {
+            i += block_comment_end.length
+            if openers.length =? 1 return BlockCommentMatch[length=i]
+            openers.pop;
+        }
+        else { i += 1 }
+    }
+    return TokenError[
+        srcfile=srcfile
+        title="Unterminated block comment"
+        pointers=[
+            loop opener in openers
+                Pointer[span=opener message="Unclosed block comment opened here"]
+        ]
+        hint="Each block comment opener needs a closing `{block_comment_end}`"
+    ]
+}
+
+probe_identifier = (src:nonemptystring):>IdentifierMatch? => {
+    i:uint64 = 0
+    loop i <? src.length and src[i] in? decoration_characters { i += 1 }
+    if i >=? src.length or src[i] not in? start_characters return none
+    i += 1
+    loop i <? src.length and (src[i] in? continue_characters or src[i] in? decoration_characters) { i += 1 }
+    return IdentifierMatch[length=i]
+}
+
+probe_symbol = (src:nonemptystring):>SymbolMatch? => {
+    loop op in symbols {
+        if src.startswith(op) return SymbolMatch[length=op.length]
+    }
+    return none
+}
+
+# These are lexical digit sets, including balanced ternary and base-64 extras.
+# Checking case variants here avoids building another dictionary for the sketch.
+# The table's cardinality gives the radix; extras do not increase it.
+is_based_digit = (c:string base:BasePrefix):>bool => {
+    info = BASE_SPECS[base]
+    if c in? info.digits or c in? info.extra_chars return true
+    if info.case_insensitive {
+        loop digit in info.digits {
+            if c.casefold =? digit.casefold return true
+        }
+    }
+    return false
+}
+
+probe_number = (src:nonemptystring default_base:BasePrefix srcfile:SrcFile):>NumberMatch? | TokenError => {
+    base:BasePrefix = default_base
+    i:uint64 = 0
+    if src.length >=? 2 {
+        prefix = src[..2)
+        if prefix is? BasePrefix {
+            base = prefix
+            i = 2
+        }
+    }
+
+    # A bare prefix, or a prefix followed by a quote/bracket, isn't a Number.
+    # Future based-string/block probes can then recognize the whole opener.
+    if i >=? src.length or not is_based_digit(src[i] base) return none
+    first_digit = i
+    loop i <? src.length and (is_based_digit(src[i] base) or src[i] =? '_') { i += 1 }
+
+    if BASE_SPECS[base].radix >? MAX_NUMBER_BASE {
+        return TokenError[
+            srcfile=srcfile
+            title="Number base too high"
+            pointers=[Pointer[span=Span[0 i] message="Unquoted base-{BASE_SPECS[base].radix} digits"]]
+            hint="Numeric literals support bases up to {MAX_NUMBER_BASE}; use a based string such as {base}'{src[first_digit..i)}'"
+        ]
+    }
+
+    # The one resolved base is used both to accept digits and construct Number.
+    # finish neither reexamines the prefix nor consults the context again.
+    return NumberMatch[length=i prefix=base]
+}
+
+# Keep only maximal lengths, but retain all ties for precedence/ambiguity.
+# There is no sorting and no dependence on registration order for equal lengths.
+consider = (@best:array<Candidate> result:Candidate?):>void => {
+    if result is? none return
+    if best.length >? 0 {
+        if result.length <? best[0].length return
+        if result.length >? best[0].length best.clear
+    }
+    best.push(result)
+}
+
+# Context eligibility is established where calls happen, not in a returned
+# list of classes. The two groups overlap, so these are independent branches.
+probe_context = (src:nonemptystring ctx:Context srcfile:SrcFile):>array<Candidate> | TokenError => {
+    best:array<Candidate> = []
+    if ctx is? WhitespaceOrCommentContexts {
+        consider(@best probe_whitespace(src))
+        consider(@best probe_line_comment(src))
+        block = probe_block_comment(src srcfile)
+        if block is? TokenError return block
+        consider(@best block)
+    }
+    if ctx is? GeneralBodyContexts {
+        consider(@best probe_identifier(src))
+        consider(@best probe_symbol(src))
+        number = probe_number(src ctx.default_base srcfile)
+        if number is? TokenError return number
+        consider(@best number)
+    }
+    # Future: narrowed BlockBody branch probes closers using opening_delim;
+    # narrowed string-body branches probe contents, escapes, and matching quotes.
+    # Those candidates retain the opener information needed by finish.
+    return best
+}
+
+# Only Identifier can be displaced by precedence in this subset. This encodes
+# the existing Python pairs (Symbol > Identifier, Number > Identifier), not a
+# total ordering that would silently resolve other, potentially invalid ties.
+select = (matches:array<Candidate> srcfile:SrcFile):>Candidate | TokenError => {
+    beats_identifier = false
+    loop m in matches {
+        if m is? SymbolMatch or m is? NumberMatch { beats_identifier = true }
+    }
+    remaining:array<Candidate> = [
+        loop m in matches
+            if not (beats_identifier and m is? IdentifierMatch) m
+    ]
+    if remaining.length =? 1 return remaining[0]
+    if remaining.length =? 0 {
+        return TokenError[
+            srcfile=srcfile
+            title="No token matched"
+            pointers=[Pointer[span=Span[0 0] message="No implemented token starts here"]]
+            hint="This sketch only implements layout, comments, identifiers, symbols, and numbers"
+        ]
+    }
+    return TokenError[
+        srcfile=srcfile
+        title="Ambiguous token"
+        pointers=[Pointer[span=Span[0 remaining[0].length] message="Multiple equally preferred tokens matched"]]
+    ]
+}
+
+# Only the selected candidate reaches this function. For these six tokens,
+# finish is construction only; none changes the context stack.
+# Future return type: [token:Token action:ContextAction], where an action is
+# Keep | Push(new_frame) | Close(opening_index). The driver applies it once.
+# Use stable token indices for delimiter links rather than captured mutable
+# references to copies of contexts or tokens.
+finish = (m:Candidate src:string loc:Span idx:uint64):>Token => match m {
+    <WhitespaceMatch> => Whitespace[src loc idx]
+    <LineCommentMatch> => LineComment[src loc idx]
+    <BlockCommentMatch> => BlockComment[src loc idx]
+    <IdentifierMatch> => Identifier[src loc idx]
+    <SymbolMatch> => Symbol[src loc idx]
+    n:NumberMatch => Number[src loc idx n.prefix]
+}
+
+# Warnings belong to the winner. Store only the offsets while probing, then
+# allocate/emit reports after selection. No shared Context.warnings buffer.
+report_warnings = (m:Candidate srcfile:SrcFile offset:uint64):>void => {
+    if m is? WhitespaceMatch {
+        loop pos in m.lone_crs {
+            Warning[
+                srcfile=srcfile
+                title="Lone carriage return"
+                pointers=[Pointer[span=Span[offset+pos offset+pos+1] message="\\r without \\n"]]
+                hint="Remove the \\r or follow it with \\n"
+            ].warn
+        }
+    }
+}
+
+tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
+    tokens:array<Token> = []
+    ctx:Context = Root[]
+    src = srcfile.body
+    i:uint64 = 0
+    loop i <? src.length {
+        candidates = probe_context(src[i..] ctx srcfile)
+        if candidates is? TokenError { candidates.shift(i) return candidates }
+        winner = select(candidates srcfile)
+        if winner is? TokenError { winner.shift(i) return winner }
+
+        # Reestablish the input-relative bound after storing/selecting matches.
+        # A future richer probe contract could make this guard redundant.
+        length = winner.length
+        if length >? src.length-i {
+            return TokenError[
+                srcfile=srcfile
+                title="Internal tokenizer error: match exceeds remaining source"
+                pointers=[Pointer[span=Span[i i] message="Invalid probe result"]]
+            ]
+        }
+        token = finish(winner src Span[i i+length] tokens.length)
+        report_warnings(winner srcfile i)
+        tokens.push(token)
+        i += length
+    }
+    return tokens
+}
+
+main = (argv:array<string>):>uint64 => {
+    if argv.length <? 2 {
+        printl"usage: t0_sketch.dewy <source-file>"
+        return 1
+    }
+    path = p(argv[1])
+    body = path.read_text
+    if body isnt? string { printl"Could not read source file" return 1 }
+    result = tokenize(SrcFile[path=path.path body=body])
+    if result is? TokenError { result.fail }
+    printl"{result}"
+    return 0
+}

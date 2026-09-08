@@ -101,6 +101,10 @@ def _fact_to_dewy(p: ty.Proposition) -> str:
 def _refined_type_to_dewy(t: ty.RefinedType) -> str:
     """`T<facts>` for facts about the value; `true & <…> | false & <…>` for a
     boolean's arms; `T & <facts>` for facts about parameters."""
+    if ty.total_dict_key(t) is not None:
+        key_value = ty.dict_key_value(t.base)
+        assert key_value is not None
+        return f'totaldict<{type_to_dewy(key_value[0])} {type_to_dewy(key_value[1])}>'
     arms = {p.when for p in t.propositions}
     if t.base == 'void':
         return f'<{" ".join(_fact_to_dewy(p) for p in t.propositions)}>'

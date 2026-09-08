@@ -140,7 +140,11 @@ TypeBody:type = type of Context #{ & [
     default_base: BasePrefix = base10
 ]}#
 
-# AllContexts = Root | StringBody | RawStringBody | TemplateStringBody | BasedStringBody | BlockBody | TypeBody
+GeneralBodyContexts = Root | BlockBody | TypeBody
+BodyWithoutTypeContexts = Root | BlockBody
+WhitespaceOrCommentContexts = Root | BlockBody | TypeBody | BasedStringBody
+
+
 
 # let Context = type of any
 let Push = type of any & [ctx:Context]
@@ -167,7 +171,7 @@ let Token:type = $abstract type of any & [
 let TokenError = type of error & Error
 
 
-
+# TODO: move somewhere better
 # 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', …
 ordinalize = (n:uint64):>string => {
     if n % 100 >=? 10 and n % 100 <=? 13 return "{n}th"
@@ -225,9 +229,7 @@ LineComment = type of Token & [
 # probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
 BlockComment = type of Token & [
     eat = (src:nonemptystring @ctx:Context):>uint64? | TokenError => {
-        doc"""
-        Block comments are of the form #\{ ... \}# and can be nested.
-        """
+        doc"""Block comments are of the form #\{ ... \}# and can be nested"""   #TODO: consider making `doc` a special tokenized case of string like raw strings, where the inside is handled as raw. perhaps we also could maintain a special registry of prefixes that use the raw string tokenization
         
         if not src.startswith(block_comment_start) return none
         
@@ -315,6 +317,74 @@ Symbol = type of Token & [
     }
 ]
 
+
+
+
+# ##### TOKEN CLASSES: NUMBERS #####
+# # Based integer literals. The base may be given explicitly via a prefix or
+# # implicitly via the current Context's `default_base` (e.g. inside certain
+# # blocks). We record the resolved base prefix on the token in `action_on_eat`.
+
+# Number = type of Token & [
+#     prefix: BasePrefix
+    
+    
+#     eat = (src:nonemptystring @ctx:GeneralBodyContexts):> uint64|none|TokenError => {
+#         doc"""a based number is a sequence of 1 or more digits, optionally preceded by a (lowercase) base prefix (up to base-16)"""
+        
+#         # try a number with a base prefix
+#         if src.length >? 2 and src[..2) in? base_prefixes {
+#             base = src[..2]
+#             digits = base_digits[base]
+#             if base_radixes[base] >? MAX_NUMBER_BASE and src[2] in? digits { # skip if not a based number literal (e.g. based string)
+#                 return error_too_high_number_base(src ctx base)
+#             }
+#             i = 2
+#             # Require at least one digit
+#             if i >=? src.length or src[i] not in? digits {
+#                 # TODO: have error here if not a based string literal or based array literal
+#                 return none
+#             }
+#             # consume digits or underscores
+#             loop i <? src.length and (src[i] in? digits or src[i] == '_') { i += 1 }
+#             return i
+        
+#         # try number with no prefix
+#         base = if ctx is? BlockBody ctx.default_base else base10
+#         digits = base_digits[base]
+#         i = 0
+#         if i >=? src.length or src[i] not in? digits { return none }
+#         # consume digits or underscores
+#         loop i <? src.length and (src[i] in? digits or src[i] == '_') { i += 1 }
+        
+#         return if i >? 0 i else none
+    
+#     action_on_eat = (ctx:GeneralBodyContexts) {
+#         if src[..2] in? base_digits
+#             prefix = src[..2]
+#         else
+#             prefix = ctx.default_base
+
+#         #doesn't modify the context stack
+#         return none
+#     }
+
+    
+#     error_too_high_number_base = (src:nonemptystring ctx:GeneralBodyContexts base:BasePrefix) {
+#         radix = base_radixes[base]
+#         digits_len = BasedStringChars.eat(src[2..] BasedStringBody[ctx.srcfile ctx.tokens_so_far none base])
+#         $runtime_assert digits_len isnt? exception, "INTERNAL ERROR: based string chars should have been eaten"
+#         digits_str = src[2..2+digits_len]
+#         error = Error[
+#             srcfile=ctx.srcfile
+#             title="number base too high"
+#             pointer_messages=[
+#                 Pointer[span=Span[ctx.current_tokenization_position(), ctx.current_tokenization_position()+len(base)), message=f"base-{radix} prefix"),
+#                 *([Pointer(span=Span(ctx.current_tokenization_position()+2, ctx.current_tokenization_position()+2+digits_len), message="unquoted digits", color='red')] if digits_len is not None else [])
+#             ],
+#             hint=f"Numeric literals only support up to base-{MAX_NUMBER_BASE} (Got base-{radix})\nTo represent larger bases, use a based string e.g. {base}'{digits_str}'"
+#         )
+#         error.throw()
 
 
 

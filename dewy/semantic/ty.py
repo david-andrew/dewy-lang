@@ -826,8 +826,39 @@ def container_entry_types(type_: TypeExpr) -> tuple[TypeExpr, TypeExpr | None] |
     return None
 
 
+def total_dict_type(key: TypeExpr, value: TypeExpr) -> 'RefinedType':
+    """`totaldict<K V>`: a dictionary with an entry for every value of its
+    finite key type — `dict<K V>` refined by the fact `keys =? K`."""
+    return RefinedType(dict_type(key, value), (Proposition('keys', '=?', 0, type_=key),))
+
+
+def total_dict_key(type_: Type) -> TypeExpr | None:
+    """The key type a `totaldict<K V>` is total over, else None."""
+    if isinstance(type_, RefinedType) and dict_key_value(type_.base) is not None:
+        for proposition in type_.propositions:
+            if proposition.subject == 'keys' and proposition.type_ is not None:
+                return proposition.type_
+    return None
+
+
+def finite_members(type_: Type) -> list[object] | None:
+    """The values of a finite type — a string or integer literal, or a union of
+    them (`'0b' | '0x'`, `1 | 2 | 3`) — else None."""
+    type_ = unfold(type_)
+    items = type_.items if isinstance(type_, TypeOr) else [type_]
+    members: list[object] = []
+    for item in items:
+        item = unfold(item)
+        if isinstance(item, (StringLiteralType, IntegerLiteralType)):
+            members.append(item.value)
+        else:
+            return None
+    return members
+
+
 def dict_key_value(type_: TypeExpr) -> tuple[TypeExpr, TypeExpr] | None:
-    """`(K, V)` when ``type_`` is a runtime dictionary object."""
+    """`(K, V)` when ``type_`` is a runtime dictionary object (a `totaldict` is one too)."""
+    type_ = strip_refinement(type_)
     if isinstance(type_, ObjectType) and type_.brand == 'dict':
         keys, values = type_.fields[0].type, type_.fields[1].type
         assert isinstance(keys, ArrayType) and isinstance(values, ArrayType)

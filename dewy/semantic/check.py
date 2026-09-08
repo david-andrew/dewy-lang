@@ -66,6 +66,7 @@ class Context:
     parameterize blocks a comparison on that name is a refinement of the value."""
     length_bounds: dict[int, int] = field(default_factory=dict)  # proven minimum lengths of runtime-length arrays
     key_facts: dict[tuple[int, tuple[str, object]], tuple[str | None, int | None]] = field(default_factory=dict)
+    declared_total: set[int] = field(default_factory=set)   # bindings declared `totaldict<K V>` (shared): every key stays present
     """Proven dictionary keys: (dictionary route id, key identity) -> (position local, literal entry index)."""
     member_facts: dict[int, hir.FunctionCall] = field(default_factory=dict)
     """Bindings holding a call's result whose union members carry facts about
@@ -1275,6 +1276,8 @@ def _complete_binding(
     if isinstance(declaration.expr, hir.TypeValue):
         binding.type_value = declaration.expr.value
     declaration = replace(declaration, binding_id=binding.id)
+    if declaration.expr is not None:
+        _copy_dictionary_facts(declaration.expr, binding.id, ctx=ctx)   # `let copy = d`: the keys come along
     binding.declaration = declaration
     if isinstance(declaration.expr, hir.FunctionLiteral):
         binding.function = declaration.expr
@@ -1301,6 +1304,19 @@ def _seed_container_facts(declaration: hir.Declare, *, ctx: Context) -> None:
     if isinstance(keys_literal, hir.ArrayLiteral):
         for index, key in enumerate(keys_literal.items):
             _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
+        _record_literal_totality(dictionary, keys_literal, ctx=ctx)
+
+
+def _record_literal_totality(dictionary: hir.AST, keys_literal: hir.ArrayLiteral, *, ctx: Context) -> None:
+    """A literal over a finite key type with every value present is total:
+    `d[k]` is then proven for any `k` of the key type (`_proven_key`)."""
+    entry_types = ty.container_entry_types(dictionary.type)
+    members = ty.finite_members(entry_types[0]) if entry_types is not None else None
+    present = {identity[1] for key in keys_literal.items if (identity := _key_identity(key, ctx=ctx)) is not None and identity[0] == 'c'}
+    if members is not None and all(member in present for member in members):
+        dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+        if dictionary_id is not None:
+            ctx.key_facts[(dictionary_id, _TOTAL_KEYS)] = (None, None)
 
 
 def _widen_inferred_let_value(expr: hir.AST, *, ctx: Context) -> hir.AST:
@@ -1355,7 +1371,8 @@ def _tcr_annotated_declaration(
         and right.kind == '[]'
         and (not right.inner or _dict_literal_block(right) is not None)
     ):
-        return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=annotation, keyword=keyword)
+        total = refined_annotation if refined_annotation is not None and ty.total_dict_key(refined_annotation) is not None else None
+        return _tcr_dict_declare(name, ast.loc, right, ctx=ctx, annotation=total if total is not None else annotation, keyword=keyword)
     optional_payload = ty.optional_payload(annotation)
     expression_expected = (
         optional_payload
@@ -1404,7 +1421,11 @@ def _tcr_annotated_declaration(
         ctx=ctx,
     )
     if refined_annotation is not None and declaration.binding_id is not None:
-        _record_refinement_facts(declaration.binding_id, refined_annotation, ctx=ctx)
+        if ty.total_dict_key(refined_annotation) is not None:
+            ctx.declared_total.add(declaration.binding_id)
+            ctx.key_facts[(declaration.binding_id, _TOTAL_KEYS)] = (None, None)
+        else:
+            _record_refinement_facts(declaration.binding_id, refined_annotation, ctx=ctx)
     if declaration.binding_id is not None:
         _seed_field_routes(declaration.binding_id, annotation, expr, (), ctx=ctx)
     if growable and declaration.binding_id is not None:
@@ -1798,12 +1819,147 @@ def _record_key_fact(
     ctx.key_facts[(dictionary_id, identity)] = (position, static_position)
 
 
+_TOTAL_KEYS = ('total', None)   # the key-fact identity of "every key of the key type is present"
+
+
 def _proven_key(dictionary: hir.AST, key: hir.AST, *, ctx: Context) -> tuple[str | None, int | None] | None:
     dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
-    identity = _key_identity(key, ctx=ctx)
-    if dictionary_id is None or identity is None:
+    if dictionary_id is None:
         return None
-    return ctx.key_facts.get((dictionary_id, identity))
+    identity = _key_identity(key, ctx=ctx)
+    if identity is not None:
+        fact = ctx.key_facts.get((dictionary_id, identity))
+        if fact is not None:
+            return fact
+    # a total dictionary (every key of `K` present): any key of a type within `K`
+    total_key = _total_key_of(dictionary, ctx=ctx)
+    if total_key is not None and ctx.type_system.is_subtype(ty.strip_refinement(key.type), total_key):
+        return (None, None)
+    return None
+
+
+def _total_key_of(dictionary: hir.AST, *, ctx: Context) -> ty.TypeExpr | None:
+    """The key type a dictionary value is known total over: declared
+    `totaldict<K V>`, or a literal whose keys covered every value of `K`."""
+    dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    entry_types = ty.container_entry_types(dictionary.type)
+    if entry_types is not None and dictionary_id is not None and ((dictionary_id, _TOTAL_KEYS) in ctx.key_facts or dictionary_id in ctx.declared_total):
+        return entry_types[0]
+    declared = ty.total_dict_key(dictionary.type)
+    if declared is not None:
+        return declared
+    if isinstance(dictionary, hir.ExpressedIdentifier) and dictionary.binding_id is not None:
+        binding = ctx.binding_registry.by_id.get(dictionary.binding_id)
+        for candidate in (
+            binding.type if binding is not None else None,
+            binding.declaration.annotation if binding is not None and isinstance(binding.declaration, hir.Declare) else None,
+        ):
+            declared = ty.total_dict_key(candidate) if candidate is not None else None
+            if declared is not None:
+                return declared
+    return None
+
+
+def _copy_dictionary_facts(source: hir.AST, target_id: int, *, ctx: Context) -> None:
+    """`let d = other` / `const radixes = [loop … k -> v]`: the new dictionary's
+    keys are the source's, entry for entry, including an inferred totality."""
+    source = _unwrap_parens(source)
+    while isinstance(source, (hir.RepresentationCast, hir.ValueCast)):
+        source = source.expr
+    if not isinstance(source, hir.ExpressedIdentifier) or ty.container_entry_types(source.type) is None:
+        return
+    source_id = _dictionary_fact_id(source, ctx=ctx)
+    if source_id is None or source_id == target_id:
+        return
+    for (dictionary_id, identity), fact in list(ctx.key_facts.items()):
+        if dictionary_id == source_id:
+            ctx.key_facts[(target_id, identity)] = fact
+
+
+def _infer_capture_totality(loop: hir.Flow, values: list[hir.AST], capture_id: int, declared: ty.Type, *, ctx: Context) -> None:
+    """`[loop [k v] in D  k -> f(v)]` over a total `D`, unfiltered, keyed by
+    `k` itself: the capture has every key `D` has, so it is total over its
+    key type when that type's values are all keys of `D`."""
+    arm = loop.arms[0]
+    condition = arm.condition
+    if not (isinstance(condition, hir.MultiIteratorExpression) and condition.iterators):
+        return
+    keys_iterator = condition.iterators[0]
+    entries = keys_iterator.iterable
+    if not (isinstance(entries, hir.DictEntries) and entries.name == 'keys'):
+        return
+    source_key = _total_key_of(entries.dictionary, ctx=ctx)
+    if source_key is None or len(values) != 1:
+        return
+    last = arm.body.items[-1] if isinstance(arm.body, hir.Block) and arm.body.items else arm.body
+    if not isinstance(last, hir.ObjectLiteral):
+        return   # a filter (`if keep(k) k -> v`): some keys may be left out
+    pair = values[0]
+    key_value = _unwrap_parens(pair.fields[0].value) if isinstance(pair, hir.ObjectLiteral) and pair.fields else None
+    while isinstance(key_value, (hir.RepresentationCast, hir.ValueCast)):
+        key_value = key_value.expr
+    if not (isinstance(key_value, hir.ExpressedIdentifier) and key_value.binding_id is not None and key_value.binding_id == keys_iterator.target.binding_id):
+        return
+    entry_types = ty.container_entry_types(declared)
+    capture_members = ty.finite_members(entry_types[0]) if entry_types is not None else None
+    source_members = ty.finite_members(source_key)
+    if capture_members is None or source_members is None or not set(capture_members) <= set(source_members):
+        return
+    ctx.key_facts[(capture_id, _TOTAL_KEYS)] = (None, None)
+
+
+def _declared_dictionary_type(dictionary: hir.AST, *, ctx: Context) -> ty.Type:
+    if isinstance(dictionary, hir.ExpressedIdentifier) and dictionary.binding_id is not None:
+        binding = ctx.binding_registry.by_id.get(dictionary.binding_id)
+        if binding is not None and isinstance(binding.declaration, hir.Declare) and binding.declaration.annotation is not None:
+            return binding.declaration.annotation
+        if binding is not None and binding.type is not None:
+            return binding.type
+    return dictionary.type
+
+
+def _declared_total_dictionary(dictionary: hir.ExpressedIdentifier, *, ctx: Context) -> bool:
+    return dictionary.binding_id in ctx.declared_total or ty.total_dict_key(_declared_dictionary_type(dictionary, ctx=ctx)) is not None
+
+
+def _spell_key(value: object) -> str:
+    return f"'{value}'" if isinstance(value, str) else str(value)
+
+
+def _prove_total_dictionary(node: hir.AST, expected: ty.Type, *, ctx: Context) -> None:
+    """A value meeting `totaldict<K V>`: a literal with an entry for every
+    value of `K` (the missing ones are the error), or a dictionary already
+    known total."""
+    key_type = ty.total_dict_key(expected)
+    assert key_type is not None
+    members = ty.finite_members(key_type) or []
+    literal = _unwrap_parens(node)
+    while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
+        literal = literal.expr
+    if isinstance(literal, hir.ObjectLiteral) and ty.dict_key_value(literal.type) is not None:
+        keys_literal = literal.fields[0].value
+        while isinstance(keys_literal, (hir.RepresentationCast, hir.ValueCast)):
+            keys_literal = keys_literal.expr
+        if isinstance(keys_literal, hir.ArrayLiteral):
+            present = {identity[1] for key in keys_literal.items if (identity := _key_identity(key, ctx=ctx)) is not None and identity[0] == 'c'}
+            missing = [member for member in members if member not in present]
+            if missing:
+                user_error(
+                    ctx.srcfile,
+                    'dictionary is missing keys',
+                    Pointer(span=node.loc, message=f'a `{type_to_dewy(expected)}` has an entry for every key; missing: {", ".join(_spell_key(m) for m in missing)}'),
+                    hint='add the missing entries, or declare it `dict<…>` if it is meant to be partial',
+                )
+            return
+    known = _total_key_of(node, ctx=ctx)
+    if known is not None and ctx.type_system.is_subtype(key_type, known):
+        return
+    user_error(
+        ctx.srcfile,
+        'cannot prove the dictionary has every key',
+        Pointer(span=node.loc, message=f'`{type_to_dewy(expected)}` needs an entry for every `{type_to_dewy(key_type)}`, which nothing establishes here'),
+        hint='write the dictionary as a literal with every key, or pass a value declared `totaldict`',
+    )
 
 
 def _dict_index_binding(left: p0.AST, *, ctx: Context) -> sb.Binding | None:
@@ -6970,6 +7126,8 @@ def _tcr_loop_capture(block: p0.Block, *, kind: Literal['array', 'set'], expecte
     if binding is None or declared is None:
         raise TypeError('INTERNAL ERROR: loop capture container was not declared')
     container_type = cast(ty.TypeExpr, declared)
+    if kind == 'dict':
+        _infer_capture_totality(loop, values, binding.id, container_type, ctx=ctx)
 
     def push(value: hir.AST) -> hir.AST:
         place = hir.Place(value.loc, container_type, hir.ExpressedIdentifier(value.loc, container_type, name, binding_id=binding.id))
@@ -7057,7 +7215,7 @@ def _tcr_dict_declare(
     block: p0.Block,
     *,
     ctx: Context,
-    annotation: ty.ObjectType | None = None,
+    annotation: ty.Type | None = None,   # `dict<K V>`, or `totaldict<K V>` (a refined one) to prove the literal total
     keyword: str = 'let',
 ) -> hir.AST:
     """Declare a dictionary: the runtime object `[keys values]` (insertion order).
@@ -7071,6 +7229,9 @@ def _tcr_dict_declare(
     assert isinstance(dict_object, ty.ObjectType)
     binding = ctx.binding_registry.allocate(block, name, 'value', loc)
     binding.type = dict_object
+    if annotation is not None and ty.total_dict_key(annotation) is not None:
+        _prove_total_dictionary(literal, annotation, ctx=ctx)   # every key, or the missing ones are the error
+        ctx.declared_total.add(binding.id)
     declaration = hir.Declare(loc, ty.VOID_TYPE, keyword, name, dict_object, literal, binding_id=binding.id)   # a `const` keeps its literal's keys proven everywhere
     binding.declaration = declaration
     ctx.declarations[name] = dict_object
@@ -7083,6 +7244,7 @@ def _tcr_dict_declare(
     if isinstance(keys_literal, hir.ArrayLiteral):
         for index, key in enumerate(keys_literal.items):
             _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
+        _record_literal_totality(dictionary, keys_literal, ctx=ctx)
     return declaration
 
 
@@ -8093,6 +8255,17 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         set_methods = {'add', 'pop', 'clear'}
         if found_dict is not None and name in (set_methods if found_dict[2] is None else dict_methods):
             dictionary, key_type, value_type = found_dict
+            if name in ('pop', 'clear') and value_type is not None:
+                if ty.total_dict_key(dictionary.type) is not None or (isinstance(dictionary, hir.ExpressedIdentifier) and _declared_total_dictionary(dictionary, ctx=ctx)):
+                    user_error(
+                        ctx.srcfile,
+                        f'`{name}` on a total dictionary',
+                        Pointer(span=binop.loc, message=f'a `totaldict<{type_to_dewy(key_type)} {type_to_dewy(value_type)}>` keeps an entry for every key'),
+                        hint='store a new value with `d[key] = value`; a dictionary that loses keys is a `dict<…>`',
+                    )
+                removed = _dictionary_fact_id(dictionary, ctx=ctx)
+                if removed is not None:
+                    ctx.key_facts.pop((removed, _TOTAL_KEYS), None)   # an inferred totality does not survive a removal
             if name == 'get':
                 assert value_type is not None
                 signature = ty.FunctionType(
@@ -11837,7 +12010,9 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     def bind_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
         # inside the body the binding has the base type; the refinement is a fact (bounds analysis)
         binding = ctx.binding_registry.allocate_param(param.name, ty.strip_refinement(param.type), binop.loc)
-        if isinstance(param.type, ty.RefinedType):
+        if ty.total_dict_key(param.type) is not None:
+            ctx.declared_total.add(binding.id)   # `table:totaldict<K V>`: every key present, `pop`/`clear` refused
+        elif isinstance(param.type, ty.RefinedType):
             _record_refinement_facts(binding.id, param.type, ctx=ctx)
         inner_bindings[param.name] = binding
         return replace(param, binding_id=binding.id)
@@ -13415,6 +13590,22 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 _word_element_type(ast_to_type(key_ast, ctx=ctx)),
                 _word_element_type(ast_to_type(value_ast, ctx=ctx)),
             )
+
+        case p0.BinOp(
+            op=t2.TypeParamJuxtapose(),
+            left=p0.Atom(item=t1.Identifier(name='totaldict')),
+            right=p0.Block(kind='<>', inner=[key_ast, value_ast]),
+        ):
+            # `totaldict<K V>`: a dictionary with an entry for every value of the finite `K`
+            key = _word_element_type(ast_to_type(key_ast, ctx=ctx))
+            if ty.finite_members(key) is None:
+                user_error(
+                    ctx.srcfile,
+                    '`totaldict` needs a finite key type',
+                    Pointer(span=key_ast.loc, message=f'`{type_to_dewy(key)}` has no fixed set of values'),
+                    hint="the key type is a union of literals, such as `'0b' | '0x'` or `1 | 2 | 3`; a dictionary over any other key is a `dict`",
+                )
+            return ty.total_dict_type(key, _word_element_type(ast_to_type(value_ast, ctx=ctx)))
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
@@ -15393,6 +15584,11 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
                     Pointer(span=node.loc, message=mismatch),
                     hint=f'declare the function with the slot\'s types: `:>{type_to_dewy(expected.ret)}`',
                 )
+    if ty.total_dict_key(expected) is not None:
+        # `totaldict<K V>`: the shape is the dictionary's; totality is proven here (a literal with every key, or a dictionary known total)
+        checked = _check_against_shape(node, ty.strip_refinement(expected), ctx=ctx)
+        _prove_total_dictionary(checked, expected, ctx=ctx)
+        return checked
     checked = _check_against_shape(node, expected, ctx=ctx)
     target = ty.unfold(ty.strip_refinement(expected))
     if isinstance(target, ty.ObjectType):

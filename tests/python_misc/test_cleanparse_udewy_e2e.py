@@ -106,6 +106,7 @@ LOWERED_CASES = [
     ('min_max_facts.dewy', 42),
     ('conditional_value_facts.dewy', 42),
     ('length_preserving_calls.dewy', 42),
+    ('total_dicts.dewy', 42),
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),
