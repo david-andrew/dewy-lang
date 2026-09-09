@@ -60,3 +60,39 @@ let main = ():>int64 => {
         '2', '1', 'caller', 'default', '2', 'default', '2', 'default',
         'made', '1', 'false', 'false', 'true', 'one', 'two',
     ]
+
+
+def test_union_defaults_select_before_reading_an_omitted_cell(tmp_path):
+    source = '''
+A=type of [items:array<int64> label:string]
+B=type of [count:int64]
+Choice:type=A|B|none
+let make=():>Choice => {printl('default') return A[[7] 'made']}
+let choose=(... key:Choice=make()):>Choice => {
+    if key is? A {key.items.push(9)}
+    return key
+}
+let missing=(prefix:int64?=none key:Choice=none suffix:int64?=none):>bool => key is? none
+let main=():>int64 => {
+    let original=A[[1] 'caller']
+    let supplied=choose(key=original)
+    if supplied isnt? A return 1
+    printl(supplied.items.length)
+    printl(original.items.length)
+    let first=choose()
+    let second=choose()
+    if first isnt? A or second isnt? A return 2
+    first.items.push(11)
+    printl(first.items.length)
+    printl(second.items.length)
+    printl(missing(suffix=7))
+    printl(missing(key=B[3]))
+    return 0
+}
+'''
+    output = tmp_path / 'union_defaults.udewy'
+    output.write_text(codegen(SrcFile(None, source)))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ['2', '1', 'default', 'default', '3', '2', 'true', 'false']

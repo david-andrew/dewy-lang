@@ -858,7 +858,7 @@ class _Lowerer(
                 binding_id=param.binding_id,
             )
             default = self._require_node(self._transform_node(param.value))
-            if isinstance(param.type, (ty.ArrayType, ty.ObjectType)):
+            if isinstance(param.type, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(param.type) is not None:
                 # Select before dereferencing: an omitted aggregate argument
                 # is an ignored zero pointer. The ordinary value-flow path
                 # copies a supplied value and constructs a default lazily,
@@ -2870,6 +2870,12 @@ class _Lowerer(
                     argument_types.append(param.type)
                     if not param.required:
                         argument_types.append('bool')
+                # Missing arguments and presence flags already have their ABI
+                # representation. A missing union/object is an ignored null
+                # pointer, not a source integer to box or dereference.
+                for index, source_position in enumerate(source_positions):
+                    if source_position is None:
+                        argument_types[index] = normalized[index].type
                 self.call_argument_types[id(transformed)] = argument_types
                 self.call_union_args[id(transformed)] = [ty.runtime_union_members(type_) for type_ in argument_types]
             called = self._direct_call_function(node)
