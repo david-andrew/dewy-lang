@@ -760,3 +760,31 @@ let main = ():>int64 => {
     udewy_path.write_text(emitted)
     monkeypatch.chdir(tmp_path)
     assert entry_point(udewy_path, []) == 42
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_string_results_from_default_parameters_keep_owned_storage(tmp_path, monkeypatch, capfd):
+    emitted = codegen(SrcFile(None, '''
+let calls:int64 = 0
+let default_text = ():>string => { calls += 1 return "made{calls}" }
+let wrap = (text:string=default_text()):>string => "pre{text}post"
+let identity = (text:string=default_text()):>string => text
+let compose = ():>string => "outer{wrap()}"
+let main = ():>int64 => {
+    let first = wrap()
+    let explicit = wrap("given")
+    let borrowed = identity()
+    let nested = compose()
+    printl(first)
+    printl(explicit)
+    printl(borrowed)
+    printl(nested)
+    printl(calls)
+    return 0
+}
+'''))
+    path = tmp_path / 'default_string_results.udewy'
+    path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == 'premade1post\npregivenpost\nmade2\nouterpremade3post\n3\n'

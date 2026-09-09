@@ -1119,6 +1119,19 @@ class _StringLowering:
             else:
                 bound = bound.combined_max(expr_bound)
         self._string_bound_in_progress.discard(key)
+        if bound is not None and any(
+            count and isinstance(literal.pos_or_kw_args[index], hir.BoundParam)
+            for index, count in bound.counts
+        ):
+            # A missing argument is evaluated inside the callee. The caller
+            # cannot size its result from that absent value slot, nor repeat
+            # an effectful default expression to find its length. Build the
+            # result in the existing caller-owned region instead; propagate
+            # the unknown capacity to callers that compose this function.
+            # Even returning the parameter itself may return a string built
+            # by its default, so that path also needs a destination.
+            bound = None
+            materialized = True
         if materialized or any(
             isinstance(self._unwrap_transparent(expr), (hir.InterpolatedString, hir.StringConcat))
             for expr in returned
