@@ -186,6 +186,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let node = tokens.node_at(source.nodes id)
+    if node is? parser.Ambiguous return ambiguous(id node env @session expected=expected call_target=call_target allow_place=allow_place)
     let number = syntax.integer(id source.nodes)
     if number isnt? none {
         let literal = types.integer_literal(number @session.types)
@@ -376,6 +377,33 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] return declaration(node.parts[1] env @session constant=keyword.name =? 'const' explicit=true)
     }
     return pending(id "{node.kind} expression" env session)
+}
+
+# All arenas and flow facts belong to the candidate transaction. A rejected
+# call/product/index reading cannot leak a declaration, type mint, place
+# invalidation, or checked body into the winning reading. This explicit
+# value snapshot is deliberately simple; copying only changed arena tails
+# is an optimization once the complete checker has been profiled.
+Choice:type = const [result:addr state:contexts.Session]
+ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
+    let winner:Choice? = none
+    let rejected:array<Error> = []
+    loop candidate in node.candidates {
+        let trial = session
+        let result = expression(candidate env @trial expected=expected call_target=call_target allow_place=allow_place)
+        if result is? Error { rejected.push(result) continue }
+        if winner isnt? none return problem(id 'ambiguous expression' 'multiple readings typecheck; add explicit operators or parentheses' env session)
+        winner = Choice[result trial]
+    }
+    if winner is? none {
+        # Keep implementation gaps visible when no supported reading wins.
+        loop rejection in rejected { if rejection.title =? 'native checker implementation pending' return rejection }
+        if rejected.length >? 0 return rejected[0]
+        return problem(id 'no valid interpretation for ambiguous expression' 'no candidate expression typechecks' env session)
+    }
+    let result = winner.result
+    session = winner.state
+    return result
 }
 
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {

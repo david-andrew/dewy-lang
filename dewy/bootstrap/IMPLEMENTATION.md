@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  62 source programs and 30 invalid programs. Short-circuit boolean HIR,
+  69 source programs and 30 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -46,6 +46,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Comparison checks include iterator bounds, target types, and exit levels,
   rather than only the module's result type. Advanced iterator formulas,
   unpacking, runtime range ends, and scope-metatag exits remain to be added.
+  Shared binding/flow shapes sink parser ambiguity to the competing values.
+  Each candidate checks in an isolated compilation snapshot; exactly one
+  successful candidate commits its bindings, types, HIR, and facts. Computed
+  fields now work in declarations, defaults, constructors, and iterators.
   This is an intermediate HIR entry point, not yet a
   compiler driver: the remaining value forms, proof validation,
   representation selection, and native emission are still required.

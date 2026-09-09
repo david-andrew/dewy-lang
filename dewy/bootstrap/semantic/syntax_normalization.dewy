@@ -1,0 +1,73 @@
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"syntax.dewy" as syntax
+
+doc"""
+Move ambiguity beneath the binding/flow shapes all readings share.
+
+`x=load().name` declares x regardless of whether the inner juxtaposition is
+a call or a product. Classifying its whole statement as an expression loses
+the declaration. The same applies to named fields, defaults, and iterator
+conditions. Competing expressions remain ambiguous until value checking.
+
+prepare builds the semantic visitor's copy of the parser arena. Original
+indices stay valid; added nodes belong only to this copy. The parser's own
+Program and its diagnostic/debug output remain unchanged.
+"""
+
+same = (left:addr right:addr nodes:array<tokens.Token>):>bool => {
+    if left =? right return true
+    let a = tokens.node_at(nodes left)
+    let b = tokens.node_at(nodes right)
+    if a.kind not=? b.kind or a.loc.start not=? b.loc.start or a.loc.stop not=? b.loc.stop or parser.token_payload(a) not=? parser.token_payload(b) return false
+    let ac = parser.children_of(a)
+    let bc = parser.children_of(b)
+    if ac.length not=? bc.length return false
+    loop i in 0.. and i <? ac.length and i <? bc.length { if not same(ac[i] bc[i] nodes) return false }
+    return true
+}
+sink = (id:addr @nodes:array<tokens.Token>):>addr => {
+    let node = tokens.node_at(nodes id)
+    if node isnt? parser.Ambiguous or node.candidates.length =? 0 return id
+    let first = tokens.node_at(nodes node.candidates[0])
+    let identical = true
+    loop candidate in node.candidates { if not same(candidate node.candidates[0] nodes) { identical = false } }
+    if identical return node.candidates[0]
+    if first isnt? parser.BinOp return id
+    let op = syntax.symbol(first.op nodes)
+    let left_shared = true
+    let right_shared = op in? ['and' '&' 'or' '|' 'xor' 'nand' 'nor' 'xnor']
+    let left:array<addr> = []
+    let right:array<addr> = []
+    loop candidate in node.candidates {
+        let item = tokens.node_at(nodes candidate)
+        if item isnt? parser.BinOp or not same(item.op first.op nodes) return id
+        if not same(item.left first.left nodes) { left_shared = false }
+        if not same(item.right first.right nodes) { right_shared = false }
+        left.push(item.left) right.push(item.right)
+    }
+    # Binding targets retain complete alternatives; only logical operators
+    # permit sinking an ambiguity into their left operand as well.
+    if left_shared {
+        let alternatives = tokens.append_node(@nodes parser.Ambiguous[loc=node.loc candidates=right])
+        let value = sink(alternatives @nodes)
+        return tokens.append_node(@nodes parser.BinOp[loc=first.loc op=first.op left=first.left right=value])
+    }
+    if right_shared {
+        let alternatives = tokens.append_node(@nodes parser.Ambiguous[loc=node.loc candidates=left])
+        let value = sink(alternatives @nodes)
+        return tokens.append_node(@nodes parser.BinOp[loc=first.loc op=first.op left=value right=first.right])
+    }
+    return id
+}
+prepare = (original:array<tokens.Token>):>array<tokens.Token> => {
+    let nodes = original
+    let count = nodes.length
+    loop i in 0.. and i <? count and i <? nodes.length {
+        let id = sink(i @nodes)
+        let normalized = tokens.node_at(nodes id)
+        $runtime_assert i <? nodes.length
+        nodes[i] = normalized
+    }
+    return nodes
+}

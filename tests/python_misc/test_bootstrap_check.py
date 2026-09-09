@@ -16,6 +16,13 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'let make=():>[x:int64] => [x=7]\nlet x=make().x\nx',
+    'let make=():>[x:int64] => [x=7]\nlet p=[x=make().x]\np.x',
+    'let make=():>[x:int64] => [x=7]\nP:type=[x:int64]\nP[x=make().x]',
+    'let make=():>[x:int64] => [x=7]\nlet use=(x:int64):>int64=>x\nuse(x=make().x)',
+    'let make=():>[x:int64] => [x=7]\nlet use=(x:int64=make().x):>int64=>x\nuse()',
+    'let make=():>[values:array<int64>] => [values=[1 2]]\nloop x in make().values {x;}',
+    'let make=():>[values:array<int64>] => [values=[1 2]]\nloop x in make().values and x >? 0 {x;}',
     'loop false {}',
     'loop true {break}',
     'let f=():>never => loop true {continue}\n@f',

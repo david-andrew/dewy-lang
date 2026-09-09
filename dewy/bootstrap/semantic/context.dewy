@@ -7,6 +7,7 @@ import p"bindings.dewy" as bindings
 import p"brands.dewy" as brands
 import p"subtyping.dewy" as subtyping
 import p"builtins.dewy" as builtins
+import p"syntax_normalization.dewy" as normalization
 
 doc"""
 Compilation-owned arenas and the lexical context of a semantic visit.
@@ -71,7 +72,7 @@ child = (context:Context @session:Session):>Context => {
 }
 begin = (srcfile:SrcFile nodes:array<tokens.Token> @session:Session):>Context => {
     let source = session.sources.length
-    session.sources.push(Source[srcfile nodes])
+    session.sources.push(Source[srcfile normalization.prepare(nodes)])
     let scope = bindings.push_scope(@session.scopes none)
     if session.builtin_aliases.length =? 0 { session.builtin_aliases = builtins.type_aliases(@session.types) }
     return Context[source scope]
