@@ -819,3 +819,24 @@ let main = ():>int64 => {
     monkeypatch.chdir(tmp_path)
     assert entry_point(path, []) == 0
     assert capfd.readouterr().out == '0\n1267650600228229401496703205376\n-1267650600228229401496703205376\nmissing\nfound\n42\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_loop_iterable_call_member_resolves_before_binding_target(tmp_path, monkeypatch, capfd):
+    emitted = codegen(SrcFile(None, '''
+let calls:int64 = 0
+let make = ():>dict<addr int64> => { calls += 1 return [0 -> 1 1 -> 2 2 -> 3] }
+let main = ():>int64 => {
+    let sum:int64 = 0
+    loop value in make().values { sum += value }
+    loop value in make().values and value <? 3 { sum += value }
+    printl(sum)
+    printl(calls)
+    return 0
+}
+'''))
+    path = tmp_path / 'loop_call_member.udewy'
+    path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == '9\n2\n'

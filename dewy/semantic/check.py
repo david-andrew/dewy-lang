@@ -712,7 +712,8 @@ def _sink_ambiguity(ast: p0.AST) -> p0.AST:
     `x = load(id).name` parses as two readings of the whole statement (call
     vs. product inside), which the declaration forms cannot match. When every
     reading is the same binary operator over the same left operand, the
-    ambiguity belongs to the right operand only.
+    ambiguity belongs to the right operand only. The same applies to a
+    shared right operand, as in `loop x in load().items and x >? 0`.
     """
     if isinstance(ast, p0.KeywordExpr) and len(ast.parts) == 2 and isinstance(ast.parts[1], p0.Ambiguous):
         return replace(ast, parts=[ast.parts[0], _sink_ambiguity(ast.parts[1])])
@@ -726,12 +727,18 @@ def _sink_ambiguity(ast: p0.AST) -> p0.AST:
             isinstance(candidate, p0.BinOp)
             and type(candidate.op) is type(first.op)
             and getattr(candidate.op, 'symbol', None) == getattr(first.op, 'symbol', None)
-            and candidate.left == first.left
             for candidate in candidates[1:]
         )
     ):
-        right = _sink_ambiguity(p0.Ambiguous(ast.loc, [candidate.right for candidate in candidates]))
-        return replace(first, right=right)
+        if all(candidate.left == first.left for candidate in candidates[1:]):
+            right = _sink_ambiguity(p0.Ambiguous(ast.loc, [candidate.right for candidate in candidates]))
+            return replace(first, right=right)
+        # Logical operands are expressions; assignment/iterator targets are
+        # binding forms and must retain their alternative complete readings.
+        if (isinstance(first.op, t1.Operator) and first.op.symbol in _ASSERT_LOGICAL_OPERATORS
+                and all(candidate.right == first.right for candidate in candidates[1:])):
+            left = _sink_ambiguity(p0.Ambiguous(ast.loc, [candidate.left for candidate in candidates]))
+            return replace(first, left=left)
     return ast
 
 
@@ -4824,6 +4831,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         _, condition_ast, body_ast = arm.parts
         assert isinstance(condition_ast, p0.AST)
         assert isinstance(body_ast, p0.AST)
+        # Recognize the shared iterator declaration before resolving the
+        # iterable's call/index/product ambiguity (`x in make().items`).
+        condition_ast = _sink_ambiguity(condition_ast)
         # The condition runs again after the body. Drop incoming facts about
         # its writes before checking the condition itself: otherwise an exact
         # initial length can turn `loop pending.length >? 0` into `loop true`.
