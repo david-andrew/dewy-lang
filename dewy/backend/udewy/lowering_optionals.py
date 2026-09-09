@@ -10,6 +10,7 @@ from dataclasses import replace
 from ...parser import t0
 from ...reporting import Span
 from ...semantic import hir, ty
+from .lowering_shared import LoopRegion
 
 
 class _OptionalLowering:
@@ -990,42 +991,18 @@ class _OptionalLowering:
         *,
         prepared: bool = True,
     ) -> tuple[list[hir.AST], hir.Flow]:
-        prelude: list[hir.AST] = []
-        arms: list[hir.IfArm | hir.LoopArm] = []
-        for index, arm in enumerate(node.arms):
-            condition_prelude, condition = self._prepare_condition(arm.condition)
-            if condition_prelude:
-                if isinstance(arm, hir.LoopArm):
-                    self._target_error(
-                        arm.condition,
-                        'union flow condition requiring extracted statements',
-                    )
-                if index > 0:
-                    # a later arm whose condition needs statements (`match mode { <'round'> => … }`
-                    # comparing strings): the rest of the chain is a nested flow in the `else`,
-                    # where those statements run after the earlier tests failed (as `_lower_flow` does)
-                    rest = replace(node, arms=list(node.arms[index:]))
-                    nested_prelude, nested = self._lower_union_flow(rest, cell, members, prepared=prepared)
-                    default = hir.Block(node.loc, ty.VOID_TYPE, [*nested_prelude, nested], True)
-                    return prelude, replace(node, type=ty.VOID_TYPE, arms=arms, default=default)
-                prelude.extend(condition_prelude)
-            arms.append(
-                replace(
-                    arm,
-                    condition=condition,
-                    body=self._union_flow_body(arm.body, cell, members, prepared=prepared),
-                )
-            )
-        default = (
-            self._union_flow_body(node.default, cell, members, prepared=prepared)
-            if node.default is not None
-            else None
-        )
-        return prelude, replace(
-            node,
-            type=ty.VOID_TYPE,
-            arms=arms,
-            default=default,
+        def lower_body(body: hir.AST) -> hir.AST:
+            return self._union_flow_body(body, cell, members, prepared=prepared)
+
+        def lower_loop(arm: hir.LoopArm, entry: LoopRegion, extracted: bool) -> hir.AST:
+            # Union-valued loops retain their existing restriction. Conditional
+            # chains share sequencing and temporary lifetimes with scalar flows.
+            if extracted:
+                self._target_error(arm.condition, 'union flow condition requiring extracted statements')
+            return lower_body(arm.body)
+
+        return self._lower_flow_chain(
+            node, lower_body=lower_body, lower_loop=lower_loop, result_type=ty.VOID_TYPE,
         )
 
     def _materialize_union(
@@ -1120,4 +1097,3 @@ class _OptionalLowering:
             self._union_write(cell, body, members, prepared=prepared),
             True,
         )
-

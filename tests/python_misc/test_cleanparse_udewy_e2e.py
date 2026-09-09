@@ -116,6 +116,7 @@ LOWERED_CASES = [
     ('family_narrowing.dewy', 42),
     ('union_flow_chains.dewy', 42),
     ('warn_then_print.dewy', 42),
+    ('union_flow_evaluation.dewy', 42),
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),
@@ -245,6 +246,7 @@ def test_udewy_fixture_compiles_and_runs(
     expected_exit: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     emitted = codegen(SrcFile.from_path(fixtures / fixture_name))
 
@@ -255,6 +257,13 @@ def test_udewy_fixture_compiles_and_runs(
     monkeypatch.chdir(tmp_path)
     exit_code = entry_point(udewy_path, [])
     assert exit_code == expected_exit
+    if fixture_name == 'warn_then_print.dewy':
+        output = capfd.readouterr()
+        assert output.out == 'after the warning\nafter the summary\n'
+        assert 'Warning: Lone carriage return' in output.err
+        assert 'Warning: Summary' in output.err
+        assert 'after the warning' not in output.err
+        assert 'after the summary' not in output.err
 
 
 def test_dynamic_array_returns_use_the_prelude_arena() -> None:

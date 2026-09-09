@@ -52,6 +52,8 @@ from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
 from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
+    LocalBindingKey,
+    local_binding_key,
     LoopRegion,
     CopyNote,
     MoveNote,
@@ -128,14 +130,13 @@ def _is_hir_node(value: object) -> bool:
 def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
     """Give every local of a function a name of its own.
 
-    The lowering keeps what a local owns — strings to release at scope exit,
-    an object's layout — by name, and the emitted µDewy is read by name too,
+    Some lowering tables still track locals by name (arrays and strings),
+    and the emitted µDewy is read by name too,
     which assumes names are unique within a function. Dewy scopes let two
     locals share a spelling (`c:Closer => …` and `c:TypeCloser => …` in one
     match, two `loop i` counters): the later bindings are renamed
     (`c`, `c__2`, …) by binding id, before anything is keyed by name.
     """
-    from dataclasses import fields, is_dataclass
     owners: dict[str, list[int]] = {}
     for param in [*literal.pos_or_kw_args, *literal.kw_only_args]:
         if param.binding_id is not None:
@@ -190,7 +191,6 @@ def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
 def _uniquify_module_locals(root: hir.Block) -> hir.Block:
     """`_uniquify_local_names` for every function literal of a module, inner
     literals first — before the lowering keys anything by a node's identity."""
-    from dataclasses import fields, is_dataclass
 
     def rebuild(value: object) -> object:
         if _is_hir_node(value):
@@ -343,7 +343,7 @@ class _Lowerer(
         self.owned_string_arrays: set[str] = set()   # those whose elements are strings the array owns (released with it)
         self.owned_cell_arrays: dict[str, ty.TypeExpr] = {}   # those whose elements are optional/union cells the array owns
         self.owned_object_arrays: dict[str, ty.ObjectType] = {}   # those whose elements are objects the array owns
-        self.owned_objects: dict[str, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
+        self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
@@ -361,8 +361,8 @@ class _Lowerer(
         self.returned_string_nodes: set[int] = set()   # string expressions a `return` may hand out (`_returned_string_node_ids`)
         self.array_element_targets: set[int] = set()   # iterator targets over arrays of strings
         self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
-        self.borrowed_fields: dict[str, set[str]] = {}          # object local name -> fields that borrow (never adopted on `return`)
-        self.object_flow_targets: set[str] = set()   # flow temporaries (and bindings) holding an object's pointer
+        self.borrowed_fields: dict[LocalBindingKey, set[str]] = {}   # object binding -> fields that borrow (never adopted on `return`)
+        self.object_flow_targets: set[LocalBindingKey] = set()   # flow temporaries (and bindings) holding an object's pointer
         self.object_literal_contexts: list[
             tuple[hir.AST, ty.ObjectType, dict[int, str]]
         ] = []
@@ -3013,6 +3013,8 @@ class _Lowerer(
         self.owned_cell_arrays = {}
         self.owned_object_arrays = {}
         self.owned_objects = {}
+        self.borrowed_fields = {}
+        self.object_flow_targets = set()
         previous_state = (
             self.loop_signal_levels,
             self.loop_signal_kind,
@@ -3120,7 +3122,7 @@ class _Lowerer(
         if isinstance(unfolded, ty.ObjectType) and not self.lowering_module_startup:
             # a literal or call result is built in this frame with arena
             # members; any other source is deep-copied (`_object_copy`)
-            self.owned_objects[node.name] = unfolded
+            self.owned_objects[local_binding_key(node)] = unfolded
 
     def _note_owned_raw_array(self, node: hir.Declare, declared_type: ty.Type) -> None:
         """An exact-length local array on the stack whose elements are string handles
@@ -3384,7 +3386,7 @@ class _Lowerer(
         """
         if (not self.owned_array_names and not self.owned_objects and not self.owned_strings and not self.owned_raw_arrays and not self.owned_cells and not exit_statements) or not isinstance(body, hir.Block):
             return body
-        owned_names = self.owned_array_names | set(self.owned_objects) | self.owned_strings | set(self.owned_raw_arrays) | set(self.owned_cells)
+        owned_names = self.owned_array_names | self.owned_strings | set(self.owned_raw_arrays) | set(self.owned_cells)
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]], moved: str | None = None) -> list[hir.AST]:
@@ -3400,8 +3402,8 @@ class _Lowerer(
                     elif local.name in self.owned_raw_arrays:
                         length, element, blocks = self.owned_raw_arrays[local.name]
                         released.extend(self._release_raw_array_members(local, length, element, blocks, local.loc))
-                    elif local.name in self.owned_objects:
-                        released.extend(self._release_object_members(local, self.owned_objects[local.name], local.loc))
+                    elif local_binding_key(local) in self.owned_objects:
+                        released.extend(self._release_object_members(local, self.owned_objects[local_binding_key(local)], local.loc))
                     else:
                         released.extend(self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(local.name), object_element=self.owned_object_arrays.get(local.name)))
             return released
@@ -3413,7 +3415,7 @@ class _Lowerer(
             here: list[hir.ExpressedIdentifier] = []
             items: list[hir.AST] = []
             for item in block.items:
-                if isinstance(item, hir.Declare) and item.name in owned_names:
+                if isinstance(item, hir.Declare) and (item.name in owned_names or local_binding_key(item) in self.owned_objects):
                     here.append(hir.ExpressedIdentifier(item.loc, 'int64', item.name, binding_id=item.binding_id))
                     items.append(item)
                 elif isinstance(item, hir.Return):
@@ -4491,7 +4493,7 @@ class _Lowerer(
                 return [*prelude, *flow_prelude, flow], replace(cell, type=node.type)
             target = self._new_flow_temp(node)
             if isinstance(ty.strip_refinement(node.type), ty.ObjectType):
-                self.object_flow_targets.add(target.name)   # a pointer word: each arm builds or copies its object
+                self.object_flow_targets.add(local_binding_key(target))   # a pointer word: each arm builds or copies its object
             declaration = hir.Declare(
                 node.loc,
                 ty.VOID_TYPE,

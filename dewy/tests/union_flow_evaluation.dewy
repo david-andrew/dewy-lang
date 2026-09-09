@@ -1,0 +1,26 @@
+# Later conditions allocate strings and mutate a counter. They must execute
+# only when reached, and their temporary storage must survive the comparison.
+A = type of any & [n:int64]
+B = type of any & [n:int64]
+let mark = (@count:int64 text:string):>string => {
+    count += 1
+    return "condition {text}"
+}
+let choose = (first:bool second:bool @count:int64):>A|B => {
+    let result:A|B = if first A[10]
+        else if mark(@count "second") =? "condition second" and second B[20]
+        else if mark(@count "third") =? "condition third" A[30]
+        else B[0]
+    return result
+}
+let main = ():>int64 => {
+    let count:int64 = 0
+    let a = choose(true false @count)
+    if count not=? 0 return 1
+    let b = choose(false true @count)
+    if count not=? 1 return 2
+    let c = choose(false false @count)
+    if count not=? 3 return 3
+    if a is? A and b is? B and c is? A and a.n + b.n + c.n =? 60 return 42
+    return 4
+}

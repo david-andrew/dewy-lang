@@ -11,6 +11,19 @@ from typing import Literal
 from ...reporting import Span, SrcFile
 from ...semantic import hir
 
+type LocalBindingKey = int | str
+
+
+def local_binding_key(node: hir.Declare | hir.ExpressedIdentifier) -> LocalBindingKey:
+    """Source bindings use semantic IDs; generated temporaries use unique symbols.
+
+    Lowered declarations and identifier views retain their source binding ID
+    even when their type or emitted spelling changes. The two key domains
+    cannot collide, and temporary symbols are allocated uniquely by lowering.
+    """
+    return node.binding_id if node.binding_id is not None else node.name
+
+
 ARRAY_DATA_OFFSET = 0
 
 ARRAY_LENGTH_OFFSET = 8
@@ -127,9 +140,9 @@ class LoweredProgram:
 class _Scope:
     """A reconstructed lexical scope used to resolve mutable, unbound HIR names.
 
-    HIR identifiers currently retain only their source spelling and type, not a
-    definition ID. The lowering pass therefore mirrors semantic scope rules and
-    records the binding selected for each identifier occurrence.
+    Resolved HIR identifiers carry semantic binding IDs. Discovery also mirrors
+    lexical scope rules for forward functions and synthesized names, recording
+    the binding selected for each identifier occurrence.
 
     ``display_path`` is a readable lexical path used only when symbol
     disambiguation requires scope qualification. The first function-body block

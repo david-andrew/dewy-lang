@@ -5,6 +5,7 @@ Split from ``lower.py``; methods run as part of ``_Lowerer``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal
 
@@ -15,6 +16,8 @@ from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
     FIXED_INTEGER_WIDTHS,
     SIGNED_FIXED_INTS,
+    LoopRegion,
+    local_binding_key,
 )
 
 
@@ -191,6 +194,37 @@ class _FlowLowering:
         target: hir.ExpressedIdentifier | None = None,
     ) -> tuple[list[hir.AST], hir.Flow]:
         """Lower one structured flow, optionally assigning each branch value."""
+        def lower_body(body: hir.AST) -> hir.AST:
+            return self._assign_flow_body(body, target) if target is not None else self._lower_statement_body(body)
+
+        def lower_loop(arm: hir.LoopArm, entry: LoopRegion, extracted: bool) -> hir.AST:
+            if target is None or extracted:
+                return self._lower_loop_body(arm, entry=entry)
+            self.lower_loop_depth += 1
+            try:
+                return lower_body(arm.body)
+            finally:
+                self.lower_loop_depth -= 1
+
+        return self._lower_flow_chain(
+            node, lower_body=lower_body, lower_loop=lower_loop,
+            result_type=ty.VOID_TYPE if target is not None else node.type,
+        )
+
+    def _lower_flow_chain(
+        self,
+        node: hir.Flow,
+        *,
+        lower_body: Callable[[hir.AST], hir.AST],
+        lower_loop: Callable[[hir.LoopArm, LoopRegion, bool], hir.AST],
+        result_type: ty.Type,
+    ) -> tuple[list[hir.AST], hir.Flow]:
+        """Sequence tests and their temporaries independently of result storage.
+
+        A later test's statements execute only after earlier tests fail.
+        Loop bodies supply their own lowering policy; the final argument says
+        whether the loop condition needs extracted statements or releases.
+        """
         prelude: list[hir.AST] = []
         arms: list[hir.IfArm | hir.LoopArm] = []
         for index, arm in enumerate(node.arms):
@@ -204,7 +238,6 @@ class _FlowLowering:
             if isinstance(arm, hir.LoopArm):
                 # the condition's frame-only strings (`loop text.split" ".length >? n`)
                 # live in the loop's region too: the condition runs every iteration
-                from .lowering_shared import LoopRegion
                 loop_entry = LoopRegion(self.loop_string_escapes.get(id(arm.body), set()))
                 self.loop_regions.append(loop_entry)
             try:
@@ -214,11 +247,12 @@ class _FlowLowering:
                 if loop_entry is not None:
                     self.loop_regions.pop()
             if (condition_prelude or condition_temporaries) and isinstance(arm, hir.LoopArm):
+                assert loop_entry is not None
                 # A loop condition that needs statements (`loop … and f(text[i])`):
                 # they must run before every test, so the loop becomes
                 # `loop true { statements; if not cond { break }; body }`
                 # (`continue` returns to the top and re-tests, as it should).
-                body = self._lower_loop_body(arm, entry=loop_entry)
+                body = lower_loop(arm, loop_entry, True)
                 loc = arm.condition.loc
                 tested = hir.ExpressedIdentifier(loc, 'bool', self._new_string_temp(loc, 'bool', 'loop_test').name)
                 declarations_and_releases = self._with_temporaries_released([], condition_temporaries)
@@ -250,34 +284,21 @@ class _FlowLowering:
                     outer_temporaries = self.statement_temporaries
                     self.statement_temporaries = []
                     try:
-                        nested_prelude, nested = self._lower_flow(rest, target=target)
+                        nested_prelude, nested = self._lower_flow_chain(rest, lower_body=lower_body, lower_loop=lower_loop, result_type=result_type)
                     finally:
                         nested_temporaries, self.statement_temporaries = self.statement_temporaries, outer_temporaries
                     default = hir.Block(node.loc, ty.VOID_TYPE, self._with_temporaries_released([*nested_prelude, nested], nested_temporaries), True)
-                    return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
+                    return prelude, replace(node, type=result_type, arms=arms, default=default)
                 prelude.extend(condition_prelude)
                 self.statement_temporaries.extend(condition_temporaries)   # a first arm's: the statement's own
-            if isinstance(arm, hir.LoopArm) and target is None:
-                body = self._lower_loop_body(arm, entry=loop_entry)
+            if isinstance(arm, hir.LoopArm):
+                assert loop_entry is not None
+                body = lower_loop(arm, loop_entry, False)
             else:
-                if isinstance(arm, hir.LoopArm):
-                    self.lower_loop_depth += 1
-                body = (
-                    self._assign_flow_body(arm.body, target)
-                    if target is not None
-                    else self._lower_statement_body(arm.body)
-                )
-                if isinstance(arm, hir.LoopArm):
-                    self.lower_loop_depth -= 1
+                body = lower_body(arm.body)
             arms.append(replace(arm, condition=condition, body=body))
-        default = None
-        if node.default is not None:
-            default = (
-                self._assign_flow_body(node.default, target)
-                if target is not None
-                else self._lower_statement_body(node.default)
-            )
-        return prelude, replace(node, type=ty.VOID_TYPE if target is not None else node.type, arms=arms, default=default)
+        default = lower_body(node.default) if node.default is not None else None
+        return prelude, replace(node, type=result_type, arms=arms, default=default)
 
     @staticmethod
     def _int64_comparison(
@@ -916,7 +937,7 @@ class _FlowLowering:
         if members is not None:
             return self._enum_word_of(item, members)
         item_type = ty.strip_refinement(item.type)
-        if isinstance(item_type, ty.ObjectType) and target.name in self.object_flow_targets:
+        if isinstance(item_type, ty.ObjectType) and local_binding_key(target) in self.object_flow_targets:
             # an object-valued flow: the temporary is a pointer word — to the arm's
             # own object (a literal, a call's result), or to a copy of a value that
             # lives on (a binding, a field), as `let t = x` copies
@@ -1008,4 +1029,3 @@ class _FlowLowering:
         )
         function = hir.ExpressedIdentifier(node.loc, function_type, '__not__')
         return hir.FunctionCall(node.loc, 'bool', function, [node], {})
-

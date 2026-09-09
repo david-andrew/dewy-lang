@@ -24,9 +24,43 @@ def test_guards_prove_string_indexes_and_slices() -> None:
 
 def test_literal_initializers_and_reassignment_track_the_length() -> None:
     _compile('let main = ():>int64 => { let word:string = "abc"  let c:string = word[2]  let ab:string = word[0..1]  return 0 }\n')
+    _compile('let main = ():>int64 => { let word:string = "abc"  let text:string = "longer"  word = text  let c:string = word[2]  return 0 }\n')
     with pytest.raises(UserError, match='string index is not proven'):
-        _compile('let main = ():>int64 => { let word:string = "abc"  let text:string = "longer"  word = text  let c:string = word[2]  return 0 }\n')
+        _compile('let f = (text:string):>string => { let word:string = "abc"  word = text  return word[2] }\n')
     _compile('let main = ():>int64 => { let word:string = "abc"  word = "de"  let c:string = word[1]  return 0 }\n')
+
+
+@pytest.mark.parametrize('binding', ['let word:string = ctx.ending.text', 'let word:string = ""\nword = ctx.ending.text'])
+def test_member_length_facts_transfer_on_declaration_and_assignment(binding: str) -> None:
+    _compile(
+        'End:type = const [text:string<length >? 0>]\n'
+        'Context:type = const [ending:End]\n'
+        f'let first = (ctx:Context):>string => {{ {binding}\nreturn word[0] }}\n'
+    )
+
+
+def test_sequence_length_transfer_snapshots_the_incoming_value() -> None:
+    _compile('let f = (source:string):>string => {\n'
+             '    if source.length <? 3 return ""\n'
+             '    let word:string = source\n'
+             '    source = ""\n'
+             '    word = word[1..]\n'
+             '    return word[1]\n}\n')
+    with pytest.raises(UserError, match='string index is not proven'):
+        _compile('let f = (source:string):>string => {\n'
+                 '    if source.length <? 3 return ""\n'
+                 '    let word:string = source\n'
+                 '    word = ""\n'
+                 '    return word[0]\n}\n')
+
+
+@pytest.mark.parametrize('binding', ['let copy:array<int64> = source', 'let copy:array<int64> = []\ncopy = source'])
+def test_array_length_transfer_is_a_value_snapshot(binding: str) -> None:
+    _compile('let f = (source:array<int64>):>int64 => {\n'
+             '    if source.length <? 2 return 0\n'
+             f'    {binding}\n'
+             '    source.clear\n'
+             '    return copy[1]\n}\n')
 
 
 def test_unproven_string_indexes_and_slices_are_rejected() -> None:

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
 from ..reporting import Span
 from . import hir, ty
-
 
 BindingKind = Literal['value', 'function', 'overload', 'param']
 
@@ -103,36 +103,90 @@ class BindingRegistry:
         return binding
 
 
-def array_route_id(node: hir.AST, registry: BindingRegistry) -> int | None:
-    """The fact id of a runtime-length array expression.
+type AccessComponent = tuple[Literal['field'], str] | tuple[Literal['index'], int | None]
+type AccessStep = hir.MemberAccess | hir.ForwardingAccess | hir.Index
 
-    A named array is its binding id; a chain of member accesses rooted at a
-    named binding (`bag.items`) is a hidden route id. Anything else has no
-    stable identity for length facts.
+
+@dataclass(frozen=True)
+class AccessPath:
+    """A root expression and its access steps in root-to-leaf order.
+
+    Keep the HIR steps so consumers can inspect owner types and evaluate
+    index expressions. A path need not have a stable binding as its root.
     """
+
+    root: hir.AST
+    steps: tuple[AccessStep, ...]
+
+    @property
+    def binding_id(self) -> int | None:
+        return self.root.binding_id if isinstance(self.root, hir.ExpressedIdentifier) else None
+
+    @property
+    def components(self) -> tuple[AccessComponent, ...]:
+        return tuple(
+            ('index', step.constant_index) if isinstance(step, hir.Index)
+            else ('field', step.name if isinstance(step, hir.MemberAccess) else step.field)
+            for step in self.steps
+        )
+
+    @property
+    def fields(self) -> tuple[str, ...] | None:
+        """A pure member path, or None if an index intervenes."""
+        names: list[str] = []
+        for step in self.steps:
+            if isinstance(step, hir.Index):
+                return None
+            names.append(step.name if isinstance(step, hir.MemberAccess) else step.field)
+        return tuple(names)
+
+
+def access_path(
+    node: hir.AST,
+    *,
+    unwrap: Callable[[hir.AST], hir.AST] = lambda node: node,
+    forwarding: bool = False,
+) -> AccessPath:
+    """Decompose access syntax with an explicit consumer-specific cast policy.
+
+    No casts are transparent by default: preserving a storage route and
+    preserving numerical facts are different questions.
+    """
+    steps: list[AccessStep] = []
+    while True:
+        node = unwrap(node)
+        if isinstance(node, hir.MemberAccess) or forwarding and isinstance(node, hir.ForwardingAccess):
+            steps.append(node)
+            node = node.value
+        elif isinstance(node, hir.Index):
+            steps.append(node)
+            node = node.array
+        else:
+            return AccessPath(node, tuple(reversed(steps)))
+
+
+def _unwrap_fact_route(node: hir.AST) -> hir.AST:
+    """Views through which sequence identity is tracked (not a value evaluator)."""
     while isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
-        node = node.expr if not isinstance(node, hir.Obligation) else node.value
-    if isinstance(node, hir.ExpressedIdentifier):
-        return node.binding_id
-    path: list[str] = []
-    current = node
-    while isinstance(current, hir.MemberAccess):
-        path.append(current.name)
-        current = current.value
-    if not path or not isinstance(current, hir.ExpressedIdentifier) or current.binding_id is None:
+        node = node.value if isinstance(node, hir.Obligation) else node.expr
+    return node
+
+
+def array_route_id(node: hir.AST, registry: BindingRegistry) -> int | None:
+    """The fact id of a named sequence or its pure member-access route."""
+    path = access_path(node, unwrap=_unwrap_fact_route)
+    root_id, fields = path.binding_id, path.fields
+    if root_id is None or fields is None:
         return None
-    if current.binding_id not in registry.by_id:
+    if not fields:
+        return root_id
+    if root_id not in registry.by_id:
         return None
-    return registry.route_id(current.binding_id, tuple(reversed(path)), node.type, node.loc)
+    return registry.route_id(root_id, fields, node.type, node.loc)
 
 
 def member_path(node: hir.AST) -> tuple[int, tuple[str, ...]] | None:
-    """The (root binding id, field path) of a member-access chain, if it has one."""
-    path: list[str] = []
-    current = node
-    while isinstance(current, hir.MemberAccess):
-        path.append(current.name)
-        current = current.value
-    if isinstance(current, hir.ExpressedIdentifier) and current.binding_id is not None:
-        return current.binding_id, tuple(reversed(path))
-    return None
+    """The (root binding id, field path) of an unwrapped member-access chain."""
+    path = access_path(node)
+    root_id, fields = path.binding_id, path.fields
+    return (root_id, fields) if root_id is not None and fields is not None else None

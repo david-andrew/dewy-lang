@@ -11,7 +11,7 @@ from typing import Callable
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
 from ...parser import t0
-from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, MoveNote
+from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, MoveNote, local_binding_key
 from ...semantic.hir_display import type_to_dewy
 
 
@@ -876,7 +876,7 @@ class _ObjectLowering:
             # an object binding is a pointer word, so each arm builds its own
             # object (of whichever concrete type) and the binding takes the pointer
             target = hir.ExpressedIdentifier(node.loc, 'int64', node.name, binding_id=node.binding_id)
-            self.object_flow_targets.add(node.name)
+            self.object_flow_targets.add(local_binding_key(node))
             declaration = replace(node, decltype='let', annotation='int64', expr=hir.Integer(node.loc, 'int64', t0.base10, 0))
             statements: list[hir.AST] = [declaration]
             for item in leading:
@@ -885,11 +885,11 @@ class _ObjectLowering:
             borrowed: set[str] = set()
             for value in _flow_values(flow):
                 borrowed |= self.literal_borrowed_fields.get(id(value), set())
-            self.borrowed_fields[node.name] = borrowed
+            self.borrowed_fields[local_binding_key(node)] = borrowed
             return [*statements, *flow_prelude, lowered]
         if isinstance(node.expr, (hir.ObjectLiteral, hir.FunctionCall)):
             prelude, ptr = self._extract_expression(node.expr)
-            self.borrowed_fields[node.name] = set(self.literal_borrowed_fields.get(id(node.expr), set()))
+            self.borrowed_fields[local_binding_key(node)] = set(self.literal_borrowed_fields.get(id(node.expr), set()))
             return [
                 *prelude,
                 replace(
@@ -1017,7 +1017,7 @@ class _ObjectLowering:
         a parameter's or a global's is not (its members are the caller's)."""
         place = self._unwrap_transparent(place)
         if isinstance(place, hir.ExpressedIdentifier):
-            return place.name in self.owned_objects or place.name in self.owned_array_names or place.name in self.owned_raw_arrays
+            return local_binding_key(place) in self.owned_objects or place.name in self.owned_array_names or place.name in self.owned_raw_arrays
         if isinstance(place, hir.MemberAccess):
             return self._place_is_owned(place.value)
         if isinstance(place, hir.Index):
@@ -1044,7 +1044,7 @@ class _ObjectLowering:
             ]
         if isinstance(field_type, ty.ArrayType) and field_type.length is None:
             if isinstance(node.target.value, hir.ExpressedIdentifier):
-                fields = self.borrowed_fields.setdefault(node.target.value.name, set())
+                fields = self.borrowed_fields.setdefault(local_binding_key(node.target.value), set())
                 (fields.discard if self._array_value_is_owned(node.value) else fields.add)(node.target.name)
             value_prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field', frame_copy=True)
         elif isinstance(field_type, ty.ArrayType):
@@ -1123,7 +1123,7 @@ class _ObjectLowering:
                 object_type,
                 item.loc,
                 move='adopt' if moved else False,
-                borrowed=self.borrowed_fields.get(returned.name, set()) if moved else frozenset(),
+                borrowed=self.borrowed_fields.get(local_binding_key(returned), set()) if moved else frozenset(),
             ),
         ]
 

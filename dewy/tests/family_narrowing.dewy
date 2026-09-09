@@ -22,8 +22,14 @@ let closer = (ctx:StringBody):>MatchData => {
     return [length=delimiter.length]
 }
 let closer2 = (ctx:StringBody):>MatchData => [length=ctx.ending.text.length]
+let choose = (flag:bool parent:T child:B) => {
+    if flag return parent
+    return child
+}
 let main = ():>int64 => {
     let m = closer(StringBody[ending=QuoteEnd[text='"']])
     if m.length not=? 1 or closer2(StringBody[ending=QuoteEnd[text="'''"]]).length not=? 3 return 1
-    return inspect(B[1 A[2]])
+    let child = B[1 A[2]]
+    if inspect(choose(true child child)) not=? 42 return 2
+    return inspect(choose(false child child))
 }

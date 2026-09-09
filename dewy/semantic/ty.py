@@ -281,6 +281,26 @@ class ObjectType:
     record. Sibling-field invariants (`radix =? alphabet.length`) live only on
     such records: what cannot change stays proven."""
 
+    @classmethod
+    def compose(
+        cls,
+        operands: list[TypeExpr],
+        *,
+        fields: list[ObjectField],
+        brand: str | None,
+        methods: list[MethodSpec],
+    ) -> ObjectType:
+        """Build a composed record with the contracts of all its operands.
+
+        The checker supplies the merged members and nominal identity. This
+        is a new type, with its own constructor list; transformations of an
+        existing type should use ``replace`` to retain its metadata instead.
+        """
+        return cls(
+            tuple(fields), brand=brand, methods=tuple(methods),
+            immutable=any(isinstance(item, ObjectType) and item.immutable for item in operands),
+        )
+
     def method(self, name: str) -> 'MethodSpec | None':
         return next((m for m in self.methods if m.name == name), None)
 
@@ -1274,6 +1294,58 @@ class TypeSystem:
         """Top-level type checking function. `s of? t` => `is_empty(s & ~t)`"""
         return self.is_empty(intersect(s, negate(t)))
 
+    def join(self, *types: TypeExpr) -> TypeExpr:
+        """Join value types, absorbing members already covered by another.
+
+        Unlike the syntactic ``union`` constructor this consults subtyping.
+        Keep the first representative of equivalent types, and the original
+        order of surviving members; callers can then restore storage order.
+        This does not perform numeric promotion or invent refinement facts.
+        """
+        combined = union(*types)
+        members = combined.items if isinstance(combined, TypeOr) else [combined]
+
+        def covered(member: TypeExpr, other: TypeExpr, seen: frozenset[tuple[int, int]] = frozenset()) -> bool:
+            # is_subtype accepts a refined target's base: check_against then
+            # proves its obligations. A join has no such checking boundary.
+            # Only transfer obligations already present on the covered type.
+            pair = (id(member), id(other))
+            if pair in seen:
+                return True
+            seen = seen | {pair}
+            member, other = unfold(member), unfold(other)
+            if isinstance(other, RefinedType):
+                return (
+                    isinstance(member, RefinedType)
+                    and all(p in member.propositions for p in other.propositions)
+                    and covered(member.base, other.base, seen)
+                )
+            if isinstance(member, RefinedType):
+                return covered(member.base, other, seen)
+            if isinstance(member, ObjectType) and isinstance(other, ObjectType):
+                for required in other.fields:
+                    actual = member.field(required.name)
+                    if actual is None or any(p not in actual.refinement for p in required.refinement):
+                        return False
+                    if not covered(actual.type, required.type, seen):
+                        return False
+            elif isinstance(member, ArrayType) and isinstance(other, ArrayType):
+                if not covered(member.element, other.element, seen):
+                    return False
+            elif isinstance(other, (FunctionType, OverloadType, TypeParameterize, TypeAnd, TypeOr, TypeNot, SequenceType, MetaType, QuantityType, TypeVariable)):
+                # These have additional variance/obligation rules. Preserve
+                # their existing union until a proof-aware relation covers it.
+                return member == other
+            return self.is_subtype(member, other)
+
+        kept: list[TypeExpr] = []
+        for member in members:
+            if any(covered(member, other) for other in kept):
+                continue
+            kept = [other for other in kept if not covered(other, member)]
+            kept.append(member)
+        return union(*kept)
+
 
     def _is_nom_subtype(self, a: Primitive, b: Primitive) -> bool:
         if a == b:
@@ -1308,6 +1380,15 @@ class TypeSystem:
             return atom.brand
         return STRUCTURAL_NOMINAL_MAP.get(type(atom))
 
+
+    @staticmethod
+    def _object_subtype(actual: ObjectType, required: ObjectType) -> bool:
+        """Nominal/structural compatibility includes the immutable contract."""
+        if actual.immutable and not required.immutable:
+            return False   # a writable ancestor would permit mutation through a place
+        if not actual.immutable and required.immutable and replace(actual, immutable=True) == required:
+            return True    # copied into an immutable value of the same shape
+        return actual == required or user_brand_descends(actual, required) or user_brand_carries(actual, required)
 
     def _meet_atoms(self, a: LiteralAtom, b: LiteralAtom) -> LiteralAtom | None:
         """
@@ -1414,14 +1495,9 @@ class TypeSystem:
                 return a
             return a if a.length == b.length else None
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
-            if a.immutable != b.immutable and replace(a, immutable=False) == replace(b, immutable=False):
-                # the same record, writable and not: a writable value may be
-                # used as the immutable record (it is copied there), never the
-                # other way round — the writable one is the subtype
-                return a if not a.immutable else b
-            if a == b or ((user_brand_descends(a, b) or user_brand_carries(a, b)) and not (a.immutable and not b.immutable)):
+            if self._object_subtype(a, b):
                 return a
-            return b if (user_brand_descends(b, a) or user_brand_carries(b, a)) and not (b.immutable and not a.immutable) else None
+            return b if self._object_subtype(b, a) else None
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a if a == b else None
         if isinstance(a, MetaType) and isinstance(b, MetaType):
@@ -1565,11 +1641,7 @@ class TypeSystem:
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
-            if not a.immutable and b.immutable and replace(a, immutable=True) == b:
-                return True   # a writable record may be used as the immutable one (it is copied there); never the reverse
-            if a.immutable and not b.immutable:
-                return False  # an immutable descendant is not its writable ancestor: `@p:P` could write through it
-            return a == b or user_brand_descends(a, b) or user_brand_carries(a, b)
+            return self._object_subtype(a, b)
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b
         if isinstance(a, MetaType) and isinstance(b, MetaType):

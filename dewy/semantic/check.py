@@ -4700,8 +4700,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     continue
                 # a member below another (`A` under its family `T`, after `if x is? A { … }`)
                 # is absorbed: the join is `T`, one object pointer — not a tagged union of the two
-                absorbed = [item for item in types if not any(item != other and ctx.type_system.is_subtype(item, other) for other in types)]
-                joined[binding_id] = _in_declared_order(ty.union(*absorbed), binding_id, ctx=ctx)
+                joined[binding_id] = _in_declared_order(ctx.type_system.join(*types), binding_id, ctx=ctx)
             ctx.refinements.clear()
             ctx.refinements.update(joined)
             joined_bounds: dict[int, int] = {}
@@ -5762,31 +5761,30 @@ def _declaration_pointers(binding: sb.Binding) -> list[Pointer]:
     return [Pointer(span=binding.declaration.loc, message='const declaration is here')]
 
 
-def _immutable_reason(node: hir.AST) -> str | None:
-    """Why a write through ``node`` is refused: the path reaches through a record
-    of an immutable type (`const [...]`), whose contents never change — a field,
-    a member's in-place mutation, a place taken of a field, an element."""
-    current = node
+def _unwrap_write_path(node: hir.AST) -> hir.AST:
+    """Follow storage views for write barriers, including explicit transmutes."""
     while True:
-        if isinstance(current, (hir.MemberAccess, hir.ForwardingAccess)):
-            owner = ty.unfold(ty.strip_refinement(current.value.type))
+        if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            node = node.items[0]
+        elif isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute, hir.Obligation)):
+            node = node.value if isinstance(node, hir.Obligation) else node.expr
+        else:
+            return node
+
+
+def _immutable_reason(node: hir.AST) -> str | None:
+    """Why a write is refused: an access step reaches through an immutable record."""
+    path = sb.access_path(node, unwrap=_unwrap_write_path, forwarding=True)
+    for step in reversed(path.steps):
+        if isinstance(step, (hir.MemberAccess, hir.ForwardingAccess)):
+            owner = ty.unfold(ty.strip_refinement(step.value.type))
             owners = owner.items if isinstance(owner, ty.TypeOr) else [owner]
             for candidate in owners:
                 candidate = ty.unfold(ty.strip_refinement(candidate))
                 if isinstance(candidate, ty.ObjectType) and candidate.immutable:
-                    return f'`{current.name if isinstance(current, hir.MemberAccess) else current.field}` is a field of an immutable record (`{type_to_dewy(candidate)}`)'
-            current = current.value
-            continue
-        if isinstance(current, hir.Index):
-            current = current.array
-            continue
-        if isinstance(current, hir.Block) and not current.scoped and len(current.items) == 1:
-            current = current.items[0]
-            continue
-        if isinstance(current, (hir.ValueCast, hir.RepresentationCast, hir.Transmute, hir.Obligation)):
-            current = current.expr if not isinstance(current, hir.Obligation) else current.value
-            continue
-        return None
+                    name = step.name if isinstance(step, hir.MemberAccess) else step.field
+                    return f'`{name}` is a field of an immutable record (`{type_to_dewy(candidate)}`)'
+    return None
 
 
 def _refuse_immutable_write(node: hir.AST, loc: Span, what: str, *, ctx: Context) -> None:
@@ -6299,6 +6297,47 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     return name
 
 
+def _merge_object_fields(
+    fields: list[ty.ObjectField],
+    additions: tuple[ty.ObjectField, ...],
+    *,
+    loc: Span,
+    ctx: Context,
+    owner: str | None = None,
+    default_only: set[str] | frozenset[str] = frozenset(),
+) -> None:
+    """Merge fields in layout order without weakening a replaced field's type.
+
+    Nominal inheritance may override just a default; that preserves all of
+    the inherited field metadata. Explicit declarations replace the field.
+    Structural intersection uses only the explicit-declaration policy.
+    """
+    positions = {field_.name: index for index, field_ in enumerate(fields)}
+    for field_ in additions:
+        index = positions.get(field_.name)
+        if index is None:
+            positions[field_.name] = len(fields)
+            fields.append(field_)
+            continue
+        previous = fields[index]
+        bare_default = field_.name in default_only and field_.default is not None
+        given_type = field_.type
+        if bare_default:
+            assert isinstance(field_.default, p0.AST)
+            given_type = typecheck_and_resolve_inner(field_.default, ctx=ctx, expected=previous.type).type
+        if not ctx.type_system.is_subtype(given_type, previous.type):
+            if owner is not None:
+                user_error(
+                    ctx.srcfile, f'minted type `{owner}` weakens field `{field_.name}`',
+                    Pointer(span=loc, message=f'`{type_to_dewy(given_type)}` does not fit the inherited `{type_to_dewy(previous.type)}`'),
+                )
+            type_error(
+                ctx.srcfile, 'intersection weakens a field',
+                Pointer(span=loc, message=f'`{field_.name}: {type_to_dewy(given_type)}` does not fit the earlier `{type_to_dewy(previous.type)}`'),
+            )
+        fields[index] = replace(previous, default=field_.default) if bare_default else field_
+
+
 def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Context) -> ty.ObjectType | None:
     """`Context & [tag:string='root']`: intersecting object types strengthens the
     structure — fields merge, a later same-name field must fit and replaces —
@@ -6315,22 +6354,10 @@ def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Cont
     methods: list[ty.MethodSpec] = []
     for item in flattened:
         assert isinstance(item, ty.ObjectType)
-        for field_ in item.fields:
-            existing_index = next((index for index, existing in enumerate(fields) if existing.name == field_.name), None)
-            if existing_index is None:
-                fields.append(field_)
-                continue
-            if not ctx.type_system.is_subtype(field_.type, fields[existing_index].type):
-                type_error(
-                    ctx.srcfile,
-                    'intersection weakens a field',
-                    Pointer(span=loc, message=f'`{field_.name}: {type_to_dewy(field_.type)}` does not fit the earlier `{type_to_dewy(fields[existing_index].type)}`'),
-                )
-            fields[existing_index] = field_
+        _merge_object_fields(fields, item.fields, loc=loc, ctx=ctx)
         methods.extend(item.methods)
     brand = branded[0].brand if branded else None
-    immutable = any(isinstance(item, ty.ObjectType) and item.immutable for item in flattened)   # `A & [extra:int64]` with `A` immutable: the contract stays
-    return ty.ObjectType(tuple(fields), brand=brand, methods=tuple(methods), immutable=immutable)
+    return ty.ObjectType.compose(flattened, fields=fields, brand=brand, methods=methods)
 
 
 def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context, nominal_parent: str | None = None, abstract: bool = False) -> ty.ObjectType:
@@ -6343,6 +6370,7 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     operands = [*(parent.items if isinstance(parent, ty.TypeAnd) else [parent]), *extras]
     fields: list[ty.ObjectField] = []
     methods: list[ty.MethodSpec] = []
+    default_only = _default_only_fields(rhs)
     ancestor: str | None = None
     for item in operands:
         if ty.user_branded(item):
@@ -6366,32 +6394,10 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
         if item == 'any' or ty.user_branded(item):
             continue
         if isinstance(item, ty.ObjectType) and item.brand is None:
-            for field_ in item.fields:
-                existing_index = next((index for index, existing in enumerate(fields) if existing.name == field_.name), None)
-                if existing_index is None:
-                    fields.append(field_)
-                    continue
-                # an inherited field given again (`type of Report & [severity='error']`):
-                # the type must still fit. Written as a bare default, the field keeps
-                # its inherited type and only the default changes — so a `Warning`
-                # is still a `Report` (the structural relation needs the same
-                # field types); an explicit annotation narrows the field instead
-                bare_default = field_.name in _default_only_fields(rhs) and field_.default is not None
-                given_type = field_.type
-                if bare_default:
-                    # the default's own type (`'error'`, not the widened `string`) is what must fit
-                    assert isinstance(field_.default, p0.AST)
-                    given_type = typecheck_and_resolve_inner(field_.default, ctx=ctx, expected=fields[existing_index].type).type
-                if not ctx.type_system.is_subtype(given_type, fields[existing_index].type):
-                    user_error(
-                        ctx.srcfile,
-                        f'minted type `{binding.name}` weakens field `{field_.name}`',
-                        Pointer(span=rhs.loc, message=f'`{type_to_dewy(given_type)}` does not fit the inherited `{type_to_dewy(fields[existing_index].type)}`'),
-                    )
-                if bare_default:
-                    fields[existing_index] = replace(fields[existing_index], default=field_.default)
-                else:
-                    fields[existing_index] = field_
+            _merge_object_fields(
+                fields, item.fields, loc=rhs.loc, ctx=ctx,
+                owner=binding.name, default_only=default_only,
+            )
             for method in item.methods:
                 slot = next((index for index, existing in enumerate(fields) if existing.name == method.name), None)
                 if slot is not None and isinstance(fields[slot].type, ty.FunctionType):
@@ -6429,8 +6435,7 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
         ty.USER_BRAND_PARENTS[name] = ancestor
     else:
         ty.USER_BRAND_PARENTS.pop(name, None)
-    immutable = any(isinstance(item, ty.ObjectType) and item.immutable for item in operands)   # `type of any & const [...]`, or an immutable parent
-    minted = ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods), immutable=immutable)
+    minted = ty.ObjectType.compose(operands, fields=fields, brand=name, methods=methods)
     ty.USER_BRAND_TYPES[name] = minted
     if abstract:
         ty.USER_ABSTRACT_BRANDS.add(name)   # `$abstract`: values only of its children
@@ -8687,24 +8692,8 @@ def _forwarding_member_access(value: hir.AST, name: str, binop: p0.BinOp, *, ctx
 
 
 def _member_root_binding(node: hir.AST, *, ctx: Context) -> sb.Binding | None:
-    root = node
-    while True:
-        if isinstance(root, hir.MemberAccess):
-            root = root.value
-            continue
-        if isinstance(root, hir.Index):
-            root = root.array
-            continue
-        if isinstance(root, hir.Block) and not root.scoped and len(root.items) == 1:
-            root = root.items[0]
-            continue
-        if isinstance(root, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
-            root = root.expr
-            continue
-        break
-    if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
-        return ctx.binding_registry.by_id.get(root.binding_id)
-    return None
+    path = sb.access_path(node, unwrap=_unwrap_write_path)
+    return ctx.binding_registry.by_id.get(path.binding_id) if path.binding_id is not None else None
 
 
 def _tcr_array_literal(
@@ -12175,7 +12164,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
             # void is deliberately not a TypeExpr. Fall-through is fine (implicit `return void`)
             resolved_ret = ty.VOID_TYPE
         else:
-            resolved_ret = ty.union(*(t for _, t in valued))
+            resolved_ret = ctx.type_system.join(*(t for _, t in valued))
             if fall_through != ty.BOTTOM_TYPE:
                 pointers = [Pointer(span=span, message=f'returns `{type_to_dewy(t)}` here') for span, t in valued]
                 pointers.append(Pointer(span=Span(body.loc.stop - 1, body.loc.stop), message='control reaches the end of the body without returning'))
@@ -14275,21 +14264,13 @@ def _validate_place_call_arguments(
         seen_places.append(place)
 
 
-PlaceRouteComponent = tuple[Literal['field'], str] | tuple[Literal['index'], int | None]
-
-
 def _place_route(
     target: hir.ExpressedIdentifier | hir.MemberAccess | hir.Index,
-) -> tuple[int, tuple[PlaceRouteComponent, ...]]:
-    if isinstance(target, hir.ExpressedIdentifier):
-        if target.binding_id is None:
-            raise ValueError('INTERNAL ERROR: place target has no binding identity')
-        return target.binding_id, ()
-    if isinstance(target, hir.MemberAccess):
-        binding_id, route = _place_route(target.value)
-        return binding_id, (*route, ('field', target.name))
-    binding_id, route = _place_route(target.array)
-    return binding_id, (*route, ('index', target.constant_index))
+) -> tuple[int, tuple[sb.AccessComponent, ...]]:
+    path = sb.access_path(target)
+    if path.binding_id is None:
+        raise ValueError('INTERNAL ERROR: place target has no binding identity')
+    return path.binding_id, path.components
 
 
 def _place_routes_may_overlap(

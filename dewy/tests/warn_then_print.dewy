@@ -4,5 +4,7 @@ let main = ():>int64 => {
     let src = SrcFile("input" "let a = 1\rlet b = 2\n")
     Warning[srcfile=src title="Lone carriage return" pointers=[Pointer[span=Span[9 10] message="\\r without \\n"]]].warn
     printl"after the warning"
+    Warning[srcfile=src title="Summary"].warn
+    printl"after the summary"
     return 42
 }

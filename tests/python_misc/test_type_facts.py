@@ -126,7 +126,7 @@ def test_a_fact_on_a_local_names_a_binding_in_scope() -> None:
 }
 '''
     _check(program)
-    with pytest.raises(UserError, match='cannot prove refinement'):
+    with pytest.raises(UserError, match='refinement refuted'):   # the stored length is 5, so 6 is definitely invalid
         _check(program.replace('n = 5', 'n = 6'))
     with pytest.raises(UserError, match='fact names a binding that is reassigned'):
         _check(program.replace('let src = "hello"', 'let src:string = "hello"').replace('n = 5', 'src = "hi"'))

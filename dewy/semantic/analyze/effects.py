@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 
+from .. import bindings as sb
 from .. import hir, ty
 
 INDEX_STEP = '[]'
@@ -363,25 +364,13 @@ class _EffectAnalyzer:
         ``inner`` collects index expressions embedded in the chain, which the
         caller must still visit for their own parameter uses.
         """
-        steps: list[str] = []
-        inner: list[hir.AST] = []
-        while True:
-            node = _unwrap(node)
-            if isinstance(node, hir.MemberAccess):
-                steps.append(node.name)
-                node = node.value
-                continue
-            if isinstance(node, hir.Index):
-                steps.append(INDEX_STEP)
-                inner.append(node.index)
-                node = node.array
-                continue
-            if (
-                isinstance(node, hir.ExpressedIdentifier)
-                and node.binding_id in params
-            ):
-                return node.binding_id, tuple(reversed(steps)), inner
+        path = sb.access_path(node, unwrap=_unwrap)
+        binding_id = path.binding_id
+        if binding_id is None or binding_id not in params:
             return None
+        route = tuple(INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps)
+        inner = [step.index for step in reversed(path.steps) if isinstance(step, hir.Index)]
+        return binding_id, route, inner
 
     def _visit(
         self,

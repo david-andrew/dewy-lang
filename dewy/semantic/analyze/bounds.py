@@ -356,6 +356,11 @@ def _is_runtime_string(type_: ty.Type) -> bool:
     return (isinstance(type_, ty.StringType) and type_.length is None) or type_ == 'string'
 
 
+def _has_sequence_length(type_: ty.Type) -> bool:
+    plain = ty.unfold(ty.strip_refinement(type_))
+    return isinstance(plain, ty.ArrayType) or ty.string_valued(plain)
+
+
 def prototype_check_condition(node: hir.AST, kind: str, *, simple, comparison, length_of, integer) -> hir.AST | None:
     """The runtime condition of a `$prototype` check for an unproven site, or
     None when no safe check can be built (the site stays a compile error).
@@ -747,6 +752,12 @@ class _BoundsValidator:
                 )
                 return current
             interval = self._eval(node.expr, current, validate=validate)
+            length = self._incoming_length(node.expr, current)
+            if node.binding_id is not None and _has_sequence_length(node.expr.type):
+                # A declaration inside a loop initializes a fresh value on
+                # every iteration. Discard the previous iteration's length
+                # before seeding the annotation and incoming value's facts.
+                self._invalidate_length(node.binding_id, current)
             if node.binding_id is not None and node.binding_id not in self.assigned:
                 self._record_element_intervals(node.binding_id, _strip_casts(node.expr))
             if node.binding_id is not None and self._nonzero_proven(node.expr, interval, current):
@@ -755,30 +766,10 @@ class _BoundsValidator:
             if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
                 interval = self._seed_refinements(node, current, interval)
             declared = ty.strip_refinement(node.annotation) if node.annotation is not None else None
-            if (
-                node.binding_id is not None
-                and isinstance(declared, ty.ArrayType)
-                and declared.length is None
-                and isinstance(node.expr.type, ty.ArrayType)
-                and node.expr.type.length is not None
-            ):
-                # A growable array initialized from an exact-length value starts
-                # with that length (the checker keeps the same fact as a refinement).
-                current[_length_key(node.binding_id)] = Interval.exact(node.expr.type.length)
             if node.binding_id is not None and isinstance(declared, ty.ObjectType):
                 self._seed_field_routes(node.binding_id, declared, node.expr, (), current)
-            if node.binding_id is not None and declared is not None and _is_runtime_string(declared):
-                # `let s:string = "abc"`: the literal's grapheme count is a fact until `s` is reassigned
-                known = self._string_length(_strip_casts(node.expr).type)
-                if known is not None:
-                    current[_length_key(node.binding_id)] = Interval.exact(known)
-            if node.binding_id is not None and isinstance(_strip_casts(node.expr), hir.MemberAccess) and (declared is None or _is_runtime_string(declared) or isinstance(declared, ty.ArrayType)):
-                # `let delimiter = ctx.ending.text` with `text:nonemptystring`: the member's
-                # length bound (its declared refinement, or a fact on its route) is the binding's
-                member_length = self._length_interval(_strip_casts(node.expr), current)
-                if member_length is not None:
-                    key = _length_key(node.binding_id)
-                    current[key] = current.get(key, self._length_default()).intersect(member_length)
+            if node.binding_id is not None:
+                self._bind_length(node.binding_id, length, current)
             if isinstance(node.expr, hir.FunctionLiteral):
                 self._analyze_function(node.expr, validate=validate, enclosing=current)
             elif isinstance(node.expr, hir.OverloadedFunction):
@@ -798,6 +789,9 @@ class _BoundsValidator:
             if flow is not None and node.target.binding_id is not None:
                 return self._bind_conditional(node, flow, current, validate=validate)
             value = self._eval(node.value, current, validate=validate)
+            # Read before invalidating the destination: `s = s[1..]` still
+            # depends on the old value's length.
+            length = self._incoming_length(node.value, current) if node.op == '=' else None
             binding_id = node.target.binding_id
             if binding_id is None:
                 return current
@@ -822,13 +816,9 @@ class _BoundsValidator:
             shifted = self._shifted_facts(current, binding_id, node) if node.op in ('+=', '-=') else {}
             _drop_index_facts(current, index_id=binding_id)
             current.update(shifted)   # `i += 2` under `src.length - i >= 2`: `i <= src.length`
-            if (isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None) or _is_runtime_string(node.target.type):
-                # Whole-sequence replacement: nothing is known about the new length.
-                current.pop(_length_key(binding_id), None)
-                _drop_index_facts(current, array_id=binding_id)
-                known = self._string_length(_strip_casts(node.value).type) if _is_runtime_string(node.target.type) else None
-                if known is not None:
-                    current[_length_key(binding_id)] = Interval.exact(known)
+            if _has_sequence_length(node.target.type):
+                self._invalidate_length(binding_id, current)
+                self._bind_length(binding_id, length, current)
             self._drop_route_facts(current, binding_id)
             if node.op == '=':
                 self._seed_value_facts(binding_id, node.value, current, node.loc)
@@ -994,8 +984,35 @@ class _BoundsValidator:
             ))
             return
 
+    def _incoming_length(self, value: hir.AST, state: State) -> Interval | None:
+        """Snapshot sequence facts before a declaration or replacement binds it."""
+        if _has_sequence_length(value.type):
+            return self._length_interval(value, state)
+        return None
+
+    def _bind_length(self, binding_id: int, length: Interval | None, state: State) -> None:
+        """Transfer a value's length, retaining any declared bound on the binding.
+
+        Reassignment must invalidate the old value's facts first. Only the
+        interval is copied here, so a later mutation of the source cannot
+        change this value's snapshot.
+        """
+        if length is not None:
+            key = _length_key(binding_id)
+            state[key] = state.get(key, self._length_default()).intersect(length)
+
+    @staticmethod
+    def _invalidate_length(binding_id: int, state: State) -> None:
+        state.pop(_length_key(binding_id), None)
+        _drop_index_facts(state, array_id=binding_id)
+
     def _length_interval(self, node: hir.AST, state: State) -> Interval | None:
-        known = self._string_length(_strip_casts(node).type) if not isinstance(node.type, ty.ArrayType) else node.type.length   # a literal keeps its length through the cast to `string`
+        plain = ty.unfold(ty.strip_refinement(node.type))
+        original = ty.unfold(ty.strip_refinement(_strip_casts(node).type))
+        if isinstance(plain, ty.ArrayType):
+            known = plain.length if plain.length is not None else original.length if isinstance(original, ty.ArrayType) else None
+        else:
+            known = self._string_length(original)   # literals keep their length through widening
         if known is not None:
             return Interval.exact(known)
         if isinstance(_strip_casts(node), hir.StringSlice):
@@ -3169,18 +3186,19 @@ class _BoundsValidator:
 
     def _element_route_of(self, node: hir.AST) -> int | None:
         """The element route a read denotes: `xs[k].f` is `xs.*.f`, `xs[k]` is `xs.*`."""
-        path: list[str] = []
-        current = _strip_casts(node)
-        while isinstance(current, hir.MemberAccess):
-            path.append(current.name)
-            current = _strip_casts(current.value)
-        if not isinstance(current, hir.Index):
+        path = sb.access_path(node, unwrap=_strip_casts)
+        # Element facts belong to the innermost indexed array, followed only
+        # by fields. Its array may itself have a tracked member route.
+        index = next((i for i in range(len(path.steps) - 1, -1, -1) if isinstance(path.steps[i], hir.Index)), None)
+        if index is None:
             return None
-        array_id = _runtime_array_id(current.array, self.registry)
+        element = path.steps[index]
+        assert isinstance(element, hir.Index)
+        array_id = _runtime_array_id(element.array, self.registry)
         if array_id is None:
             return None
-        route = self.registry.route_ids.get((array_id, ('*', *reversed(path))))
-        return route
+        fields = tuple(step.name for step in path.steps[index + 1:])
+        return self.registry.route_ids.get((array_id, ('*', *fields)))
 
     def _value_fact_sources(self, value: hir.AST) -> list[tuple[tuple[str, ...], int]]:
         """The fact-bearing parts of a value about to be stored: `(path, id)` — a
