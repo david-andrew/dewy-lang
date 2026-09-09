@@ -4535,6 +4535,15 @@ class _Lowerer(
         if isinstance(node, hir.Flow):
             if node.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
                 self._target_error(node, 'statement-only flow used where a value is required')
+            payload = ty.optional_payload(node.type)
+            if payload is not None:
+                # Contextual checking can widen every branch to T | none
+                # even when each branch currently produces T. The join must
+                # still construct the optional ABI cell, not a raw T word.
+                cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('flow'))
+                declaration = hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(node.loc))
+                flow_prelude, flow = self._lower_optional_flow(node, cell, payload)
+                return [declaration, *flow_prelude, flow], replace(cell, type=node.type)
             union_members = ty.runtime_union_members(node.type)
             if union_members is not None:
                 # a union-valued flow (`if c 'A' else 'C'`, a match over an
