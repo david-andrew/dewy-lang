@@ -108,6 +108,35 @@ let main = ():>int64 => {
     assert 'let value:int64 = __dewy_module_1_lib_answer' in emitted
 
 
+def test_namespaced_constructors_keep_same_spelling_mints_distinct(tmp_path, monkeypatch):
+    for module, field in [('left', 'number:int64'), ('right', 'text:string')]:
+        _write(tmp_path / f'{module}.dewy',
+               'Token = $abstract type of [kind:string]\n'
+               f'Item = type of Token & [{field}]\n'
+               'Missing = type of error\n')
+    entry = _write(tmp_path / 'main.dewy', '''
+import p"left.dewy" as left
+import p"right.dewy" as right
+read = (token:left.Token | right.Token):>int64 => {
+    if token is? left.Item return token.number
+    if token is? right.Item return token.text.length
+    return 0
+}
+main = ():>int64 => {
+    let a = left.Item[kind="a" number=40]
+    let b = right.Item(kind="b" text="hi")
+    if a is? right.Token return 1
+    let failure:left.Missing | right.Missing = left.Missing
+    if failure is? right.Missing return 2
+    return read(a) + read(b)
+}
+''')
+    output = tmp_path / 'main.udewy'
+    output.write_text(codegen(SrcFile.from_path(entry)))
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(output, []) == 42
+
+
 @pytest.mark.parametrize(
     ('main_source', 'message'),
     [

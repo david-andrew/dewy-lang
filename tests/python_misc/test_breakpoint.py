@@ -186,7 +186,7 @@ def test_lldb_shows_dewy_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert '(string) label = "run"' in text and '(int64 | none) maybe = none' in text and '(int64) total = 9' in text
     assert '(Hit) h = Hit[length=3 name="a"]' in text
     caller = text[text.rindex('frame variable'):]
-    assert '(array<Hit length=2>) hits = [Hit[length=3 name="a"] Hit[length=10 name="b"]]' in caller   # raw frame data, through the thunk
+    assert '(array<Hit>) hits = [Hit[length=3 name="a"] Hit[length=10 name="b"]]' in caller   # declared contract; current length is a fact
     assert ' r = ' not in caller                                                                    # not declared yet at the call
 
 

@@ -21,6 +21,10 @@ class Binding:
     kind: BindingKind
     loc: Span
     type: ty.Type | None = None
+    store_type: ty.Type | None = None
+    """A place parameter's declared storage contract, before flow narrowing.
+    Unlike a value parameter's copied local, every write remains constrained
+    by the caller's storage type, including scalar refinements."""
     type_value: ty.TypeAliasValue | None = None
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
@@ -37,6 +41,9 @@ class Binding:
     the `hir.GenericFunction`, its bindings, and the checking context of the
     call that created it — so a later pass can instantiate the generic again
     for other types (the representation pass, when an argument becomes big)."""
+    nominal_name: str | None = None
+    """The identity minted by this declaration. Spelling alone cannot identify
+    a type: two modules (or nested scopes) can each declare their own Token."""
     route_root: int | None = None
     """For a hidden *route* binding (`bag.items`): the root binding's id.
     Length and index facts are keyed by these ids so member arrays get the
@@ -54,6 +61,14 @@ class BindingRegistry:
     route_ids: dict[tuple[int, tuple[str, ...]], int] = field(default_factory=dict)
     routes_by_root: dict[int, list[int]] = field(default_factory=dict)
     route_paths: dict[int, tuple[str, ...]] = field(default_factory=dict)
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        # Object addresses belong to the process that wrote the cache. The
+        # syntax itself is retained by each binding and restored by pickle;
+        # rebuild its index before any newly parsed syntax can reuse an old
+        # address and accidentally complete an unrelated binding.
+        self.by_syntax = {id(binding.syntax): binding for binding in self.by_syntax.values()}
 
     def route_id(self, root_id: int, path: tuple[str, ...], type_: ty.Type, loc: Span) -> int:
         """A stable id for the member route ``root.path``, allocated on first use."""

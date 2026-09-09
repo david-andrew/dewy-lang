@@ -90,7 +90,10 @@ def _erase_dimensions(root: object) -> None:
         if isinstance(type_, ty.TypeOr):
             # `rational * Length | Overflow`: the members lose their dimensions too
             members = [erase(member) for member in type_.items]
-            return type_ if all(a is b for a, b in zip(members, type_.items)) else ty.TypeOr(members)
+            # Erasure can merge alternatives (`int64 | addr` becomes one
+            # word). Retaining duplicate members would invent a tagged cell
+            # for a scalar, or hide a single-payload optional from lowering.
+            return type_ if all(a is b for a, b in zip(members, type_.items)) else ty.union(*members)
         return type_.number if isinstance(type_, ty.QuantityType) else type_
 
     def walk(value: object) -> None:
@@ -273,6 +276,10 @@ class _Lowerer(
         self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}
         self.named_copy_symbols: dict[int, str] = {}  # recursive alias id -> deep-copy function symbol
         self.pending_named_copies: list[ty.NamedType] = []
+        self.object_copy_symbols: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], str]] = []
+        self.pending_object_copies: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], str]] = []
+        self.object_release_symbols: list[tuple[ty.ObjectType, str]] = []
+        self.pending_object_releases: list[tuple[ty.ObjectType, str]] = []
         self.string_clone_needed = False   # a string array was copied: emit `__dewy_string_clone` once
         self.optional_globals_initialized: set[int] = set()
         self.union_globals_initialized: set[int] = set()
@@ -431,7 +438,7 @@ class _Lowerer(
                     continue
                 continue
             lowered_functions.append(self._lower_function(function))
-        lowered_functions.extend(self._synthesize_named_copies())
+        lowered_functions.extend(self._synthesize_aggregate_helpers())
         lowered_functions.extend(self._synthesize_string_clone())
 
         globals_: list[hir.Declare] = []
@@ -499,7 +506,7 @@ class _Lowerer(
             else None
         )
         # module startup may have requested more copy functions
-        lowered_functions.extend(self._synthesize_named_copies())
+        lowered_functions.extend(self._synthesize_aggregate_helpers())
         lowered_functions.extend(self._synthesize_string_clone())
         for name, data in self.unicode_table_globals.items():
             # a packed byte literal is a constant initializer: no startup needed
@@ -570,11 +577,6 @@ class _Lowerer(
             self._target_error(
                 literal,
                 'object returns require a recursively fixed result layout',
-            )
-        if isinstance(result_payload, ty.ArrayType):
-            self._target_error(
-                literal,
-                'optional array returns require array ownership lowering',
             )
         string_result = id(function) in self.string_result_needs_dest
         union_result = ty.runtime_union_members(literal.rettype) is not None
@@ -3491,7 +3493,7 @@ class _Lowerer(
             if isinstance(lowered, hir.Block) and not (lowered.items and isinstance(lowered.items[-1], hir.Return)):
                 return replace(lowered, items=[*lowered.items, hir.Return(node.loc, ty.BOTTOM_TYPE, None)])
             return lowered
-        if self._contains_return(node):
+        if node.type == ty.BOTTOM_TYPE or self._contains_return(node):
             return self._lower_statement_body(node)
         if isinstance(node, hir.Block) and node.scoped:
             value_indices = [
@@ -4604,11 +4606,8 @@ class _Lowerer(
             return self._extract_array_literal(node)
         if isinstance(node, hir.ArrayLength):
             raw_representation = self._array_use_representation(node.array)
-            if raw_representation is not None and isinstance(
-                node.type,
-                ty.IntegerLiteralType,
-            ):
-                return [], self._int64_literal(node.loc, node.type.value)
+            if raw_representation is not None:
+                return [], self._int64_literal(node.loc, self._raw_array_length(node.array))
             static_bytes = self._static_binary_array_source(node.array)
             if static_bytes is not None and isinstance(
                 node.type,

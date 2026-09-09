@@ -1005,6 +1005,11 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     reading it once per arm is free of effects."""
     if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
         return None
+    if _number_object(value.type, ctx=ctx) is not None:
+        # Numeric representations may themselves be tagged unions (bigint's
+        # zero/nonzero cases). Their print protocol precedes the generic
+        # container spelling, just as their arithmetic precedes cell dispatch.
+        return None
     plain = ty.strip_refinement(value.type)
     if _optional_container_element(plain):
         payload = ty.optional_payload(plain)
@@ -1093,7 +1098,7 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         if optional_flow is not None:
             parts.append(optional_flow)   # `none`, or the payload's text
             continue
-        if _optional_container_element(ty.strip_refinement(value.type)) or _union_container_element(ty.strip_refinement(value.type)):
+        if _number_object(value.type, ctx=ctx) is None and (_optional_container_element(ty.strip_refinement(value.type)) or _union_container_element(ty.strip_refinement(value.type))):
             # any other union-valued expression (`xs[i]`, a call): evaluate it
             # once into a hidden local declared before the statement, then the
             # flow tests and reads the local
@@ -1389,23 +1394,19 @@ def _tcr_annotated_declaration(
     )
     expr = check_against(expr, refined_annotation or annotation, ctx=ctx)
     optional_annotation_payload = ty.optional_payload(annotation)
-    growable = (
-        keyword == 'let'
+    runtime_array = (
+        keyword not in {'const', 'local_const'}
         and isinstance(annotation, ty.ArrayType)
         and annotation.length is None
-        and isinstance(expr.type, ty.ArrayType)
-        and expr.type.length is not None
-        # grown somewhere in this module, or declared runtime-length and
-        # started empty (`let buffer:array<uint8> = []`): an empty exact array
-        # is useless unless grown, often by a callee through `@buffer`
-        and (name in ctx.grown_array_names or expr.type.length == 0)
     )
-    # an object or array annotation takes the value's exact shape (field
-    # refinements, exact lengths) — but a minted child stored under its parent's
-    # annotation (`let t:Token = Name(…)`) is a parent value: the annotation governs
+    # A declared runtime array keeps its contract, independently of which
+    # mutations happen to appear elsewhere in this module. Its initial exact
+    # length is evidence about this value, not a restriction on later stores.
+    # Objects still retain structural field refinements, except that a minted
+    # child stored under its parent's annotation remains a parent value.
     ctx.declarations[name] = (
         annotation
-        if growable
+        if runtime_array
         else expr.type
         if isinstance(annotation, (ty.ArrayType, ty.ObjectType))
         and isinstance(expr.type, type(annotation))
@@ -1421,6 +1422,8 @@ def _tcr_annotated_declaration(
         hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, refined_annotation or annotation, expr),
         ctx=ctx,
     )
+    if runtime_array and declaration.binding_id is not None:
+        ctx.binding_registry.by_id[declaration.binding_id].type = annotation
     if refined_annotation is not None and declaration.binding_id is not None:
         if ty.total_dict_key(refined_annotation) is not None:
             ctx.declared_total.add(declaration.binding_id)
@@ -1429,7 +1432,7 @@ def _tcr_annotated_declaration(
             _record_refinement_facts(declaration.binding_id, refined_annotation, ctx=ctx)
     if declaration.binding_id is not None:
         _seed_field_routes(declaration.binding_id, annotation, expr, (), ctx=ctx)
-    if growable and declaration.binding_id is not None:
+    if runtime_array and isinstance(expr.type, ty.ArrayType) and expr.type.length is not None and declaration.binding_id is not None:
         # A runtime-length binding initialized from an exact-length
         # value keeps that exact length as a refinement until a
         # length-changing operation invalidates it, so index proofs
@@ -1749,6 +1752,7 @@ def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = 
         ctx.refinements.pop(_exclusion_key(route_id), None)
         ctx.length_bounds.pop(route_id, None)
         _drop_key_facts(ctx, dictionary_id=route_id)
+        _drop_key_facts(ctx, key_id=route_id)
     if not prefix:
         _drop_key_facts(ctx, dictionary_id=root_id)
 
@@ -1771,12 +1775,16 @@ def _new_key_position_name() -> str:
 
 
 def _key_identity(key: hir.AST, *, ctx: Context) -> tuple[str, object] | None:
-    """How a key expression is tracked in facts: a binding or a constant."""
+    """Track a key's binding/member route or its constant value."""
     key = _unwrap_parens(key)
-    while isinstance(key, (hir.RepresentationCast, hir.ValueCast)):
-        key = key.expr
+    while isinstance(key, (hir.RepresentationCast, hir.ValueCast, hir.Obligation)):
+        key = _unwrap_parens(key.value if isinstance(key, hir.Obligation) else key.expr)
     if isinstance(key, hir.ExpressedIdentifier) and key.binding_id is not None:
         return ('b', key.binding_id)
+    if isinstance(key, hir.MemberAccess):
+        route = sb.array_route_id(key, ctx.binding_registry)
+        if route is not None:
+            return ('b', route)
     if isinstance(key, hir.String):
         return ('c', key.content)
     if isinstance(key.type, ty.StringLiteralType):
@@ -1963,8 +1971,8 @@ def _prove_total_dictionary(node: hir.AST, expected: ty.Type, *, ctx: Context) -
     )
 
 
-def _dict_index_binding(left: p0.AST, *, ctx: Context) -> sb.Binding | None:
-    """The dictionary binding of an assignment target spelled `d[key]`, else None."""
+def _dict_assignment_target(left: p0.AST, *, ctx: Context) -> hir.AST | None:
+    """A writable named dictionary or member route in `target[key]`."""
     if not isinstance(left, p0.BinOp):
         return None
     op = left.op
@@ -1972,19 +1980,39 @@ def _dict_index_binding(left: p0.AST, *, ctx: Context) -> sb.Binding | None:
         op = next((option for option in op.options if isinstance(option, t2.IndexJuxtapose)), op)
     if not isinstance(op, t2.IndexJuxtapose):
         return None
-    if not (isinstance(left.left, p0.Atom) and isinstance(left.left.item, t1.Identifier)):
+    if isinstance(left.left, p0.Atom) and isinstance(left.left.item, t1.Identifier):
+        binding = ctx.binding_scopes.get(left.left.item.name)
+        if binding is None or ty.dict_key_value(binding.type) is None:
+            return None
+        dictionary = tcr_identifier(left.left.item, ctx=ctx)
+    elif isinstance(left.left, p0.BinOp) and isinstance(left.left.op, t1.Operator) and left.left.op.symbol == '.':
+        dictionary = _tcr_member_access(left.left, ctx=ctx)
+        if ty.dict_key_value(dictionary.type) is None:
+            return None
+        binding = _member_root_binding(dictionary, ctx=ctx)
+    else:
         return None
-    binding = ctx.binding_scopes.get(left.left.item.name)
-    if binding is None or ty.dict_key_value(binding.type) is None:
-        return None  # (a set target falls through to the index-assignment error)
-    return binding
+    if binding is None:
+        not_implemented(ctx.srcfile, left.left.loc, 'dictionary assignment without a named storage root')
+    if (reason := _read_only_reason(binding)) is not None:
+        user_error(
+            ctx.srcfile,
+            'cannot store into a const dictionary',
+            Pointer(span=left.left.loc, message=f'`{binding.name}` {reason}'),
+        )
+    path = sb.access_path(dictionary)
+    for step in path.steps:
+        if isinstance(step, hir.MemberAccess) and not step.mutable:
+            user_error(ctx.srcfile, f'cannot mutate const object field `{step.name}`', Pointer(span=step.loc, message='this field is const'))
+    _refuse_immutable_write(dictionary, left.left.loc, 'store into a dictionary member', ctx=ctx)
+    return dictionary
 
 
 def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
-    """Check `d[key] = value` when `d` names a dictionary."""
+    """Check `d[key] = value` for a dictionary binding or member route."""
     left = ast.left
-    binding = _dict_index_binding(left, ctx=ctx)
-    if binding is None:
+    dictionary = _dict_assignment_target(left, ctx=ctx)
+    if dictionary is None:
         return None
     assert isinstance(left, p0.BinOp)
     if not isinstance(left.right, p0.Block) or len(left.right.inner) != 1:
@@ -1993,13 +2021,6 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
             'dictionary store takes one key',
             Pointer(span=left.right.loc, message='expected exactly one key expression'),
         )
-    if (reason := _read_only_reason(binding)) is not None:
-        user_error(
-            ctx.srcfile,
-            'cannot store into a const dictionary',
-            Pointer(span=left.left.loc, message=f'`{binding.name}` {reason}'),
-        )
-    dictionary = tcr_identifier(left.left.item, ctx=ctx)
     found = _dict_value(dictionary)
     assert found is not None and found[2] is not None
     dictionary, key_type, value_type = found
@@ -2069,18 +2090,21 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             ),
         )
 
-    if (dict_binding := _dict_index_binding(ast.left, ctx=ctx)) is not None:
+    if (dictionary := _dict_assignment_target(ast.left, ctx=ctx)) is not None:
         # `d[k] op= v` is `d[k] = d[k] op v`: the key must be proven present
         # (the lookup says so otherwise), and the store replaces its value
-        if (reason := _read_only_reason(dict_binding)) is not None:
-            user_error(
-                ctx.srcfile,
-                'cannot store into a const dictionary',
-                Pointer(span=ast.left.loc, message=f'`{dict_binding.name}` {reason}'),
-            )
         assert isinstance(ast.left, p0.BinOp)
-        lookup = _tcr_index(ast.left, ctx=ctx)
+        lookup = _tcr_index(ast.left, ctx=ctx, array=dictionary)
         assert isinstance(lookup, hir.DictLookup)
+        # One compound assignment evaluates its key once. Retain the checked
+        # lookup proof, but use a hidden local for both the read and the store.
+        original_key = lookup.key
+        key_binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_store_key_{ctx.binding_registry.next_id}', 'value', original_key.loc)
+        key_binding.type = original_key.type
+        key_local = hir.ExpressedIdentifier(original_key.loc, original_key.type, key_binding.name, binding_id=key_binding.id)
+        key_declaration = hir.Declare(original_key.loc, ty.VOID_TYPE, 'let', key_binding.name, original_key.type, original_key, binding_id=key_binding.id)
+        key_binding.declaration = key_declaration
+        lookup = replace(lookup, key=key_local)
         value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=lookup.type)
         result = _dispatch_builtin(
             builtins.BINOP_DUNDER_MAP[symbol],
@@ -2092,7 +2116,11 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             expected=lookup.type,
         )
         result = check_against(result, lookup.type, ctx=ctx)
-        return hir.DictStore(ast.loc, ty.VOID_TYPE, lookup.keys, lookup.values, lookup.key, result)
+        _forget_positions(dictionary, ctx=ctx)
+        position = _new_key_position_name()
+        _record_key_fact(dictionary, original_key, ctx=ctx, position=position)
+        store = hir.DictStore(ast.loc, ty.VOID_TYPE, lookup.keys, lookup.values, lookup.key, result, position=position)
+        return hir.Block(ast.loc, ty.VOID_TYPE, [key_declaration, store], False)
 
     target = tcr_assignment_target(ast.left, ctx=ctx, refined=True)
     if isinstance(target, hir.Index):
@@ -2112,6 +2140,11 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
         expected=target.type,
     )
     result = check_against(result, target.type, ctx=ctx)
+    if isinstance(target, hir.ExpressedIdentifier) and target.binding_id is not None:
+        binding = ctx.binding_registry.by_id.get(target.binding_id)
+        contract = binding.store_type if binding is not None else None
+        if contract is not None:
+            result = check_against(result, contract, ctx=ctx)
     if isinstance(target, hir.MemberAccess):
         # `obj.field += v` is `obj.field = obj.field + v`
         assigned = sb.member_path(target)
@@ -2119,7 +2152,15 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             root_id, path = assigned
             _invalidate_routes(root_id, ctx=ctx, prefix=path)
         return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, result)
-    if _is_string_type(target.type):
+    # Only the primitive operator may be handed to the target as `op=`.
+    # Library-backed arithmetic (bigint, rational, sets, strings, ...) has
+    # already selected a checked implementation; discarding that result here
+    # would bypass its conversions and ask the backend to redispatch it.
+    if _is_string_type(target.type) or not (
+        isinstance(result, hir.FunctionCall)
+        and isinstance(result.func, hir.ExpressedIdentifier)
+        and result.func.name == builtins.BINOP_DUNDER_MAP[symbol]
+    ):
         return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', result)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, f'{symbol}=', value)
 
@@ -3514,6 +3555,18 @@ def _refine_condition_context(
     *,
     truth: bool,
 ) -> Context:
+    condition = _unwrap_parens(_strip_obligations(condition))
+    if (
+        isinstance(condition, hir.FunctionCall)
+        and isinstance(condition.func, hir.ExpressedIdentifier)
+        and condition.func.name == '__not__'
+        and len(condition.pos_args) == 1
+        and not condition.kw_args
+    ):
+        # Negation swaps the two paths for every predicate, including
+        # `not in?`. An early return on absence therefore proves presence
+        # in the continuation just as the positive guard does in its body.
+        return _refine_condition_context(ctx, condition.pos_args[0], truth=not truth)
     refinements = dict(ctx.refinements)
     key_facts = dict(ctx.key_facts)  # facts are path-sensitive: every refined context owns its copy
     if isinstance(condition, hir.DictContains) and truth:
@@ -4771,6 +4824,22 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         _, condition_ast, body_ast = arm.parts
         assert isinstance(condition_ast, p0.AST)
         assert isinstance(body_ast, p0.AST)
+        # The condition runs again after the body. Drop incoming facts about
+        # its writes before checking the condition itself: otherwise an exact
+        # initial length can turn `loop pending.length >? 0` into `loop true`.
+        # Facts established by the checked condition then hold at each entry
+        # to the body, including iterator predicates.
+        mutated_names = _mutated_binding_names(body_ast)
+        for name in mutated_names:
+            binding = ctx.binding_scopes.get(name)
+            if binding is None:
+                continue
+            for binding_id in (binding.id, *ctx.binding_registry.routes_under(binding.id)):
+                ctx.refinements.pop(binding_id, None)
+                ctx.refinements.pop(_exclusion_key(binding_id), None)
+                ctx.length_bounds.pop(binding_id, None)
+                _drop_key_facts(ctx, dictionary_id=binding_id)
+                _drop_key_facts(ctx, key_id=binding_id)
         # iterator clauses mixed with Boolean predicates (`loop i in 0.. and
         # i <? n and src[i] in? ws`): the iterators advance, then the
         # predicates are tested with the targets bound — the loop ends at the
@@ -4818,11 +4887,8 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     [hir.IfArm(predicate_ast.loc, ty.VOID_TYPE, predicate, hir.Void(predicate_ast.loc, ty.VOID_TYPE))],
                     hir.Break(predicate_ast.loc, ty.BOTTOM_TYPE, None, 0),
                 )
-        # A refinement established before the loop is only sound inside the
-        # body if nothing in the body can invalidate it on a later iteration,
-        # so drop refinements of every binding the body assigns or grows.
         iterated_containers = _iterated_container_names(condition)
-        for mutated_name in _mutated_binding_names(body_ast):
+        for mutated_name in mutated_names:
             if mutated_name in iterated_containers:
                 # Python raises "changed size during iteration" at runtime;
                 # entries may move (compaction, resize), so it is rejected here
@@ -4832,28 +4898,6 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     Pointer(span=body_ast.loc, message=f'this loop body changes `{mutated_name}`, the container it iterates'),
                     hint='collect the changes and apply them after the loop',
                 )
-            mutated_binding = ctx.binding_scopes.get(mutated_name)
-            if mutated_binding is not None:
-                invalidated = [
-                    mutated_binding.id,
-                    *ctx.binding_registry.routes_under(mutated_binding.id),
-                ]
-                for invalidated_id in invalidated:
-                    for key in (invalidated_id, _exclusion_key(invalidated_id)):
-                        ctx.refinements.pop(key, None)
-                        body_ctx.refinements.pop(key, None)
-                    ctx.length_bounds.pop(invalidated_id, None)
-                    body_ctx.length_bounds.pop(invalidated_id, None)
-                    _drop_key_facts(ctx, dictionary_id=invalidated_id)
-                    _drop_key_facts(body_ctx, dictionary_id=invalidated_id)
-                    _drop_key_facts(ctx, key_id=invalidated_id)
-                    _drop_key_facts(body_ctx, key_id=invalidated_id)
-        if iterator_result is None:
-            # The condition is re-evaluated before every iteration, so the
-            # facts it establishes hold at the top of the body even when the
-            # body mutates the tested bindings; only facts inherited from
-            # before the loop were dropped above.
-            body_ctx = _refine_condition_context(ctx, condition, truth=True)
         if not ctx.label_scopes:
             raise ValueError('INTERNAL ERROR: loop has no containing lexical label scope')
         boundary = LoopBoundary(ctx.label_scopes[-1])
@@ -4866,10 +4910,39 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         )
         if guard is not None or unpack_declares:
             body = hir.Block(body.loc, body.type, [*unpack_declares, *([guard] if guard is not None else []), body], False)
-        loop_arm = hir.LoopArm(arm.loc, ty.VOID_TYPE, condition, body)
-        return hir.Flow(ast.loc, ty.VOID_TYPE, [loop_arm], None)
+        # Reaching the next iteration is not falling out of `loop true`.
+        # Only a break aimed at this loop supplies a continuation. Inspect
+        # checked HIR so rejected parse alternatives cannot leave exit state.
+        diverges = isinstance(condition, hir.Bool) and condition.value and not _breaks_loop(body)
+        result_type = ty.BOTTOM_TYPE if diverges else ty.VOID_TYPE
+        loop_arm = hir.LoopArm(arm.loc, result_type, condition, body)
+        return hir.Flow(ast.loc, result_type, [loop_arm], None)
 
     not_implemented(ctx.srcfile, ast.loc, 'mixed or advanced flow chain')
+
+
+def _breaks_loop(node: object, depth: int = 0) -> bool:
+    """Conservatively find an exit aimed at the loop containing this body.
+
+    Nested-loop breaks count only when their resolved level reaches us;
+    nested functions have their own control boundaries. An unreachable
+    written break may keep a loop void, but cannot incorrectly prove never.
+    """
+    if isinstance(node, hir.Break):
+        return node.loop_levels == depth
+    if isinstance(node, hir.FunctionLiteral):
+        return False
+    if isinstance(node, hir.LoopArm):
+        return _breaks_loop(node.condition, depth) or _breaks_loop(node.body, depth + 1)
+    if isinstance(node, hir.AST):
+        return any(_breaks_loop(getattr(node, f.name), depth) for f in fields(node))
+    if isinstance(node, hir.ObjectField):
+        return _breaks_loop(node.value, depth)
+    if isinstance(node, (list, tuple)):
+        return any(_breaks_loop(item, depth) for item in node)
+    if isinstance(node, dict):
+        return any(_breaks_loop(item, depth) for item in node.values())
+    return False
 
 def _direct_scope_metatag(item: p0.AST) -> t1.Metatag | None:
     if isinstance(item, p0.Atom) and isinstance(item.item, t1.Metatag):
@@ -4961,7 +5034,7 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     Both take `condition` or `condition, message`. A condition the checker
     already folds is decided here; otherwise `$assert` leaves a `hir.Assert`
     for the bounds analysis to prove (or refute), and `$runtime_assert`
-    becomes `if condition {} else { report; _exit(101) }` whose failure body
+    becomes `if condition {} else { report; exit(101) }` whose failure body
     diverges, so the code after it keeps the condition's facts exactly as
     code after an early-return guard does.
     """
@@ -5239,7 +5312,7 @@ def _assert_failure_report(
     Fills the report model of `library/reporting.dewy` — the condition as the
     pointer with the message as its text, the `, message` tail dimmed, the
     operands' values as notes — renders it over the condition's source line,
-    then `_exit(101)`; an expectation records the failure and returns instead.
+    then `exit(101)`; an expectation records the failure and returns instead.
     """
     loc = ast.loc
 
@@ -5309,7 +5382,7 @@ def _assert_failure_report(
         statements.append(call('_expect_failed'))
         statements.append(hir.Return(loc, ty.BOTTOM_TYPE, None))
     else:
-        statements.append(call('_exit', integer(101)))
+        statements.append(call('exit', integer(101)))
     return statements
 
 
@@ -6238,6 +6311,21 @@ def _prebind_type_aliases(block: p0.Block, *, ctx: Context) -> list[sb.Binding]:
     return aliases
 
 
+def _nominal_name(binding: sb.Binding) -> str:
+    """Allocate once per binding; repeated resolution reuses that mint.
+
+    Keep the short spelling when available, but never merge another module's
+    type merely because its author chose the same name. Binding ids are shared
+    by all modules in a compile, including the restored prelude.
+    """
+    if binding.nominal_name is None:
+        name = binding.name
+        if name in ty.USER_BRANDS or name in ty.USER_NOMINAL_TYPES:
+            name = f'{name}#{binding.id}'
+        binding.nominal_name = name
+    return binding.nominal_name
+
+
 def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.TypeExpr | None:
     """`let NotFound:type = type of error` mints a fresh nominal type named
     after the alias, a subtype of the `of` operand. Only the `error` family is
@@ -6259,7 +6347,7 @@ def _mint_nominal_type(binding: sb.Binding, rhs: p0.AST, *, ctx: Context) -> ty.
     assert isinstance(mint, p0.Prefix)
     parent = ast_to_type(mint.item, ctx=ctx)
     extras = [ast_to_type(item, ctx=ctx) for item in operands if item is not mint]
-    name = binding.name
+    name = _nominal_name(binding)
     if ty.user_branded(parent) and isinstance(parent, ty.ObjectType) and parent.brand in ty.USER_NOMINAL_TYPES:
         # `type of TokenError & [...]`: a child of an error carrying fields is
         # one too, nominally under its parent
@@ -6423,8 +6511,8 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
             rhs.loc,
             f'`type of {type_to_dewy(parent)}` (mintable so far: error types, and object types — possibly intersected with `any`)',
         )
-    name = binding.name
-    reminted = nominal_parent is not None and ty.USER_NOMINAL_TYPES.get(name) == nominal_parent   # the same error minted again (another compile in this process)
+    name = _nominal_name(binding)
+    reminted = nominal_parent is not None and ty.USER_NOMINAL_TYPES.get(name) == nominal_parent
     if (name in ty.USER_NOMINAL_TYPES or name in ctx.type_system._named_types) and name not in ty.USER_BRANDS and not reminted:
         user_error(
             ctx.srcfile,
@@ -6739,7 +6827,11 @@ def _widen_type_argument(type_: ty.TypeExpr, *, loc: Span, ctx: Context) -> ty.T
         return ty.StringType()
     if isinstance(type_, ty.BinaryLiteralType):
         return ty.ArrayType('uint8', len(type_.value))
-    return ty.strip_refinement(type_)
+    # Scalar call arguments were already widened to their bases by inference.
+    # A refinement that reaches here came from inside a container/signature:
+    # erasing it changes an invariant element contract (array<addr> would
+    # become array<int64>) and can authorize invalid writes in the instance.
+    return type_
 
 
 def _instantiate_generic_call(
@@ -7151,7 +7243,9 @@ def _tcr_loop_capture(block: p0.Block, *, kind: Literal['array', 'set'], expecte
         )
 
     def common_type(nodes: list[hir.AST], what: str) -> ty.TypeExpr:
-        widened = [_widen_type_argument(cast(ty.TypeExpr, node.type), loc=node.loc, ctx=ctx) for node in nodes]
+        # These are new element values, unlike type arguments extracted from
+        # an existing invariant container. Infer their ordinary storage types.
+        widened = [_widen_type_argument(ty.strip_refinement(cast(ty.TypeExpr, node.type)), loc=node.loc, ctx=ctx) for node in nodes]
         chosen = widened[0]
         for index, other in enumerate(widened[1:], start=1):
             if other == chosen or ctx.type_system.is_subtype(other, chosen):
@@ -7240,7 +7334,7 @@ def _tcr_set_literal(
     *,
     expected: ty.Type | None,
     ctx: Context,
-) -> hir.ObjectLiteral:
+) -> hir.AST:
     """`set[a b c]`: the set object over the distinct members, in first-seen order."""
     annotation = ty.strip_refinement(expected) if expected is not None else None
     element = ty.set_element(annotation) if annotation is not None else None
@@ -7255,14 +7349,15 @@ def _tcr_set_literal(
     )
     if not isinstance(members, hir.ArrayLiteral) or not isinstance(members.type, ty.ArrayType):
         not_implemented(ctx.srcfile, block.loc, 'set literals from non-literal member lists')
-    # duplicates collapse at compile time, so `live` is exact; members must
-    # be constants for that (runtime members dedupe at the first table build)
+    # Constant members collapse here, retaining exact cardinality. Runtime
+    # members use the ordinary array-to-set operation, which evaluates the
+    # member array once in source order and deduplicates by value at runtime.
     seen: dict[object, int] = {}
     distinct: list[hir.AST] = []
     for item in members.items:
         identity = _key_identity(item, ctx=ctx)
         if identity is None or identity[0] != 'c':
-            not_implemented(ctx.srcfile, item.loc, 'set literal members that are not constants')
+            return _library_call('_set_of_array', [members], loc, ctx=ctx)
         if identity[1] in seen:
             continue
         seen[identity[1]] = len(distinct)
@@ -8224,7 +8319,7 @@ def _bind_array_method(
 ) -> hir.ArrayMethod:
     value = replace(value, type=declared)
     element = declared.element
-    integer_elements = isinstance(element, str) and element in ty.FIXED_INTEGER_TYPES
+    integer_elements = ty.fixed_integer_layout(ty.strip_refinement(element)) is not None
     # `xs.sort(key=(x) => … reverse=true)`: a stable ascending (or descending)
     # sort by a fixed-width integer key. Integer elements are their own key,
     # so `key` is optional for them and required for everything else. The
@@ -8298,7 +8393,11 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 hint='available names: ' + ', '.join(module.exports),  # type: ignore[attr-defined]
             )
         if binding.type_value is not None or binding.type == ty.TYPE_TYPE:
-            not_implemented(ctx.srcfile, binop.loc, 'runtime use of an imported type')
+            if ty.is_user_nominal(binding.type_value):
+                return hir.ErrorValue(binop.loc, binding.type_value, binding.type_value)
+            if binding.type_value is None:
+                not_implemented(ctx.srcfile, binop.loc, 'runtime type values')
+            return hir.TypeValue(binop.loc, ty.TYPE_TYPE, binding.type_value, name)
         if binding.type is None:
             raise ValueError(f'INTERNAL ERROR: module member `{name}` has no type')
         return hir.ExpressedIdentifier(
@@ -8970,7 +9069,10 @@ def _union_container_element(type_: ty.Type) -> bool:
         return False
     for member in members:
         unfolded = ty.unfold(member)
-        if member == 'none' or member == 'bool' or ty.fixed_integer_layout(member) is not None or ty.string_valued(member):
+        # A singleton integer carries its value in the union tag. In
+        # particular, bigint's zero alternative needs no abstract-int
+        # storage; its other alternative owns the sign and limb array.
+        if member == 'none' or member == 'bool' or isinstance(member, ty.IntegerLiteralType) or ty.fixed_integer_layout(member) is not None or ty.string_valued(member):
             continue
         if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
             continue
@@ -10289,6 +10391,39 @@ def _literal_member_test(args: list[hir.AST], *, negated: bool, loc: Span, ctx: 
     return None
 
 
+def _equality_snapshot(value: hir.AST, ctx: Context) -> tuple[hir.Declare, hir.ExpressedIdentifier]:
+    """Evaluate an equality operand once, before testing either operand's tag."""
+    local = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_eq_{ctx.binding_registry.next_id}', 'value', value.loc)
+    local.type = value.type
+    declaration = hir.Declare(value.loc, ty.VOID_TYPE, 'let', local.name, value.type, value, binding_id=local.id)
+    local.declaration = declaration
+    return declaration, hir.ExpressedIdentifier(value.loc, value.type, local.name, binding_id=local.id)
+
+
+def _union_pair_equality(args: list[hir.AST], members: list[ty.TypeExpr], *, negated: bool, loc: Span, source_name: str, ctx: Context) -> hir.AST:
+    """Equal alternatives compare their payloads; different alternatives differ.
+
+    Tags are tested by member type, not numeric tag position, so source union
+    order is irrelevant. Both operands are captured in source order even if
+    their tags differ. Numeric library unions dispatch before this helper.
+    """
+    left_decl, left = _equality_snapshot(args[0], ctx)
+    right_decl, right = _equality_snapshot(args[1], ctx)
+    combined: hir.AST | None = None
+    for member in members:
+        branch: hir.AST = hir.ShortCircuit(loc, 'bool', 'or' if negated else 'and',
+                                          hir.TypeTest(loc, 'bool', left, member, negated),
+                                          hir.TypeTest(loc, 'bool', right, member, negated))
+        if member != 'none' and not ty.is_user_nominal(member):
+            payload = _dispatch_builtin('__ne__' if negated else '__eq__',
+                                        [replace(left, type=member), replace(right, type=member)],
+                                        loc=loc, op_loc=loc, source_name=source_name, ctx=ctx)
+            branch = hir.ShortCircuit(loc, 'bool', 'or' if negated else 'and', branch, payload)
+        combined = branch if combined is None else hir.ShortCircuit(loc, 'bool', 'and' if negated else 'or', combined, branch)
+    assert combined is not None
+    return hir.Block(loc, 'bool', [left_decl, right_decl, combined], False)
+
+
 def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, source_name: str, ctx: Context) -> hir.AST | None:
     """`x =? v` where `x` is a tagged cell (`T | none`, `A | B`) and `v` a value of one member type.
 
@@ -10299,7 +10434,7 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
     fact of the bounds analysis, as for a plain integer); in the else branch
     of `x not=? 3` likewise. A value that is not a binding (an element)
     compares through a hidden `let`. `x =? none` is `x is? none`. Two cells
-    cannot be compared yet.
+    with the same alternatives compare by tag and then member equality.
     """
     for value, other in ((args[0], args[1]), (args[1], args[0])):
         union = ty.unfold(ty.strip_refinement(value.type))
@@ -10310,7 +10445,11 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
         if other_type == 'none':
             return hir.TypeTest(loc, 'bool', value, 'none', negated)
         if isinstance(other_type, ty.TypeOr):
-            not_implemented(ctx.srcfile, loc, 'equality between two union values (narrow one side with `is?` first)')
+            left_members = ty.strip_all_refinements(union)
+            right_members = ty.strip_all_refinements(other_type)
+            if isinstance(left_members, ty.TypeOr) and isinstance(right_members, ty.TypeOr) and all(m in right_members.items for m in left_members.items) and all(m in left_members.items for m in right_members.items):
+                return _union_pair_equality(args, left_members.items, negated=negated, loc=loc, source_name=source_name, ctx=ctx)
+            not_implemented(ctx.srcfile, loc, 'equality between unions with different alternatives (narrow one side with `is?` first)')
         members = [
             member for member in union.items
             if member != 'none' and ctx.type_system.is_subtype(other_type, member)
@@ -10325,16 +10464,19 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
                 hint='narrow the union with `is?` first',
             )
         member = members[0]
-        if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
+        simple = (hir.ExpressedIdentifier, hir.Integer, hir.Bool, hir.String, hir.NoneValue)
+        if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None and all(isinstance(_unwrap_parens(arg), simple) for arg in args):
             tested: hir.AST = value
             prelude: list[hir.AST] = []
         else:
-            local = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_eq_{ctx.binding_registry.next_id}', 'value', value.loc)
-            local.type = value.type
-            declaration = hir.Declare(value.loc, ty.VOID_TYPE, 'let', local.name, value.type, value, binding_id=local.id)
-            local.declaration = declaration
-            tested = hir.ExpressedIdentifier(value.loc, value.type, local.name, binding_id=local.id)
-            prelude = [declaration]
+            # Equality is eager even when the payload comparison will be
+            # skipped. Capture in source order, including a simple left
+            # binding that the right expression could change.
+            captured = [_equality_snapshot(arg, ctx) for arg in args]
+            prelude = [declaration for declaration, _read in captured]
+            value_index = 0 if value is args[0] else 1
+            tested = captured[value_index][1]
+            other = captured[1 - value_index][1]
         narrowed = replace(tested, type=member)
         payload_equal = _dispatch_builtin(
             '__ne__' if negated else '__eq__', [narrowed, other], loc=loc, op_loc=loc, source_name=source_name, ctx=ctx,
@@ -10698,11 +10840,16 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
         return hir.TargetBool(prefix.loc, 'bool', not target_bool.value)
     if isinstance(target_bool, hir.DecidedBool) and prefix.op.symbol == 'not':
         return hir.DecidedBool(prefix.loc, 'bool', not target_bool.value)
-    if isinstance(item, hir.Integer) and isinstance(result, hir.FunctionCall):
+    if isinstance(item.type, ty.IntegerLiteralType) and isinstance(result, hir.FunctionCall):
+        # Parentheses and literal-preserving casts may wrap the integer.
+        # Generic unary dispatch initially returns its operand's singleton
+        # type; update that fact as well as the runtime operation, or later
+        # constant materialization can resurrect the unnegated value.
+        value = item.type.value
         if prefix.op.symbol == '-':
-            return replace(result, type=ty.IntegerLiteralType(-item.value))
+            return replace(result, type=ty.IntegerLiteralType(-value))
         if prefix.op.symbol in ('not', '~'):
-            return replace(result, type=ty.IntegerLiteralType(~item.value))
+            return replace(result, type=ty.IntegerLiteralType(~value))
     return result
 
 
@@ -10860,8 +11007,9 @@ def _known_string_length(type_: ty.Type) -> int | None:
     return None
 
 
-def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
-    array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+def _tcr_index(binop: p0.BinOp, *, ctx: Context, array: hir.AST | None = None) -> hir.AST:
+    if array is None:
+        array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
     source_place = array if isinstance(array, hir.Place) else None
     if source_place is not None:
         array = source_place.target
@@ -11676,6 +11824,12 @@ def tcr_assignment_target(
                 Pointer(span=target.loc, message=f'`{binding.name}` is {what} declared by {origin}; only its own module assigns it'),
                 hint=f'to declare your own `{binding.name}`, write `let {binding.name} = …` — it shadows that one within this module',
             )
+        if not refined and binding is not None:
+            contract = binding.store_type
+            if contract is None and binding.declaration is not None:
+                contract = binding.declaration.annotation
+            if contract is not None and contract != ty.INFERRED_TYPE:
+                resolved = replace(resolved, type=contract)
         return resolved
 
     if isinstance(target, p0.BinOp):
@@ -12109,6 +12263,9 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # a parameter's facts may name its siblings (`(src:string n:uint64<v => v <=? src.length>)`)
     pos_or_kw_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in pos_or_kw_args]
     kw_only_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in kw_only_args]
+    for param in [*pos_or_kw_args, *kw_only_args]:
+        if param.place and param.binding_id is not None:
+            ctx.binding_registry.by_id[param.binding_id].store_type = param.type
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
     catcher = Catcher(expected=annotated, void_facts=void_facts)
     function_boundary_labels = dict(ctx.function_boundary_labels)
@@ -13143,6 +13300,16 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
     `hir.Obligation` for the bounds analysis, which proves it from intervals,
     guards, and length facts — or reports it, like `$assert`.
     """
+    if isinstance(node, hir.Obligation):
+        # Argument parsing may already have discharged the constant parts of
+        # a contract. Rebind the remaining relational obligations even when
+        # that subset is shorter than the full parameter contract at dispatch.
+        # Proposition equality intentionally ignores resolved binding ids.
+        resolved = tuple(
+            next((new for new in refined.propositions if new == old), old)
+            for old in node.refined.propositions
+        )
+        node = replace(node, refined=ty.RefinedType(node.refined.base, resolved))
     if isinstance(node, hir.Obligation) and node.refined == refined:
         # already deferred once (arguments are checked at parsing and again at
         # dispatch): keep the obligation, with the better-resolved terms (the
@@ -14759,7 +14926,14 @@ def _construction_arguments(arguments: p0.AST) -> p0.AST:
 
 
 def _type_constructor_target(ast: p0.AST, *, ctx: Context) -> hir.TypeValue | None:
-    """`Span` in call position, when `Span` names an object type: the value being called is the type."""
+    """An object type in call position, bare or qualified by its module."""
+    if (
+        isinstance(ast, p0.BinOp) and _operator_symbol(ast.op) == '.'
+        and isinstance(ast.left, p0.Atom) and isinstance(ast.left.item, t1.Identifier)
+        and ast.left.item.name in ctx.module_namespaces
+    ):
+        candidate = _tcr_member_access(ast, ctx=ctx)
+        return candidate if isinstance(candidate, hir.TypeValue) and _constructed_object_type(candidate) is not None else None
     if not (isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier)):
         return None
     binding = ctx.binding_scopes.get(ast.item.name)
@@ -15850,6 +16024,16 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
         type_error(ctx.srcfile, 'type mismatch',
             Pointer(span=node.loc, message=f'expected `{expected_str}`, got `{node.type}`'))
+    if isinstance(expected, ty.TypeOr) and isinstance(node.type, (ty.IntegerLiteralType, ty.RationalLiteralType)):
+        # Applicability of a literal includes materialization (a nonzero
+        # integer can inhabit BigInt's object alternative). Preserve that
+        # conversion when the chosen representation is inside a union,
+        # rather than letting subsumption send a raw word to an object slot.
+        # Multiple compatible alternatives retain the existing dispatch;
+        # this rule introduces no preference between numeric representations.
+        candidates = [member for member in expected.items if ctx.type_system.is_subtype(node.type, member)]
+        if len(candidates) == 1 and any(_is_prelude_number(candidates[0], name, ctx=ctx) for name in _NUMBER_OBJECT_NAMES):
+            return check_against(node, candidates[0], ctx=ctx)
     if _is_bigint(expected, ctx=ctx) and not _is_bigint(node.type, ctx=ctx):
         nonzero = _is_nonzero_form(expected, BIGINT_TYPE_NAME, ctx=ctx)
         constant = _constant_integer(_unwrap_parens(node), ctx=ctx)

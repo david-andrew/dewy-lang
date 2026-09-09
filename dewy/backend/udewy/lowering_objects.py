@@ -30,6 +30,83 @@ def _flow_values(flow: hir.Flow) -> list[hir.AST]:
     return values
 
 class _ObjectLowering:
+    def _object_copy_call(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span,
+                          *, prepared: bool, move: bool | str, borrowed: set[str] = frozenset()) -> hir.FunctionCall:
+        """Share copy code by structural type and ownership mode.
+
+        Only prepared-result copies and arena-backed copies may be outlined:
+        a frame-backed nested allocation must remain in the caller's frame.
+        Register before emitting a body so recursive union members can reuse
+        the same helper rather than expand its implementation indefinitely.
+        """
+        key = (object_type, prepared, move, frozenset(borrowed))
+        symbol = next((entry[4] for entry in self.object_copy_symbols if entry[:4] == key), None)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_copy_object_{len(self.object_copy_symbols)}')
+            entry = (*key, symbol)
+            self.object_copy_symbols.append(entry)
+            self.pending_object_copies.append(entry)
+        function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+        return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol),
+                                [replace(dest, type='int64'), replace(src, type='int64')], {})
+
+    def _synthesize_object_copies(self) -> list:
+        from .lowering_shared import LoweredFunction
+        synthesized = []
+        while self.pending_object_copies:
+            object_type, prepared, move, borrowed, symbol = self.pending_object_copies.pop(0)
+            loc = self.root.loc
+            dest = hir.ExpressedIdentifier(loc, 'int64', '__dewy_dest')
+            src = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src')
+            if prepared:
+                statements = self._copy_object_into_result_storage(dest, src, object_type, loc, move=move, borrowed=borrowed, inline=True)
+            else:
+                assert isinstance(move, bool)
+                statements = self._object_copy(dest, src, object_type, loc, arena=True, move=move, inline=True)
+            function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            literal = hir.FunctionLiteral(loc, function_type, [hir.Param('__dewy_dest', 'int64'), hir.Param('__dewy_src', 'int64')],
+                                          [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, statements, True))
+            synthesized.append(LoweredFunction(symbol, literal))
+        return synthesized
+
+    def _object_release_call(self, base: hir.AST, object_type: ty.ObjectType, loc: Span) -> hir.FunctionCall:
+        symbol = next((symbol for existing, symbol in self.object_release_symbols if existing == object_type), None)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_release_object_{len(self.object_release_symbols)}')
+            self.object_release_symbols.append((object_type, symbol))
+            self.pending_object_releases.append((object_type, symbol))
+        function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+        return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol), [replace(base, type='int64')], {})
+
+    def _synthesize_object_releases(self) -> list:
+        from .lowering_shared import LoweredFunction
+        synthesized = []
+        while self.pending_object_releases:
+            object_type, symbol = self.pending_object_releases.pop(0)
+            loc = self.root.loc
+            base = hir.ExpressedIdentifier(loc, 'int64', '__dewy_value')
+            statements = self._release_object_members(base, object_type, loc, inline=True)
+            function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            literal = hir.FunctionLiteral(loc, function_type, [hir.Param('__dewy_value', 'int64')], [], None, ty.VOID_TYPE,
+                                          hir.Block(loc, ty.VOID_TYPE, statements, True))
+            synthesized.append(LoweredFunction(symbol, literal))
+        return synthesized
+
+    def _synthesize_aggregate_helpers(self) -> list:
+        # A structural copy may discover a recursive alias, and an alias
+        # copy may discover another structural layout. Drain both queues.
+        result = []
+        startup = self.lowering_module_startup
+        self.lowering_module_startup = False
+        try:
+            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases:
+                result.extend(self._synthesize_named_copies())
+                result.extend(self._synthesize_object_copies())
+                result.extend(self._synthesize_object_releases())
+        finally:
+            self.lowering_module_startup = startup
+        return result
+
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._copy_source_expression(node)
         return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall))
@@ -399,10 +476,13 @@ class _ObjectLowering:
         *,
         arena: bool = False,
         move: bool = False,
+        inline: bool = False,
     ) -> list[hir.AST]:
         """Copy every field; with ``arena``, nested mutable storage is arena-backed too.
         A minted object's brand word is copied, and the fields a child carries
         beyond the static type follow, selected by that brand at runtime."""
+        if arena and not inline:
+            return [self._object_copy_call(dest, src, object_type, loc, prepared=False, move=move)]
         _size, offsets = self._object_layout(object_type, dest)
 
         def copy_field(field: ty.ObjectField, dest_addr: hir.AST, src_addr: hir.AST) -> list[hir.AST]:
@@ -1245,9 +1325,12 @@ class _ObjectLowering:
         *,
         move: bool | str = False,
         borrowed: set[str] = frozenset(),
+        inline: bool = False,
     ) -> list[hir.AST]:
         """Recursively copy an object into already-prepared mutable storage (``move='adopt'``: take the arrays of fields not in ``borrowed``)."""
 
+        if not inline:
+            return [self._object_copy_call(dest, src, object_type, loc, prepared=True, move=move, borrowed=borrowed)]
         _size, offsets = self._object_layout(
             object_type,
             hir.Void(loc, ty.VOID_TYPE),

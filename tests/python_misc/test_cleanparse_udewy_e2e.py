@@ -28,6 +28,7 @@ ROUNDTRIP_CASES = [
     ('recursive_symbol.udewy', 42),
 ]
 LOWERED_CASES = [
+    ('runtime_container_contracts.dewy', 42),
     ('bootstrap_language_support.dewy', 42),
     ('overload_calls.dewy', 42),
     ('inline_overloads.dewy', 42),

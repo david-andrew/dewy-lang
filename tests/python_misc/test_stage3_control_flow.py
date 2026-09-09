@@ -441,3 +441,21 @@ def test_match_arms_must_be_signatures() -> None:
     # `match` is implemented (see test_match.py); an arm that is not `pattern => body` is a focused error
     with pytest.raises(UserError, match='match arm must be `pattern => body`'):
         _check('let main = ():>int64 => { match true { return 42 } }')
+
+
+@pytest.mark.parametrize('body', [
+    'loop true { if flag return 42 }',
+    'loop true { loop true { break } if flag return 42 }',
+    'loop true { continue }',
+])
+def test_unconditional_loop_without_an_exit_does_not_fall_through(body):
+    codegen(SrcFile(None, f'f = (flag:bool):>int64 => {{ {body} }}'))
+
+
+@pytest.mark.parametrize('body', [
+    'loop true { if flag return 42 break }',
+    '$outer loop true { loop true { if flag return 42 break $outer } }',
+])
+def test_a_break_targeting_the_loop_preserves_its_fallthrough(body):
+    with pytest.raises(UserError, match='not all paths return'):
+        _check(f'f = (flag:bool):>int64 => {{ {body} }}')

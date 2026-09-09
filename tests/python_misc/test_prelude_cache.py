@@ -1,6 +1,5 @@
 """The checked-prelude cache: identical output with and without it, and resilience to a bad entry."""
 import os
-from pathlib import Path
 
 import pytest
 
@@ -46,6 +45,7 @@ def test_resident_prelude_gives_identical_output_across_compiles() -> None:
     names), and the same as a fresh process — with or without the cache."""
     import subprocess
     import sys
+
     from dewy.semantic import modules
     first = codegen(SrcFile(None, SOURCE))
     assert len(modules._resident_preludes) == 1
@@ -61,3 +61,25 @@ def test_resident_prelude_gives_identical_output_across_compiles() -> None:
     for variable in ('DEWY_NO_RESIDENT_PRELUDE', 'DEWY_NO_PRELUDE_CACHE'):
         fresh = subprocess.run([sys.executable, '-c', program], capture_output=True, text=True, env={**os.environ, variable: '1'}, check=True)
         assert fresh.stdout == first, variable
+
+
+def test_cached_binding_registry_rebuilds_syntax_identity() -> None:
+    import pickle
+
+    from dewy.reporting import Span
+    from dewy.semantic.bindings import BindingRegistry
+
+    registry = BindingRegistry()
+    syntax = object()
+    binding = registry.allocate(syntax, 'saved', 'function', Span(0, 1))
+    # Model an address from the process that wrote the cache. It must never
+    # identify an unrelated node in the process that restores it.
+    unrelated = object()
+    registry.by_syntax = {id(unrelated): binding}
+    restored = pickle.loads(pickle.dumps(registry))
+    saved = restored.by_id[binding.id]
+    assert restored.by_syntax == {id(saved.syntax): saved}
+    assert id(unrelated) not in restored.by_syntax
+    fresh = restored.allocate(unrelated, 'fresh', 'value', Span(1, 2))
+    assert fresh.id != saved.id
+    assert restored.by_syntax[id(saved.syntax)] is saved

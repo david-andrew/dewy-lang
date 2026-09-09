@@ -174,10 +174,12 @@ def _call_argument(node: hir.AST, name: str) -> hir.AST | None:
     if function_type is None or not isinstance(call, hir.FunctionCall):
         return None
     if name in call.kw_args:
-        return call.kw_args[name]
+        argument = call.kw_args[name]
+        return argument.target if isinstance(argument, hir.Place) else argument
     for index, param in enumerate(function_type.pos_or_kw):
         if param.name == name:
-            return call.pos_args[index] if index < len(call.pos_args) else None
+            argument = call.pos_args[index] if index < len(call.pos_args) else None
+            return argument.target if isinstance(argument, hir.Place) else argument
     return None
 
 
@@ -820,14 +822,15 @@ class _BoundsValidator:
                 value = None
             self._set_interval(current, binding_id, value)
             self.member_facts.pop(binding_id, None)
-            shifted = self._shifted_facts(current, binding_id, node) if node.op in ('+=', '-=') else {}
+            shift = self._assignment_shift(node)
+            shifted = self._shifted_facts(current, binding_id, shift) if shift is not None else {}
             _drop_index_facts(current, index_id=binding_id)
             current.update(shifted)   # `i += 2` under `src.length - i >= 2`: `i <= src.length`
             if _has_sequence_length(node.target.type):
                 self._invalidate_length(binding_id, current)
                 self._bind_length(binding_id, length, current)
             self._drop_route_facts(current, binding_id)
-            if node.op == '=':
+            if node.op == '=' and shift is None:
                 self._seed_value_facts(binding_id, node.value, current, node.loc)
             declared = self.declared_refinements.get(binding_id)
             if declared is not None:
@@ -1301,18 +1304,15 @@ class _BoundsValidator:
             state[_nonzero_key(route_id)] = Interval.exact(1)
 
     def _seed_term_fact(self, binding_id: int, proposition: ty.Proposition, state: State, loc: Span) -> None:
-        """`n:uint64<v => v <=? src.length>` declared or assigned: the fact holds of
-        `n`, provided `src` is never reassigned here (else the fact has no fixed
-        meaning; the checker already proved the value against it)."""
+        """A proved dependent contract becomes a relation to the current term.
+
+        Assignments and length-changing operations invalidate or transform
+        these relations just like relations obtained from a comparison. A
+        later write somewhere in the function does not prevent using a
+        fact before that write.
+        """
         if proposition.term_id is None or proposition.term_id < 0 or proposition.subject != 'self':
             return
-        if proposition.term_id in self.assigned:
-            user_error(
-                self.srcfile,
-                'fact names a binding that is reassigned',
-                Pointer(span=loc, message=f'`{proposition.term}` is assigned in this function, so `{_describe_proposition_text(proposition)}` cannot be kept as a fact'),
-                hint='a fact may name a binding that is never reassigned (a parameter, a `let` assigned once)',
-            )
         bound = _length_key(proposition.term_id) if proposition.term_of == 'length' else proposition.term_id
         for direction, gap in {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}.get(proposition.op, []):
             smaller, larger = (binding_id, bound) if direction == 'upper' else (bound, binding_id)
@@ -1789,7 +1789,7 @@ class _BoundsValidator:
         if binding is None:
             return None
         # `let i:uint64 = 0` records the initializer's type (`0`) on the binding; the annotation is the width
-        declared = binding.declaration.annotation if isinstance(binding.declaration, hir.Declare) and binding.declaration.annotation is not None else binding.type
+        declared = binding.store_type or (binding.declaration.annotation if isinstance(binding.declaration, hir.Declare) and binding.declaration.annotation is not None else binding.type)
         layout = ty.fixed_integer_layout(ty.strip_refinement(declared)) if declared is not None else None
         if layout is None and isinstance(declared, ty.TypeOr):
             # `uint64 | none`: read as a number, the value is the one fixed-width member
@@ -2046,12 +2046,15 @@ class _BoundsValidator:
             constant = self._constant_binding(node.binding_id, set())
             if constant is not None:
                 return constant
+            declared = self._type_interval(node.binding_id) if node.binding_id is not None else None
             layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
             if layout is not None:
-                # a fixed-width value with no tracked facts lies in its type's range
+                # A call may erase flow facts while preserving the storage
+                # contract (`@position:addr` still cannot contain -1).
                 width, signed = layout
-                return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
-            return None
+                width_range = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+                return width_range if declared is None else width_range.intersect(declared)
+            return declared
         if isinstance(node, hir.Place):
             self._eval(node.target, state, validate=validate)
             root = node.target
@@ -2059,6 +2062,8 @@ class _BoundsValidator:
                 root = root.value if isinstance(root, hir.MemberAccess) else root.array
             if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
                 state.pop(root.binding_id, None)
+                self._invalidate_length(root.binding_id, state)
+                _drop_index_facts(state, index_id=root.binding_id)
                 self._drop_route_facts(state, root.binding_id)   # the callee may store anything
             return None
         if isinstance(node, hir.ValueCast):
@@ -2119,6 +2124,10 @@ class _BoundsValidator:
             self._eval(node.key, state, validate=validate)
             if node.default is not None:
                 self._eval(node.default, state, validate=validate)
+            if isinstance(node.type, ty.RefinedType):
+                # The dictionary enforces its value contract at every store;
+                # a checked fallback satisfies that same contract.
+                return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
             return None
         if isinstance(node, hir.DictContains):
             self._eval(node.key, state, validate=validate)
@@ -2137,6 +2146,8 @@ class _BoundsValidator:
                     else:
                         state.pop(key, None)  # tombstone now, compaction later
                     _drop_index_facts(state, array_id=array_id)
+            if isinstance(node.type, ty.RefinedType):
+                return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
             return None
         if isinstance(node, hir.DictEntries):
             self._eval(node.dictionary, state, validate=validate)
@@ -2256,6 +2267,16 @@ class _BoundsValidator:
                         _add(current.lower, 1),
                         _minimum_upper(_add(current.upper, 1), self.max_length),
                     )
+                    # The new length is exactly old_length + 1. In particular
+                    # an index saved as the old end is now strictly in bounds.
+                    # Update both orientations; retaining old_length >= i
+                    # unchanged would be unsound when the length is the lower
+                    # term of another relation (e.g. a saved upper limit).
+                    for fact_key, fact in list(state.items()):
+                        order = _decode_order_fact(fact_key)
+                        if order is not None and fact.lower is not None and key in order:
+                            change = (1 if order[1] == key else 0) - (1 if order[0] == key else 0)
+                            state[fact_key] = Interval(fact.lower + change, None)
                 elif name == 'pop':
                     state[key] = Interval(
                         max(0, (current.lower or 0) - 1),
@@ -2576,6 +2597,11 @@ class _BoundsValidator:
                 for numerator in (left.lower, left.upper)
                 for divisor in divisors
             ]
+            if right.upper is None:
+                # Arbitrarily large positive divisors bring either sign's
+                # truncating quotient to zero. The smallest divisor alone
+                # cannot establish a positive lower (or negative upper) bound.
+                candidates.append(0)
             result = Interval(min(candidates), max(candidates))
         elif (
             name == '__mod__'
@@ -3020,6 +3046,10 @@ class _BoundsValidator:
         source = self._binding_id(stripped) if isinstance(stripped, (hir.ExpressedIdentifier, hir.MemberAccess)) else None
         if source is not None and source >= 0:
             self._copy_relational_facts(state, source, subject)
+            if _has_sequence_length(stripped.type):
+                # Value semantics copies shape as well as elements. Evidence
+                # for an index in the copy survives replacement of the source.
+                self._copy_relational_facts(state, _length_key(source), _length_key(subject))
             if isinstance(stripped, hir.ExpressedIdentifier):
                 self._copy_element_facts(state, source, subject, loc)
                 for route in self.registry.routes_under(source):
@@ -3123,13 +3153,31 @@ class _BoundsValidator:
                             state[key] = Interval(needed if previous is None or previous.lower is None else max(previous.lower, needed), None)
         return state
 
-    def _shifted_facts(self, state: State, term: int, node: hir.Assign) -> dict[int, Interval]:
-        """The order and remainder facts on `term` after `term += c` / `term -= c`,
-        each gap moved by the constant (dropped when it would go negative)."""
-        constant = self._constant_expr(node.value, set())
+    def _assignment_shift(self, node: hir.Assign) -> int | None:
+        """The same affine update whether spelled `i += c` or `i = i + c`.
+
+        A checked storage contract can wrap the latter in an obligation; it
+        does not change the arithmetic or invalidate an otherwise known gap.
+        """
+        value = _strip_casts(node.value)
+        op = node.op
+        if op == '=':
+            if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier)
+                    and value.func.name in ('__add__', '__sub__') and len(value.pos_args) == 2
+                    and self._binding_id(value.pos_args[0]) == node.target.binding_id):
+                return None
+            op = '+=' if value.func.name == '__add__' else '-='
+            value = value.pos_args[1]
+        if op not in ('+=', '-='):
+            return None
+        constant = self._constant_expr(value, set())
         if constant is None or constant.lower is None or constant.lower != constant.upper:
-            return {}
-        shift = constant.lower if node.op == '+=' else -constant.lower
+            return None
+        return constant.lower if op == '+=' else -constant.lower
+
+    def _shifted_facts(self, state: State, term: int, shift: int) -> dict[int, Interval]:
+        """The order and remainder facts on `term` after a constant shift,
+        each gap moved by the constant (dropped when it would go negative)."""
         shifted: dict[int, Interval] = {}
         for key, interval in state.items():
             if interval.lower is None:
@@ -3192,17 +3240,19 @@ class _BoundsValidator:
         for key, interval in list(state.items()):
             remainder = _decode_remainder_fact(key)
             if remainder is not None:
-                if remainder[0] == source:
-                    state[_remainder_key(target, remainder[1], remainder[2])] = interval
+                if source in remainder:
+                    state[_remainder_key(*(target if term == source else term for term in remainder))] = interval
                 continue
             order = _decode_order_fact(key)
             if order is not None:
-                if order[0] == source:
-                    state[_order_key(target, order[1])] = interval
+                if source in order:
+                    state[_order_key(*(target if term == source else term for term in order))] = interval
                 continue
             index_fact = _decode_index_fact(key)
             if index_fact is not None and index_fact[0] == source:
                 state[_index_fact_key(target, index_fact[1])] = interval
+            elif index_fact is not None and source < 0 and _length_key(index_fact[1]) == source:
+                state[_index_fact_key(index_fact[0], -target - 1)] = interval
 
     # ---- element facts: what holds of every element of an array ----
     #
@@ -3420,6 +3470,8 @@ class _BoundsValidator:
                 return
             index_id = self._binding_id(index)
             if index_id is not None and _index_fact_key(index_id, array_id) in state:
+                return
+            if self._bounded_by_length(index, array_id, 0 if allow_end else 1, state):
                 return
         known = (
             'unknown'

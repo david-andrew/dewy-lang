@@ -128,7 +128,7 @@ def test_a_fact_on_a_local_names_a_binding_in_scope() -> None:
     _check(program)
     with pytest.raises(UserError, match='refinement refuted'):   # the stored length is 5, so 6 is definitely invalid
         _check(program.replace('n = 5', 'n = 6'))
-    with pytest.raises(UserError, match='fact names a binding that is reassigned'):
+    with pytest.raises(UserError, match='slice.*not proven|slice.*out of bounds'):
         _check(program.replace('let src = "hello"', 'let src:string = "hello"').replace('n = 5', 'src = "hi"'))
     with pytest.raises(UserError, match='fact names an unknown binding'):
         _check('let main = ():>int64 => { let n:uint64<v => v <=? text.length> = 3  return 0 }\n')

@@ -132,6 +132,61 @@ let main = ():>int64 => countdown(2) + even(2)
     assert 'return odd(value - 1)' in emitted
 
 
+def test_shared_call_graph_checks_reuse_successful_requirements(monkeypatch):
+    from dewy.semantic.analyze.initialization import _InitializationChecker
+
+    visits = 0
+    original = _InitializationChecker._check_eager
+
+    def counted(self, *args, **kwargs):
+        nonlocal visits
+        visits += 1
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(_InitializationChecker, '_check_eager', counted)
+    lines = ['let f0 = ():>int64 => 42']
+    for level in range(1, 15):
+        lines.append(f'let f{level} = ():>int64 => {{ f{level-1}(); return f{level-1}() }}')
+    lines.append('let main = ():>int64 => f14()')
+    check.typecheck_and_resolve(SrcFile(None, '\n'.join(lines)), include_prelude=False)
+    # A shared binary call graph has linear distinct bodies, not 2^depth
+    # independent initialization proofs. Count work instead of timing it.
+    assert visits < 200
+
+
+def test_cached_callable_check_keeps_callback_and_read_dependencies():
+    source = '''
+let invoke = (fn:<():>int64>):>int64 => fn()
+let ready = ():>int64 => 42
+let pending = ():>int64 => later()
+invoke(@ready)
+invoke(@pending)
+let later = ():>int64 => 0
+'''
+    with pytest.raises(UserError, match='`later` used before initialization'):
+        _check(source)
+
+
+def test_recursive_cached_check_retains_its_ancestor_assumption():
+    from dewy.semantic.analyze.initialization import _InitializationChecker
+
+    source = SrcFile(None, '''
+let first = ():>int64 => { second(); return later() }
+let second = ():>int64 => first()
+let later = ():>int64 => 42
+''')
+    root, context = check._typecheck_module(source)
+    declared = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    checker = _InitializationChecker(root, context.binding_registry, source)
+    available = {item.binding_id for item in declared.values()}
+    # During first's check, second skips its active ancestor. Its certificate
+    # therefore depends on that ancestor, even though it did not read later.
+    checker._check_function(declared['first'].expr, available, (), {}, {}, set())
+    available.remove(declared['later'].binding_id)
+    with pytest.raises(UserError, match='`later` used before initialization'):
+        checker._check_function(declared['second'].expr, available, (), {}, {}, set())
+
+
 def test_local_function_use_before_declaration_is_rejected() -> None:
     source = """
 let main = ():>int64 => {

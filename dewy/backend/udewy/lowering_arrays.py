@@ -646,6 +646,29 @@ class _ArrayLowering:
             return 'static_bytes'
         return None
 
+    def _raw_array_length(self, node: hir.AST) -> int:
+        """The fixed backing allocation's extent, independent of flow facts.
+
+        Raw storage is selected only for a stable alias group with one known
+        extent. A conservative checker invalidation may erase the expression's
+        exact-length type; that cannot turn raw data into a descriptor.
+        """
+        while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            node = node.items[0]
+        assert isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None
+        group_id = self.array_alias_group_by_binding.get(node.binding_id)
+        group = self.array_alias_groups[group_id] if group_id is not None else (node.binding_id,)
+        for binding_id in group:
+            declaration = self.array_declarations.get(binding_id)
+            if declaration is None:
+                continue
+            source_type = declaration.expr.type
+            if isinstance(source_type, ty.ArrayType) and source_type.length is not None:
+                return source_type.length
+            if isinstance(source_type, ty.BinaryLiteralType):
+                return len(source_type.value)
+        raise ValueError('INTERNAL ERROR: raw array has no known allocation extent')
+
     def _materialize_array_call_argument(
         self,
         node: hir.AST,
@@ -871,10 +894,25 @@ class _ArrayLowering:
         )
         if place_cell is not None:
             if array_type.length is None:
-                self._target_error(
-                    node,
-                    'whole-array rebinding through a runtime-length place',
-                )
+                # The caller owns this place. Finish the copy before releasing
+                # its previous value (the RHS may read it), and publish an
+                # arena descriptor, never a pointer into this callee's frame.
+                prelude, copied = self._clone_array_value(node.value, array_type, arena=True)
+                fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('place_rebound'))
+                target = replace(node.target, type='int64')
+                element = array_type.element
+                return [
+                    *prelude,
+                    hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied),
+                    *self._release_owned_array(
+                        target, node.loc,
+                        string_elements=self._is_string_valued(element),
+                        cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
+                        object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                    ),
+                    replace(node, target=target, value=fresh),
+                    *self._value_store(target, place_cell, 'int64', node.loc),
+                ]
             # The local parameter contains the descriptor for storage prepared by
             # the caller.  Replacing that descriptor with one allocated in this
             # function would leave the caller holding pointers into an expired
@@ -1123,11 +1161,13 @@ class _ArrayLowering:
         empty = self._typed_equality(string, self._int64_literal(loc, 0), 'int64', loc)
         return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, empty, hir.Block(loc, ty.VOID_TYPE, [], True))], by_owner)
 
-    def _release_object_members(self, base: hir.AST, object_type: ty.ObjectType, loc) -> list[hir.AST]:
+    def _release_object_members(self, base: hir.AST, object_type: ty.ObjectType, loc, *, inline: bool = False) -> list[hir.AST]:
         """Give back the runtime-sized storage an object's fields own, by their
         owner words: string fields, runtime-length array fields (with their
         elements), the string payloads of inline union cells, and nested
         objects' fields. The object's own block is the caller's business."""
+        if not inline:
+            return [self._object_release_call(base, object_type, loc)]
         _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
         statements: list[hir.AST] = []
 
@@ -3258,4 +3298,3 @@ class _ArrayLowering:
             ),
             loop,
         ]
-

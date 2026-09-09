@@ -257,11 +257,15 @@ let Segment:type = [
     is_zero_width = ():>bool => start_col =? end_col
 ]
 
-# set column `col` of a glyph row, growing the row with spaces as needed
-let _put_glyph = (@glyphs:array<string> @colors:array<string> col:int64 glyph:string color:string):>void => {
+# A column owns its glyph and color together. This makes their correspondence
+# structural, including when a helper grows the row through a mutable place.
+GlyphColumn:type = [glyph:string color:string]
+
+# Set column `col` of a row, growing it with spaces as needed.
+let _put_glyph = (@row:array<GlyphColumn> col:int64 glyph:string color:string):>void => {
     if col <? 0 { return void }
-    loop glyphs.length <=? col { glyphs.push(" ")  colors.push("") }
-    if col <? glyphs.length and col <? colors.length { glyphs[col] = glyph  colors[col] = color }
+    loop row.length <=? col { row.push(GlyphColumn[" " ""]) }
+    if col <? row.length { row[col] = GlyphColumn[glyph color] }
     return void
 }
 
@@ -508,18 +512,17 @@ let Report:type = [
     # and anchors, then zero-width pointers over them — `╱╲` below, `╲╱`
     # above, a run of adjacent ones sharing `╳`s (`╱╳╲`)
     print_baseline = (segments:array<Segment> above:bool digits:int64 theme:Theme) => {
-        let glyphs:array<string> = []
-        let colors:array<string> = []
+        let columns:array<GlyphColumn> = []
         loop seg in segments {
             if seg.render_pointer and not seg.is_zero_width {
                 let col:int64 = seg.start_col
                 loop col <? seg.end_col {
-                    _put_glyph(@glyphs @colors col "─" seg.color)
+                    _put_glyph(@columns col "─" seg.color)
                     col += 1
                 }
                 if seg.show_anchor {
-                    if above { _put_glyph(@glyphs @colors seg.anchor_col "┴" seg.color) }
-                    else { _put_glyph(@glyphs @colors seg.anchor_col "┬" seg.color) }
+                    if above { _put_glyph(@columns seg.anchor_col "┴" seg.color) }
+                    else { _put_glyph(@columns seg.anchor_col "┬" seg.color) }
                 }
             }
         }
@@ -537,23 +540,24 @@ let Report:type = [
                 count += 1
                 j += 1
             }
-            if above { _put_glyph(@glyphs @colors run_start "╲" first.color) }
-            else { _put_glyph(@glyphs @colors run_start "╱" first.color) }
+            if above { _put_glyph(@columns run_start "╲" first.color) }
+            else { _put_glyph(@columns run_start "╱" first.color) }
             let m:int64 = i + 1
             loop m <? zeros.length and m <? j {
-                _put_glyph(@glyphs @colors run_start + (m - i) "╳" zeros[m].color)
+                _put_glyph(@columns run_start + (m - i) "╳" zeros[m].color)
                 m += 1
             }
-            if above { _put_glyph(@glyphs @colors run_start + count "╱" last.color) }
-            else { _put_glyph(@glyphs @colors run_start + count "╲" last.color) }
+            if above { _put_glyph(@columns run_start + count "╱" last.color) }
+            else { _put_glyph(@columns run_start + count "╲" last.color) }
             i = j
         }
         marker_prefix(digits)
-        let width:int64 = glyphs.length
-        loop width >? 0 and glyphs[width - 1] =? " " { width -= 1 }
+        let width:int64 = columns.length
+        loop width >? 0 and columns[width - 1].glyph =? " " { width -= 1 }
         let col:int64 = 0
         loop col <? width {
-            if glyphs[col] =? " " { print" " } else { theme.colored(glyphs[col] colors[col]) }
+            let column = columns[col]
+            if column.glyph =? " " { print" " } else { theme.colored(column.glyph column.color) }
             col += 1
         }
         print"\n"

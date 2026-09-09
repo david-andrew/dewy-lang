@@ -35,6 +35,43 @@ if index >=? 0 and index <? values.length
 
 Inside the body, the index relationship is available to prove the access valid. Mutation and calls invalidate any fact they may falsify.
 
+### Array Contracts and Dependent Indices
+
+A mutable declaration `let xs:array<int64> = [1]` retains `array<int64>` as
+its assignment contract. Its initial length of one is a fact about the current
+value, so indexing `xs[0]` is valid, and assigning `[40 2]` later is also valid.
+An explicit `array<int64 length=1>` annotation instead requires every assigned
+value to have that length. Immutable bindings can retain their exact shape.
+
+A result can relate an index to an array passed as a mutable place. The
+contract below is checked against the updated array at each return:
+
+<!-- dewy-example: compiler -->
+
+```dewy
+let append = <T>(@xs:array<T> value:T):>addr<i => i <? xs.length> => {
+    let i = xs.length
+    xs.push(value)
+    return i
+}
+
+let example = ():>int64 => {
+    let xs:array<int64> = []
+    let i = append(@xs 42)
+    return xs[i]
+}
+```
+
+The result uses ordinary refinement syntax. Growth preserves this bounds
+evidence; a value copy preserves the corresponding evidence for the copy.
+Truncation, replacement, or passing the array to another mutable call can
+invalidate it. The fact says that the index is in bounds for that array's
+current value; it does not establish provenance for an unrelated array, or
+promise that insertion has preserved which element occupies an index.
+
+Array membership similarly carries a result fact: after `if value in? xs`,
+`xs` is known to be nonempty. A failed search promises nothing about length.
+
 The general proposition language must be a deliberately bounded, decidable fragment. Unsupported Dewy expressions produce an unknown proof result or a diagnostic; they do not silently enter refinement checking as trusted predicates.
 
 ### Refined Parameters

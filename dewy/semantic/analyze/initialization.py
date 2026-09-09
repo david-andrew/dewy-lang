@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NoReturn
 
 from ...reporting import Error, Pointer, SrcFile
@@ -17,6 +17,20 @@ class CallableEffect:
     """Concrete callable alternatives supplied for one function parameter."""
 
     targets: tuple[hir.FunctionLiteral, ...]
+
+
+@dataclass
+class _CheckFrame:
+    function_id: int
+    available: set[int]
+    required: set[int] = field(default_factory=set)
+    assumed_calls: set[int] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class _CheckedCall:
+    required: frozenset[int]
+    assumed_calls: frozenset[int]
 
 
 class _InitializationChecker:
@@ -35,6 +49,15 @@ class _InitializationChecker:
         self._collect_reassigned_callables(root)
         self.all_functions: list[hir.FunctionLiteral] = []
         self._collect_functions(root)
+        self._check_frames: list[_CheckFrame] = []
+        self._checked_calls: dict[tuple[int, tuple], list[_CheckedCall]] = {}
+
+    def _record_requirements(self, required: set[int] | frozenset[int], assumed: set[int] | frozenset[int] = frozenset()) -> None:
+        for frame in self._check_frames:
+            # Locals initialized inside this body need not be ready at its
+            # call site. Only reads supplied by the entry state are required.
+            frame.required.update(required & frame.available)
+            frame.assumed_calls.update(assumed - {frame.function_id})
 
     def _collect_functions(self, node: object) -> None:
         """Every function literal in the program: the candidates for a call
@@ -652,6 +675,7 @@ class _InitializationChecker:
         call_stack: set[int],
     ) -> None:
         if id(function) in call_stack:
+            self._record_requirements(set(), {id(function)})
             return
         available = set(initialized)
         for binding_id, _name in function.object_fields:
@@ -708,12 +732,31 @@ class _InitializationChecker:
                         )
         if function.rest_args is not None and function.rest_args.binding_id is not None:
             available.add(function.rest_args.binding_id)
+        effect_key = tuple(sorted(
+            (binding_id, tuple(id(target) for target in effect.targets))
+            for binding_id, effect in parameter_effects.items()
+        ))
+        key = (id(function), effect_key)
+        for checked in self._checked_calls.get(key, ()):
+            if checked.required <= available and checked.assumed_calls <= call_stack:
+                self._record_requirements(checked.required, checked.assumed_calls)
+                return
+        # Cache successful checks by their actual dependencies, not the whole
+        # caller state (which contains unrelated locals). A check that skipped
+        # an active recursive ancestor is reusable only under that assumption.
+        # Self-recursion needs no external assumption: this body is checked.
+        frame = _CheckFrame(id(function), set(available))
+        self._check_frames.append(frame)
         body = function.body
         stack = {*call_stack, id(function)}
-        if isinstance(body, hir.Block):
-            self._check_block(body, available, parameter_effects, stack)
-        else:
-            self._check_eager(body, available, parameter_effects, stack)
+        try:
+            if isinstance(body, hir.Block):
+                self._check_block(body, available, parameter_effects, stack)
+            else:
+                self._check_eager(body, available, parameter_effects, stack)
+        finally:
+            self._check_frames.pop()
+        self._checked_calls.setdefault(key, []).append(_CheckedCall(frozenset(frame.required), frozenset(frame.assumed_calls)))
 
     def _callable_targets(
         self,
@@ -902,7 +945,10 @@ class _InitializationChecker:
         node: hir.ExpressedIdentifier,
         initialized: set[int],
     ) -> None:
-        if node.binding_id is None or node.binding_id in initialized:
+        if node.binding_id is None:
+            return
+        if node.binding_id in initialized:
+            self._record_requirements({node.binding_id})
             return
         binding = self.registry.by_id[node.binding_id]
         pointers = [

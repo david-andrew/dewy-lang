@@ -591,3 +591,31 @@ let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {
     }
     return chunks
 }
+
+# Decimal value text for consumers that need to retain it (the compiler's
+# literal table, diagnostics, serialization). Printing can still stream the
+# same chunks without allocating a complete string.
+let _bigint_as_string = (value:BigInt):>string => {
+    if value =? 0 return "0"
+    let parts:array<string> = []
+    if value.sign <? 0 { parts.push("-") }
+    let chunks = _bigint_decimal_chunks(value.limbs)
+    let i:addr = chunks.length
+    let first:bool = true
+    loop i >? 0 {
+        i -= 1
+        if i <? chunks.length {
+            let chunk = chunks[i]
+            if not first {
+                let pad:uint64 = 100000000
+                loop pad >? chunk and pad >? 1 {
+                    parts.push("0")
+                    pad = pad // 10
+                }
+            }
+            parts.push("{chunk}")
+            first = false
+        }
+    }
+    return parts.join
+}

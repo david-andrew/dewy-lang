@@ -31,6 +31,12 @@ Source imports must be known while constructing the module graph. Runtime string
 
 Values, constants, functions, overload sets, and type aliases are importable. Imported type values remain compile-time values in the receiving module.
 
+Namespace-qualified types can be constructed directly: `library.Point[x=1 y=2]`
+or `library.Point(1 2)`. Minting with `type of` creates identity at the
+declaration, independently of spelling. Two modules may each declare a `Token`
+family; their types remain distinct, while importing the same declaration
+under another name preserves its identity.
+
 ## Graph and Initialization
 
 Reachable source modules share a coherent type environment, initialize once in dependency order, and reject unresolved names, cycles, and collisions. A source suffix is conventional and does not select different Dewy semantics.

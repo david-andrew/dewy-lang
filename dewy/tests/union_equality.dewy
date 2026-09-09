@@ -5,6 +5,13 @@
 # `int64` whose value is 3; in the else of `x not=? 3` likewise.
 let Pair = type of any & [v:int64|none]
 
+same = (a:string? b:string?):>bool => a =? b
+different = (a:string? b:string?):>bool => a not=? b
+mixed_same = (a:int64 | string | none b:none | string | int64):>bool => a =? b
+next = (@count:int64 value:string?):>string? => { count += 1 return value }
+next_string = (@count:int64):>string => { count += 1 return 'x' }
+replace_string = (@value:string?):>string => { value = 'after' return 'before' }
+
 let main = ():>int64 => {
     let checks:int64 = 0
     let x:int64|none = 1
@@ -41,5 +48,20 @@ let main = ():>int64 => {
     if x not=? 3 { checks += 1000 } else { let also:int8 = x  if also =? 3 { checks += 8192 } }
     let s:int64|string = 3
     if s =? 3 { let n:int64 = s  if n =? 3 { checks += 16384 } }
+    if not same(none none) return 101
+    if same(none 'a') or same('a' none) return 102
+    if not same('a' 'a') or same('a' 'b') return 103
+    if different(none none) or different('a' 'a') return 104
+    if not different(none 'a') or not different('a' none) or not different('a' 'b') return 105
+    if not mixed_same(3 3) or not mixed_same('x' 'x') or not mixed_same(none none) return 106
+    if mixed_same(3 'x') or mixed_same(none 3) return 107
+    let calls:int64 = 0
+    if next(@calls none) =? next(@calls 'x') return 108
+    if calls not=? 2 return 109
+    let absent:string? = none
+    if absent =? next_string(@calls) return 110
+    if calls not=? 3 return 111
+    let original:string? = 'before'
+    if not (original =? replace_string(@original)) return 112
     return checks - 32725         # 32767 - 32725
 }

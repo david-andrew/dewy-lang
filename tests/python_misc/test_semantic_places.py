@@ -226,15 +226,13 @@ let main = ():>int64 => {
     assert 'values = __load_i64__(__dewy_place_cell_values_' in emitted
 
 
-def test_runtime_length_array_place_rebinding_is_rejected_until_owned_storage_exists() -> None:
-    with pytest.raises(
-        NotImplementedYet,
-        match='whole-array rebinding through a runtime-length place',
-    ):
-        codegen(SrcFile(None, '''
+def test_runtime_length_array_place_rebinding_uses_caller_owned_storage() -> None:
+    emitted = codegen(SrcFile(None, """
 let replace = (@items:array<int64>):>void => { items = [20 22] }
 let main = ():>void => void
-'''))
+"""))
+    assert 'place_rebound' in emitted
+    assert '__store_i64__(items __dewy_place_items_' in emitted
 
 
 def test_scalar_place_lowering_uses_typed_cell_loads_and_stores() -> None:

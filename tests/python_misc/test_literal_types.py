@@ -129,3 +129,14 @@ def test_the_address_space() -> None:
     for source in ('let g = (x:nat64):>addr => x\n', 'let g = (x:int64):>addr => x\n', 'let g = (a:addr):>addr => a * 3\n'):
         with pytest.raises((TypeCheckError, UserError), match='cannot prove'):
             _declared(source)
+
+
+@pytest.mark.parametrize(('expression', 'value'), [
+    ('-(5)', -5),
+    ('-((5))', -5),
+    ('-(9223372036854775808 as bigint)', -(2**63)),
+    ('not (5)', -6),
+])
+def test_wrapped_unary_literal_updates_its_singleton_fact(expression, value) -> None:
+    declared = _declared(f'const result = {expression}')
+    assert declared['result'].expr.type == ty.IntegerLiteralType(value)

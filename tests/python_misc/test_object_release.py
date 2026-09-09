@@ -24,6 +24,9 @@ POINT = (
 def test_an_object_local_releases_its_string_and_array_members_at_scope_exit() -> None:
     emitted = _compile(POINT + 'let round = (n:int64):>int64 => {\n    let one = make(n)\n    return one.name.length\n}\nlet main = ():>int64 => round(3)\n')
     body = _function(emitted, 'round')
+    release = re.search(r'(__dewy_release_object_\d+)\(one\)', body)
+    assert release is not None
+    body = _function(emitted, release[1])
     # the string field by its owner word, then the tags array's elements, then its buffer
     assert re.search(r'__load_i64__\(__dewy_string_field_string_\d+ \+ 40\) =\? 1', body)
     assert re.search(r'__load_i64__\(__dewy_string_release_element_\d+ \+ 40\)', body)
@@ -41,7 +44,8 @@ def test_a_copied_object_owns_its_copies_and_a_field_store_releases_the_old_stri
     emitted = _compile(POINT + 'let round = (n:int64):>int64 => {\n    let one = make(n)\n    let two:Point = one\n    two.name = "changed"\n    return two.name.length\n}\nlet main = ():>int64 => round(3)\n')
     body = _function(emitted, 'round')
     # the copy's fields are released too (two owners' worth of field releases) …
-    assert len(re.findall(r'let __dewy_string_field_string_\d+:int64', body)) >= 2
+    assert re.search(r'__dewy_release_object_\d+\(two\)', body)
+    assert re.search(r'__dewy_release_object_\d+\(one\)', body)
     # … and the store over `two.name` gives back the value it held first
     assert re.search(r'let __dewy_string_old_field_\d+:int64 = __load_i64__\(two\)', body)
 
@@ -81,6 +85,10 @@ def test_a_returned_local_object_hands_its_strings_to_the_result_and_releases_no
     emitted = _compile(POINT + 'let build = (n:int64):>Point => {\n    let pt = make(n)\n    pt.name = "renamed"\n    return pt\n}\nlet main = ():>int64 => build(3).name.length\n')
     build = _function(emitted, 'build')
     # the adopt moves the name by handle and empties the local's slot …
-    assert re.search(r'__store_i64__\(0 pt\)', build)
+    copied = re.search(r'(__dewy_copy_object_\d+)\(__dewy_result_\d+ pt\)', build)
+    assert copied is not None
+    assert re.search(r'__store_i64__\(0 __dewy_src\)', _function(emitted, copied[1]))
     # … and the scope release skips an empty slot before reading its owner word
-    assert re.search(r'if __dewy_string_field_string_\d+ =\? 0 \{', build)
+    released = re.search(r'(__dewy_release_object_\d+)\(pt\)', build)
+    assert released is not None
+    assert re.search(r'if __dewy_string_field_string_\d+ =\? 0 \{', _function(emitted, released[1]))

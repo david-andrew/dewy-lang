@@ -96,6 +96,21 @@ def test_explicit_array_annotation_preserves_initializer_length() -> None:
     assert declaration.expr.type == ty.ArrayType('uint8', 3)
 
 
+def test_runtime_array_annotation_is_the_store_contract():
+    codegen(SrcFile(None, '''
+let f = ():>int64 => {
+    let values:array<int64> = [1]
+    let first = values[0]
+    values = [40 2]
+    return values[0] + values[1] + first
+}
+'''))
+    with pytest.raises(UserError, match='not proven|out of bounds'):
+        _check('let f = ():>int64 => { let xs:array<int64> = [1 2] xs = [] return xs[1] }')
+    with pytest.raises(TypeCheckError, match='array length mismatch'):
+        _check('let f = ():>int64 => { let xs:array<int64 length=1> = [1] xs = [1 2] return 0 }')
+
+
 def test_array_length_is_an_exact_integer_and_proves_constant_expression() -> None:
     body = _function_body(
         'let f = ():>int64 => { '

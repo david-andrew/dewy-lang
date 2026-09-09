@@ -431,6 +431,12 @@ class _DictLowering:
         loc = node.loc
         prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
+        # Hashing, probing, and insertion reuse the key. Give the already
+        # lowered value a fresh runtime name: lowering it again can repeat a
+        # call or unbox a narrowed optional twice (`load(load(cell + 8)+8)`).
+        key_temp = self._name('dict_key', loc, parts.key_type)
+        key_prelude = [*key_prelude, self._declare(key_temp, key, loc, parts.key_type)]
+        key = key_temp
         if node.value is not None and parts.value_type is not None:
             # the stored value is the dictionary's own (an escape copy of a
             # string, a fresh cell for an optional) — the compaction copies in
@@ -438,6 +444,11 @@ class _DictLowering:
             value_prelude, value = self._array_storage_value(node.value, parts.value_type)
         else:
             value_prelude, value = self._extract_expression(node.value) if node.value is not None else ([], None)
+        if value is not None:
+            runtime_type = self._lower_runtime_value_type(value.type)
+            value_temp = self._name('dict_value', loc, runtime_type)
+            value_prelude = [*value_prelude, self._declare(value_temp, value, loc, runtime_type)]
+            value = value_temp
         values = self._dict_descriptor(parts, 'values', loc) if parts.value_type is not None else None
         keys = self._dict_descriptor(parts, 'keys', loc)
         indices = self._dict_descriptor(parts, 'indices', loc)

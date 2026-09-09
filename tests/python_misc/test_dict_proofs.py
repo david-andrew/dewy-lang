@@ -9,11 +9,11 @@ def _check(body: str) -> hir.Block:
     return check.typecheck_and_resolve(SrcFile(None, f'let main = ():>int64 => {{\n{body}\n    return 0\n}}'))
 
 
-def _lookups(root: hir.Block) -> list[hir.DictLookup]:
-    found: list[hir.DictLookup] = []
+def _nodes[T: hir.AST](root: hir.Block, kind: type[T]) -> list[T]:
+    found: list[T] = []
 
     def walk(value: object) -> None:
-        if isinstance(value, hir.DictLookup):
+        if isinstance(value, kind):
             found.append(value)
         if isinstance(value, hir.AST):
             for name in value.__dataclass_fields__:
@@ -28,10 +28,38 @@ def _lookups(root: hir.Block) -> list[hir.DictLookup]:
     return found
 
 
+def _lookups(root: hir.Block) -> list[hir.DictLookup]:
+    return _nodes(root, hir.DictLookup)
+
+
 def test_unproven_key_is_rejected_with_the_get_hint() -> None:
     with pytest.raises(UserError, match='dictionary key is not proven present') as info:
         _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    let v = d[k]")
     assert 'd.get(key)' in str(info.value.report)
+
+
+def test_dictionary_member_stores_establish_route_facts_and_obey_const():
+    root = _check('''
+    let wrapper:[inner:[entries:dict<string int64>]] = [inner=[entries=[]]]
+    wrapper.inner.entries['a'] = 40
+    wrapper.inner.entries['a'] += 2
+    let answer = wrapper.inner.entries['a']
+''')
+    assert all(lookup.proven for lookup in _lookups(root))
+    for declaration in (
+        'const wrapper:[entries:dict<string int64>] = [entries=[]]',
+        'let Wrapper:type = const [entries:dict<string int64>]\nlet wrapper:Wrapper = [entries=[]]',
+    ):
+        with pytest.raises(UserError, match='const dictionary|immutable record'):
+            _check(declaration + "\nwrapper.entries['a'] = 1")
+
+
+def test_member_key_facts_follow_the_field_value():
+    prefix = "let d = ['a' -> 1]\nlet key:[name:string] = [name='a']\n"
+    _check(prefix + 'if key.name in? d { let value = d.pop(key.name) }')
+    for change in ("key.name = 'b'", "key = [name='b']"):
+        with pytest.raises(UserError, match='key is not proven present'):
+            _check(prefix + f'if key.name in? d {{ {change} let value = d[key.name] }}')
 
 
 def test_literal_store_guard_and_iteration_prove_keys() -> None:
@@ -167,11 +195,31 @@ def test_compound_store_updates_a_proven_key_in_place() -> None:
         "    let k:string = 'b'\n"
         "    if k in? d { d[k] *= 2 }"
     )
-    stores = [item for item in root.items[0].expr.body.items if isinstance(item, hir.DictStore)]   # type: ignore[union-attr]
-    assert len(stores) == 1 and isinstance(stores[0].value, hir.FunctionCall)   # `d['a'] = d['a'] + 1`
+    stores = _nodes(root, hir.DictStore)
+    assert len(stores) == 2 and all(isinstance(store.value, hir.FunctionCall) for store in stores)
     assert len(_lookups(root)) == 2 and all(lookup.proven for lookup in _lookups(root))
 
 
 def test_compound_store_needs_a_proven_key() -> None:
     with pytest.raises(UserError, match='dictionary key is not proven present'):
         _check("    let d = ['a' -> 1]\n    let k:string = 'b'\n    d[k] += 1")
+
+
+@pytest.mark.parametrize('guard', ['key not in? entries', 'not (key in? entries)'])
+@pytest.mark.parametrize('key_type', ['string', 'addr'])
+def test_negative_membership_return_guard_proves_the_continuing_lookup(guard, key_type):
+    root = check.typecheck_and_resolve(SrcFile(None, f'''
+f = (key:{key_type} @entries:dict<{key_type} int64>):>int64 => {{
+    if {guard} return 0
+    let value = entries[key]
+    entries[key] = value + 1
+    return value
+}}
+'''))
+    assert all(lookup.proven for lookup in _lookups(root))
+
+
+def test_negated_membership_proof_still_expires_on_mutation():
+    with pytest.raises(UserError, match='not proven present'):
+        _check("let entries:dict<string int64> = []\nlet key:string = 'a'\n"
+               'if key not in? entries return 0\nentries.clear\nlet value = entries[key]')

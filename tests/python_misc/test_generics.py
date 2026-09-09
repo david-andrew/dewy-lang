@@ -18,6 +18,23 @@ def _declared(source: str) -> dict[str, hir.Declare]:
     return {item.name: item for item in _root(source).items if isinstance(item, hir.Declare)}
 
 
+def test_container_element_refinements_survive_generic_instantiation():
+    _root('''
+let copy = <T>(xs:array<T>):>array<T> => xs
+let f = ():>int64 => {
+    let positions:array<addr> = [0 1]
+    let copied = copy(positions)
+    if 1 in? copied return copied[0]
+    return 0
+}
+''')
+    with pytest.raises((TypeCheckError, UserError), match='refinement refuted|type mismatch'):
+        _root('''
+let overwrite = <T>(@xs:array<T>):>void => { if xs.length >? 0 { xs[0] = -1 } }
+let f = ():>int64 => { let xs:array<addr> = [0] overwrite(@xs) return 0 }
+''')
+
+
 def test_generic_declaration_is_a_placeholder_and_instances_are_hoisted() -> None:
     declared = _declared(FIRST + """
 let main = ():>int64 => {

@@ -61,8 +61,9 @@ def test_an_element_compares_through_a_hidden_binding() -> None:
     checked = _check('let xs:array<int64|none> = [1 none]\nif xs[0] =? 1 { let a = 0 }')
     outer = _conditions(checked)[0]
     assert isinstance(outer, hir.Block) and not outer.scoped
-    declaration, flow = outer.items
+    declaration, right, flow = outer.items
     assert isinstance(declaration, hir.Declare) and declaration.name.startswith('__dewy_eq_')
+    assert isinstance(right, hir.Declare) and isinstance(right.expr, hir.Integer)
     assert isinstance(flow, hir.ShortCircuit)
 
 
@@ -75,6 +76,16 @@ def test_an_ambiguous_member_is_rejected() -> None:
         _check('let x:int64|uint64 = 1\nif x =? 1 { let a = 0 }')
 
 
-def test_two_cells_are_not_compared_yet() -> None:
-    with pytest.raises(NotImplementedYet, match='equality between two union values'):
-        _check('let x:int64|none = 1\nlet y:int64|none = 1\nif x =? y { let a = 0 }')
+def test_two_cells_compare_after_both_operands_are_captured() -> None:
+    checked = _check('let x:int64|none = 1\nlet y:int64|none = 1\nif x =? y { let a = 0 }')
+    outer = _conditions(checked)[0]
+    assert isinstance(outer, hir.Block)
+    left, right, comparison = outer.items
+    assert isinstance(left, hir.Declare) and left.expr.name == 'x'
+    assert isinstance(right, hir.Declare) and right.expr.name == 'y'
+    assert isinstance(comparison, hir.ShortCircuit)
+
+
+def test_unions_with_different_alternatives_still_require_narrowing() -> None:
+    with pytest.raises(NotImplementedYet, match='unions with different alternatives'):
+        _check('let x:int64|none = 1\nlet y:string|none = "a"\nif x =? y { let a = 0 }')

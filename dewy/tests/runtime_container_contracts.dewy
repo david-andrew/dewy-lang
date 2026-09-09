@@ -1,0 +1,83 @@
+# Current lengths are facts about a value at a program point. A loop must
+# reread them after its body changes the array, including through a place.
+let empty = (@xs:array<int64>):>void => { xs.clear }
+let next = (@count:int64):>int64 => { count += 1 return count % 2 }
+let maybe_words = (present:bool):>array<string> | none => {
+    if not present return none
+    let words:array<string> = []
+    words.push("hello")
+    words.push("world")
+    return words
+}
+let copy_words = (words:array<string> | none):>array<string> | none => words
+let key_once = (@count:int64):>'key' => { count += 1 return 'key' }
+
+# Replacing a place publishes owned storage that survives the callee. Value
+# copies retain their old contents even when a forwarded/projected place moves.
+let replace_words = (@words:array<string>):>void => {
+    let next:array<string> = ["next"]
+    loop word in words { next.push(word) }
+    words = next
+}
+let forward_words = (@words:array<string>):>void => replace_words(@words)
+let identity_words = (@words:array<string>):>void => { words = words }
+
+KeyNode = $abstract type of []
+RequiredKey = type of KeyNode & [key:addr]
+OptionalKey = type of KeyNode & [key:addr?]
+let common_key = (node:RequiredKey | OptionalKey):>int64 => {
+    let key = node.key
+    if key isnt? none return key
+    return 0
+}
+
+let main = ():>int64 => {
+    let pending:array<int64> = [10 20]
+    let total:int64 = 0
+    loop pending.length >? 0 { total += pending.pop }
+    if total not=? 30 return 1
+    pending = [40]
+    loop pending.length >? 0 { empty(@pending) }
+
+    # Runtime set members evaluate once in source order; duplicates collapse.
+    let count:int64 = 0
+    let values = set[next(@count) next(@count) next(@count)]
+    if count not=? 3 or values.length not=? 2 return 2
+    if 0 not in? values or 1 not in? values return 3
+
+    # Compound assignment retains the arithmetic implementation selected by
+    # the checker even when its result is represented by a tagged union.
+    let big:bigint = 1
+    loop i in 0.. and i <? 70 { big *= 2 }
+    if big not=? 1180591620717411303424 return 4
+    big -= 1180591620717411303424
+    if big not=? 0 return 5
+    let words = maybe_words(true)
+    let copied = copy_words(words)
+    words = none
+    if copied is? none return 6
+    if copied.join(' ') not=? 'hello world' return 7
+    if maybe_words(false) isnt? none return 8
+
+    let wrapper:[inner:[entries:dict<string int64>]] = [inner=[entries=[]]]
+    count = 0
+    wrapper.inner.entries[key_once(@count)] = 40
+    wrapper.inner.entries[key_once(@count)] += 2
+    if count not=? 2 or wrapper.inner.entries['key'] not=? 42 return 9
+    let holder:[words:array<string>] = [words=["old"]]
+    let snapshot = holder.words
+    forward_words(@holder.words)
+    if holder.words.join(' ') not=? 'next old' return 10
+    if snapshot.join(' ') not=? 'old' return 11
+    identity_words(@holder.words)
+    let fresh = holder.words
+    holder.words.clear
+    if fresh.join(' ') not=? 'next old' return 12
+    let ids:array<addr> = [4 1 3 2]
+    ids.sort
+    if ids[0] not=? 1 or ids[3] not=? 4 return 13
+    if common_key(RequiredKey[42]) not=? 42 return 14
+    if common_key(OptionalKey[42]) not=? 42 return 15
+    if common_key(OptionalKey[none]) not=? 0 return 16
+    return 42
+}

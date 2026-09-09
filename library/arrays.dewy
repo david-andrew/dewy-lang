@@ -1,6 +1,10 @@
 # Array membership uses value equality, preserving the language's normal
 # overload resolution. Operands are evaluated once as function arguments.
-let _array_contains = <T>(needle:T values:array<T>):>bool => {
+# The query need only support equality with an element; it is never stored
+# into the array. Keep its type separate so int64 can search array<addr>, for
+# example, without pretending the array has a writable int64 element type.
+let _array_contains = <T U>(needle:T values:array<U>):>true & <values.length >? 0> | false => {
+    if values.length =? 0 return false
     loop value in values { if value =? needle return true }
     return false
 }
