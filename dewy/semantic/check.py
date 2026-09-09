@@ -16034,8 +16034,25 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
                 return check_against(node, member, ctx=ctx)
         if isinstance(node.type, ty.TypeOr) and ctx.type_system.is_subtype(node.type, expected):
             # a union value (`uint64 | none`) meeting the refined union: the
-            # refinements of the members it may be are obligations on the value
-            pending = tuple(p for member in _refined_members(expected) if any(ctx.type_system.is_subtype(item, member.base) for item in node.type.items) for p in member.propositions)
+            # applicable members must carry the promised predicates. Widening
+            # an already refined union (for example adding none) does not
+            # create new obligations, nor make a record arm owe numeric facts.
+            # Compare resolved identities as well as predicate spelling: two
+            # bindings named `src` do not establish the same length relation.
+            pending = tuple(
+                p
+                for member in _refined_members(expected)
+                for p in member.propositions
+                if any(
+                    ctx.type_system.is_subtype(item, member.base)
+                    and not (
+                        isinstance(item, ty.RefinedType)
+                        and any(p == carried and p.term_id == carried.term_id and p.subject_id == carried.subject_id
+                                for carried in item.propositions)
+                    )
+                    for item in node.type.items
+                )
+            )
             return _prove_refinements(node, ty.RefinedType(ty.strip_refinement(expected), pending), ctx=ctx) if pending else node
     if node.type == ty.VOID_TYPE or node.type == ty.INFERRED_TYPE or expected == ty.VOID_TYPE:
         expected_str = type_to_dewy(expected) if expected != ty.VOID_TYPE else 'void'
