@@ -2526,6 +2526,20 @@ class _BoundsValidator:
                     bound=self._difference_bound(node, state) if name == '__sub__' else None,
                     floor=node.integer_operation is not None,
                 )
+            # A user call's fixed-width result has the whole representation
+            # range even when its contract specifies only one endpoint. A
+            # partial promise must refine that range, not replace its other
+            # endpoint with infinity. Arithmetic transfers above retain their
+            # separate overflow/representation checks.
+            if not arithmetic and node.integer_operation is None:
+                layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
+                if layout is not None:
+                    width, signed = layout
+                    representation = Interval(
+                        -(1 << (width - 1)) if signed else 0,
+                        (1 << (width - (1 if signed else 0))) - 1,
+                    )
+                    result = representation if result is None else result.intersect(representation)
             refined_result = _call_result_refinement(node)
             if refined_result is not None:
                 declared = self._bounds_of(refined_result.propositions)   # `:>addr`: a capped `[0, 2^bits)`
