@@ -8,13 +8,26 @@ import pytest
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
-from dewy.semantic import check, ty
+from dewy.semantic import check, hir, ty
+from dewy.semantic.analyze.effects import _iter_children
 from dewy.semantic.hir_display import type_to_dewy
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'loop false {}',
+    'loop true {break}',
+    'let f=():>never => loop true {continue}\n@f',
+    'let n:int64=0\nloop n <? 3 {n+=1}\nn',
+    'loop i in 0..3 {i;}',
+    'loop i in [2,4..10) {i;}',
+    'loop i in (5,3..0] {i;}',
+    'loop i in 0.. and i <? 3 {i;}',
+    'loop x in [1 2] {x;}',
+    'loop x in "hi" {x;}',
+    'loop x in [1 2] and y in [3 4] {x+y;}',
+    'let xs:array<int64>=[1]\nloop xs.length >? 0 {xs.pop;}\nxs',
     '1', "'hello'", 'true', 'none', '1 + 2', '3 >? 2',
     'let x:int64 = 1\nx + 2',
     'let x:int64=1\nx+=2\nx',
@@ -63,6 +76,13 @@ CASES = [
 
 
 ERROR_CASES = [
+    'break', 'continue',
+    'loop true { let f=():>void => {break} }',
+    'loop i in ..3 {}',
+    'loop i in 1,1..3 {}',
+    'loop x in [1] and x in [2] {}',
+    'loop p in [[x=1]] {p.x=2}',
+
     'let xs:array<int64 length=1>=[1]\nxs.push(2)',
     'let xs:array<int64>=[]\nxs.pop',
     'let xs:array<int64>=[1]\nxs.insert(2 3)',
@@ -90,12 +110,27 @@ ERROR_CASES = [
 ]
 
 
+def loop_summary(node):
+    parts = []
+    if isinstance(node, hir.LoopArm):
+        parts.append(f'loop:{type_to_dewy(node.type)};')
+    if isinstance(node, hir.IteratorExpression):
+        last = 'none' if node.last is None else str(node.last)
+        count = 'none' if node.count is None else str(node.count)
+        parts.append(f'iter:{type_to_dewy(node.target.type)}:{node.first}:{node.step}:{last}:{count}:{str(node.guarded).lower()};')
+    if isinstance(node, (hir.Break, hir.Continue)):
+        parts.append(f'{type(node).__name__.lower()}:{node.loop_levels};')
+    for child in _iter_children(node):
+        parts.append(loop_summary(child))
+    return ''.join(parts)
+
+
 def test_native_source_values(tmp_path):
     expected = []
     for text in CASES:
         ty.reset_program_brands()
         module, _ = check._typecheck_module(SrcFile(None, text))
-        expected.append(type_to_dewy(module.type))
+        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module))
     for text in ERROR_CASES:
         ty.reset_program_brands()
         with pytest.raises((check.UserError, check.TypeCheckError, check.NotImplementedYet)):
@@ -108,6 +143,22 @@ import p"{ROOT / 'dewy/bootstrap/parser/p0.dewy'}" as parser
 import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
 import p"{ROOT / 'dewy/bootstrap/semantic/check.dewy'}" as checking
 import p"{ROOT / 'dewy/bootstrap/semantic/type_display.dewy'}" as display
+import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
+loop_summary = (id:addr session:contexts.Session):>string => {{
+    let node=checking.node_at(id session)
+    let parts:array<string>=[]
+    if node is? hir.LoopArm {{ parts.push("loop:{{display.type_to_dewy(node.value_type session.types)}};") }}
+    if node is? hir.IteratorExpression {{
+        let target=checking.node_at(node.target session)
+        let last=if node.last is? none 'none' else "{{node.last}}"
+        let count=if node.count is? none 'none' else "{{node.count}}"
+        parts.push("iter:{{display.type_to_dewy(target.value_type session.types)}}:{{node.first}}:{{node.step}}:{{last}}:{{count}}:{{node.guarded}};")
+    }}
+    if node is? hir.Break {{ parts.push("break:{{node.loop_levels}};") }}
+    if node is? hir.Continue {{ parts.push("continue:{{node.loop_levels}};") }}
+    loop child in hir.children(node) {{ parts.push(loop_summary(child session)) }}
+    return parts.join
+}}
 main = ():>int64 => {{
     let cases:array<string> = [{cases}]
     let failures:int64 = 0
@@ -121,7 +172,7 @@ main = ():>int64 => {{
         let module = checking.block(parsed.root environment @session)
         if module is? Error {{ module.fail failures += 1 continue }}
         let node = checking.node_at(module session)
-        printl(display.type_to_dewy(node.value_type session.types))
+        printl("{{display.type_to_dewy(node.value_type session.types)}}|{{loop_summary(module session)}}")
     }}
     let invalid:array<string> = [{errors}]
     loop text in invalid {{

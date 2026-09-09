@@ -1,0 +1,87 @@
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"../parser/t2.dewy" as post
+import p"syntax.dewy" as syntax
+
+doc"""
+Source shapes needed before a loop condition can be checked.
+
+The body may change an incoming value before the next condition evaluation.
+This conservative scan invalidates those names before checking the condition;
+the condition can then establish fresh facts for every body entry. Nested
+function bodies have their own execution boundary and are not traversed.
+"""
+
+children = (node:tokens.Token):>array<addr> => {
+    if node is? parser.BinOp return [node.left node.right]
+    if node is? parser.Prefix|parser.Postfix return [node.item]
+    if node is? parser.Flat return node.items
+    if node is? parser.Block|parser.ParametricEscape return node.inner
+    if node is? parser.Ambiguous return node.candidates
+    if node is? parser.KeywordExpr return node.parts
+    if node is? parser.IString return node.content
+    if node is? parser.Flow {
+        let result = node.arms
+        if node.default isnt? none { result.push(node.default) }
+        return result
+    }
+    if node is? parser.Directive {
+        let result:array<addr> = []
+        if node.condition isnt? none { result.push(node.condition) }
+        if node.message isnt? none { result.push(node.message) }
+        return result
+    }
+    return []
+}
+root_name = (id:addr nodes:array<tokens.Token>):>string? => {
+    let node = tokens.node_at(nodes syntax.unparen(id nodes))
+    if node is? parser.BinOp {
+        let op = syntax.symbol(node.op nodes)
+        let token = tokens.node_at(nodes node.op)
+        if op =? '.' or op =? 'IndexJuxtapose' or (token is? post.Juxtapose and 'IndexJuxtapose' in? token.options) return root_name(node.left nodes)
+    }
+    return syntax.identifier(syntax.unparen(id nodes) nodes)
+}
+mutations = (id:addr nodes:array<tokens.Token> replacements:bool=false):>set<string> => {
+    let node = tokens.node_at(nodes id)
+    let names:set<string> = set[]
+    let target:addr? = none
+    if node is? parser.Prefix and syntax.is_operator(node.op '@' nodes) { target = node.item }
+    if node is? parser.BinOp {
+        let op = syntax.symbol(node.op nodes)
+        if op =? '=>' return names
+        if op in? ['=' ':=' '::'] or tokens.node_at(nodes node.op) is? post.CombinedAssignment {
+            if not replacements or syntax.identifier(node.left nodes) isnt? none { target = node.left }
+        }
+        if not replacements and op =? '.' {
+            let method = syntax.identifier(node.right nodes)
+            if method in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'add' 'remove'] { target = node.left }
+        }
+    }
+    if target isnt? none {
+        let name = root_name(target nodes)
+        if name isnt? none { names.add(name) }
+    }
+    loop child in children(node) {
+        loop name in mutations(child nodes replacements) { names.add(name) }
+    }
+    return names
+}
+contains_iterator = (id:addr nodes:array<tokens.Token>):>bool => {
+    let node = tokens.node_at(nodes syntax.unparen(id nodes))
+    if node is? parser.BinOp {
+        let op = syntax.symbol(node.op nodes)
+        if op =? 'in' return true
+        if op in? ['and' '&' 'or' '|' 'xor' 'nand' 'nor' 'xnor'] return contains_iterator(node.left nodes) or contains_iterator(node.right nodes)
+    }
+    return false
+}
+conjuncts = (id:addr nodes:array<tokens.Token>):>array<addr> => {
+    let node = tokens.node_at(nodes syntax.unparen(id nodes))
+    if node is? parser.BinOp and syntax.symbol(node.op nodes) in? ['and' '&'] {
+        let result = conjuncts(node.left nodes)
+        loop item in conjuncts(node.right nodes) { result.push(item) }
+        return result
+    }
+    return [id]
+}

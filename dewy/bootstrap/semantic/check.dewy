@@ -16,6 +16,10 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 import p"array_methods.dewy" as array_methods
 import p"../targets.dewy" as targets
 import p"namespaces.dewy" as namespaces
+import p"loop_syntax.dewy" as loop_syntax
+import p"type_queries.dewy" as views
+import p"analyze/value_bounds.dewy" as constants
+import p"analyze/hir_facts.dewy" as hir_facts
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -31,7 +35,7 @@ loading, representation selection, and the final validation/lowering driver
 are separate work still needed by the compiler invocation.
 """
 
-Environment:type = const [lexical:contexts.Context state:addr return_type:addr?=none]
+Environment:type = const [lexical:contexts.Context state:addr return_type:addr?=none loop_depth:addr=0]
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 node_at = (id:addr session:contexts.Session):>hir.AST => hir.node_at(session.hir id)
 void_at = (id:addr env:Environment @session:contexts.Session):>addr => {
@@ -76,6 +80,9 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let actual = types.node_at(session.types node.value_type)
     if actual is? types.ArrayType and target is? types.ArrayType and target.length is? none and actual.element =? target.element return value
     if types.is_primitive(target 'any') return value
+    # An abstract integer parameter does not materialize a new machine
+    # representation. Keep singleton bounds for guards such as `i <? 3`.
+    if actual is? types.IntegerLiteralType and (types.is_primitive(target 'int') or types.is_primitive(target 'uint')) return value
     if target is? types.TypeOr {
         if actual is? types.TypeOr return put(hir.RepresentationCast[node.loc expected value] @session)
         let candidates:array<addr> = []
@@ -197,7 +204,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         return if expected is? none value else against(value expected id env @session)
     }
     if node is? parser.Flow return flow(id node env @session expected=expected)
+    if node is? parser.Flat and syntax.is_operator(node.op 'RangeJuxtapose' source.nodes) return range_value(id node env @session)
     if node is? parser.Block {
+        if node.inner.length =? 1 and node.delims in? ['[]' '[)' '(]' '()'] {
+            let content = tokens.node_at(source.nodes node.inner[0])
+            if content is? parser.Flat and syntax.is_operator(content.op 'RangeJuxtapose' source.nodes) return range_value(id content env @session bounds=node.delims)
+        }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         if node.delims =? '[]' {
             loop item in node.inner {
@@ -343,6 +355,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if reference in? session.prepared_imports return void_at(id env @session)
             return pending(id 'loading an import at this expression site' env session)
         }
+        if keyword is? tokens.Keyword and keyword.name in? ['break' 'continue'] {
+            if env.loop_depth =? 0 return problem(id "`{keyword.name}` outside a loop" 'there is no enclosing loop to exit' env session)
+            if node.parts.length not=? 1 return pending(id 'scope-metatag loop exit resolution' env session)
+            let bottom = types.primitive('never' @session.types)
+            return put(if keyword.name =? 'break' hir.Break[node.loc bottom] else hir.Continue[node.loc bottom] @session)
+        }
         if keyword is? tokens.Keyword and keyword.name =? 'return' {
             if env.return_type is? none return problem(id '`return` outside a function' 'nothing here catches this return' env session)
             let empty = void_at(id env @session)
@@ -440,7 +458,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
 block = (id:addr env:Environment @session:contexts.Session scoped:bool=false expected:addr?=none):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.Block return expression(id env @session expected=expected)
-    let inner = if scoped Environment[contexts.child(env.lexical @session) env.state env.return_type] else env
+    let inner = if scoped Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth] else env
     loop statement in node.inner {
         let alias = declarations.predeclare_alias(statement inner.lexical @session)
         if alias is? Error return alias
@@ -484,7 +502,7 @@ fork = (env:Environment @session:contexts.Session):>Environment => {
     let copy = session.read_states[env.state]
     let state = session.read_states.length
     session.read_states.push(copy)
-    return Environment[env.lexical state env.return_type]
+    return Environment[env.lexical state env.return_type env.loop_depth]
 }
 
 # Annotated functions reserve their signature before any body in the block
@@ -643,6 +661,13 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
 }
 flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
+    if node.arms.length =? 1 and node.default is? none {
+        let arm = tokens.node_at(source.nodes node.arms[0])
+        if arm is? parser.KeywordExpr and arm.parts.length =? 3 {
+            let keyword = tokens.node_at(source.nodes arm.parts[0])
+            if keyword is? tokens.Keyword and keyword.name =? 'loop' return loop_flow(id arm env @session)
+        }
+    }
     let remaining = fork(env @session)
     let arms:array<addr> = []
     let results:array<addr> = []
@@ -765,7 +790,7 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
 # field values; they do not cause the initializer to run again.
 record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
     let wanted:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
     let fields:array<hir.ObjectField> = []
     let layout:array<types.ObjectField> = []
@@ -841,7 +866,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
     let source = contexts.source_at(env.lexical session)
     let arguments = tokens.node_at(source.nodes arguments_id)
     let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
     let given:dict<string addr> = []
     let positional:array<addr> = []
     loop item in items {
@@ -884,7 +909,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
             let default_scope = bindings.push_scope(@session.scopes reference.scope)
             loop [name binding] in scope.names { bindings.bind(@session.scopes default_scope name binding) }
             let lexical = contexts.Context[reference.source default_scope]
-            let default_env = Environment[lexical env.state env.return_type]
+            let default_env = Environment[lexical env.state env.return_type env.loop_depth]
             let checked = expression(reference.node default_env @session expected=field.value_type)
             if checked is? Error return checked
             value = checked
@@ -1115,4 +1140,237 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     # Keep the selected operation, including any conversions, on the RHS.
     # Lowering need not redispatch a source compound operator independently.
     return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' result] @session)
+}
+
+# Ranges remain values, including their open/closed endpoints and step pair.
+# Normalizing an iterator is a separate operation: an unbounded value is
+# legal even when it has no first element from which a loop could start.
+range_value = (id:addr node:parser.Flat env:Environment @session:contexts.Session bounds:string?=none):>addr|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let left:addr? = none
+    let right:addr? = none
+    let before = true
+    loop item in node.items {
+        if syntax.identifier(item source.nodes) =? '..' { before = false continue }
+        if before { left = item } else { right = item }
+    }
+    let pair:hir.RangeStep? = none
+    let checked_left:addr? = none
+    let checked_right:addr? = none
+    let left_pair = false
+    loop side in [true false] {
+        let item = if side left else right
+        if item is? none continue
+        let value = tokens.node_at(source.nodes item)
+        if value is? parser.Flat and syntax.is_operator(value.op ',' source.nodes) {
+            if value.items.length not=? 2 return problem(item 'range step syntax requires exactly two anchors' 'expected `first,second..last`' env session)
+            if not side and left_pair return problem(item 'range cannot specify step anchors on both sides' 'choose one step-pair form' env session)
+            if not side and left isnt? none return problem(item 'trailing range step pairs require an unbounded left side' 'write `first,second..last` instead' env session)
+            let first = expression(value.items[0] env @session)
+            if first is? Error return first
+            let second = expression(value.items[1] env @session)
+            if second is? Error return second
+            pair = hir.RangeStep[first second]
+            if side { checked_left = first left_pair = true } else { checked_right = second }
+        } else {
+            let checked = expression(item env @session)
+            if checked is? Error return checked
+            if side { checked_left = checked } else { checked_right = checked }
+        }
+    }
+    # Character/scalar domains use the same HIR, but require the Unicode
+    # ordinal conversion before their iterator normalization is enabled.
+    let anchors:array<addr> = []
+    if checked_left isnt? none { anchors.push(checked_left) }
+    if checked_right isnt? none { anchors.push(checked_right) }
+    if pair isnt? none { anchors.push(pair.first) anchors.push(pair.second) }
+    loop anchor in anchors {
+        if views.string_valued(node_at(anchor session).value_type session.types) return pending(id 'character range ordinal conversion' env session)
+    }
+    let delims:('[]'|'[)'|'(]'|'()')? = none
+    if bounds isnt? none {
+        $runtime_assert bounds is? '[]'|'[)'|'(]'|'()'
+        delims = bounds
+    }
+    return put(hir.Range[contexts.node_at(id env.lexical session).loc types.primitive('range' @session.types) delims pair checked_left checked_right] @session)
+}
+constant_integer = (id:addr session:contexts.Session):>bigint? => {
+    let env = constants.Environment[session.hir session.types session.registry targets.max_length(session.target)]
+    let value = constants.constant(id env)
+    if value is? none or value.lower is? none or value.upper is? none or value.lower not=? value.upper return none
+    return value.lower
+}
+
+IteratorResult:type = const [value:addr environment:Environment]
+iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let node = tokens.node_at(source.nodes syntax.unparen(id source.nodes))
+    if node isnt? parser.BinOp or not syntax.is_operator(node.op 'in' source.nodes) return pending(id 'non-conjunctive iterator formula' env session)
+    let name = syntax.identifier(node.left source.nodes)
+    if name is? none return pending(id 'iterator target unpacking' env session)
+    let iterable = expression(node.right env @session)
+    if iterable is? Error return iterable
+    let value = node_at(iterable session)
+    let shape = types.node_at(session.types types.strip_refinement(value.value_type session.types))
+    let target:addr? = none
+    let first:bigint = 0
+    let step:bigint = 1
+    let last:bigint? = none
+    let count:bigint? = none
+    if shape is? types.ArrayType {
+        target = shape.element
+        count = shape.length
+    } else if views.string_valued(value.value_type session.types) {
+        target = types.string_type(1 @session.types)
+        if shape is? types.StringType { count = shape.length }
+        if shape is? types.StringLiteralType { count = shape.value.length }
+    } else if value is? hir.Range {
+        if value.left is? none return problem(id 'range iteration requires a left anchor' 'this range has no first value to iterate from' env session)
+        let anchor = constant_integer(value.left session)
+        let second:bigint? = none
+        let right:bigint? = none
+        if value.step_pair isnt? none { second = constant_integer(value.step_pair.second session) }
+        if value.right isnt? none { right = constant_integer(value.right session) }
+        if anchor is? none or (value.step_pair isnt? none and second is? none) or (value.right isnt? none and right is? none) return pending(id 'runtime range endpoint normalization' env session)
+        first = anchor
+        if second isnt? none { step = second-anchor }
+        if step =? 0 return problem(id 'range iterator step cannot be zero' 'choose a distinct second anchor' env session)
+        let bounds = if value.bounds is? none '[]' else value.bounds
+        if bounds.startswith('(') { first += step }
+        if right isnt? none {
+            let distance = (if step >? 0 right-first else first-right) - (if bounds.endswith(']') 0 else 1)
+            let magnitude:bigint = if step >? 0 step else -step
+            $runtime_assert magnitude not=? 0
+            count = if distance <? 0 0 else distance // magnitude + 1
+        }
+        target = types.primitive('int' @session.types)
+    } else return problem(id 'value is not iterable' display.type_to_dewy(value.value_type session.types) env session)
+    if count isnt? none { last = first + (count-1)*step }
+    if value is? hir.Range and count isnt? none and last isnt? none {
+        let fits = true
+        loop n in [first step last count] { if n <? -9223372036854775808 or n >? 9223372036854775807 { fits = false } }
+        if fits { target = types.primitive('int64' @session.types) }
+    }
+    $runtime_assert target isnt? none
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let binding_id = bindings.allocate_param(@session.registry name target node.loc)
+    let binding = bindings.binding_at(session.registry binding_id)
+    binding.store_type = target
+    if types.node_at(session.types types.strip_refinement(target session.types)) is? types.ObjectType { binding.read_only_reason = 'borrows the array element; copy it with `let` to change it' }
+    session.registry.by_id[binding_id] = binding
+    bindings.bind(@session.scopes inner.lexical.scope name binding_id)
+    let target_node = put(hir.ExpressedIdentifier[tokens.node_at(source.nodes node.left).loc target name binding_id] @session)
+    let type = types.parameterize(types.primitive('iterator' @session.types) [target] @session.types)
+    return IteratorResult[put(hir.IteratorExpression[node.loc type target_node iterable first step last count] @session) inner]
+}
+
+invalidate_loop_names = (names:set<string> replacements:set<string> env:Environment @session:contexts.Session):>void => {
+    loop name in names {
+        let id = declarations.lookup(name env.lexical session)
+        if id is? none continue
+        let current = read_type(id env session)
+        let binding = bindings.binding_at(session.registry id)
+        let declared = if binding.store_type is? none binding.value_type else binding.store_type
+        if declared isnt? none { set_read_type(id declared env @session) }
+        if name not in? replacements and current isnt? none {
+            let shape = types.node_at(session.types types.strip_refinement(current session.types))
+            if shape is? types.ArrayType { set_read_type(id types.array_type(shape.element none @session.types) env @session) }
+        }
+        loop route in bindings.routes_under(session.registry id []) {
+            let field = bindings.binding_at(session.registry route)
+            if field.value_type isnt? none { set_read_type(route field.value_type env @session) }
+        }
+    }
+}
+breaks_loop = (id:addr depth:addr session:contexts.Session):>bool => {
+    let node = node_at(id session)
+    if node is? hir.Break return node.loop_levels =? depth
+    if node is? hir.FunctionLiteral return false
+    if node is? hir.LoopArm return breaks_loop(node.condition depth session) or breaks_loop(node.body depth+1 session)
+    loop child in hir.children(node) { if breaks_loop(child depth session) return true }
+    return false
+}
+loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Session):>addr|Error => {
+    $runtime_assert arm.parts.length =? 3
+    let source = contexts.source_at(env.lexical session)
+    let changed = loop_syntax.mutations(arm.parts[2] source.nodes)
+    let replaced = loop_syntax.mutations(arm.parts[2] source.nodes true)
+    invalidate_loop_names(changed replaced env @session)
+    let body_env = fork(env @session)
+    let condition:addr? = none
+    let prefix:array<addr> = []
+    if loop_syntax.contains_iterator(arm.parts[1] source.nodes) {
+        let iterators:array<addr> = []
+        let predicates:array<addr> = []
+        let names:set<string> = set[]
+        let formula:array<hir.IteratorFormulaToken> = []
+        loop part in loop_syntax.conjuncts(arm.parts[1] source.nodes) {
+            if not loop_syntax.contains_iterator(part source.nodes) { predicates.push(part) continue }
+            let result = iterator(part body_env @session)
+            if result is? Error return result
+            let iter = node_at(result.value session)
+            $runtime_assert iter is? hir.IteratorExpression
+            let target = node_at(iter.target session)
+            $runtime_assert target is? hir.ExpressedIdentifier
+            if target.name in? names return problem(part 'duplicate iterator target' target.name env session)
+            names.add(target.name)
+            let owner = node_at(iter.iterable session)
+            let route = bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
+            let root = node_at(route.root session)
+            if owner is? hir.DictEntries and root is? hir.ExpressedIdentifier and root.name in? changed return problem(part 'cannot mutate a container while iterating it' root.name env session)
+            formula.push(iterators.length)
+            if iterators.length >? 0 { formula.push('and') }
+            iterators.push(result.value)
+            body_env = result.environment
+        }
+        $runtime_assert iterators.length >? 0
+        loop predicate_id in predicates {
+            let predicate = expression(predicate_id body_env @session expected=types.primitive('bool' @session.types))
+            if predicate is? Error return predicate
+            body_env = refined(predicate true body_env @session)
+            loop index in 0.. and index <? iterators.length {
+                let iter = node_at(iterators[index] session)
+                $runtime_assert iter is? hir.IteratorExpression
+                let target = node_at(iter.target session)
+                $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+                if hir_facts.predicate_bounds_counter(predicate target.binding_id session.hir session.types) {
+                    let item = iterators[index]
+                    $runtime_assert item <? session.hir.length
+                    session.hir[item] = hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true]
+                }
+            }
+            let loc = tokens.node_at(source.nodes predicate_id).loc
+            let empty = put(hir.Void[loc types.primitive('void' @session.types)] @session)
+            let guard = put(hir.IfArm[loc node_at(empty session).value_type predicate empty] @session)
+            let stop = put(hir.Break[loc types.primitive('never' @session.types)] @session)
+            prefix.push(put(hir.Flow[loc node_at(empty session).value_type [guard] stop] @session))
+        }
+        condition = iterators[0]
+        if iterators.length >? 1 {
+            let type = types.parameterize(types.primitive('multiiterator' @session.types) [types.primitive('int64' @session.types)] @session.types)
+            condition = put(hir.MultiIteratorExpression[arm.loc type iterators formula false] @session)
+        }
+    } else {
+        let value = expression(arm.parts[1] env @session expected=types.primitive('bool' @session.types))
+        if value is? Error return value
+        condition = value
+        body_env = refined(value true env @session)
+    }
+    $runtime_assert condition isnt? none
+    body_env = Environment[body_env.lexical body_env.state body_env.return_type body_env.loop_depth+1]
+    let checked_body = expression(arm.parts[2] body_env @session)
+    if checked_body is? Error return checked_body
+    let body:addr = checked_body
+    if prefix.length >? 0 {
+        prefix.push(body)
+        body = put(hir.Block[node_at(body session).loc node_at(body session).value_type prefix false] @session)
+    }
+    let test = node_at(condition session)
+    let diverges = test is? hir.Bool and test.value and not breaks_loop(body 0 session)
+    let type = types.primitive(if diverges 'never' else 'void' @session.types)
+    # The general bounds pass computes loop fixed points. The source visitor
+    # retains no body-only facts on an exit or on a possible zero-iteration path.
+    invalidate_loop_names(changed replaced env @session)
+    let checked_arm = put(hir.LoopArm[arm.loc type condition body] @session)
+    return put(hir.Flow[contexts.node_at(id env.lexical session).loc type [checked_arm]] @session)
 }

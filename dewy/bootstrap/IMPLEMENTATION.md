@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  50 source programs and 23 invalid programs. Short-circuit boolean HIR,
+  62 source programs and 30 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -39,6 +39,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   while explicitly fixed arrays keep their contract. Bare function names call
   the function, and `@fn` retains its value. Compound assignments and contextual
   call-result obligations preserve their selected operations and conversions.
+  While-style loops, static integer ranges, array/string iterators, guarded
+  counters, and conjunctive iterator groups now enter HIR with scoped targets.
+  Loop exits respect function boundaries. The visitor drops facts the next
+  iteration can invalidate and keeps borrowed record elements read-only.
+  Comparison checks include iterator bounds, target types, and exit levels,
+  rather than only the module's result type. Advanced iterator formulas,
+  unpacking, runtime range ends, and scope-metatag exits remain to be added.
   This is an intermediate HIR entry point, not yet a
   compiler driver: the remaining value forms, proof validation,
   representation selection, and native emission are still required.
@@ -49,6 +56,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   path aliases, single initialization, missing exports, and import cycles.
   Target-selected imports, automatic prelude installation, dynamic path
   evaluation, and filesystem symlink identity remain driver work.
+- Hosted union destinations preserve machine-integer to bigint payload
+  conversion, including optional values evaluated once. Bigint's existing
+  decimal formatter now participates in interpolation and `as string`,
+  including optional members and container elements. Dedicated execution
+  tests cover unsigned maximum, zero, absence, large decimal text, and retained
+  string lifetime; the conversion also passes 63 numeric/union regressions,
+  and string formatting passes 44 related regressions.
 - Hosted short-circuit continuations join mutations from the evaluated and
   skipped paths. Bounds evaluation composes value blocks and conditional
   expressions without replaying effects; scoped expression blocks share the

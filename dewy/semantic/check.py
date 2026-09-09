@@ -14881,8 +14881,8 @@ def _quoted_member(type_: ty.TypeExpr) -> bool:
 
 def _number_object(type_: ty.TypeExpr, *, ctx: Context) -> str | None:
     """The name of the prelude number object (`Rational`, `BigInt`, …) values
-    of this type are, else None: they print through their own `print` arm but
-    have no string form yet."""
+    of this type are, else None. Their print and conversion protocols belong
+    to the corresponding numeric library representation."""
     for name in _NUMBER_OBJECT_NAMES:
         binding = ctx.binding_scopes.get(name)
         if binding is not None and binding.type_value is not None and not isinstance(binding.type_value, ty.GenericTypeAlias):
@@ -14984,7 +14984,7 @@ def _structure_string(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST | N
     if members is None and object_type is None:
         return None
     if _number_object(value.type, ctx=ctx) is not None:
-        return None   # prints through its own `print` arm; no string form yet
+        return None   # numeric library conversions precede structural formatting
     bad = _unconvertible_part(value.type, ctx=ctx)
     if bad is not None:
         number = _number_object(bad, ctx=ctx)
