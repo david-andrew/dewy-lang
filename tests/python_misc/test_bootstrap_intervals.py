@@ -57,7 +57,7 @@ def test_native_interval_operations_match_hosted(tmp_path):
     for operation, left, right, word, bound in arithmetic:
         width = Interval(-128, 127) if word == 'int8' else None
         arithmetic_lines.append(f"printl(spell(intervals.binary('{operation}' {interval_literal(left)} {interval_literal(right)} {interval_literal(width)} {interval_literal(bound)})))")
-    source = tmp_path / 'intervals.dewy' 
+    source = tmp_path / 'intervals.dewy'
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/analyze/intervals.dewy'}" as intervals
 import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts

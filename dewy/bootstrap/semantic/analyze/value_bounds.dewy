@@ -1,0 +1,237 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../type_queries.dewy" as views
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"intervals.dewy" as ranges
+import p"fact_state.dewy" as facts
+
+doc"""
+Numeric evidence from declarations, constants, and iterator sources.
+
+The mutable flow state is separate from these source contracts. A local may
+currently hold a singleton while its declared place contract permits other
+values; a subsequent read without flow evidence falls back to that contract.
+Constant evaluation is deliberately limited to the hosted pass's pure subset.
+An unsupported expression contributes no evidence, never an assumed value.
+"""
+
+Environment:type = const [nodes:array<hir.AST> types:array<types.Type> registry:bindings.Registry cap:bigint]
+length_default = (cap:bigint):>ranges.Interval => ranges.Interval[0 cap true]
+bounds_of = (props:array<propositions.Proposition> cap:bigint):>ranges.Interval? => {
+    let interval = ranges.propositions_interval(props)
+    loop p in props {
+        if p.axiom =? 'addr' {
+            let positions = ranges.Interval[0 cap-1 true]
+            return if interval is? none positions else ranges.intersect(interval positions)
+        }
+    }
+    return interval
+}
+fixed_bounds = (id:addr type_nodes:array<types.Type>):>ranges.Interval? => {
+    let bounds = views.fixed_integer_bounds(id type_nodes)
+    if bounds is? none return none
+    return ranges.Interval[bounds.minimum bounds.maximum]
+}
+# Like the hosted _fit_type, this checks a concrete result representation.
+# A refined or abstract result is still mathematical evidence at this stage;
+# its obligations and representation selection happen at their own boundary.
+result_width = (id:addr type_nodes:array<types.Type>):>ranges.Interval? => {
+    if types.node_at(type_nodes id) isnt? types.Primitive return none
+    return fixed_bounds(id type_nodes)
+}
+binary = (name:string left:ranges.Interval? right:ranges.Interval? result_type:addr type_nodes:array<types.Type> bound:ranges.Interval?=none):>ranges.Interval? => {
+    if name isnt? ranges.Operation return none
+    let width = result_width(result_type type_nodes)
+    if bound isnt? none and (left is? none or right is? none) return ranges.fits(bound width)
+    return ranges.binary(name left right width bound)
+}
+
+binding_type = (binding:bindings.Binding nodes:array<hir.AST>):>addr? => {
+    if binding.store_type isnt? none return binding.store_type
+    let declaration_id = binding.declaration
+    if declaration_id isnt? none {
+        let declaration = hir.node_at(nodes declaration_id)
+        if declaration is? hir.Declare and declaration.annotation isnt? none return declaration.annotation
+    }
+    return binding.value_type
+}
+type_interval = (binding_id:addr env:Environment):>ranges.Interval? => {
+    let binding = env.registry.by_id.get(binding_id)
+    if binding is? none return none
+    let declared = binding_type(binding env.nodes)
+    if declared is? none return none
+    let node = types.node_at(env.types declared)
+    let interval = fixed_bounds(declared env.types)
+    if interval is? none and node is? types.TypeOr {
+        # Numeric reads of an optional can use its unique concrete integer
+        # width. Two different widths do not establish either one's range.
+        let differing = false
+        loop member in node.items {
+            let candidate = fixed_bounds(member env.types)
+            if candidate is? none continue
+            if interval is? none { interval = candidate }
+            else if not ranges.same_bounds(interval candidate) { differing = true }
+        }
+        if differing return none
+    }
+    if interval is? none return none
+    let refined:types.RefinedType? = none
+    if node is? types.RefinedType { refined = node }
+    else if node is? types.TypeOr {
+        loop member in node.items {
+            let item = types.node_at(env.types member)
+            if item is? types.RefinedType { refined = item break }
+        }
+    }
+    if refined isnt? none {
+        let direct:array<propositions.Proposition> = []
+        loop p in refined.propositions {
+            if p.term is? none and propositions.field(p) is? none { direct.push(p) }
+        }
+        let constrained = bounds_of(direct env.cap)
+        if constrained isnt? none { interval = ranges.intersect(interval constrained) }
+    }
+    return interval
+}
+binding_interval = (term:facts.Term state:facts.State env:Environment):>ranges.Interval => {
+    let known = facts.lookup(state facts.value(term))
+    if known isnt? none return known
+    if term.projection =? 'length' return length_default(env.cap)
+    let declared = type_interval(term.binding_id env)
+    return if declared is? none ranges.UNKNOWN else declared
+}
+
+constant_binding = (id:addr? env:Environment @seen:set<addr>):>ranges.Interval? => {
+    if id is? none return none
+    if id in? seen return none
+    let binding = env.registry.by_id.get(id)
+    if binding is? none return none
+    let declaration_id = binding.declaration
+    if declaration_id is? none return none
+    let declaration = hir.node_at(env.nodes declaration_id)
+    if declaration isnt? hir.Declare return none
+    if declaration.decltype not=? 'const' return none
+    seen.add(id)
+    return constant_expr(declaration.expr env @seen)
+}
+constant_expr = (id:addr env:Environment @seen:set<addr>):>ranges.Interval? => {
+    let node = hir.node_at(env.nodes id)
+    let value_type = types.node_at(env.types node.value_type)
+    if value_type is? types.IntegerLiteralType return ranges.exact(value_type.value)
+    if node is? hir.Integer return ranges.exact(node.value)
+    if node is? hir.ValueCast | hir.RepresentationCast return constant_expr(node.expr env @seen)
+    if node is? hir.ArrayLength {
+        let array_type = types.node_at(env.types hir.node_at(env.nodes node.array).value_type)
+        if array_type is? types.ArrayType {
+            let length = array_type.length
+            if length isnt? none return ranges.exact(length)
+        }
+        return none
+    }
+    if node is? hir.ExpressedIdentifier return constant_binding(node.binding_id env @seen)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 return constant_expr(node.items[0] env @seen)
+    if node isnt? hir.FunctionCall return none
+    let function = hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier return none
+    if node.pos_args.length =? 1 and function.name =? '__unary_sub__' {
+        let value = constant_expr(node.pos_args[0] env @seen)
+        if value is? none return none
+        let lower = value.lower
+        if lower is? none return none
+        return ranges.exact(-lower)
+    }
+    if node.pos_args.length =? 2 {
+        let left = constant_expr(node.pos_args[0] env @seen)
+        let right = constant_expr(node.pos_args[1] env @seen)
+        return binary(function.name left right node.value_type env.types)
+    }
+    return none
+}
+constant = (id:addr env:Environment):>ranges.Interval? => {
+    let seen:set<addr> = set[]
+    return constant_expr(id env @seen)
+}
+literal_elements = (id:addr env:Environment):>ranges.Interval? => {
+    let node = hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    if node isnt? hir.ArrayLiteral return none
+    let result:ranges.Interval? = none
+    loop item in node.items {
+        if hir.node_at(env.nodes item) is? hir.Spread return none
+        let value = constant(expressions.strip_casts(item env.nodes) env)
+        if value is? none return none
+        if value.lower is? none or value.upper is? none return none
+        result = if result is? none value else ranges.union(result value)
+    }
+    return result
+}
+
+# Populated only for bindings the mutation pre-scan says are never changed.
+# A dictionary's keys and values have separate element intervals.
+ElementIntervals:type = dict<string ranges.Interval>
+element_key = (binding:addr slot:string?=none):>string => "{binding}:{slot}"
+record_elements = (@elements:ElementIntervals binding:addr expr:addr env:Environment):>void => {
+    let direct = literal_elements(expr env)
+    if direct isnt? none { elements[element_key(binding)] = direct return void }
+    let node = hir.node_at(env.nodes expr)
+    let node_type = types.node_at(env.types node.value_type)
+    if node isnt? hir.ObjectLiteral or node_type isnt? types.ObjectType return void
+    if node_type.brand not=? 'dict' return void
+    loop field in node.fields {
+        if field.name =? 'keys' or field.name =? 'values' {
+            let interval = literal_elements(field.value env)
+            if interval isnt? none { elements[element_key(binding field.name)] = interval }
+        }
+    }
+}
+iterable_elements = (id:addr elements:ElementIntervals env:Environment):>ranges.Interval? => {
+    let current = expressions.strip_casts(id env.nodes)
+    let direct = literal_elements(current env)
+    if direct isnt? none return direct
+    let node = hir.node_at(env.nodes current)
+    if node is? hir.ExpressedIdentifier {
+        let binding = node.binding_id
+        if binding isnt? none return elements.get(element_key(binding))
+    }
+    if node is? hir.DictEntries {
+        let owner = hir.node_at(env.nodes expressions.strip_casts(node.dictionary env.nodes))
+        if owner is? hir.ExpressedIdentifier {
+            let binding = owner.binding_id
+            if binding isnt? none return elements.get(element_key(binding node.name))
+        }
+    }
+    return none
+}
+iterator_interval = (iterator:hir.IteratorExpression elements:ElementIntervals env:Environment):>ranges.Interval => {
+    let iterable_type = types.node_at(env.types hir.node_at(env.nodes iterator.iterable).value_type)
+    if iterable_type is? types.ArrayType {
+        let target = types.node_at(env.types hir.node_at(env.nodes iterator.target).value_type)
+        let id = hir.node_at(env.nodes iterator.target).value_type
+        if target is? types.TypeOr and target.items.length =? 2 {
+            let first = target.items[0]
+            let second = target.items[1]
+            if types.is_primitive(types.node_at(env.types first) 'none') { id = second }
+            else if types.is_primitive(types.node_at(env.types second) 'none') { id = first }
+        }
+        let width = fixed_bounds(id env.types)
+        if width is? none return ranges.UNKNOWN
+        let items = iterable_elements(iterator.iterable elements env)
+        return if items is? none width else ranges.intersect(width items)
+    }
+    if iterator.count is? none {
+        return if iterator.step >? 0 ranges.Interval[iterator.first none] else ranges.Interval[none iterator.first]
+    }
+    let last = iterator.last
+    $runtime_assert last isnt? none
+    return if iterator.first <? last ranges.Interval[iterator.first last] else ranges.Interval[last iterator.first]
+}
+loop_counter_interval = (iterator:hir.IteratorExpression elements:ElementIntervals env:Environment):>ranges.Interval => {
+    if iterator.guarded and iterator.step >? 0 {
+        let upper:bigint = 9223372036854775807
+        let last = iterator.last
+        if last isnt? none and last <? upper { upper = last }
+        return ranges.Interval[iterator.first upper]
+    }
+    return iterator_interval(iterator elements env)
+}
