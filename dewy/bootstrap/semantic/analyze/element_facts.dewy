@@ -1,0 +1,164 @@
+from reporting import Span
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"relations.dewy" as relations
+import p"intervals.dewy" as ranges
+
+doc"""
+Evidence shared by every element of an array.
+
+Pushing a record whose `length` satisfies `length <= src.length - i`
+contributes that promise to `matches.*.length`. Reading an element gives
+the new value its own copy of the promise. Pushing an element without the
+promise removes it; pushing into an empty array establishes the incoming
+element's promises. This is value evidence, not an alias to the source.
+
+The `*` path component is an internal route, not source field syntax.
+Routes are stable in the registry; the flow state holds their current facts.
+"""
+
+route = (array:addr path:array<string> word_type:addr loc:Span @registry:bindings.Registry):>addr => {
+    let full:array<string> = ['*']
+    loop name in path { full.push(name) }
+    return bindings.route_id(@registry array full word_type loc)
+}
+routes = (array:addr registry:bindings.Registry):>array<bindings.Route> => {
+    let result:array<bindings.Route> = []
+    loop item in registry.routes {
+        if item.root =? array and item.path.length >? 0 and item.path[0] =? '*' { result.push(item) }
+    }
+    return result
+}
+roots = (registry:bindings.Registry):>dict<addr addr> => {
+    let result:dict<addr addr> = []
+    loop item in registry.routes {
+        if item.path.length >? 0 and item.path[0] =? '*' { result[item.id] = item.root }
+    }
+    return result
+}
+
+route_of = (id:addr env:values.Environment @registry:bindings.Registry):>addr? => {
+    let path = bindings.access_path(id env.nodes facts=true)
+    # Use the innermost indexed array, followed only by fields. The array
+    # may itself be a tracked field of an object (`owner.items[k].length`).
+    let index:addr? = none
+    loop i in 0.. and i <? path.steps.length {
+        if hir.node_at(env.nodes path.steps[i]) is? hir.Index { index = i }
+    }
+    if index is? none return none
+    $runtime_assert index <? path.steps.length
+    let indexed = hir.node_at(env.nodes path.steps[index])
+    $runtime_assert indexed is? hir.Index
+    let array = terms.sequence_id(indexed.array env @registry)
+    if array is? none return none
+    let fields:array<string> = ['*']
+    let cursor = index + 1
+    loop cursor <? path.steps.length {
+        let field = hir.node_at(env.nodes path.steps[cursor])
+        $runtime_assert field is? hir.MemberAccess
+        fields.push(field.name)
+        cursor += 1
+    }
+    loop item in registry.routes {
+        if item.root =? array and item.path.length =? fields.length and bindings.path_starts_with(item.path fields) return item.id
+    }
+    return none
+}
+
+Source:type = const [path:array<string> binding:addr]
+sources = (id:addr env:values.Environment @registry:bindings.Registry):>array<Source> => {
+    let current = expressions.strip_casts(id env.nodes)
+    let node = hir.node_at(env.nodes current)
+    let result:array<Source> = []
+    if node is? hir.ObjectLiteral {
+        loop field in node.fields {
+            let value = terms.binding_term(field.value env @registry)
+            if value is? none or value.projection not=? 'value' continue
+            result.push(Source[[field.name] value.binding_id])
+            loop item in registry.routes {
+                if item.root =? value.binding_id {
+                    let path:array<string> = [field.name]
+                    loop name in item.path { path.push(name) }
+                    result.push(Source[path item.id])
+                }
+            }
+        }
+        return result
+    }
+    let term = terms.binding_term(current env @registry)
+    let source:addr? = none
+    if term isnt? none {
+        if term.projection not=? 'value' return []
+        source = term.binding_id
+    } else { source = route_of(current env @registry) }
+    if source is? none return []
+    result.push(Source[[] source])
+    if node is? hir.ExpressedIdentifier {
+        loop item in registry.routes {
+            if item.root =? source { result.push(Source[item.path item.id]) }
+        }
+    }
+    return result
+}
+
+store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:values.Environment @registry:bindings.Registry):>void => {
+    let length = facts.lookup(state facts.value(facts.Term[array 'length']))
+    let empty = length isnt? none and ranges.same_bounds(length ranges.exact(0))
+    let stored:dict<addr facts.State> = []
+    loop source in sources(value env @registry) {
+        let target = route(array source.path word_type loc @registry)
+        stored[target] = relations.facts_of(state facts.Term[source.binding])
+    }
+    loop item in routes(array registry) {
+        let existing = relations.facts_of(state facts.Term[item.id])
+        let incoming:facts.State = if item.id in? stored stored[item.id] else []
+        loop entry in existing.values {
+            let key = relations.rekey(entry.fact facts.Term[item.id])
+            if entry.fact.key in? incoming {
+                facts.put(@state key ranges.union(entry.interval incoming[entry.fact.key].interval))
+            } else if not empty {
+                if key.key in? state { state.pop(key.key); }
+            }
+        }
+    }
+    if empty {
+        loop [target promises] in stored {
+            loop entry in promises.values { facts.put(@state relations.rekey(entry.fact facts.Term[target]) entry.interval) }
+        }
+    }
+}
+
+# Reading also seeds the element type's declared refinements. Return that
+# contract separately so the bounds evaluator can apply its ordinary binding
+# refinement rule (including interval, field, and parameter predicates).
+declared_refinement = (array:addr type_nodes:array<types.Type> registry:bindings.Registry):>types.RefinedType? => {
+    let binding = registry.by_id.get(array)
+    if binding is? none or binding.value_type is? none return none
+    let declared = types.node_at(type_nodes types.strip_refinement(binding.value_type type_nodes))
+    if declared isnt? types.ArrayType return none
+    let element = types.node_at(type_nodes declared.element)
+    return if element is? types.RefinedType element else none
+}
+read = (@state:facts.State array:addr target:addr word_type:addr loc:Span @registry:bindings.Registry):>void => {
+    loop item in routes(array registry) {
+        let path:array<string> = []
+        loop i in 1.. and i <? item.path.length { path.push(item.path[i]) }
+        let subject = if path.length =? 0 target else bindings.route_id(@registry target path word_type loc)
+        loop entry in relations.facts_of(state facts.Term[item.id]).values {
+            facts.put(@state relations.rekey(entry.fact facts.Term[subject]) entry.interval)
+        }
+    }
+}
+copy = (@state:facts.State source:addr target:addr word_type:addr loc:Span @registry:bindings.Registry):>void => {
+    loop item in routes(source registry) {
+        let mirrored = bindings.route_id(@registry target item.path word_type loc)
+        loop entry in relations.facts_of(state facts.Term[item.id]).values {
+            facts.put(@state relations.rekey(entry.fact facts.Term[mirrored]) entry.interval)
+        }
+    }
+}
