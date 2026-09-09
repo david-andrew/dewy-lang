@@ -365,6 +365,9 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if right is? Error return right
             let func = identifier(operator id env @session)
             if func is? Error return func
+            let specialized = builtin_value(func [left right] id env @session)
+            if specialized is? Error return specialized
+            if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
             let value = call(func [left right] [] id right_env @session expected=if logical types.primitive('bool' @session.types) else expected)
             if value is? Error return value
             let result = node_at(value session)
@@ -681,10 +684,10 @@ select_type = (current:addr tested:addr truth:bool @session:contexts.Session):>a
     if truth and subtyping.is_subtype(tested current session.links @session.types) return tested
     return if truth overlap else types.intersect([current types.negate(tested @session.types)] @session.types)
 }
-refined = (condition:addr truth:bool env:Environment @session:contexts.Session invalidated:set<addr>=set[]):>Environment => {
+refined = (condition:addr truth:bool env:Environment @session:contexts.Session invalidated:set<addr>=set[] moved:set<addr>=set[]):>Environment => {
     let result = fork(env @session)
     let node = node_at(condition session)
-    if node is? hir.ValueCast return refined(node.expr truth result @session invalidated=invalidated)
+    if node is? hir.ValueCast return refined(node.expr truth result @session invalidated=invalidated moved=moved)
     if node isnt? hir.ShortCircuit {
         loop binding in predicate_effects.read_bindings(condition session.hir) {
             if binding in? invalidated return result
@@ -692,11 +695,15 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
     }
     if node is? hir.FunctionCall and node.pos_args.length =? 1 {
         let func = node_at(node.func session)
-        if func is? hir.ExpressedIdentifier and func.name =? '__not__' return refined(node.pos_args[0] not truth result @session invalidated=invalidated)
+        if func is? hir.ExpressedIdentifier and func.name =? '__not__' return refined(node.pos_args[0] not truth result @session invalidated=invalidated moved=moved)
     }
     if node is? hir.DictContains and truth {
         let array = node_at(node.keys session)
-        if array is? hir.MemberAccess { container_state.remember(array.value node.key result.state @session position=node.position) }
+        if array is? hir.MemberAccess {
+            let position = node.position
+            loop binding in predicate_effects.read_bindings(node.keys session.hir) { if binding in? moved { position = none break } }
+            container_state.remember(array.value node.key result.state @session position=position)
+        }
     }
     if node is? hir.TypeTest {
         let value = node_at(node.value session)
@@ -712,8 +719,10 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         if effective_truth =? conjunction {
             let changed = invalidated
             loop binding in predicate_effects.mutated_bindings(node.right session.hir) { changed.add(binding) }
-            result = refined(node.left effective_truth result @session invalidated=changed)
-            result = refined(node.right effective_truth result @session invalidated=invalidated)
+            let compacted = moved
+            loop binding in predicate_effects.compacted_bindings(node.right session.hir) { compacted.add(binding) }
+            result = refined(node.left effective_truth result @session invalidated=changed moved=compacted)
+            result = refined(node.right effective_truth result @session invalidated=invalidated moved=moved)
         }
     }
     return result
@@ -1745,4 +1754,57 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
         if fields[i] =? 'keys' { container_state.remember(iterable target inner.state @session) }
     }
     return IteratorResult[values inner]
+}
+
+# Algebra is a builtin-call rule, so a lexical replacement of an operator
+# remains an ordinary function. Invariant containers need matching element
+# types; dictionary union retains left order and the right value on overlap.
+container_algebra = (name:string left:addr right:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let a = node_at(left session)
+    let b = node_at(right session)
+    let a_entry = views.container_entry_types(a.value_type session.types)
+    let b_entry = views.container_entry_types(b.value_type session.types)
+    if a_entry is? none or b_entry is? none return problem(id 'container operands must have the same kind' 'combine two dictionaries or two sets' env session)
+    let operation = container_methods.algebra.get(name)
+    if operation is? none return problem(id 'no matching container operator' name env session)
+    if a_entry.value isnt? none or b_entry.value isnt? none {
+        if a_entry.value is? none or b_entry.value is? none or operation not=? 'union' return problem(id 'dictionaries combine with union' 'use `|`/`or`, or take `.keys` for set algebra' env session)
+        if not types.same_type(a.value_type b.value_type session.types) return problem(id 'dictionary operands have different types' 'their key and value types must match' env session)
+    } else if not types.same_type(a_entry.key b_entry.key session.types) return problem(id 'set operands have different element types' 'their member types must match' env session)
+    let loc = contexts.node_at(id env.lexical session).loc
+    return put(hir.SetAlgebra[loc a.value_type operation left right] @session)
+}
+
+# Some builtins select a representation-bearing HIR operation once their
+# operand types are known. Only the original builtin binding reaches these
+# rules; lexical operator declarations keep normal function-call semantics.
+builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let func = node_at(function session)
+    if func isnt? hir.ExpressedIdentifier or func.binding_id is? none return none
+    let binding = bindings.binding_at(session.registry func.binding_id)
+    if binding.kind not=? 'function' or binding.syntax isnt? none or binding.declaration isnt? none return none
+    let name = func.name
+    if arguments.length not=? 2 return none
+    let left = arguments[0]
+    let right = arguments[1]
+    let a = node_at(left session)
+    let b = node_at(right session)
+    if views.container_entry_types(a.value_type session.types) isnt? none or views.container_entry_types(b.value_type session.types) isnt? none return container_algebra(name left right id env @session)
+    if not views.string_valued(a.value_type session.types) or not views.string_valued(b.value_type session.types) return none
+    let loc = contexts.node_at(id env.lexical session).loc
+    let a_type = types.node_at(session.types a.value_type)
+    let b_type = types.node_at(session.types b.value_type)
+    if name in? ['__eq__' '__ne__'] {
+        let boolean = types.primitive('bool' @session.types)
+        if a_type is? types.StringLiteralType and b_type is? types.StringLiteralType return put(hir.Bool[loc boolean (a_type.value =? b_type.value) not=? (name =? '__ne__')] @session)
+        return put(hir.StringEqual[loc boolean left right name =? '__ne__'] @session)
+    }
+    if name =? '__add__' {
+        if a_type is? types.StringLiteralType and b_type is? types.StringLiteralType {
+            let content = a_type.value + b_type.value
+            return put(hir.String[loc types.string_literal(content @session.types) content] @session)
+        }
+        return put(hir.StringConcat[loc types.string_type(none @session.types) left right] @session)
+    }
+    return none
 }

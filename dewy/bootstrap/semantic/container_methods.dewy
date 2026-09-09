@@ -22,3 +22,5 @@ signature = (name:string entry:views.EntryTypes @nodes:array<types.Type>):>addr 
     } else if name =? 'add' { pos = [key] }
     return types.function_type(pos kw none result [] @nodes)
 }
+
+const algebra:dict<string string> = ['__or__' -> 'union' '__and__' -> 'intersection' '__sub__' -> 'difference' '__xor__' -> 'symmetric']

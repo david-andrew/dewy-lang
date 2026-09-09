@@ -46,3 +46,22 @@ mutated_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
     }
     return result
 }
+
+# A view/iterator can compact a container without changing logical members.
+# Preserve membership through that operation, but do not resurrect a search
+# slot observed by an earlier short-circuit operand.
+compacted_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
+    let result:set<addr> = set[]
+    let pending:array<addr> = [root]
+    loop pending.length >? 0 {
+        let node = hir.node_at(nodes pending.pop)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.DictView|hir.DictEntries {
+            let path = bindings.access_path(node.dictionary nodes facts=true)
+            let owner = hir.node_at(nodes path.root)
+            if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none { result.add(owner.binding_id) }
+        }
+        loop child in hir.children(node) { pending.push(child) }
+    }
+    return result
+}

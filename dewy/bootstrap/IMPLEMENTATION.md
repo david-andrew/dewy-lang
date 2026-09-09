@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  100 source programs and 53 invalid programs. Short-circuit boolean HIR,
+  112 source programs and 57 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -61,7 +61,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Dictionary unpacking and set iteration share the ordinary iterator HIR.
   Iteration proves the current key, drops positions that compaction may move,
   and rejects mutation of the iterated container. Unpacked records obey the
-  same read-only borrow rule as array elements. Runtime set conversion and
+  same read-only borrow rule as array elements. Set algebra, dictionary union,
+  and string equality/concatenation retain their specialized HIR operations
+  and literal folding. Membership survives view compaction while cached entry
+  positions expire, including across short-circuit guards and const captures.
+  Runtime set conversion and
   generic library calls remain separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
   and `container_methods.dewy` keep those transfers outside the source visitor.
   This is an intermediate HIR entry point, not yet a
@@ -326,11 +330,13 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The latest broad run passed **1,857 tests, 10 skipped**, including the expanded
-source value checker, aggregate parameter defaults, fixed-width call-result
-bounds, and native import-syntax comparison. The new native module-graph
-comparison also passes separately (namespace shadowing, alias identity,
-missing exports, and cycles).
+The committed container checkpoint (`9dd54e51`) passed **1,859 tests,
+23 skipped** in a fresh checkout. Thirteen skips were SDL tests whose generated
+artifacts were absent from that checkout; all thirteen passed separately in
+the main workspace, leaving the usual ten unavailable-toolchain skips.
+Container iteration then passed its expanded native comparison (100 valid
+programs and 53 rejected programs), and the const-container capture regression
+passes after discarding cached positions across function boundaries.
 
 
 The full suite passed with **1,837 passed, 10 skipped** after the source type

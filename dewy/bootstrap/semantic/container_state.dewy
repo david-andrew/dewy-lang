@@ -106,7 +106,9 @@ inherited = (state:addr session:contexts.Session):>array<keys.Fact> => {
     loop fact in facts(state session) {
         let binding = session.registry.by_id.get(fact.container)
         if binding isnt? none and binding.route_root is? none and binding.read_only_reason =? 'const binding' {
-            if fact.key is? keys.Literal|keys.Total { result.push(fact) }
+            # Capturing a logical value does not capture a caller's search
+            # temporary or promise that a view will keep its physical slots.
+            if fact.key is? keys.Literal|keys.Total { result.push(keys.Fact[fact.container fact.key]) }
         }
     }
     return result

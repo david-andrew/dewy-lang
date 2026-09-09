@@ -16,6 +16,19 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'set[1 2] | set[2 3]',
+    'set[1 2] and set[2 3]',
+    'set[1 2] - set[2]',
+    'set[1 2] xor set[2 3]',
+    "['a' -> 1] | ['b' -> 2]",
+    "'a' + 'b'",
+    "let text:string='a'\ntext+'b'",
+    "'a' =? 'b'",
+    "let f=(a:string b:string):>bool=>a not=? b\nf('a' 'b')",
+    "let seed=['a' -> 1 'b' -> 2]\nseed.pop('a');\nconst d=seed\nlet read=():>int64=>d['b']\nread()",
+    "let d=['a' -> 1 'b' -> 2]\nd.pop('a');\nlet k:string='b'\nif k in? d and d.values.length >? 0 {d[k];}",
+    "let update=(@x:int64|string):>bool=>{x='done' return false}\nlet x:int64|string=1\nloop update(@x) {}\nx",
+
     "let d=['a' -> 1 'b' -> 2]\nloop [k v] in d {d[k];}",
     "let d=['a' -> 1]\nloop [k v] in d and v >? 0 {d[k];}",
     'let s=set[1 2]\nloop x in s {x;}',
@@ -116,6 +129,11 @@ CASES = [
 
 
 ERROR_CASES = [
+    "set[1] | set['a']",
+    "['a' -> 1] & ['b' -> 2]",
+    "set[1] | ['a' -> 1]",
+    "['a' -> 1] | ['b' -> 'wrong']",
+
     'let s=set[1 2]\nloop x in s {s.pop(x);}',
     "let d=['a' -> 1]\nloop [k v] in d {d['b']=2}",
     "let d=['a' -> [x=1]]\nloop [k v] in d {v.x=2}",
@@ -179,6 +197,12 @@ def loop_summary(node):
     parts = []
     if isinstance(node, hir.LoopArm):
         parts.append(f'loop:{type_to_dewy(node.type)};')
+    if isinstance(node, hir.SetAlgebra):
+        parts.append(f'algebra:{node.op};')
+    if isinstance(node, hir.StringEqual):
+        parts.append(f'string_equal:{str(node.negated).lower()};')
+    if isinstance(node, hir.StringConcat):
+        parts.append('concat;')
     if isinstance(node, hir.DictLookup):
         slot = 'none' if node.static_position is None else str(node.static_position)
         parts.append(f'lookup:{type_to_dewy(node.type)}:{str(node.proven).lower()}:{str(node.position is not None).lower()}:{slot};')
@@ -222,6 +246,9 @@ loop_summary = (id:addr session:contexts.Session):>string => {{
     let node=checking.node_at(id session)
     let parts:array<string>=[]
     if node is? hir.LoopArm {{ parts.push("loop:{{display.type_to_dewy(node.value_type session.types)}};") }}
+    if node is? hir.SetAlgebra {{ parts.push("algebra:{{node.op}};") }}
+    if node is? hir.StringEqual {{ parts.push("string_equal:{{node.negated}};") }}
+    if node is? hir.StringConcat {{ parts.push('concat;') }}
     if node is? hir.DictLookup {{
         let slot = if node.static_position is? none 'none' else "{{node.static_position}}"
         parts.push("lookup:{{display.type_to_dewy(node.value_type session.types)}}:{{node.proven}}:{{node.position isnt? none}}:{{slot}};")
@@ -276,5 +303,7 @@ main = ():>int64 => {{
     output.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=90, check=False)
+    (tmp_path / 'native-output.txt').write_text(result.stdout)
+    (tmp_path / 'expected-output.txt').write_text('\n'.join(expected + ['rejected'] * len(ERROR_CASES)) + '\n')
     assert result.returncode == 0, result.stderr
     assert list(zip(CASES + ERROR_CASES, result.stdout.splitlines(), strict=True)) == list(zip(CASES + ERROR_CASES, expected + ['rejected'] * len(ERROR_CASES), strict=True))
