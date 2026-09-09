@@ -3474,7 +3474,7 @@ def _length_bound_fact(
     *,
     ctx: Context,
 ) -> tuple[int, int] | None:
-    """A proven minimum length from `xs.length <op> k` (or `k <op> xs.length`)."""
+    """A minimum length from a comparison with a constant or another length."""
     if not (
         isinstance(condition, hir.FunctionCall)
         and isinstance(condition.func, hir.ExpressedIdentifier)
@@ -3492,17 +3492,13 @@ def _length_bound_fact(
 
     binding_id = length_binding(left)
     if binding_id is not None:
-        constant = _constant_integer(right, ctx=ctx)
-        if constant is None:
-            return None
+        other = right
         relation = name
     else:
         binding_id = length_binding(right)
         if binding_id is None:
             return None
-        constant = _constant_integer(left, ctx=ctx)
-        if constant is None:
-            return None
+        other = left
         # `k op len` mirrors to `len op' k`.
         relation = {
             '__gt__': '__lt__', '__lt__': '__gt__',
@@ -3515,12 +3511,23 @@ def _length_bound_fact(
             '__ge__': '__lt__', '__lt__': '__ge__',
             '__eq__': '__ne__', '__ne__': '__eq__',
         }[relation]
-    # relation now holds `len <relation> constant` as a true fact.
+    constant = _constant_integer(other, ctx=ctx)
+    exact = constant is not None
+    if constant is None:
+        if isinstance(other, hir.ArrayLength):
+            other_id = length_binding(other)
+            constant = ctx.length_bounds.get(other_id, 0) if other_id is not None else 0
+        elif isinstance(other, hir.StringLength):
+            constant = 0
+        else:
+            return None
+    # The other operand is at least `constant`. Equality and lower-bound
+    # comparisons transfer that minimum; inequality needs an exact zero.
     if relation == '__gt__':
         return binding_id, max(constant + 1, 0)
     if relation in {'__ge__', '__eq__'}:
         return binding_id, max(constant, 0)
-    if relation == '__ne__' and constant == 0:
+    if relation == '__ne__' and exact and constant == 0:
         return binding_id, 1
     return None
 

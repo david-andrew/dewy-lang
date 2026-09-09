@@ -81,6 +81,39 @@ forget = (@state:State term:Term):>void => {
     loop key in removed { if key in? state { state.pop(key); } }
 }
 
+# The caller records the new length separately. Both order and remainder
+# gaps describe `upper - subject`, with an unchanged scalar offset for a
+# remainder. The lower bound on that gap changes by the least possible
+# contribution of the sequence's length change.
+change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
+    let term = Term[sequence 'length']
+    let entries = state.values
+    loop entry in entries {
+        let fact = entry.fact
+        if fact is? Index and fact.sequence =? sequence {
+            if change.lower is? none or change.lower <? 0 {
+                if fact.key in? state { state.pop(fact.key); }
+            }
+            continue
+        }
+        let subject:Term? = none
+        let upper:Term? = none
+        if fact is? Order { subject = fact.smaller upper = fact.larger }
+        else if fact is? Remainder { subject = fact.subject upper = fact.upper }
+        if subject is? none or upper is? none continue
+        let subtract = same_term(subject term)
+        let add = same_term(upper term)
+        if subtract =? add continue  # absent from both, or cancels itself
+        let adjustment:bigint? = none
+        if add { adjustment = change.lower }
+        else if change.upper isnt? none { adjustment = -change.upper }
+        let lower = entry.interval.lower
+        if lower is? none or adjustment is? none {
+            if fact.key in? state { state.pop(fact.key); }
+        } else { put(@state fact ranges.Interval[lower+adjustment none]) }
+    }
+}
+
 vacuous = (state:State fact:Fact context:Context):>bool => {
     let subject:Term? = none
     if fact is? Remainder { subject = fact.subject }

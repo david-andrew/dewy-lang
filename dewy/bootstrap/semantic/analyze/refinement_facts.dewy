@@ -61,12 +61,13 @@ seed_field = (@state:facts.State root:addr p:propositions.Proposition base:addr 
     if p.op =? 'not=?' and p.value =? 0 { facts.put(@state facts.nonzero(subject) ranges.exact(1)) }
 }
 seed_term = (@state:facts.State subject:addr p:propositions.Proposition context:Context):>void => {
-    if p.term_id is? none or p.subject not=? 'self' return
+    if p.term_id is? none or (p.subject not=? 'self' and p.subject not=? 'length') return
+    let source = facts.Term[subject (if p.subject =? 'length' 'length' else 'value')]
     let target = facts.Term[p.term_id p.term_projection]
     loop bound in terms.directions(p.op) {
-        let key = if bound.direction =? 'upper' facts.order(facts.Term[subject] target) else facts.order(target facts.Term[subject])
+        let key = if bound.direction =? 'upper' facts.order(source target) else facts.order(target source)
         facts.put(@state key ranges.Interval[bound.gap none])
-        if bound.direction =? 'upper' and p.term_projection =? 'length' {
+        if bound.direction =? 'upper' and p.term_projection =? 'length' and p.subject =? 'self' {
             # A length-related bound also supplies the target's address-space
             # cap, so a guarded counter can be represented by a machine word.
             let capped = ranges.Interval[none context.env.cap-bound.gap true]

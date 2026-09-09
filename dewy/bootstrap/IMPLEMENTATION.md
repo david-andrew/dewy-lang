@@ -150,6 +150,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   as minima, including contracts on member routes. Assignments retain both
   endpoints for subsequent analysis. Guarded growth and shrinking are checked
   against the resulting length, not just against valid element indices.
+  Relative length contracts are seeded and validated too. A shared transfer
+  adjusts order and remainder gaps by the possible length change; shrinking
+  drops coarse index facts but can retain stronger order evidence. Unknown
+  replacement invalidates remainder subjects as well as their upper terms.
+  Runtime truncation counts require a nonnegative proof. Mutation obligations
+  without a supported `$prototype` check remain compile errors, not internal
+  assertions or unchecked operations.
 - Iterator recognition uses the existing ambiguity normalization before
   binding loop targets, including `loop x in make().values` and guarded
   forms. Logical conditions can share either operand; binding targets retain
@@ -182,8 +189,8 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The full suite passed with **1,783 passed, 10 skipped** after the refinement
-and affine-fact ports and the array length-contract fix. The 4,356-pair native
+The full suite passed with **1,790 passed, 10 skipped** after the relational
+length-transfer and dependent array-contract changes. The 4,356-pair native
 type-algebra comparison allows 90 seconds under parallel load (its executable
 takes about 24 seconds alone). Both native µDewy generations also match.
 The call-term comparison's table-driven harness retains all 361 cases while

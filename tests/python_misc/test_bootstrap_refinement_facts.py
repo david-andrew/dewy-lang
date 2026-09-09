@@ -40,6 +40,7 @@ def test_native_refinement_facts_match_hosted(tmp_path):
                                 p('.text', '>=?', 2, of='length'), p('.position', '>=?', 0, axiom='addr'))),
         ty.RefinedType('int64', (p('self', '=?', 0, term='value', term_id=2, term_of='value'),)),
         ty.addr_type(),
+        ty.RefinedType(ty.ArrayType('int64', None), (p('length', '<=?', 0, term='sequence', term_id=sequence.binding_id),)),
     ]
     references = [reference(f'v{i}', contract) for i, contract in enumerate(contracts)]
     fields = (ty.ObjectField('alphabet', ty.StringType(None), refinement=(p('length', '>=?', 2), p('length', '<=?', 255))),

@@ -51,6 +51,13 @@ named arrays, place parameters, and array fields. A guard such as
 checks the replacement and retains the declared length bounds for later
 operations.
 
+The bound can also name another array's length, for example
+`(limit:array<int64> @xs:array<int64 length <=? limit.length>)`. Growth then
+needs a guard such as `xs.length <? limit.length`. Shrinking preserves that
+upper-bound relationship. More precise index guards can also survive a
+removal: an index known to be below `xs.length - 1` remains in bounds after
+one `pop`. This describes bounds, not which element occupies the index.
+
 A result can relate an index to an array passed as a mutable place. The
 contract below is checked against the updated array at each return:
 

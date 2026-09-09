@@ -419,7 +419,11 @@ def prototype_check_condition(node: hir.AST, kind: str, *, simple, comparison, l
             return None
         return conjoin(parts)
     if kind == 'obligation':
-        assert isinstance(node, hir.Obligation)
+        # Mutation contracts are also obligations, but need a check on the
+        # operation's resulting state. Until that check can be built safely,
+        # retain the compile error instead of treating the call as a cast.
+        if not isinstance(node, hir.Obligation):
+            return None
         if not simple(node.value):
             return None
         parts = []
@@ -548,7 +552,7 @@ def _drop_index_facts(
         remainder = _decode_remainder_fact(key)
         if remainder is not None:
             subject, upper, offset = remainder
-            if (index_id is not None and index_id in (subject, upper, offset)) or (array_id is not None and _length_key(array_id) == upper):
+            if (index_id is not None and index_id in (subject, upper, offset)) or (array_id is not None and _length_key(array_id) in (subject, upper)):
                 del state[key]
             continue
         order = _decode_order_fact(key)
@@ -566,6 +570,36 @@ def _drop_index_facts(
             array_id is not None and fact_array == array_id
         ):
             del state[key]
+
+
+def _change_length_facts(state: State, array_id: int, change: Interval) -> None:
+    """Transform relations by the guaranteed change in a sequence's length.
+
+    In both an order and a remainder, the gap is `upper - subject` (minus
+    an unchanged offset for a remainder). Increasing the upper term raises
+    the gap; increasing the subject lowers it. A one-sided change retains
+    just the relations that remain justified. Index facts survive growth,
+    but shrinking requires a stronger order fact to prove an index remains.
+    The caller stores the new length interval separately.
+    """
+    term = _length_key(array_id)
+    for key, interval in list(state.items()):
+        remainder = _decode_remainder_fact(key)
+        order = _decode_order_fact(key)
+        pair = remainder[:2] if remainder is not None else order
+        if pair is not None:
+            coefficient = int(pair[1] == term) - int(pair[0] == term)
+            if not coefficient:
+                continue
+            adjustment = change.lower if coefficient == 1 else None if change.upper is None else -change.upper
+            if interval.lower is None or adjustment is None:
+                del state[key]
+            else:
+                state[key] = Interval(interval.lower + adjustment, None)
+        else:
+            index = _decode_index_fact(key)
+            if index is not None and index[1] == array_id and (change.lower is None or change.lower < 0):
+                del state[key]
 
 
 @dataclass
@@ -926,11 +960,14 @@ class _BoundsValidator:
         member = _member_invariant(node.func.array) if isinstance(node.func, hir.ArrayMethod) else ()
         propositions = (*(() if declared is None else declared.propositions), *member)
         required = _length_propositions_interval(propositions)
-        if required is None:
+        dependent = [p for p in propositions if p.subject == 'length' and p.term is not None]
+        if required is None and not dependent:
             return
-        missing_lower = required.lower is not None and (after.lower is None or after.lower < required.lower)
-        missing_upper = required.upper is not None and (after.upper is None or after.upper > required.upper)
-        if not missing_lower and not missing_upper:
+        missing_lower = required is not None and required.lower is not None and (after.lower is None or after.lower < required.lower)
+        missing_upper = required is not None and required.upper is not None and (after.upper is None or after.upper > required.upper)
+        assert isinstance(node.func, hir.ArrayMethod)
+        unproven = [p for p in dependent if self._proposition_verdict(p, node.func.array, None, state) is not True]
+        if not missing_lower and not missing_upper and not unproven:
             return
         method = node.func.name if isinstance(node.func, hir.ArrayMethod) else 'this'
         failures = []
@@ -938,6 +975,7 @@ class _BoundsValidator:
             failures.append(f'fewer than {required.lower} elements')
         if missing_upper:
             failures.append(f'more than {required.upper} elements')
+        failures.extend(f'a length that does not satisfy `{_describe_proposition_text_plain(p)}`' for p in unproven)
         contract = declared
         if contract is None:
             assert isinstance(node.func, hir.ArrayMethod)
@@ -1324,13 +1362,14 @@ class _BoundsValidator:
         later write somewhere in the function does not prevent using a
         fact before that write.
         """
-        if proposition.term_id is None or proposition.term_id < 0 or proposition.subject != 'self':
+        if proposition.term_id is None or proposition.term_id < 0 or proposition.subject not in {'self', 'length'}:
             return
+        subject = binding_id if proposition.subject == 'self' else _length_key(binding_id)
         bound = _length_key(proposition.term_id) if proposition.term_of == 'length' else proposition.term_id
         for direction, gap in {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}.get(proposition.op, []):
-            smaller, larger = (binding_id, bound) if direction == 'upper' else (bound, binding_id)
+            smaller, larger = (subject, bound) if direction == 'upper' else (bound, subject)
             state[_order_key(smaller, larger)] = Interval(gap, None)
-            if direction == 'upper' and proposition.term_of == 'length':
+            if direction == 'upper' and proposition.term_of == 'length' and proposition.subject == 'self':
                 # bounded by a length: below the address-space cap too, so `i + 1` fits a word
                 capped = Interval(None, self.max_length - gap, capped=True)
                 state[binding_id] = self._binding_interval(state, binding_id).intersect(capped)
@@ -2272,6 +2311,14 @@ class _BoundsValidator:
                         node, index_arg, index_interval, state, array_id, current,
                         allow_end=name == 'insert',
                     )
+                if validate and name == 'truncate' and (index_interval is None or index_interval.lower is None or index_interval.lower < 0):
+                    assert index_arg is not None
+                    self._proof_failure(node, 'obligation', Error(
+                        srcfile=self.srcfile,
+                        title='truncate length is not proven nonnegative',
+                        pointer_messages=[Pointer(span=index_arg.loc, message='the count may be negative')],
+                        hint='prove the count with a guard such as `if count >=? 0 { xs.truncate(count) }`',
+                    ))
                 if name in {'push', 'insert'}:
                     stored = node.pos_args[0] if node.pos_args else node.kw_args.get('value')
                     if stored is not None:
@@ -2280,22 +2327,13 @@ class _BoundsValidator:
                         _add(current.lower, 1),
                         _minimum_upper(_add(current.upper, 1), self.max_length),
                     )
-                    # The new length is exactly old_length + 1. In particular
-                    # an index saved as the old end is now strictly in bounds.
-                    # Update both orientations; retaining old_length >= i
-                    # unchanged would be unsound when the length is the lower
-                    # term of another relation (e.g. a saved upper limit).
-                    for fact_key, fact in list(state.items()):
-                        order = _decode_order_fact(fact_key)
-                        if order is not None and fact.lower is not None and key in order:
-                            change = (1 if order[1] == key else 0) - (1 if order[0] == key else 0)
-                            state[fact_key] = Interval(fact.lower + change, None)
+                    _change_length_facts(state, array_id, Interval.exact(1))
                 elif name == 'pop':
                     state[key] = Interval(
                         max(0, (current.lower or 0) - 1),
                         _subtract(current.upper, 1),
                     )
-                    _drop_index_facts(state, array_id=array_id)
+                    _change_length_facts(state, array_id, Interval.exact(-1))
                 elif name == 'truncate':
                     cap_lower = 0 if index_interval is None or index_interval.lower is None else max(index_interval.lower, 0)
                     cap_upper = None if index_interval is None else index_interval.upper
@@ -2303,10 +2341,13 @@ class _BoundsValidator:
                         min(current.lower or 0, cap_lower),
                         _minimum_upper(current.upper, cap_upper),
                     )
-                    _drop_index_facts(state, array_id=array_id)
+                    _change_length_facts(state, array_id, Interval(None, 0))
                 elif name == 'clear':
                     state[key] = Interval.exact(0)
-                    _drop_index_facts(state, array_id=array_id)
+                    _change_length_facts(state, array_id, Interval(
+                        None if current.upper is None else -current.upper,
+                        0 if current.lower is None else -current.lower,
+                    ))
                 if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
                     self._validate_length_invariant(node, array_id, state[key], state)
             return None
@@ -2319,6 +2360,7 @@ class _BoundsValidator:
                 self._store_element(state, capture_id, node.pos_args[1], node.loc)
                 length = state.get(_length_key(capture_id), self._length_default())
                 state[_length_key(capture_id)] = Interval(_add(length.lower, 1), _minimum_upper(_add(length.upper, 1), self.max_length))
+                _change_length_facts(state, capture_id, Interval.exact(1))
             return None
         if isinstance(node, hir.FunctionCall):
             self._eval(node.func, state, validate=validate)

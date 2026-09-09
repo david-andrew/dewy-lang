@@ -60,7 +60,14 @@ def test_native_fact_state_matches_hosted(tmp_path):
         {length(2): interval(0, 0), length(4): interval(0, 10)},
         {3: interval(0, 2), remainder(1, length(2), 3): interval(4, None)},
         {3: interval(-1, 4), remainder(1, length(2), 3): interval(2, None)},
+        {length(2): interval(3, 8), order(length(2), length(4)): interval(2, None),
+         order(length(4), length(2)): interval(-4, None),
+         remainder(length(2), length(4), 3): interval(1, None),
+         remainder(length(4), length(2), 3): interval(2, None),
+         order(length(2), length(2)): interval.exact(0),
+         bounds._index_fact_key(1, 2): interval(None, None), bounds._nonzero_key(3): interval.exact(1)},
     ]
+    changes = [interval.exact(1), interval.exact(-1), interval(0, 2), interval(None, 0), interval(-7, 0), interval(None, None)]
     lines = []
     for i, state in enumerate(states):
         lines.append(f'    let s{i}:facts.State = []')
@@ -84,6 +91,15 @@ def test_native_fact_state_matches_hosted(tmp_path):
         result.pop(3, None)
         bounds._drop_index_facts(result, index_id=3)
         expected.extend(f'{i}:forget|{fact(key)[1]}|{spelling(value)}' for key, value in result.items())
+        for j, change in enumerate(changes):
+            result = dict(left)
+            bounds._change_length_facts(result, 2, change)
+            expected.extend(f'{i}:{j}:length|{fact(key)[1]}|{spelling(value)}' for key, value in result.items())
+        result = dict(left)
+        result.pop(length(2), None)
+        bounds._drop_index_facts(result, array_id=2)
+        expected.extend(f'{i}:forget-length|{fact(key)[1]}|{spelling(value)}' for key, value in result.items())
+    changes_text = ' '.join(f'ranges.Interval[{"none" if c.lower is None else f"({c.lower})"} {"none" if c.upper is None else f"({c.upper})"}]' for c in changes)
     source = tmp_path / 'fact_state.dewy'
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/analyze/fact_state.dewy'}" as facts
@@ -99,6 +115,7 @@ emit = (prefix:string state:facts.State):>void => {{
 main = ():>int64 => {{
     let context = facts.Context[cap=1024 widths=[3 -> ranges.Interval[(-128) 127]] element_roots=[{element} -> 2]]
 {chr(10).join(lines)}
+    let changes:array<ranges.Interval> = [{changes_text}]
     loop i in 0.. and i <? states.length {{
         let left = states[i]
         loop j in 0.. and j <? states.length {{
@@ -108,6 +125,14 @@ main = ():>int64 => {{
             emit("{{i}}:{{j}}:widen" facts.widen(left right context))
         }}
         emit("{{i}}:shift" facts.shifted(left facts.Term[3] 1))
+        loop j in 0.. and j <? changes.length {{
+            let changed = left
+            facts.change_length(@changed 2 changes[j])
+            emit("{{i}}:{{j}}:length" changed)
+        }}
+        let lost_length = left
+        facts.forget(@lost_length facts.Term[2 'length'])
+        emit("{{i}}:forget-length" lost_length)
         facts.forget(@left facts.Term[3])
         emit("{{i}}:forget" left)
     }}

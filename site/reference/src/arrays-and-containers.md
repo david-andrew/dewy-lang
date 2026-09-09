@@ -31,6 +31,8 @@ Length-changing methods also preserve declared minimum and maximum lengths,
 including contracts on array fields. `xs.push(v)` must prove it stays below
 an annotated maximum, and `pop`, `truncate`, or `clear` must preserve an
 annotated minimum. See [array contracts](refinements-and-effects.md#array-contracts-and-dependent-indices).
+The count passed to `truncate` must be proven nonnegative, including when it
+is only known at runtime.
 
 Container mutation is reached only through the container value; free functions are reserved for genuinely global operations.
 
