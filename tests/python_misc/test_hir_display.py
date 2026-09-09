@@ -1,10 +1,45 @@
 """Tests for HIR tree repr and Dewy pretty-printer."""
 
-from dewy.reporting import Span
-from dewy.semantic import hir
-from dewy.semantic.hir_display import hir_to_dewy, hir_to_tree_str
+import pytest
+
+from dewy.reporting import Span, SrcFile
+from dewy.semantic import check, hir, ty
+from dewy.semantic.hir_display import hir_to_dewy, hir_to_tree_str, type_to_dewy
 
 LOC = Span(0, 0)
+
+
+@pytest.mark.parametrize('value', [
+    'quote"\u0301 slash\\\u0301 {\u0301missing}',
+    ''.join(map(chr, range(32))),
+    'é😀\r\n',
+])
+def test_literal_rendering_round_trips(value):
+    literal = hir_to_dewy(hir.String(LOC, 'string', value))
+    annotation = type_to_dewy(ty.StringLiteralType(value))
+    root = check.typecheck_and_resolve(SrcFile(None, f'let text:{annotation} = {literal}'))
+    declaration = next(item for item in root.items if isinstance(item, hir.Declare))
+    assert declaration.annotation == ty.StringLiteralType(value)
+    assert isinstance(declaration.expr, hir.String)
+    assert declaration.expr.content == value
+
+
+def test_interpolation_rendering_escapes_only_literal_parts():
+    prefix = 'literal {missing} "\0'
+    suffix = '"\\ end'
+    node = hir.InterpolatedString(LOC, 'string', [
+        hir.String(LOC, 'string', prefix),
+        hir.ExpressedIdentifier(LOC, 'int64', 'x'),
+        hir.String(LOC, 'string', suffix),
+    ])
+    source = f'let x:int64 = 42\nlet text = {hir_to_dewy(node)}'
+    root = check.typecheck_and_resolve(SrcFile(None, source))
+    declaration = next(item for item in root.items if isinstance(item, hir.Declare) and item.name == 'text')
+    assert isinstance(declaration.expr, hir.InterpolatedString)
+    assert declaration.expr.parts[0].content == prefix
+    assert declaration.expr.parts[-1].content == suffix
+    assert isinstance(declaration.expr.parts[1], hir.ExpressedIdentifier)
+    assert declaration.expr.parts[1].name == 'x'
 
 
 def _int(n: int, typ: str = 'int') -> hir.Integer:

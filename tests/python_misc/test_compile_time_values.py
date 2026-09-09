@@ -4,14 +4,13 @@ in a literal union at runtime; `chr` and `set"…"`/`set(values)`."""
 from pathlib import Path
 
 import pytest
+from test_cleanparse_udewy_e2e import x86_64_toolchain_available
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
 from dewy.semantic.errors import TypeCheckError, UserError
 from udewy.frontend import entry_point
-
-from test_cleanparse_udewy_e2e import x86_64_toolchain_available
 
 needs_toolchain = pytest.mark.skipif(not x86_64_toolchain_available(), reason='needs the x86_64 toolchain')
 PREFIX = "let BasePrefix:type = '0b' | '0t' | '0x'\n"
@@ -32,10 +31,10 @@ def _main_body(source: str) -> hir.Block:
 def test_a_type_value_is_its_spelling_where_a_value_is_needed() -> None:
     body = _main_body(PREFIX + 'let main = ():>int64 => {\n    let a = "{BasePrefix}"\n    let b:string = BasePrefix as string\n    return 0\n}\n')
     a, b = (item.expr for item in body.items if isinstance(item, hir.Declare))
-    assert isinstance(a, hir.InterpolatedString) and isinstance(a.parts[0], hir.String) and a.parts[0].content == "'0b' | '0t' | '0x'"
+    assert isinstance(a, hir.InterpolatedString) and isinstance(a.parts[0], hir.String) and a.parts[0].content == '"0b" | "0t" | "0x"'
     while isinstance(b, hir.RepresentationCast):
         b = b.expr   # the `let`'s annotation materializes the literal
-    assert isinstance(b, hir.String) and b.content == "'0b' | '0t' | '0x'"
+    assert isinstance(b, hir.String) and b.content == '"0b" | "0t" | "0x"'
     emitted = _compile(PREFIX + 'let main = ():>int64 => { printl(BasePrefix)  return 0 }\n')
     assert 'print__string' in emitted   # the generic's value parameter received the spelling
 
@@ -103,7 +102,7 @@ def test_materialized_values_print(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert entry_point(udewy_path, []) == 0
     out, _ = capfd.readouterr()
     assert out.splitlines() == [
-        "'0b' | '0t' | '0x'",
+        '"0b" | "0t" | "0x"',
         '<(a:int64):>int64>',
         'prefix',
         'zz not',

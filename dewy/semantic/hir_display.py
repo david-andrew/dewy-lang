@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -11,6 +12,13 @@ from . import builtins, hir, ty
 # ---------------------------------------------------------------------------
 # type → Dewy
 # ---------------------------------------------------------------------------
+
+def string_to_dewy(value: str) -> str:
+    """A quoted source literal: Python repr permits unsupported byte escapes
+    and leaves interpolation openers active. JSON supplies compatible Unicode
+    escapes; Dewy's additional opener must also be escaped."""
+    return json.dumps(value, ensure_ascii=False).replace('{', r'\{')
+
 
 def type_to_dewy(t: ty.Type) -> str:
     """Render a type as Dewy source syntax."""
@@ -27,11 +35,11 @@ def type_to_dewy(t: ty.Type) -> str:
     if isinstance(t, ty.IntegerLiteralType):
         return str(t.value)
     if isinstance(t, ty.StringLiteralType):
-        return repr(t.value)
+        return string_to_dewy(t.value)
     if isinstance(t, ty.BinaryLiteralType):
         return f'0x"{t.value.hex()}"'
     if isinstance(t, ty.PathLiteralType):
-        return f'p{t.value!r}'
+        return f'p{string_to_dewy(t.value)}'
     if isinstance(t, ty.PathType):
         return 'Path'
     if isinstance(t, ty.MetaType):
@@ -769,12 +777,12 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
     if isinstance(node, hir.Bool):
         return _text('true' if node.value else 'false')
     if isinstance(node, hir.String):
-        return _text(repr(node.content))
+        return _text(string_to_dewy(node.content))
     if isinstance(node, hir.InterpolatedString):
         parts: list[Doc] = [_text('"')]
         for part in node.parts:
             if isinstance(part, hir.String):
-                parts.append(_text(repr(part.content)[1:-1]))
+                parts.append(_text(string_to_dewy(part.content)[1:-1]))
             else:
                 parts.extend([
                     _text('{'),

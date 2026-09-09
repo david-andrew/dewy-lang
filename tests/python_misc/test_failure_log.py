@@ -32,7 +32,7 @@ def test_failed_compile_is_recorded_with_every_source_it_read(tmp_path: Path) ->
     text = records[0].read_text()
     assert text.startswith('# compile failure: bad.dewy')
     assert '- command: `dewy bad.dewy`' in text
-    assert "expected `int`, got `'nope'`" in text and '\x1b[' not in text
+    assert 'expected `int`, got `"nope"`' in text and '\x1b[' not in text
     assert f'### {(tmp_path / "bad.dewy").resolve()}' in text and "x:int = 'nope'" in text
     assert f'### {(tmp_path / "helper.dewy").resolve()}' in text and 'helper_value = 42' in text
     assert 'library/linux/system.dewy' not in text.split('### library')[0]   # library files are listed, never inlined
