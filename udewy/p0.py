@@ -613,7 +613,10 @@ def matching_right_paren_idx(toks: list[t1.Token], idx: int) -> int:
     scan = idx + 1
     while scan < len(toks):
         kind = toks[scan].kind
-        if kind == t1.Kind.TK_LEFT_PAREN:
+        # Call tokens consume their opening parenthesis too. Ignoring them
+        # mistakes a call's close for the condition group's close, and can
+        # turn a guarded dereference into an eager bitwise expression.
+        if kind in (t1.Kind.TK_LEFT_PAREN, t1.Kind.TK_IDENT_CALL, t1.Kind.TK_EXPR_CALL):
             depth = depth + 1
         elif kind == t1.Kind.TK_RIGHT_PAREN:
             depth = depth - 1

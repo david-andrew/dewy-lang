@@ -958,7 +958,8 @@ let matching_right_paren_idx = (state:int idx:int):>int => {
     let n:int = tok_count(state)
     loop scan <? n {
         let k:int = tok_kind(state scan)
-        if k =? TK_LEFT_PAREN { depth = depth + 1 }
+        # Named and indirect call tokens include their opening parenthesis.
+        if (k =? TK_LEFT_PAREN) or (k =? TK_IDENT_CALL) or (k =? TK_EXPR_CALL) { depth = depth + 1 }
         else if k =? TK_RIGHT_PAREN {
             depth = depth - 1
             if depth =? 0 { return scan }

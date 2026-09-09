@@ -341,3 +341,30 @@ def test_x86_64_debug_information_matches_between_compilers(bootstrap_binary, tm
     for expected in ('.section .debug_info', '.string "apples"', '.string "__fmt_a"', '.string "int | none"', '.string "i"', '    int', '"awR",@progbits', '.loc  '):   # (digits blanked)
         assert expected in joined
     assert '.string "tmp"' not in joined and '.string "b"' not in joined
+
+
+def test_grouped_conditions_count_call_parentheses(bootstrap_binary, tmp_path) -> None:
+    """Calls inside a boolean group must not make its guarded side eager.
+
+    Also keep bitwise semantics when the whole group is used as a value in
+    a comparison: both cases rely on finding the group's actual close.
+    """
+    source = '''
+let read = (p:int):>int => { return __load__(p) }
+let main = ():>int => {
+    let memory:int = __alloca__(8)
+    __store__(0 memory)
+    let fn:int = @read
+    if (__load__(memory) =? 1 and __load__(0) =? 0) and true { return 1 }
+    if ((@fn)(memory) =? 1 and __load__(0) =? 0) and true { return 2 }
+    if (__load__(memory) =? 0 or __load__(0) =? 0) and false { return 3 }
+    if (__load__(memory) or 2) =? 2 { return 0 }
+    return 4
+}
+'''
+    for label, command in [('hosted', ['python', '-m', 'udewy']), ('native', [str(bootstrap_binary)])]:
+        work = tmp_path / label
+        work.mkdir()
+        binary = _compile_with(command, source, 'x86_64', work)
+        result = subprocess.run([str(binary)], capture_output=True, timeout=30, check=False)
+        assert result.returncode == 0, (label, result.stderr)
