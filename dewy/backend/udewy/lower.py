@@ -4335,7 +4335,10 @@ class _Lowerer(
                 return [], word
             payload = self.optional_payloads.get(node.binding_id)
             if payload is not None:
-                cell = replace(node, type='int64')
+                # This identifier is now a physical cell address. Retaining
+                # the semantic binding id would make a later lowering walk
+                # interpret it as another narrowed read of that same cell.
+                cell = replace(node, type='int64', binding_id=None)
                 if ty.optional_payload(node.type) is not None:
                     return [], cell
                 loaded = self._optional_load_payload(cell, payload, node.loc)
@@ -4348,7 +4351,7 @@ class _Lowerer(
                 return [], loaded
             members = self.union_cells.get(node.binding_id)
             if members is not None:
-                cell = replace(node, type='int64')
+                cell = replace(node, type='int64', binding_id=None)
                 if ty.runtime_union_members(node.type) is not None or ty.optional_payload(node.type) is not None:
                     # Full or subset union view: tags are physical (the
                     # storage union's numbering), so the cell passes through
