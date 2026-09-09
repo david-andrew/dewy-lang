@@ -60,6 +60,13 @@ retain defaults, methods, and resolved proof bindings; structural equality
 compares their separate shape keys. A recursive alias has a stable identity
 and a target filled in after its declaration resolves.
 
+The source type visitor resolves forward and generic aliases, recursive
+record references, immutable field invariants, function result facts, and
+record composition/minting. Deferred defaults and methods retain both their
+source arena and defining lexical scope. Native source tests compare the
+resolved types with the hosted checker and exercise invalid declarations.
+This is one part of semantic checking, not yet the complete native compiler.
+
 Minted families are also compilation-owned. The brand registry assigns
 preorder intervals after registration, so a runtime test of a parent covers
 all its descendants without tying runtime tags to source binding ids.

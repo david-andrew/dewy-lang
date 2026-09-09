@@ -1,0 +1,70 @@
+from reporting import SrcFile, Error, Pointer
+import p"../targets.dewy" as targets
+import p"../parser/t1.dewy" as tokens
+import p"ty.dewy" as types
+import p"hir.dewy" as hir
+import p"bindings.dewy" as bindings
+import p"brands.dewy" as brands
+import p"subtyping.dewy" as subtyping
+import p"builtins.dewy" as builtins
+
+doc"""
+Compilation-owned arenas and the lexical context of a semantic visit.
+
+A source module keeps its own parser arena. Defaults and pending bodies
+cross module boundaries by an interned SyntaxRef, not by an index borrowed
+from whichever source is currently being checked. HIR and type identities
+belong to the entire compilation. A Context is cheap to copy for a nested
+scope; all allocations explicitly update the Session place.
+"""
+
+Source:type = const [srcfile:SrcFile nodes:array<tokens.Token>]
+SyntaxRef:type = const [source:addr node:addr scope:addr]
+Context:type = const [source:addr scope:addr refinement_subject:string?=none immutable_record:bool=false]
+PendingAlias:type = const [expression:SyntaxRef]
+Session:type = [
+    target:targets.Target=$target
+    sources:array<Source>=[]
+    syntax_refs:array<SyntaxRef>=[]
+    types:array<types.Type>=[]
+    hir:array<hir.AST>=[]
+    registry:bindings.Registry=bindings.Registry[]
+    scopes:array<bindings.Scope>=[]
+    brands:brands.Registry=brands.Registry[]
+    links:array<subtyping.Link>=subtyping.default_links
+    builtin_aliases:dict<string addr>=[]
+    pending_aliases:dict<addr PendingAlias>=[]
+    resolving_aliases:set<addr>=set[]
+    named_refs:dict<addr addr>=[]
+]
+source_at = (context:Context session:Session):>Source => {
+    $runtime_assert context.source <? session.sources.length
+    return session.sources[context.source]
+}
+node_at = (id:addr context:Context session:Session):>tokens.Token => tokens.node_at(source_at(context session).nodes id)
+syntax_ref = (id:addr context:Context @session:Session):>addr => {
+    loop i in 0.. and i <? session.syntax_refs.length {
+        let reference = session.syntax_refs[i]
+        if reference.source =? context.source and reference.node =? id and reference.scope =? context.scope return i
+    }
+    let reference = session.syntax_refs.length
+    session.syntax_refs.push(SyntaxRef[context.source id context.scope])
+    return reference
+}
+problem = (id:addr title:string message:string context:Context session:Session hint:string=''):>Error => {
+    let source = source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    return Error[srcfile=source.srcfile title=title pointers=[Pointer[span=node.loc message=message]] hint=hint]
+}
+unsupported = (id:addr detail:string context:Context session:Session):>Error => problem(id 'native checker implementation pending' detail context session)
+child = (context:Context @session:Session):>Context => {
+    let scope = bindings.push_scope(@session.scopes context.scope)
+    return Context[context.source scope context.refinement_subject context.immutable_record]
+}
+begin = (srcfile:SrcFile nodes:array<tokens.Token> @session:Session):>Context => {
+    let source = session.sources.length
+    session.sources.push(Source[srcfile nodes])
+    let scope = bindings.push_scope(@session.scopes none)
+    if session.builtin_aliases.length =? 0 { session.builtin_aliases = builtins.type_aliases(@session.types) }
+    return Context[source scope]
+}

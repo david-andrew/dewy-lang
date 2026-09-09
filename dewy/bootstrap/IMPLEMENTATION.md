@@ -25,6 +25,26 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- `semantic/context.dewy` owns source modules, syntax references, lexical
+  scopes, types, HIR, and mint registries for one compilation. Deferred
+  defaults and methods retain their defining source and scope.
+- `semantic/type_check.dewy` now visits parsed source types: primitive and
+  literal types, containers, immutable records, field contracts, function
+  signatures and boolean/void result facts, generic/forward/recursive aliases,
+  structural record intersections, and named object/error mints. Record
+  composition shares its field replacement rule in `record_types.dewy`.
+  Method bodies remain source references for later expression checking.
+  Native source comparisons cover successful forms and rejection of invalid
+  contracts, aliases, fields, and mints. Arbitrary default inference, module
+  type imports, numeric library representation roles, and protocol method
+  slot synthesis still require the full expression/module checker.
+- Supporting hosted fixes preserve lexical record-default scopes through
+  imports and generic syntax copies; keep nested place stores alive beyond
+  the storing frame; distinguish lowered physical cell addresses from semantic
+  narrowed bindings; and allocate optional cells for contextual flow arguments.
+  Early prelude generics can use numeric helpers installed later in the same
+  compilation. Function type signatures use the same fact-only result rule
+  as function literals.
 - Hosted big-integer calls retain their mathematical operator in HIR, so
   range guards and arithmetic evidence survive library lowering. Proven
   `bigint` values now cross fixed-width boundaries (implicit or `as`) through
@@ -52,8 +72,8 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   hierarchy as atoms. `semantic/type_aliases.dewy` checks application arity
   and parameter bounds in order, then substitutes the body; its comparison
   covers dependent bounds and shadowing by nested callable type parameters.
-  The full checker still needs to resolve source alias declarations and
-  route source applications into this entry point.
+  The source type visitor now resolves alias declarations and routes their
+  applications into this entry point.
   The supporting hosted union check preserves predicates already carried by
   a member when alternatives are added, while still requiring missing facts
   and retaining resolved identities of dependent terms.

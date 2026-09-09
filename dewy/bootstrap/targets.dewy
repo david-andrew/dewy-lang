@@ -1,0 +1,24 @@
+doc"""
+Targets currently shared with µDewy. A target's address width is an axiom
+used by bounds analysis, not the width of every integer representation.
+
+The fuller triples (OS, freestanding environment, and ABI) sketched in the
+hosted targets.py are still pending. They must not silently acquire support
+just because a CPU name has a backend. GPU and interpreter targets remain
+design questions; C here means the existing 64-bit-host C backend.
+"""
+
+Target:type = 'x86_64' | 'arm' | 'riscv' | 'c' | 'wasm32'
+const address_bits:totaldict<Target uint8> = [
+    'x86_64' -> 48  # 4-level virtual-address paging
+    'arm' -> 48     # AArch64 with 4 KiB pages
+    'riscv' -> 48   # Sv48
+    'c' -> 48
+    'wasm32' -> 32  # linear memory
+]
+max_length = (target:Target):>uint64<n => n <=? 281474976710655> => {
+    # Both supported address spaces fit in a word. The result contract lets
+    # callers prove a mathematical integer fits before materializing it.
+    if target =? 'wasm32' return 4294967295
+    return 281474976710655
+}

@@ -67,7 +67,8 @@ CallableType:type = FunctionType | OverloadType
 
 ObjectField:type = const [
     name:string value_type:addr mutable:bool=true
-    # Parser-arena id; evaluated only when a constructor needs this default.
+    # Compilation SyntaxRef id, retaining source and lexical scope; evaluated
+    # only when a constructor needs this default.
     default:addr?=none
     # Field invariants are proved on construction/store and assumed on read.
     refinement:array<facts.Proposition>=[]

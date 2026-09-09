@@ -1,0 +1,71 @@
+from reporting import Error
+import p"context.dewy" as contexts
+import p"ty.dewy" as types
+import p"subtyping.dewy" as subtyping
+import p"type_display.dewy" as display
+
+doc"""
+Record composition preserves layout order. An explicit repeated field must
+strengthen the previous type; nominal inheritance may instead replace only
+a default, preserving the inherited storage contract and mutability.
+
+The source visitor owns name resolution and minting. This module combines
+already resolved descriptions, and never invents an identity for `&`.
+"""
+
+merge = (@fields:array<types.ObjectField> additions:array<types.ObjectField> default_only:set<string> id:addr context:contexts.Context @session:contexts.Session owner:string?=none):>Error? => {
+    loop field in additions {
+        let position:addr? = none
+        loop i in 0.. and i <? fields.length { if fields[i].name =? field.name { position = i break } }
+        if position is? none { fields.push(field) continue }
+        $runtime_assert position <? fields.length
+        let previous = fields[position]
+        if not subtyping.is_subtype(field.value_type previous.value_type session.links @session.types) {
+            let title = if owner is? none 'intersection weakens a field' else "minted type `{owner}` weakens field `{field.name}`"
+            return contexts.problem(id title "`{display.type_to_dewy(field.value_type session.types)}` does not fit the earlier `{display.type_to_dewy(previous.value_type session.types)}`" context session)
+        }
+        if field.name in? default_only and field.default isnt? none {
+            fields[position] = types.ObjectField[previous.name previous.value_type previous.mutable field.default previous.refinement]
+        } else { fields[position] = field }
+    }
+    return none
+}
+flatten = (id:addr nodes:array<types.Type>):>array<addr> => {
+    let node = types.node_at(nodes types.unfold(id nodes))
+    if node isnt? types.TypeAnd return [id]
+    let result:array<addr> = []
+    loop item in node.items {
+        let nested = flatten(item nodes)
+        loop member in nested { result.push(member) }
+    }
+    return result
+}
+intersect = (left:addr right:addr id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let operands = flatten(left session.types)
+    let other = flatten(right session.types)
+    loop item in other { operands.push(item) }
+    let brand:string? = none
+    let minted = false
+    let parent:addr? = none
+    let abstract = false
+    loop item in operands {
+        let node = types.node_at(session.types types.unfold(item session.types))
+        if node isnt? types.ObjectType return types.intersect([left right] @session.types)
+        if node.brand isnt? none {
+            if brand isnt? none or not node.minted return types.intersect([left right] @session.types)
+            brand = node.brand minted = node.minted parent = node.parent abstract = node.abstract
+        }
+    }
+    let fields:array<types.ObjectField> = []
+    let methods:array<types.MethodSpec> = []
+    let immutable = false
+    loop item in operands {
+        let node = types.node_at(session.types types.unfold(item session.types))
+        $runtime_assert node is? types.ObjectType
+        let error = merge(@fields node.fields set[] id context @session)
+        if error isnt? none return error
+        loop method in node.methods { methods.push(method) }
+        immutable = immutable or node.immutable
+    }
+    return types.object_type(fields brand immutable methods [] @session.types minted=minted parent=parent abstract=abstract)
+}

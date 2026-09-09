@@ -1,0 +1,100 @@
+import p"../parser/p0.dewy" as parser
+import p"../parser/t0.dewy" as raw
+import p"../parser/t1.dewy" as tokens
+import p"../parser/t2.dewy" as post
+
+doc"""
+Read semantic shapes from the parser arena without changing parser nodes.
+
+Operators and atoms retain their lexical token descriptions. Semantic
+visitors use these views instead of repeating the AST/token unwrapping at
+every call site. An unrecognized shape is absent, never an invented name.
+"""
+
+identifier = (id:addr nodes:array<tokens.Token>):>string? => {
+    let node = tokens.node_at(nodes id)
+    if node isnt? parser.Atom return none
+    let item = tokens.node_at(nodes node.item)
+    return if item is? tokens.Identifier item.name else none
+}
+symbol = (id:addr nodes:array<tokens.Token>):>string => {
+    let node = tokens.node_at(nodes id)
+    if node is? tokens.Operator return node.symbol
+    if node is? post.CombinedAssignment return "{symbol(node.op nodes)}="
+    if node is? post.InvertedComparison {
+        if node.symbol =? '=?' return 'not=?'
+        if node.symbol =? '<?' return '>=?'
+        if node.symbol =? '>?' return '<=?'
+        if node.symbol =? '<=?' return '>?'
+        if node.symbol =? '>=?' return '<?'
+        return "not {node.symbol}"
+    }
+    return parser.operator_label(node nodes)
+}
+is_operator = (id:addr name:string nodes:array<tokens.Token>):>bool => symbol(id nodes) =? name
+unparen = (id:addr nodes:array<tokens.Token>):>addr => {
+    let current = id
+    loop true {
+        let node = tokens.node_at(nodes current)
+        if node isnt? parser.Block or node.delims not=? '()' or node.inner.length not=? 1 return current
+        current = node.inner[0]
+    }
+}
+
+# The lexer has already established membership in the chosen alphabet.
+# Keep the arithmetic arbitrary precision, including balanced ternary's T.
+integer_value = (text:string base:raw.BasePrefix):>bigint => {
+    let spec = raw.BASE_SPECS[base]
+    let input = if text.length >=? 2 and text.startswith(base) text[2..] else text
+    let value:bigint = 0
+    loop character in input {
+        if character =? '_' and '_' not in? spec.extra_chars and not spec.alphabet.contains('_') continue
+        if character in? spec.extra_chars {
+            let digit = spec.extra_chars[character]
+            if digit isnt? none { value = value * spec.radix + digit }
+            continue
+        }
+        let found = false
+        loop index in 0.. and index <? spec.alphabet.length {
+            let digit = spec.alphabet[index]
+            if character =? digit or (not spec.case_sensitive and character.casefold =? digit.casefold) {
+                value = value * spec.radix + index
+                found = true
+                break
+            }
+        }
+        $runtime_assert found
+    }
+    return value
+}
+integer = (id:addr nodes:array<tokens.Token>):>bigint? => {
+    let node = tokens.node_at(nodes unparen(id nodes))
+    if node is? parser.Atom {
+        let item = tokens.node_at(nodes node.item)
+        if item is? tokens.Integer return integer_value(raw.token_text(item.value) item.value.prefix)
+    }
+    if node is? parser.Prefix and is_operator(node.op '-' nodes) {
+        let inner = integer(node.item nodes)
+        if inner isnt? none return -inner
+    }
+    return none
+}
+
+intersection_operands = (id:addr nodes:array<tokens.Token>):>array<addr> => {
+    let node = tokens.node_at(nodes id)
+    if node isnt? parser.BinOp or not is_operator(node.op '&' nodes) return [id]
+    let result = intersection_operands(node.left nodes)
+    let right = intersection_operands(node.right nodes)
+    loop item in right { result.push(item) }
+    return result
+}
+is_mint = (id:addr nodes:array<tokens.Token>):>bool => {
+    let node = tokens.node_at(nodes id)
+    if node is? parser.Directive and node.name =? 'abstract' and node.condition isnt? none return is_mint(node.condition nodes)
+    let operands = intersection_operands(id nodes)
+    loop operand in operands {
+        let item = tokens.node_at(nodes operand)
+        if item is? parser.Prefix and is_operator(item.op 'type of' nodes) return true
+    }
+    return false
+}

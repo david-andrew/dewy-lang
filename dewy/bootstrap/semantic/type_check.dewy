@@ -1,0 +1,897 @@
+from reporting import Error
+import p"../targets.dewy" as targets
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"context.dewy" as contexts
+import p"syntax.dewy" as syntax
+import p"ty.dewy" as types
+import p"record_types.dewy" as records
+import p"brands.dewy" as brands
+import p"bindings.dewy" as bindings
+import p"propositions.dewy" as facts
+import p"type_queries.dewy" as views
+import p"type_display.dewy" as display
+import p"subtyping.dewy" as subtyping
+import p"type_aliases.dewy" as aliases
+
+doc"""
+Resolve source type expressions into the compilation's type arena.
+
+Fields retain their defaults as source references, and their invariants
+beside the storage type. Reading a declaration does not evaluate a default
+or grant its predicate to an arbitrary value. The value checker proves
+those obligations at construction and assignment sites.
+
+The expression visitor and this visitor share lexical binding identities.
+In particular a name missing from scope is an error, not a new nominal type.
+Only an alias declaration containing `type of` may mint a fresh identity.
+"""
+
+refine = (base:addr propositions:array<facts.Proposition> @session:contexts.Session):>addr => {
+    if propositions.length =? 0 return base
+    let node = types.node_at(session.types base)
+    let all:array<facts.Proposition> = []
+    let plain = base
+    if node is? types.RefinedType { all = node.propositions plain = node.base }
+    loop p in propositions { if not views.has_proposition(all p) { all.push(p) } }
+    return types.refined_type(plain all @session.types)
+}
+word_element = (id:addr @session:contexts.Session):>addr => {
+    let node = types.node_at(session.types id)
+    if types.is_primitive(node 'int') return types.primitive('int64' @session.types)
+    if types.is_primitive(node 'uint') return types.primitive('uint64' @session.types)
+    return id
+}
+lookup = (name:string context:contexts.Context session:contexts.Session):>addr? => bindings.lookup(session.scopes context.scope name)
+resolve_name = (name:string id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let binding_id = lookup(name context session)
+    if binding_id isnt? none {
+        let binding = bindings.binding_at(session.registry binding_id)
+        let value = binding.type_value
+        if value is? none and binding_id in? session.pending_aliases {
+            let resolved = resolve_alias(binding_id @session)
+            if resolved is? Error return resolved
+            value = resolved
+        }
+        if value is? types.GenericTypeAlias return contexts.problem(id 'generic type alias requires arguments' "use `{name}<...>`" context session)
+        if value is? addr return value
+        return contexts.problem(id "`{name}` does not name a type" 'this binding has a runtime value' context session)
+    }
+    let alias = session.builtin_aliases.get(name)
+    if alias isnt? none return alias
+    if name in? views.nat_bases {
+        return refine(types.primitive(views.nat_bases[name] @session.types) [facts.Proposition['self' '>=?' 0]] @session)
+    }
+    if name =? 'addr' {
+        return refine(types.primitive('int64' @session.types) [facts.Proposition['self' '>=?' 0] facts.Proposition['self' '<?' 0 axiom='addr']] @session)
+    }
+    if name in? ['any' 'void' 'untyped' 'noreturn'] return types.primitive(name @session.types)
+    loop link in session.links {
+        if name =? link.child or name =? link.parent return types.primitive(name @session.types)
+    }
+    return contexts.problem(id "undefined type `{name}`" 'no type of this name is in scope' context session)
+}
+
+# A literal bound also admits a fixed-width min/max and a boolean (1/0).
+literal_bound = (id:addr context:contexts.Context @session:contexts.Session):>bigint? => {
+    let source = contexts.source_at(context session)
+    let literal = syntax.integer(id source.nodes)
+    if literal isnt? none return literal
+    let node = tokens.node_at(source.nodes id)
+    if node is? parser.Atom {
+        let atom = tokens.node_at(source.nodes node.item)
+        if atom is? tokens.Bool return if atom.value 1 else 0
+    }
+    if node is? parser.BinOp and syntax.is_operator(node.op '.' source.nodes) {
+        let owner = syntax.identifier(node.left source.nodes)
+        let member = syntax.identifier(node.right source.nodes)
+        if owner isnt? none and member isnt? none and (member =? 'min' or member =? 'max') {
+            let bounds = views.fixed_integer_bounds(types.primitive(owner @session.types) session.types)
+            if bounds isnt? none return if member =? 'min' bounds.minimum else bounds.maximum
+        }
+    }
+    return none
+}
+Subject:type = const [name:string projection:facts.Projection='value']
+subject_of = (id:addr name:string subject:string fields:bool nodes:array<tokens.Token>):>Subject? => {
+    let direct = syntax.identifier(id nodes)
+    if direct isnt? none {
+        if direct =? name return Subject[subject]
+        if fields and direct not=? 'length' return Subject[".{direct}"]
+        return none
+    }
+    let node = tokens.node_at(nodes id)
+    if node is? parser.BinOp and syntax.is_operator(node.op '.' nodes) {
+        let owner = syntax.identifier(node.left nodes)
+        let member = syntax.identifier(node.right nodes)
+        if owner is? none or member is? none return none
+        if owner =? name return Subject[if member =? 'length' 'length' else ".{member}"]
+        if fields and member =? 'length' return Subject[".{owner}" 'length']
+    }
+    return none
+}
+comparison = (left:addr right:addr op:facts.Operator name:string subject:string fields:bool context:contexts.Context @session:contexts.Session):>facts.Proposition|none|Error => {
+    let source = contexts.source_at(context session)
+    let target = subject_of(left name subject fields source.nodes)
+    let bound = right
+    let operator = op
+    if target is? none {
+        target = subject_of(right name subject fields source.nodes)
+        bound = left
+        if op =? '<?' { operator = '>?' }
+        else if op =? '>?' { operator = '<?' }
+        else if op =? '<=?' { operator = '>=?' }
+        else if op =? '>=?' { operator = '<=?' }
+    }
+    if target is? none return none
+    let literal = literal_bound(bound context @session)
+    if literal isnt? none return facts.Proposition[target.name operator literal projection=target.projection]
+    let term = syntax.identifier(bound source.nodes)
+    let bound_projection:facts.Projection = 'value'
+    let node = tokens.node_at(source.nodes bound)
+    if node is? parser.BinOp and syntax.is_operator(node.op '.' source.nodes) and syntax.identifier(node.right source.nodes) =? 'length' {
+        term = syntax.identifier(node.left source.nodes)
+        bound_projection = 'length'
+    }
+    if term isnt? none and term not=? name and term not=? 'length' {
+        if operator =? 'not=?' return contexts.unsupported(bound 'a dependent term in an inequality (`not=?`)' context session)
+        return facts.Proposition[target.name operator projection=target.projection term=term term_projection=bound_projection]
+    }
+    return contexts.unsupported(bound 'refinement conditions beyond integer literals, fixed-width min/max, and named value/length terms' context session)
+}
+
+# Conjunctions and chains are expanded while retaining the same subject.
+# A chain has one direction; equality may occur between its ordered links.
+conditions = (id:addr context:contexts.Context @session:contexts.Session name:string?=none):>array<facts.Proposition>|none|Error => {
+    let source = contexts.source_at(context session)
+    let current = syntax.unparen(id source.nodes)
+    let node = tokens.node_at(source.nodes current)
+    if node isnt? parser.BinOp return none
+    let op = syntax.symbol(node.op source.nodes)
+    if op =? '=>' {
+        let parameter = syntax.identifier(node.left source.nodes)
+        if parameter is? none return none
+        let result = conditions(node.right context @session name=parameter)
+        return if result is? none contexts.unsupported(node.right 'this refinement proposition' context session) else result
+    }
+    if op =? 'and' {
+        let left = conditions(node.left context @session name=name)
+        if left is? Error return left
+        let right = conditions(node.right context @session name=name)
+        if right is? Error return right
+        if left is? none or right is? none return none
+        loop p in right { left.push(p) }
+        return left
+    }
+    if op is? facts.Operator and op not=? 'is?' and op not=? 'isnt?' {
+        # Flatten the left-associated parser tree into adjacent comparisons.
+        let preceding = tokens.node_at(source.nodes node.left)
+        if preceding is? parser.BinOp {
+            let previous = syntax.symbol(preceding.op source.nodes)
+            if previous is? facts.Operator {
+                if op =? 'not=?' or previous =? 'not=?' return contexts.problem(node.op 'comparison does not chain' "`{op}` cannot be part of a comparison chain" context session hint='combine the conditions with `and`')
+                let rising = false
+                let falling = false
+                let cursor:tokens.Token = node
+                loop cursor is? parser.BinOp {
+                    let link = syntax.symbol(cursor.op source.nodes)
+                    if link isnt? facts.Operator break
+                    if link =? '<?' or link =? '<=?' { rising = true }
+                    if link =? '>?' or link =? '>=?' { falling = true }
+                    if rising and falling return contexts.problem(node.op 'comparison chain changes direction' 'a chain must read one way, including across equality links' context session)
+                    cursor = tokens.node_at(source.nodes cursor.left)
+                }
+                let first = conditions(node.left context @session name=name)
+                if first is? Error return first
+                if first is? none return none
+                let last = single_comparison(preceding.right node.right op context @session name=name)
+                if last is? Error return last
+                if last is? none return none
+                first.push(last)
+                return first
+            }
+        }
+        let result = single_comparison(node.left node.right op context @session name=name)
+        if result is? Error return result
+        return if result is? none none else [result]
+    }
+    if op is? 'is?' | 'isnt?' {
+        let subject = syntax.identifier(node.left source.nodes)
+        if subject is? none return contexts.unsupported(node.left 'a type fact about anything but a name' context session)
+        let tested = resolve(node.right context @session)
+        if tested is? Error return tested
+        let target = if subject =? context.refinement_subject 'self' else ".{subject}"
+        return [facts.Proposition[target op tested_type=tested]]
+    }
+    return none
+}
+single_comparison = (left:addr right:addr op:facts.Operator context:contexts.Context @session:contexts.Session name:string?=none):>facts.Proposition|none|Error => {
+    if name isnt? none return comparison(left right op name 'self' false context @session)
+    let result = comparison(left right op 'length' 'length' false context @session)
+    if result isnt? none return result
+    if context.refinement_subject isnt? none {
+        result = comparison(left right op context.refinement_subject 'self' false context @session)
+        if result isnt? none return result
+    }
+    return comparison(left right op '' 'self' true context @session)
+}
+
+bind_subjects = (base:addr propositions:array<facts.Proposition> id:addr context:contexts.Context @session:contexts.Session):>array<facts.Proposition>|Error => {
+    let plain = types.strip_refinement(base session.types)
+    let node = types.node_at(session.types plain)
+    let result:array<facts.Proposition> = []
+    loop p in propositions {
+        let field = facts.field(p)
+        let subject = p.subject
+        let field_type:addr? = none
+        if field isnt? none and node is? types.ObjectType {
+            let found = types.object_field(node field)
+            if found isnt? none { field_type = found.value_type }
+        }
+        if field isnt? none and field_type is? none and (p.projection =? 'length' or p.tested_type isnt? none or types.is_primitive(node 'bool') or types.is_primitive(node 'void') or types.is_primitive(node 'none') or p.term isnt? none) {
+            subject = "@{field}"
+        }
+        else if field isnt? none and field_type is? none {
+            return contexts.problem(id 'refinement subject does not apply' "`{display.type_to_dewy(base session.types)}` has no field `{field}`" context session)
+        }
+        else if p.subject =? 'length' and node isnt? types.ArrayType|types.StringType and not types.is_primitive(node 'array') and not types.is_primitive(node 'string') {
+            return contexts.problem(id 'refinement subject does not apply' "`{display.type_to_dewy(base session.types)}` has no `length`" context session)
+        }
+        else if p.subject =? 'self' {
+            let integer = types.primitive('int' @session.types)
+            if not subtyping.is_subtype(plain integer session.links @session.types) return contexts.unsupported(id "value refinements on `{display.type_to_dewy(base session.types)}`" context session)
+        }
+        result.push(facts.Proposition[subject p.op p.value p.projection p.term p.term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
+    }
+    return result
+}
+
+function_args = (id:addr context:contexts.Context @session:contexts.Session):>array<types.PosOrKwArg>|Error => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    let items:array<addr> = if node is? parser.Block and node.delims =? '()' node.inner else [id]
+    let result:array<types.PosOrKwArg> = []
+    loop item in items {
+        let row = tokens.node_at(source.nodes item)
+        let place = false
+        if row is? parser.Prefix and syntax.is_operator(row.op '@' source.nodes) { place = true row = tokens.node_at(source.nodes row.item) }
+        let name = syntax.identifier(item source.nodes)
+        let type = types.primitive('any' @session.types)
+        if row is? parser.BinOp and syntax.is_operator(row.op ':' source.nodes) {
+            let target = tokens.node_at(source.nodes row.left)
+            let target_id = row.left
+            if target is? parser.Prefix and syntax.is_operator(target.op '@' source.nodes) { place = true target_id = target.item }
+            name = syntax.identifier(target_id source.nodes)
+            let inner = contexts.Context[context.source context.scope name]
+            let declared = resolve(row.right inner @session)
+            if declared is? Error return declared
+            type = declared
+        }
+        if name is? none return contexts.problem(item 'function type parameter requires a name' 'write this parameter as `name:type`' context session)
+        result.push(types.PosOrKwArg[name type place=place])
+    }
+    return result
+}
+
+# Integer singleton unions at storage boundaries are a word plus its exact
+# value-set invariant. Elsewhere the same union remains a tagged type.
+value_type = (value:addr id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let node = types.node_at(session.types value)
+    if node isnt? types.TypeOr return value
+    let values:array<bigint> = []
+    loop member in node.items {
+        let literal = types.node_at(session.types member)
+        if literal isnt? types.IntegerLiteralType return value
+        values.push(literal.value)
+    }
+    $runtime_assert values.length >? 0
+    let low = values[0]
+    let high = low
+    loop number in values {
+        if number <? low { low = number }
+        if number >? high { high = number }
+    }
+    if low <? -9223372036854775808 or high >? 9223372036854775807 return contexts.unsupported(id 'integer singleton unions outside the int64 range' context session)
+    if high - low >? 1024 return contexts.unsupported(id 'integer singleton unions spanning more than 1024 values' context session)
+    let promises = [facts.Proposition['self' '>=?' low] facts.Proposition['self' '<=?' high]]
+    let gap = low
+    loop gap <=? high {
+        if gap not in? values { promises.push(facts.Proposition['self' 'not=?' gap]) }
+        gap += 1
+    }
+    return refine(types.primitive('int64' @session.types) promises @session)
+}
+
+# A fact-only result is void with promises; a type enclosed in angle
+# brackets is still an ordinary result type, e.g. :> <(x:int64):>int64>.
+function_result = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let node = contexts.node_at(id context session)
+    if node is? parser.Block and node.delims =? '<>' and node.inner.length >? 0 {
+        let promises:array<facts.Proposition> = []
+        let all_facts = true
+        loop item in node.inner {
+            let parsed = conditions(item context @session)
+            if parsed is? Error return parsed
+            if parsed is? none { all_facts = false break }
+            loop p in parsed { promises.push(p) }
+        }
+        if all_facts return attach_facts(types.primitive('void' @session.types) promises id context @session)
+    }
+    return resolve(id context @session)
+}
+
+# Defaults remain syntax. Infer their storage shape here when the expression
+# itself supplies it; arbitrary calls need the value checker's resolution.
+infer_default = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes syntax.unparen(id source.nodes))
+    let number = syntax.integer(id source.nodes)
+    if number isnt? none {
+        if number >=? -9223372036854775808 and number <=? 9223372036854775807 return types.primitive('int64' @session.types)
+        return contexts.unsupported(id 'materializing a large default through the numeric prelude' context session)
+    }
+    if node is? parser.Atom {
+        let atom = tokens.node_at(source.nodes node.item)
+        if atom is? tokens.String return types.primitive('string' @session.types)
+        if atom is? tokens.Bool return types.primitive('bool' @session.types)
+        if atom is? tokens.Identifier {
+            if atom.name =? 'none' return types.primitive('none' @session.types)
+            let bound = lookup(atom.name context session)
+            if bound isnt? none {
+                let binding = bindings.binding_at(session.registry bound)
+                if binding.value_type isnt? none return binding.value_type
+            }
+        }
+    }
+    if node is? parser.Block and node.delims =? '[]' {
+        if node.inner.length =? 0 return contexts.problem(id 'cannot infer empty array element type' 'annotate the field with its element type' context session)
+        let elements:array<addr> = []
+        loop item in node.inner {
+            let inferred = infer_default(item context @session)
+            if inferred is? Error return inferred
+            elements.push(inferred)
+        }
+        return types.array_type(subtyping.join(elements session.links @session.types) node.inner.length @session.types)
+    }
+    return contexts.unsupported(id 'inferring this field default through the expression checker' context session)
+}
+
+field = (id:addr context:contexts.Context @session:contexts.Session):>types.ObjectField|Error => {
+    let source = contexts.source_at(context session)
+    let current = id
+    let row = tokens.node_at(source.nodes current)
+    let mutable = true
+    if row is? parser.KeywordExpr and row.parts.length =? 2 {
+        let keyword = tokens.node_at(source.nodes row.parts[0])
+        if keyword is? tokens.Keyword and keyword.name in? ['const' 'let'] {
+            mutable = keyword.name not=? 'const'
+            current = row.parts[1]
+            row = tokens.node_at(source.nodes current)
+        }
+    }
+    let default:addr? = none
+    let default_node:addr? = none
+    if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+        default = contexts.syntax_ref(row.right context @session)
+        default_node = row.right
+        current = row.left
+        row = tokens.node_at(source.nodes current)
+    }
+    let bare_name = syntax.identifier(current source.nodes)
+    if bare_name isnt? none and default_node isnt? none {
+        let inferred = infer_default(default_node context @session)
+        if inferred is? Error return inferred
+        return types.ObjectField[bare_name inferred mutable default]
+    }
+    # `fn:(x:T):>U` parses with :> outside the field's colon.
+    if row is? parser.BinOp and syntax.is_operator(row.op ':>' source.nodes) {
+        let target = tokens.node_at(source.nodes row.left)
+        if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) {
+            let name = syntax.identifier(target.left source.nodes)
+            if name isnt? none {
+                let args = function_args(target.right context @session)
+                if args is? Error return args
+                let ret = function_result(row.right context @session)
+                if ret is? Error return ret
+                return types.ObjectField[name types.function_type(args [] none ret [] @session.types) mutable default]
+            }
+        }
+    }
+    if row isnt? parser.BinOp or not syntax.is_operator(row.op ':' source.nodes) return contexts.problem(id 'object type fields must be `name:type`' 'this is not a named field type' context session)
+    let name = syntax.identifier(row.left source.nodes)
+    if name is? none return contexts.problem(id 'object type fields must be `name:type`' 'this is not a named field type' context session)
+    let inner = contexts.Context[context.source context.scope name]
+    let declared = resolve(row.right inner @session)
+    if declared is? Error return declared
+    declared = value_type(declared row.right inner @session)
+    if declared is? Error return declared
+    let node = types.node_at(session.types declared)
+    if node is? types.RefinedType return types.ObjectField[name node.base mutable default node.propositions]
+    return types.ObjectField[name declared mutable default]
+}
+
+fact_block = (block:parser.Block context:contexts.Context @session:contexts.Session):>array<facts.Proposition>|Error => {
+    let result:array<facts.Proposition> = []
+    loop item in block.inner {
+        let found = conditions(item context @session)
+        if found is? Error return found
+        if found is? none return contexts.problem(item 'not a fact' 'a fact block holds conditions, not types' context session)
+        loop p in found { result.push(p) }
+    }
+    return result
+}
+attach_facts = (base:addr promises:array<facts.Proposition> id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let node = types.node_at(session.types base)
+    let members:array<addr> = if node is? types.TypeOr node.items else [base]
+    let result:array<addr> = []
+    loop member in members {
+        let bound = bind_subjects(member promises id context @session)
+        if bound is? Error return bound
+        result.push(refine(member bound @session))
+    }
+    return types.union(result @session.types)
+}
+BoolArm:type = const [truth:bool propositions:array<facts.Proposition>]
+bool_arm = (id:addr context:contexts.Context @session:contexts.Session):>BoolArm?|Error => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    if node is? parser.Atom {
+        let item = tokens.node_at(source.nodes node.item)
+        if item is? tokens.Bool return BoolArm[item.value []]
+    }
+    if node is? parser.BinOp and syntax.symbol(node.op source.nodes) in? ['&' 'and'] {
+        let block = tokens.node_at(source.nodes node.right)
+        if block is? parser.Block and block.delims =? '<>' {
+            let arm = bool_arm(node.left context @session)
+            if arm is? Error return arm
+            if arm is? none return none
+            let parsed = fact_block(block context @session)
+            if parsed is? Error return parsed
+            let bound = bind_subjects(types.primitive('bool' @session.types) parsed id context @session)
+            if bound is? Error return bound
+            let all = arm.propositions
+            loop p in bound { all.push(p) }
+            return BoolArm[arm.truth all]
+        }
+    }
+    return none
+}
+when_true = (p:facts.Proposition truth:bool):>facts.Proposition =>
+    facts.Proposition[p.subject p.op p.value p.projection p.term p.term_id p.term_projection p.tested_type truth p.subject_id p.axiom]
+
+resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    let literal = syntax.integer(id source.nodes)
+    if literal isnt? none return types.integer_literal(literal @session.types)
+    if node is? parser.Atom {
+        let item = tokens.node_at(source.nodes node.item)
+        if item is? tokens.Identifier return resolve_name(item.name id context @session)
+        if item is? tokens.String return types.string_literal(item.content @session.types)
+        return contexts.unsupported(id "{item.kind} in type position" context session)
+    }
+    if node is? parser.KeywordExpr and node.parts.length =? 2 {
+        let keyword = tokens.node_at(source.nodes node.parts[0])
+        let body = tokens.node_at(source.nodes node.parts[1])
+        if keyword is? tokens.Keyword and keyword.name =? 'const' and body is? parser.Block and body.delims =? '[]' {
+            return resolve(node.parts[1] contexts.Context[context.source context.scope context.refinement_subject true] @session)
+        }
+    }
+    if node is? parser.Block {
+        if (node.delims =? '()' or node.delims =? '<>') and node.inner.length =? 1 return resolve(node.inner[0] context @session)
+        if node.delims =? '[]' {
+            let fields:array<types.ObjectField> = []
+            let methods:array<types.MethodSpec> = []
+            let names:set<string> = set[]
+            let inner = contexts.Context[context.source context.scope context.refinement_subject]
+            loop item in node.inner {
+                let row = tokens.node_at(source.nodes item)
+                if row is? parser.BinOp and syntax.symbol(row.op source.nodes) in? ['=' '&='] {
+                    let name = syntax.identifier(row.left source.nodes)
+                    let body = tokens.node_at(source.nodes row.right)
+                    if name isnt? none and body is? parser.BinOp and syntax.is_operator(body.op '=>' source.nodes) {
+                        if syntax.is_operator(row.op '=' source.nodes) and name in? names return contexts.problem(item "duplicate object member `{name}`" 'this member repeats a name' context session)
+                        names.add(name)
+                        methods.push(types.MethodSpec[name contexts.syntax_ref(row.right inner @session)])
+                        continue
+                    }
+                }
+                let declared = field(item inner @session)
+                if declared is? Error return declared
+                if declared.name in? names return contexts.problem(item "duplicate object member `{declared.name}`" 'this member repeats a name' context session)
+                loop p in declared.refinement {
+                    if p.term is? none or facts.field(p) isnt? none continue
+                    if p.term not in? names return contexts.problem(id "`{declared.name}` names `{p.term}`, which is not an earlier field" 'a field invariant may name a sibling field declared before it' context session)
+                    if not context.immutable_record return contexts.problem(id "`{declared.name}` relates to `{p.term}` in a writable record" 'the relation would not survive assignment' context session hint='make the record immutable: `const [...]`')
+                }
+                names.add(declared.name)
+                fields.push(declared)
+            }
+            return types.object_type(fields none context.immutable_record methods [] @session.types)
+        }
+    }
+    if node is? parser.Postfix and syntax.is_operator(node.op '?' source.nodes) {
+        let inner = resolve(node.item context @session)
+        if inner is? Error return inner
+        let absent = types.primitive('none' @session.types)
+        return types.union([inner absent] @session.types)
+    }
+    if node is? parser.Prefix {
+        let op = syntax.symbol(node.op source.nodes)
+        if op =? 'type of' return contexts.problem(id '`type of` mints only in an alias declaration' 'a fresh type needs a name to be referred to by' context session)
+        if op =? '~' or op =? 'not' {
+            let inner = resolve(node.item context @session)
+            if inner is? Error return inner
+            return types.intern(@session.types types.TypeNot[key="not:{inner}" item=inner])
+        }
+    }
+    if node is? parser.BinOp {
+        let op = syntax.symbol(node.op source.nodes)
+        if op is? facts.Operator {
+            let parsed = conditions(id context @session)
+            if parsed is? Error return parsed
+            if parsed isnt? none {
+                let boolean = types.primitive('bool' @session.types)
+                let bound = bind_subjects(boolean parsed id context @session)
+                if bound is? Error return bound
+                loop p in bound {
+                    if facts.parameter(p) is? none return contexts.problem(id 'a proposition as a type speaks of parameters' 'name the parameter whose value this result establishes' context session)
+                }
+                if bound.length not=? 1 return contexts.unsupported(id 'a compound proposition as a type (write explicit true/false fact arms)' context session)
+                let p = bound[0]
+                return refine(boolean [when_true(p true) when_true(facts.negated(p) false)] @session)
+            }
+        }
+        if op =? 'TypeParamJuxtapose' return parameterize(node id context @session)
+        if op =? ':>' {
+            let args = function_args(node.left context @session)
+            if args is? Error return args
+            let ret = function_result(node.right context @session)
+            if ret is? Error return ret
+            return types.function_type(args [] none ret [] @session.types)
+        }
+        if op =? '|' or op =? 'or' {
+            let left = bool_arm(node.left context @session)
+            if left is? Error return left
+            let right = bool_arm(node.right context @session)
+            if right is? Error return right
+            if left isnt? none or right isnt? none {
+                if left is? none or right is? none or left.truth =? right.truth return contexts.problem(id 'a boolean fact type has a `true` arm and a `false` arm' 'expected one arm of each kind' context session)
+                let promises:array<facts.Proposition> = []
+                loop p in left.propositions { promises.push(when_true(p left.truth)) }
+                loop p in right.propositions { promises.push(when_true(p right.truth)) }
+                return refine(types.primitive('bool' @session.types) promises @session)
+            }
+        }
+        if op =? '&' or op =? 'and' {
+            let block = tokens.node_at(source.nodes node.right)
+            if block is? parser.Block and block.delims =? '<>' {
+                let parsed = fact_block(block context @session)
+                if parsed is? Error return parsed
+                let base = resolve(node.left context @session)
+                if base is? Error return base
+                return attach_facts(base parsed id context @session)
+            }
+        }
+        if op in? ['|' 'or' '&' 'and'] {
+            let left = resolve(node.left context @session)
+            if left is? Error return left
+            let right = resolve(node.right context @session)
+            if right is? Error return right
+            return if op =? '|' or op =? 'or' types.union([left right] @session.types) else records.intersect(left right id context @session)
+        }
+    }
+    return contexts.unsupported(id "{node.kind} in type position" context session)
+}
+
+parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let source = contexts.source_at(context session)
+    let parameters = tokens.node_at(source.nodes node.right)
+    if parameters isnt? parser.Block or parameters.delims not=? '<>' return contexts.unsupported(id 'this type application' context session)
+    let name = syntax.identifier(node.left source.nodes)
+    let arguments:array<addr> = []
+    let promises:array<facts.Proposition> = []
+    let length:addr? = none
+    loop item in parameters.inner {
+        let entry = tokens.node_at(source.nodes item)
+        if name =? 'array' and entry is? parser.BinOp and syntax.is_operator(entry.op '=' source.nodes) and syntax.identifier(entry.left source.nodes) =? 'length' {
+            if length isnt? none return contexts.problem(item 'duplicate array length parameter' '`length` was already specified' context session)
+            let value = syntax.integer(entry.right source.nodes)
+            if value is? none or value <? 0 return contexts.problem(entry.right 'array length must be an integer literal' 'expected a non-negative integer' context session)
+            if value >? targets.max_length(session.target) return contexts.unsupported(entry.right 'array length beyond the target address space' context session)
+            length = value as addr
+            continue
+        }
+        let found = conditions(item context @session)
+        if found is? Error return found
+        if found isnt? none { loop p in found { promises.push(p) } continue }
+        let argument = resolve(item context @session)
+        if argument is? Error return argument
+        arguments.push(argument)
+    }
+    if name =? 'array' {
+        if arguments.length =? 0 and promises.length >? 0 return refine(types.primitive('array' @session.types) promises @session)
+        if arguments.length not=? 1 return contexts.problem(id 'array type requires an element type' 'use `array<T>`' context session)
+        let base = types.array_type(word_element(arguments[0] @session) length @session.types)
+        let bound = bind_subjects(base promises id context @session)
+        if bound is? Error return bound
+        return refine(base bound @session)
+    }
+    if arguments.length =? 0 and promises.length >? 0 {
+        let base = resolve(node.left context @session)
+        if base is? Error return base
+        let bound = bind_subjects(base promises id context @session)
+        if bound is? Error return bound
+        return refine(base bound @session)
+    }
+    if name =? 'set' and arguments.length =? 1 return views.set_type(word_element(arguments[0] @session) @session.types)
+    if (name =? 'dict' or name =? 'totaldict') and arguments.length =? 2 {
+        let key = word_element(arguments[0] @session)
+        let value = word_element(arguments[1] @session)
+        if name =? 'totaldict' and views.finite_members(key session.types) is? none return contexts.problem(id 'totaldict requires a finite key type' 'use a finite union of literal keys' context session)
+        return if name =? 'dict' views.dict_type(key value @session.types) else views.total_dict_type(key value @session.types)
+    }
+    if name =? 'range' and arguments.length =? 1 return types.parameterize(types.primitive('range' @session.types) arguments @session.types)
+    if name isnt? none {
+        let binding_id = lookup(name context session)
+        if binding_id isnt? none {
+            let binding = bindings.binding_at(session.registry binding_id)
+            if binding.type_value is? none and binding_id not in? session.pending_aliases return contexts.problem(id "`{name}` does not name a type" 'this binding has a runtime value' context session)
+            let value = resolve_alias(binding_id @session)
+            if value is? Error return value
+            if value is? types.GenericTypeAlias return aliases.instantiate(value arguments session.links @session.types source.srcfile node.loc)
+            return contexts.problem(node.left 'type alias is not generic' 'this alias takes no arguments' context session)
+        }
+    }
+    return contexts.unsupported(id 'these type arguments' context session)
+}
+
+# A block first reserves its alias names, then resolves their bodies lazily.
+# This permits forward references and gives a cycle a stable binding identity.
+# Value/function declarations are reserved by the expression checker.
+predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):>addr?|Error => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    if node is? parser.KeywordExpr and node.parts.length =? 2 {
+        let keyword = tokens.node_at(source.nodes node.parts[0])
+        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = tokens.node_at(source.nodes node.parts[1]) }
+    }
+    if node isnt? parser.BinOp or syntax.symbol(node.op source.nodes) not in? ['=' '::' ':='] return none
+    let target = tokens.node_at(source.nodes node.left)
+    let name:string? = none
+    if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) and syntax.identifier(target.right source.nodes) =? 'type' {
+        name = syntax.identifier(target.left source.nodes)
+    } else if syntax.is_mint(node.right source.nodes) { name = syntax.identifier(node.left source.nodes) }
+    else return none
+    if name is? none return contexts.problem(id 'type alias needs a name' 'use `Name:type = ...`' context session)
+    let scope = bindings.scope_at(session.scopes context.scope)
+    if name in? scope.names return contexts.problem(id "duplicate declaration `{name}`" 'this scope already declares the name' context session)
+    let reference = contexts.syntax_ref(id context @session)
+    let binding_id = bindings.allocate(@session.registry reference name 'value' node.loc)
+    let binding = bindings.binding_at(session.registry binding_id)
+    binding.value_type = types.primitive('type' @session.types)
+    session.registry.by_id[binding_id] = binding
+    bindings.bind(@session.scopes context.scope name binding_id)
+    session.pending_aliases[binding_id] = contexts.PendingAlias[contexts.SyntaxRef[context.source node.right context.scope]]
+    return binding_id
+}
+
+generic_alias = (parameters:parser.Block body:addr context:contexts.Context @session:contexts.Session):>types.GenericTypeAlias|Error => {
+    if parameters.inner.length =? 0 return contexts.problem(body 'generic type alias requires at least one parameter' 'this parameter list is empty' context session)
+    let source = contexts.source_at(context session)
+    let inner = contexts.child(context @session)
+    let params:array<types.GenericParam> = []
+    let names:set<string> = set[]
+    loop item in parameters.inner {
+        let node = tokens.node_at(source.nodes item)
+        let name = syntax.identifier(item source.nodes)
+        let bound = types.primitive('any' @session.types)
+        if node is? parser.BinOp and syntax.is_operator(node.op 'of' source.nodes) {
+            name = syntax.identifier(node.left source.nodes)
+            let resolved = resolve(node.right inner @session)
+            if resolved is? Error return resolved
+            bound = resolved
+        }
+        if name is? none return contexts.problem(item 'invalid generic type parameter' 'expected `T` or `T of Bound`' context session)
+        if name in? names return contexts.problem(item "duplicate generic type parameter `{name}`" 'this parameter name is repeated' context session)
+        names.add(name)
+        params.push(types.GenericParam[name bound])
+        let binding_id = bindings.allocate_param(@session.registry name types.primitive('type' @session.types) node.loc)
+        let binding = bindings.binding_at(session.registry binding_id)
+        binding.type_value = types.type_variable(name bound @session.types)
+        session.registry.by_id[binding_id] = binding
+        bindings.bind(@session.scopes inner.scope name binding_id)
+    }
+    let resolved = resolve(body inner @session)
+    if resolved is? Error return resolved
+    return types.GenericTypeAlias[params resolved]
+}
+
+contains_named = (id:addr nodes:array<types.Type>):>bool => {
+    let node = types.node_at(nodes id)
+    if node is? types.NamedType return true
+    if node is? types.RefinedType return contains_named(node.base nodes)
+    if node is? types.TypeNot return contains_named(node.item nodes)
+    if node is? types.ArrayType return contains_named(node.element nodes)
+    if node is? types.TypeOr | types.TypeAnd | types.SequenceType {
+        loop child in node.items { if contains_named(child nodes) return true }
+    }
+    if node is? types.ObjectType {
+        loop field in node.fields { if contains_named(field.value_type nodes) return true }
+    }
+    if node is? types.FunctionType {
+        if contains_named(node.ret nodes) return true
+        loop param in node.pos_or_kw { if contains_named(param.value_type nodes) return true }
+        loop param in node.kw_only { if contains_named(param.value_type nodes) return true }
+    }
+    if node is? types.TypeParameterize {
+        if contains_named(node.head nodes) return true
+        loop param in node.args { if contains_named(param nodes) return true }
+    }
+    return false
+}
+
+# A recursive record field is finite behind a union handle, with an actual
+# base case. The hosted lowerer still cannot lay out recursive array elements;
+# keep that pending work explicit rather than accepting an unusable type.
+recursive_member = (value:addr in_union:bool id:addr name:string context:contexts.Context session:contexts.Session):>Error? => {
+    let node = types.node_at(session.types value)
+    if node is? types.NamedType {
+        if not in_union return contexts.problem(id "recursive type `{name}` refers to itself without a union" 'a required field of its own type would be an infinite value' context session hint='make the recursive field a union such as `Node | none`')
+        return none
+    }
+    if node is? types.RefinedType return recursive_member(node.base in_union id name context session)
+    if node is? types.ArrayType and contains_named(node.element session.types) return contexts.unsupported(id 'arrays of a recursive alias (use an arena and indices for now, as in the hosted compiler)' context session)
+    if node is? types.TypeOr {
+        let base_case = false
+        loop member in node.items { if types.node_at(session.types member) isnt? types.NamedType { base_case = true } }
+        if not base_case return contexts.problem(id "recursive type `{name}` has no base case" 'every member is a recursive reference' context session)
+        loop member in node.items {
+            let error = recursive_member(member true id name context session)
+            if error isnt? none return error
+        }
+    }
+    if node is? types.ObjectType {
+        loop field in node.fields {
+            let error = recursive_member(field.value_type false id name context session)
+            if error isnt? none return error
+        }
+    }
+    return none
+}
+
+resolve_alias = (binding_id:addr @session:contexts.Session):>types.TypeAliasValue|Error => {
+    let binding = bindings.binding_at(session.registry binding_id)
+    if binding.type_value isnt? none return binding.type_value
+    let pending = session.pending_aliases.get(binding_id)
+    $runtime_assert pending isnt? none
+    let context = contexts.Context[pending.expression.source pending.expression.scope]
+    if binding_id in? session.resolving_aliases {
+        let reference = session.named_refs.get(binding_id)
+        if reference isnt? none return reference
+        let named = types.named_type(binding.name binding_id @session.types)
+        session.named_refs[binding_id] = named
+        return named
+    }
+    session.resolving_aliases.add(binding_id)
+    let expression = contexts.node_at(pending.expression.node context session)
+    let value:types.TypeAliasValue|Error = types.primitive('never' @session.types)
+    if syntax.is_mint(pending.expression.node contexts.source_at(context session).nodes) { value = mint(binding_id pending.expression.node context @session) }
+    else if expression is? parser.BinOp and syntax.is_operator(expression.op 'TypeParamJuxtapose' contexts.source_at(context session).nodes) {
+        let parameters = contexts.node_at(expression.left context session)
+        if parameters is? parser.Block and parameters.delims =? '<>' { value = generic_alias(parameters expression.right context @session) }
+        else { value = resolve(pending.expression.node context @session) }
+    } else { value = resolve(pending.expression.node context @session) }
+    if binding_id in? session.resolving_aliases { session.resolving_aliases.pop(binding_id); }
+    if value is? Error return value
+    let named = session.named_refs.get(binding_id)
+    if named isnt? none {
+        if value is? types.GenericTypeAlias return contexts.unsupported(pending.expression.node 'recursive generic type aliases' context session)
+        let node = types.node_at(session.types value)
+        if node is? types.NamedType return contexts.problem(pending.expression.node "cyclic type alias involving `{binding.name}`" 'this alias is part of the cycle' context session)
+        if node isnt? types.ObjectType return contexts.problem(pending.expression.node "recursive type `{binding.name}` must be an object type" 'the recursion has no object to carry it' context session)
+        let error = recursive_member(value false pending.expression.node binding.name context session)
+        if error isnt? none return error
+        types.resolve_alias(named value @session.types)
+    }
+    binding.type_value = value
+    session.registry.by_id[binding_id] = binding
+    return value
+}
+
+# Minting is the one generative type operation. Keep it attached to a lexical
+# binding: resolving the same alias twice returns the original identity.
+mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let source = contexts.source_at(context session)
+    let binding = bindings.binding_at(session.registry binding_id)
+    let expression = id
+    let abstract = false
+    let directive = tokens.node_at(source.nodes id)
+    if directive is? parser.Directive and directive.name =? 'abstract' and directive.condition isnt? none {
+        expression = directive.condition abstract = true
+    }
+    let operands = syntax.intersection_operands(expression source.nodes)
+    let parent:addr? = none
+    let additions:array<addr> = []
+    let default_only:set<string> = set[]
+    loop operand in operands {
+        let node = tokens.node_at(source.nodes operand)
+        if node is? parser.Prefix and syntax.is_operator(node.op 'type of' source.nodes) {
+            if parent isnt? none return contexts.problem(operand 'an alias mints once' 'a second `type of` in the same intersection' context session)
+            let resolved = resolve(node.item context @session)
+            if resolved is? Error return resolved
+            parent = resolved
+        } else {
+            let resolved = resolve(operand context @session)
+            if resolved is? Error return resolved
+            additions.push(resolved)
+            if node is? parser.Block and node.delims =? '[]' {
+                loop item in node.inner {
+                    let row = tokens.node_at(source.nodes item)
+                    if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+                        let name = syntax.identifier(row.left source.nodes)
+                        if name isnt? none { default_only.add(name) }
+                    }
+                }
+            }
+        }
+    }
+    if parent is? none return contexts.problem(id '`$abstract` marks a `type of` mint' 'an alias of an existing type cannot be abstract' context session)
+    let name = binding.name
+    let taken = brands.lookup(name session.brands) isnt? none
+    loop link in session.links { if link.child =? name { taken = true } }
+    if taken { name = "{name}#{binding_id}" }
+    let parent_node = types.node_at(session.types types.unfold(parent session.types))
+    let error_type = types.primitive('error' @session.types)
+    let nominal_error = subtyping.is_subtype(parent error_type session.links @session.types)
+    if parent_node is? types.Primitive and nominal_error {
+        if abstract return contexts.problem(id '`$abstract` marks an object mint' 'error types are not abstract' context session)
+        if additions.length =? 0 {
+            session.links.push(subtyping.Link[name parent_node.name])
+            return types.primitive(name @session.types)
+        }
+    }
+    let all:array<addr> = [parent]
+    loop addition in additions { all.push(addition) }
+    let fields:array<types.ObjectField> = []
+    let methods:array<types.MethodSpec> = []
+    let ancestor:addr? = none
+    let immutable = false
+    # Nominal ancestors lead even when an intersection was written with a
+    # structural operand first. Only one nominal parent is supported.
+    loop operand in all {
+        let node = types.node_at(session.types types.unfold(operand session.types))
+        if node is? types.ObjectType and node.minted {
+            if ancestor isnt? none return contexts.unsupported(id 'a minted type with two nominal parents' context session)
+            ancestor = operand
+            fields = node.fields methods = node.methods
+        }
+    }
+    loop operand in all {
+        let node = types.node_at(session.types types.unfold(operand session.types))
+        if types.is_primitive(node 'any') continue
+        if node is? types.Primitive and nominal_error and operand =? parent continue
+        if node isnt? types.ObjectType return contexts.unsupported(id 'minting from types other than errors and objects' context session)
+        immutable = immutable or node.immutable
+        if node.minted continue
+        if node.brand isnt? none return contexts.unsupported(id 'minting a compiler representation family' context session)
+        let error = records.merge(@fields node.fields default_only id context @session owner=binding.name)
+        if error isnt? none return error
+        loop method in node.methods {
+            let owner = if method.owner is? none name else method.owner
+            let declared = types.MethodSpec[method.name method.literal method.binding_id method.place_self owner method.static]
+            let slot:addr? = none
+            loop i in 0.. and i <? methods.length { if methods[i].name =? method.name { slot = i break } }
+            if slot is? none { methods.push(declared) }
+            else { $runtime_assert slot <? methods.length methods[slot] = declared }
+        }
+    }
+    let minted = types.object_type(fields name immutable methods [] @session.types minted=true parent=if ancestor is? none parent else ancestor abstract=abstract)
+    brands.register(minted @session.brands session.types)
+    if nominal_error {
+        let nominal_parent = if parent_node is? types.Primitive parent_node.name else if parent_node is? types.ObjectType parent_node.brand else none
+        $runtime_assert nominal_parent isnt? none
+        session.links.push(subtyping.Link[name nominal_parent])
+    }
+    return minted
+}
