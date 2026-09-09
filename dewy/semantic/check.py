@@ -103,6 +103,26 @@ class Context:
     # TODO: etc stuff
 
 
+class _ModuleNamespace:
+    """An import namespace participates in ordinary lexical binding lookup.
+
+    The module record is compile-time state, outside type/HIR dataclass
+    walks. The alias's binding id distinguishes it from a shadowing local,
+    parameter, or type alias with exactly the same spelling.
+    """
+    def __init__(self, record: object, binding_id: int):
+        self.record = record
+        self.binding_id = binding_id
+
+
+def _module_namespace(name: str, *, ctx: Context) -> object | None:
+    namespace = ctx.module_namespaces.get(name)
+    binding = ctx.binding_scopes.get(name)
+    if isinstance(namespace, _ModuleNamespace) and binding is not None and binding.id == namespace.binding_id:
+        return namespace.record
+    return None
+
+
 class _DefaultScope:
     """Keep a default's lexical environment outside generic dataclass walks.
 
@@ -2271,7 +2291,13 @@ def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None
 
     if namespace_name is not None:
         _check_import_name_available(namespace_name, ast.loc, ctx=ctx)
-        ctx.module_namespaces[namespace_name] = record
+        binding = ctx.binding_registry.allocate(ast, namespace_name, 'value', ast.loc)
+        binding.type = ty.ModuleType(tuple(
+            ty.ModuleField(name, exported.type or ty.TOP_TYPE, exported.id, exported.type_value)
+            for name, exported in record.exports.items()
+        ))
+        ctx.binding_scopes[namespace_name] = binding
+        ctx.module_namespaces[namespace_name] = _ModuleNamespace(record, binding.id)
         return hir.Void(ast.loc, ty.VOID_TYPE)
 
     imports = (
@@ -8470,7 +8496,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     if (
         isinstance(binop.left, p0.Atom)
         and isinstance(binop.left.item, t1.Identifier)
-        and (module := ctx.module_namespaces.get(binop.left.item.name)) is not None
+        and (module := _module_namespace(binop.left.item.name, ctx=ctx)) is not None
     ):
         binding = module.exports.get(name)  # type: ignore[attr-defined]
         if binding is None:
@@ -12859,7 +12885,7 @@ def _named_type_alias_value(
         and isinstance(ast.left.item, t1.Identifier)
         and isinstance(ast.right, p0.Atom)
         and isinstance(ast.right.item, t1.Identifier)
-        and (module := ctx.module_namespaces.get(ast.left.item.name)) is not None
+        and (module := _module_namespace(ast.left.item.name, ctx=ctx)) is not None
     ):
         binding = module.exports.get(ast.right.item.name)  # type: ignore[attr-defined]
         return None if binding is None else binding.type_value
@@ -13758,7 +13784,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             op=t1.Operator(symbol='.'),
             left=p0.Atom(item=t1.Identifier(name=module_name)),
             right=p0.Atom(item=t1.Identifier(name=member_name)),
-        ) if (module := ctx.module_namespaces.get(module_name)) is not None:
+        ) if (module := _module_namespace(module_name, ctx=ctx)) is not None:
             binding = module.exports.get(member_name)  # type: ignore[attr-defined]
             if binding is None:
                 user_error(
@@ -15050,7 +15076,7 @@ def _type_constructor_target(ast: p0.AST, *, ctx: Context) -> hir.TypeValue | No
     if (
         isinstance(ast, p0.BinOp) and _operator_symbol(ast.op) == '.'
         and isinstance(ast.left, p0.Atom) and isinstance(ast.left.item, t1.Identifier)
-        and ast.left.item.name in ctx.module_namespaces
+        and _module_namespace(ast.left.item.name, ctx=ctx) is not None
     ):
         candidate = _tcr_member_access(ast, ctx=ctx)
         return candidate if isinstance(candidate, hir.TypeValue) and _constructed_object_type(candidate) is not None else None
@@ -16463,7 +16489,7 @@ def tcr_identifier(
     expected: ty.Type | None = None,
     refined: bool = True,
 ) -> hir.AST:
-    if (module := ctx.module_namespaces.get(id.name)) is not None:
+    if (module := _module_namespace(id.name, ctx=ctx)) is not None:
         return hir.ModuleNamespace(
             id.loc,
             ty.ModuleType(tuple(

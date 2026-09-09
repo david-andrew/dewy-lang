@@ -263,8 +263,10 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The full suite passed with **1,807 passed, 10 skipped** after native
-expression/length proofs and index validation. The 4,356-pair native
+The full suite passed with **1,837 passed, 10 skipped** after the source type
+visitor, numeric helper instantiation, and optional-flow argument fixes.
+The source comparison covers 49 valid forms and 13 rejected declarations.
+The 4,356-pair native
 type-algebra comparison allows 90 seconds under parallel load (its executable
 takes about 24 seconds alone). Both native µDewy generations also match.
 The call-term comparison's table-driven harness retains all 361 cases while
