@@ -146,6 +146,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 - Result contracts substitute known argument lengths using the ordinary
   comparison constraint rule. A lower-bound promise no longer incorrectly
   seeds an upper bound, and inequality promises do not imply equality.
+- Length-changing array methods preserve declared maximum lengths as well
+  as minima, including contracts on member routes. Assignments retain both
+  endpoints for subsequent analysis. Guarded growth and shrinking are checked
+  against the resulting length, not just against valid element indices.
 - Iterator recognition uses the existing ambiguity normalization before
   binding loop targets, including `loop x in make().values` and guarded
   forms. Logical conditions can share either operand; binding targets retain
@@ -178,14 +182,14 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The full suite passed with **1,772 passed, 10 skipped** after the element-fact
-port and shared ambiguity normalization fix. The 4,356-pair native
+The full suite passed with **1,783 passed, 10 skipped** after the refinement
+and affine-fact ports and the array length-contract fix. The 4,356-pair native
 type-algebra comparison allows 90 seconds under parallel load (its executable
 takes about 24 seconds alone). Both native µDewy generations also match.
 The call-term comparison's table-driven harness retains all 361 cases while
 avoiding hundreds of separately emitted checks. The element-fact comparison
 and loop-iterable regression are included in this full run.
-The subsequent native refinement-fact comparison also passes, including
+The native refinement-fact comparison also passes, including
 unknown sibling bounds that must remain unknown rather than imply a range.
 The affine assignment/sum/difference comparison passes as well.
 Temporary logs are not required to resume: the comparison programs are

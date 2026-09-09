@@ -848,10 +848,10 @@ class _BoundsValidator:
                         if proposition.op == 'not=?' and proposition.value == 0:
                             current[_nonzero_key(binding_id)] = Interval.exact(1)
                     elif proposition.subject == 'length':
-                        minimum = proposition.lower_bound()
-                        if minimum is not None:
+                        minimum, maximum = proposition.lower_bound(), proposition.upper_bound()
+                        if minimum is not None or maximum is not None:
                             key = _length_key(binding_id)
-                            current[key] = current.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
+                            current[key] = current.get(key, self._length_default()).intersect(Interval(minimum, maximum))
             return current
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
@@ -917,24 +917,37 @@ class _BoundsValidator:
         return interval
 
     def _validate_length_invariant(self, node: hir.FunctionCall, array_id: int, after: Interval, state: State) -> None:
-        """A binding declared `array<T length >=? k>` keeps its invariant through
-        `pop`/`truncate`/`clear`: the length afterwards must be proven at least `k`
-        (`if xs.length =? 1 return …` before `xs.pop` is the usual proof)."""
+        """Length-changing methods preserve both endpoints of the storage contract.
+
+        Shrinking must preserve a minimum; growing must preserve a maximum.
+        A tracked field carries the same obligation as a named binding.
+        """
         declared = self.declared_refinements.get(array_id)
-        if declared is None:
+        member = _member_invariant(node.func.array) if isinstance(node.func, hir.ArrayMethod) else ()
+        propositions = (*(() if declared is None else declared.propositions), *member)
+        required = _length_propositions_interval(propositions)
+        if required is None:
             return
-        required = _length_propositions_interval(declared.propositions)
-        if required is None or required.lower is None:
-            return
-        if after.lower is not None and after.lower >= required.lower:
+        missing_lower = required.lower is not None and (after.lower is None or after.lower < required.lower)
+        missing_upper = required.upper is not None and (after.upper is None or after.upper > required.upper)
+        if not missing_lower and not missing_upper:
             return
         method = node.func.name if isinstance(node.func, hir.ArrayMethod) else 'this'
+        failures = []
+        if missing_lower:
+            failures.append(f'fewer than {required.lower} elements')
+        if missing_upper:
+            failures.append(f'more than {required.upper} elements')
+        contract = declared
+        if contract is None:
+            assert isinstance(node.func, hir.ArrayMethod)
+            contract = ty.RefinedType(node.func.array.type, tuple(member))
         self._proof_failure(node, 'obligation', Error(
             srcfile=self.srcfile,
             title='cannot prove the array keeps its declared length',
-            pointer_messages=[Pointer(span=node.loc, message=f'`{method}` may leave fewer than {required.lower} elements; the binding is declared `{type_to_dewy(declared)}`')],
+            pointer_messages=[Pointer(span=node.loc, message=f'`{method}` may leave {" or ".join(failures)}; the storage is declared `{type_to_dewy(contract)}`')],
             notes=[f'the length afterwards {self._describe_interval(after, array=True)}'],
-            hint=f'guard it (`if xs.length >? {required.lower} {{ xs.{method} }}`), or declare the binding without the length fact',
+            hint='guard the operation to prove the resulting length stays within the contract, or declare storage without that length fact',
         ))
 
     def _validate_divisor(self, divisor: hir.AST, interval: Interval | None, state: State) -> None:
@@ -2294,7 +2307,7 @@ class _BoundsValidator:
                 elif name == 'clear':
                     state[key] = Interval.exact(0)
                     _drop_index_facts(state, array_id=array_id)
-                if validate and name in {'pop', 'truncate', 'clear'}:
+                if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
                     self._validate_length_invariant(node, array_id, state[key], state)
             return None
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
@@ -3975,7 +3988,7 @@ class _BoundsValidator:
         self.declared_refinements[node.binding_id] = node.annotation
         lower: int | None = None
         upper: int | None = None
-        length_lower: int | None = None
+        length_bounds = _length_propositions_interval(node.annotation.propositions)
         for proposition in node.annotation.propositions:
             if proposition.term is not None:
                 self._seed_term_fact(node.binding_id, proposition, state, node.loc)
@@ -3985,14 +3998,12 @@ class _BoundsValidator:
             elif proposition.subject == 'self':
                 lower = _maximum_lower(lower, proposition.lower_bound())
                 upper = _minimum_upper(upper, proposition.upper_bound())
-            elif proposition.subject == 'length':
-                length_lower = _maximum_lower(length_lower, proposition.lower_bound())
         if lower is not None or upper is not None:
             declared = Interval(lower, upper)
             interval = declared if interval is None else interval.intersect(declared)
         base = ty.strip_refinement(node.annotation)
         if (
-            length_lower is not None
+            length_bounds is not None
             and isinstance(base, ty.ArrayType)
             and base.length is None
             and isinstance(node.expr.type, ty.ArrayType)
@@ -4000,7 +4011,7 @@ class _BoundsValidator:
         ):
             key = _length_key(node.binding_id)
             current = state.get(key, self._length_default())
-            state[key] = current.intersect(Interval(length_lower, self.max_length))
+            state[key] = current.intersect(length_bounds)
         return interval
 
     @staticmethod

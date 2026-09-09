@@ -24,7 +24,7 @@ let eat_whitespace = (src:nonemptystring):>uint64? => {
 }
 ```
 
-Checking a value against a refined type yields one of three outcomes: proven, refuted (a compile error), or unknown (reported as unproven, never as false). A binding declared with a refined type carries the base type together with the proven facts: integer bounds feed range analysis and minimum lengths feed bounds proofs. Refinements currently apply to bindings; refined parameters and results are provisional.
+Checking a value against a refined type yields one of three outcomes: proven, refuted (a compile error), or unknown (reported as unproven, never as false). A binding declared with a refined type carries the base type together with the proven facts: integer bounds feed range analysis and length intervals feed bounds proofs. The supported predicates apply to bindings, parameters, results, and object fields.
 
 Refinement facts may arise from annotations, literals, ordinary control-flow conditions, successful explicit checks, and trusted interfaces. The facts the compiler tracks today include exact and minimum array lengths, `i <? xs.length` index guards, the difference two compared terms keep (`start <=? end` makes `end - start` nonnegative), integer intervals, narrowed union members, and proven dictionary and set keys.
 
@@ -42,6 +42,14 @@ its assignment contract. Its initial length of one is a fact about the current
 value, so indexing `xs[0]` is valid, and assigning `[40 2]` later is also valid.
 An explicit `array<int64 length=1>` annotation instead requires every assigned
 value to have that length. Immutable bindings can retain their exact shape.
+
+Length inequalities are storage contracts too. Growing an
+`array<int64 length <=? 3>` must leave at most three elements; shrinking an
+`array<int64 length >=? 1>` must leave at least one. These checks apply to
+named arrays, place parameters, and array fields. A guard such as
+`if xs.length <? 3 { xs.push(value) }` proves bounded growth. Reassignment
+checks the replacement and retains the declared length bounds for later
+operations.
 
 A result can relate an index to an array passed as a mutable place. The
 contract below is checked against the updated array at each return:

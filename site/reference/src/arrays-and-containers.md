@@ -27,6 +27,11 @@ An array whose type has no exact length (`array<T>`) may change length through m
 
 Each partial operation carries a proof obligation: `pop` requires a proven positive length, and `pop(idx)`/`insert(v idx)` require `0 <= idx < length` (`<=` for `insert`). Proofs come from literal lengths (an exact length is retained as a fact until a length-changing operation steps it), from `push`/`pop` stepping known lengths, and from guards such as `xs.length >? 0` or `idx <? xs.length`. A binding declared with an exact length (`array<T length=N>`) cannot change length.
 
+Length-changing methods also preserve declared minimum and maximum lengths,
+including contracts on array fields. `xs.push(v)` must prove it stays below
+an annotated maximum, and `pop`, `truncate`, or `clear` must preserve an
+annotated minimum. See [array contracts](refinements-and-effects.md#array-contracts-and-dependent-indices).
+
 Container mutation is reached only through the container value; free functions are reserved for genuinely global operations.
 
 A `let` with a runtime-length annotation and an empty initializer, `let buffer:array<uint8> = []`, is a growable array from the start (an empty exact array would be useless), and a callee may grow it through a place parameter: `fill(@buffer 5)`. Passing `@name` makes the compiler forget what it knew about the binding — an exact length, a refinement — since the callee may have changed it.

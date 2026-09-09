@@ -123,7 +123,7 @@ nodes for later phases to interpret.
 
 ## Validation
 
-The latest full suite passed with **1772 passed, 10 skipped**. See
+The latest full suite passed with **1783 passed, 10 skipped**. See
 [IMPLEMENTATION.md](IMPLEMENTATION.md) for changes verified since that run.
 Native semantic tests compare type algebra, dispatch, bindings, minting,
 parameter effects, source-order initialization, intervals, and relational
