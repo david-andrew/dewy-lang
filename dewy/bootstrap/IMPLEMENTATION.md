@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  92 source programs and 47 invalid programs. Short-circuit boolean HIR,
+  100 source programs and 53 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -58,8 +58,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Concrete call signatures contextualize literal arguments, including finite
   dictionary key types. Homogeneous array inference uses the same entry checker.
   The comparison checks lookup proof/slot metadata and removal optionality too.
-  Runtime set conversion, container iteration, and generic library calls remain
-  separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
+  Dictionary unpacking and set iteration share the ordinary iterator HIR.
+  Iteration proves the current key, drops positions that compaction may move,
+  and rejects mutation of the iterated container. Unpacked records obey the
+  same read-only borrow rule as array elements. Runtime set conversion and
+  generic library calls remain separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
   and `container_methods.dewy` keep those transfers outside the source visitor.
   This is an intermediate HIR entry point, not yet a
   compiler driver: the remaining value forms, proof validation,

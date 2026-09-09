@@ -16,6 +16,15 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    "let d=['a' -> 1 'b' -> 2]\nloop [k v] in d {d[k];}",
+    "let d=['a' -> 1]\nloop [k v] in d and v >? 0 {d[k];}",
+    'let s=set[1 2]\nloop x in s {x;}',
+    'let s=set[1 2]\nloop x in s {if x in? s {x;}}',
+    "let d=['a' -> [x=1]]\nloop [k v] in d {let own=v own.x=2}",
+    "let d=['a' -> 1 'b' -> 2 'c' -> 3]\nd.pop('a');\nloop [k v] in d {}\nd['b']",
+    "let d=['a' -> 1 'b' -> 2 'c' -> 3]\nd.pop('a');\nlet values=d.values\nd['b']",
+    "let d=['a' -> 1 'b' -> 2]\nloop [k v] in d and i in 0..3 {v+i;}",
+
     "let d=['a' -> 1 'b' -> 2]\nd['b']",
     "let d:dict<string int64>=[]\nd['a']=7\nd['a']",
     "let d=['a' -> 1]\nd.get('z')",
@@ -107,6 +116,13 @@ CASES = [
 
 
 ERROR_CASES = [
+    'let s=set[1 2]\nloop x in s {s.pop(x);}',
+    "let d=['a' -> 1]\nloop [k v] in d {d['b']=2}",
+    "let d=['a' -> [x=1]]\nloop [k v] in d {v.x=2}",
+    "let d=['a' -> 1]\nloop [k k] in d {}",
+    "let d=['a' -> 1]\nloop [k] in d {}",
+    'let s=set[1 2]\nloop [k v] in s {}',
+
     "[1 'mixed']",
     "['a' -> 1 'b' -> 'mixed']",
     'set[]',

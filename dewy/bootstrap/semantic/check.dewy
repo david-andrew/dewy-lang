@@ -1300,15 +1300,17 @@ constant_integer = (id:addr session:contexts.Session):>bigint? => {
     return value.lower
 }
 
-IteratorResult:type = const [value:addr environment:Environment]
+IteratorResult:type = const [values:array<addr> environment:Environment]
 iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|Error => {
     let source = contexts.source_at(env.lexical session)
     let node = tokens.node_at(source.nodes syntax.unparen(id source.nodes))
     if node isnt? parser.BinOp or not syntax.is_operator(node.op 'in' source.nodes) return pending(id 'non-conjunctive iterator formula' env session)
-    let name = syntax.identifier(node.left source.nodes)
-    if name is? none return pending(id 'iterator target unpacking' env session)
     let iterable = expression(node.right env @session)
     if iterable is? Error return iterable
+    let entry = views.container_entry_types(node_at(iterable session).value_type session.types)
+    if entry isnt? none return container_iterators(id node iterable entry env @session)
+    let name = syntax.identifier(node.left source.nodes)
+    if name is? none return pending(id 'iterator target unpacking over non-container values' env session)
     let value = node_at(iterable session)
     let shape = types.node_at(session.types types.strip_refinement(value.value_type session.types))
     let target:addr? = none
@@ -1360,7 +1362,7 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
     bindings.bind(@session.scopes inner.lexical.scope name binding_id)
     let target_node = put(hir.ExpressedIdentifier[tokens.node_at(source.nodes node.left).loc target name binding_id] @session)
     let type = types.parameterize(types.primitive('iterator' @session.types) [target] @session.types)
-    return IteratorResult[put(hir.IteratorExpression[node.loc type target_node iterable first step last count] @session) inner]
+    return IteratorResult[[put(hir.IteratorExpression[node.loc type target_node iterable first step last count] @session)] inner]
 }
 
 invalidate_loop_names = (names:set<string> replacements:set<string> env:Environment @session:contexts.Session):>void => {
@@ -1395,6 +1397,8 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
     let source = contexts.source_at(env.lexical session)
     let changed = loop_syntax.mutations(arm.parts[2] source.nodes)
     let replaced = loop_syntax.mutations(arm.parts[2] source.nodes true)
+    loop name in loop_syntax.mutations(arm.parts[1] source.nodes) { changed.add(name) }
+    loop name in loop_syntax.mutations(arm.parts[1] source.nodes true) { replaced.add(name) }
     invalidate_loop_names(changed replaced env @session)
     let body_env = fork(env @session)
     let condition:addr? = none
@@ -1408,19 +1412,24 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
             if not loop_syntax.contains_iterator(part source.nodes) { predicates.push(part) continue }
             let result = iterator(part body_env @session)
             if result is? Error return result
-            let iter = node_at(result.value session)
-            $runtime_assert iter is? hir.IteratorExpression
-            let target = node_at(iter.target session)
-            $runtime_assert target is? hir.ExpressedIdentifier
-            if target.name in? names return problem(part 'duplicate iterator target' target.name env session)
-            names.add(target.name)
-            let owner = node_at(iter.iterable session)
-            let route = bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
-            let root = node_at(route.root session)
-            if owner is? hir.DictEntries and root is? hir.ExpressedIdentifier and root.name in? changed return problem(part 'cannot mutate a container while iterating it' root.name env session)
-            formula.push(iterators.length)
-            if iterators.length >? 0 { formula.push('and') }
-            iterators.push(result.value)
+            loop iterator_id in result.values {
+                let iter = node_at(iterator_id session)
+                $runtime_assert iter is? hir.IteratorExpression
+                let target = node_at(iter.target session)
+                $runtime_assert target is? hir.ExpressedIdentifier
+                if target.name in? names return problem(part 'duplicate iterator target' target.name env session)
+                names.add(target.name)
+                let owner = node_at(iter.iterable session)
+                let route = bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
+                let root = node_at(route.root session)
+                if owner is? hir.DictEntries {
+                    if root is? hir.ExpressedIdentifier and root.name in? changed return problem(part 'cannot mutate a container while iterating it' root.name env session)
+                    container_state.forget_positions(owner.dictionary env.state @session)
+                }
+                formula.push(iterators.length)
+                if iterators.length >? 0 { formula.push('and') }
+                iterators.push(iterator_id)
+            }
             body_env = result.environment
         }
         $runtime_assert iterators.length >? 0
@@ -1698,4 +1707,42 @@ prove_total = (value:addr key_type:addr id:addr env:Environment @session:context
     }
     if known isnt? none and subtyping.is_subtype(key_type known session.links @session.types) return none
     return problem(id 'cannot prove the dictionary has every key' 'provide a literal covering the key type or an already-total dictionary' env session)
+}
+
+# A dictionary's key/value targets advance together over its compacted live
+# entry arrays. This uses the same iterator HIR as arrays, preserving the
+# binding identity of the key so `d[key]` is proven inside the body.
+container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.EntryTypes env:Environment @session:contexts.Session):>IteratorResult|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let target_syntax = tokens.node_at(source.nodes node.left)
+    let targets:array<addr> = [node.left]
+    let fields:array<string> = ['keys']
+    let elements:array<addr> = [entry.key]
+    if entry.value isnt? none {
+        if target_syntax isnt? parser.Block or target_syntax.delims not=? '[]' or target_syntax.inner.length not=? 2 return problem(id 'dictionary iteration needs two targets' 'write `loop [key value] in dictionary`' env session)
+        targets = target_syntax.inner
+        fields.push('values') elements.push(entry.value)
+    } else if target_syntax is? parser.Block return problem(id 'a set iterator has one target' 'iterate the member directly' env session)
+    container_state.forget_positions(iterable env.state @session)
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let values:array<addr> = []
+    loop i in 0.. and i <? targets.length and i <? fields.length and i <? elements.length {
+        let name = syntax.identifier(targets[i] source.nodes)
+        if name is? none return pending(id 'nested iterator target unpacking' env session)
+        let scope = bindings.scope_at(session.scopes inner.lexical.scope)
+        if name in? scope.names return problem(id 'duplicate iterator target' name env session)
+        let element = elements[i]
+        let binding_id = bindings.allocate_param(@session.registry name element node.loc)
+        let binding = bindings.binding_at(session.registry binding_id)
+        binding.store_type = element
+        if types.node_at(session.types types.strip_refinement(element session.types)) is? types.ObjectType { binding.read_only_reason = 'borrows the array element; copy it with `let` to change it' }
+        session.registry.by_id[binding_id] = binding
+        bindings.bind(@session.scopes inner.lexical.scope name binding_id)
+        let target = put(hir.ExpressedIdentifier[tokens.node_at(source.nodes targets[i]).loc element name binding_id] @session)
+        let entries = put(hir.DictEntries[node.loc types.array_type(element none @session.types) iterable fields[i]] @session)
+        let type = types.parameterize(types.primitive('iterator' @session.types) [element] @session.types)
+        values.push(put(hir.IteratorExpression[node.loc type target entries 0 1 none none] @session))
+        if fields[i] =? 'keys' { container_state.remember(iterable target inner.state @session) }
+    }
+    return IteratorResult[values inner]
 }
