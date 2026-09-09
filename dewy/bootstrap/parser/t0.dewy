@@ -1,29 +1,23 @@
+import p"cli.dewy" as cli
 doc"""
-Tokenizer Framework
+Context-sensitive lexical tokenization: narrow context -> probe -> select -> finish.
 
-(TBD attempt to simplify over the )
+Tokens keep source spans; delimiter pairs use stable indices. Recognition
+retains the information needed to construct only the selected token. String
+endings distinguish quotes, heredocs, and EOF; lexical modes remain contexts.
+The pending hosted-parser design notes are preserved in ../DESIGN_NOTES.md.
 """
 
-from reporting import Report, SrcFile #, Error, Warning, Info, Hint
-
-
-
-# some helpers
-let err = (msg:string?=none) => {
-    if msg is? string printl"error: {msg}" else printl"error: unimplemented"  # would be nice if this could print out the location it was called
-    exit(1)
-}
+from reporting import SrcFile, Span, Pointer, Error, Warning
 
 let nonemptystring:type = string<length >? 0>
+let PositiveLength:type = addr<(>? 0)>
+let TokenError = type of error & Error
 
-
-
-
-##### CHARACTER SETS AND USEFUL CONSTANTS #####
-
+# Character/base tables shared by recognition and later literal decoding.
 const newline_chars = set['\n' '\r\n']
 const whitespace = set[' ' '\t' '\n' '\r\n' '\r']
-const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
+const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # most ascii<0x20 are ignored for security reasons
 const line_comment_start:'#' = '#'
 const block_comment_start: '#\{' = '#\{'
 const block_comment_end: '\}#' = '\}#'
@@ -51,43 +45,31 @@ const decoration_characters = superscripts | subscripts | misc_decorations | pri
 # numbers may have _ as a separator (if _ is not in the set of digits)
 const BasePrefix:type = '0b' | '0t' | '0q' | '0s' | '0o' | '0d' | '0z' | '0x' | '0u' | '0r' | '0g'
 
-BaseInfo:type = [
-    digits:set<string> #length>?1 >  #TODO: compiler improvements: adding the length here didn't work
-    case_insensitive:bool
-    extra_chars:dict<string int?>     # TODO compiler improvements: calling this `:dict<string int|undefined>` gave a pretty cryptic error when below I tried including empty dicts in the structure. "arrays require a fixed-width scalar or handle element type, got `int | undefined`". perhaps the error could highlight multiple places? but also general improvements to the error (e.g. hint to change `int` to some `intN`, etc.). and also just the ability to have `int` here in the first place, and it would figure out what it width it needs based on all the places that do provide something rather than failing on the ones that don't need it
+BaseInfo:type = const [
+    alphabet:string<2 <=? length <=? uint8.max>
+    case_sensitive:bool
+    extra_chars:dict<string int8?>
+    radix:uint8<radix =? alphabet.length> = alphabet.length
 ]
 
-BASE_SPECS: dict<BasePrefix BaseInfo> = [
-    '0b' -> [set'01' false []]    # binary
-    '0t' -> [set'012' false ['T'->(-1)]]    # ternary (and also support balanced ternary with 'T')
-    '0q' -> [set'0123' false []]    # quaternary
-    '0s' -> [set'012345' false []]    # seximal
-    '0o' -> [set'01234567' false []]    # octal
-    '0d' -> [set'0123456789' false []]    # decimal
-    '0z' -> [set'0123456789XE' true []]    # dozenal (case-insensitive)
-    '0x' -> [set'0123456789abcdef' true []]    # hexadecimal (case-insensitive)
-    '0u' -> [set'0123456789abcdefghijklmnopqrstuv' true []]    # base 32 (duotrigesimal) (case-insensitive)
-    '0r' -> [set'0123456789abcdefghijklmnopqrstuvwxyz' true []]    # base 36 (hexatrigesimal) (case-insensitive)
-    '0g' -> [set'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' false ['-'->62 '_'->63 '='->none]]    # base 64 (tetrasexagesimal) (case-sensitive)
+const BASE_SPECS: totaldict<BasePrefix BaseInfo> = [
+    '0b' -> ['01' true []]
+    '0t' -> ['012' true ['T'->(-1)]]
+    '0q' -> ['0123' true []]
+    '0s' -> ['012345' true []]
+    '0o' -> ['01234567' true []]
+    '0d' -> ['0123456789' true []]
+    '0z' -> ['0123456789XE' false []]
+    '0x' -> ['0123456789abcdef' false []]
+    '0u' -> ['0123456789abcdefghijklmnopqrstuv' false []]
+    '0r' -> ['0123456789abcdefghijklmnopqrstuvwxyz' false []]
+    '0g' -> ['0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' true ['-'->62 '_'->63 '='->none]]
 ]
-
-base_radixes: dict<BasePrefix int> = [
-    loop [prefix info] in BASE_SPECS
-        prefix -> info.digits.length
-]
-
 
 # commonly used bases
 const base10 = '0d'
 const base16 = '0x'
-const MAX_NUMBER_BASE = 16  # maximum base for integer literals. Rest must be based strings or based arrays
-
-
-
-
-
-
-
+const MAX_NUMBER_BASE = 16  # explicitly prefixed numbers; higher bases use strings/arrays
 
 # Mostly operators, but also some special identifiers
 # Symbols are case-sensitive
@@ -108,380 +90,784 @@ symbols:array<nonemptystring> = [
 symbols.sort(key=(.length) reverse=true)
 LEN_LONGEST_SYMBOL = symbols[0].length
 
-# shift operators are not allowed in type groups, so deal with them separately
-shift_operators = ['<<' '>>' '<<<' '>>>' '<<!' '!>>']
+shift_operators:array<nonemptystring> = ['<<' '>>' '<<<' '>>>' '<<!' '!>>']
 shift_operators.sort(key=(.length) reverse=true)
 
+# Normalize the opening information once. Frames contain immutable lexical
+# state; stack mutation is confined to the driver. An index is an identifier
+# into the output sequence, not a reference to a mutable token object.
+BlockKind:type = 'square' | 'round' | 'curly' | 'based'
+CloseSpelling:type = ']' | ')' | '\}'
+Opening:type = const [idx:addr loc:Span]
+QuoteEnd = type of any & const [text:nonemptystring]
+HeredocEnd = type of any & const [text:nonemptystring]
+EndOfFile = type of any
+StringEnding:type = QuoteEnd | HeredocEnd | EndOfFile
+StringMode:type = 'ordinary' | 'raw' | 'template'
+InterpolationKind:type = 'ordinary' | 'template' | 'unicode'
+
+# Individual tokenization contexts.
+Root = type of any & const [default_base:BasePrefix=base10]
+BlockBody = type of any & const [opening:Opening kind:BlockKind default_base:BasePrefix=base10]
+TypeBody = type of any & const [opening:Opening default_base:BasePrefix=base10]
+
+# The delimiter text is normalized at recognition, without a prefix such as r/t.
+StringBody = type of any & const [opening:Opening ending:StringEnding]
+RawStringBody = type of any & const [opening:Opening ending:StringEnding]
+TemplateStringBody = type of any & const [opening:Opening ending:StringEnding]
+BasedStringBody = type of any & const [opening:Opening ending:StringEnding base:BasePrefix]
+# Heredoc and EOF openers reuse the text body contexts.
 
 
+# Compound context groups. Keep the complete set last.
+NestedContext:type = BlockBody | TypeBody | StringBody | RawStringBody | TemplateStringBody | BasedStringBody
+GeneralBodyContexts:type = Root | BlockBody | TypeBody
+BodyWithoutTypeContexts:type = Root | BlockBody
+WhitespaceOrCommentContexts:type = GeneralBodyContexts | BasedStringBody
+QuotedStringContexts:type = StringBody | RawStringBody | TemplateStringBody | BasedStringBody
+EscapedStringContexts:type = StringBody | TemplateStringBody
+Context:type = Root | BlockBody | TypeBody | StringBody | RawStringBody | TemplateStringBody | BasedStringBody
 
-
-# Token Structs
-# StringQuoteOpener = type of any & [matching_quote:StringQuoteCloser?=none]
-# StringQuoteCloser = type of any & [matching_quote:StringQuoteOpener|RawStringQuoteOpener|TemplateStringQuoteOpener|BasedStringQuoteOpener|none=none]  # TODO compiler fixes: causes recursion limit overflow
-
-
-# Tokenization Contexts
-Context = $abstract type of any & [srcfile:SrcFile previous:Token? warnings:array<Report> = []]   # warnings an `eat` raises, with spans relative to its `src`; the tokenize loop shifts and prints them
-Root:type = type of Context & [default_base:BasePrefix=base10]
-StringBody:type = type of Context# & [opening_quote: StringQuoteOpener | RestOfFileStringQuote | HeredocStringOpener]
-RawStringBody:type = type of Context# & [opening_quote: RawStringQuoteOpener | RawHeredocStringOpener | RawRestOfFileStringQuote]
-TemplateStringBody:type = type of Context# & [opening_quote: TemplateStringQuoteOpener | TemplateHeredocStringOpener | TemplateRestOfFileStringQuote]
-BasedStringBody:type = type of Context#{ & [
-    opening_quote: BasedStringQuoteOpener
-    base: BasePrefix
-]}#
-BlockBody:type = type of Context #{ & [
-    opening_delim: LeftSquareBracket | LeftParenthesis | LeftCurlyBrace | TemplateLeftCurlyBrace | ParametricStringEscape
-    default_base: BasePrefix = base10
-] }#
-TypeBody:type = type of Context #{ & [
-    opening_delim: LeftAngleBracket
-    default_base: BasePrefix = base10
-]}#
-
-GeneralBodyContexts = Root | BlockBody | TypeBody
-BodyWithoutTypeContexts = Root | BlockBody
-WhitespaceOrCommentContexts = Root | BlockBody | TypeBody | BasedStringBody
-
-
-
-# let Context = type of any
-let Push = type of any & [ctx:Context]
-let Pop = type of any
-# ConextAction:type = Push | Pop | none
-
-let eatfn:type = (src:nonemptystring @ctx:Context):>addr & <(<=?src.length)> | none | TokenError
-let actionfn:type = (ctx:Context):>Push|Pop
-# let no_op = (ctx:Context)=>none
-
-let Token:type = $abstract type of any & [
-    src:string
+# Tokens are completed output values. No recognizer protocol on the base type,
+# and no Number temporarily lacking its required prefix.
+Token = $abstract type of any & [
+    src:string                 # token text; loc remains relative to SrcFile.body
     loc:Span
     idx:addr
-    eat:eatfn
-    action_on_eat:actionfn?=none
-    __as__ = ():>string => if loc.start <? loc.stop <=? src.length
-        "<{typename} {_quoted(src[loc.start..loc.stop))}>"
-    else
-        "<{typename}>"
-
+    __as__ = ():>string => "<{typename} {_quoted(src)}>"
 ]
+Whitespace = type of Token
+LineComment = type of Token
+BlockComment = type of Token
+Identifier = type of Token
+Symbol = type of Token
+Number = type of Token & [prefix:BasePrefix]
+Metatag = type of Token
+ShiftSymbol = type of Token
+LeftSquareBracket = type of Token
+LeftParenthesis = type of Token
+LeftCurlyBrace = type of Token
+LeftAngleBracket = type of Token
+BasedBlockOpener = type of Token & [base:BasePrefix]
+RightSquareBracket = type of Token
+RightParenthesis = type of Token
+RightCurlyBrace = type of Token
+RightAngleBracket = type of Token
+StringQuoteOpener = type of Token
+RawStringQuoteOpener = type of Token
+TemplateStringQuoteOpener = type of Token
+StringQuoteCloser = type of Token
+StringChars = type of Token
+RawStringChars = type of Token
+StringEscape = type of Token
+TemplateLeftCurlyBrace = type of Token
+ParametricStringEscape = type of Token
+ExponentMarker = type of Token & [power:Number]
 
-let TokenError = type of error & Error
+HeredocStringOpener = type of Token
+RawHeredocStringOpener = type of Token
+TemplateHeredocStringOpener = type of Token
+HeredocStringCloser = type of Token
+RestOfFileStringQuote = type of Token
+RawRestOfFileStringQuote = type of Token
+TemplateRestOfFileStringQuote = type of Token
+BasedStringQuoteOpener = type of Token & [base:BasePrefix]
+BasedStringChars = type of Token
 
+# Whole-source spans are authoritative; callers need no reconstructed slices.
+token_text = (token:Token):>string => token.src
 
-# TODO: move somewhere better
-# 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', …
-ordinalize = (n:nat64):>string => {
-    if n % 100 >=? 10 and n % 100 <=? 13 return "{n}th"
-    last_digit = n % 10
-    if last_digit =? 1 return "{n}st"
-    if last_digit =? 2 return "{n}nd"
-    if last_digit =? 3 return "{n}rd"
-    return "{n}th"
-}
+# A match is a small construction recipe. Minted variants preserve identity
+# even when their fields are identical. No full tokens or contexts are built.
+MatchData:type = [length:PositiveLength]
+WhitespaceMatch = type of any & MatchData & [lone_crs:array<addr>]
+LineCommentMatch = type of any & MatchData
+BlockCommentMatch = type of any & MatchData
+IdentifierMatch = type of any & MatchData
+SymbolMatch = type of any & MatchData
+NumberMatch = type of any & MatchData & [prefix:BasePrefix]
+MetatagMatch = type of any & MatchData
+ShiftSymbolMatch = type of any & MatchData
+OpenBlockMatch = type of any & MatchData & [kind:BlockKind base:BasePrefix=base10]
+OpenTypeMatch = type of any & MatchData
+# Retain the narrowed frame as evidence. finish never reads the current stack.
+CloseBlockMatch = type of any & MatchData & [spelling:CloseSpelling frame:BlockBody]
+CloseTypeMatch = type of any & MatchData & [frame:TypeBody]
+OpenStringMatch = type of any & MatchData & [mode:StringMode ending:StringEnding]
+CloseStringMatch = type of any & MatchData & [opening:Opening heredoc:bool=false]
+StringCharsMatch = type of any & MatchData & [raw:bool]
+StringEscapeMatch = type of any & MatchData
+InterpolationMatch = type of any & MatchData & [kind:InterpolationKind]
+ExponentMatch = type of any & MatchData & [power:NumberMatch]
+OpenBasedStringMatch = type of any & MatchData & [ending:QuoteEnd base:BasePrefix]
+BasedStringCharsMatch = type of any & MatchData
+Candidate:type = WhitespaceMatch | LineCommentMatch | BlockCommentMatch | IdentifierMatch | SymbolMatch | NumberMatch | MetatagMatch | ShiftSymbolMatch | OpenBlockMatch | OpenTypeMatch | CloseBlockMatch | CloseTypeMatch | OpenStringMatch | CloseStringMatch | StringCharsMatch | StringEscapeMatch | InterpolationMatch | ExponentMatch | OpenBasedStringMatch | BasedStringCharsMatch
 
+Keep = type of any
+Push = type of any & [frame:NestedContext]
+Close = type of any & [opening:Opening]
+ContextAction:type = Keep | Push | Close
+Finished:type = [token:Token action:ContextAction=Keep[]]
+# Append a pair only after its closer wins. Tokens never acquire half-built
+# backlinks. t1 can build a partner lookup from these indices when it needs it.
+DelimiterPair:type = const [opening:addr closing:addr]
+Tokenization:type = [tokens:array<Token> pairs:array<DelimiterPair>]
 
-##### TOKEN CLASSES: WHITESPACE AND COMMENTS #####
-# Tokens that consume layout-only characters or comments. These are valid in
-# general body contexts and usually don't affect the context stack.
+# Probe contracts:
+# - none means this recognizer does not apply; no continuation exists.
+# - a candidate contains everything finish needs from recognition.
+# - TokenError means malformed syntax that must not fall back to another token.
+# - every successful length is <= src.length (checked again by the driver;
+#   the candidate type above only preserves the source-independent positivity).
+# Probes do not mutate context, emit reports, or alter the output token list.
+# All diagnostic spans are absolute. offset locates the probed suffix; an
+# earlier opener can therefore appear in the same report without being shifted.
 
-# TODO: want a warning if there is a lone \r not followed by \n
-Whitespace = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> addr? => {
-        doc"""white space is any sequence of whitespace characters"""
-        i = 0
-        loop i <? src.length and src[i] in? whitespace {
-            if src[i] =? '\r' { # dewy grapheme handling automatically merges \r\n into a single character
-                warning_lone_carriage_return(src i @ctx) # just emit a warning
-            }
-            i += 1
-        }
-        return if i >? 0 i else none
-    }
-    
-    warning_lone_carriage_return = (src:nonemptystring i:addr<(<? src.length)> @ctx:Context):>void => {   # an offset into `src`
-        ctx.warnings.push(Warning[
-            srcfile=ctx.srcfile
-            title="Lone carriage return"
-            pointers=[Pointer[span=Span[i i+1] message="\\r without \\n"]]  #TODO: test if we can remove `Pointer` since it's completely structural
-            hint="\\r should always be followed by \\n in Dewy source code. Recommend either removing the \\r or adding newline (\\r\\n)"
-        ])
-    }
-
-]
-
-LineComment = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):>addr? => {
-        doc"""line comments are any sequence of characters after a # until the end of the line"""
-        if not src.startswith(line_comment_start) return none
-        if src.startswith(block_comment_start) return none # don't match a block comment\
-        # consume until the end of the line
-        loop i in 0.. and i <? src.length {  
-            if src[i] in? newline_chars return i + 1
-        }
-        return src.length
-    }
-]
-
-
-BlockComment = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):>addr? | TokenError => {
-        doc"""Block comments are of the form #\{ ... \}# and can be nested"""   #TODO: consider making `doc` a special tokenized case of string like raw strings, where the inside is handled as raw. perhaps we also could maintain a special registry of prefixes that use the raw string tokenization
-        
-        if not src.startswith(block_comment_start) return none
-        
-        openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
-        i:addr = block_comment_start.length
-
-        loop i <? src.length {
-            if src[i..].startswith(block_comment_start) {
-                openers.push(Span[i i+block_comment_start.length])
-                i+=block_comment_start.length
-            }
-            else if src[i..].startswith(block_comment_end) {
-                i+=block_comment_end.length
-                if openers.length =? 1 return i
-                openers.pop;
-            }
-            else { i += 1 }
-        }
-    
-        # error, unterminated block comment(s). Spans are relative to `src`: the tokenize loop shifts them
-        plural = if openers.length >? 1 "s" else ""
-        pointers:array<Pointer> = [
-            loop k in 0.. and k <? openers.length {
-                inside = if k >? 0 " (inside {ordinalize(k)})" else ""
-                Pointer[span=openers[k] message="{ordinalize(k+1)} unterminated block comment opened here{inside}"]
-            }
-        ]
-        unbound:array<Span> = [   # the text between one opener's end and the next one's start
-            loop k in 1.. and k <? openers.length
-                if openers[k].start >=? openers[k-1].stop
-                    Span[openers[k-1].stop openers[k].start]
-        ]
-        pointers.push(Pointer[span=Span[openers[end].stop src.length] spans=unbound message="Unbound block comment{plural}"])
-        return TokenError[
-            srcfile=ctx.srcfile
-            title="{openers.length} unterminated block comment{plural}"
-            pointers=pointers
-            hint="Did you forget {openers.length} closing `{block_comment_end}`?\nBlock comments start with `{block_comment_start}` and end with `{block_comment_end}` and can be nested"
-        ]
-    }
-]
-
-
-
-
-##### TOKEN CLASSES: IDENTIFIERS AND SYMBOLIC OPERATORS #####
-# Identifier-like things: plain identifiers and variants such as hashtags.
-
-Identifier = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> addr? => {
-        doc"""
-        Identifiers:
-        - may not start with a number
-        - may not be an operator (handled by longest match + token precedence)
-        - may contain decorator characters (superscripts/subscripts) anywhere (but must include at least one start character)
-        """
-        i = 0
-        
-        # Skip leading decorator characters
-        loop i <? src.length and src[i] in? decoration_characters { i += 1 }
-        
-        # Must have at least one start character
-        if i >=? src.length or src[i] not in? start_characters { return none }
-        
-        # Consume the start character
+probe_whitespace = (src:nonemptystring):>WhitespaceMatch? => {
+    i:addr = 0
+    lone_crs:array<addr> = []
+    loop i <? src.length and src[i] in? whitespace {
+        if src[i] =? '\r' lone_crs.push(i)
         i += 1
-        
-        # Continue consuming continue_characters or decorator characters
-        loop i <? src.length and (src[i] in? continue_characters or src[i] in? decoration_characters) { i += 1 }
-        
-        return i
     }
-]
+    if i =? 0 return none
+    return WhitespaceMatch[length=i lone_crs=lone_crs]
+}
 
+probe_line_comment = (src:nonemptystring):>LineCommentMatch? => {
+    if not src.startswith(line_comment_start) return none
+    if src.startswith(block_comment_start) return none
+    loop i in 0.. and i <? src.length {
+        if src[i] in? newline_chars return LineCommentMatch[length=i+1]
+    }
+    return LineCommentMatch[length=src.length]
+}
 
-Symbol = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> addr? => {
-        doc"""symbolic operators are any sequence of characters in the symbolic_operators set"""
-        loop op in symbols {
-            if src.startswith(op) {
-                return op.length
-            }
+probe_block_comment = (src:nonemptystring srcfile:SrcFile offset:addr):>BlockCommentMatch? | TokenError => {
+    if not src.startswith(block_comment_start) return none
+    openers:array<Span length>=?1> = [Span[offset offset+block_comment_start.length]]
+    i:addr = block_comment_start.length
+    loop i <? src.length {
+        if src[i..].startswith(block_comment_start) {
+            openers.push(Span[offset+i offset+i+block_comment_start.length])
+            i += block_comment_start.length
         }
-        return none
+        else if src[i..].startswith(block_comment_end) {
+            i += block_comment_end.length
+            if openers.length =? 1 return BlockCommentMatch[length=i]
+            openers.pop;
+        }
+        else { i += 1 }
     }
-]
-
-
-
-
-# ##### TOKEN CLASSES: NUMBERS #####
-# # Based integer literals. The base may be given explicitly via a prefix or
-# # implicitly via the current Context's `default_base` (e.g. inside certain
-# # blocks). We record the resolved base prefix on the token in `action_on_eat`.
-
-# Number = type of Token & [
-#     prefix: BasePrefix
-    
-    
-#     eat = (src:nonemptystring @ctx:GeneralBodyContexts):> addr|none|TokenError => {
-#         doc"""a based number is a sequence of 1 or more digits, optionally preceded by a (lowercase) base prefix (up to base-16)"""
-        
-#         # try a number with a base prefix
-#         if src.length >? 2 and src[..2) in? base_prefixes {
-#             base = src[..2]
-#             digits = base_digits[base]
-#             if base_radixes[base] >? MAX_NUMBER_BASE and src[2] in? digits { # skip if not a based number literal (e.g. based string)
-#                 return error_too_high_number_base(src ctx base)
-#             }
-#             i = 2
-#             # Require at least one digit
-#             if i >=? src.length or src[i] not in? digits {
-#                 # TODO: have error here if not a based string literal or based array literal
-#                 return none
-#             }
-#             # consume digits or underscores
-#             loop i <? src.length and (src[i] in? digits or src[i] == '_') { i += 1 }
-#             return i
-        
-#         # try number with no prefix
-#         base = if ctx is? BlockBody ctx.default_base else base10
-#         digits = base_digits[base]
-#         i = 0
-#         if i >=? src.length or src[i] not in? digits { return none }
-#         # consume digits or underscores
-#         loop i <? src.length and (src[i] in? digits or src[i] == '_') { i += 1 }
-        
-#         return if i >? 0 i else none
-    
-#     action_on_eat = (ctx:GeneralBodyContexts) {
-#         if src[..2] in? base_digits
-#             prefix = src[..2]
-#         else
-#             prefix = ctx.default_base
-
-#         #doesn't modify the context stack
-#         return none
-#     }
-
-    
-#     error_too_high_number_base = (src:nonemptystring ctx:GeneralBodyContexts base:BasePrefix) {
-#         radix = base_radixes[base]
-#         digits_len = BasedStringChars.eat(src[2..] BasedStringBody[ctx.srcfile ctx.tokens_so_far none base])
-#         $runtime_assert digits_len isnt? exception, "INTERNAL ERROR: based string chars should have been eaten"
-#         digits_str = src[2..2+digits_len]
-#         error = Error[
-#             srcfile=ctx.srcfile
-#             title="number base too high"
-#             pointer_messages=[
-#                 Pointer[span=Span[ctx.current_tokenization_position(), ctx.current_tokenization_position()+len(base)), message=f"base-{radix} prefix"),
-#                 *([Pointer(span=Span(ctx.current_tokenization_position()+2, ctx.current_tokenization_position()+2+digits_len), message="unquoted digits", color='red')] if digits_len is not None else [])
-#             ],
-#             hint=f"Numeric literals only support up to base-{MAX_NUMBER_BASE} (Got base-{radix})\nTo represent larger bases, use a based string e.g. {base}'{digits_str}'"
-#         )
-#         error.throw()
-
-
-
-
-# what tokens are allowed in what contexts
-contextmap = (ctx:Context):>array<type<Token>> => match ctx {
-    <Root> => [
-        Whitespace
-        LineComment
-        BlockComment
-        Identifier
-        Symbol
-    ]
-    <StringBody> => []
-    <RawStringBody> => []
-    <TemplateStringBody> => []
-    <BasedStringBody> => []
-    <BlockBody> => [
-        Whitespace
-        LineComment
-        BlockComment
-        Identifier
-        Symbol
-    ]
-    <TypeBody> => [
-        Whitespace
-        LineComment
-        BlockComment
-        Identifier
-        Symbol
+    return TokenError[
+        srcfile=srcfile
+        title="Unterminated block comment"
+        pointers=[
+            loop opener in openers
+                Pointer[span=opener message="Unclosed block comment opened here"]
+        ]
+        hint="Each block comment opener needs a closing `{block_comment_end}`"
     ]
 }
 
+probe_identifier = (src:nonemptystring):>IdentifierMatch? => {
+    i:addr = 0
+    loop i <? src.length and src[i] in? decoration_characters { i += 1 }
+    if i >=? src.length or src[i] not in? start_characters return none
+    i += 1
+    loop i <? src.length and (src[i] in? continue_characters or src[i] in? decoration_characters) { i += 1 }
+    return IdentifierMatch[length=i]
+}
 
+probe_symbol = (src:nonemptystring):>SymbolMatch? => {
+    loop op in symbols {
+        if src.startswith(op) return SymbolMatch[length=op.length]
+    }
+    return none
+}
 
-tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
-    ctx_stack:array<Context length>?0> = [  #TODO: what's the clean way to share tokens (unlike p0.py where tokens and tokens_so_far were separate views on the same thing. want to reduce the redundancy)
-        Root[srcfile=srcfile previous=none]
+# Canonical alphabet order encodes digit values. Extras are accepted even
+# when their value is none (padding); only membership is needed in this stage.
+# This direct scan keeps the spec as the only table. A later decoder can derive
+# canonical/case-alias/extra lookup entries once if profiling warrants it.
+is_based_digit = (c:string base:BasePrefix):>bool => {
+    info = BASE_SPECS[base]
+    if c in? info.extra_chars return true
+    loop digit in info.alphabet {
+        if c =? digit return true
+        if not info.case_sensitive and c.casefold =? digit.casefold return true
+    }
+    return false
+}
+
+probe_number = (src:nonemptystring default_base:BasePrefix srcfile:SrcFile offset:addr):>NumberMatch? | TokenError => {
+    base:BasePrefix = default_base
+    i:addr = 0
+    explicit_prefix = false
+    if src.length >=? 2 {
+        prefix = src[..2)
+        if prefix is? BasePrefix {
+            base = prefix
+            explicit_prefix = true
+            i = 2
+        }
+    }
+
+    # A bare prefix, or a prefix followed by a quote/bracket, isn't a Number.
+    # Future based-string/block probes can then recognize the whole opener.
+    if i >=? src.length or not is_based_digit(src[i] base) return none
+    first_digit = i
+    i += 1  # consume the digit already proven present; positivity is explicit
+    loop i <? src.length and (is_based_digit(src[i] base) or src[i] =? '_') { i += 1 }
+
+    # Preserve hosted behavior: a high-base array body permits unprefixed
+    # numbers; an explicitly prefixed high-base number is still rejected.
+    if explicit_prefix and BASE_SPECS[base].radix >? MAX_NUMBER_BASE {
+        return TokenError[
+            srcfile=srcfile
+            title="Number base too high"
+            pointers=[Pointer[span=Span[offset offset+i] message="Unquoted base-{BASE_SPECS[base].radix} digits"]]
+            hint="Numeric literals support bases up to {MAX_NUMBER_BASE}; use a based string such as {base}'{src[first_digit..i)}'"
+        ]
+    }
+
+    # The one resolved base is used both to accept digits and construct Number.
+    # finish neither reexamines the prefix nor consults the context again.
+    return NumberMatch[length=i prefix=base]
+}
+
+probe_metatag = (src:nonemptystring):>MetatagMatch? => {
+    if not src.startswith('$') or src.length <=? 1 return none
+    name = probe_identifier(src[1..])
+    if name is? none return none
+    return MetatagMatch[length=name.length+1]
+}
+
+probe_shift_symbol = (src:nonemptystring):>ShiftSymbolMatch? => {
+    loop op in shift_operators {
+        if src.startswith(op) return ShiftSymbolMatch[length=op.length]
+    }
+    return none
+}
+
+probe_block_opener = (src:nonemptystring):>OpenBlockMatch? => {
+    if src.startswith('[') return OpenBlockMatch[length=1 kind='square']
+    if src.startswith('(') return OpenBlockMatch[length=1 kind='round']
+    if src.startswith('\{') return OpenBlockMatch[length=1 kind='curly']
+    if src.length >=? 3 {
+        prefix = src[..2)
+        if prefix is? BasePrefix and src[2] =? '[' {
+            return OpenBlockMatch[length=3 kind='based' base=prefix]
+        }
+    }
+    return none
+}
+
+probe_type_opener = (src:nonemptystring):>OpenTypeMatch? => {
+    if src.startswith('<') return OpenTypeMatch[length=1]
+    return none
+}
+
+probe_block_closer = (src:nonemptystring ctx:BlockBody):>CloseBlockMatch? => {
+    c = src[0]
+    if c is? ']' | ')' | '\}' {
+        return CloseBlockMatch[length=1 spelling=c frame=ctx]
+    }
+    return none
+}
+
+probe_type_closer = (src:nonemptystring ctx:TypeBody):>CloseTypeMatch? => {
+    if src.startswith('>') return CloseTypeMatch[length=1 frame=ctx]
+    return none
+}
+
+# A run of N quotes opens with N quotes if odd, N/2 if even (empty strings).
+# Save the exact delimiter here; string-body probes never inspect opener tokens.
+probe_string_opener = (src:nonemptystring):>OpenStringMatch? => {
+    mode:StringMode = 'ordinary'
+    start:addr = 0
+    if src.startswith('r"') or src.startswith("r'") { mode = 'raw' start = 1 }
+    else if src.startswith('t"') or src.startswith("t'") { mode = 'template' start = 1 }
+    if start >=? src.length return none
+    quote = src[start]
+    if quote isnt? '"' | "'" return none
+    i:addr = start + 1
+    loop i <? src.length and src[i] =? quote { i += 1 }
+    count = i-start
+    length = if count % 2 =? 0 count//2 else count
+    if length <=? 0 return none
+    stop = start+length
+    if stop <=? start or stop >? src.length return none  # expose the slice bounds and nonemptiness
+    return OpenStringMatch[length=stop mode=mode ending=QuoteEnd[src[start..stop)]]
+}
+
+# Heredoc delimiters admit the language's identifier/symbol characters and
+# internal spaces, but neither quotes nor leading/trailing spaces.
+const legal_heredoc_delim_chars = continue_characters | decoration_characters | set'#()[]\{\} ' | set(symbols.join) | set(shift_operators.join)
+
+probe_special_string = (src:nonemptystring at_root:bool srcfile:SrcFile offset:addr):>OpenStringMatch? | TokenError => {
+    if not src.startswith('$') return none
+    mode:StringMode = 'ordinary'
+    start:addr = 1
+    if src.startswith('$r') { mode = 'raw' start = 2 }
+    else if src.startswith('$t') { mode = 'template' start = 2 }
+    if start >=? src.length return none
+    quote = src[start]
+    if quote isnt? '"' | "'" return none
+    if at_root and src[start..].startswith(quote+quote+quote) {
+        return OpenStringMatch[length=start+3 mode=mode ending=EndOfFile[]]
+    }
+    begin = start+1
+    i:addr = begin
+    loop i <? src.length and src[i] in? legal_heredoc_delim_chars { i += 1 }
+    if i <=? begin return none
+    if i >=? src.length or src[i] not=? quote {
+        return TokenError[srcfile=srcfile title="Incomplete heredoc delimiter"
+            pointers=[Pointer[span=Span[offset offset+i] message="Expected closing quote {quote} for heredoc delimiter"]]]
+    }
+    delimiter = src[begin..i)
+    if delimiter.trim =? "" {
+        return TokenError[srcfile=srcfile title="Heredoc delimiter cannot be all space"
+            pointers=[Pointer[span=Span[offset+begin offset+i] message="Choose a nonempty delimiter"]]]
+    }
+    if delimiter.startswith(' ') or delimiter.endswith(' ') {
+        return TokenError[srcfile=srcfile title="Heredoc delimiter cannot start or end with space"
+            pointers=[Pointer[span=Span[offset+begin offset+i] message="Remove leading and trailing spaces"]]]
+    }
+    return OpenStringMatch[length=i+1 mode=mode ending=HeredocEnd[delimiter]]
+}
+
+probe_based_string = (src:nonemptystring):>OpenBasedStringMatch? => {
+    if src.length <? 3 return none
+    prefix = src[..2)
+    if prefix isnt? BasePrefix return none
+    opening = probe_string_opener(src[2..])
+    if opening is? none or opening.mode not=? 'ordinary' return none
+    ending = opening.ending
+    if ending isnt? QuoteEnd return none
+    return OpenBasedStringMatch[length=opening.length+2 ending=ending base=prefix]
+}
+
+probe_based_chars = (src:nonemptystring ctx:BasedStringBody):>BasedStringCharsMatch? => {
+    i:addr = 0
+    loop i <? src.length and (src[i] =? '_' or is_based_digit(src[i] ctx.base)) { i += 1 }
+    if i =? 0 return none
+    return BasedStringCharsMatch[length=i]
+}
+
+ending_description = (ending:StringEnding):>string => {
+    if ending is? EndOfFile return "end of file"
+    return _quoted(ending.text)
+}
+
+probe_string_closer = (src:nonemptystring ctx:QuotedStringContexts):>CloseStringMatch? => {
+    ending = ctx.ending
+    if ending is? EndOfFile return none
+    delimiter = ending.text
+    if src.startswith(delimiter) {
+        return CloseStringMatch[length=delimiter.length opening=ctx.opening heredoc=(ending is? HeredocEnd)]
+    }
+    return none
+}
+
+probe_string_chars = (src:nonemptystring ctx:StringBody | RawStringBody | TemplateStringBody):>StringCharsMatch? => {
+    i:addr = 0
+    ending = ctx.ending
+    loop i <? src.length {
+        if ending isnt? EndOfFile and src[i..].startswith(ending.text) break
+        if ctx isnt? RawStringBody {
+            if src[i] =? '\\' break
+            if ctx is? StringBody and src[i] =? '\{' break
+            if ctx is? TemplateStringBody and src[i..].startswith('$\{') break
+        }
+        i += 1
+    }
+    if i =? 0 return none
+    return StringCharsMatch[length=i raw=(ctx is? RawStringBody)]
+}
+
+# Parametric escapes open ordinary expression blocks whose default base is hex.
+# These compete with simple escapes, but simple escapes explicitly decline \u{.
+probe_interpolation = (src:nonemptystring ctx:EscapedStringContexts):>InterpolationMatch? => {
+    if src.startswith('\\u\{') or src.startswith('\\U\{') {
+        return InterpolationMatch[length=3 kind='unicode']
+    }
+    if ctx is? StringBody and src.startswith('\{') return InterpolationMatch[length=1 kind='ordinary']
+    if ctx is? TemplateStringBody and src.startswith('$\{') return InterpolationMatch[length=2 kind='template']
+    return none
+}
+
+probe_string_escape = (src:nonemptystring srcfile:SrcFile offset:addr):>StringEscapeMatch? | TokenError => {
+    if not src.startswith('\\') return none
+    if src.length <? 2 {
+        return TokenError[
+            srcfile=srcfile title="Incomplete escape sequence at end of string"
+            pointers=[Pointer[span=Span[offset offset+src.length] message="Expected a character after the backslash"]]
+        ]
+    }
+    code = src[1]
+    if code is? 'x' | 'X' {
+        return TokenError[
+            srcfile=srcfile title="Hex byte escapes are not supported in Dewy strings"
+            pointers=[Pointer[span=Span[offset offset+2] message="Unsupported hex byte escape"]]
+            hint="Use a Unicode escape or a based byte string"
+        ]
+    }
+    if code is? 'u' | 'U' {
+        if src.length >=? 3 and src[2] =? '\{' return none
+        i:addr = 2
+        loop i <? src.length and i <? 6 and is_based_digit(src[i] base16) { i += 1 }
+        if i <? 6 {
+            return TokenError[
+                srcfile=srcfile title="Unicode escape sequence is too short"
+                pointers=[Pointer[span=Span[offset offset+i] message="Expected four hexadecimal digits after the escape code"]]
+                hint="Use four hex digits or a braced Unicode expression"
+            ]
+        }
+        return StringEscapeMatch[length=i]
+    }
+    # Includes predefined escapes, escaped newline, and the catch-all literal.
+    # t0 recognizes the source span; decoding the escaped value belongs to t1.
+    return StringEscapeMatch[length=2]
+}
+
+# The immediate previous token must be a Number (whitespace is not skipped).
+# Only that observation crosses the probe boundary, not an optional token.
+# Keep the nested NumberMatch and pass its own absolute offset to diagnostics.
+probe_exponent = (src:nonemptystring previous_is_number:bool base:BasePrefix srcfile:SrcFile offset:addr):>ExponentMatch? | TokenError => {
+    if not previous_is_number or src.length <? 2 return none
+    if src[0] not in? set'eEpP' return none
+    power = probe_number(src[1..] base srcfile offset+1)
+    if power is? TokenError return power
+    if power is? none return none
+    return ExponentMatch[length=power.length+1 power=power]
+}
+
+# Keep only maximal lengths, but retain all ties for precedence/ambiguity.
+# There is no sorting and no dependence on registration order for equal lengths.
+consider = (@best:array<Candidate> result:Candidate?):>void => {
+    if result is? none return
+    if best.length >? 0 {
+        if result.length <? best[0].length return
+        if result.length >? best[0].length best.clear
+    }
+    best.push(result)
+}
+
+# Context eligibility is established where calls happen, not in a returned
+# list of classes. The two groups overlap, so these are independent branches.
+probe_context = (src:nonemptystring ctx:Context previous_is_number:bool srcfile:SrcFile offset:addr):>array<Candidate> | TokenError => {
+    best:array<Candidate> = []
+    if ctx is? WhitespaceOrCommentContexts {
+        consider(@best probe_whitespace(src))
+        consider(@best probe_line_comment(src))
+        block = probe_block_comment(src srcfile offset)
+        if block is? TokenError return block
+        consider(@best block)
+    }
+    if ctx is? GeneralBodyContexts {
+        consider(@best probe_identifier(src))
+        consider(@best probe_symbol(src))
+        number = probe_number(src ctx.default_base srcfile offset)
+        if number is? TokenError return number
+        consider(@best number)
+        exponent = probe_exponent(src previous_is_number ctx.default_base srcfile offset)
+        if exponent is? TokenError return exponent
+        consider(@best exponent)
+        consider(@best probe_string_opener(src))
+        special = probe_special_string(src (ctx is? Root) srcfile offset)
+        if special is? TokenError return special
+        consider(@best special)
+        consider(@best probe_based_string(src))
+        consider(@best probe_metatag(src))
+        consider(@best probe_block_opener(src))
+        consider(@best probe_type_opener(src))
+    }
+    if ctx is? BodyWithoutTypeContexts {
+        consider(@best probe_shift_symbol(src))
+    }
+    if ctx is? BlockBody {
+        consider(@best probe_block_closer(src ctx))
+    }
+    if ctx is? TypeBody {
+        consider(@best probe_type_closer(src ctx))
+    }
+    if ctx is? QuotedStringContexts {
+        consider(@best probe_string_closer(src ctx))
+    }
+    if ctx is? StringBody | RawStringBody | TemplateStringBody {
+        consider(@best probe_string_chars(src ctx))
+    }
+    if ctx is? BasedStringBody { consider(@best probe_based_chars(src ctx)) }
+    if ctx is? EscapedStringContexts {
+        consider(@best probe_interpolation(src ctx))
+        escape = probe_string_escape(src srcfile offset)
+        if escape is? TokenError return escape
+        consider(@best escape)
+    }
+    return best
+}
+
+# Only Identifier can be displaced by precedence in this subset. This encodes
+# the existing Python pairs (Symbol/Number/ExponentMarker > Identifier), not a
+# total ordering that would silently resolve other, potentially invalid ties.
+select = (matches:array<Candidate> srcfile:SrcFile offset:addr):>Candidate | TokenError => {
+    beats_identifier = false
+    loop m in matches {
+        if m is? SymbolMatch or m is? NumberMatch or m is? ExponentMatch { beats_identifier = true }
+    }
+    remaining:array<Candidate> = [
+        loop m in matches
+            if not (beats_identifier and m is? IdentifierMatch) m
     ]
+    if remaining.length =? 1 return remaining[0]
+    if remaining.length =? 0 {
+        return TokenError[
+            srcfile=srcfile
+            title="No token matched"
+            pointers=[Pointer[span=Span[offset offset] message="No implemented token starts here"]]
+            hint="Check the token spelling and the surrounding lexical context"
+        ]
+    }
+    return TokenError[
+        srcfile=srcfile
+        title="Ambiguous token"
+        pointers=[Pointer[span=Span[offset offset+remaining[0].length] message="Multiple equally preferred tokens matched"]]
+    ]
+}
+
+# Validation occurs after selection: e.g. a TypeBody's `>` candidate must
+# not cause a pop or a mismatch report when the longer symbol `>?` wins.
+# The sole driver applies the returned action exactly once, after construction.
+closing_matches = (kind:BlockKind spelling:CloseSpelling):>bool => {
+    if kind is? 'square' | 'round' return spelling is? ']' | ')'
+    if kind =? 'based' return spelling =? ']'
+    return spelling =? '\}'
+}
+
+expected_closer = (kind:BlockKind):>string => {
+    if kind is? 'square' | 'round' return "`]` or `)`"
+    if kind =? 'based' return "`]`"
+    return "`\}`"
+}
+
+finish = (m:Candidate srcfile:SrcFile loc:Span idx:addr):>Finished | TokenError => {
+    $runtime_assert loc.start <=? loc.stop <=? srcfile.body.length
+    src = srcfile.body[loc.start..loc.stop)
+    return match m {
+        <WhitespaceMatch> => Finished[token=Whitespace[src loc idx]]
+        <LineCommentMatch> => Finished[token=LineComment[src loc idx]]
+        <BlockCommentMatch> => Finished[token=BlockComment[src loc idx]]
+        <IdentifierMatch> => Finished[token=Identifier[src loc idx]]
+        <SymbolMatch> => Finished[token=Symbol[src loc idx]]
+        n:NumberMatch => Finished[token=Number[src loc idx n.prefix]]
+        <MetatagMatch> => Finished[token=Metatag[src loc idx]]
+        <ShiftSymbolMatch> => Finished[token=ShiftSymbol[src loc idx]]
+        e:ExponentMatch => Finished[token=ExponentMarker[
+            src loc idx Number[(if src.length >? 1 src[1..] else "") Span[loc.start+1 loc.stop] idx e.power.prefix]
+        ]]
+        o:OpenStringMatch => {
+            opening = Opening[idx loc]
+            # Construct the token and its matching frame together in each arm.
+            match o.mode {
+                <'ordinary'> => Finished[
+                    token=(if o.ending is? EndOfFile RestOfFileStringQuote[src loc idx] else if o.ending is? HeredocEnd HeredocStringOpener[src loc idx] else StringQuoteOpener[src loc idx])
+                    action=Push[StringBody[opening o.ending]]
+                ]
+                <'raw'> => Finished[
+                    token=(if o.ending is? EndOfFile RawRestOfFileStringQuote[src loc idx] else if o.ending is? HeredocEnd RawHeredocStringOpener[src loc idx] else RawStringQuoteOpener[src loc idx])
+                    action=Push[RawStringBody[opening o.ending]]
+                ]
+                <'template'> => Finished[
+                    token=(if o.ending is? EndOfFile TemplateRestOfFileStringQuote[src loc idx] else if o.ending is? HeredocEnd TemplateHeredocStringOpener[src loc idx] else TemplateStringQuoteOpener[src loc idx])
+                    action=Push[TemplateStringBody[opening o.ending]]
+                ]
+            }
+        }
+        c:CloseStringMatch => Finished[token=(if c.heredoc HeredocStringCloser[src loc idx] else StringQuoteCloser[src loc idx]) action=Close[c.opening]]
+        o:OpenBasedStringMatch => Finished[token=BasedStringQuoteOpener[src loc idx o.base] action=Push[BasedStringBody[Opening[idx loc] o.ending o.base]]]
+        <BasedStringCharsMatch> => Finished[token=BasedStringChars[src loc idx]]
+        c:StringCharsMatch => {
+            token:Token = if c.raw RawStringChars[src loc idx] else StringChars[src loc idx]
+            Finished[token=token]
+        }
+        <StringEscapeMatch> => Finished[token=StringEscape[src loc idx]]
+        o:InterpolationMatch => {
+            token:Token = match o.kind {
+                <'ordinary'> => LeftCurlyBrace[src loc idx]
+                <'template'> => TemplateLeftCurlyBrace[src loc idx]
+                <'unicode'> => ParametricStringEscape[src loc idx]
+            }
+            base:BasePrefix = if o.kind =? 'unicode' base16 else base10
+            frame = BlockBody[opening=Opening[idx loc] kind='curly' default_base=base]
+            Finished[token=token action=Push[frame]]
+        }
+        o:OpenBlockMatch => {
+            token:Token = match o.kind {
+                <'square'> => LeftSquareBracket[src loc idx]
+                <'round'> => LeftParenthesis[src loc idx]
+                <'curly'> => LeftCurlyBrace[src loc idx]
+                <'based'> => BasedBlockOpener[src loc idx o.base]
+            }
+            frame = BlockBody[opening=Opening[idx loc] kind=o.kind default_base=o.base]
+            Finished[token=token action=Push[frame]]
+        }
+        <OpenTypeMatch> => Finished[
+            token=LeftAngleBracket[src loc idx]
+            action=Push[TypeBody[opening=Opening[idx loc]]]
+        ]
+        c:CloseBlockMatch => {
+            if not closing_matches(c.frame.kind c.spelling) {
+                return TokenError[
+                    srcfile=srcfile
+                    title="Mismatched opening and closing delimiters"
+                    pointers=[
+                        Pointer[span=c.frame.opening.loc message="Block opened here"]
+                        Pointer[span=loc message="Expected {expected_closer(c.frame.kind)}"]
+                    ]
+                ]
+            }
+            token:Token = match c.spelling {
+                <']'> => RightSquareBracket[src loc idx]
+                <')'> => RightParenthesis[src loc idx]
+                <'\}'> => RightCurlyBrace[src loc idx]
+            }
+            Finished[token=token action=Close[c.frame.opening]]
+        }
+        c:CloseTypeMatch => Finished[
+            token=RightAngleBracket[src loc idx]
+            action=Close[c.frame.opening]
+        ]
+    }
+}
+
+# Warnings belong to the winner. Store only the offsets while probing, then
+# allocate/emit reports after selection. No shared Context.warnings buffer.
+report_warnings = (m:Candidate srcfile:SrcFile offset:addr):>void => {
+    if m is? WhitespaceMatch {
+        loop pos in m.lone_crs {
+            Warning[
+                srcfile=srcfile
+                title="Lone carriage return"
+                pointers=[Pointer[span=Span[offset+pos offset+pos+1] message="\\r without \\n"]]
+                hint="Remove the \\r or follow it with \\n"
+            ].warn
+        }
+    }
+}
+
+# The root is never popped. Keeping a single nonempty stack makes entering,
+# resuming, and EOF validation explicit without copying token lists into frames.
+tokenize = (srcfile:SrcFile):>Tokenization | TokenError => {
     tokens:array<Token> = []
-    
+    pairs:array<DelimiterPair> = []
+    stack:array<Context length>?0> = [Root[]]
     src = srcfile.body
-    printl"src: {src}"
     i:addr = 0
     loop i <? src.length {
-        ctx = ctx_stack[end]
-        allowed_tokens = contextmap(ctx)
-        printl"---------------------------------------------------\nallowed_tokens: {allowed_tokens}"
-        matches = [
-            loop token_cls in allowed_tokens {
-                result = token_cls.eat(src[i..] @ctx)
-                if result is? TokenError { result.shift(i)  return result }   # its spans were relative to `src[i..]`
-                if result isnt? exception
-                    [length=result token_cls=token_cls]
+        previous_is_number = false
+        if tokens.length >? 0 {
+            previous = tokens[end]
+            previous_is_number = previous is? Number
+        }
+        candidates = probe_context(src[i..] stack[end] previous_is_number srcfile i)
+        if candidates is? TokenError return candidates
+        winner = select(candidates srcfile i)
+        if winner is? TokenError return winner
+
+        # Reestablish the input-relative bound after storing/selecting matches.
+        # PositiveLength already proves progress; source identity isn't encoded
+        # in Candidate, so the driver still checks this particular upper bound.
+        length = winner.length
+        if length >? src.length-i {
+            return TokenError[
+                srcfile=srcfile
+                title="Internal tokenizer error: match exceeds remaining source"
+                pointers=[Pointer[span=Span[i i] message="Invalid probe result"]]
+            ]
+        }
+        finished = finish(winner srcfile Span[i i+length] tokens.length)
+        if finished is? TokenError return finished
+        action = finished.action
+        if action is? Close {
+            # These checks establish driver invariants at the mutation boundary.
+            # No stack update has occurred since probing the selected closer.
+            top = stack[end]
+            if stack.length <=? 1 or top is? Root {
+                return TokenError[
+                    srcfile=srcfile
+                    title="Internal tokenizer error: attempt to close root"
+                    pointers=[Pointer[span=Span[i i+length] message="Invalid close action"]]
+                ]
+            }
+            if action.opening.idx >=? tokens.length or action.opening.idx not=? top.opening.idx {
+                return TokenError[
+                    srcfile=srcfile
+                    title="Internal tokenizer error: closer refers to a different frame"
+                    pointers=[Pointer[span=Span[i i+length] message="Invalid opening index"]]
+                ]
+            }
+            pairs.push(DelimiterPair[action.opening.idx tokens.length])
+            stack.pop;
+        }
+        else if action is? Push {
+            stack.push(action.frame)
+        }
+        tokens.push(finished.token)
+        report_warnings(winner srcfile i)
+        i += length
+    }
+
+    if stack.length =? 2 {
+        top = stack[end]
+        if top is? StringBody | RawStringBody | TemplateStringBody and top.ending is? EndOfFile { stack.pop; }
+    }
+    if stack.length >? 1 {
+        pointers:array<Pointer> = [
+            loop frame in stack {
+                if frame is? BlockBody {
+                    Pointer[span=frame.opening.loc message="Unclosed block; expected {expected_closer(frame.kind)}"]
+                }
+                else if frame is? TypeBody {
+                    Pointer[span=frame.opening.loc message="Unclosed type body; expected `>`"]
+                }
+                else if frame is? QuotedStringContexts {
+                    Pointer[span=frame.opening.loc message="Unclosed string; expected {ending_description(frame.ending)}"]
+                }
             }
         ]
-        loop w in ctx.warnings { w.shift(i)  w.warn }
-        ctx.warnings.clear
-        matches.sort(key=(.length) reverse=true)
-        longest_match_length = if matches.length >? 0 matches[0].length else 0
-        matches = [loop m in matches if m.length =? longest_match_length m else break]
-        printl"matched tokens: {matches}"
-        if matches.length >? 1 err"TODO: handling multiple matches not handled yet: {matches}"
-        if matches.length =? 0 err"TODO: no tokens matched this round. remaining src:\n```dewy\n{_quoted(src[i..])}\n```"
-        [length token_cls] = matches[0]
-        token = token_cls[src Span[i i+length] tokens.length]
-        printl"matched token {token}"
-        tokens.push(token)
-        i+=length
+        pointers.push(Pointer[span=Span[src.length src.length] message="End of file reached here"])
+        return TokenError[srcfile=srcfile title="Unclosed delimiters" pointers=pointers]
     }
-
-    return tokens
+    return Tokenization[tokens pairs]
 }
 
-
-
-
-# # why is iterating over argv/accessing members so difficult? `loop i in 0..argv.length` complains about argv.length not being a compiletime constant...
-main = (argv:array<string>):>int64 => {
-    if argv.length <? 2 {
-        err"please specify the path to the file to tokenize"
+dump_tokens = (result:Tokenization):>void => {
+    loop token in result.tokens {
+        let payload = token.src
+        if token is? Number { payload = "{token.prefix}:{token.src}" }
+        printl"0\t{token.typename}\t{token.loc.start}\t{token.loc.stop}\t{_quoted(payload)}"
     }
-    path_arg = p(argv[1])
-    printl"tokenizing {path_arg}"
-    # if not path.exists { printl"path does not exist: {path}" return }
-    # src = 
-    # src = path.read_text
-    srcfile = SrcFile[
-        path=path_arg.path
-        body=match path_arg.read_text {
-            s:string => s
-            _ => err"failed to read file {path_arg}"
+    loop pair in result.pairs { printl"0\tDelimiterPair\t{pair.opening}\t{pair.closing}\t\"\"" }
+}
+
+let run = (input:cli.Input):>int64 => {
+    let result = tokenize(input.srcfile)
+    if result is? TokenError { result.fail }
+    if input.dump { dump_tokens(result) }
+    else {
+        let pointers:array<Pointer> = []
+        loop token in result.tokens {
+            if token is? Whitespace | LineComment | BlockComment continue
+            pointers.push(Pointer[span=token.loc message="{token}"])
         }
-    ]
-    tokens = tokenize(srcfile)
-    if tokens is? TokenError { tokens.fail } # exit with report
-    printl"tokens={tokens}"
-
-
+        cli.show_tokens(input.srcfile pointers 't0')
+    }
     return 0
+}
+main = (argv:array<string>):>int64 => {
+    let input = cli.read_input(argv 't0')
+    if input isnt? cli.Input { input.fail }
+    if input.stage not=? 't0' { printl"Use parser.dewy to select another stage" return 1 }
+    return run(input)
 }

@@ -1,0 +1,6 @@
+# Array membership uses value equality, preserving the language's normal
+# overload resolution. Operands are evaluated once as function arguments.
+let _array_contains = <T>(needle:T values:array<T>):>bool => {
+    loop value in values { if value =? needle return true }
+    return false
+}

@@ -1570,6 +1570,8 @@ class TypeSystem:
         F of? G<B...>        ⟺  false   (open world; can't invent args)
         Structural atoms also imply their STRUCTURAL_NOMINAL_MAP umbrella (and ancestors).
         """
+        if isinstance(a, str) and a in ('string', 'grapheme', 'char') and isinstance(b, StringType):
+            return b.length is None or (a in ('grapheme', 'char') and b.length == 1)
         if isinstance(a, TypeVariable):
             return a == b or self.is_subtype(a.bound, b)
         if isinstance(b, TypeVariable):

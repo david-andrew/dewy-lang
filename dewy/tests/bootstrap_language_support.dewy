@@ -1,0 +1,91 @@
+# Contracts exposed by the bootstrap's token families and indexed arenas.
+Family = $abstract type of any & [name:string]
+A = type of Family & [extra:int64]
+B = type of Family & [other:string]
+C = type of Family & []
+Group = $abstract type of Family
+D = type of Group & []
+is_other = (node:Family):>bool => node isnt? Group
+make = (@calls:array<int64>):>Family => { calls.push(1) return B[name='bee' other='payload'] }
+direct_read = (node:Family):>string => node.name
+read = (node:Family):>string => {
+    if node is? A | B return direct_read(node)
+    return 'other'
+}
+Position:type = [value:addr?]
+choose_position = (flag:bool a:addr b:addr):>Position => Position[value=(if flag a else b)]
+Box = type of Family & [value:string?]
+copy_box = (value:string):>Family => {
+    let optional:string? = value
+    return Box[name='box' value=optional]
+}
+optional_object = (text:string):>Box? => {
+    let result:Box? = none
+    if text.length >? 0 {
+        let local = Box[name=text value=text]
+        result = local
+    }
+    return result
+}
+box_text = (node:Family):>string => {
+    if node is? Box return "{if node.value is? none '' else node.value}"
+    return ''
+}
+concat = (left:string right:string):>string => left+right
+quote_three = (text:string):>string => {
+    if text isnt? '"' | "'" return ''
+    return text+text+text
+}
+next_item = (values:array<int64> i:addr stop:addr):>int64 => {
+    if stop >? values.length return 0
+    if i+1 <? stop return values[i+1]
+    return 0
+}
+append = (@values:array<int64> value:int64):>int64 => { values.push(value) return value }
+identity = (value:int64):>int64 => value
+main = ():>int64 => {
+    let calls:array<int64> = []
+    if make(@calls) isnt? A | B return 1
+    if calls.length not=? 1 return 2
+    if read(A[name='aye' extra=3]) not=? 'aye' return 3
+    if read(B[name='bee' other='payload']) not=? 'bee' return 4
+    if read(C[name='see']) not=? 'other' return 5
+    if quote_three('"') not=? '"""' return 6
+    if concat('e' '\u0301').length not=? 1 return 7
+    let text:string = 'x'
+    text += concat('y' 'z')
+    if text not=? 'xyz' return 8
+    let positions:dict<string addr> = ['a'->0]
+    let position = positions.get('a')
+    if position is? none return 9
+    let copy:addr = position
+    if next_item([10 20 30] copy 3) not=? 20 return 10
+    if identity(append(@calls 2)) not=? 2 return 11
+    if calls.length not=? 2 return 12
+    let boxes:array<Family> = []
+    boxes.push(copy_box(concat('payload' '!')))
+    let churn = concat('overwrite' ' released storage')
+    if box_text(boxes[0]) not=? 'payload!' return 13
+    let optional = optional_object(concat('scoped' ' object'))
+    if optional is? none return 14
+    if box_text(optional) not=? 'scoped object' return 15
+    let numbers:array<int64> = [1 2 3]
+    if 2 not in? numbers or 4 in? numbers return 16
+    let names:array<string> = ['left' 'right']
+    if 'right' not in? names or 'middle' in? names return 17
+    let copies:array<Box> = []
+    copies.push(Box[name='initial' value='initial'])
+    loop i in [0..3) {
+        let next:array<Box> = []
+        loop old in copies { next.push(Box[name=old.name value=old.value]) }
+        copies = next
+    }
+    if copies.length not=? 1 return 18
+    if box_text(copies[0]) not=? 'initial' return 19
+    if not is_other(C[name='outside']) return 20
+    if is_other(D[name='inside']) return 21
+    let position_box = choose_position(true 27 3)
+    if position_box.value is? none return 22
+    if position_box.value not=? 27 return 23
+    return 42
+}

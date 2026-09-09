@@ -86,3 +86,43 @@ def test_end_desugars_to_length_minus_one_on_runtime_sequences() -> None:
         _compile('let f = (text:string):>string => text[end]\n')  # the string may be empty
     with pytest.raises(UserError, match='not proven'):
         _compile('let f = (text:string):>string => { if text.length >? 0 { return text[end - 1] }  return "" }\n')
+
+
+@pytest.mark.parametrize('second', ['string<length >? 0>', 'string'])
+def test_common_union_field_length_facts(second: str) -> None:
+    source = (
+        'A = type of any & const [text:string<length >? 0>]\n'
+        f'B = type of any & const [text:{second}]\n'
+        'let first = (ending:A|B):>string => { let text = ending.text\nreturn text[0] }\n'
+    )
+    if second == 'string':
+        with pytest.raises(UserError, match='string index is not proven'):
+            _compile(source)
+    else:
+        _compile(source)
+
+
+@pytest.mark.parametrize('condition', ['i+1 <? stop', 'stop >? i+1'])
+def test_offset_comparisons_prove_the_next_index(condition):
+    _compile(f'''f = (xs:array<int64> i:addr stop:addr):>int64 => {{
+        if stop >? xs.length return 0
+        if {condition} return xs[i+1]
+        return 0
+    }}''')
+
+
+def test_non_strict_offset_comparison_does_not_prove_an_index():
+    with pytest.raises(UserError, match='index is not proven'):
+        _compile('''f = (xs:array<int64> i:addr stop:addr):>int64 => {
+            if stop >? xs.length return 0
+            if i+1 <=? stop return xs[i+1]
+            return 0
+        }''')
+
+
+def test_optional_field_retains_the_narrowed_payload_contract():
+    _compile('''Position:type = [value:addr?]
+    f = (position:Position):>addr => {
+        if position.value is? none return 0
+        return position.value
+    }''')

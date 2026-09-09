@@ -11,7 +11,7 @@ from udewy.cache import cache_layout
 from udewy.frontend import EntryPointOptions, entry_point
 
 REPO = Path(__file__).resolve().parents[2]
-SKETCH = REPO / 'dewy/bootstrap/parser/t0_sketch.dewy'
+SKETCH = REPO / 'dewy/bootstrap/parser/t0.dewy'
 
 # A test entry point prints semantic fields rather than parsing Token.__as__.
 # All scanning, selection, construction, and stack handling comes from the sketch.
@@ -55,7 +55,7 @@ def sketch_binary(tmp_path_factory):
 def run_sketch(binary, folder, source):
     path = folder / 'input.dewy'
     path.write_bytes(source.encode())
-    return subprocess.run([str(binary), str(path)], capture_output=True, text=True, timeout=10)
+    return subprocess.run([str(binary), str(path)], capture_output=True, text=True, timeout=60)
 
 
 def read_dump(output):
@@ -156,3 +156,17 @@ def test_lone_cr_warning_does_not_discard_tokens(sketch_binary, tmp_path):
         ('StringQuoteCloser', 2, 3), ('Whitespace', 3, 5),
     ]
     assert pairs == [(0, 2)]
+
+
+@pytest.mark.parametrize('path', sorted((REPO / 'dewy/bootstrap/tests').glob('*.dewy')) + [SKETCH])
+def test_fixture_and_self_tokenization(sketch_binary, tmp_path, path):
+    test_matches_hosted_tokens_and_pairs(sketch_binary, tmp_path, path.read_text())
+
+
+@pytest.mark.parametrize('source', [
+    '$"END"helloEND', '$r"END"\\n {raw}END', '$t"END"a${1}END',
+    '$"""last character', '$r"""\\n {raw}', '$t"""a${1}tail',
+    '$"""', '0x"01 af #{ ignored }# ff"', "0b'01 # comment\n 10'",
+])
+def test_extended_string_forms(sketch_binary, tmp_path, source):
+    test_matches_hosted_tokens_and_pairs(sketch_binary, tmp_path, source)

@@ -408,3 +408,13 @@ let main = ():>int64 => add(answer)
     assert entry_point(udewy_path, []) == 42
     assert emitted.count('let main =') == 1
     assert 'import p"' not in emitted
+
+
+@pytest.mark.parametrize('import_line, lookup', [
+    ('import p"lib.dewy" as library', 'library.table[key]'),
+    ('from p"lib.dewy" import table', 'table[key]'),
+])
+def test_import_preserves_total_dictionary_contract(tmp_path, import_line, lookup):
+    _write(tmp_path / 'lib.dewy', "const table:totaldict<'a'|'b' int64> = ['a'->20 'b'->22]\n")
+    entry = _write(tmp_path / 'main.dewy', f'{import_line}\nlet read=(key:\'a\'|\'b\'):>int64 => {lookup}\nlet main=():>int64 => read(\'a\')\n')
+    codegen(SrcFile.from_path(entry))

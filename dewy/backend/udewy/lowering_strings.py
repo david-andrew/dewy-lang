@@ -1051,6 +1051,8 @@ class _StringLowering:
 
     @staticmethod
     def _is_string_valued(type_: object) -> bool:
+        if isinstance(type_, (ty.RefinedType, ty.NamedType)):
+            type_ = ty.unfold(ty.strip_refinement(type_))
         if isinstance(type_, ty.TypeOr):
             return ty.string_valued(type_)   # a union of string literals: one string handle
         return isinstance(type_, (ty.StringType, ty.StringLiteralType)) or type_ in (
@@ -1118,7 +1120,7 @@ class _StringLowering:
                 bound = bound.combined_max(expr_bound)
         self._string_bound_in_progress.discard(key)
         if materialized or any(
-            isinstance(self._unwrap_transparent(expr), hir.InterpolatedString)
+            isinstance(self._unwrap_transparent(expr), (hir.InterpolatedString, hir.StringConcat))
             for expr in returned
         ):
             self.string_result_needs_dest.add(key)
@@ -1228,9 +1230,10 @@ class _StringLowering:
             return StringResultBound(
                 len(expr.type.value.encode('utf-8')), (), False
             )
-        if isinstance(expr, hir.InterpolatedString):
+        if isinstance(expr, (hir.InterpolatedString, hir.StringConcat)):
             bound = StringResultBound(0, (), True)
-            for part in expr.parts:
+            parts = expr.parts if isinstance(expr, hir.InterpolatedString) else [expr.left, expr.right]
+            for part in parts:
                 part_bound = self._string_part_bound(
                     part, literal, local_cache, in_progress
                 )
@@ -5276,4 +5279,3 @@ class _StringLowering:
             None,
         )
         return declarations, [scalar_update, encode]
-

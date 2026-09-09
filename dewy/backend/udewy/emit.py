@@ -674,7 +674,7 @@ def emit_operand(node: hir.AST, ctx: EmitContext) -> str:
     if (
         isinstance(node, hir.FunctionCall)
         and _binop_call(node) is not None
-        or isinstance(node, hir.Transmute)
+        or isinstance(node, (hir.Transmute, hir.ShortCircuit))
     ):
         return f'({emit_ast(node, ctx)})'
     return emit_ast(node, ctx)

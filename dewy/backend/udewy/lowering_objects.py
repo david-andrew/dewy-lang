@@ -409,7 +409,7 @@ class _ObjectLowering:
             statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
-                statements.extend(self._union_copy_cell(dest_addr, src_addr, members, loc, prepared=False))
+                statements.extend(self._union_copy_cell(dest_addr, src_addr, members, loc, prepared=False, move=move))
             elif isinstance(field.type, ty.ObjectType):
                 statements.extend(self._object_copy(dest_addr, src_addr, field.type, loc, arena=arena, move=move))
             elif isinstance(field.type, ty.ArrayType) and move and field.type.length is None:
@@ -594,6 +594,11 @@ class _ObjectLowering:
         if isinstance(node, hir.FunctionCall) and isinstance(node.type, ty.ObjectType):
             return self._extract_expression(node)
         prelude, value = self._extract_expression(node)
+        members = ty.runtime_union_members(node.type)
+        if members is not None and all(isinstance(ty.unfold(member), ty.ObjectType) for member in members):
+            # An object parameter accepts every member of this narrowed
+            # family. Its ABI takes the object, not the union view's cell.
+            return prelude, self._union_source_pointer(value, node.loc)
         return prelude, value
 
     def _extract_member_access(
@@ -623,7 +628,7 @@ class _ObjectLowering:
     ) -> hir.AST:
         """Read a union-typed field: the cell itself for a union view, else
         the payload of the member the checker narrowed the route to."""
-        if isinstance(static_type, ty.TypeOr):
+        if ty.runtime_union_members(static_type) is not None or ty.optional_payload(static_type) is not None:
             return replace(cell, type='int64')
         system = ty.TypeSystem()
         member = next((m for m in members if system.is_subtype(static_type, m)), None)
@@ -1252,7 +1257,7 @@ class _ObjectLowering:
             statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
-                statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False))
+                statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False, move=bool(move)))
                 if move == 'adopt' and any(self._is_string_valued(member) for member in members):
                     # a string payload moved by handle: empty the local's payload word
                     statements.append(self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._int64_binary('__add__', source_address, self._int64_literal(loc, 8), loc)], ty.VOID_TYPE, loc))
@@ -1331,4 +1336,3 @@ class _ObjectLowering:
 
         statements.extend(self._by_brand(src, object_type, loc, child_fields))
         return statements
-

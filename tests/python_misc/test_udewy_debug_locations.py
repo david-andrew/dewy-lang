@@ -114,3 +114,10 @@ let main = ():>int => { return f(1) }
     assert '.string "__dewy_debug_show_7"' in formatter_label[:120] and '.Ldbg_type_word - .Ldebug_info0' in formatter_label[:200]
     hit_type = info[info.index('.string "array<Hit>"'):]
     assert '.Ldbg_fmt0 - .Ldebug_info0' in hit_type[:120]
+
+
+def test_many_declarations_do_not_overflow_debug_scope_traversal() -> None:
+    declarations = '\n'.join(f'    let value{i}:int = {i}' for i in range(1100))
+    asm = assemble('let main = ():>int => {\n' + declarations + '\n    return value1099\n}\n')
+    assert '    .string "value1099"' in asm
+    assert asm.count('    .uleb128 5\n') == 1100

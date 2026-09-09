@@ -46,7 +46,7 @@ fi
 
 source_dir="${temp_dir}/source"
 runtime_stage="${temp_dir}/runtime"
-for required_path in VERSION dewy/__main__.py udewy/__main__.py library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/time.dewy library/doc.dewy library/unicode.dewy library/unicode/casefold.bin library/linux/io.dewy library/linux/files.dewy library/linux/process.dewy library/linux/system.dewy tools/dewy_lldb.py tools/dewy_gdb.py; do
+for required_path in VERSION dewy/__main__.py udewy/__main__.py library/arrays.dewy library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/time.dewy library/doc.dewy library/unicode.dewy library/unicode/casefold.bin library/linux/io.dewy library/linux/files.dewy library/linux/process.dewy library/linux/system.dewy tools/dewy_lldb.py tools/dewy_gdb.py; do
     if [ ! -f "${source_dir}/${required_path}" ]; then
         echo "Downloaded source archive is missing ${required_path}." >&2
         exit 1
@@ -88,6 +88,7 @@ copy_runtime_file "${source_dir}/VERSION"
 copy_runtime_file "${source_dir}/tools/dewy_lldb.py"
 copy_runtime_file "${source_dir}/tools/dewy_gdb.py"
 copy_runtime_file "${source_dir}/library/strings.dewy"
+copy_runtime_file "${source_dir}/library/arrays.dewy"
 copy_runtime_file "${source_dir}/library/path.dewy"
 copy_runtime_file "${source_dir}/library/math.dewy"
 copy_runtime_file "${source_dir}/library/rational.dewy"

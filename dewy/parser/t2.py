@@ -1066,7 +1066,7 @@ def collect_keyword_atom(tokens: list[t1.Token], start: int, *, stop_keywords: s
     if kw.name in {"break", "continue"}:
         if i < len(tokens) and isinstance(tokens[i], t1.Metatag):
             ht = tokens[i]
-            return KeywordExpr(Span(kw.loc.start, ht.loc.stop), [kw, [ht]]), i + 1
+            return KeywordExpr(Span(kw.loc.start, ht.loc.stop), [kw, Chain(ht.loc, [ht])]), i + 1
         return KeywordExpr(kw.loc, [kw]), i
 
     if kw.name in {"let", "const", "local_const", "overload_only"}:

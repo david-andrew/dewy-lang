@@ -264,6 +264,7 @@ class _Lowerer(
         self.lowering_module_startup = False
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
+        self.object_storage: dict[int, ty.ObjectType] = {}
         # Unicode property tables referenced by lowered code: one hidden
         # global per table, declared once and stored at module startup
         self.unicode_table_globals: dict[str, hir.BasedString] = {}
@@ -278,6 +279,7 @@ class _Lowerer(
         self.object_globals_initialized: set[int] = set()
         self.call_optional_args: dict[int, list[ty.TypeExpr | None]] = {}
         self.call_union_args: dict[int, list[tuple[ty.TypeExpr, ...] | None]] = {}
+        self.call_argument_types: dict[int, list[ty.TypeExpr]] = {}
         self.call_optional_kwargs: dict[int, dict[str, ty.TypeExpr]] = {}
         self.array_representations: dict[int, ArrayRepresentation] = {}
         self.array_declarations: dict[int, hir.Declare] = {}
@@ -1543,6 +1545,9 @@ class _Lowerer(
         declarations are compile-time callable sets; all other declarations
         are runtime values.
         """
+        declared_object = ty.unfold(ty.strip_refinement(declare.annotation or declare.expr.type))
+        if declare.binding_id is not None and isinstance(declared_object, ty.ObjectType):
+            self.object_storage[declare.binding_id] = declared_object
         binding = self.declare_bindings.get(id(declare))
         if binding is not None:
             if isinstance(declare.expr, hir.FunctionLiteral):
@@ -1692,6 +1697,10 @@ class _Lowerer(
             enum = ty.enum_members(param.type)
             if enum is not None and param.binding_id is not None:
                 self.enum_words[param.binding_id] = enum
+        for param in [*literal.pos_or_kw_args, *literal.kw_only_args]:
+            object_type = ty.unfold(ty.strip_refinement(param.type))
+            if param.binding_id is not None and isinstance(object_type, ty.ObjectType):
+                self.object_storage[param.binding_id] = object_type
         if literal.rest_args is not None:
             self._new_binding(
                 function_scope,
@@ -2705,10 +2714,12 @@ class _Lowerer(
                 right=self._require_node(self._transform_node(node.right)),
             )
         if isinstance(node, hir.StringConcat):
-            return replace(
-                node,
-                left=self._require_node(self._transform_node(node.left)),
-                right=self._require_node(self._transform_node(node.right)),
+            # Concatenation has exactly the materialization and grapheme
+            # re-segmentation semantics of two adjacent interpolation fields.
+            return hir.InterpolatedString(
+                node.loc, node.type,
+                [self._require_node(self._transform_node(node.left)),
+                 self._require_node(self._transform_node(node.right))],
             )
         if isinstance(node, hir.InterpolatedString):
             return replace(
@@ -2845,12 +2856,18 @@ class _Lowerer(
             if source_function_type is not None:
                 self.call_optional_args[id(transformed)] = optional_payloads
                 self.call_optional_kwargs[id(transformed)] = {}
-                union_slots: list[tuple[ty.TypeExpr, ...] | None] = []
+                argument_types: list[ty.TypeExpr] = []
                 for param in source_function_type.pos_or_kw:
-                    union_slots.append(ty.runtime_union_members(param.type))
+                    argument_types.append(param.type)
                     if not param.required:
-                        union_slots.append(None)
-                self.call_union_args[id(transformed)] = union_slots
+                        argument_types.append('bool')
+                argument_types.extend(arg.type for arg in transformed_pos[len(source_function_type.pos_or_kw):])
+                for param in source_function_type.kw_only:
+                    argument_types.append(param.type)
+                    if not param.required:
+                        argument_types.append('bool')
+                self.call_argument_types[id(transformed)] = argument_types
+                self.call_union_args[id(transformed)] = [ty.runtime_union_members(type_) for type_ in argument_types]
             called = self._direct_call_function(node)
             if called is not None and id(called) in self.string_result_needs_dest:
                 # The transformed call loses resolvable identifier identity,
@@ -4287,6 +4304,25 @@ class _Lowerer(
         ):
             return self._extract_object_field_identifier(node)
         if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+            stored_object = self.object_storage.get(node.binding_id)
+            narrowed_members = ty.runtime_union_members(node.type)
+            if stored_object is not None and narrowed_members is not None:
+                # A family narrowed to several children still lives as one
+                # object pointer. Make a borrowed union view for consumers
+                # that dispatch through a cell; never read the object as one.
+                pointer = replace(node, type='int64', binding_id=None)
+                cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('family_view'))
+                statements = [hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(node.loc))]
+                brand_word = self._brand_word_load(pointer, stored_object, node.loc)
+                arms = []
+                for member in narrowed_members:
+                    brand = self._brand_under_test(member)
+                    if brand is None:
+                        self._target_error(node, 'non-object member in a narrowed object family')
+                    body = [self._tag_write(cell, member, node.loc), self._intrinsic_call('__store_i64__', [pointer, self._optional_payload_address(cell, node.loc)], ty.VOID_TYPE, node.loc)]
+                    arms.append(hir.IfArm(node.loc, ty.VOID_TYPE, self._brand_range_test(brand_word, brand, node.loc), hir.Block(node.loc, ty.VOID_TYPE, body, True)))
+                statements.append(hir.Flow(node.loc, ty.VOID_TYPE, arms, None))
+                return statements, cell
             enum = self.enum_words.get(node.binding_id)
             if enum is not None:
                 word = replace(node, type='int64')
@@ -4311,7 +4347,7 @@ class _Lowerer(
             members = self.union_cells.get(node.binding_id)
             if members is not None:
                 cell = replace(node, type='int64')
-                if isinstance(node.type, ty.TypeOr):
+                if ty.runtime_union_members(node.type) is not None or ty.optional_payload(node.type) is not None:
                     # Full or subset union view: tags are physical (the
                     # storage union's numbering), so the cell passes through
                     # and consumers consult the storage members.
@@ -4359,6 +4395,20 @@ class _Lowerer(
         if isinstance(node, hir.ForwardingAccess):
             return self._extract_forwarding_access(node)
         if isinstance(node, hir.TypeTest):
+            if isinstance(node.test_type, ty.TypeOr) and any(self._brand_under_test(member) is not None for member in node.test_type.items):
+                # Membership in a union is disjunction (its negation is
+                # conjunction). Evaluate a potentially effectful receiver once.
+                prelude, value = self._extract_expression(node.value)
+                name = self._new_optional_name('tested')
+                prelude.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', name, 'int64', replace(value, type='int64')))
+                receiver = hir.ExpressedIdentifier(node.loc, node.value.type, name)
+                test = None
+                for member in node.test_type.items:
+                    part = replace(node, value=receiver, test_type=member)
+                    test = part if test is None else hir.ShortCircuit(node.loc, 'bool', 'and' if node.negated else 'or', test, part)
+                assert test is not None
+                extra, result = self._extract_expression(test)
+                return [*prelude, *extra], result
             enum_test = self._extract_enum_type_test(node)
             if enum_test is not None:
                 return enum_test
@@ -4635,11 +4685,14 @@ class _Lowerer(
             )
             optional_arguments = self.call_optional_args.get(id(node), [])
             union_arguments = self.call_union_args.get(id(node), [])
+            argument_types = self.call_argument_types.get(id(node), [])
             pos_args: list[hir.AST] = []
             place_postlude: list[hir.AST] = []
             for index, arg in enumerate(node.pos_args):
                 expected_type = (
-                    function_type.pos_or_kw[index].type
+                    argument_types[index]
+                    if index < len(argument_types)
+                    else function_type.pos_or_kw[index].type
                     if function_type is not None
                     and index < len(function_type.pos_or_kw)
                     else None

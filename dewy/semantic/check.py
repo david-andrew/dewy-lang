@@ -2119,6 +2119,8 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             root_id, path = assigned
             _invalidate_routes(root_id, ctx=ctx, prefix=path)
         return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, result)
+    if _is_string_type(target.type):
+        return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', result)
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, f'{symbol}=', value)
 
 
@@ -2414,11 +2416,10 @@ def _loop_exit_metatag(ast: p0.KeywordExpr, *, ctx: Context) -> t1.Metatag | Non
         return None
     if (
         len(parts) == 2
-        and isinstance(parts[1], list)
-        and len(parts[1]) == 1
-        and isinstance(parts[1][0], t1.Metatag)
+        and isinstance(parts[1], p0.Atom)
+        and isinstance(parts[1].item, t1.Metatag)
     ):
-        return parts[1][0]
+        return parts[1].item
     user_error(
         ctx.srcfile,
         'invalid labeled loop exit',
@@ -7305,7 +7306,9 @@ def _tcr_dict_declare(
     if annotation is not None and ty.total_dict_key(annotation) is not None:
         _prove_total_dictionary(literal, annotation, ctx=ctx)   # every key, or the missing ones are the error
         ctx.declared_total.add(binding.id)
-    declaration = hir.Declare(loc, ty.VOID_TYPE, keyword, name, dict_object, literal, binding_id=binding.id)   # a `const` keeps its literal's keys proven everywhere
+    # Keep the declared contract on the exported binding. Module-local flow
+    # facts are not available to an importer of a total dictionary.
+    declaration = hir.Declare(loc, ty.VOID_TYPE, keyword, name, annotation if annotation is not None else dict_object, literal, binding_id=binding.id)
     binding.declaration = declaration
     ctx.declarations[name] = dict_object
     ctx.binding_scopes[name] = binding
@@ -11051,13 +11054,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             ty.ArrayType(array.type.element, len(items)),
             items,
         )
-    if not (
-        isinstance(index.type, ty.IntegerLiteralType)
-        or (
-            isinstance(index.type, str)
-            and ctx.type_system.is_subtype(index.type, 'int')
-        )
-    ):
+    if not ctx.type_system.is_subtype(index.type, 'int'):
         user_error(
             ctx.srcfile,
             'array index must be an integer',
@@ -11263,6 +11260,24 @@ def _is_member_route(ast: p0.AST) -> bool:
     return isinstance(ast, p0.Atom) and isinstance(ast.item, t1.Identifier)
 
 
+def _value_membership(left: hir.AST, right: hir.AST, loc: Span, *, ctx: Context) -> hir.AST | None:
+    """One membership dispatch for both `in?` and `not in?`."""
+    target = _target_membership(left, right, loc)
+    if target is not None:
+        return target
+    range_operand = right if isinstance(right, hir.Range) else _resolve_range_value(right, ctx=ctx)
+    if range_operand is not None:
+        return _tcr_range_membership(left, range_operand, ctx=ctx)
+    found_dict = _dict_value(right)
+    if found_dict is not None:
+        dictionary, key_type, _ = found_dict
+        keys, _ = _dict_arrays(dictionary, loc, ctx=ctx)
+        return hir.DictContains(loc, 'bool', keys, check_against(left, key_type, ctx=ctx), position=_new_key_position_name())
+    if isinstance(ty.unfold(ty.strip_refinement(right.type)), ty.ArrayType):
+        return _library_call('_array_contains', [left, right], loc, ctx=ctx)
+    return None
+
+
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
@@ -11454,16 +11469,11 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
         right = typecheck_and_resolve_inner(binop.right, ctx=ctx, type_block=type_block)
         if binop.op.op == 'in?':
-            membership = _target_membership(left, right, binop.loc)
-            if membership is not None:
+            membership = _value_membership(left, right, binop.loc, ctx=ctx)
+            if isinstance(membership, hir.TargetBool):
                 return replace(membership, value=not membership.value)
-            found_dict = _dict_value(right)
-            if found_dict is not None:
-                # `x not in? container` is the negated membership test
-                dictionary, key_type, _value_type = found_dict
-                keys, _values = _dict_arrays(dictionary, binop.loc, ctx=ctx)
-                contains = hir.DictContains(binop.loc, 'bool', keys, check_against(left, key_type, ctx=ctx))
-                return _dispatch_builtin('__not__', [contains], loc=binop.loc, op_loc=binop.op.loc, source_name='not', ctx=ctx)
+            if membership is not None:
+                return _dispatch_builtin('__not__', [membership], loc=binop.loc, op_loc=binop.op.loc, source_name='not', ctx=ctx)
         fname = builtins.INVERTED_COMPARISON_DUNDER_MAP.get(binop.op.op)
         if fname is None:
             not_implemented(ctx.srcfile, binop.op.loc, f'inverted comparison `not{binop.op.op}`')
@@ -11516,28 +11526,10 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             return hir.TargetBool(binop.loc, 'bool', folded)
 
     if symbol == 'in?':
-        membership = _target_membership(left, right, binop.loc)
+        membership = _value_membership(left, right, binop.loc, ctx=ctx)
         if membership is not None:
             return membership
-        range_operand = (
-            right
-            if isinstance(right, hir.Range)
-            else _resolve_range_value(right, ctx=ctx)
-        )
-        if range_operand is not None:
-            return _tcr_range_membership(left, range_operand, ctx=ctx)
-        found_dict = _dict_value(right)
-        if found_dict is not None:
-            dictionary, key_type, _value_type = found_dict
-            keys, _values = _dict_arrays(dictionary, binop.loc, ctx=ctx)
-            return hir.DictContains(
-                binop.loc,
-                'bool',
-                keys,
-                check_against(left, key_type, ctx=ctx),
-                position=_new_key_position_name(),
-            )
-    
+
     match binop.op:
         case t2.QJuxtapose():
             not_implemented(ctx.srcfile, binop.loc, 'quantum juxtapose')
@@ -14174,6 +14166,10 @@ def parse_call_arguments(
 def _contains_place(value: object) -> bool:
     if isinstance(value, hir.Place):
         return True
+    if isinstance(value, hir.FunctionCall):
+        # The nested call has already validated and consumed its place
+        # arguments. Its result is an ordinary value of the return type.
+        return False
     if isinstance(value, (list, tuple)):
         return any(_contains_place(item) for item in value)
     if isinstance(value, dict):
@@ -15436,6 +15432,9 @@ def _through_refinement(value: hir.AST) -> hir.AST:
 
 
 def _is_string_type(type_: ty.Type) -> bool:
+    type_ = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(type_, ty.TypeOr):
+        return ty.string_valued(type_)
     if isinstance(type_, (ty.StringLiteralType, ty.StringType)):
         return True
     return isinstance(type_, str) and type_ in {'string', 'grapheme', 'char'}

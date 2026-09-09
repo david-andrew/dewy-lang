@@ -286,3 +286,11 @@ let main = ():>int64 => {
     assert 'set(values)' in emitted
     assert 'place_cell_pair' not in emitted
     assert 'place_cell_values' not in emitted
+
+
+def test_nested_call_consumes_its_own_place_argument():
+    codegen(SrcFile(None, '''
+let append = (@items:array<int64> value:int64):>int64 => { items.push(value) return value }
+let consume = (value:int64):>int64 => value
+let main = ():>int64 => { let items:array<int64> = [] return consume(append(@items 42)) }
+'''))

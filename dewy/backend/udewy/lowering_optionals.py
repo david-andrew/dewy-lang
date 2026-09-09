@@ -138,6 +138,7 @@ class _OptionalLowering:
         value: hir.AST,
         payload: ty.TypeExpr,
     ) -> list[hir.AST]:
+        value = self._unwrap_transparent(value)
         if isinstance(value, hir.ValueCast):
             return self._optional_write(cell, value.expr, payload)
         if (
@@ -149,9 +150,9 @@ class _OptionalLowering:
             # the tag-and-payload store below is that conversion (a decode
             # `bytes as string | none` is a real conversion and stays)
             return self._optional_write(cell, value.expr, payload)
-        if isinstance(payload, ty.NamedType):
-            # `Node | none`: the payload is a handle, deep-copied on every
-            # store, exactly as in a general union cell (the tags coincide)
+        if isinstance(payload, (ty.NamedType, ty.ObjectType, ty.ArrayType)) or self._is_string_valued(payload):
+            # An optional owns its aggregate or string payload, just like
+            # a general union. A pointer into a shorter-lived local is unsafe.
             return self._union_write(cell, value, ('none', payload), prepared=False)
         if isinstance(value, hir.Flow):
             prelude, flow = self._lower_optional_flow(value, cell, payload)
@@ -664,6 +665,7 @@ class _OptionalLowering:
         aggregate_indexes = [
             index for index, member in enumerate(members)
             if self._union_member_kind(member, prepared=prepared) != 'word'
+            or (not move and self._has_arena() and self._is_string_valued(member))
         ]
         tag = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
@@ -689,10 +691,16 @@ class _OptionalLowering:
         arms: list[hir.IfArm | hir.LoopArm] = []
         for index in aggregate_indexes:
             member = members[index]
-            body = self._union_aggregate_copy_into(
-                dest, self._union_source_pointer(source, loc), member, slots.get(index), loc,
-                move=move and isinstance(member, ty.ObjectType),
-            )
+            if self._is_string_valued(member):
+                body = self._copy_string_element(
+                    self._optional_load_payload(source, member, loc),
+                    self._optional_payload_address(dest, loc), member, loc,
+                )
+            else:
+                body = self._union_aggregate_copy_into(
+                    dest, self._union_source_pointer(source, loc), member, slots.get(index), loc,
+                    move=move and isinstance(member, ty.ObjectType),
+                )
             arms.append(
                 hir.IfArm(
                     loc,
@@ -803,6 +811,7 @@ class _OptionalLowering:
         call may write its result there directly — never for an assignment,
         whose target may be an argument of that very call.
         """
+        value = self._unwrap_transparent(value)
         if isinstance(value, hir.ValueCast):
             return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh)
         if (
@@ -851,7 +860,7 @@ class _OptionalLowering:
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         stored_members = self._stored_union_members(value)
         possible = self._field_union_members(value.type)
-        if stored_members is not None and stored_members != members and possible is not None and all(member in members for member in possible):
+        if stored_members is not None and stored_members != members and possible is not None and all(any(self._union_same_storage_member(member, target) for target in members) for member in possible):
             # a narrowed union (`length` after `isnt? none`): its cell still
             # carries the declaration's tags, so the copy retags by those (a
             # narrowed-away member gets no arm: it cannot be the live one)
@@ -872,7 +881,7 @@ class _OptionalLowering:
             return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared, move=dead_temporary)]
         source_members = self._field_union_members(value.type)
         if source_members is not None:
-            if not all(member in members for member in source_members):
+            if not all(any(self._union_same_storage_member(member, target) for target in members) for member in source_members):
                 self._target_error(
                     value,
                     'a union value whose members are not all members of the target union',
@@ -887,7 +896,7 @@ class _OptionalLowering:
                 *prelude,
                 *self._union_retag(cell, source_word, source_members, members, value.loc, prepared=prepared),
             ]
-        if isinstance(value.type, ty.TypeOr):
+        if isinstance(value.type, ty.TypeOr) and not self._is_string_valued(value.type):
             self._target_error(
                 value,
                 'retagging between differently shaped union types',
@@ -945,6 +954,10 @@ class _OptionalLowering:
             self._optional_store_payload(payload_value, cell, member, value.loc),
         ]
 
+    def _union_same_storage_member(self, source: ty.TypeExpr, target: ty.TypeExpr) -> bool:
+        # All string spellings share one canonical tag and handle layout.
+        return source == target or (self._is_string_valued(source) and self._is_string_valued(target))
+
     def _union_retag(
         self,
         dest: hir.AST,
@@ -973,10 +986,18 @@ class _OptionalLowering:
         )
         arms: list[hir.IfArm | hir.LoopArm] = []
         for member in source_members:
-            if member not in dest_members or self._union_member_kind(member, prepared=prepared) == 'word':
+            dest_index = next((index for index, target in enumerate(dest_members) if self._union_same_storage_member(member, target)), None)
+            if dest_index is None:
                 continue
-            dest_index = dest_members.index(member)
-            body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc)
+            if self._is_string_valued(member) and self._has_arena():
+                body = self._copy_string_element(
+                    self._optional_load_payload(source, member, loc),
+                    self._optional_payload_address(dest, loc), member, loc,
+                )
+            elif self._union_member_kind(member, prepared=prepared) != 'word':
+                body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc)
+            else:
+                continue
             arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, body, True)))
         if not arms:
             return [*statements, word_copy]

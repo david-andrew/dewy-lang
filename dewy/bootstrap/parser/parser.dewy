@@ -1,0 +1,15 @@
+from reporting import Error
+import p"cli.dewy" as cli
+import p"t0.dewy" as lexical
+import p"t1.dewy" as compound
+import p"t2.dewy" as post
+import p"p0.dewy" as syntax
+
+main = (argv:array<string>):>int64 => {
+    let input = cli.read_input(argv 'p0')
+    if input is? Error { input.fail }
+    if input.stage =? 't0' return lexical.run(input)
+    if input.stage =? 't1' return compound.run(input)
+    if input.stage =? 't2' return post.run(input)
+    return syntax.run(input)
+}

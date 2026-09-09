@@ -438,7 +438,7 @@ def parse(srcfile: SrcFile) -> Block:
     chains = t2.postok(srcfile)
     ctx = Context(srcfile=srcfile)
     asts = [parse_chain(chain, ctx) for chain in chains]
-    return Block(loc=Span(asts[0].loc.start, asts[-1].loc.stop), inner=asts, kind='{}', base=None)
+    return Block(loc=Span(asts[0].loc.start, asts[-1].loc.stop) if asts else Span(0, 0), inner=asts, kind='{}', base=None)
 
 # TODO: consider making AST container types for each of the items that recursed into so we aren't shoving ASTs where tokens are expected...
 def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
@@ -448,6 +448,14 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
     for t in chain.items:
         # operators are added as is, to be used by the reduction loop
         if isinstance(t, t2.Operator):
+            try:
+                get_precedence(t)
+            except KeyError as missing:
+                Error(
+                    srcfile=ctx.srcfile,
+                    title=f'No precedence is defined for `{missing.args[0]}`',
+                    pointer_messages=[Pointer(span=t.loc, message='This token is reserved; its operator semantics are not implemented yet')],
+                ).throw()
             items.append(t)
             continue
         

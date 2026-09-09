@@ -552,17 +552,16 @@ class X86_64Backend(Backend):
         type_names: dict[tuple[str, str | None], str] = {}   # (type name, formatter) -> typedef label
         formatters: dict[str, str] = {}                      # formatter -> typedef label
 
-        def collect(scope: _DebugScope) -> None:
+        pending = [function.scope for function in reversed(functions)]
+        while pending:
+            scope = pending.pop()
             for _name, _slot, type_name, formatter in [*scope.parameters, *scope.variables]:
                 if formatter is not None and formatter not in formatters:
                     formatters[formatter] = f".Ldbg_fmt{len(formatters)}"
                 if (type_name, formatter) not in type_names:
                     type_names[(type_name, formatter)] = f".Ldbg_type{len(type_names)}"
-            for child in scope.children:
-                collect(child)
+            pending.extend(reversed(scope.children))
 
-        for function in functions:
-            collect(function.scope)
         has_lines = bool(self._source_files)
         out: list[str] = []
         out.append('.section .debug_abbrev,"",@progbits')
@@ -647,23 +646,30 @@ class X86_64Backend(Backend):
             out.append(f"    .long {base} - .Ldebug_info0")
 
         def emit_scope(scope: _DebugScope, *, block: bool) -> None:
-            if block:
-                out.append("    .uleb128 6")
-                out.append(f"    .quad {scope.low}")
-                out.append(f"    .quad {scope.high} - {scope.low}")
-            entries = [(7, entry) for entry in scope.parameters] + [(5, entry) for entry in scope.variables]
-            for abbrev, (variable_name, slot, type_name, formatter) in entries:
-                out.append(f"    .uleb128 {abbrev}")
-                out.append(f"    .string {self._dwarf_string(variable_name)}")
-                out.append(f"    .long {type_names[(type_name, formatter)]} - .Ldebug_info0")
-                offset_bytes = _sleb128_bytes(slot)
-                out.append(f"    .uleb128 {1 + len(offset_bytes)}")
-                out.append("    .byte 0x91")   # DW_OP_fbreg
-                out.append("    .byte " + ", ".join(str(byte) for byte in offset_bytes))
-            for child in scope.children:
-                emit_scope(child, block=True)
-            if block:
-                out.append("    .byte 0")
+            # Every declaration opens a lexical scope. Generated functions can
+            # have thousands; traversal must not consume the Python call stack.
+            pending: list[tuple[_DebugScope | None, bool]] = [(scope, block)]
+            while pending:
+                scope, block = pending.pop()
+                if scope is None:
+                    out.append("    .byte 0")
+                    continue
+                if block:
+                    out.append("    .uleb128 6")
+                    out.append(f"    .quad {scope.low}")
+                    out.append(f"    .quad {scope.high} - {scope.low}")
+                entries = [(7, entry) for entry in scope.parameters] + [(5, entry) for entry in scope.variables]
+                for abbrev, (variable_name, slot, type_name, formatter) in entries:
+                    out.append(f"    .uleb128 {abbrev}")
+                    out.append(f"    .string {self._dwarf_string(variable_name)}")
+                    out.append(f"    .long {type_names[(type_name, formatter)]} - .Ldebug_info0")
+                    offset_bytes = _sleb128_bytes(slot)
+                    out.append(f"    .uleb128 {1 + len(offset_bytes)}")
+                    out.append("    .byte 0x91")   # DW_OP_fbreg
+                    out.append("    .byte " + ", ".join(str(byte) for byte in offset_bytes))
+                if block:
+                    pending.append((None, False))
+                pending.extend((child, True) for child in reversed(scope.children))
 
         for function in functions:
             out.append("    .uleb128 4")

@@ -202,9 +202,8 @@ def test_parser_keeps_metatags_generic_while_hir_extracts_labels() -> None:
     assert isinstance(parsed.inner[0].item, t1.Metatag)
     assert isinstance(parsed.inner[1], p0.KeywordExpr)
     parts = cast(list[object], parsed.inner[1].parts)
-    assert isinstance(parts[1], list)
-    assert len(parts[1]) == 1
-    assert isinstance(parts[1][0], t1.Metatag)
+    assert isinstance(parts[1], p0.Atom)
+    assert isinstance(parts[1].item, t1.Metatag)
 
     body = _main_body("""
 let main = ():>void => {

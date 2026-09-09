@@ -200,6 +200,7 @@ let printl = <T>(value:T):>void => {
 
 # A string inside a structure is quoted, with the escapes of its literal syntax.
 let _escaped = (g:string):>string => {
+    if g =? "\r\n" { return "\\r\\n" }  # CRLF is one grapheme
     if g =? "\n" { return "\\n" }
     if g =? "\t" { return "\\t" }
     if g =? "\r" { return "\\r" }

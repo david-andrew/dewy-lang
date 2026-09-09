@@ -195,20 +195,27 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
     field's own, plus what enclosing fields declare about it
     (`denominator:bigint<sign =? 1>` speaks about `q.denominator.sign`)."""
     node = _strip_casts(node)
-    if not isinstance(node, hir.MemberAccess):
+    if not isinstance(node, (hir.MemberAccess, hir.ForwardingAccess)):
         return ()
+    if isinstance(node, hir.ForwardingAccess) and node.exception_type != ty.BOTTOM_TYPE:
+        return ()  # a forwarded exception does not satisfy the ordinary fields' facts
+    name = node.field if isinstance(node, hir.ForwardingAccess) else node.name
     object_type = _object_of(node.value.type)
-    field = object_type.field(node.name) if object_type is not None else None
+    field = object_type.field(name) if object_type is not None else None
     propositions: list[ty.Proposition] = list(field.refinement) if field is not None else []
+    # A type test can expose the contract of an optional field's payload.
+    narrowed = ty.unfold(node.type)
+    own = tuple(p for p in narrowed.propositions if p.term is None and p.field is None) if isinstance(narrowed, ty.RefinedType) else ()
     union = ty.unfold(ty.strip_refinement(node.value.type))
     if object_type is None and isinstance(union, ty.TypeOr):
         # a forwarded member of a union of objects (`remaining[0].length` on a `Candidate`):
         # the invariant every member declares for the field
         members = [_object_of(ty.unfold(item)) for item in union.items]
-        fields = [member.field(node.name) if member is not None else None for member in members]
-        if fields and all(f is not None for f in fields) and all(f.refinement == fields[0].refinement for f in fields):
-            propositions = list(fields[0].refinement)
-    suffix = node.name
+        fields = [member.field(name) if member is not None else None for member in members]
+        if fields and all(f is not None for f in fields):
+            propositions = [p for p in fields[0].refinement if all(p in f.refinement for f in fields[1:])]
+    propositions.extend(own)
+    suffix = name
     parent = _strip_casts(node.value)
     while isinstance(parent, hir.MemberAccess):
         parent_type = _object_of(parent.value.type)
@@ -2025,6 +2032,12 @@ class _BoundsValidator:
                 if node.binding_id is not None
                 else None
             )
+            # A narrowed payload may carry a contract even when its source
+            # was a container lookup, rather than a function result.
+            if isinstance(node.type, ty.RefinedType):
+                own = self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
+                if own is not None:
+                    interval = (interval or UNKNOWN_INTERVAL).intersect(own)
             if interval is not None:
                 # a `not=? 0` fact moves a bound that sits on zero past it
                 if node.binding_id is not None and _nonzero_key(node.binding_id) in state and (interval.lower == 0 or interval.upper == 0):
@@ -2161,6 +2174,8 @@ class _BoundsValidator:
             interval = self._eval(node.index, state, validate=validate)
             if validate:
                 self._validate_index(node, interval, state)
+            if isinstance(node.type, ty.RefinedType):
+                return self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
             return None
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, state, validate=validate)
@@ -2415,8 +2430,7 @@ class _BoundsValidator:
         if isinstance(node, hir.ForwardingAccess):
             # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
             self._eval(node.value, state, validate=validate)
-            forwarded = hir.MemberAccess(node.loc, node.type, node.value, node.field, True)
-            return self._bounds_of(_member_invariant(forwarded))
+            return self._bounds_of(_member_invariant(node))
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             value = self._eval(node.value, state, validate=validate)
@@ -2797,6 +2811,27 @@ class _BoundsValidator:
     def _id_bounded_by_length(self, subject: int, sequence_id: int, gap: int, state: State) -> bool:
         """`sequence.length - subject >= gap` for a term the facts name."""
         return self._ordered(subject, _length_key(sequence_id), gap, state)
+
+    def _offset_term(self, node: hir.AST) -> tuple[int, int] | None:
+        """A named term plus a constant, for facts such as `i + 1 < stop`."""
+        node = _strip_casts(node)
+        binding = self._binding_id(node)
+        if binding is not None:
+            return binding, 0
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and len(node.pos_args) == 2:
+            name = node.func.name
+            if name in ('__add__', '__sub__'):
+                left, right = node.pos_args
+                constant = self._constant_expr(right, set())
+                term = self._offset_term(left)
+                if term is not None and constant is not None and constant.lower is not None and constant.lower == constant.upper:
+                    return term[0], term[1] + constant.lower * (1 if name == '__add__' else -1)
+                if name == '__add__':
+                    constant = self._constant_expr(left, set())
+                    term = self._offset_term(right)
+                    if term is not None and constant is not None and constant.lower is not None and constant.lower == constant.upper:
+                        return term[0], term[1] + constant.lower
+        return None
 
     def _lower_bounded_by_length(self, node: hir.AST, sequence_id: int, gap: int, state: State) -> bool:
         """`node - sequence.length >= gap`: the length itself plus a constant, or a term above the length."""
@@ -3700,14 +3735,16 @@ class _BoundsValidator:
         effective = name if truth else {'__gt__': '__le__', '__ge__': '__lt__', '__lt__': '__ge__', '__le__': '__gt__'}.get(name)
         if effective in ordered:
             smaller, larger = ordered[effective]
-            smaller_id, larger_id = self._binding_id(smaller), self._binding_id(larger)
-            if smaller_id is not None and larger_id is not None and smaller_id != larger_id:
+            smaller_term, larger_term = self._offset_term(smaller), self._offset_term(larger)
+            if smaller_term is not None and larger_term is not None and smaller_term[0] != larger_term[0]:
+                smaller_id, smaller_offset = smaller_term
+                larger_id, larger_offset = larger_term
+                gap = (1 if effective in {'__lt__', '__gt__'} else 0) + smaller_offset - larger_offset
                 for key in list(refined):
                     decoded = _decode_index_fact(key)
-                    if decoded is not None and decoded[0] == larger_id and decoded[1] != _NONZERO_MARK:
+                    if gap >= 0 and decoded is not None and decoded[0] == larger_id and decoded[1] != _NONZERO_MARK:
                         refined[_index_fact_key(smaller_id, decoded[1])] = Interval.exact(1)
                 # and the comparison itself is kept: `larger - smaller >= gap`
-                gap = 1 if effective in {'__lt__', '__gt__'} else 0
                 refined[_order_key(smaller_id, larger_id)] = Interval(gap, None)
         if (name == '__eq__') == truth and name in {'__eq__', '__ne__'}:
             # `a =? b` holding (or `a not=? b` failing): each is at most the other

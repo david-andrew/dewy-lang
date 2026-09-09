@@ -129,7 +129,7 @@ class Real(Token):
     """
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Real]|None:
-        if start + 2 >= len(tokens):
+        if start + 1 >= len(tokens):
             return None
         ########## Whole number part ##########
         if not isinstance(tokens[start], t0.Number):
@@ -151,7 +151,7 @@ class Real(Token):
         exponent = None
         # weird disambiguation case where the exponent part looked like an identifier
         if start + i < len(tokens) and isinstance(marker:=tokens[start + i], t0.ExponentMarker):
-            exponent = Exponent(marker.power)
+            exponent = Exponent(marker.power, binary=marker.src[0] in 'pP')
             i += 1
         # <eEpP><number>
         elif (
@@ -212,7 +212,7 @@ class String(Token):
             span = Span(opener.loc.start, opener.matching_quote.loc.stop)
             eaten = body_stop - body_start + 2  # body len + 2 quotes
         elif isinstance(opener, (t0.RestOfFileStringQuote, t0.RawRestOfFileStringQuote, t0.TemplateRestOfFileStringQuote)):
-            body_start, body_stop = start + 1, len(tokens) - 1
+            body_start, body_stop = start + 1, len(tokens)
             span = Span(opener.loc.start, tokens[-1].loc.stop)
             eaten = len(tokens) - body_start + 1  # body len + just 1 opening quote
         else:

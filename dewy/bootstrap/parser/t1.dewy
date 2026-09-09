@@ -1,0 +1,327 @@
+from reporting import SrcFile, Span, Pointer
+import p"t0.dewy" as raw
+
+import p"cli.dewy" as cli
+doc"""
+Compound tokenization. The token shapes follow hosted t1; child lists hold
+indices into a token arena so later rewriting passes can share subtrees under
+Dewy's value semantics. A token is complete before its index is published.
+See ../DESIGN_NOTES.md for pending literal and syntax decisions.
+"""
+
+
+TokenError:type = raw.TokenError
+BasePrefix:type = raw.BasePrefix
+Token1 = $abstract type of any & [loc:Span kind:string]
+Identifier1 = type of Token1 & [kind='Identifier' name:string]
+Keyword1 = type of Token1 & [kind='Keyword' name:string]
+Metatag1 = type of Token1 & [kind='Metatag' name:string]
+Operator1 = type of Token1 & [kind='Operator' symbol:string]
+Whitespace1 = type of Token1 & [kind='Whitespace']
+Semicolon1 = type of Token1 & [kind='Semicolon']
+Bool1 = type of Token1 & [kind='Bool' value:bool]
+Integer1 = type of Token1 & [kind='Integer' value:raw.Number]
+Exponent1:type = [value:raw.Number positive:bool=true binary:bool=false]
+Real1 = type of Token1 & [kind='Real' whole:raw.Number fraction:raw.Number? exponent:Exponent1?]
+String1 = type of Token1 & [kind='String' content:string]
+StringChunk1 = type of Token1 & [kind='StringChunk' content:string]
+IString1 = type of Token1 & [kind='IString' content:array<addr>]
+Block1 = type of Token1 & [kind='Block' inner:array<addr> delims:string base:BasePrefix?=none]
+ParametricEscape1 = type of Token1 & [kind='ParametricEscape' inner:array<addr>]
+BasedString1 = type of Token1 & [kind='BasedString' digits:array<raw.BasedStringChars> base:BasePrefix]
+TokenStream:type = [nodes:array<Token1> roots:array<addr>]
+
+const keywords = set['loop' 'if' 'else' 'match' 'return' 'yield' 'break' 'continue' 'import' 'from' 'let' 'const' 'local_const' 'overload_only']
+# extern/intrinsic/none/void/untyped/end/new remain ordinary identifiers.
+const symbolic_identifiers = set['..' '...' '$' '∞' '∅']
+const word_operators = set['and' 'or' 'xor' 'nand' 'nor' 'xnor' 'not' 'as' 'in' 'transmute' 'of' 'or_throw']
+const escape_map:dict<string string> = ['n'->'\n' '\n'->'' '\r\n'->'' 'r'->'\r' 't'->'\t' 'v'->'\v' 'f'->'\f' 'b'->'\b' 'a'->'\a' '0'->'\0']
+
+append_node = (@nodes:array<Token1> token:Token1):>addr => {
+    let id = nodes.length
+    nodes.push(token)
+    return id
+}
+node_at = (nodes:array<Token1> id:addr):>Token1 => {
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+
+lexical_error = (srcfile:SrcFile loc:Span title:string):>TokenError => TokenError[
+    srcfile=srcfile title=title pointers=[Pointer[span=loc message=title]]
+]
+
+# Decode only escapes whose value is known during parsing. Braced Unicode
+# escapes remain expression nodes, and byte escapes remain the hosted placeholder.
+escape_text = (token:raw.StringEscape srcfile:SrcFile):>string | TokenError => {
+    let text = raw.token_text(token)
+    if text.length <? 2 return lexical_error(srcfile token.loc "Incomplete string escape")
+    let code = text[1..]
+    if code in? escape_map return escape_map[code]
+    if text[1] is? 'u' | 'U' {
+        let alphabet = raw.BASE_SPECS['0x'].alphabet
+        let value:uint32 = 0
+        loop i in 2.. and i <? text.length {
+            let c = text[i].casefold
+            let digit:uint32 = 0
+            loop j in 0.. and j <? alphabet.length {
+                if alphabet[j] =? c { digit = j as uint32 }
+            }
+            value = value*16+digit
+        }
+        if value >=? 0x110000 or 0xD800 <=? value <=? 0xDFFF return lexical_error(srcfile token.loc "Unicode escape is not a scalar value")
+        return chr(value)
+    }
+    return text[1..]
+}
+
+RealMatch1:type = [count:addr value:Real1]
+probe_real = (tokens:array<raw.Token> start:addr stop:addr):>RealMatch1? => {
+    if start >=? stop or stop >? tokens.length return none
+    let whole = tokens[start]
+    if whole isnt? raw.Number return none
+    let i:addr = start+1
+    let fraction:raw.Number? = none
+    if i+1 <? stop {
+        let dot = tokens[i]
+        let digits = tokens[i+1]
+        if dot is? raw.Symbol and raw.token_text(dot) =? '.' and digits is? raw.Number {
+            fraction = digits
+            i += 2
+        }
+    }
+    let exponent:Exponent1? = none
+    if i <? stop {
+        let marker = tokens[i]
+        let spelling = raw.token_text(marker)
+        if marker is? raw.ExponentMarker {
+            exponent = Exponent1[value=marker.power binary=spelling.startswith('p') or spelling.startswith('P')]
+            i += 1
+        }
+        else if marker is? raw.Identifier and spelling in? set['e' 'E' 'p' 'P'] {
+            let next:addr = i+1
+            let positive:bool = true
+            if next <? stop {
+                let sign = tokens[next]
+                if sign is? raw.Symbol and raw.token_text(sign) in? set['+' '-'] {
+                    positive = raw.token_text(sign) =? '+'
+                    next += 1
+                }
+            }
+            if next <? stop {
+                let power = tokens[next]
+                if power is? raw.Number {
+                    exponent = Exponent1[value=power positive=positive binary=spelling in? set['p' 'P']]
+                    i = next+1
+                }
+            }
+        }
+    }
+    if fraction is? none and exponent is? none return none
+    if i <=? start or i >? tokens.length return none
+    return RealMatch1[count=i-start value=Real1[loc=Span[whole.loc.start tokens[i-1].loc.stop] whole=whole fraction=fraction exponent=exponent]]
+}
+
+StringOpeners1:type = raw.StringQuoteOpener | raw.RawStringQuoteOpener | raw.TemplateStringQuoteOpener | raw.HeredocStringOpener | raw.RawHeredocStringOpener | raw.TemplateHeredocStringOpener | raw.RestOfFileStringQuote | raw.RawRestOfFileStringQuote | raw.TemplateRestOfFileStringQuote
+BlockOpeners1:type = raw.LeftSquareBracket | raw.LeftParenthesis | raw.LeftCurlyBrace | raw.LeftAngleBracket | raw.BasedBlockOpener
+
+# The arena is append-only. A recursive call completes its children before
+# the parent is appended; there are no cyclic token references to initialize.
+compound_range = (tokens:array<raw.Token> partners:dict<addr addr> start:addr stop:addr srcfile:SrcFile @nodes:array<Token1>):>array<addr> | TokenError => {
+    if start >? stop or stop >? tokens.length return lexical_error(srcfile Span[0 0] "Invalid token range")
+    let output:array<addr> = []
+    let i:addr = start
+    loop i <? stop {
+        let token = tokens[i]
+        let loc = token.loc
+        let text = raw.token_text(token)
+        if token is? raw.Whitespace | raw.LineComment | raw.BlockComment {
+            let limit:addr = i+1
+            loop limit <? stop {
+                let following = tokens[limit]
+                if following isnt? raw.Whitespace | raw.LineComment | raw.BlockComment break
+                limit += 1
+            }
+            output.push(append_node(@nodes Whitespace1[loc=Span[loc.start tokens[limit-1].loc.stop]]))
+            i = limit
+            continue
+        }
+        if token is? raw.Number {
+            let real = probe_real(tokens i stop)
+            if real isnt? none {
+                output.push(append_node(@nodes real.value))
+                i += real.count
+                continue
+            }
+            output.push(append_node(@nodes Integer1[loc=loc value=token]))
+        }
+        else if token is? StringOpeners1 {
+            let eof = token is? raw.RestOfFileStringQuote | raw.RawRestOfFileStringQuote | raw.TemplateRestOfFileStringQuote
+            let close:addr = stop
+            let after:addr = stop
+            let limit:addr = srcfile.body.length
+            if not eof {
+                let partner = partners.get(i)
+                if partner is? none return lexical_error(srcfile loc "Missing string closing quote")
+                close = partner
+                if close >=? stop return lexical_error(srcfile loc "String closer outside token range")
+                after = close+1
+                limit = tokens[close].loc.stop
+            }
+            let chunks:array<addr> = []
+            let plain:string = ""
+            let interpolated:bool = false
+            let j:addr = i+1
+            loop j <? close and j <? tokens.length {
+                let part = tokens[j]
+                if part is? raw.StringChars | raw.RawStringChars { plain += raw.token_text(part) }
+                else if part is? raw.StringEscape {
+                    let decoded = escape_text(part srcfile)
+                    if decoded is? TokenError return decoded
+                    plain += decoded
+                }
+                else if part is? raw.ParametricStringEscape | raw.LeftCurlyBrace | raw.TemplateLeftCurlyBrace {
+                    let closing = partners.get(j)
+                    if closing is? none return lexical_error(srcfile part.loc "Missing interpolation closing brace")
+                    if closing >=? close or closing >=? tokens.length return lexical_error(srcfile part.loc "Invalid interpolation boundary")
+                    if part isnt? raw.ParametricStringEscape and closing =? j+1 return lexical_error(srcfile part.loc "Empty interpolation block")
+                    if plain.length >? 0 {
+                        chunks.push(append_node(@nodes StringChunk1[loc=part.loc content=plain]))
+                        plain = ""
+                    }
+                    let inner = compound_range(tokens partners j+1 closing srcfile @nodes)
+                    if inner is? TokenError return inner
+                    let span = Span[part.loc.start tokens[closing].loc.stop]
+                    if part is? raw.ParametricStringEscape {
+                        chunks.push(append_node(@nodes ParametricEscape1[loc=span inner=inner]))
+                    }
+                    else { chunks.push(append_node(@nodes Block1[loc=span inner=inner delims='\{\}'])) }
+                    interpolated = true
+                    j = closing+1
+                    continue
+                }
+                else { return lexical_error(srcfile part.loc "Invalid token in string body") }
+                j += 1
+            }
+            let span = Span[loc.start limit]
+            if interpolated {
+                if plain.length >? 0 { chunks.push(append_node(@nodes StringChunk1[loc=span content=plain])) }
+                output.push(append_node(@nodes IString1[loc=span content=chunks]))
+            }
+            else { output.push(append_node(@nodes String1[loc=span content=plain])) }
+            i = after
+            continue
+        }
+        else if token is? BlockOpeners1 | raw.BasedStringQuoteOpener {
+            let close = partners.get(i)
+            if close is? none return lexical_error(srcfile loc "Missing closing delimiter")
+            if close >=? stop return lexical_error(srcfile loc "Closing delimiter outside token range")
+            let span = Span[loc.start tokens[close].loc.stop]
+            if token is? raw.BasedStringQuoteOpener {
+                let digits:array<raw.BasedStringChars> = []
+                let j:addr = i+1
+                loop j <? close {
+                    let part = tokens[j]
+                    if part is? raw.BasedStringChars { digits.push(part) }
+                    j += 1
+                }
+                output.push(append_node(@nodes BasedString1[loc=span digits=digits base=token.base]))
+            }
+            else {
+                let inner = compound_range(tokens partners i+1 close srcfile @nodes)
+                if inner is? TokenError return inner
+                let base:BasePrefix? = none
+                if token is? raw.BasedBlockOpener { base = token.base }
+                if text.length =? 0 return lexical_error(srcfile loc "Empty block opener")
+                let delims = text[text.length-1]+raw.token_text(tokens[close])
+                output.push(append_node(@nodes Block1[loc=span inner=inner delims=delims base=base]))
+            }
+            i = close+1
+            continue
+        }
+        else if token is? raw.Identifier {
+            if text in? keywords { output.push(append_node(@nodes Keyword1[loc=loc name=text])) }
+            else if text in? word_operators { output.push(append_node(@nodes Operator1[loc=loc symbol=text])) }
+            else if text =? 'true' or text =? 'false' { output.push(append_node(@nodes Bool1[loc=loc value=(text =? 'true')])) }
+            else { output.push(append_node(@nodes Identifier1[loc=loc name=text])) }
+        }
+        else if token is? raw.Symbol | raw.ShiftSymbol {
+            if text =? ';' { output.push(append_node(@nodes Semicolon1[loc=loc])) }
+            else if text in? symbolic_identifiers { output.push(append_node(@nodes Identifier1[loc=loc name=text])) }
+            else { output.push(append_node(@nodes Operator1[loc=loc symbol=text])) }
+        }
+        else if token is? raw.Metatag {
+            output.push(append_node(@nodes Metatag1[loc=loc name=(if text.length >? 1 text[1..] else '')]))
+        }
+        else { return lexical_error(srcfile loc "No compound token found") }
+        i += 1
+    }
+    return output
+}
+
+tokenize = (srcfile:SrcFile):>TokenStream | TokenError => {
+    let lexical = raw.tokenize(srcfile)
+    if lexical is? TokenError return lexical
+    let partners:dict<addr addr> = []
+    loop pair in lexical.pairs { partners[pair.opening] = pair.closing }
+    let nodes:array<Token1> = []
+    let roots = compound_range(lexical.tokens partners 0 lexical.tokens.length srcfile @nodes)
+    if roots is? TokenError return roots
+    return TokenStream[nodes roots]
+}
+
+# Stable, source-located tree output shared by the command line and parity
+# tests. String payloads use Dewy's escaped literal spelling.
+number_text = (number:raw.Number):>string => "{number.prefix}:{raw.token_text(number)}"
+token_payload = (node:Token1):>string => {
+    if node is? Identifier1 | Keyword1 | Metatag1 return node.name
+    if node is? Operator1 return node.symbol
+    if node is? String1 | StringChunk1 return node.content
+    if node is? Bool1 return if node.value 'true' else 'false'
+    if node is? Integer1 return number_text(node.value)
+    if node is? Real1 {
+        let parts:array<string> = [number_text(node.whole)]
+        let fraction = node.fraction
+        let exponent = node.exponent
+        parts.push(if fraction is? none '' else number_text(fraction))
+        if exponent is? none { parts.push('') }
+        else { parts.push("{if exponent.positive '+' else '-'}{if exponent.binary 'p' else 'e'}{number_text(exponent.value)}") }
+        return parts.join('|')
+    }
+    if node is? Block1 return "{node.delims}:{if node.base is? none '' else node.base}"
+    if node is? BasedString1 {
+        let pieces:array<string> = []
+        loop digit in node.digits { pieces.push(raw.token_text(digit)) }
+        return "{node.base}:{pieces.join('|')}"
+    }
+    return ''
+}
+dump_tree = (nodes:array<Token1> roots:array<addr> depth:addr):>void => {
+    loop id in roots {
+        let node = node_at(nodes id)
+        printl"{depth}\t{node.kind}\t{node.loc.start}\t{node.loc.stop}\t{_quoted(token_payload(node))}"
+        if node is? Block1 | ParametricEscape1 { dump_tree(nodes node.inner depth+1) }
+        else if node is? IString1 { dump_tree(nodes node.content depth+1) }
+    }
+}
+let run = (input:cli.Input):>int64 => {
+    let result = tokenize(input.srcfile)
+    if result is? TokenError { result.fail }
+    if input.dump { dump_tree(result.nodes result.roots 0) }
+    else {
+        let pointers:array<Pointer> = []
+        loop id in result.roots {
+            let node = node_at(result.nodes id)
+            if node is? Whitespace1 continue
+            pointers.push(Pointer[span=node.loc message="{node.kind} {_quoted(token_payload(node))}"])
+        }
+        cli.show_tokens(input.srcfile pointers 't1')
+    }
+    return 0
+}
+main = (argv:array<string>):>int64 => {
+    let input = cli.read_input(argv 't1')
+    if input isnt? cli.Input { input.fail }
+    if input.stage not=? 't1' { printl"Use parser.dewy to select another stage" return 1 }
+    return run(input)
+}

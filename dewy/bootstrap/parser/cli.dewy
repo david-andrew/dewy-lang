@@ -1,0 +1,39 @@
+from reporting import SrcFile, Error, Report, Pointer
+
+# The stage files and the combined driver share argument and file handling.
+Stage:type = 't0' | 't1' | 't2' | 'p0'
+Input:type = [srcfile:SrcFile stage:Stage dump:bool]
+read_input = (argv:array<string> default_stage:Stage):>Input | Error => {
+    let source:string = ''
+    let stage:Stage = default_stage
+    let dump:bool = false
+    let i:addr = 1
+    loop i <? argv.length {
+        let arg = argv[i]
+        if arg is? '--help' | '-h' {
+            printl"usage: parser.dewy <source-file> [--stage t0|t1|t2|p0] [--dump]"
+            printl"Stage files use their own stage by default. --dump prints tab-separated tree rows."
+            exit(0)
+        }
+        else if arg =? '--dump' { dump = true }
+        else if arg =? '--stage' {
+            i += 1
+            if i >=? argv.length return Error[title='--stage needs t0, t1, t2, or p0']
+            let value = argv[i]
+            if value isnt? Stage return Error[title='Unknown parser stage' message=value]
+            stage = value
+        }
+        else if arg.startswith('-') { return Error[title='Unknown option' message=arg] }
+        else if source.length >? 0 { return Error[title='Expected one source file'] }
+        else { source = arg }
+        i += 1
+    }
+    if source.length =? 0 return Error[title='Expected a source file' hint='Use --help for usage.']
+    let path = p(source)
+    let body = path.read_text
+    if body isnt? string return Error[title='Could not read source file' message=source]
+    return Input[SrcFile[path=path.path body=body] stage dump]
+}
+show_tokens = (srcfile:SrcFile pointers:array<Pointer> stage:Stage):>void => {
+    Report[severity='info' srcfile=srcfile title="{stage} tokens" pointers=pointers].render(srcfile)
+}

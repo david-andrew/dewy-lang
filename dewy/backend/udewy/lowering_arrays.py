@@ -886,6 +886,10 @@ class _ArrayLowering:
             )
         if self._array_use_representation(node.target) == 'stack_data':
             prelude, copied = self._clone_array_to_raw(node.value, array_type)
+        elif array_type.length is None:
+            # Rebinding can cross a block/loop boundary. Its RHS frame buffer
+            # dies at that boundary, while the target remains live.
+            prelude, copied = self._clone_array_value(node.value, array_type, arena=True)
         else:
             prelude, copied = self._independent_array_value(
                 node.value,
