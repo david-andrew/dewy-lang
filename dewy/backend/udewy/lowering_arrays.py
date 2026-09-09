@@ -1047,11 +1047,9 @@ class _ArrayLowering:
                 # sharing the elements would dangle once the source is rebound
                 arena = True
             return self._clone_dynamic_array_value(node, array_type, arena=arena, move=move)
-        if arena:
-            self._target_error(node, 'an arena-backed copy of an exact-length array (inside an element of a growable array)')
         source_is_raw = self._array_use_representation(node) is not None
         source_prelude, source = self._extract_expression(node)
-        allocation, target = self._allocate_array_value(array_type, node.loc)
+        allocation, target = self._allocate_array_value(array_type, node.loc, arena=arena)
         element_bytes, _signed = self._array_element_layout(
             array_type.element,
             node,
@@ -1085,6 +1083,7 @@ class _ArrayLowering:
                 target_address,
                 array_type.element,
                 node.loc,
+                arena=arena,
                 move=move,
             ))
         return statements, target
@@ -2368,8 +2367,10 @@ class _ArrayLowering:
         self,
         array_type: ty.ArrayType,
         loc: Span,
+        *,
+        arena: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Allocate an exact array descriptor and its caller-owned backing data."""
+        """Allocate an exact array in its owner frame, or the arena if it escapes."""
 
         if array_type.length is None:
             self._target_error(
@@ -2385,6 +2386,13 @@ class _ArrayLowering:
         data = hir.ExpressedIdentifier(loc, 'int64', data_name)
         allocator = '__static_alloca__' if self.lowering_module_startup else '__alloca__'
         descriptor = replace(target, type='int64')
+
+        def allocate(size: int) -> hir.FunctionCall:
+            amount = self._int64_literal(loc, max(1, size))
+            if arena:
+                return self._arena_allocation(amount, loc)
+            return self._intrinsic_call(allocator, [amount], 'int64', loc)
+
         statements: list[hir.AST] = [
             hir.Declare(
                 loc,
@@ -2392,15 +2400,7 @@ class _ArrayLowering:
                 'let',
                 data_name,
                 'int64',
-                self._intrinsic_call(
-                    allocator,
-                    [self._int64_literal(
-                        loc,
-                        max(1, array_type.length * element_bytes),
-                    )],
-                    'int64',
-                    loc,
-                ),
+                allocate(array_type.length * element_bytes),
             ),
             hir.Declare(
                 loc,
@@ -2408,12 +2408,7 @@ class _ArrayLowering:
                 'let',
                 target.name,
                 'int64',
-                self._intrinsic_call(
-                    allocator,
-                    [self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE)],
-                    'int64',
-                    loc,
-                ),
+                allocate(ARRAY_DESCRIPTOR_SIZE),
             ),
             self._store_i64_field(descriptor, ARRAY_DATA_OFFSET, data, loc),
             self._store_i64_field(
@@ -2437,13 +2432,13 @@ class _ArrayLowering:
             self._store_i64_field(
                 descriptor,
                 ARRAY_FLAGS_OFFSET,
-                self._int64_literal(loc, ARRAY_MUTABLE),
+                self._int64_literal(loc, ARRAY_MUTABLE | (ARRAY_ARENA_DESCRIPTOR if arena else 0)),
                 loc,
             ),
             self._store_i64_field(
                 descriptor,
                 ARRAY_OWNER_OFFSET,
-                self._int64_literal(loc, 0),
+                self._int64_literal(loc, 1 if arena else 0),
                 loc,
             ),
         ]

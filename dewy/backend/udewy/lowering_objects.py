@@ -1007,6 +1007,7 @@ class _ObjectLowering:
             self._target_error(node, 'object assignment requires an object')
         dest = replace(node.target, type='int64')
         statements: list[hir.AST] = []
+        fresh_destination = False
         binding = (
             self.binding_by_semantic_id.get(node.target.binding_id)
             if node.target.binding_id is not None
@@ -1030,8 +1031,23 @@ class _ObjectLowering:
                 )
             )
             self.object_globals_initialized.add(node.target.binding_id)
+            fresh_destination = True
         prelude, src = self._extract_object_pointer(node.value)
         statements.extend(prelude)
+        if not self._place_is_owned(node.target):
+            # Replacing caller/global storage must not install descriptors
+            # from this frame. Finish an independent copy before releasing
+            # the old fields: the RHS can be the destination itself or one
+            # of its members. Then transfer that copy's ownership by moving
+            # the inline object bytes into the existing caller-owned block.
+            size, _offsets = self._object_layout(node.target.type, node)
+            temporary = self._new_object_temp(node.loc)
+            statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', temporary.name, 'int64', self._object_allocation(node.loc, size)))
+            statements.extend(self._object_copy(temporary, src, node.target.type, node.loc, arena=True))
+            if not fresh_destination and self._has_arena():
+                statements.extend(self._release_object_members(dest, node.target.type, node.loc))
+            statements.extend(self._byte_copy_loop(dest, temporary, self._int64_literal(node.loc, size), node.loc))
+            return statements
         statements.extend(self._object_copy(dest, src, node.target.type, node.loc))
         return statements
 
