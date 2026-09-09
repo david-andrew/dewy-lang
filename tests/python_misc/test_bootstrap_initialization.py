@@ -60,6 +60,9 @@ def type_builder(lines):
             return cache[key]
         if isinstance(value, str):
             call = f'types.primitive({json.dumps(value)} @type_nodes)'
+        elif isinstance(value, ty.GenericTypeAlias):
+            params = ' '.join(f'types.GenericParam[{optional(p.name)} {build(p.bound)}]' for p in value.params)
+            call = f'types.GenericTypeAlias[[{params}] {build(value.body)}]'
         elif isinstance(value, ty.IntegerLiteralType):
             call = f'types.integer_literal(({value.value}) @type_nodes)'
         elif isinstance(value, ty.StringLiteralType):
@@ -79,7 +82,7 @@ def type_builder(lines):
         elif isinstance(value, ty.MetaType):
             call = f'types.meta_type({build(value.family)} @type_nodes)'
         elif isinstance(value, ty.ModuleType):
-            fields = ' '.join(f'types.ModuleField[{optional(f.name)} {build(f.type)} {f.binding_id}]' for f in value.fields)
+            fields = ' '.join(f'types.ModuleField[{optional(f.name)} {build(f.type)} {f.binding_id} {"none" if f.type_value is None else build(f.type_value)}]' for f in value.fields)
             call = f'types.module_type([{fields}] @type_nodes)'
         elif isinstance(value, ty.DimensionType):
             powers = ' '.join(f'types.DimensionPower[{optional(name)} ({power})]' for name, power in value.powers)

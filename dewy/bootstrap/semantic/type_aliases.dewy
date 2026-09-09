@@ -1,0 +1,38 @@
+from reporting import SrcFile, Span, Error, Pointer
+import p"ty.dewy" as types
+import p"subtyping.dewy" as subtyping
+import p"type_display.dewy" as display
+
+doc"""
+Application of an already resolved generic type alias.
+
+The source checker resolves the alias's body and parameter bounds in its
+lexical scope. An application checks arity and substitutes accepted arguments
+left to right: a later parameter's bound may name an earlier parameter. Only
+then is the body substituted, preserving the type algebra's rules for nested
+callable binders. This is check.py's _instantiate_type_alias, without Python
+exceptions or a dependency on the compiler's eventual full checking context.
+
+Parsing/resolving an alias declaration and looking it up through imports are
+still tasks for that checker; this layer consumes their compile-time value.
+"""
+
+instantiate = (alias:types.GenericTypeAlias arguments:array<addr> links:array<subtyping.Link> @nodes:array<types.Type> srcfile:SrcFile loc:Span):>addr | Error => {
+    if arguments.length not=? alias.params.length {
+        return Error[srcfile=srcfile title='wrong number of generic type arguments'
+            pointers=[Pointer[span=loc message="expected {alias.params.length}, got {arguments.length}"]]]
+    }
+    let accepted:dict<string addr> = []
+    loop i in 0.. and i <? alias.params.length {
+        $runtime_assert i <? arguments.length
+        let param = alias.params[i]
+        let argument = arguments[i]
+        let bound = types.substitute(param.bound accepted @nodes)
+        if not subtyping.is_subtype(argument bound links @nodes) {
+            return Error[srcfile=srcfile title='generic type argument does not satisfy its bound'
+                pointers=[Pointer[span=loc message="`{display.type_to_dewy(argument nodes)}` is not a subtype of `{display.type_to_dewy(bound nodes)}` for `{param.name}`"]]]
+        }
+        accepted[param.name] = argument
+    }
+    return types.substitute(alias.body accepted @nodes)
+}

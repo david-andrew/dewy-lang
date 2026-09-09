@@ -1,5 +1,6 @@
 from reporting import Span
 import p"hir.dewy" as hir
+import p"ty.dewy" as types
 
 doc"""
 Stable declaration identities, lexical lookup, and projected storage routes.
@@ -20,7 +21,7 @@ Binding:type = [
     # Place parameters keep the caller's store contract through forwarding
     # and mutation, separately from a read's current flow facts.
     store_type:addr?=none
-    type_value:addr?=none
+    type_value:types.TypeAliasValue?=none
     declaration:addr?=none
     function:addr?=none
     syntax:addr?=none

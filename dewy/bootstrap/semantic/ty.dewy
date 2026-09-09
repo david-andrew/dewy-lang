@@ -49,6 +49,10 @@ QuantityType = type of Type & [number:addr dimension:addr]
 PosOrKwArg:type = const [name:string? value_type:addr required:bool=true place:bool=false]
 KwOnlyArg:type = const [name:string value_type:addr required:bool place:bool=false]
 GenericParam:type = const [name:string bound:addr]
+# An alias is a compile-time constructor, not an atom in the value-type
+# hierarchy. Its body and bounds refer into the ordinary type arena.
+GenericTypeAlias:type = const [params:array<GenericParam> body:addr]
+TypeAliasValue:type = addr | GenericTypeAlias
 FunctionType = type of Type & [
     pos_or_kw:array<PosOrKwArg>
     kw_only:array<KwOnlyArg>
@@ -88,7 +92,7 @@ PathLiteralType = type of PathType & [value:string]
 RefinedType = type of Type & [base:addr propositions:array<facts.Proposition>]
 NamedType = type of Type & [name:string alias_id:addr target:addr?=none]
 MetaType = type of Type & [family:addr]
-ModuleField:type = const [name:string value_type:addr binding_id:addr type_value:addr?=none]
+ModuleField:type = const [name:string value_type:addr binding_id:addr type_value:TypeAliasValue?=none]
 ModuleType = type of Type & [fields:array<ModuleField>]
 
 # A clause is a conjunction of signed atoms; the outer list is a disjunction.
@@ -370,12 +374,23 @@ unfold = (id:addr nodes:array<Type>):>addr => {
     return node.target
 }
 meta_type = (family:addr @nodes:array<Type>):>addr => intern(@nodes MetaType[key="H{family}" shape="H{shapes_key([family] nodes)}" family=family])
+alias_key = (value:TypeAliasValue nodes:array<Type> structural:bool):>string => {
+    if value is? addr return if structural shape_of(value nodes) else "{value}"
+    let params:array<string> = []
+    loop param in value.params {
+        let bound = if structural shape_of(param.bound nodes) else "{param.bound}"
+        params.push("{_quoted(param.name)}:{_quoted(bound)}")
+    }
+    let body = if structural shape_of(value.body nodes) else "{value.body}"
+    return "alias[{params.join(';')}]:{_quoted(body)}"
+}
 module_type = (fields:array<ModuleField> @nodes:array<Type>):>addr => {
     let parts:array<string> = []
     let shapes:array<string> = []
     loop f in fields {
-        parts.push("{_quoted(f.name)}:{f.value_type}:{f.binding_id}:{f.type_value}")
-        let value = if f.type_value is? none 'none' else shapes_key([f.type_value] nodes)
+        let stored = if f.type_value is? none 'none' else alias_key(f.type_value nodes false)
+        parts.push("{_quoted(f.name)}:{f.value_type}:{f.binding_id}:{stored}")
+        let value = if f.type_value is? none 'none' else alias_key(f.type_value nodes true)
         shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.binding_id}:{value}")
     }
     return intern(@nodes ModuleType[key="Z{parts.join(';')}" shape="Z{shapes.join(';')}" fields=fields])

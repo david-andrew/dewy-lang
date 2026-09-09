@@ -8,8 +8,8 @@ Source spellings for types and contracts, corresponding to hir_display.py.
 Unlike ty.describe's internal dump, these spellings retain callable names,
 place parameters, field invariants, and conditional proof arms. Named aliases
 stay named: diagnostics must not recursively unfold a recursive declaration.
-Generic type-alias values still await their checker representation; they will
-wrap this renderer with the alias's parameter list, as in the hosted version.
+Generic alias values wrap the body with their parameter list. They are
+compile-time constructors rather than members of the type-expression algebra.
 """
 
 # Iterate Unicode scalars, not graphemes: a quote or interpolation opener may
@@ -120,11 +120,18 @@ atom = (id:addr nodes:array<types.Type>):>string => {
     let text = type_to_dewy(id nodes)
     return if types.node_at(nodes id) is? types.TypeAnd | types.TypeOr | types.OverloadType "({text})" else text
 }
-function_to_dewy = (node:types.FunctionType nodes:array<types.Type>):>string => {
+generic_params = (params:array<types.GenericParam> nodes:array<types.Type>):>string => {
     let generics:array<string> = []
-    loop param in node.type_params {
+    loop param in params {
         generics.push(if types.is_primitive(types.node_at(nodes param.bound) 'any') param.name else "{param.name} of {type_to_dewy(param.bound nodes)}")
     }
+    return generics.join(' ')
+}
+type_alias_value_to_dewy = (value:types.TypeAliasValue nodes:array<types.Type>):>string => {
+    if value is? addr return type_to_dewy(value nodes)
+    return "<{generic_params(value.params nodes)}>({type_to_dewy(value.body nodes)})"
+}
+function_to_dewy = (node:types.FunctionType nodes:array<types.Type>):>string => {
     let args:array<string> = []
     loop arg in node.pos_or_kw {
         let text = type_to_dewy(arg.value_type nodes)
@@ -143,7 +150,7 @@ function_to_dewy = (node:types.FunctionType nodes:array<types.Type>):>string => 
         $runtime_assert args.length >? 0
         signature = args[0]
     }
-    let prefix = if generics.length =? 0 '' else "<{generics.join(' ')}>"
+    let prefix = if node.type_params.length =? 0 '' else "<{generic_params(node.type_params nodes)}>"
     return "<{prefix}{signature}:>{type_to_dewy(node.ret nodes)}>"
 }
 
