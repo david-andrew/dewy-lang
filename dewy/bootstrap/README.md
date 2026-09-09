@@ -123,12 +123,13 @@ nodes for later phases to interpret.
 
 ## Validation
 
-The latest full suite passed with **1805 passed, 10 skipped**. See
+The latest full suite passed with **1807 passed, 10 skipped**. See
 [IMPLEMENTATION.md](IMPLEMENTATION.md) for changes verified since that run.
 Native semantic tests compare type algebra, dispatch, bindings, minting,
 parameter effects, source-order initialization, intervals, and relational
 fact states, shared type queries, source type rendering, generic alias
-application, and HIR fact views with the hosted implementations.
+application, HIR fact views, expression/length proofs, and index validation
+with the hosted implementations.
 Native parity tests cover all bootstrap fixtures, explicit ambiguous parses,
 reserved operators, CLI behavior, Unicode/grapheme coordinates, and parsing
 all four parser-stage source files through both t2 and p0. The native p0

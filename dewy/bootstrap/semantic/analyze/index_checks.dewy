@@ -1,0 +1,100 @@
+from reporting import SrcFile, Error, Pointer
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"length_proofs.dewy" as proofs
+
+doc"""
+Index obligations after evaluating the sequence and the index.
+
+Return the diagnostic to the driver, which decides whether a `$prototype`
+site has a supported runtime check. Success may also establish a constant
+index for lowering. The mathematical endpoint remains a bigint here; the
+driver converts it to the target index representation when updating HIR.
+
+An upper proof alone is insufficient: a negative index is below every
+nonempty length. All successful runtime-index paths first prove zero as a
+lower bound. Insertion alone permits the endpoint equal to the length.
+"""
+
+Proven:type = const [constant_index:bigint?=none]
+known_interval = (interval:ranges.Interval?):>string => {
+    if interval is? none return 'unknown'
+    let lower = if interval.lower is? none '-∞' else _bigint_as_string(interval.lower)
+    let upper = if interval.upper is? none '∞' else _bigint_as_string(interval.upper)
+    return "{lower}..{upper}"
+}
+string_length = (id:addr nodes:array<types.Type>):>addr? => {
+    let node = types.node_at(nodes id)
+    if node is? types.StringLiteralType return node.value.length
+    if node is? types.StringType return node.length
+    if types.is_primitive(node 'char') or types.is_primitive(node 'grapheme') return 1
+    return none
+}
+constant = (interval:ranges.Interval):>Proven => Proven[
+    if ranges.same_endpoint(interval.lower interval.upper) interval.lower else none
+]
+
+# `length_interval` includes the evaluated sequence's field/parameter
+# invariants. A route's state entry alone need not contain those bounds.
+check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_interval:ranges.Interval? state:facts.State context:proofs.Context srcfile:SrcFile @registry:bindings.Registry):>Proven|Error => {
+    let sequence:addr = if node is? hir.Index node.array else node.string
+    let sequence_type = hir.node_at(context.env.nodes sequence).value_type
+    let length:addr? = none
+    let kind = if node is? hir.Index 'array' else 'string'
+    if node is? hir.Index {
+        let type = types.node_at(context.env.types sequence_type)
+        if type is? types.ArrayType { length = type.length }
+    } else { length = string_length(sequence_type context.env.types) }
+    let index = node.index
+    let index_node = hir.node_at(context.env.nodes index)
+    let nonnegative = interval isnt? none and interval.lower isnt? none and interval.lower >=? 0
+    if length isnt? none and interval isnt? none and nonnegative and interval.upper isnt? none and interval.upper <? length return constant(interval)
+    if length is? none {
+        let array_id = terms.sequence_id(sequence context.env @registry)
+        if array_id isnt? none and interval isnt? none and nonnegative {
+            let measured = if length_interval is? none values.length_default(context.env.cap) else length_interval
+            let minimum:bigint = if measured.lower is? none 0 else measured.lower
+            if interval.upper isnt? none and interval.upper <? minimum return constant(interval)
+            let named = terms.binding_term(index context.env @registry)
+            if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return Proven[]
+            let offset = terms.length_offset(index array_id context.env @registry)
+            if offset isnt? none and minimum >=? offset return Proven[]
+            if proofs.upper(index array_id 1 state context @registry) return Proven[]
+        }
+    }
+    let notes:array<string> = []
+    if length is? none { notes.push("nothing establishes the {kind}'s length here, so even a small index may be past the end") }
+    let hint = "establish both a nonnegative lower bound and an upper bound below the {kind} length"
+    if length is? none and interval isnt? none and nonnegative {
+        let upper = if interval.upper is? none 'None' else _bigint_as_string(interval.upper)
+        hint = "guard on the length first: `if xs.length >? {upper} \{ … }` proves a constant index, `i <? xs.length` a running one"
+    }
+    return Error[
+        srcfile=srcfile title="{kind} index is not proven in bounds"
+        pointers=[Pointer[span=index_node.loc message="the index interval here is `{known_interval(interval)}`"]]
+        notes=notes hint=hint
+    ]
+}
+
+check_method_index = (method:string index:addr interval:ranges.Interval? state:facts.State array_id:addr length:ranges.Interval allow_end:bool context:proofs.Context srcfile:SrcFile @registry:bindings.Registry):>Error? => {
+    if interval isnt? none and interval.lower isnt? none and interval.lower >=? 0 {
+        let minimum:bigint = if length.lower is? none 0 else length.lower
+        let limit = minimum + (if allow_end 1 else 0)
+        if interval.upper isnt? none and interval.upper <? limit return none
+        let named = terms.binding_term(index context.env @registry)
+        if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return none
+        if proofs.upper(index array_id (if allow_end 0 else 1) state context @registry) return none
+    }
+    let index_node = hir.node_at(context.env.nodes index)
+    let relation = if allow_end 'at or below' else 'below'
+    return Error[
+        srcfile=srcfile title="`{method}` index is not proven in bounds"
+        pointers=[Pointer[span=index_node.loc message="the index interval here is `{known_interval(interval)}`"]]
+        hint="establish a nonnegative lower bound and an upper bound {relation} the array length (for example `if idx <? xs.length \{ ... }`)"
+    ]
+}

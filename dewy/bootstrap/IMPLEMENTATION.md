@@ -144,6 +144,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   The evaluator supplies an interval snapshot at the query site; proof
   search does not evaluate effectful expressions again. These snapshots must
   not survive a change to the flow state. The full evaluator remains pending.
+- `semantic/analyze/index_checks.dewy` uses these proofs to validate array
+  and string subscripts and the indices of pop/insert calls. Its 224 native
+  comparisons check success, constant-index hints for lowering, and failure
+  titles, pointer messages, notes, and help text. They include empty/fixed/runtime
+  sequences, grapheme lengths, end-relative indices, and index facts whose
+  subject may still be negative. Results and diagnostics are values for the
+  future validator driver, including its `$prototype` handling.
 - The supporting hosted fixes include dictionary field stores, field-valued
   key facts with invalidation, runtime set literals, and optional array
   returns through the existing aggregate ownership path. Loop conditions
@@ -221,8 +228,8 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The full suite passed with **1,805 passed, 10 skipped** after native generic alias application and
-transport, and preservation of carried union-member proofs. The 4,356-pair native
+The full suite passed with **1,807 passed, 10 skipped** after native
+expression/length proofs and index validation. The 4,356-pair native
 type-algebra comparison allows 90 seconds under parallel load (its executable
 takes about 24 seconds alone). Both native µDewy generations also match.
 The call-term comparison's table-driven harness retains all 361 cases while
