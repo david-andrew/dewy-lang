@@ -3203,6 +3203,11 @@ def _flow_value_type(
             continuing,
         )
     ]
+    bases = [ty.strip_refinement(value) for value in values]
+    if any(value != values[0] for value in values) and all(base == bases[0] for base in bases):
+        # arms that differ only in their facts (`s.length` is a `nat64`, `k` an `int64`): the base;
+        # the facts the arms agree on are the join's (`_bind_conditional`), not the type's
+        return bases[0]
     if any(value != values[0] for value in values) and all(isinstance(value, ty.IntegerLiteralType) for value in values):
         # integer singleton branches are an `int64` word (`if flag 100 else
         # 0`), as singleton unions are at every value boundary; string
@@ -8319,7 +8324,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             result_type: ty.Type = (
                 ty.IntegerLiteralType(value.type.length)
                 if value.type.length is not None
-                else 'int64'
+                else ty.nat_type('nat64')   # a length is never negative
             )
             return hir.ArrayLength(binop.loc, result_type, value)
         string_length = _known_string_length(value.type)
@@ -8327,7 +8332,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             result_type = (
                 ty.IntegerLiteralType(string_length)
                 if string_length is not None
-                else 'int64'
+                else ty.nat_type('nat64')
             )
             return hir.StringLength(binop.loc, result_type, value)
     value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
@@ -8867,6 +8872,7 @@ def _word_element_type(type_: ty.Type) -> ty.Type:
 
 
 def _supported_array_element_type(type_: ty.Type) -> bool:
+    type_ = ty.strip_refinement(type_)   # `array<nat64>`: the element is the base's word; the fact rides on the elements
     return (
         isinstance(
             type_,
@@ -13383,6 +13389,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return name
             if name in builtins.builtin_type_aliases:
                 return builtins.builtin_type_aliases[name]
+            if name in ty.NAT_BASES:
+                return ty.nat_type(name)   # `nat64`: an `int64` that is never negative
             if name == 'rational' and RATIONAL_TYPE_NAME in ctx.binding_scopes:
                 return _rational_type(ctx, ast.loc)
             if name == 'fixed' and FIXED_TYPE_NAME in ctx.binding_scopes:

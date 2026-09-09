@@ -14,7 +14,7 @@ No closures, generators, token-class registry, or context-dependent finish call.
 from reporting import SrcFile, Span, Pointer, Error, Warning
 
 let nonemptystring:type = string<length >? 0>
-let PositiveLength:type = uint64 & <(>?0)>
+let PositiveLength:type = nat64<(>? 0)>
 let TokenError = type of error & Error
 
 # Character/base tables copied from t0.dewy so the sketch can stand alone.
@@ -126,7 +126,7 @@ WhitespaceOrCommentContexts:type = GeneralBodyContexts | BasedStringBody
 Token = $abstract type of any & [
     src:string                 # whole source, as in t0.dewy; loc selects its text
     loc:Span
-    idx:uint64
+    idx:nat64
     __as__ = ():>string => if loc.start <? loc.stop <=? src.length
         "<{typename} {_quoted(src[loc.start..loc.stop))}>"
     else "<{typename}>"
@@ -141,7 +141,7 @@ Number = type of Token & [prefix:BasePrefix]
 # A match is a small construction recipe. Minted variants preserve identity
 # even when their fields are identical. No full tokens or contexts are built.
 MatchData:type = [length:PositiveLength]
-WhitespaceMatch = type of any & MatchData & [lone_crs:array<uint64>]
+WhitespaceMatch = type of any & MatchData & [lone_crs:array<nat64>]
 LineCommentMatch = type of any & MatchData
 BlockCommentMatch = type of any & MatchData
 IdentifierMatch = type of any & MatchData
@@ -159,8 +159,8 @@ Candidate:type = WhitespaceMatch | LineCommentMatch | BlockCommentMatch | Identi
 # All diagnostic spans are relative to the probed suffix.
 
 probe_whitespace = (src:nonemptystring):>WhitespaceMatch? => {
-    i:uint64 = 0
-    lone_crs:array<uint64> = []
+    i:nat64 = 0
+    lone_crs:array<nat64> = []
     loop i <? src.length and src[i] in? whitespace {
         if src[i] =? '\r' lone_crs.push(i)
         i += 1
@@ -181,7 +181,7 @@ probe_line_comment = (src:nonemptystring):>LineCommentMatch? => {
 probe_block_comment = (src:nonemptystring srcfile:SrcFile):>BlockCommentMatch? | TokenError => {
     if not src.startswith(block_comment_start) return none
     openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
-    i:uint64 = block_comment_start.length
+    i:nat64 = block_comment_start.length
     loop i <? src.length {
         if src[i..].startswith(block_comment_start) {
             openers.push(Span[i i+block_comment_start.length])
@@ -206,7 +206,7 @@ probe_block_comment = (src:nonemptystring srcfile:SrcFile):>BlockCommentMatch? |
 }
 
 probe_identifier = (src:nonemptystring):>IdentifierMatch? => {
-    i:uint64 = 0
+    i:nat64 = 0
     loop i <? src.length and src[i] in? decoration_characters { i += 1 }
     if i >=? src.length or src[i] not in? start_characters return none
     i += 1
@@ -237,7 +237,7 @@ is_based_digit = (c:string base:BasePrefix):>bool => {
 
 probe_number = (src:nonemptystring default_base:BasePrefix srcfile:SrcFile):>NumberMatch? | TokenError => {
     base:BasePrefix = default_base
-    i:uint64 = 0
+    i:nat64 = 0
     if src.length >=? 2 {
         prefix = src[..2)
         if prefix is? BasePrefix {
@@ -263,6 +263,7 @@ probe_number = (src:nonemptystring default_base:BasePrefix srcfile:SrcFile):>Num
 
     # The one resolved base is used both to accept digits and construct Number.
     # finish neither reexamines the prefix nor consults the context again.
+    if i =? 0 return none   # never taken: the digit loop ran at least once (its guard held before it) — a first-iteration fact the analysis does not carry yet
     return NumberMatch[length=i prefix=base]
 }
 
@@ -335,7 +336,7 @@ select = (matches:array<Candidate> srcfile:SrcFile):>Candidate | TokenError => {
 # Keep | Push(new_frame) | Close(opening_index). The driver applies it once.
 # Use stable token indices for delimiter links rather than captured mutable
 # references to copies of contexts or tokens.
-finish = (m:Candidate src:string loc:Span idx:uint64):>Token => match m {
+finish = (m:Candidate src:string loc:Span idx:nat64):>Token => match m {
     <WhitespaceMatch> => Whitespace[src loc idx]
     <LineCommentMatch> => LineComment[src loc idx]
     <BlockCommentMatch> => BlockComment[src loc idx]
@@ -346,7 +347,7 @@ finish = (m:Candidate src:string loc:Span idx:uint64):>Token => match m {
 
 # Warnings belong to the winner. Store only the offsets while probing, then
 # allocate/emit reports after selection. No shared Context.warnings buffer.
-report_warnings = (m:Candidate srcfile:SrcFile offset:uint64):>void => {
+report_warnings = (m:Candidate srcfile:SrcFile offset:nat64):>void => {
     if m is? WhitespaceMatch {
         loop pos in m.lone_crs {
             Warning[
@@ -363,7 +364,7 @@ tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
     tokens:array<Token> = []
     ctx:Context = Root[]
     src = srcfile.body
-    i:uint64 = 0
+    i:nat64 = 0
     loop i <? src.length {
         candidates = probe_context(src[i..] ctx srcfile)
         if candidates is? TokenError { candidates.shift(i) return candidates }
@@ -388,7 +389,7 @@ tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
     return tokens
 }
 
-main = (argv:array<string>):>uint64 => {
+main = (argv:array<string>):>int64 => {
     if argv.length <? 2 {
         printl"usage: t0_sketch.dewy <source-file>"
         return 1

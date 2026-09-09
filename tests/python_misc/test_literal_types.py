@@ -93,3 +93,20 @@ def test_width_ties_resolve_by_expected_type_then_literal_default() -> None:
     declared = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
     assert declared['x'].expr.type == 'int64'
     assert declared['z'].expr.type == 'uint64'
+
+
+def test_the_natural_numbers() -> None:
+    """`nat64` is `int64 & <(>=? 0)>`, displayed by name (also with more facts);
+    `.length` is a `nat64`; a negative literal is refuted; an arbitrary `int64`
+    needs a proof; `nat` is the abstract form."""
+    from dewy.semantic.hir_display import type_to_dewy
+    declared = _declared('let n:nat64 = 3\nlet k = (s:string) => s.length\nlet f = (src:string):>nat64<(<=? src.length)> => 0\nlet a:nat = 1\n')
+    assert declared['n'].annotation == ty.RefinedType('int64', (ty.NAT_PROPOSITION,))
+    assert type_to_dewy(declared['n'].annotation) == 'nat64'
+    assert type_to_dewy(declared['k'].expr.type.ret) == 'nat64'
+    assert type_to_dewy(declared['f'].expr.type.ret) == 'nat64<i => i <=? src.length>'
+    assert ty.strip_refinement(declared['a'].annotation) == 'int'
+    with pytest.raises((TypeCheckError, UserError), match='refuted'):
+        _declared('let n:nat64 = -1\n')
+    with pytest.raises((TypeCheckError, UserError), match='cannot prove'):
+        _declared('let g = (x:int64):>nat64 => x\n')

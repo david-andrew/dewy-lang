@@ -200,6 +200,14 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
     object_type = _object_of(node.value.type)
     field = object_type.field(node.name) if object_type is not None else None
     propositions: list[ty.Proposition] = list(field.refinement) if field is not None else []
+    union = ty.unfold(ty.strip_refinement(node.value.type))
+    if object_type is None and isinstance(union, ty.TypeOr):
+        # a forwarded member of a union of objects (`remaining[0].length` on a `Candidate`):
+        # the invariant every member declares for the field
+        members = [_object_of(ty.unfold(item)) for item in union.items]
+        fields = [member.field(node.name) if member is not None else None for member in members]
+        if fields and all(f is not None for f in fields) and all(f.refinement == fields[0].refinement for f in fields):
+            propositions = list(fields[0].refinement)
     suffix = node.name
     parent = _strip_casts(node.value)
     while isinstance(parent, hir.MemberAccess):
@@ -1107,6 +1115,8 @@ class _BoundsValidator:
         refined_result = _call_result_refinement(value)
         if refined_result is not None and proposition in refined_result.propositions:
             return True   # `f():>bigint<sign =? 1>` proves `sign =? 1` of its result
+        if any(proposition in refined.propositions for refined in _call_result_refinements(value)):
+            return True   # a member of the call's union result promises it (`:>nat64<…> | none`): the obligation is that member's
         stripped = _strip_casts(value)
         if isinstance(stripped, hir.ExpressedIdentifier) and stripped.binding_id is not None and stripped.binding_id not in self.assigned:
             # `_BIGINT_ONE:bigint<sign =? 1> = […]`: a never-reassigned binding's
@@ -1175,36 +1185,45 @@ class _BoundsValidator:
         for direction, gap in {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}.get(proposition.op, []):
             smaller, larger = (binding_id, bound) if direction == 'upper' else (bound, binding_id)
             state[_order_key(smaller, larger)] = Interval(gap, None)
+            if direction == 'upper' and proposition.term_of == 'length':
+                # bounded by a length: below the address-space cap too, so `i + 1` fits a word
+                capped = Interval(None, self.max_length - gap, capped=True)
+                state[binding_id] = self._binding_interval(state, binding_id).intersect(capped)
 
     def _seed_parameter_refinements(self, function: hir.FunctionLiteral, state: State) -> None:
         """Inside the body a refined parameter's propositions are facts."""
-        param_loc = function.loc
         for param in [*function.pos_or_kw_args, *function.kw_only_args]:
-            if not isinstance(param.type, ty.RefinedType) or param.binding_id is None:
+            if isinstance(param.type, ty.RefinedType) and param.binding_id is not None:
+                self._seed_binding_refinement(param.binding_id, param.type, state, function.loc)
+
+    def _seed_binding_refinement(self, binding_id: int, refined: ty.RefinedType, state: State, loc: Span) -> None:
+        """A binding known to satisfy ``refined`` — a parameter, a loop variable
+        over `array<nonemptystring>`, an element read — takes its propositions
+        as facts: intervals, nonzero-ness, a minimum length, term facts."""
+        self.declared_refinements[binding_id] = refined
+        lower: int | None = None
+        upper: int | None = None
+        for proposition in refined.propositions:
+            if proposition.term is not None:
+                self._seed_term_fact(binding_id, proposition, state, loc)
                 continue
-            self.declared_refinements[param.binding_id] = param.type
-            lower: int | None = None
-            upper: int | None = None
-            for proposition in param.type.propositions:
-                if proposition.term is not None:
-                    self._seed_term_fact(param.binding_id, proposition, state, param_loc)
-                    continue
-                if proposition.field is not None:
-                    # `r:Ratio<bottom >? 0>`: a fact on the field's member route
-                    self._seed_field_proposition(param.binding_id, proposition, param.type.base, state, param_loc)
-                    continue
-                if proposition.subject == 'self':
-                    lower = _maximum_lower(lower, proposition.lower_bound())
-                    upper = _minimum_upper(upper, proposition.upper_bound())
-                    if proposition.op == 'not=?' and proposition.value == 0:
-                        state[_nonzero_key(param.binding_id)] = Interval.exact(1)
-                elif proposition.subject == 'length':
-                    minimum = proposition.lower_bound()
-                    if minimum is not None:
-                        key = _length_key(param.binding_id)
-                        state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
-            if lower is not None or upper is not None:
-                self._set_interval(state, param.binding_id, Interval(lower, upper))
+            if proposition.field is not None:
+                # `r:Ratio<bottom >? 0>`: a fact on the field's member route
+                self._seed_field_proposition(binding_id, proposition, refined.base, state, loc)
+                continue
+            if proposition.subject == 'self':
+                lower = _maximum_lower(lower, proposition.lower_bound())
+                upper = _minimum_upper(upper, proposition.upper_bound())
+                if proposition.op == 'not=?' and proposition.value == 0:
+                    state[_nonzero_key(binding_id)] = Interval.exact(1)
+            elif proposition.subject == 'length':
+                minimum = proposition.lower_bound()
+                if minimum is not None:
+                    key = _length_key(binding_id)
+                    state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
+        if lower is not None or upper is not None:
+            # narrows what is already known (a term fact may have capped the interval)
+            self._set_interval(state, binding_id, self._binding_interval(state, binding_id).intersect(Interval(lower, upper)))
 
     def _validate_assert(self, node: hir.Assert, state: State) -> None:
         """`$assert` is proven when its false path is impossible, refuted when its true path is."""
@@ -1503,12 +1522,17 @@ class _BoundsValidator:
 
         iterated = _runtime_array_id(iterator.iterable, self.registry) if isinstance(iterator.iterable.type, ty.ArrayType) else None
 
+        element = iterator.iterable.type.element if isinstance(iterator.iterable.type, ty.ArrayType) else None
+
         def enter(head: State) -> State:
             body_state = dict(head)
             if iterator.target.binding_id is not None:
                 body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator)
                 if iterated is not None:
                     self._read_element(body_state, iterated, iterator.target.binding_id, iterator.loc)
+                if isinstance(element, ty.RefinedType):
+                    # `loop op in symbols` over an `array<nonemptystring>`: the element type's promise holds of `op`
+                    self._seed_binding_refinement(iterator.target.binding_id, element, body_state, iterator.loc)
             return body_state
 
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
@@ -2206,6 +2230,11 @@ class _BoundsValidator:
             if declared is not None:
                 interval = declared if interval is None else interval.intersect(declared)
             return interval
+        if isinstance(node, hir.ForwardingAccess):
+            # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
+            self._eval(node.value, state, validate=validate)
+            forwarded = hir.MemberAccess(node.loc, node.type, node.value, node.field, True)
+            return _propositions_interval(_member_invariant(forwarded))
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             value = self._eval(node.value, state, validate=validate)
@@ -3053,7 +3082,12 @@ class _BoundsValidator:
                     state[self._rekey(key, route)] = interval
 
     def _read_element(self, state: State, array_id: int, target: int, loc: Span) -> None:
-        """`let m = xs[k]`, `loop m in xs`: the element facts hold of `m` and its routes."""
+        """`let m = xs[k]`, `loop m in xs`: the element facts hold of `m` and its routes,
+        and so does a refined element type's promise (`array<nonemptystring>`)."""
+        binding = self.registry.by_id.get(array_id)
+        declared = ty.strip_refinement(binding.type) if binding is not None and binding.type is not None else None
+        if isinstance(declared, ty.ArrayType) and isinstance(declared.element, ty.RefinedType):
+            self._seed_binding_refinement(target, declared.element, state, loc)
         for route in self._element_routes(array_id):
             path = self.registry.route_paths[route][1:]
             subject = target if not path else self.registry.route_id(target, path, 'int64', loc)
@@ -3418,6 +3452,10 @@ class _BoundsValidator:
                             survivors.append(item)
                     if len(survivors) == 1 and isinstance(survivors[0], ty.RefinedType):
                         self._apply_call_facts(refined, remembered, None, member=survivors[0])
+                        # the member's own bounds (`nat64<…>`: `>= 0`) hold of the narrowed binding
+                        own = _propositions_interval([p for p in survivors[0].propositions if p.term is None and p.field is None])
+                        if own is not None and tested.binding_id is not None:
+                            refined[tested.binding_id] = self._binding_interval(refined, tested.binding_id).intersect(own)
             return refined
         if isinstance(bare, hir.ExpressedIdentifier) and bare.type == 'bool' and bare.binding_id is not None:
             # a boolean binding as the condition: it is `true` (`1`) or `false` (`0`) here

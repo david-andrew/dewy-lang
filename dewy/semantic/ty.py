@@ -1032,9 +1032,33 @@ def is_zero_arg_function(type_: Type) -> bool:
     )
 
 
-def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
-    """Return `(bit_width, signed)` for a concrete fixed-width integer."""
+# the non-negative integers: `nat` is `int & <(>=? 0)>`, `natN` is `intN & <(>=? 0)>` —
+# a refinement, so a `nat64` is an `int64` for arithmetic and converts to a
+# `uint64` by its own fact; the names are baked in (parsed and displayed as such)
+NAT_BASES: dict[str, str] = {'nat': 'int', 'nat8': 'int8', 'nat16': 'int16', 'nat32': 'int32', 'nat64': 'int64'}
+NAT_PROPOSITION = Proposition('self', '>=?', 0)
 
+
+def nat_type(name: str) -> 'RefinedType':
+    return RefinedType(NAT_BASES[name], (NAT_PROPOSITION,))
+
+
+def nat_name(type_: Type) -> tuple[str, tuple[Proposition, ...]] | None:
+    """`(natN, the other propositions)` when ``type_`` is a refined signed
+    integer carrying the non-negativity fact, else None."""
+    if not isinstance(type_, RefinedType) or not isinstance(type_.base, str):
+        return None
+    name = next((nat for nat, base in NAT_BASES.items() if base == type_.base), None)
+    if name is None or NAT_PROPOSITION not in type_.propositions:
+        return None
+    return name, tuple(p for p in type_.propositions if p != NAT_PROPOSITION)
+
+
+def fixed_integer_layout(type_: TypeExpr) -> tuple[int, bool] | None:
+    """Return `(bit_width, signed)` for a concrete fixed-width integer (a
+    refinement such as `nat64` has its base's layout)."""
+
+    type_ = strip_refinement(type_)
     return _fixed_integer_widths.get(type_) if isinstance(type_, str) else None
 
 
@@ -1736,6 +1760,9 @@ class TypeSystem:
         expected_return: TypeExpr | None = None,
     ) -> dict[str, TypeExpr] | None:
         """Bind generic params from arguments and an optional contextual return type."""
+        # a refined argument (`nat64`, a length) binds a type parameter by its base
+        pos_types = [strip_refinement(t) for t in pos_types]
+        kw_types = {name: strip_refinement(t) for name, t in (kw_types or {}).items()}
         type_vars = {gp.name for gp in m.type_params}
         bindings: dict[str, TypeExpr] = {}
         contextual_type_vars: set[str] = set()
@@ -1884,6 +1911,9 @@ class TypeSystem:
         expected_return: TypeExpr | None = None,
     ) -> FunctionType | None:
         """Instantiate generics for this call (if any) and check concrete acceptance."""
+        # a refined argument (`nat64`, a length) binds a type parameter by its base
+        pos_types = [strip_refinement(t) for t in pos_types]
+        kw_types = {name: strip_refinement(t) for name, t in kw_types.items()}
         if not m.type_params:
             return m if self.call_accepted_concrete(m, pos_types, kw_types) else None
         bindings = self.infer_type_args(m, pos_types, kw_types, expected_return)
@@ -1986,7 +2016,10 @@ class TypeSystem:
         expected_return: TypeExpr | None = None,
     ) -> DispatchResult:
         """Julia-style: unique most-specific applicable method, with promote-and-redispatch fallback."""
-        kw_types = kw_types or {}
+        # applicability is by base type: a refined argument (`nat64`, a length) is its width for dispatch,
+        # and what its refinement promises is proven where the parameter demands it
+        pos_types = [strip_refinement(t) for t in pos_types]
+        kw_types = {name: strip_refinement(t) for name, t in (kw_types or {}).items()}
         apps = self._applicable_indexed(methods, pos_types, kw_types, expected_return)
         promote_pos: list[TypeExpr | None] = [None] * len(pos_types)
 

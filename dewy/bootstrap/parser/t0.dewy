@@ -151,14 +151,14 @@ let Push = type of any & [ctx:Context]
 let Pop = type of any
 # ConextAction:type = Push | Pop | none
 
-let eatfn:type = (src:nonemptystring @ctx:Context):>uint64 & <(<=?src.length)> | none | TokenError
+let eatfn:type = (src:nonemptystring @ctx:Context):>nat64 & <(<=?src.length)> | none | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
 let Token:type = $abstract type of any & [
     src:string
     loc:Span
-    idx:uint64
+    idx:nat64
     eat:eatfn
     action_on_eat:actionfn?=none
     __as__ = ():>string => if loc.start <? loc.stop <=? src.length
@@ -173,7 +173,7 @@ let TokenError = type of error & Error
 
 # TODO: move somewhere better
 # 1 -> '1st', 2 -> '2nd', 3 -> '3rd', 4 -> '4th', 11 -> '11th', …
-ordinalize = (n:uint64):>string => {
+ordinalize = (n:nat64):>string => {
     if n % 100 >=? 10 and n % 100 <=? 13 return "{n}th"
     last_digit = n % 10
     if last_digit =? 1 return "{n}st"
@@ -189,7 +189,7 @@ ordinalize = (n:uint64):>string => {
 
 # TODO: want a warning if there is a lone \r not followed by \n
 Whitespace = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> uint64? => {
+    eat = (src:nonemptystring @ctx:Context):> nat64? => {
         doc"""white space is any sequence of whitespace characters"""
         i = 0
         loop i <? src.length and src[i] in? whitespace {
@@ -201,7 +201,7 @@ Whitespace = type of Token & [
         return if i >? 0 i else none
     }
     
-    warning_lone_carriage_return = (src:nonemptystring i:uint64 @ctx:Context):>void => {
+    warning_lone_carriage_return = (src:nonemptystring i:nat64<(<? src.length)> @ctx:Context):>void => {   # an offset into `src`: `i + 1` cannot wrap
         ctx.warnings.push(Warning[
             srcfile=ctx.srcfile
             title="Lone carriage return"
@@ -213,12 +213,12 @@ Whitespace = type of Token & [
 ]
 
 LineComment = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):>uint64? => {
+    eat = (src:nonemptystring @ctx:Context):>nat64? => {
         doc"""line comments are any sequence of characters after a # until the end of the line"""
         if not src.startswith(line_comment_start) return none
         if src.startswith(block_comment_start) return none # don't match a block comment\
         # consume until the end of the line
-        loop i in 0..uint64.max and i <? src.length {  
+        loop i in 0.. and i <? src.length {  
             if src[i] in? newline_chars return i + 1
         }
         return src.length
@@ -226,15 +226,14 @@ LineComment = type of Token & [
 ]
 
 
-# probably the simplest is that value casting between uint64 and int64 is allowed, perhaps returning an error if a truncation happened? tbd (or no error if known within convertable bounds)
 BlockComment = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):>uint64? | TokenError => {
+    eat = (src:nonemptystring @ctx:Context):>nat64? | TokenError => {
         doc"""Block comments are of the form #\{ ... \}# and can be nested"""   #TODO: consider making `doc` a special tokenized case of string like raw strings, where the inside is handled as raw. perhaps we also could maintain a special registry of prefixes that use the raw string tokenization
         
         if not src.startswith(block_comment_start) return none
         
         openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
-        i:uint64 = block_comment_start.length
+        i:nat64 = block_comment_start.length
 
         loop i <? src.length {
             if src[i..].startswith(block_comment_start) {
@@ -279,7 +278,7 @@ BlockComment = type of Token & [
 # Identifier-like things: plain identifiers and variants such as hashtags.
 
 Identifier = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> uint64? => {
+    eat = (src:nonemptystring @ctx:Context):> nat64? => {
         doc"""
         Identifiers:
         - may not start with a number
@@ -306,7 +305,7 @@ Identifier = type of Token & [
 
 
 Symbol = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> uint64? => {
+    eat = (src:nonemptystring @ctx:Context):> nat64? => {
         doc"""symbolic operators are any sequence of characters in the symbolic_operators set"""
         loop op in symbols {
             if src.startswith(op) {
@@ -329,7 +328,7 @@ Symbol = type of Token & [
 #     prefix: BasePrefix
     
     
-#     eat = (src:nonemptystring @ctx:GeneralBodyContexts):> uint64|none|TokenError => {
+#     eat = (src:nonemptystring @ctx:GeneralBodyContexts):> nat64|none|TokenError => {
 #         doc"""a based number is a sequence of 1 or more digits, optionally preceded by a (lowercase) base prefix (up to base-16)"""
         
 #         # try a number with a base prefix
@@ -428,7 +427,7 @@ tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
     
     src = srcfile.body
     printl"src: {src}"
-    i:uint64 = 0
+    i:nat64 = 0
     loop i <? src.length {
         ctx = ctx_stack[end]
         allowed_tokens = contextmap(ctx)
@@ -463,7 +462,7 @@ tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
 
 
 # # why is iterating over argv/accessing members so difficult? `loop i in 0..argv.length` complains about argv.length not being a compiletime constant...
-main = (argv:array<string>):>uint64 => {
+main = (argv:array<string>):>int64 => {
     if argv.length <? 2 {
         err"please specify the path to the file to tokenize"
     }

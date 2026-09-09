@@ -105,6 +105,10 @@ def _refined_type_to_dewy(t: ty.RefinedType) -> str:
         key_value = ty.dict_key_value(t.base)
         assert key_value is not None
         return f'totaldict<{type_to_dewy(key_value[0])} {type_to_dewy(key_value[1])}>'
+    nat = ty.nat_name(t)
+    if nat is not None:
+        name, rest = nat
+        return name if not rest else _refined_type_to_dewy(ty.RefinedType(name, rest))   # `nat64`, `nat64<(<=? src.length)>`
     arms = {p.when for p in t.propositions}
     if t.base == 'void':
         return f'<{" ".join(_fact_to_dewy(p) for p in t.propositions)}>'

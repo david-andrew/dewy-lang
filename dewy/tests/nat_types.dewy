@@ -1,0 +1,32 @@
+# The natural numbers: `nat64` is `int64 & <(>=? 0)>` — an `int64` that is
+# never negative, which is what a size is. `.length` is a `nat64`; a `nat64`
+# takes part in `int64` arithmetic as it is, stores into a `uint64` by its own
+# fact, and takes an `int64` only with a proof; it may carry further facts.
+let head = (s:string n:nat64):>string => {
+    if n >? s.length return s
+    return s[..n)                                    # 0 <= n from the type, n <= length from the guard
+}
+let spaces = (src:string):>nat64<(<=? src.length)> | none => {
+    if src.length =? 0 return none
+    let i:nat64 = 0
+    loop i <? src.length and src[i] =? ' ' { i += 1 }
+    return i
+}
+let main = ():>int64 => {
+    let a:nat64 = 3
+    let b:nat64 = a + 2                              # 5: a sum of naturals is one
+    let u:uint64 = b                                 # proven by the type's own fact
+    let s = "  hello"
+    let rest:nat64 = s.length - a                    # proven from the values
+    let len = s.length                               # a `nat64`
+    let m:nat64 = len
+    let xs:array<nat64> = [1 2 3]
+    let total:nat64 = 0
+    loop x in xs { total += x }
+    let ys = [s.length s.length]
+    let lengths = [loop w in ["a" "bb"] w -> w.length]
+    let big = max(s.length 3)
+    let n = spaces(s)
+    if n is? nat64 and n =? 2 and head(s b) =? "  hel" and u =? 5 and rest =? 4 and m =? 7 and total =? 6 and ys.length =? 2 and lengths.length =? 2 and big =? 7 return 42
+    return 1
+}
