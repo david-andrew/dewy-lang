@@ -240,3 +240,11 @@ def test_replacing_an_enclosing_record_expires_literal_key_proofs():
     for replacement in ("p=[entries=['b' -> 2]]", "p.entries=['b' -> 2]"):
         with pytest.raises(UserError, match='key is not proven present'):
             _check("let p=[entries=['a' -> 1]]\n" + replacement + "\nlet value=p.entries['a']")
+
+
+def test_unpacked_dictionary_records_are_read_only_borrows():
+    with pytest.raises(UserError, match='const object|read.only'):
+        _check("let d=['a' -> [x=1]]\nloop [k v] in d {v.x=2}")
+    _check("let d=['a' -> [x=1]]\nloop [k v] in d {let own=v own.x=2}")
+    with pytest.raises(UserError, match='set iterator has one target'):
+        _check('let s=set[1 2]\nloop [k v] in s {}')

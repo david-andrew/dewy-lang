@@ -4084,6 +4084,8 @@ def _tcr_dict_unpack_iterators(
         if isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier)
     ]
     dictionary, key_type, value_type = found_dict
+    if value_type is None:
+        user_error(ctx.srcfile, 'a set iterator has one target', Pointer(span=condition_ast.left.loc, message='iterate the member directly, without `[key value]` unpacking'))
     # iteration compacts away removed entries, which moves entries: forget
     # remembered positions and exact lengths
     _forget_positions(dictionary, ctx=ctx)
@@ -4114,6 +4116,8 @@ def _array_expression_iterator(
     assert isinstance(array_type, ty.ArrayType)
     element_type = array_type.element
     binding = ctx.binding_registry.allocate_param(target_name, element_type, target_loc)
+    if isinstance(ty.unfold(ty.strip_refinement(element_type)), ty.ObjectType):
+        binding.read_only_reason = 'borrows the array element, so it is read-only (copy it with `let` to change it)'
     iterator_ctx = replace(
         ctx,
         declarations=ctx.declarations.new_child({target_name: element_type}),
