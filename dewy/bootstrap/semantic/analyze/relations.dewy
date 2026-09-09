@@ -1,0 +1,120 @@
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+
+doc"""
+Relational proofs and transfer, independent of HIR traversal.
+
+An order fact records a guaranteed gap, `larger - smaller >= gap`.
+The bounded chain search follows the hosted proof budget; not finding a
+proof is unknown, not evidence that the relation is false. Copying facts
+copies value evidence, not an alias between the two storage locations.
+"""
+
+Context:type = const [facts:facts.Context minimum_lengths:dict<addr bigint>=[]]
+interval_of = (term:facts.Term state:facts.State context:Context):>ranges.Interval => {
+    let known = facts.known(state term context.facts)
+    if known isnt? none return known
+    let width = context.facts.widths.get(term.binding_id)
+    return if width is? none ranges.UNKNOWN else width
+}
+minimum_length = (sequence:addr state:facts.State context:Context):>bigint => {
+    let interval = facts.lookup(state facts.value(facts.Term[sequence 'length']))
+    if interval isnt? none {
+        let lower = interval.lower
+        if lower isnt? none return lower
+    }
+    let declared = context.minimum_lengths.get(sequence)
+    return if declared is? none 0 else declared
+}
+ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context depth:addr=2):>bool => {
+    if facts.same_term(smaller larger) return gap <=? 0
+    let direct = facts.lookup(state facts.order(smaller larger))
+    if direct isnt? none and direct.lower isnt? none and direct.lower >=? gap return true
+    if depth >? 0 {
+        loop entry in state.values {
+            let fact = entry.fact
+            let lower = entry.interval.lower
+            if fact is? facts.Order and lower isnt? none and facts.same_term(fact.smaller smaller) and not facts.same_term(fact.larger larger) {
+                if ordered(fact.larger larger gap-lower state context depth-1) return true
+            }
+        }
+    }
+    let left = interval_of(smaller state context)
+    let right = interval_of(larger state context)
+    if larger.projection =? 'length' {
+        right = ranges.intersect(right ranges.Interval[minimum_length(larger.binding_id state context) none])
+    }
+    if left.upper isnt? none and right.lower isnt? none and right.lower - left.upper >=? gap return true
+    if larger.projection =? 'length' {
+        if smaller.projection =? 'value' and gap <=? 1 and facts.index(smaller.binding_id larger.binding_id).key in? state return true
+        loop entry in state.values {
+            let fact = entry.fact
+            let lower = entry.interval.lower
+            if fact is? facts.Remainder and lower isnt? none and facts.same_term(fact.subject smaller) and facts.same_term(fact.upper larger) and lower >=? gap return true
+        }
+    }
+    return false
+}
+
+replace_term = (term:facts.Term source:facts.Term target:facts.Term):>facts.Term => if facts.same_term(term source) target else term
+copy_relational = (@state:facts.State source:facts.Term target:facts.Term):>void => {
+    # Snapshot first: facts derived for the copy must not recursively feed
+    # this same copy operation or mutate the dictionary being traversed.
+    let entries = state.values
+    loop entry in entries {
+        let fact = entry.fact
+        if not facts.mentions(fact source) continue
+        if fact is? facts.Order {
+            facts.put(@state facts.order(replace_term(fact.smaller source target) replace_term(fact.larger source target)) entry.interval)
+        }
+        else if fact is? facts.Remainder {
+            let offset = fact.offset
+            if source.projection =? 'value' and target.projection =? 'value' and offset =? source.binding_id { offset = target.binding_id }
+            facts.put(@state facts.remainder(replace_term(fact.subject source target) replace_term(fact.upper source target) offset) entry.interval)
+        }
+        else if fact is? facts.Nonzero and target.projection =? 'value' { facts.put(@state facts.nonzero(target.binding_id) entry.interval) }
+        else if fact is? facts.Index {
+            if source.projection =? 'value' and target.projection =? 'value' {
+                facts.put(@state facts.index(target.binding_id fact.sequence) entry.interval)
+            }
+            else if source.projection =? 'length' and target.projection =? 'length' {
+                facts.put(@state facts.index(fact.index target.binding_id) entry.interval)
+            }
+            else if source.projection =? 'length' and target.projection =? 'value' {
+                # `let n = xs.length`: an index bound against xs becomes an
+                # order bound against n, not an imaginary sequence with n's id.
+                facts.put(@state facts.order(facts.Term[fact.index] target) ranges.Interval[1 none])
+            }
+        }
+    }
+}
+
+subject_of = (fact:facts.Fact):>facts.Term? => {
+    if fact is? facts.Order return fact.smaller
+    if fact is? facts.Remainder return fact.subject
+    if fact is? facts.Nonzero return facts.Term[fact.subject]
+    if fact is? facts.Index return facts.Term[fact.index]
+    return none
+}
+rekey = (fact:facts.Fact subject:facts.Term):>facts.Fact => {
+    if fact is? facts.Order return facts.order(subject fact.larger)
+    if fact is? facts.Remainder return facts.remainder(subject fact.upper fact.offset)
+    if fact is? facts.Nonzero {
+        $runtime_assert subject.projection =? 'value'
+        return facts.nonzero(subject.binding_id)
+    }
+    $runtime_assert fact is? facts.Index and subject.projection =? 'value'
+    return facts.index(subject.binding_id fact.sequence)
+}
+# Normalize just the subject so an element's facts can be compared with the
+# facts stored for an array's element route. Other bindings retain identity.
+facts_of = (state:facts.State subject:facts.Term):>facts.State => {
+    let output:facts.State = []
+    loop entry in state.values {
+        let term = subject_of(entry.fact)
+        if term isnt? none and facts.same_term(term subject) {
+            facts.put(@output rekey(entry.fact facts.Term[0]) entry.interval)
+        }
+    }
+    return output
+}
