@@ -202,3 +202,95 @@ seed = (@state:facts.State subject:facts.Term promises:array<CallFact> context:r
         }
     }
 }
+
+assignment_shift = (node:hir.Assign env:values.Environment @registry:bindings.Registry):>bigint? => {
+    let value = expressions.strip_casts(node.value env.nodes)
+    let op = node.op
+    if op =? '=' {
+        let call = hir.node_at(env.nodes value)
+        if call isnt? hir.FunctionCall or call.pos_args.length not=? 2 return none
+        let function = hir.node_at(env.nodes call.func)
+        if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return none
+        let left = binding_term(call.pos_args[0] env @registry)
+        let target = hir.node_at(env.nodes node.target)
+        $runtime_assert target is? hir.ExpressedIdentifier
+        if left is? none or left.projection not=? 'value' or left.binding_id not=? target.binding_id return none
+        op = if function.name =? '__add__' '+=' else '-='
+        value = call.pos_args[1]
+    }
+    if op not=? '+=' and op not=? '-=' return none
+    let constant = values.constant(value env)
+    if constant is? none or constant.lower is? none or not ranges.same_endpoint(constant.lower constant.upper) return none
+    return if op =? '+=' constant.lower else -constant.lower
+}
+
+# These transfers run after arithmetic has been checked: they preserve
+# evidence for the mathematical sum, not for a possibly wrapped word.
+seed_sum = (@state:facts.State subject:addr id:addr env:values.Environment context:relations.Context @registry:bindings.Registry):>void => {
+    let node = hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return
+    let function = hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return
+    loop side in 0..1 {
+        if side =? 1 and function.name =? '__sub__' break
+        let source = if side =? 0 node.pos_args[0] else node.pos_args[1]
+        let offset = if side =? 0 node.pos_args[1] else node.pos_args[0]
+        let term = binding_term(source env @registry)
+        let constant = values.constant(offset env)
+        if term is? none or constant is? none or constant.lower is? none or not ranges.same_endpoint(constant.lower constant.upper) continue
+        let shift = if function.name =? '__add__' constant.lower else -constant.lower
+        let entries = state.values
+        loop entry in entries {
+            let fact = entry.fact
+            let lower = entry.interval.lower
+            if lower is? none continue
+            if fact is? facts.Order and facts.same_term(fact.smaller term) and not facts.same_term(fact.larger term) {
+                if lower - shift >=? 0 { facts.put(@state facts.order(facts.Term[subject] fact.larger) ranges.Interval[lower-shift none]) }
+            }
+            else if fact is? facts.Remainder and facts.same_term(fact.subject term) and lower - shift >=? 0 {
+                facts.put(@state facts.remainder(facts.Term[subject] fact.upper fact.offset) ranges.Interval[lower-shift none])
+            }
+        }
+        return
+    }
+    if function.name =? '__sub__' {
+        # `text.length - suffix.length`: the subtrahend is within the source
+        # length, so subtracting its minimum leaves a bound on the result.
+        let measured = expressions.sequence_of(node.pos_args[0] env.nodes)
+        if measured is? none return
+        let sequence = sequence_id(measured env @registry)
+        let taken = binding_term(node.pos_args[1] env @registry)
+        if sequence is? none or taken is? none return
+        let target = facts.Term[sequence 'length']
+        let interval = relations.interval_of(taken state context)
+        if relations.ordered(taken target 0 state context) and interval.lower isnt? none and interval.lower >=? 0 {
+            facts.put(@state facts.order(facts.Term[subject] target) ranges.Interval[interval.lower none])
+        }
+        return
+    }
+    let left = binding_term(node.pos_args[0] env @registry)
+    let right = binding_term(node.pos_args[1] env @registry)
+    if left is? none or right is? none or left.projection not=? 'value' or right.projection not=? 'value' return
+    let entries = state.values
+    loop entry in entries {
+        let fact = entry.fact
+        let lower = entry.interval.lower
+        if fact is? facts.Remainder and lower isnt? none {
+            if (facts.same_term(fact.subject left) and fact.offset =? right.binding_id) or (facts.same_term(fact.subject right) and fact.offset =? left.binding_id) {
+                facts.put(@state facts.order(facts.Term[subject] fact.upper) ranges.Interval[lower none])
+            }
+        }
+    }
+}
+
+difference_bound = (left:addr right:addr state:facts.State env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
+    let a = binding_term(left env @registry)
+    let b = binding_term(right env @registry)
+    if a is? none or b is? none or facts.same_term(a b) return none
+    let lower = facts.lookup(state facts.order(b a))
+    let upper = facts.lookup(state facts.order(a b))
+    let lower_endpoint = if lower is? none none else lower.lower
+    let upper_endpoint = if upper is? none or upper.lower is? none none else -upper.lower
+    let bound = ranges.Interval[lower_endpoint upper_endpoint]
+    return if ranges.same_bounds(bound ranges.UNKNOWN) none else bound
+}
