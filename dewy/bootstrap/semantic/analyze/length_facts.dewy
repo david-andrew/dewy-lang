@@ -1,0 +1,52 @@
+import p"intervals.dewy" as ranges
+import p"fact_state.dewy" as facts
+
+doc"""
+Length transfer for array methods and loop-capture appends.
+
+Argument and storage-contract validation belongs to the bounds validator.
+Its fixed-point iterations also need this transfer before all proofs have
+settled, so an unknown count loses precision rather than asserting a proof.
+Element evidence is transferred separately before changing the length.
+"""
+
+Method:type = 'push' | 'insert' | 'pop' | 'truncate' | 'clear'
+Change:type = const [after:ranges.Interval delta:ranges.Interval]
+transition = (before:ranges.Interval method:Method count:ranges.Interval? cap:bigint):>Change => {
+    if method =? 'push' or method =? 'insert' {
+        return Change[
+            ranges.Interval[ranges.shift_endpoint(before.lower 1) ranges.minimum_upper(ranges.shift_endpoint(before.upper 1) cap)]
+            ranges.exact(1)
+        ]
+    }
+    if method =? 'pop' {
+        let lower:bigint = if before.lower is? none 0 else before.lower-1
+        if lower <? 0 { lower = 0 }
+        return Change[ranges.Interval[lower ranges.shift_endpoint(before.upper (-1))] ranges.exact(-1)]
+    }
+    if method =? 'truncate' {
+        let minimum:bigint = 0
+        let maximum:bigint? = none
+        if count isnt? none {
+            if count.lower isnt? none and count.lower >? 0 { minimum = count.lower }
+            maximum = count.upper
+        }
+        let lower:bigint = if before.lower is? none 0 else before.lower
+        if minimum <? lower { lower = minimum }
+        return Change[ranges.Interval[lower ranges.minimum_upper(before.upper maximum)] ranges.Interval[none 0]]
+    }
+    $runtime_assert method =? 'clear'
+    let minimum = if before.upper is? none none else -before.upper
+    let maximum = if before.lower is? none 0 else -before.lower
+    return Change[ranges.exact(0) ranges.Interval[minimum maximum]]
+}
+
+apply = (@state:facts.State sequence:addr method:Method count:ranges.Interval? cap:bigint):>ranges.Interval => {
+    let key = facts.value(facts.Term[sequence 'length'])
+    let known = facts.lookup(state key)
+    let before = if known is? none ranges.Interval[0 cap true] else known
+    let changed = transition(before method count cap)
+    facts.put(@state key changed.after)
+    facts.change_length(@state sequence changed.delta)
+    return changed.after
+}
