@@ -1,0 +1,197 @@
+from reporting import SrcFile, Error
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"context.dewy" as contexts
+import p"check.dewy" as checking
+import p"import_syntax.dewy" as imports
+import p"syntax.dewy" as syntax
+import p"bindings.dewy" as bindings
+import p"ty.dewy" as types
+import p"hir.dewy" as hir
+
+doc"""
+File-relative source modules, corresponding to semantic/modules.py.
+
+The graph owns one semantic Session: imported types and values keep the same
+binding identity, and a file contributes its initialization once. Exports
+are its top-level HIR declarations. A namespace itself has no runtime value
+or exported declaration, matching the hosted namespace import behavior.
+
+This first graph entry prepares unconditional module-level imports. Imports
+inside target-selected flows, prelude installation, and per-module proof and
+representation validation remain work for the full driver. A checked HIR
+graph is not yet permission to emit an executable.
+"""
+
+Module:type = const [path:string context:contexts.Context root:addr exports:dict<string addr> no_prelude:bool=false]
+Engine:type = [
+    session:contexts.Session=contexts.Session[]
+    modules:array<Module>=[]
+    by_path:dict<string addr>=[]
+    loading:array<string>=[]
+    library_roots:array<string>=[]
+]
+module_at = (id:addr engine:Engine):>Module => {
+    $runtime_assert id <? engine.modules.length
+    return engine.modules[id]
+}
+
+# Canonicalize lexical aliases before graph lookup. Filesystem identity
+# through symlinks still needs the portable path layer's realpath service;
+# lexical normalization must not be advertised as resolving those aliases.
+normalize_path = (text:string):>string => {
+    let parts:array<string> = []
+    let absolute = text.startswith('/')
+    loop part in text.split('/') {
+        if part =? '' or part =? '.' continue
+        if part =? '..' and parts.length >? 0 and parts[parts.length-1] not=? '..' { parts.pop; }
+        else if part not=? '..' or not absolute { parts.push(part) }
+    }
+    return "{if absolute '/' else ''}{parts.join('/')}"
+}
+
+literal_path = (id:addr nodes:array<tokens.Token>):>string? => {
+    let node = tokens.node_at(nodes syntax.unparen(id nodes))
+    if node is? parser.BinOp and syntax.identifier(node.left nodes) =? 'p' {
+        let arguments = tokens.node_at(nodes node.right)
+        let item_id = node.right
+        if arguments is? parser.Block and arguments.inner.length =? 1 { item_id = arguments.inner[0] }
+        let item = tokens.node_at(nodes item_id)
+        if item is? parser.Atom {
+            let string = tokens.node_at(nodes item.item)
+            if string is? tokens.String return string.content
+        }
+    }
+    if node is? parser.Block and node.delims =? '[]' {
+        loop row_id in node.inner {
+            let row = tokens.node_at(nodes row_id)
+            if row is? parser.BinOp and syntax.is_operator(row.op '=' nodes) and syntax.identifier(row.left nodes) =? 'path' {
+                let atom = tokens.node_at(nodes row.right)
+                if atom is? parser.Atom {
+                    let string = tokens.node_at(nodes atom.item)
+                    if string is? tokens.String return string.content
+                }
+            }
+        }
+    }
+    return none
+}
+source_path = (spec:imports.Import context:contexts.Context engine:Engine):>string|Error => {
+    let source = contexts.source_at(context engine.session)
+    let library = imports.library_name(spec.path source.nodes)
+    if library isnt? none {
+        loop root in engine.library_roots {
+            let candidate = normalize_path("{root}/{library}.dewy")
+            if p(candidate).is_file return candidate
+        }
+        return contexts.problem(spec.path 'library module not found' library context engine.session)
+    }
+    let path = literal_path(spec.path source.nodes)
+    if path is? none return contexts.unsupported(spec.path 'evaluating this import path expression' context engine.session)
+    if path.startswith('/') return normalize_path(path)
+    let parent = p(source.srcfile.path).parent.path
+    return normalize_path("{parent}/{path}")
+}
+
+install = (spec:imports.Import module:Module id:addr env:checking.Environment @engine:Engine):>Error? => {
+    let source = contexts.source_at(env.lexical engine.session)
+    let loc = tokens.node_at(source.nodes id).loc
+    let scope = bindings.scope_at(engine.session.scopes env.lexical.scope)
+    if spec.namespace isnt? none {
+        let name = spec.namespace
+        if name in? scope.names return contexts.problem(id 'import name is already declared' name env.lexical engine.session)
+        let fields:array<types.ModuleField> = []
+        loop [exported binding_id] in module.exports {
+            let binding = bindings.binding_at(engine.session.registry binding_id)
+            let type = binding.value_type
+            if type is? none { type = types.primitive(if binding.type_value is? none 'any' else 'type' @engine.session.types) }
+            $runtime_assert type isnt? none
+            fields.push(types.ModuleField[exported type binding_id binding.type_value])
+        }
+        let reference = contexts.syntax_ref(id env.lexical @engine.session)
+        let binding_id = bindings.allocate(@engine.session.registry reference name 'value' loc)
+        let binding = bindings.binding_at(engine.session.registry binding_id)
+        binding.value_type = types.module_type(fields @engine.session.types)
+        binding.read_only_reason = 'module namespace'
+        engine.session.registry.by_id[binding_id] = binding
+        bindings.bind(@engine.session.scopes env.lexical.scope name binding_id)
+    } else {
+        let names:array<imports.Name> = []
+        if spec.names is? none {
+            loop [name binding] in module.exports { names.push(imports.Name[name name loc]) }
+        } else { names = spec.names }
+        loop name in names {
+            let binding_id = module.exports.get(name.source)
+            if binding_id is? none return contexts.problem(id 'module does not export this name' name.source env.lexical engine.session)
+            let prior = scope.names.get(name.local)
+            if prior isnt? none and prior not=? binding_id return contexts.problem(id 'import name is already declared' name.local env.lexical engine.session)
+            bindings.bind(@engine.session.scopes env.lexical.scope name.local binding_id)
+            scope = bindings.scope_at(engine.session.scopes env.lexical.scope)
+        }
+    }
+    let reference = contexts.syntax_ref(id env.lexical @engine.session)
+    engine.session.prepared_imports.add(reference)
+    return none
+}
+
+load = (path:string @engine:Engine):>addr|Error => {
+    let normalized = normalize_path(path)
+    let cached = engine.by_path.get(normalized)
+    if cached isnt? none return cached
+    if normalized in? engine.loading return Error[title='cyclic module import' message=normalized hint=engine.loading.join(' -> ')]
+    engine.loading.push(normalized)
+    let result = load_source(normalized @engine)
+    # Recursive loads balance their own entries, including error returns.
+    $runtime_assert engine.loading.length >? 0
+    engine.loading.pop;
+    return result
+}
+load_source = (path:string @engine:Engine):>addr|Error => {
+    let body = p(path).read_text
+    if body isnt? string return Error[title='could not read module' message=path]
+    let source = SrcFile[path body]
+    let parsed = parser.parse(source)
+    if parsed is? Error return parsed
+    let program = parsed
+    let root = tokens.node_at(program.nodes program.root)
+    $runtime_assert root is? parser.Block
+    let no_prelude = false
+    let statements:array<addr> = []
+    loop statement in root.inner {
+        let item = tokens.node_at(program.nodes statement)
+        if item is? parser.Atom {
+            let atom = tokens.node_at(program.nodes item.item)
+            if atom is? tokens.Metatag and atom.name =? 'no_prelude' { no_prelude = true continue }
+        }
+        statements.push(statement)
+    }
+    let filtered_root = parser.Block[loc=root.loc inner=statements delims=root.delims base=root.base]
+    let root_id = tokens.append_node(@program.nodes filtered_root)
+    let context = contexts.begin(source program.nodes @engine.session)
+    let env = checking.begin(context @engine.session)
+    loop statement in statements {
+        let spec = imports.read(statement env.lexical engine.session)
+        if spec is? Error return spec
+        if spec is? none continue
+        let path = source_path(spec env.lexical engine)
+        if path is? Error return path
+        let dependency = load(path @engine)
+        if dependency is? Error return dependency
+        let module = module_at(dependency engine)
+        let error = install(spec module statement env @engine)
+        if error isnt? none return error
+    }
+    let checked = checking.block(root_id env @engine.session)
+    if checked is? Error return checked
+    let block = hir.node_at(engine.session.hir checked)
+    $runtime_assert block is? hir.Block
+    let exports:dict<string addr> = []
+    loop item in block.items {
+        let declaration = hir.node_at(engine.session.hir item)
+        if declaration is? hir.Declare and declaration.binding_id isnt? none { exports[declaration.name] = declaration.binding_id }
+    }
+    let index = engine.modules.length
+    engine.modules.push(Module[path env.lexical checked exports no_prelude])
+    engine.by_path[path] = index
+    return index
+}

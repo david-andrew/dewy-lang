@@ -15,6 +15,7 @@ import p"type_display.dewy" as display
 import p"analyze/predicate_effects.dewy" as predicate_effects
 import p"array_methods.dewy" as array_methods
 import p"../targets.dewy" as targets
+import p"namespaces.dewy" as namespaces
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -112,6 +113,7 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
         if binding.value_type is? none return problem(id "cannot infer `{name}` before its declaration" 'add a type annotation to permit a forward reference' env session)
         let current = read_type(binding_id env session)
         $runtime_assert current isnt? none
+        if types.node_at(session.types current) is? types.ModuleType return put(hir.ModuleNamespace[source.loc current name] @session)
         return put(hir.ExpressedIdentifier[source.loc current name binding_id] @session)
     }
     # A builtin type has no runtime declaration, but it may occur as a value
@@ -336,6 +338,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
     }
     if node is? parser.KeywordExpr and node.parts.length >? 0 {
         let keyword = tokens.node_at(source.nodes node.parts[0])
+        if keyword is? tokens.Keyword and keyword.name in? ['import' 'from'] {
+            let reference = contexts.syntax_ref(id env.lexical @session)
+            if reference in? session.prepared_imports return void_at(id env @session)
+            return pending(id 'loading an import at this expression site' env session)
+        }
         if keyword is? tokens.Keyword and keyword.name =? 'return' {
             if env.return_type is? none return problem(id '`return` outside a function' 'nothing here catches this return' env session)
             let empty = void_at(id env @session)
@@ -724,6 +731,13 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
     let value = node_at(receiver session)
     let type = types.node_at(session.types types.unfold(types.strip_refinement(value.value_type session.types) session.types))
     let loc = tokens.node_at(source.nodes id).loc
+    if type is? types.ModuleType {
+        let field = namespaces.field(type name)
+        if field is? none return problem(id 'module does not export this name' name env session)
+        if field.type_value isnt? none return put(hir.TypeValue[loc types.primitive('type' @session.types) field.type_value name] @session)
+        let binding = bindings.binding_at(session.registry field.binding_id)
+        return put(hir.ExpressedIdentifier[loc field.value_type binding.name field.binding_id] @session)
+    }
     if type is? types.ObjectType {
         let field = types.object_field(type name)
         if field isnt? none return put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session)

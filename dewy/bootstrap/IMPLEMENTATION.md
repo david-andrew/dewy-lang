@@ -40,8 +40,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   the function, and `@fn` retains its value. Compound assignments and contextual
   call-result obligations preserve their selected operations and conversions.
   This is an intermediate HIR entry point, not yet a
-  compiler driver: imports, the remaining value forms, proof validation,
+  compiler driver: the remaining value forms, proof validation,
   representation selection, and native emission are still required.
+- `semantic/modules.dewy` loads file-relative module graphs into that shared
+  session. Namespace and selective imports retain original declaration ids;
+  qualified type names and constructors use lexical namespace bindings, so
+  parameters can shadow an imported namespace. Native tests cover normalized
+  path aliases, single initialization, missing exports, and import cycles.
+  Target-selected imports, automatic prelude installation, dynamic path
+  evaluation, and filesystem symlink identity remain driver work.
 - Hosted short-circuit continuations join mutations from the evaluated and
   skipped paths. Bounds evaluation composes value blocks and conditional
   expressions without replaying effects; scoped expression blocks share the
@@ -287,13 +294,11 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The latest broad run passed **1,852 tests, 10 skipped**, with the evolving
-source value-checker comparison run separately. Its expanded comparison now
-passes as well. Subsequent hosted fixes for aggregate parameter defaults and
-fixed-width call-result bounds pass their dedicated regressions; the latter
-also passes 55 numeric/prototype tests. The predicate lifetime rule passes
-11 focused tests, 78 related tests, and its native dependency comparison.
-A new full run is still needed after these last hosted changes.
+The latest broad run passed **1,857 tests, 10 skipped**, including the expanded
+source value checker, aggregate parameter defaults, fixed-width call-result
+bounds, and native import-syntax comparison. The new native module-graph
+comparison also passes separately (namespace shadowing, alias identity,
+missing exports, and cycles).
 
 
 The full suite passed with **1,837 passed, 10 skipped** after the source type

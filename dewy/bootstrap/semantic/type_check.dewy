@@ -4,6 +4,7 @@ import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"context.dewy" as contexts
 import p"syntax.dewy" as syntax
+import p"namespaces.dewy" as namespaces
 import p"ty.dewy" as types
 import p"record_types.dewy" as records
 import p"brands.dewy" as brands
@@ -477,6 +478,13 @@ when_true = (p:facts.Proposition truth:bool):>facts.Proposition =>
 resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
     let source = contexts.source_at(context session)
     let node = tokens.node_at(source.nodes id)
+    let exported = namespaces.source_field(id context session)
+    if exported isnt? none {
+        let value = exported.type_value
+        if value is? addr return value
+        if value isnt? none return contexts.unsupported(id 'unapplied generic alias imported through a namespace' context session)
+        return contexts.problem(id 'exported value is not a type' exported.name context session)
+    }
     let literal = syntax.integer(id source.nodes)
     if literal isnt? none return types.integer_literal(literal @session.types)
     if node is? parser.Atom {

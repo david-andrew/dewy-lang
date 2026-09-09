@@ -1,0 +1,33 @@
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"context.dewy" as contexts
+import p"syntax.dewy" as syntax
+import p"bindings.dewy" as bindings
+import p"ty.dewy" as types
+
+doc"""
+A namespace is resolved through the nearest lexical binding, exactly like a
+value. There is no spelling-keyed module map that could survive shadowing by
+a parameter or local. Exported fields carry the original binding and alias
+value so both source type lookup and expression lookup use the same identity.
+"""
+
+field = (module:types.ModuleType name:string):>types.ModuleField? => {
+    loop member in module.fields { if member.name =? name return member }
+    return none
+}
+source_field = (id:addr context:contexts.Context session:contexts.Session):>types.ModuleField? => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    if node isnt? parser.BinOp or not syntax.is_operator(node.op '.' source.nodes) return none
+    let owner = syntax.identifier(node.left source.nodes)
+    let name = syntax.identifier(node.right source.nodes)
+    if owner is? none or name is? none return none
+    let binding_id = bindings.lookup(session.scopes context.scope owner)
+    if binding_id is? none return none
+    let binding = bindings.binding_at(session.registry binding_id)
+    if binding.value_type is? none return none
+    let module = types.node_at(session.types binding.value_type)
+    if module is? types.ModuleType return field(module name)
+    return none
+}
