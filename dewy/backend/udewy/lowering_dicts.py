@@ -281,7 +281,12 @@ class _DictLowering:
             self._int64_binary('__mul__', self._dict_length_of(indices, loc), self._int64_literal(loc, 2), loc),
             loc,
         )
-        return [self._if(too_full, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)]
+        # an empty dictionary (`let d:dict<string int64> = []`) has no table at
+        # all until its first use: `0 > 0` never built one, and the probe then
+        # read an empty `indices` with mask -1
+        no_table = self._typed_equality(self._dict_length_of(indices, loc), self._int64_literal(loc, 0), 'int64', loc)
+        needs_table = hir.ShortCircuit(loc, 'bool', 'or', no_table, too_full)
+        return [self._if(needs_table, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)]
 
     def _dict_probe(
         self,

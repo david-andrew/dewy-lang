@@ -20,7 +20,7 @@ let TokenError = type of error & Error
 # Character/base tables copied from t0.dewy so the sketch can stand alone.
 const newline_chars = set['\n' '\r\n']
 const whitespace = set[' ' '\t' '\n' '\r\n' '\r']
-const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # {chr(i) for i in range(0x20) if i not in whitespace} | {'\x7F'} # most ascii<0x20 are ignored for security reasons
+const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # most ascii<0x20 are ignored for security reasons
 const line_comment_start:'#' = '#'
 const block_comment_start: '#\{' = '#\{'
 const block_comment_end: '\}#' = '\}#'
@@ -68,11 +68,6 @@ const BASE_SPECS: totaldict<BasePrefix BaseInfo> = [
     '0r' -> [set'0123456789abcdefghijklmnopqrstuvwxyz' true [] 36]    # base 36 (hexatrigesimal) (case-insensitive)
     '0g' -> [set'0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' false ['-'->62 '_'->63 '='->none] 64]    # base 64 (tetrasexagesimal) (case-sensitive)
 ]
-
-# const base_radixes: dict<BasePrefix int> = [
-#     loop [prefix info] in BASE_SPECS
-#         prefix -> info.digits.length
-# ]
 
 
 # commonly used bases

@@ -3392,6 +3392,11 @@ class _Lowerer(
                 if index != value_index:
                     items.extend(self._lower_statement(item))
                     continue
+                if isinstance(self._unwrap_transparent(item), hir.Flow) and (distributed := self._distributed_return(item)) is not None:
+                    # `match m { <A> => A[…] … }` as the result: each arm returns its own value
+                    # by its result kind's rule, so the flow needs no temporary of the result's type
+                    items.extend(self._lower_statement(distributed))
+                    continue
                 if self.current_optional_result is not None:
                     payload = ty.optional_payload(self.current_optional_result.type)
                     if payload is None:
@@ -3426,7 +3431,9 @@ class _Lowerer(
                     continue
                 items.extend(self._lower_result_expression(item, self._extract_expression))
             return replace(node, type=ty.BOTTOM_TYPE, items=items)
-        if self.current_optional_result is not None:
+        if isinstance(self._unwrap_transparent(node), hir.Flow) and (distributed := self._distributed_return(node)) is not None:
+            statements = self._lower_statement(distributed)   # each arm returns its own value
+        elif self.current_optional_result is not None:
             payload = ty.optional_payload(self.current_optional_result.type)
             if payload is None:
                 raise TypeError('INTERNAL ERROR: missing optional result payload')
@@ -3954,6 +3961,8 @@ class _Lowerer(
                 *self._value_store(target, place_cell, runtime_type, node.loc),
             ]
         if isinstance(node, hir.Return):
+            if node.item is not None and isinstance(self._unwrap_transparent(node.item), hir.Flow) and (distributed := self._distributed_return(node.item)) is not None:
+                return self._lower_statement(distributed)   # `return match …`: each arm returns its own value
             if self.current_object_result is not None:
                 if node.item is None:
                     self._target_error(node, 'object return without a value')

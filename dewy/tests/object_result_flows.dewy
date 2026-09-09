@@ -1,0 +1,52 @@
+# A flow in result position — `match m { <A> => A[…] … }` or `if c X[…] else Y[…]`
+# — returns an object, an array of union elements, or a union member: each arm
+# returns its own value by its result kind's rule, so no temporary of the
+# result's type is needed (the t0 sketch's `finish`). And `array<A | B> | FlErr`:
+# a runtime-length array of union cells is a handle, a fine union member.
+let FlTok:type = $abstract type of any & [text:string idx:addr]
+let FlWord = type of FlTok
+let FlPunct = type of FlTok
+let FlNum = type of FlTok & [base:int64]
+let FlMatchData:type = [length:addr]
+let FlWordMatch = type of any & FlMatchData                # minted: `<FlWordMatch>` and `<FlPunctMatch>` are distinct arms
+let FlPunctMatch = type of any & FlMatchData
+let FlNumMatch = type of any & FlMatchData & [base:int64]
+let FlMatch:type = FlWordMatch | FlPunctMatch | FlNumMatch
+let FlErr:type = type of error & [message:string]
+
+let finish = (m:FlMatch text:string idx:addr):>FlTok => match m {
+    <FlWordMatch> => FlWord[text idx]
+    <FlPunctMatch> => FlPunct[text idx]
+    n:FlNumMatch => FlNum[text idx n.base]
+}
+let pick = (flag:bool):>FlTok => if flag FlWord["yes" 0] else FlPunct["!" 1]
+let probe = (s:string):>array<FlMatch> | FlErr => {
+    if s.length =? 0 return FlErr[message="empty"]
+    let out:array<FlMatch> = []
+    if s[0] in? set'0123456789' { out.push(FlNumMatch[length=1 base=10]) } else { out.push(FlWordMatch[length=s.length]) }
+    out.push(FlPunctMatch[length=1])
+    return out
+}
+let describe = (m:FlMatch):>string | FlErr => match m {   # a union result from a match
+    n:FlNumMatch => "num{n.base}"
+    <FlPunctMatch> => FlErr[message="punct"]
+    w:FlWordMatch => "word{w.length}"
+}
+let main = ():>int64 => {
+    let ms = probe("7x")
+    if ms is? FlErr return 1
+    if ms.length not=? 2 return 6
+    let total:addr = 0
+    loop m in ms { total += m.length }                 # 1 + 1
+    let t = finish(ms[0] "7" 0)
+    let u = finish(FlWordMatch[length=2] "ab" 1)
+    let p = pick(false)
+    let d = describe(ms[0])
+    if d is? FlErr return 2
+    let e = describe(ms[1])
+    if e isnt? FlErr return 3
+    let empty = probe("")
+    if empty isnt? FlErr return 4
+    if total =? 2 and t is? FlNum and u is? FlWord and p is? FlPunct and d =? "num10" and e.message =? "punct" return 42
+    return 5
+}

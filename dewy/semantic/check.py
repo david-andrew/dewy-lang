@@ -6773,8 +6773,14 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
         plain = replace(literal_ast, left=signature.right)
     try:
         literal = tcr_function_literal(plain, ctx=instance_ctx)
-    except (TypeCheckError, UserError) as error:
-        if call_loc is None or defining.srcfile is ctx.srcfile:
+    except BaseException as error:
+        # an instance whose body does not check leaves no cache entry behind
+        # (a debugger formatter's attempt is dropped; a later request must
+        # not find a binding whose function was never declared)
+        source.instances.pop(key, None)
+        defining.declarations.maps[0].pop(name, None)
+        defining.binding_scopes.maps[0].pop(name, None)
+        if not isinstance(error, (TypeCheckError, UserError)) or call_loc is None or defining.srcfile is ctx.srcfile:
             raise
         report = error.report
         reason = next((pointer.message for pointer in report.pointer_messages), None)
@@ -14587,7 +14593,14 @@ def _object_string(type_: ty.TypeExpr, object_type: ty.ObjectType, loc: Span, *,
     binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', loc)
     binding.type = signature_of(literal, ctx=module_ctx)   # known before the body: a field may hold the type again
     ctx.object_strings[key] = binding
-    checked = tcr_function_literal(literal, ctx=module_ctx)
+    try:
+        checked = tcr_function_literal(literal, ctx=module_ctx)
+    except BaseException:
+        # a conversion that does not check (a debugger formatter's, left out by
+        # the caller) must not stay cached: a later request would take a
+        # binding whose function was never declared (`Undefined function`)
+        ctx.object_strings.pop(key, None)
+        raise
     binding.type = checked.type
     declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, None, checked, binding_id=binding.id)
     binding.declaration = declaration

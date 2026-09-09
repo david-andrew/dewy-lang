@@ -1,0 +1,21 @@
+# An empty dictionary has no probe table until its first use: a lookup on it
+# (`in?`, `.get`, a proven `d[k]` after `in?`) must build one rather than probe
+# an empty table (mask -1 read past the end). Also as a field of an object
+# stored in a total dictionary (t0's `BASE_SPECS` extras).
+let Info:type = [extras:dict<string int8?> radix:uint8]
+const SPECS: totaldict<'0b' | '0x' Info> = [
+    '0b' -> [[] 2]
+    '0x' -> [['-'->62 '='->none] 16]
+]
+let is_extra = (c:string base:'0b' | '0x'):>bool => c in? SPECS[base].extras
+let main = ():>int64 => {
+    let d:dict<string int64> = []
+    if "k" in? d return 1
+    if d.get("k") isnt? none return 2
+    d["k"] = 7                                        # the first insertion builds the table it needs
+    if "k" not in? d or d["k"] not=? 7 return 3
+    let e:dict<int64 string> = []
+    if 3 in? e return 4
+    if is_extra("7" '0b') or not is_extra("-" '0x') or is_extra("=" '0b') return 5
+    return 42
+}

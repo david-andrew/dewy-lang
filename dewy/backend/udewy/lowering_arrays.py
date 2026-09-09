@@ -2642,12 +2642,24 @@ class _ArrayLowering:
 
         if array_type.length is None:
             # word elements, and objects (arena-backed handles) whose own
-            # layout is returnable
-            element = array_type.element
-            return cls._is_word_element_static(element) or (
-                isinstance(element, ty.ObjectType)
-                and cls._object_result_fields_are_returnable(element)
-            )
+            # layout is returnable; a union or optional element is one word —
+            # a pointer to a cell the array owns — so `array<A | B>` is a
+            # handle like `array<A>` (`array<Candidate> | TokenError`)
+            element = ty.strip_refinement(array_type.element)
+            if cls._is_word_element_static(element):
+                return True
+            if isinstance(element, ty.ObjectType):
+                return cls._object_result_fields_are_returnable(element)
+            members = ty.runtime_union_members(element)
+            if members is None and (payload := ty.optional_payload(element)) is not None:
+                members = ('none', payload)
+            if members is not None:
+                return all(
+                    member == 'none' or cls._is_word_element_static(member) or isinstance(member, ty.NamedType) or ty.is_user_nominal(member)
+                    or (isinstance(member, ty.ObjectType) and cls._object_result_fields_are_returnable(member))
+                    for member in members
+                )
+            return False
         element_type = array_type.element
         return (
             array_type.length == 0

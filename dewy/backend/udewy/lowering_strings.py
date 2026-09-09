@@ -2876,8 +2876,8 @@ class _StringLowering:
         string is then handed to the caller by its own rule (a parameter as a view,
         a call result as it is, an owning local's copy)."""
         expr = self._unwrap_transparent(item)
-        if not (isinstance(expr, hir.Flow) and expr.default is not None and expr.arms and all(isinstance(arm, hir.IfArm) for arm in expr.arms)):
-            return None
+        if not (isinstance(expr, hir.Flow) and expr.arms and all(isinstance(arm, hir.IfArm) for arm in expr.arms)):
+            return None   # (a value flow without a default is an exhaustive match: the checker proved every value takes an arm)
 
         def returning(body: hir.AST) -> hir.AST:
             if isinstance(body, hir.Block) and body.items:
@@ -2889,7 +2889,16 @@ class _StringLowering:
                 return body
             return hir.Return(body.loc, ty.BOTTOM_TYPE, body)
 
-        return replace(expr, type=ty.VOID_TYPE, arms=[replace(arm, body=returning(arm.body)) for arm in expr.arms], default=returning(expr.default))
+        if expr.default is not None:
+            default = returning(expr.default)
+        else:
+            # an exhaustive match: no value falls through, and µDewy wants every
+            # path to return — the never-taken default is the unreachable loop
+            loc = expr.loc
+            # (the spin, then a `return void` µDewy's every-path-returns rule can see — as `exit` ends)
+            spin = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, hir.Bool(loc, 'bool', True), hir.Block(loc, ty.VOID_TYPE, [], True))], None)
+            default = hir.Block(loc, ty.BOTTOM_TYPE, [spin, hir.Return(loc, ty.BOTTOM_TYPE, hir.Void(loc, ty.VOID_TYPE))], True)
+        return replace(expr, type=ty.VOID_TYPE, arms=[replace(arm, body=returning(arm.body)) for arm in expr.arms], default=default)
 
     def _string_sources(self, item: hir.AST) -> set[tuple[str, int | None]]:
         """Where a string value's descriptor comes from, precisely: `static`, `fresh`
