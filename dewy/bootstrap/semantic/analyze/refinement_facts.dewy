@@ -52,7 +52,7 @@ seed_field = (@state:facts.State root:addr p:propositions.Proposition base:addr 
     let upper = propositions.upper_bound(p)
     let bound:ranges.Interval? = none
     if lower isnt? none or upper isnt? none { bound = ranges.Interval[lower upper] }
-    if p.axiom =? 'addr' { bound = ranges.Interval[0 context.env.cap-1 true] }
+    if p.axiom =? 'addr' { bound = ranges.Interval[0 context.env.cap true] }
     if bound isnt? none {
         let key = facts.value(facts.Term[subject])
         let known = facts.lookup(state key)

@@ -23,7 +23,7 @@ bounds_of = (props:array<propositions.Proposition> cap:bigint):>ranges.Interval?
     let interval = ranges.propositions_interval(props)
     loop p in props {
         if p.axiom =? 'addr' {
-            let positions = ranges.Interval[0 cap-1 true]
+            let positions = ranges.Interval[0 cap true]
             return if interval is? none positions else ranges.intersect(interval positions)
         }
     }

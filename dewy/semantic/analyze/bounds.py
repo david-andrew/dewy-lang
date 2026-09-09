@@ -1169,6 +1169,11 @@ class _BoundsValidator:
         directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}
         if proposition.axiom == 'addr':
             subject_node, _interval = self._subject_interval(proposition, value, interval, state)
+            # The evaluated value may be a checked conversion whose source
+            # has no standalone interval (for example a dictionary lookup).
+            # Do not discard that evidence by stripping and re-evaluating it.
+            if _interval is not None and _interval.upper is not None and _interval.upper <= self.max_length:
+                return True
             return True if self._is_position(subject_node, state) else None
         if proposition.param is not None:
             # a fact about a parameter (`prefix.length <=? src.length`, `n >? 0`, `a <=? b`): its own facts decide it
@@ -1366,7 +1371,7 @@ class _BoundsValidator:
         lower, upper = proposition.lower_bound(), proposition.upper_bound()
         bounds = Interval(lower, upper) if lower is not None or upper is not None else None
         if proposition.axiom == 'addr':
-            bounds = Interval(0, self.max_length - 1, capped=True)   # `.start:addr`: a position
+            bounds = Interval(0, self.max_length, capped=True)   # `.start:addr`: a position
         if bounds is not None:
             current_interval = state.get(route_id, UNKNOWN_INTERVAL)
             state[route_id] = current_interval.intersect(bounds)
@@ -1404,7 +1409,7 @@ class _BoundsValidator:
         axiom included: an `addr` lies in `[0, cap)` (a capped interval)."""
         interval = _propositions_interval(propositions)
         if any(p.axiom == 'addr' for p in propositions):
-            positions = Interval(0, self.max_length - 1, capped=True)
+            positions = Interval(0, self.max_length, capped=True)
             interval = positions if interval is None else interval.intersect(positions)
         return interval
 
@@ -1419,7 +1424,7 @@ class _BoundsValidator:
         if isinstance(node, hir.FunctionCall) and any(ty.is_addr(refined) for refined in _call_result_refinements(node)):
             return True   # a call declared `:>addr` or `:>addr | none` (the node carries the base type, narrowed to the integer)
         interval = self._eval(node, state, validate=False)
-        if interval is not None and interval.upper is not None and interval.upper < self.max_length:
+        if interval is not None and interval.upper is not None and interval.upper <= self.max_length:
             return True
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
             return all(self._is_position(argument, state) for argument in node.pos_args)
