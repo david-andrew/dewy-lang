@@ -1,0 +1,86 @@
+from reporting import Error, Span
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"context.dewy" as contexts
+import p"syntax.dewy" as syntax
+
+doc"""
+The source shapes of hosted tcr_import and _parse_import_names. Keep a path
+as syntax: module loading decides whether it names a library or evaluates to
+an exact path value. Selecting names is distinct from creating a namespace;
+either operation must retain the exported declarations' binding identities.
+"""
+
+Name:type = const [source:string local:string loc:Span]
+Import:type = const [path:addr names:(array<Name>)?=none namespace:string?=none]
+keyword = (id:addr expected:string nodes:array<tokens.Token>):>bool => {
+    let node = tokens.node_at(nodes id)
+    return node is? tokens.Keyword and node.name =? expected
+}
+read_names = (id:addr context:contexts.Context session:contexts.Session):>array<Name>|Error => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    let items:array<addr> = [id]
+    if node is? parser.Block and node.delims =? '()' { items = node.inner }
+    if node is? parser.Flat and syntax.is_operator(node.op ',' source.nodes) { items = node.items }
+    if items.length =? 1 {
+        let first = tokens.node_at(source.nodes items[0])
+        if first is? parser.Flat and syntax.is_operator(first.op ',' source.nodes) { items = first.items }
+    }
+    let names:array<Name> = []
+    loop item in items {
+        let row = tokens.node_at(source.nodes item)
+        let source_name = syntax.identifier(item source.nodes)
+        let local = source_name
+        if row is? parser.BinOp and syntax.is_operator(row.op 'as' source.nodes) {
+            source_name = syntax.identifier(row.left source.nodes)
+            local = syntax.identifier(row.right source.nodes)
+        }
+        if source_name is? none or local is? none return contexts.problem(item 'invalid imported name' 'use `name` or `name as alias`' context session)
+        names.push(Name[source_name local row.loc])
+    }
+    return names
+}
+read = (id:addr context:contexts.Context session:contexts.Session):>Import|Error|none => {
+    let source = contexts.source_at(context session)
+    let node = tokens.node_at(source.nodes id)
+    if node isnt? parser.KeywordExpr or node.parts.length =? 0 return none
+    if not keyword(node.parts[0] 'from' source.nodes) and not keyword(node.parts[0] 'import' source.nodes) return none
+    if node.parts.length =? 4 {
+        let path:addr? = none
+        let selected:addr? = none
+        if keyword(node.parts[0] 'from' source.nodes) and keyword(node.parts[2] 'import' source.nodes) {
+            path = node.parts[1] selected = node.parts[3]
+        }
+        if keyword(node.parts[0] 'import' source.nodes) and keyword(node.parts[2] 'from' source.nodes) {
+            path = node.parts[3] selected = node.parts[1]
+        }
+        if path isnt? none and selected isnt? none {
+            let names = read_names(selected context session)
+            if names is? Error return names
+            return Import[path names]
+        }
+    }
+    if node.parts.length =? 2 and keyword(node.parts[0] 'import' source.nodes) {
+        let path = tokens.node_at(source.nodes node.parts[1])
+        if path is? parser.BinOp and syntax.is_operator(path.op 'as' source.nodes) {
+            let name = syntax.identifier(path.right source.nodes)
+            if name is? none return contexts.problem(id 'namespace import needs a name' 'use `import source as name`' context session)
+            return Import[path.left namespace=name]
+        }
+        return Import[node.parts[1]]
+    }
+    return contexts.problem(id 'invalid import syntax' 'expected `import source`, `import source as name`, or `from source import names`' context session)
+}
+
+library_name = (id:addr nodes:array<tokens.Token>):>string? => {
+    let name = syntax.identifier(id nodes)
+    if name isnt? none return name
+    let node = tokens.node_at(nodes id)
+    if node is? parser.BinOp and syntax.is_operator(node.op '.' nodes) {
+        let parent = library_name(node.left nodes)
+        let member = syntax.identifier(node.right nodes)
+        if parent isnt? none and member isnt? none return "{parent}/{member}"
+    }
+    return none
+}
