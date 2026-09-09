@@ -915,6 +915,17 @@ class _FlowLowering:
         members = ty.enum_members(target.type)
         if members is not None:
             return self._enum_word_of(item, members)
+        item_type = ty.strip_refinement(item.type)
+        if isinstance(item_type, ty.ObjectType) and target.name in self.object_flow_targets:
+            # an object-valued flow: the temporary is a pointer word — to the arm's
+            # own object (a literal, a call's result), or to a copy of a value that
+            # lives on (a binding, a field), as `let t = x` copies
+            if isinstance(item, (hir.ObjectLiteral, hir.FunctionCall)):
+                return self._extract_object_pointer(item)
+            size, _offsets = self._object_layout(item_type, item)
+            cell = hir.ExpressedIdentifier(item.loc, 'int64', self._new_optional_name('flow_object'))
+            prelude, source = self._extract_object_pointer(item)
+            return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size)), *self._object_copy(cell, source, item_type, item.loc)], cell
         if self._is_string_valued(item.type):
             return self._kept_string_value(item)   # the flow's temporary keeps a call's result
         return self._extract_expression(item)
@@ -923,6 +934,8 @@ class _FlowLowering:
         """Return an udewy-representable initializer for a flow temporary."""
         if isinstance(node.type, ty.RefinedType):
             node = replace(node, type=node.type.base)   # `int64<0..100>` is an int64 word
+        if isinstance(node.type, ty.ObjectType) and node.type.brand not in ('dict', 'set'):
+            return hir.Integer(node.loc, 'int64', t0.base10, 0)   # an object value is a pointer word (see `_enum_aware_extract`)
         if ty.enum_members(node.type) is not None:
             return hir.Integer(node.loc, 'int64', t0.base10, 0)   # an enum is its tag word
         if node.type == 'bool':

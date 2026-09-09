@@ -1565,14 +1565,15 @@ class _ArrayLowering:
 
         if method.name == 'pop':
             last = self._int64_binary('__sub__', length, one, loc)
-            result = hir.ExpressedIdentifier(loc, element_type, self._new_array_name('popped'))
+            popped_type = self._lower_runtime_value_type(element_type)   # a union or object element is one word (its cell's or object's pointer)
+            result = hir.ExpressedIdentifier(loc, popped_type, self._new_array_name('popped'))
             index_arg = self._optional_method_argument(node, 'idx')
             if index_arg is None:
                 return [
                     *prelude,
                     length_declare,
                     hir.Declare(
-                        loc, ty.VOID_TYPE, 'let', result.name, element_type,
+                        loc, ty.VOID_TYPE, 'let', result.name, popped_type,
                         self._array_load(
                             self._pointer_element_address(data, last, element_bytes, loc),
                             element_type,
@@ -1580,7 +1581,7 @@ class _ArrayLowering:
                         ),
                     ),
                     self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last, loc),
-                ], result
+                ], replace(result, type=element_type)
             # `xs.pop(idx)`: take the element, shift the tail down, shrink
             index_prelude, index = self._extract_expression(index_arg)
             index_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('pop_index'))
@@ -1592,7 +1593,7 @@ class _ArrayLowering:
                 hir.Declare(loc, ty.VOID_TYPE, 'let', index_name.name, 'int64', index),
                 hir.Declare(loc, ty.VOID_TYPE, 'let', last_name.name, 'int64', last),
                 hir.Declare(
-                    loc, ty.VOID_TYPE, 'let', result.name, element_type,
+                    loc, ty.VOID_TYPE, 'let', result.name, popped_type,
                     self._array_load(
                         self._pointer_element_address(data, index_name, element_bytes, loc),
                         element_type,
@@ -1601,7 +1602,7 @@ class _ArrayLowering:
                 ),
                 *shift_loop(index_name, '__lt__', last_name, +1, +1),
                 self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last_name, loc),
-            ], result
+            ], replace(result, type=element_type)
         if method.name == 'insert':
             # grow, shift the tail up from the end, store, extend
             value_prelude, value = self._growable_element_value(node.pos_args[0], element_type)

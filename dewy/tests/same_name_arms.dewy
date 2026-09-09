@@ -1,0 +1,36 @@
+# Two match arms may bind the same name to different types (`c:Closer` and
+# `c:TypeCloser`): the lowering's per-function bookkeeping of what a local
+# owns (its strings to release at scope exit, its object layout) is by name,
+# so the second arm's `c` used to overwrite the first's — and the first arm's
+# early return then released the wrong layout and crashed.
+let Span:type = [start:addr stop:addr = start]
+let Opening:type = [idx:addr loc:Span]
+let Frame = type of any & [opening:Opening kind:'square' | 'round' name:string = "block"]
+let TypeFrame = type of any & [opening:Opening name:string = "type"]
+let MatchData:type = [length:addr]
+let Word = type of any & MatchData & [text:string]
+let Closer = type of any & MatchData & [spelling:']' | ')' frame:Frame]
+let TypeCloser = type of any & MatchData & [frame:TypeFrame]
+let Candidate:type = Word | Closer | TypeCloser
+let Err:type = type of error & [message:string]
+let describe = (m:Candidate):>string | Err => {
+    return match m {
+        w:Word => "word {w.text}"
+        c:Closer => {
+            if c.spelling =? ')' { return Err[message="mismatch for {c.frame.name} opened at {c.frame.opening.loc.start}"] }
+            "close {c.frame.kind} {c.frame.name} at {c.frame.opening.idx}"
+        }
+        c:TypeCloser => "close type {c.frame.name} at {c.frame.opening.idx}"
+    }
+}
+let main = ():>int64 => {
+    let frame = Frame[opening=Opening[idx=3 loc=Span[7 8]] kind='square']
+    let a = describe(Closer[length=1 spelling=']' frame=frame])
+    let b = describe(Closer[length=1 spelling=')' frame=frame])
+    let t = describe(TypeCloser[length=1 frame=TypeFrame[opening=Opening[idx=5 loc=Span[9]]]])
+    let w = describe(Word[length=2 text="hi"])
+    if a is? Err or t is? Err or w is? Err return 1
+    if b isnt? Err return 2
+    if a =? "close square block at 3" and b.message =? "mismatch for block opened at 7" and t =? "close type type at 5" and w =? "word hi" return 42
+    return 3
+}

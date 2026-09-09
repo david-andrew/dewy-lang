@@ -1165,10 +1165,10 @@ class _BoundsValidator:
             current = leaf
         route_id = self.registry.route_id(root_id, path, leaf, loc)
         if proposition.of == 'length':
-            minimum = proposition.lower_bound()
-            if minimum is not None:
+            minimum, maximum = proposition.lower_bound(), proposition.upper_bound()
+            if minimum is not None or maximum is not None:
                 key = _length_key(route_id)
-                state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
+                state[key] = state.get(key, self._length_default()).intersect(Interval(minimum if minimum is not None else 0, maximum if maximum is not None else self.max_length))
             return
         lower, upper = proposition.lower_bound(), proposition.upper_bound()
         bounds = Interval(lower, upper) if lower is not None or upper is not None else None
@@ -1266,10 +1266,11 @@ class _BoundsValidator:
                 if proposition.op == 'not=?' and proposition.value == 0:
                     state[_nonzero_key(binding_id)] = Interval.exact(1)
             elif proposition.subject == 'length':
-                minimum = proposition.lower_bound()
-                if minimum is not None:
+                # `alphabet:string<2 <=? length <=? uint8.max>`: both bounds are facts on the length
+                minimum, maximum = proposition.lower_bound(), proposition.upper_bound()
+                if minimum is not None or maximum is not None:
                     key = _length_key(binding_id)
-                    state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
+                    state[key] = state.get(key, self._length_default()).intersect(Interval(minimum if minimum is not None else 0, maximum if maximum is not None else self.max_length))
         bounds = self._bounds_of(refined.propositions)
         if bounds is not None:
             # narrows what is already known (a term fact may have capped the interval)
@@ -2275,8 +2276,23 @@ class _BoundsValidator:
             self._analyze_function(node, validate=validate, enclosing=state)
             return None
         if isinstance(node, hir.ObjectLiteral):
+            object_type = ty.unfold(node.type) if isinstance(node.type, (ty.ObjectType, ty.NamedType)) else None
             for field in node.fields:
-                self._eval(field.value, state, validate=validate)
+                interval = self._eval(field.value, state, validate=validate)
+                if field.binding_id is None:
+                    continue
+                # the field's value is a binding while the literal is built: a later
+                # field's default or refinement reads it (`radix:uint8 = alphabet.length`),
+                # with the value's facts and the field's declared ones
+                self._set_interval(state, field.binding_id, interval)
+                value = _strip_casts(field.value)
+                known = self._string_length(value.type) if not isinstance(value.type, ty.ArrayType) else value.type.length
+                if known is not None:
+                    state[_length_key(field.binding_id)] = Interval.exact(known)
+                self._seed_value_facts(field.binding_id, field.value, state, field.loc)
+                declared = object_type.field(field.name) if isinstance(object_type, ty.ObjectType) else None
+                if declared is not None and declared.refinement:
+                    self._seed_binding_refinement(field.binding_id, ty.RefinedType(declared.type, tuple(declared.refinement)), state, field.loc)
             return None
         if isinstance(node, hir.MemberAccess):
             self._eval(node.value, state, validate=validate)

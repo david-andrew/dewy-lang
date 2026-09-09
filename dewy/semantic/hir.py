@@ -81,6 +81,11 @@ class GenericSource:
         self.context = context
         self.instances: dict[tuple, object] = {}
 
+    def __repr__(self) -> str:
+        # the defining context holds the whole module's scope: printing it (a
+        # failing test's assertion message) took minutes and looked like a hang
+        return f'GenericSource(<{len(self.params)} type parameters, {len(self.instances)} instances>)'
+
 
 @dataclass
 class GenericFunction(AST):

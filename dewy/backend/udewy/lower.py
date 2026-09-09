@@ -117,6 +117,101 @@ def _erase_dimensions(root: object) -> None:
     walk(root)
 
 
+
+def _is_hir_node(value: object) -> bool:
+    """A checked-tree dataclass: an `AST`, or a part of one that is not (an
+    `ObjectField`, a `Param`, a match arm) — every one is walked."""
+    from dataclasses import is_dataclass
+    return is_dataclass(value) and not isinstance(value, type) and type(value).__module__ == hir.__name__
+
+
+def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
+    """Give every local of a function a name of its own.
+
+    The lowering keeps what a local owns — strings to release at scope exit,
+    an object's layout — by name, and the emitted µDewy is read by name too,
+    which assumes names are unique within a function. Dewy scopes let two
+    locals share a spelling (`c:Closer => …` and `c:TypeCloser => …` in one
+    match, two `loop i` counters): the later bindings are renamed
+    (`c`, `c__2`, …) by binding id, before anything is keyed by name.
+    """
+    from dataclasses import fields, is_dataclass
+    owners: dict[str, list[int]] = {}
+    for param in [*literal.pos_or_kw_args, *literal.kw_only_args]:
+        if param.binding_id is not None:
+            owners.setdefault(param.name, []).append(param.binding_id)
+
+    def collect(value: object) -> None:
+        if isinstance(value, hir.FunctionLiteral):
+            return   # a nested literal is lowered on its own
+        if isinstance(value, hir.Declare) and value.binding_id is not None and not isinstance(value.expr, (hir.FunctionLiteral, hir.OverloadedFunction, hir.GenericFunction)):
+            # (a nested function is hoisted under its binding's own name: not a local of this frame)
+            ids = owners.setdefault(value.name, [])
+            if value.binding_id not in ids:
+                ids.append(value.binding_id)
+        elif isinstance(value, hir.IteratorExpression) and value.target.binding_id is not None:
+            ids = owners.setdefault(value.target.name, [])
+            if value.target.binding_id not in ids:
+                ids.append(value.target.binding_id)
+        if _is_hir_node(value):
+            for field_ in fields(value):
+                collect(getattr(value, field_.name))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+
+    collect(literal.body)
+    renamed = {binding_id: f'{name}__{ordinal}' for name, ids in owners.items() if len(ids) > 1 for ordinal, binding_id in enumerate(ids[1:], 2)}
+    if not renamed:
+        return literal
+
+    def rename(value: object) -> object:
+        if isinstance(value, hir.FunctionLiteral):
+            return value
+        if isinstance(value, (hir.Declare, hir.ExpressedIdentifier)) and value.binding_id in renamed:
+            value = replace(value, name=renamed[value.binding_id])
+        if _is_hir_node(value):
+            updates = {field_.name: rename(getattr(value, field_.name)) for field_ in fields(value) if field_.name not in ('loc', 'type', 'binding_id', 'name')}
+            return replace(value, **updates)
+        if isinstance(value, list):
+            return [rename(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(rename(item) for item in value)
+        if isinstance(value, dict):
+            return {key: rename(item) for key, item in value.items()}
+        return value
+
+    return replace(literal, body=rename(literal.body))
+
+
+def _uniquify_module_locals(root: hir.Block) -> hir.Block:
+    """`_uniquify_local_names` for every function literal of a module, inner
+    literals first — before the lowering keys anything by a node's identity."""
+    from dataclasses import fields, is_dataclass
+
+    def rebuild(value: object) -> object:
+        if _is_hir_node(value):
+            updates = {field_.name: rebuild(getattr(value, field_.name)) for field_ in fields(value) if field_.name not in ('loc', 'type', 'binding_id', 'name')}
+            rebuilt = replace(value, **updates) if any(updates[name] is not getattr(value, name) for name in updates) else value
+            return _uniquify_local_names(rebuilt) if isinstance(rebuilt, hir.FunctionLiteral) else rebuilt
+        if isinstance(value, list):
+            items = [rebuild(item) for item in value]
+            return items if any(new is not old for new, old in zip(items, value)) else value
+        if isinstance(value, tuple):
+            items = tuple(rebuild(item) for item in value)
+            return items if any(new is not old for new, old in zip(items, value)) else value
+        if isinstance(value, dict):
+            items = {key: rebuild(item) for key, item in value.items()}
+            return items if any(items[key] is not value[key] for key in value) else value
+        return value
+
+    rebuilt = rebuild(root)
+    assert isinstance(rebuilt, hir.Block)
+    return rebuilt
+
 class _Lowerer(
     _DictLowering,
     _StringLowering,
@@ -267,6 +362,7 @@ class _Lowerer(
         self.array_element_targets: set[int] = set()   # iterator targets over arrays of strings
         self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
         self.borrowed_fields: dict[str, set[str]] = {}          # object local name -> fields that borrow (never adopted on `return`)
+        self.object_flow_targets: set[str] = set()   # flow temporaries (and bindings) holding an object's pointer
         self.object_literal_contexts: list[
             tuple[hir.AST, ty.ObjectType, dict[int, str]]
         ] = []
@@ -4394,13 +4490,15 @@ class _Lowerer(
                 flow_prelude, flow = self._lower_union_flow(node, cell, union_members)
                 return [*prelude, *flow_prelude, flow], replace(cell, type=node.type)
             target = self._new_flow_temp(node)
+            if isinstance(ty.strip_refinement(node.type), ty.ObjectType):
+                self.object_flow_targets.add(target.name)   # a pointer word: each arm builds or copies its object
             declaration = hir.Declare(
                 node.loc,
                 ty.VOID_TYPE,
                 'let',
                 target.name,
                 'int64'
-                if isinstance(node.type, ty.ArrayType)
+                if isinstance(node.type, (ty.ArrayType, ty.ObjectType))
                 or ty.enum_members(node.type) is not None
                 or isinstance(node.type, ty.TypeOr) and (ty.string_valued(node.type) or self._is_optional_element(node.type))
                 else node.type,
@@ -5167,6 +5265,7 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     """Legalize checked HIR function constructs for udewy source emission."""
     if not isinstance(root, hir.Block):
         raise TypeError(f'expected Block, got {type(root).__name__}')
+    root = _uniquify_module_locals(root)   # every local of a function under a name of its own
     lowerer = _Lowerer(root, srcfile, entry_name)
     program = lowerer.lower()
     last_copy_notes[:] = lowerer.copy_notes

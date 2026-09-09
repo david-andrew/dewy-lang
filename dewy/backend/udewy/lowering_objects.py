@@ -10,9 +10,24 @@ from typing import Callable
 
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
+from ...parser import t0
 from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, MoveNote
 from ...semantic.hir_display import type_to_dewy
 
+
+
+def _flow_values(flow: hir.Flow) -> list[hir.AST]:
+    """The value expression each arm (and the default) of a value flow ends with."""
+    values: list[hir.AST] = []
+    for body in [*(arm.body for arm in flow.arms), *([flow.default] if flow.default is not None else [])]:
+        if isinstance(body, hir.Block):
+            items = [item for item in body.items if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)]
+            values.extend(items[-1:])
+        elif isinstance(body, hir.Flow):
+            values.extend(_flow_values(body))
+        else:
+            values.append(body)
+    return values
 
 class _ObjectLowering:
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
@@ -848,6 +863,30 @@ class _ObjectLowering:
         node: hir.Declare,
         object_type: ty.ObjectType,
     ) -> list[hir.AST]:
+        flow = self._unwrap_transparent(node.expr)
+        leading: list[hir.AST] = []
+        if isinstance(flow, hir.Block):
+            # the checker's block around a `match`: its statements, then the flow as the value
+            value_indices = [index for index, item in enumerate(flow.items) if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)]
+            if len(value_indices) == 1 and isinstance(self._unwrap_transparent(flow.items[value_indices[0]]), hir.Flow):
+                leading = [item for index, item in enumerate(flow.items) if index != value_indices[0]]
+                flow = self._unwrap_transparent(flow.items[value_indices[0]])
+        if isinstance(flow, hir.Flow) and flow.arms and all(isinstance(arm, hir.IfArm) for arm in flow.arms):
+            # `token:Token = match o.kind { <'square'> => LeftSquareBracket[…] … }`:
+            # an object binding is a pointer word, so each arm builds its own
+            # object (of whichever concrete type) and the binding takes the pointer
+            target = hir.ExpressedIdentifier(node.loc, 'int64', node.name, binding_id=node.binding_id)
+            self.object_flow_targets.add(node.name)
+            declaration = replace(node, decltype='let', annotation='int64', expr=hir.Integer(node.loc, 'int64', t0.base10, 0))
+            statements: list[hir.AST] = [declaration]
+            for item in leading:
+                statements.extend(self._lower_statement(item))
+            flow_prelude, lowered = self._lower_flow(flow, target=target)
+            borrowed: set[str] = set()
+            for value in _flow_values(flow):
+                borrowed |= self.literal_borrowed_fields.get(id(value), set())
+            self.borrowed_fields[node.name] = borrowed
+            return [*statements, *flow_prelude, lowered]
         if isinstance(node.expr, (hir.ObjectLiteral, hir.FunctionCall)):
             prelude, ptr = self._extract_expression(node.expr)
             self.borrowed_fields[node.name] = set(self.literal_borrowed_fields.get(id(node.expr), set()))
