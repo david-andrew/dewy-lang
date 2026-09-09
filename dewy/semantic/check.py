@@ -15725,8 +15725,10 @@ def _forget_dictionary(
 ) -> None:
     """Update length and key facts after `pop`/`clear`.
 
-    Removal leaves a tombstone, so the other keys stay proven *with* their
-    positions; only the removed key's fact goes. `clear` forgets every key.
+    Removal leaves a tombstone, so distinct constant keys keep their slots.
+    Binding identity does not establish value inequality: a variable key may
+    equal a proven literal or another binding. Forget every possibly equal
+    key, and any inferred totality. `clear` forgets every key.
     """
     dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
     removed_identity = _key_identity(removed, ctx=ctx) if removed is not None else None
@@ -15734,7 +15736,13 @@ def _forget_dictionary(
         route_id, identity = fact_key
         if route_id != dictionary_id:
             continue
-        if cleared or identity == removed_identity:
+        distinct_constants = (
+            removed_identity is not None
+            and removed_identity[0] == 'c'
+            and identity[0] == 'c'
+            and identity != removed_identity
+        )
+        if cleared or not distinct_constants:
             del ctx.key_facts[fact_key]
     for member in (keys, values):
         if member is None:
