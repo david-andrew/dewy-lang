@@ -25,7 +25,7 @@
 #       ╰───
 #     help: insert a space or an operator
 #
-# `Span`s are offsets in graphemes (`nat64`, the type of `.length`) — the units `body[i]` indexes and `.length`
+# `Span`s are offsets in graphemes (`addr`, the type of `.length`) — the units `body[i]` indexes and `.length`
 # counts — so the offsets a tokenizer computes over a string are the offsets a
 # report wants; columns count graphemes too, and `\r\n` is one of them.
 #
@@ -50,13 +50,13 @@ let ColorName:type = 'cyan' | 'green' | 'yellow' | 'blue' | 'purple' | 'pink' | 
 
 # ---- spans and pointers ----
 let Span:type = [
-    start:nat64
-    stop:nat64 = start
+    start:addr
+    stop:addr = start
     is_zero_width = ():>bool => start >=? stop
-    contains = (offset:nat64):>bool => start <=? offset and offset <? stop
-    clamp_to = (lo:nat64 hi:nat64):>Span => {
-        let a:nat64 = start
-        let b:nat64 = stop
+    contains = (offset:addr):>bool => start <=? offset and offset <? stop
+    clamp_to = (lo:addr hi:addr):>Span => {
+        let a:addr = start
+        let b:addr = stop
         if a <? lo { a = lo }
         if a >? hi { a = hi }
         if b <? lo { b = lo }
@@ -64,15 +64,6 @@ let Span:type = [
         return Span[a b]
     }
 ]
-
-# a span moved by `by`: offsets into one source never overflow, but the sum of
-# two naturals is an `int64` that could, so a wrapped result keeps the span
-let _span_shifted = (s:Span by:nat64):>Span => {
-    let start:int64 = s.start + by
-    let stop:int64 = s.stop + by
-    if start <? 0 or stop <? 0 return s
-    return Span[start stop]
-}
 
 # One message about one or more places. `placement` is where its underline
 # goes (`none`: the layout decides); `color` a palette name (`none`: the
@@ -202,9 +193,9 @@ let SrcFile:type = [
         return count
     }
     # the offset where `line` starts (the body's length past the last line)
-    line_start = (line:int64):>nat64 => {
+    line_start = (line:int64):>addr => {
         let current:int64 = 0
-        let i:nat64 = 0
+        let i:addr = 0
         loop i <? body.length {
             if current =? line { return i }
             if _is_line_end(body[i]) { current += 1 }
@@ -213,17 +204,17 @@ let SrcFile:type = [
         return body.length
     }
     # one past the last grapheme of `line`, excluding its line end
-    line_end = (line:int64):>nat64 => {
-        let i:nat64 = line_start(line)
+    line_end = (line:int64):>addr => {
+        let i:addr = line_start(line)
         loop i <? body.length {
             if _is_line_end(body[i]) { return i }
             i += 1
         }
         return body.length
     }
-    line_of = (offset:nat64):>int64 => {
+    line_of = (offset:addr):>int64 => {
         let line:int64 = 0
-        let i:nat64 = 0
+        let i:addr = 0
         loop i <? offset and i <? body.length {
             if _is_line_end(body[i]) { line += 1 }
             i += 1
@@ -231,21 +222,21 @@ let SrcFile:type = [
         return line
     }
     # 0-based column of an offset within its line (graphemes)
-    column_of = (offset:nat64):>int64 => {
-        let begin:nat64 = line_start(line_of(offset))
+    column_of = (offset:addr):>int64 => {
+        let begin:addr = line_start(line_of(offset))
         return offset - begin
     }
     # the width of `line` in graphemes
     line_length = (line:int64):>int64 => line_end(line) - line_start(line)
     # the text of `line` without its line end
     line_text = (line:int64):>string => {
-        let a:nat64 = line_start(line)
-        let b:nat64 = line_end(line)
+        let a:addr = line_start(line)
+        let b:addr = line_end(line)
         if a <=? b and b <=? body.length { return body[a..b) }
         return ""
     }
     # the printed row number of an offset, and its 1-based column: `path:row:col`
-    location = (offset:nat64):>string => "{path}:{first_row + line_of(offset)}:{column_of(offset) + 1}"
+    location = (offset:addr):>string => "{path}:{first_row + line_of(offset)}:{column_of(offset) + 1}"
 ]
 
 # ---- Segment: one pointer on one line, in columns (reporting.py's `_Segment`) ----
@@ -301,24 +292,25 @@ let Report:type = [
     use_color:bool = true
 
     # move every span by `by`: a report made against a slice of the source
-    # (`eat(src[i..])` in a tokenizer) becomes one against the whole source
-    shift = (by:nat64) => {
+    # (`eat(src[i..])` in a tokenizer) becomes one against the whole source;
+    # a position plus an offset is a position (the address-space axiom)
+    shift = (by:addr) => {
         let moved:array<Pointer> = []
         loop p in pointers {
             let more:array<Span> = []
-            loop s in p.spans { more.push(_span_shifted(s by)) }
-            moved.push(Pointer[span=_span_shifted(p.span by) message=p.message spans=more placement=p.placement color=p.color group=p.group])
+            loop s in p.spans { more.push(Span[s.start + by s.stop + by]) }
+            moved.push(Pointer[span=Span[p.span.start + by p.span.stop + by] message=p.message spans=more placement=p.placement color=p.color group=p.group])
         }
         pointers.clear
         loop m in moved { pointers.push(m) }
         let dim_moved:array<Span> = []
-        loop s in dimmed { dim_moved.push(_span_shifted(s by)) }
+        loop s in dimmed { dim_moved.push(Span[s.start + by s.stop + by]) }
         dimmed.clear
         loop d in dim_moved { dimmed.push(d) }
     }
     describe = (text:string) => { message = text }
-    point = (start:nat64 stop:nat64 text:string) => { pointers.push(Pointer(Span(start stop) text)) }
-    dim = (start:nat64 stop:nat64) => { dimmed.push(Span(start stop)) }
+    point = (start:addr stop:addr text:string) => { pointers.push(Pointer(Span(start stop) text)) }
+    dim = (start:addr stop:addr) => { dimmed.push(Span(start stop)) }
     note = (text:string) => { notes.push(text) }
     help = (text:string) => { hint = text }
 
@@ -657,7 +649,7 @@ let Report:type = [
             }
             if marks >? 0 { print"\n"  return void }
         }
-        let offset:nat64 = src.line_start(line)
+        let offset:addr = src.line_start(line)
         let dimming:bool = false
         loop g in text {
             let glyph = _control_glyph(g)
@@ -723,7 +715,7 @@ let Report:type = [
         }
         let segments:array<Segment> = layout(src theme)
         # the header points at the earliest pointer
-        let first_offset:nat64 = 0
+        let first_offset:addr = 0
         let found:bool = false
         loop p in pointers { loop s in _pointer_spans(p) { if not found or s.start <? first_offset { first_offset = s.start  found = true } } }
         let first_line:int64 = src.line_of(first_offset)
@@ -793,15 +785,15 @@ let Hint = type of Report & [severity="hint"]
 # ---- the report of a failed `$runtime_assert` or `$expect` (the compiler emits the calls) ----
 # The condition is the pointer, its message the pointer text, and the
 # `, message` tail of the source (up to `dim_stop`) is greyed out.
-let _condition_report = (title:string start:nat64 stop:nat64 dim_stop:nat64 message:string):>Report => {
+let _condition_report = (title:string start:addr stop:addr dim_stop:addr message:string):>Report => {
     let report = Report("error" title)
     report.point(start stop message)
     if dim_stop >? stop { report.dim(stop dim_stop) }
     return report
 }
 
-let _assertion_report = (start:nat64 stop:nat64 dim_stop:nat64 message:string):>Report => _condition_report("assertion failed" start stop dim_stop message)
-let _expectation_report = (start:nat64 stop:nat64 dim_stop:nat64 message:string):>Report => _condition_report("expectation failed" start stop dim_stop message)
+let _assertion_report = (start:addr stop:addr dim_stop:addr message:string):>Report => _condition_report("assertion failed" start stop dim_stop message)
+let _expectation_report = (start:addr stop:addr dim_stop:addr message:string):>Report => _condition_report("expectation failed" start stop dim_stop message)
 
 let _assertion_note = (@report:Report text:string):>void => {
     report.note(text)

@@ -7841,7 +7841,9 @@ def _tcr_object_literal(
         assert value is not None
         binding = field_bindings[index]
         fields.append(hir.ObjectField(loc, name, value, binding.id, mutable))
-        types.append(ty.ObjectField(name, ty.strip_refinement(binding.type or value.type), mutable))  # a field invariant is not part of the literal's shape
+        field_type = binding.type or value.type
+        # a field invariant is not part of the literal's shape — except the facts that are a type's name (`addr`, `nat64`)
+        types.append(ty.ObjectField(name, ty.strip_refinement(field_type), mutable, refinement=ty.named_refinement(field_type)))
     object_type = ty.ObjectType(tuple(types))
     if expected_object is not None:
         check_against(
@@ -8324,7 +8326,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             result_type: ty.Type = (
                 ty.IntegerLiteralType(value.type.length)
                 if value.type.length is not None
-                else ty.nat_type('nat64')   # a length is never negative
+                else ty.addr_type()   # a length: a position in the address space
             )
             return hir.ArrayLength(binop.loc, result_type, value)
         string_length = _known_string_length(value.type)
@@ -8332,7 +8334,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             result_type = (
                 ty.IntegerLiteralType(string_length)
                 if string_length is not None
-                else ty.nat_type('nat64')
+                else ty.addr_type()
             )
             return hir.StringLength(binop.loc, result_type, value)
     value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
@@ -8538,7 +8540,7 @@ def _brand_constructor(family: ty.ObjectType, loc: Span, *, ctx: Context) -> sb.
                 f'`{brand}` leaves the slot `{unfilled[0]}` unfilled',
                 Pointer(span=loc, message=f'every type constructed through a `type<{family.brand}>` value fills its function-typed slots with a method'),
             )
-    params = ' '.join(f'{f.name}:{type_to_dewy(f.type)}' for f in given)
+    params = ' '.join(f'{f.name}:{type_to_dewy(ty.RefinedType(f.type, f.refinement) if f.refinement else f.type)}' for f in given)   # `idx:addr`: the invariant travels with the parameter
     args = ' '.join(f'{f.name}={f.name}' for f in given)
     arms = '\n'.join(f'    <{brand}> => return {brand}({args})' for brand in brands)
     text = f'(__dewy_kind:type<{family.brand}> {params}):>{family.brand} => {{ match __dewy_kind {{\n{arms}\n}} }}'
@@ -10298,7 +10300,7 @@ def _dispatch_builtin(
 ) -> hir.AST:
     """Resolve a builtin dunder call and apply any selected promotions."""
     if expected is not None:
-        expected = ty.strip_result_refinement(expected)   # the operator computes the base type; the facts are the return's to prove
+        expected = ty.strip_all_refinements(expected)   # the operator computes the base type; the facts are the return's to prove
     arg_types = [
         require_valued(
             arg.type,
@@ -12226,15 +12228,22 @@ def _adopt_result_refinement(rettype: ty.Type, expected: ty.Type | None, params:
     contract = _map_result_type(expected.ret, renamed_refinement)
     if rettype == ty.INFERRED_TYPE:
         return contract
-    if isinstance(rettype, ty.RefinedType) or (isinstance(rettype, ty.TypeOr) and _refined_members(rettype)):
-        return rettype   # its own refinements: checked against the contract by the subtyping of the call site
     if ty.strip_refinement(contract) == rettype or (isinstance(contract, ty.TypeOr) and ty.union(*(ty.strip_refinement(item) for item in contract.items)) == rettype):
         return contract
     # (a list of pairs: an object member such as `| TokenError` is not hashable)
     contract_members = [(ty.strip_refinement(member.base) if isinstance(member, ty.RefinedType) else member, member) for member in (contract.items if isinstance(contract, ty.TypeOr) else [contract])]
 
     def adopted(item: ty.TypeExpr) -> ty.TypeExpr:
-        return next((member for base, member in contract_members if base == item), item)
+        base = ty.strip_refinement(item.base) if isinstance(item, ty.RefinedType) else item
+        member = next((member for member_base, member in contract_members if member_base == base), None)
+        if member is None:
+            return item
+        if isinstance(item, ty.RefinedType):
+            # its own facts join the contract's: `:>addr?` under an `eatfn` contract
+            # returns `addr<(<=? src.length)> | none`, each return proven against both
+            promised = member.propositions if isinstance(member, ty.RefinedType) else ()
+            return ty.RefinedType(base, promised + tuple(p for p in item.propositions if p not in promised))
+        return member
 
     if isinstance(rettype, ty.TypeOr):
         return ty.union(*(adopted(item) for item in rettype.items))
@@ -13012,6 +13021,8 @@ def _refined(base: ty.Type, propositions: list[ty.Proposition]) -> ty.Type:
 
 
 def _describe_proposition(proposition: ty.Proposition) -> str:
+    if proposition.axiom == 'addr':
+        return f'{proposition.field or "value"} is a position in the address space'
     op = proposition.op.replace('not=?', 'not =?')
     if proposition.param is not None:
         return f'{proposition.subject_text} {op} {proposition.bound_text}'
@@ -13133,6 +13144,11 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
                 else None
             )
         requirement = _describe_proposition(proposition)
+        if proposition.axiom == 'addr' and fact is not None:
+            from ..targets import ADDRESS_BITS
+            if not (0 <= fact < (1 << ADDRESS_BITS.get(ctx.target, 48))):
+                type_error(ctx.srcfile, 'refinement refuted', Pointer(span=node.loc, message=f'the value is {fact}, which is not a position in the address space of `{ctx.target}`'))
+            continue   # a constant position: no obligation left
         if fact is None:
             pending.append(proposition)
             continue
@@ -13391,6 +13407,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return builtins.builtin_type_aliases[name]
             if name in ty.NAT_BASES:
                 return ty.nat_type(name)   # `nat64`: an `int64` that is never negative
+            if name == 'addr':
+                return ty.addr_type()      # a position in the target's address space
             if name == 'rational' and RATIONAL_TYPE_NAME in ctx.binding_scopes:
                 return _rational_type(ctx, ast.loc)
             if name == 'fixed' and FIXED_TYPE_NAME in ctx.binding_scopes:
@@ -15629,6 +15647,7 @@ def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Propo
                 p.op,
                 p.value,
                 of='length' if p.subject == 'length' or (p.field is not None and p.of == 'length') else 'value',
+                axiom=p.axiom,
             )
             for p in field.refinement
         )
@@ -16028,11 +16047,11 @@ def tcr_identifier(
                 if inhabitant is not None:
                     return inhabitant
             return type_value
-        resolved_type = ty.unfold(ty.strip_refinement(
-            ctx.refinements.get(binding.id, declared_type)
-            if refined and binding is not None
-            else declared_type
-        ))
+        source_type = ctx.refinements.get(binding.id, declared_type) if refined and binding is not None else declared_type
+        resolved_type = ty.unfold(ty.strip_refinement(source_type))
+        named = ty.named_refinement(source_type) if isinstance(source_type, ty.RefinedType) else ()
+        if named and isinstance(resolved_type, str):
+            resolved_type = ty.RefinedType(resolved_type, named)   # a binding's facts are facts; its *name* (`addr`, `nat64`) it keeps
         return hir.ExpressedIdentifier(
             id.loc,
             resolved_type,

@@ -151,14 +151,14 @@ let Push = type of any & [ctx:Context]
 let Pop = type of any
 # ConextAction:type = Push | Pop | none
 
-let eatfn:type = (src:nonemptystring @ctx:Context):>nat64 & <(<=?src.length)> | none | TokenError
+let eatfn:type = (src:nonemptystring @ctx:Context):>addr & <(<=?src.length)> | none | TokenError
 let actionfn:type = (ctx:Context):>Push|Pop
 # let no_op = (ctx:Context)=>none
 
 let Token:type = $abstract type of any & [
     src:string
     loc:Span
-    idx:nat64
+    idx:addr
     eat:eatfn
     action_on_eat:actionfn?=none
     __as__ = ():>string => if loc.start <? loc.stop <=? src.length
@@ -189,7 +189,7 @@ ordinalize = (n:nat64):>string => {
 
 # TODO: want a warning if there is a lone \r not followed by \n
 Whitespace = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> nat64? => {
+    eat = (src:nonemptystring @ctx:Context):> addr? => {
         doc"""white space is any sequence of whitespace characters"""
         i = 0
         loop i <? src.length and src[i] in? whitespace {
@@ -201,7 +201,7 @@ Whitespace = type of Token & [
         return if i >? 0 i else none
     }
     
-    warning_lone_carriage_return = (src:nonemptystring i:nat64<(<? src.length)> @ctx:Context):>void => {   # an offset into `src`: `i + 1` cannot wrap
+    warning_lone_carriage_return = (src:nonemptystring i:addr<(<? src.length)> @ctx:Context):>void => {   # an offset into `src`
         ctx.warnings.push(Warning[
             srcfile=ctx.srcfile
             title="Lone carriage return"
@@ -213,7 +213,7 @@ Whitespace = type of Token & [
 ]
 
 LineComment = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):>nat64? => {
+    eat = (src:nonemptystring @ctx:Context):>addr? => {
         doc"""line comments are any sequence of characters after a # until the end of the line"""
         if not src.startswith(line_comment_start) return none
         if src.startswith(block_comment_start) return none # don't match a block comment\
@@ -227,13 +227,13 @@ LineComment = type of Token & [
 
 
 BlockComment = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):>nat64? | TokenError => {
+    eat = (src:nonemptystring @ctx:Context):>addr? | TokenError => {
         doc"""Block comments are of the form #\{ ... \}# and can be nested"""   #TODO: consider making `doc` a special tokenized case of string like raw strings, where the inside is handled as raw. perhaps we also could maintain a special registry of prefixes that use the raw string tokenization
         
         if not src.startswith(block_comment_start) return none
         
         openers:array<Span length>=?1> = [Span[0 block_comment_start.length]]
-        i:nat64 = block_comment_start.length
+        i:addr = block_comment_start.length
 
         loop i <? src.length {
             if src[i..].startswith(block_comment_start) {
@@ -278,7 +278,7 @@ BlockComment = type of Token & [
 # Identifier-like things: plain identifiers and variants such as hashtags.
 
 Identifier = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> nat64? => {
+    eat = (src:nonemptystring @ctx:Context):> addr? => {
         doc"""
         Identifiers:
         - may not start with a number
@@ -305,7 +305,7 @@ Identifier = type of Token & [
 
 
 Symbol = type of Token & [
-    eat = (src:nonemptystring @ctx:Context):> nat64? => {
+    eat = (src:nonemptystring @ctx:Context):> addr? => {
         doc"""symbolic operators are any sequence of characters in the symbolic_operators set"""
         loop op in symbols {
             if src.startswith(op) {
@@ -328,7 +328,7 @@ Symbol = type of Token & [
 #     prefix: BasePrefix
     
     
-#     eat = (src:nonemptystring @ctx:GeneralBodyContexts):> nat64|none|TokenError => {
+#     eat = (src:nonemptystring @ctx:GeneralBodyContexts):> addr|none|TokenError => {
 #         doc"""a based number is a sequence of 1 or more digits, optionally preceded by a (lowercase) base prefix (up to base-16)"""
         
 #         # try a number with a base prefix
@@ -427,7 +427,7 @@ tokenize = (srcfile:SrcFile):>array<Token> | TokenError => {
     
     src = srcfile.body
     printl"src: {src}"
-    i:nat64 = 0
+    i:addr = 0
     loop i <? src.length {
         ctx = ctx_stack[end]
         allowed_tokens = contextmap(ctx)

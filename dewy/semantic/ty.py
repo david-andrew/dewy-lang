@@ -280,7 +280,7 @@ class ObjectType:
     def invariants(self) -> list['Proposition']:
         """The field refinements as field-subject propositions on the object."""
         return [
-            Proposition(f'.{f.name}', p.op, p.value, term=p.term, term_id=p.term_id)
+            Proposition(f'.{f.name}', p.op, p.value, term=p.term, term_id=p.term_id, axiom=p.axiom)
             for f in self.fields
             for p in f.refinement
             if p.param is None and p.type_ is None
@@ -677,6 +677,10 @@ class Proposition:
     unconditionally (of the value, or of the parameters at every return)."""
     subject_id: int | None = field(default=None, compare=False, hash=False)
     """The binding a parameter subject (`@name`) resolves to, once known."""
+    axiom: str | None = None
+    """A bound the analysis holds by axiom rather than by proof: `'addr'` —
+    the value is a position in the target's address space, below `2^bits`
+    (what a length is assumed to be); ``value`` is then unused (0)."""
 
     @property
     def param(self) -> str | None:
@@ -706,7 +710,7 @@ class Proposition:
     def negated(self) -> 'Proposition':
         """The fact that holds when this one does not (`is?` ↔ `isnt?`, `<=?` ↔ `>?`)."""
         flipped = {'is?': 'isnt?', 'isnt?': 'is?', '=?': 'not=?', 'not=?': '=?', '<?': '>=?', '>=?': '<?', '<=?': '>?', '>?': '<=?'}[self.op]
-        return Proposition(self.subject, flipped, self.value, self.of, self.term, self.term_id, self.term_of, self.type_, None if self.when is None else not self.when, self.subject_id)
+        return Proposition(self.subject, flipped, self.value, self.of, self.term, self.term_id, self.term_of, self.type_, None if self.when is None else not self.when, self.subject_id, axiom=self.axiom)
 
     @property
     def field(self) -> str | None:
@@ -721,6 +725,8 @@ class Proposition:
     def holds(self, fact: int) -> bool:
         if self.term is not None or self.type_ is not None:
             raise ValueError('INTERNAL ERROR: a term proposition is not decided by a constant')
+        if self.axiom is not None:
+            return fact >= 0   # the cap itself is the target's: the checker compares against it
         match self.op:
             case '>?': return fact > self.value
             case '>=?': return fact >= self.value
@@ -732,7 +738,7 @@ class Proposition:
 
     def lower_bound(self) -> int | None:
         """The minimum value this proposition guarantees, if it is a lower bound."""
-        if self.term is not None or self.type_ is not None or self.param is not None:
+        if self.term is not None or self.type_ is not None or self.param is not None or self.axiom is not None:
             return None
         if self.op == '>?':
             return self.value + 1
@@ -741,7 +747,7 @@ class Proposition:
         return None
 
     def upper_bound(self) -> int | None:
-        if self.term is not None or self.type_ is not None or self.param is not None:
+        if self.term is not None or self.type_ is not None or self.param is not None or self.axiom is not None:
             return None
         if self.op == '<?':
             return self.value - 1
@@ -884,12 +890,29 @@ def strip_refinement(type_: TypeExpr) -> TypeExpr:
 def strip_result_refinement(type_: TypeExpr) -> TypeExpr:
     """A result type as a value's type: refinements stripped, also inside a union
     (`uint64<n => n <=? src.length> | none` is the value `uint64 | none`; the
-    promise lives on the function type and becomes facts at the call)."""
+    promise lives on the function type and becomes facts at the call) — except
+    the facts that are a type's name: `addr<(<=? src.length)> | none` is the
+    value `addr | none`."""
+    if isinstance(type_, RefinedType):
+        return _named_or_base(type_)
+    if isinstance(type_, TypeOr) and any(isinstance(item, RefinedType) for item in type_.items):
+        return union(*(_named_or_base(item) if isinstance(item, RefinedType) else item for item in type_.items))
+    return type_
+
+
+def strip_all_refinements(type_: TypeExpr) -> TypeExpr:
+    """A type as the runtime sees it: every refinement gone, also inside a union
+    (`addr | none` is stored as `int64 | none`)."""
     if isinstance(type_, RefinedType):
         return type_.base
     if isinstance(type_, TypeOr) and any(isinstance(item, RefinedType) for item in type_.items):
         return union(*(strip_refinement(item) for item in type_.items))
     return type_
+
+
+def _named_or_base(type_: 'RefinedType') -> TypeExpr:
+    named = named_refinement(type_)
+    return RefinedType(type_.base, named) if named and type_.propositions != named else type_.base if not named else type_
 
 
 @dataclass(frozen=True)
@@ -943,7 +966,7 @@ def optional_payload(type_: Type) -> TypeExpr | None:
     """Return the sole non-none member of ``T | none``."""
 
     if isinstance(type_, TypeOr):
-        type_ = strip_result_refinement(type_)   # a refined `none` member (`none & <facts>`) is `none` at runtime
+        type_ = strip_all_refinements(type_)   # a refined `none` member (`none & <facts>`) is `none` at runtime
     if not isinstance(type_, TypeOr) or 'none' not in type_.items:
         return None
     payloads = [item for item in type_.items if item != 'none']
@@ -1002,7 +1025,7 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     """
     if not isinstance(type_, TypeOr):
         return None
-    type_ = strip_result_refinement(type_)   # a refined member (`uint64<n => n <=? src.length> | none`) is its base at runtime
+    type_ = strip_all_refinements(type_)   # a refined member (`addr<n => n <=? src.length> | none`) is its base at runtime
     if not isinstance(type_, TypeOr):
         return None
     if optional_payload(type_) is not None:
@@ -1037,6 +1060,38 @@ def is_zero_arg_function(type_: Type) -> bool:
 # `uint64` by its own fact; the names are baked in (parsed and displayed as such)
 NAT_BASES: dict[str, str] = {'nat': 'int', 'nat8': 'int8', 'nat16': 'int16', 'nat32': 'int32', 'nat64': 'int64'}
 NAT_PROPOSITION = Proposition('self', '>=?', 0)
+# `addr`: a natural that is a position in the target's address space — what a
+# length is (`[0, 2^bits)` by the address-space axiom), and what an offset or
+# index is; sums and differences of positions are positions, by the same axiom
+ADDR_PROPOSITION = Proposition('self', '<?', 0, axiom='addr')
+
+
+def addr_type() -> 'RefinedType':
+    return RefinedType('int64', (NAT_PROPOSITION, ADDR_PROPOSITION))
+
+
+def addr_name(type_: Type) -> tuple[str, tuple[Proposition, ...]] | None:
+    """`('addr', the other propositions)` when ``type_`` is an `addr` (perhaps with more facts)."""
+    if not isinstance(type_, RefinedType) or type_.base != 'int64':
+        return None
+    if NAT_PROPOSITION not in type_.propositions or ADDR_PROPOSITION not in type_.propositions:
+        return None
+    return 'addr', tuple(p for p in type_.propositions if p not in (NAT_PROPOSITION, ADDR_PROPOSITION))
+
+
+def is_addr(type_: Type) -> bool:
+    return addr_name(type_) is not None
+
+
+def named_refinement(type_: TypeExpr) -> tuple[Proposition, ...]:
+    """The propositions that are a type's *name* (`addr`, `nat64`): what a
+    value of the type keeps where other refinements are shed, such as the
+    shape of a record literal (`[length=result]` from an `addr` is `[length:addr]`)."""
+    if is_addr(type_):
+        return (NAT_PROPOSITION, ADDR_PROPOSITION)
+    if nat_name(type_) is not None:
+        return (NAT_PROPOSITION,)
+    return ()
 
 
 def nat_type(name: str) -> 'RefinedType':

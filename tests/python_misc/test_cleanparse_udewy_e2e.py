@@ -108,6 +108,7 @@ LOWERED_CASES = [
     ('length_preserving_calls.dewy', 42),
     ('total_dicts.dewy', 42),
     ('nat_types.dewy', 42),
+    ('addr_types.dewy', 42),
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),

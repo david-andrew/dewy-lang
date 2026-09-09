@@ -225,6 +225,12 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
 
 
 def _describe_proposition_text(proposition: ty.Proposition) -> str:
+    if proposition.axiom == 'addr':
+        return f'{proposition.field or "value"} is a position in the address space'
+    return _describe_proposition_text_plain(proposition)
+
+
+def _describe_proposition_text_plain(proposition: ty.Proposition) -> str:
     op = proposition.op.replace('not=?', 'not =?')
     if proposition.param is not None:
         return f'{proposition.subject_text} {op} {proposition.bound_text}'
@@ -1056,6 +1062,9 @@ class _BoundsValidator:
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
         directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}
+        if proposition.axiom == 'addr':
+            subject_node, _interval = self._subject_interval(proposition, value, interval, state)
+            return True if self._is_position(subject_node, state) else None
         if proposition.param is not None:
             # a fact about a parameter (`prefix.length <=? src.length`, `n >? 0`, `a <=? b`): its own facts decide it
             if proposition.subject_id is None:
@@ -1162,9 +1171,12 @@ class _BoundsValidator:
                 state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
             return
         lower, upper = proposition.lower_bound(), proposition.upper_bound()
-        if lower is not None or upper is not None:
+        bounds = Interval(lower, upper) if lower is not None or upper is not None else None
+        if proposition.axiom == 'addr':
+            bounds = Interval(0, self.max_length - 1, capped=True)   # `.start:addr`: a position
+        if bounds is not None:
             current_interval = state.get(route_id, UNKNOWN_INTERVAL)
-            state[route_id] = current_interval.intersect(Interval(lower, upper))
+            state[route_id] = current_interval.intersect(bounds)
         if proposition.op == 'not=?' and proposition.value == 0:
             state[_nonzero_key(route_id)] = Interval.exact(1)
 
@@ -1196,13 +1208,52 @@ class _BoundsValidator:
             if isinstance(param.type, ty.RefinedType) and param.binding_id is not None:
                 self._seed_binding_refinement(param.binding_id, param.type, state, function.loc)
 
+    def _bounds_of(self, propositions: tuple[ty.Proposition, ...] | list[ty.Proposition]) -> Interval | None:
+        """The interval a set of value propositions guarantees, the address-space
+        axiom included: an `addr` lies in `[0, cap)` (a capped interval)."""
+        interval = _propositions_interval(propositions)
+        if any(p.axiom == 'addr' for p in propositions):
+            positions = Interval(0, self.max_length - 1, capped=True)
+            interval = positions if interval is None else interval.intersect(positions)
+        return interval
+
+    def _is_position(self, node: hir.AST, state: State) -> bool:
+        """Whether a value is a position in the address space: typed `addr`, a
+        length, a value the facts bound below the cap, or a sum or difference of
+        positions (a position plus an offset within the same space is a
+        position — the axiom that lets a length grow)."""
+        node = _strip_casts(node)
+        if ty.is_addr(node.type) or _sequence_of(node) is not None:
+            return True
+        if isinstance(node, hir.FunctionCall) and any(ty.is_addr(refined) for refined in _call_result_refinements(node)):
+            return True   # a call declared `:>addr` or `:>addr | none` (the node carries the base type, narrowed to the integer)
+        interval = self._eval(node, state, validate=False)
+        if interval is not None and interval.upper is not None and interval.upper < self.max_length:
+            return True
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
+            return all(self._is_position(argument, state) for argument in node.pos_args)
+        subject = self._binding_id(node)
+        if subject is None:
+            subject = self._element_route_of(node)
+        if subject is not None:
+            declared = self.declared_refinements.get(subject)
+            if declared is not None and any(ty.is_addr(member) for member in (declared.items if isinstance(declared, ty.TypeOr) else [declared])):
+                return True   # `result:addr<…> | none | TokenError`, narrowed to the integer
+            # a term the facts keep at or below some length (`i <=? src.length` after a guarded loop, an index fact)
+            for key in list(state):
+                if -_FACT_BASE < key < 0 and self._ordered(subject, key, 0, state):
+                    return True
+            for key in list(state):
+                decoded = _decode_index_fact(key)
+                if decoded is not None and decoded[0] == subject and decoded[1] != _NONZERO_MARK:
+                    return True
+        return False
+
     def _seed_binding_refinement(self, binding_id: int, refined: ty.RefinedType, state: State, loc: Span) -> None:
         """A binding known to satisfy ``refined`` — a parameter, a loop variable
         over `array<nonemptystring>`, an element read — takes its propositions
         as facts: intervals, nonzero-ness, a minimum length, term facts."""
         self.declared_refinements[binding_id] = refined
-        lower: int | None = None
-        upper: int | None = None
         for proposition in refined.propositions:
             if proposition.term is not None:
                 self._seed_term_fact(binding_id, proposition, state, loc)
@@ -1212,8 +1263,6 @@ class _BoundsValidator:
                 self._seed_field_proposition(binding_id, proposition, refined.base, state, loc)
                 continue
             if proposition.subject == 'self':
-                lower = _maximum_lower(lower, proposition.lower_bound())
-                upper = _minimum_upper(upper, proposition.upper_bound())
                 if proposition.op == 'not=?' and proposition.value == 0:
                     state[_nonzero_key(binding_id)] = Interval.exact(1)
             elif proposition.subject == 'length':
@@ -1221,9 +1270,10 @@ class _BoundsValidator:
                 if minimum is not None:
                     key = _length_key(binding_id)
                     state[key] = state.get(key, self._length_default()).intersect(Interval(minimum, self.max_length))
-        if lower is not None or upper is not None:
+        bounds = self._bounds_of(refined.propositions)
+        if bounds is not None:
             # narrows what is already known (a term fact may have capped the interval)
-            self._set_interval(state, binding_id, self._binding_interval(state, binding_id).intersect(Interval(lower, upper)))
+            self._set_interval(state, binding_id, self._binding_interval(state, binding_id).intersect(bounds))
 
     def _validate_assert(self, node: hir.Assert, state: State) -> None:
         """`$assert` is proven when its false path is impossible, refuted when its true path is."""
@@ -1627,7 +1677,13 @@ class _BoundsValidator:
         if layout is None:
             return None
         width, signed = layout
-        return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+        interval = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+        refined = declared if isinstance(declared, ty.RefinedType) else next((item for item in declared.items if isinstance(item, ty.RefinedType)), None) if isinstance(declared, ty.TypeOr) else None
+        if refined is not None:
+            bounds = self._bounds_of([p for p in refined.propositions if p.term is None and p.field is None])
+            if bounds is not None:
+                interval = interval.intersect(bounds)   # `n:addr`, `n:nat64`: what the declaration promises
+        return interval
 
     def _proof_failure(self, node: hir.AST, kind: str, report: Error) -> None:
         """An unproven obligation: a compile error, or in `$prototype` a
@@ -2156,7 +2212,7 @@ class _BoundsValidator:
                 )
             refined_result = _call_result_refinement(node)
             if refined_result is not None:
-                declared = _propositions_interval(refined_result.propositions)
+                declared = self._bounds_of(refined_result.propositions)   # `:>addr`: a capped `[0, 2^bits)`
                 if declared is not None:
                     result = declared if result is None else result.intersect(declared)
             if validate and arithmetic and node.type in ('int', 'uint'):
@@ -2226,7 +2282,7 @@ class _BoundsValidator:
             self._eval(node.value, state, validate=validate)
             route_id = sb.array_route_id(node, self.registry)
             interval = state.get(route_id) if route_id is not None else None
-            declared = _propositions_interval(_member_invariant(node))
+            declared = self._bounds_of(_member_invariant(node))
             if declared is not None:
                 interval = declared if interval is None else interval.intersect(declared)
             return interval
@@ -2234,7 +2290,7 @@ class _BoundsValidator:
             # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
             self._eval(node.value, state, validate=validate)
             forwarded = hir.MemberAccess(node.loc, node.type, node.value, node.field, True)
-            return _propositions_interval(_member_invariant(forwarded))
+            return self._bounds_of(_member_invariant(forwarded))
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             value = self._eval(node.value, state, validate=validate)
@@ -3453,7 +3509,7 @@ class _BoundsValidator:
                     if len(survivors) == 1 and isinstance(survivors[0], ty.RefinedType):
                         self._apply_call_facts(refined, remembered, None, member=survivors[0])
                         # the member's own bounds (`nat64<…>`: `>= 0`) hold of the narrowed binding
-                        own = _propositions_interval([p for p in survivors[0].propositions if p.term is None and p.field is None])
+                        own = self._bounds_of([p for p in survivors[0].propositions if p.term is None and p.field is None])
                         if own is not None and tested.binding_id is not None:
                             refined[tested.binding_id] = self._binding_interval(refined, tested.binding_id).intersect(own)
             return refined

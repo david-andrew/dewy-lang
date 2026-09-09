@@ -78,9 +78,9 @@ def type_to_dewy(t: ty.Type) -> str:
         return f'dict<{type_to_dewy(key_value[0])} {type_to_dewy(key_value[1])}>'
     if isinstance(t, ty.ObjectType):
         fields = ' '.join(
-            f'{"const " if not field.mutable else ""}{field.name}:{type_to_dewy(field.type)}'
+            f'{"const " if not field.mutable else ""}{field.name}:{type_to_dewy(ty.RefinedType(field.type, field.refinement) if field.refinement else field.type)}'
             for field in t.fields
-        )
+        )   # a field's invariant is part of the type (`[start:addr stop:addr]`): synthesized code keeps it
         return f'[{fields}]'
     if isinstance(t, ty.FunctionType):
         return _function_type_to_dewy(t)
@@ -92,6 +92,8 @@ def type_to_dewy(t: ty.Type) -> str:
 
 
 def _fact_to_dewy(p: ty.Proposition) -> str:
+    if p.axiom == 'addr':
+        return 'i => i fits the address space'
     op = p.op.replace('not=?', 'not =?')
     if p.subject == 'self':
         return f'i => i {op} {p.bound_text}'
@@ -105,6 +107,10 @@ def _refined_type_to_dewy(t: ty.RefinedType) -> str:
         key_value = ty.dict_key_value(t.base)
         assert key_value is not None
         return f'totaldict<{type_to_dewy(key_value[0])} {type_to_dewy(key_value[1])}>'
+    addr = ty.addr_name(t)
+    if addr is not None:
+        name, rest = addr
+        return name if not rest else _refined_type_to_dewy(ty.RefinedType(name, rest))   # `addr`, `addr<(<=? src.length)>`
     nat = ty.nat_name(t)
     if nat is not None:
         name, rest = nat

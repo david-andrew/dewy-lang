@@ -1,0 +1,35 @@
+# `addr` is the natural that fits the target's address space: what `.length`
+# is, what an offset or index is. A position plus or minus a position is a
+# position by the same axiom that lets a length grow, so spans shift and
+# widths subtract without guards beyond the order they need; an arbitrary
+# `nat64` or `int64` becomes an `addr` only with a proof that it is a
+# position (bounded by a length, or a constant below the cap).
+let Span:type = [start:addr stop:addr = start]
+let shift = (spans:array<Span> by:addr):>array<Span> => {
+    let out:array<Span> = []
+    loop s in spans { out.push(Span[s.start + by s.stop + by]) }      # positions: no proof needed
+    return out
+}
+let width = (s:Span):>addr => {
+    if s.stop <? s.start return 0
+    return s.stop - s.start                                           # non-negative by the guard, a position by the axiom
+}
+let measure = (s:string):>addr => s.length
+let main = ():>int64 => {
+    let text = "hello world"
+    let n = text.length                                               # an `addr`
+    let i:addr = 0
+    loop i <? n and text[i] =? 'h' { i += 1 }                         # a counter under a length is a position
+    let moved = shift([Span[1 3] Span[4 9]] i)
+    let k:addr = 4096                                                 # a constant below the cap
+    let total:addr = 0
+    loop s in moved { total += width(s) }                             # `addr += addr`
+    let hits = [loop m in [1 2] { let length = measure(text)  if m =? 1 [length=length m=m] }]
+    if hits.length =? 0 return 1
+    [length m] = hits[0]
+    let span = Span[i i + length]                                     # a record keeps the field's name `addr`
+    let j:nat64 = 2
+    if j <? n { let p:addr = j }                                      # a natural under a length is a position
+    if moved.length =? 2 and total =? 7 and k + n =? 4107 and width(Span[3 1]) =? 0 and span.stop =? 12 return 42
+    return 1
+}

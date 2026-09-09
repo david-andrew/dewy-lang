@@ -103,10 +103,29 @@ def test_the_natural_numbers() -> None:
     declared = _declared('let n:nat64 = 3\nlet k = (s:string) => s.length\nlet f = (src:string):>nat64<(<=? src.length)> => 0\nlet a:nat = 1\n')
     assert declared['n'].annotation == ty.RefinedType('int64', (ty.NAT_PROPOSITION,))
     assert type_to_dewy(declared['n'].annotation) == 'nat64'
-    assert type_to_dewy(declared['k'].expr.type.ret) == 'nat64'
+    assert type_to_dewy(declared['k'].expr.type.ret) == 'addr'   # a length: a natural that fits the address space
     assert type_to_dewy(declared['f'].expr.type.ret) == 'nat64<i => i <=? src.length>'
     assert ty.strip_refinement(declared['a'].annotation) == 'int'
     with pytest.raises((TypeCheckError, UserError), match='refuted'):
         _declared('let n:nat64 = -1\n')
     with pytest.raises((TypeCheckError, UserError), match='cannot prove'):
         _declared('let g = (x:int64):>nat64 => x\n')
+
+
+def test_the_address_space() -> None:
+    """`addr` is a `nat64` that is a position in the target's address space:
+    what `.length` is; sums and differences of positions are positions by the
+    axiom; a `nat64` or `int64` needs a proof; a product does; a constant at
+    or above the cap is refuted."""
+    from dewy.semantic.hir_display import type_to_dewy
+    declared = _declared('let n:addr = 3\nlet k = (s:string) => s.length\nlet f = (src:string):>addr<(<=? src.length)> => 0\nlet h = (a:addr b:addr):>addr => a + b\n')
+    assert declared['n'].annotation == ty.addr_type()
+    assert ty.nat_name(declared['n'].annotation) is not None   # an `addr` is a `nat64` with one more fact
+    assert type_to_dewy(declared['n'].annotation) == 'addr'
+    assert type_to_dewy(declared['k'].expr.type.ret) == 'addr'
+    assert type_to_dewy(declared['f'].expr.type.ret) == 'addr<i => i <=? src.length>'
+    with pytest.raises((TypeCheckError, UserError), match='refuted'):
+        _declared('let n:addr = 0x1_0000_0000_0000\n')
+    for source in ('let g = (x:nat64):>addr => x\n', 'let g = (x:int64):>addr => x\n', 'let g = (a:addr):>addr => a * 3\n'):
+        with pytest.raises((TypeCheckError, UserError), match='cannot prove'):
+            _declared(source)
