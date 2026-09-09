@@ -1117,6 +1117,9 @@ class _ObjectLowering:
         address = self._field_address(obj, offsets[node.target.name], node.loc)
         field = node.target.value.type.field(node.target.name)
         field_type = field.type if field is not None else node.target.type
+        # A place parameter or global may outlive this function. Its nested
+        # descriptors and array data must not be copied into this frame.
+        local_destination = self._place_is_owned(node.target.value)
         members = self._field_union_members(field_type)
         if members is not None:
             return [*prelude, *self._union_write(address, node.value, members, prepared=False)]
@@ -1125,18 +1128,21 @@ class _ObjectLowering:
             return [
                 *prelude,
                 *value_prelude,
-                *self._object_copy(address, src, field_type, node.loc),
+                *(self._object_copy(address, src, field_type, node.loc) if local_destination
+                  else self._copy_object_into_result_storage(address, src, field_type, node.loc)),
             ]
         if isinstance(field_type, ty.ArrayType) and field_type.length is None:
             if isinstance(node.target.value, hir.ExpressedIdentifier):
                 fields = self.borrowed_fields.setdefault(local_binding_key(node.target.value), set())
                 (fields.discard if self._array_value_is_owned(node.value) else fields.add)(node.target.name)
-            value_prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field', frame_copy=True)
+            value_prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field', frame_copy=local_destination)
         elif isinstance(field_type, ty.ArrayType):
-            value_prelude, value = self._independent_array_value(
-                node.value,
-                field_type,
-            )
+            # Exact arrays already have complete destination storage. Keep
+            # that caller-owned buffer instead of installing a local pointer.
+            if not local_destination:
+                target_array = self._value_load(address, field_type, node.loc)
+                return [*prelude, *self._write_array_result_value(target_array, node.value, field_type)]
+            value_prelude, value = self._independent_array_value(node.value, field_type)
         elif self._is_string_valued(field_type):
             value_prelude, value = self._escaping_string_value(node.value)
             if self._place_is_owned(node.target.value):
