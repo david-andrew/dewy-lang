@@ -33,6 +33,18 @@ let f = 2^100                      # constant, folded exactly
 
 A big value cannot silently cross a word-sized boundary. Returning it from a function whose result type is `int` or `int64`, passing it to a word-sized parameter, or storing it in a fixed-width binding is a compile error unless a comparison proves the range or the boundary is annotated `bigint`; `int` in a signature is a 64-bit word, so functions that carry big values say `bigint`.
 
+An explicit `bigint` can cross a fixed-width boundary after a range guard;
+`as` uses the same proof as an annotated binding or result. Both signed and
+unsigned limits are inclusive, and widening a `uint64` to `bigint` preserves
+all 64 bits.
+
+```dewy
+let byte = (n:bigint):>uint8 | none => {
+    if n >=? 0 and n <=? 255 return n as uint8
+    return none
+}
+```
+
 Arithmetic, comparisons, `//`, `%`, `^`, and `/` (an exact `rational`) apply to big integers. A `bigint` is `0 | [sign:-1|1 limbs:array<uint64 length >? 0>]`: zero is its own case rather than a sign value, so no negative zero and no zero with limbs is representable (canonical limbs — no leading zeros — remain the constructors' convention). `if x =? 0` / `x not=? 0` narrow between the two cases like `is?`, `bigint & ~0` names the nonzero form, and a big divisor must have it: `a // b`, `a % b`, and `a / b` need `if b not=? 0 { … }` or a `b:bigint & ~0` parameter (`cannot prove the divisor is nonzero` otherwise); a word divisor is proven the way any `int64 & ~0` argument is.
 
 ```dewy

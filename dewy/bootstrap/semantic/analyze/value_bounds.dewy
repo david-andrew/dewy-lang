@@ -137,7 +137,7 @@ constant_expr = (id:addr env:Environment @seen:set<addr>):>ranges.Interval? => {
     let function = hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier return none
     let operation = if node.integer_operation is? none function.name else node.integer_operation
-    if node.pos_args.length =? 1 and (operation =? 'identity' or operation =? 'narrow') {
+    if node.pos_args.length =? 1 and (node.integer_operation =? 'identity' or node.integer_operation =? 'narrow') {
         let value = constant_expr(node.pos_args[0] env @seen)
         return if operation =? 'identity' value else ranges.fits(value result_width(node.value_type env.types))
     }

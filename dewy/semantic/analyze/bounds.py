@@ -2416,7 +2416,7 @@ class _BoundsValidator:
                 self._apply_call_facts(state, node, None)   # what a single result promises of the arguments unconditionally
             result: Interval | None = None
             arithmetic = False
-            if name in ('identity', 'narrow') and len(arguments) == 1:
+            if node.integer_operation in ('identity', 'narrow') and len(arguments) == 1:
                 result = arguments[0]
                 if name == 'narrow':
                     result = self._fit_type(result, node.type)
@@ -2609,7 +2609,7 @@ class _BoundsValidator:
             else None
         )
         arguments = [self._constant_expr(arg, seen) for arg in node.pos_args]
-        if len(arguments) == 1 and name in ('identity', 'narrow'):
+        if len(arguments) == 1 and node.integer_operation in ('identity', 'narrow'):
             return arguments[0] if name == 'identity' else self._fit_type(arguments[0], node.type)
         if len(arguments) == 1 and name == '__unary_sub__':
             value = arguments[0]

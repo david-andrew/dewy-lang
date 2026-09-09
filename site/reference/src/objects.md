@@ -69,6 +69,12 @@ let main = ():>int64 => {
 
 Calling an object type constructs a value of it. The field list is the constructor's signature, read exactly like a function's: positional arguments fill fields in declaration order, keyword arguments name them, and a field declared with a default (`name:type = default`) may be left out — a default may refer to earlier fields by name.
 
+Other names in a default come from the scope where the type was declared,
+including that module's namespace imports. Importing the type does not require
+repeating those imports. Earlier fields use the values supplied to this
+particular construction; explicit arguments are evaluated in the caller's
+scope.
+
 <!-- dewy-example: compiler -->
 ```dewy
 let Span:type = [start:int64 stop:int64 = start label:string = "span"]

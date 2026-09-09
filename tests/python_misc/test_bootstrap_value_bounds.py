@@ -54,6 +54,8 @@ def test_native_value_bounds_match_hosted(tmp_path):
         hir.FunctionCall(LOC, 'int', helper, [number(-10), number(3)], {}, integer_operation='__floordiv__'),
         hir.FunctionCall(LOC, 'int', helper, [number(10), number(-3)], {}, integer_operation='__floordiv__'),
         hir.FunctionCall(LOC, 'int', helper, [number(10), number(-3)], {}, integer_operation='__mod__'),
+        hir.FunctionCall(LOC, 'int64', hir.ExpressedIdentifier(LOC, helper.type, 'identity'), [number(17)], {}),
+        hir.FunctionCall(LOC, 'int64', hir.ExpressedIdentifier(LOC, helper.type, 'narrow'), [number(17)], {}),
     ])
     binary_type = ty.FunctionType([], [], None, 'int64')
     for name, a, b, result_type in [('__add__', 1, 2, 'int64'), ('__sub__', 0, 3, 'int64'),
