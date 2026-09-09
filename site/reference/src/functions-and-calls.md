@@ -107,6 +107,12 @@ Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies 
 
 Argument expressions evaluate from left to right before the function body begins, except that omitted defaults evaluate as part of completing the call. A defaulted parameter may be optional — `(message:string? = none)` — and the default fills the cell when the argument is omitted.
 
+Record and container parameters may also have defaults, such as
+`(seen:set<int64> = set[])`. An omitted default is evaluated for each call;
+mutating that value does not affect the next call. An explicitly supplied
+record or container follows ordinary value-copy semantics, and its default
+is not evaluated.
+
 ## Overloads
 
 `&` combines compatible functions into an overload set. The call contract selects a unique applicable alternative:
@@ -119,12 +125,6 @@ let describe = ((value:int64):>string => "integer")
 Ambiguous or unmatched calls are errors. Runtime multifunction values remain part of the provisional dynamic-dispatch design; ordinary overload resolution is static.
 
 ## Function Handles
-
-Record and container parameters may also have defaults, such as
-`(seen:set<int64> = set[])`. An omitted default is evaluated for each call;
-mutating that value does not affect the next call. An explicitly supplied
-record or container follows ordinary value-copy semantics, and its default
-is not evaluated.
 
 A bare function name is always a call: a function whose parameters all have defaults is called with none, and mentioning a function with required parameters without its arguments is an error rather than a reference. `@fn` selects the function binding as a first-class value instead:
 

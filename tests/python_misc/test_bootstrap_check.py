@@ -16,7 +16,9 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
     '1', "'hello'", 'true', 'none', '1 + 2', '3 >? 2',
-    'let x:int64 = 1\nx + 2', 'const x = 1\nx', '[1 2]',
+    'let x:int64 = 1\nx + 2',
+    'let x:int64=1\nx+=2\nx',
+    'let p=[x=1]\np.x+=2\np.x', 'const x = 1\nx', '[1 2]',
     'let x:int64 = 1\nx = 2\nx', 'let xs:array<int64> = []\nxs',
     'Count:type = int64\nlet n:Count = 7\nn',
     'let f=(x:int64):>int64 => x + 1\nf(7)',
@@ -25,6 +27,19 @@ CASES = [
     'let f=(x:int64|string):>int64 => if x is? int64 x else 0\nf(7)',
     'let f=(x:bool):>int64 => { if x return 1 return 2 }\nf(false)',
     'if true 1 else 2',
+    'let xs:array<int64>=[1]\nxs.push(2)\nxs.length',
+    'let xs=[1]\nxs.push(2)\nxs.length',
+    'let xs:array<int64>=[1]\nxs.pop',
+    'let xs:array<int64>=[1]\nxs.clear\nxs.length',
+    'let xs:array<int64>=[1]\nxs.insert(2 0)\nxs.truncate(1)\nxs.length',
+    'let xs:array<int64>=[1]\nxs.reserve(4)\nxs.length',
+    'let xs:array<string>=["a" "b"]\nxs.join(",")',
+    'let f=():>int64 => 7\nf',
+    'let f=():>int64 => 7\nlet alias=@f\nalias()',
+    'let set=(@x:int64):>void => {x=7}\nlet x:int64=1\nset(@x)\nx',
+    'let set=(@x:int64):>void => {x=7}\nlet p=[x=1]\nset(@p.x)\np.x',
+    'let set=(@x:int64 @y:int64):>void => {x=7 y=9}\nlet p=[x=1 y=2]\nset(@p.x @p.y)\np',
+    'let f=(@x:int64|string):>bool => {x="changed" return true}\nlet g=(@x:int64|string):>bool => x is? int64 and f(@x)\nlet x:int64|string=1\ng(@x)',
     'let f=(x:int64|string):>bool => x is? int64 and x >? 0\nf(7)',
     'let f=(x:int64|string):>bool => x isnt? int64 or x >? 0\nf(7)',
     'let f=(x:bool y:bool):>bool => x nand y\nf(true false)',
@@ -48,6 +63,20 @@ CASES = [
 
 
 ERROR_CASES = [
+    'let xs:array<int64 length=1>=[1]\nxs.push(2)',
+    'let xs:array<int64>=[]\nxs.pop',
+    'let xs:array<int64>=[1]\nxs.insert(2 3)',
+    'let xs:array<int64>=[1]\nxs.truncate(-1)',
+    'const p=[x=1]\np.x=2',
+    'let change=(@x:int64|string):>bool => {x="changed" return true}\nlet bad=(@x:int64|string):>int64 => {if x is? int64 and change(@x) return x+1 return 0}',
+
+    'let f=(@x:int64):>void => {}\nlet x:int64=1\nf(x)',
+    'let f=(x:int64):>void => {}\nlet x:int64=1\nf(@x)',
+    'let f=(@x:int64):>void => {}\nconst x:int64=1\nf(@x)',
+    'let f=(@x:int64 @y:int64):>void => {}\nlet x:int64=1\nf(@x @x)',
+    'let f=(@p:[x:int64] @x:int64):>void => {}\nlet p=[x=1]\nf(@p @p.x)',
+    'let x:int64=1\nlet escaped=@x',
+    'let f=(@x:int64=1):>void => {}',
     'let x:int64=1\nx="wrong"',
     'const x=1\n{x=2}',
     'let f=():>int64 => "wrong"\nf()',
@@ -81,6 +110,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/check.dewy'}" as checking
 import p"{ROOT / 'dewy/bootstrap/semantic/type_display.dewy'}" as display
 main = ():>int64 => {{
     let cases:array<string> = [{cases}]
+    let failures:int64 = 0
     loop text in cases {{
         let source = SrcFile['fixture' text]
         let parsed = parser.parse(source)
@@ -89,7 +119,7 @@ main = ():>int64 => {{
         let lexical = contexts.begin(source parsed.nodes @session)
         let environment = checking.begin(lexical @session)
         let module = checking.block(parsed.root environment @session)
-        if module is? Error {{ module.fail return 1 }}
+        if module is? Error {{ module.fail failures += 1 continue }}
         let node = checking.node_at(module session)
         printl(display.type_to_dewy(node.value_type session.types))
     }}
@@ -107,7 +137,7 @@ main = ():>int64 => {{
         $runtime_assert result.pointers.length >? 0 and result.pointers[0].message.length >? 0
         printl('rejected')
     }}
-    return 0
+    return if failures =? 0 0 else 1
 }}
 ''')
     output = source.with_suffix('.udewy')

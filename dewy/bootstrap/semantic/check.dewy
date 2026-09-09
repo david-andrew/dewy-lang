@@ -12,6 +12,9 @@ import p"builtins.dewy" as builtins
 import p"dispatch.dewy" as dispatch
 import p"subtyping.dewy" as subtyping
 import p"type_display.dewy" as display
+import p"analyze/predicate_effects.dewy" as predicate_effects
+import p"array_methods.dewy" as array_methods
+import p"../targets.dewy" as targets
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -132,20 +135,27 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     if matched is? dispatch.DispatchError return problem(id 'no matching function' matched.message env session)
     let method = dispatch.method_at(session.types matched.method)
     let args:array<addr> = []
+    let places:array<addr> = []
     loop i in 0.. and i <? positional.length {
         if i >=? method.pos_or_kw.length return pending(id 'variadic argument materialization' env session)
-        let checked = against(positional[i] method.pos_or_kw[i].value_type id env @session)
+        let slot = method.pos_or_kw[i]
+        let checked = call_argument(positional[i] slot.value_type slot.place id env @session)
         if checked is? Error return checked
+        let error = remember_place(checked @places id env session)
+        if error isnt? none return error
         args.push(checked)
     }
     let kwargs:dict<string addr> = []
     loop [name argument] in keyword {
         let required:addr? = none
-        loop slot in method.pos_or_kw { if slot.name =? name { required = slot.value_type break } }
-        loop slot in method.kw_only { if slot.name =? name { required = slot.value_type break } }
+        let is_place = false
+        loop slot in method.pos_or_kw { if slot.name =? name { required = slot.value_type is_place = slot.place break } }
+        loop slot in method.kw_only { if slot.name =? name { required = slot.value_type is_place = slot.place break } }
         $runtime_assert required isnt? none
-        let checked = against(argument required id env @session)
+        let checked = call_argument(argument required is_place id env @session)
         if checked is? Error return checked
+        let error = remember_place(checked @places id env session)
+        if error isnt? none return error
         kwargs[name] = checked
     }
     let selected:addr? = if shape is? types.OverloadType matched.method_index else none
@@ -156,10 +166,15 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     if func is? hir.ExpressedIdentifier and shape is? types.FunctionType and shape.type_params.length >? 0 {
         callee = put(hir.ExpressedIdentifier[func.loc matched.method func.name func.binding_id] @session)
     }
-    return put(hir.FunctionCall[source.loc method.ret callee args kwargs selected] @session)
+    if func is? hir.ArrayMethod {
+        let error = array_transition(func args kwargs id env @session)
+        if error isnt? none return error
+    }
+    let result = put(hir.FunctionCall[source.loc method.ret callee args kwargs selected] @session)
+    return if expected is? none result else against(result expected id env @session)
 }
 
-expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let node = tokens.node_at(source.nodes id)
     let number = syntax.integer(id source.nodes)
@@ -176,11 +191,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         else if atom is? tokens.Bool { value = put(hir.Bool[node.loc types.primitive('bool' @session.types) atom.value] @session) }
         else return pending(id "{atom.kind} value" env session)
         if value is? Error return value
+        if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return call(value [] [] id env @session expected=expected)
         return if expected is? none value else against(value expected id env @session)
     }
     if node is? parser.Flow return flow(id node env @session expected=expected)
     if node is? parser.Block {
-        if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected)
+        if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         if node.delims =? '[]' {
             loop item in node.inner {
                 let row = tokens.node_at(source.nodes item)
@@ -208,6 +224,14 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
     }
     if node is? parser.Prefix {
         let op = syntax.symbol(node.op source.nodes)
+        if op =? '@' {
+            let value = expression(node.item env @session call_target=true)
+            if value is? Error return value
+            let target = node_at(value session)
+            if types.node_at(session.types target.value_type) is? types.CallableType return value
+            if not allow_place return problem(id 'a place can only be used as a function argument' 'pass it directly to an `@` parameter' env session)
+            return place(value id env @session)
+        }
         let name = builtins.prefix_operators.get(op)
         if name isnt? none {
             let operand = expression(node.item env @session)
@@ -231,6 +255,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if tested is? Error return tested
             return put(hir.TypeTest[node.loc types.primitive('bool' @session.types) value tested op =? 'isnt?'] @session)
         }
+        if tokens.node_at(source.nodes node.op) is? post.CombinedAssignment return compound_assignment(id node env @session)
         if op =? '=>' return function_literal(id node env @session)
         if op =? '=' or op =? ':=' or op =? '::' return declaration(id env @session)
         if op =? 'as' {
@@ -239,15 +264,19 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             return expression(node.left env @session expected=target)
         }
         if op =? '.' {
-            let receiver = expression(node.left env @session)
+            let receiver = expression(node.left env @session allow_place=allow_place)
             if receiver is? Error return receiver
-            let value = member(receiver node.right id env @session)
+            let base = node_at(receiver session)
+            let selected = if base is? hir.Place base.target else receiver
+            let value = member(selected node.right id env @session)
             if value is? Error return value
+            if base is? hir.Place return place(value id env @session)
+            if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return call(value [] [] id env @session expected=expected)
             return if expected is? none value else against(value expected id env @session)
         }
         let adjacency = tokens.node_at(source.nodes node.op)
         if adjacency is? post.Juxtapose and adjacency.options.length >? 1 {
-            let left = expression(node.left env @session)
+            let left = expression(node.left env @session call_target=true)
             if left is? Error return left
             let value = node_at(left session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
@@ -265,7 +294,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             return pending(id 'ambiguous adjacency involving this value type' env session)
         }
         if op =? 'CallJuxtapose' {
-            let func = expression(node.left env @session)
+            let func = expression(node.left env @session call_target=true)
             if func is? Error return func
             let value = node_at(func session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
@@ -290,7 +319,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if right is? Error return right
             let func = identifier(operator id env @session)
             if func is? Error return func
-            let value = call(func [left right] [] id right_env @session expected=expected)
+            let value = call(func [left right] [] id right_env @session expected=if logical types.primitive('bool' @session.types) else expected)
             if value is? Error return value
             let result = node_at(value session)
             if logical and result is? hir.FunctionCall and types.is_primitive(types.node_at(session.types result.value_type) 'bool') {
@@ -299,7 +328,8 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
                 let first = node_at(left session)
                 if first is? hir.Bool { paths = [if first.value =? continues right_env else shortcut] }
                 join_reads(paths env @session)
-                return put(hir.ShortCircuit[node.loc result.value_type operation left right] @session)
+                let checked = put(hir.ShortCircuit[node.loc result.value_type operation left right] @session)
+                return if expected is? none checked else against(checked expected id env @session)
             }
             return value
         }
@@ -344,6 +374,12 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         let member = node_at(place session)
         if member isnt? hir.MemberAccess return pending(id 'this projected assignment target' env session)
         if not member.mutable return problem(id 'cannot assign to an immutable field' member.name env session)
+        let path = bindings.access_path(place session.hir)
+        let root = node_at(path.root session)
+        if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
+            let binding = bindings.binding_at(session.registry root.binding_id)
+            if binding.read_only_reason isnt? none return problem(id 'cannot mutate a field of a const binding' binding.name env session)
+        }
         let value = expression(node.right env @session expected=member.value_type)
         if value is? Error return value
         return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) place value] @session)
@@ -546,10 +582,19 @@ select_type = (current:addr tested:addr truth:bool @session:contexts.Session):>a
     if truth and subtyping.is_subtype(tested current session.links @session.types) return tested
     return if truth overlap else types.intersect([current types.negate(tested @session.types)] @session.types)
 }
-refined = (condition:addr truth:bool env:Environment @session:contexts.Session):>Environment => {
+refined = (condition:addr truth:bool env:Environment @session:contexts.Session invalidated:set<addr>=set[]):>Environment => {
     let result = fork(env @session)
     let node = node_at(condition session)
-    if node is? hir.ValueCast return refined(node.expr truth result @session)
+    if node is? hir.ValueCast return refined(node.expr truth result @session invalidated=invalidated)
+    if node isnt? hir.ShortCircuit {
+        loop binding in predicate_effects.read_bindings(condition session.hir) {
+            if binding in? invalidated return result
+        }
+    }
+    if node is? hir.FunctionCall and node.pos_args.length =? 1 {
+        let func = node_at(node.func session)
+        if func is? hir.ExpressedIdentifier and func.name =? '__not__' return refined(node.pos_args[0] not truth result @session invalidated=invalidated)
+    }
     if node is? hir.TypeTest {
         let value = node_at(node.value session)
         if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {
@@ -558,9 +603,15 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session):
             set_read_type(value.binding_id select_type(current node.test_type truth not=? node.negated @session) result @session)
         }
     }
-    if node is? hir.ShortCircuit and ((node.op =? 'and' and truth) or (node.op =? 'or' and not truth)) {
-        result = refined(node.left truth result @session)
-        result = refined(node.right truth result @session)
+    if node is? hir.ShortCircuit {
+        let effective_truth = if node.op in? ['nand' 'nor'] not truth else truth
+        let conjunction = node.op in? ['and' 'nand']
+        if effective_truth =? conjunction {
+            let changed = invalidated
+            loop binding in predicate_effects.mutated_bindings(node.right session.hir) { changed.add(binding) }
+            result = refined(node.left effective_truth result @session invalidated=changed)
+            result = refined(node.right effective_truth result @session invalidated=invalidated)
+        }
     }
     return result
 }
@@ -633,12 +684,12 @@ call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:
             let name = syntax.identifier(row.left source.nodes)
             if name is? none return problem(item 'named argument needs a name' 'use `name=value`' env session)
             if name in? keyword return problem(item 'duplicate named argument' name env session)
-            let value = expression(row.right env @session)
+            let value = expression(row.right env @session allow_place=true)
             if value is? Error return value
             keyword[name] = value
         } else {
             if keyword.length >? 0 return pending(item 'interleaved named and positional argument normalization' env session)
-            let value = expression(item env @session)
+            let value = expression(item env @session allow_place=true)
             if value is? Error return value
             positional.push(value)
         }
@@ -677,6 +728,7 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
         let field = types.object_field(type name)
         if field isnt? none return put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session)
     }
+    if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
     if name =? 'length' {
         let word = types.primitive('int64' @session.types)
         if type is? types.ArrayType {
@@ -837,4 +889,216 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
     let loc = tokens.node_at(source.nodes id).loc
     let value = put(hir.ObjectLiteral[loc type fields] @session)
     return if expected is? none value else against(value expected id env @session)
+}
+
+# A place keeps its declared storage type, even when the latest read carried
+# a stronger alternative or length. The callee can replace that storage, so
+# preparing the argument invalidates read facts about its containing root.
+place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let target = node_at(value session)
+    if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'a place needs mutable storage' 'use a binding, field, or indexed element' env session)
+    let path = bindings.access_path(value session.hir)
+    let root = node_at(path.root session)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'a place needs a named root' 'this temporary does not name caller storage' env session)
+    let binding = bindings.binding_at(session.registry root.binding_id)
+    if binding.read_only_reason isnt? none return problem(id 'cannot pass a const binding as a mutable place' binding.name env session)
+    loop step in path.steps {
+        let member = node_at(step session)
+        if member is? hir.MemberAccess and not member.mutable return problem(id 'cannot pass an immutable field as a mutable place' member.name env session)
+    }
+    let store_type = target.value_type
+    if target is? hir.ExpressedIdentifier {
+        if binding.store_type isnt? none { store_type = binding.store_type }
+        else if binding.value_type isnt? none { store_type = binding.value_type }
+        value = put(hir.ExpressedIdentifier[target.loc store_type target.name target.binding_id] @session)
+    }
+    if binding.value_type isnt? none { set_read_type(binding.id binding.value_type env @session) }
+    let loc = contexts.node_at(id env.lexical session).loc
+    return put(hir.Place[loc store_type value] @session)
+}
+call_argument = (argument:addr required:addr place_parameter:bool id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node = node_at(argument session)
+    if place_parameter and node isnt? hir.Place return problem(id 'place argument requires `@`' 'the parameter can write its caller binding' env session)
+    if not place_parameter and node is? hir.Place return problem(id 'value parameter does not accept a place' 'remove `@` to pass an independent value' env session)
+    if node is? hir.Place {
+        if not place_fits(node.value_type required @session) return problem(id 'place parameter types are invariant' 'the storage and parameter types must agree' env session)
+        return argument
+    }
+    return against(argument required id env @session)
+}
+remember_place = (argument:addr @places:array<addr> id:addr env:Environment session:contexts.Session):>Error? => {
+    let node = node_at(argument session)
+    if node isnt? hir.Place return none
+    let path = bindings.access_path(node.target session.hir)
+    let root = node_at(path.root session)
+    $runtime_assert root is? hir.ExpressedIdentifier
+    loop previous in places {
+        let other = bindings.access_path(previous session.hir)
+        let owner = node_at(other.root session)
+        $runtime_assert owner is? hir.ExpressedIdentifier
+        if root.binding_id not=? owner.binding_id continue
+        let disjoint = false
+        loop i in 0.. and i <? path.steps.length and i <? other.steps.length {
+            let left = node_at(path.steps[i] session)
+            let right = node_at(other.steps[i] session)
+            if left is? hir.MemberAccess and right is? hir.MemberAccess and left.name not=? right.name { disjoint = true break }
+            if left is? hir.Index and right is? hir.Index {
+                let a = node_at(left.index session)
+                let b = node_at(right.index session)
+                if a is? hir.Integer and b is? hir.Integer and a.value not=? b.value { disjoint = true break }
+            }
+        }
+        if not disjoint return problem(id 'overlapping mutable places in one call' 'these arguments may name the same storage' env session)
+    }
+    places.push(node.target)
+    return none
+}
+
+# The established nominal exception keeps the parent's leading field layout.
+# It does not make ordinary mutable containers covariant.
+place_fits = (actual:addr required:addr @session:contexts.Session):>bool => {
+    if types.same_type(actual required session.types) return true
+    let a = types.node_at(session.types types.unfold(types.strip_refinement(actual session.types) session.types))
+    let r = types.node_at(session.types types.unfold(types.strip_refinement(required session.types) session.types))
+    if a isnt? types.ObjectType or not a.minted or r isnt? types.ObjectType return false
+    return subtyping.is_subtype(actual required session.links @session.types)
+}
+
+array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let receiver_node = node_at(receiver session)
+    let declared:addr = receiver_node.value_type
+    if name not=? 'join' {
+        let path = bindings.access_path(receiver session.hir)
+        let root = node_at(path.root session)
+        if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'array mutation needs a named receiver' 'bind the array before changing it' env session)
+        let binding = bindings.binding_at(session.registry root.binding_id)
+        if binding.read_only_reason isnt? none return problem(id 'cannot mutate a const binding' binding.name env session)
+        loop step in path.steps {
+            let field = node_at(step session)
+            if field is? hir.MemberAccess and not field.mutable return problem(id 'cannot mutate an immutable field' field.name env session)
+        }
+        if receiver_node is? hir.ExpressedIdentifier and binding.store_type isnt? none { declared = binding.store_type }
+        if receiver_node is? hir.ExpressedIdentifier and binding.declaration isnt? none {
+            let declaration_id = binding.declaration
+            let declaration = node_at(declaration_id session)
+            let stored = types.node_at(session.types types.strip_refinement(declared session.types))
+            if declaration is? hir.Declare and declaration.annotation is? none and stored is? types.ArrayType {
+                # An inferred array grows when its program uses a growth
+                # method. An explicitly fixed length remains a store contract.
+                declared = types.array_type(stored.element none @session.types)
+                binding.value_type = declared binding.store_type = declared
+                session.registry.by_id[binding.id] = binding
+                $runtime_assert declaration_id <? session.hir.length
+                session.hir[declaration_id] = hir.Declare[declaration.loc declaration.value_type declaration.decltype declaration.name declared declaration.expr declaration.binding_id]
+            }
+        }
+        let shape = types.node_at(session.types types.strip_refinement(declared session.types))
+        if shape is? types.TypeOr {
+            loop alternative in shape.items {
+                let candidate = types.node_at(session.types types.strip_refinement(alternative session.types))
+                if candidate is? types.ArrayType and candidate.length is? none and subtyping.is_subtype(receiver_node.value_type alternative session.links @session.types) {
+                    declared = alternative
+                    break
+                }
+            }
+            shape = types.node_at(session.types types.strip_refinement(declared session.types))
+        }
+        if shape isnt? types.ArrayType or shape.length isnt? none return problem(id 'exact-length arrays cannot change length' 'declare the storage as `array<T>` to permit growth' env session)
+        declared = types.strip_refinement(declared session.types)
+        if receiver_node is? hir.ExpressedIdentifier { receiver = put(hir.ExpressedIdentifier[receiver_node.loc declared receiver_node.name receiver_node.binding_id] @session) }
+        else if receiver_node is? hir.MemberAccess { receiver = put(hir.MemberAccess[receiver_node.loc declared receiver_node.value receiver_node.name receiver_node.mutable] @session) }
+    } else {
+        if not subtyping.is_subtype(read.element types.primitive('string' @session.types) session.links @session.types) return problem(id '`join` requires string elements' display.type_to_dewy(read.element session.types) env session)
+    }
+    let signature = array_methods.signature(name read.element @session.types)
+    let loc = contexts.node_at(id env.lexical session).loc
+    return put(hir.ArrayMethod[loc signature receiver name] @session)
+}
+
+# This is the checker's exact-length view. The bounds validator separately
+# transfers intervals, proves operation indices, and enforces the original
+# storage refinements; losing an exact length is not permission to skip it.
+array_transition = (method:hir.ArrayMethod positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session):>Error? => {
+    if method.name in? ['join' 'reserve' 'sort'] return none
+    let limit = targets.max_length(session.target)
+    let route = bindings.array_route_id(method.array session.hir @session.registry)
+    if route is? none return none
+    let current = read_type(route env session)
+    let array = types.node_at(session.types node_at(method.array session).value_type)
+    $runtime_assert array is? types.ArrayType
+    let length:addr? = none
+    if current isnt? none {
+        let shape = types.node_at(session.types types.strip_refinement(current session.types))
+        if shape is? types.ArrayType { length = shape.length }
+    }
+    let index:addr? = none
+    if method.name =? 'pop' or method.name =? 'truncate' {
+        index = if positional.length >? 0 positional[0] else keyword.get(if method.name =? 'pop' 'idx' else 'count')
+    }
+    if method.name =? 'insert' { index = if positional.length >? 1 positional[1] else keyword.get('idx') }
+    let count:bigint? = none
+    if index isnt? none {
+        let number = node_at(index session)
+        if number is? hir.Integer { count = number.value }
+    }
+    if count isnt? none and count <? 0 return problem(id 'array method index cannot be negative' method.name env session)
+    if method.name =? 'clear' { length = 0 }
+    else if method.name =? 'push' or method.name =? 'insert' {
+        if method.name =? 'insert' and count isnt? none and length isnt? none and count >? length return problem(id 'insert index is out of bounds' 'the index must be at or before the end' env session)
+        if length isnt? none {
+            if length >=? limit return problem(id 'array length exceeds the target address space' 'this array cannot grow by another element' env session)
+            length += 1
+        }
+    } else if method.name =? 'pop' {
+        if length isnt? none {
+            if length =? 0 return problem(id 'pop on an empty array' 'no element can be removed' env session)
+            if count isnt? none and count >=? length return problem(id 'pop index is out of bounds' 'the index must select an existing element' env session)
+            length -= 1
+        }
+    } else if method.name =? 'truncate' {
+        if count is? none { length = none }
+        else if length isnt? none and count <? length {
+            $runtime_assert count >=? 0 and count <=? limit
+            length = count as addr
+        }
+    }
+    set_read_type(route types.array_type(array.element length @session.types) env @session)
+    return none
+}
+
+compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contexts.Session):>addr|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let op = tokens.node_at(source.nodes node.op)
+    $runtime_assert op is? post.CombinedAssignment
+    let symbol = syntax.symbol(op.op source.nodes)
+    let name = builtins.binary_operators.get(symbol)
+    if name is? none return pending(id "compound operator `{symbol}=`" env session)
+    let target = expression(node.left env @session call_target=true)
+    if target is? Error return target
+    let read = node_at(target session)
+    if read isnt? hir.ExpressedIdentifier|hir.MemberAccess return pending(id 'compound indexed assignment' env session)
+    let path = bindings.access_path(target session.hir)
+    let root = node_at(path.root session)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'assignment needs named storage' 'the target is temporary' env session)
+    let binding = bindings.binding_at(session.registry root.binding_id)
+    if binding.read_only_reason isnt? none return problem(id 'cannot assign to a constant' binding.name env session)
+    loop step in path.steps {
+        let field = node_at(step session)
+        if field is? hir.MemberAccess and not field.mutable return problem(id 'cannot assign to an immutable field' field.name env session)
+    }
+    let required = read.value_type
+    if read is? hir.ExpressedIdentifier and binding.store_type isnt? none { required = binding.store_type }
+    let right = expression(node.right env @session expected=read.value_type)
+    if right is? Error return right
+    let func = identifier(name id env @session)
+    if func is? Error return func
+    let result = call(func [target right] [] id env @session expected=read.value_type)
+    if result is? Error return result
+    result = against(result required id env @session)
+    if result is? Error return result
+    if read is? hir.MemberAccess return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) target result] @session)
+    set_read_type(binding.id node_at(result session).value_type env @session)
+    # Keep the selected operation, including any conversions, on the RHS.
+    # Lowering need not redispatch a source compound operator independently.
+    return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' result] @session)
 }

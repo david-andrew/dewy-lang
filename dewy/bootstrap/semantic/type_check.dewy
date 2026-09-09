@@ -282,6 +282,7 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session):>ar
             type = declared
         }
         if name is? none return contexts.problem(item 'function type parameter requires a name' 'write this parameter as `name:type`' context session)
+        if place and default isnt? none return contexts.problem(item 'place parameters cannot have defaults' 'every call must explicitly supply the storage' context session)
         result.push(types.PosOrKwArg[name type required=default is? none place=place])
     }
     return result

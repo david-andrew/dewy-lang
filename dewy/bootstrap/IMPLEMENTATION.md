@@ -30,10 +30,16 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  35 source programs and 10 invalid programs. Short-circuit boolean HIR,
+  50 source programs and 23 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
-  sequence lengths remain singleton types. This is an intermediate HIR entry point, not yet a
+  sequence lengths remain singleton types. Place arguments preserve storage
+  contracts and reject overlapping routes; array methods share their signature
+  table and update exact length views. Inferred arrays become growable on use,
+  while explicitly fixed arrays keep their contract. Bare function names call
+  the function, and `@fn` retains its value. Compound assignments and contextual
+  call-result obligations preserve their selected operations and conversions.
+  This is an intermediate HIR entry point, not yet a
   compiler driver: imports, the remaining value forms, proof validation,
   representation selection, and native emission are still required.
 - Hosted short-circuit continuations join mutations from the evaluated and
@@ -280,6 +286,15 @@ allocation) will be recorded here with examples and implementation limits.
 No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
+
+The latest broad run passed **1,852 tests, 10 skipped**, with the evolving
+source value-checker comparison run separately. Its expanded comparison now
+passes as well. Subsequent hosted fixes for aggregate parameter defaults and
+fixed-width call-result bounds pass their dedicated regressions; the latter
+also passes 55 numeric/prototype tests. The predicate lifetime rule passes
+11 focused tests, 78 related tests, and its native dependency comparison.
+A new full run is still needed after these last hosted changes.
+
 
 The full suite passed with **1,837 passed, 10 skipped** after the source type
 visitor, numeric helper instantiation, and optional-flow argument fixes.

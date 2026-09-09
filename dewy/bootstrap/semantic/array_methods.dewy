@@ -1,0 +1,37 @@
+import p"ty.dewy" as types
+
+doc"""
+The existing compiler-provided array method signatures. Binding the receiver
+and transferring its length facts belong to the checker; this table only
+specifies calls. `pop` has an optional index, `sort` a keyword key/reverse,
+and `join` an optional separator. No allocator policy is implied here.
+"""
+
+const names:set<string> = set['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'join']
+signature = (name:string element:addr @nodes:array<types.Type>):>addr => {
+    $runtime_assert name in? names
+    let word = types.primitive('int64' @nodes)
+    let void_type = types.primitive('void' @nodes)
+    let pos:array<types.PosOrKwArg> = []
+    let kw:array<types.KwOnlyArg> = []
+    let result = void_type
+    if name =? 'push' or name =? 'insert' { pos.push(types.PosOrKwArg['value' element]) }
+    if name =? 'pop' {
+        pos.push(types.PosOrKwArg['idx' word required=false])
+        result = element
+    }
+    if name =? 'insert' { pos.push(types.PosOrKwArg['idx' word]) }
+    if name =? 'truncate' or name =? 'reserve' { pos.push(types.PosOrKwArg['count' word]) }
+    if name =? 'join' {
+        result = types.string_type(none @nodes)
+        pos.push(types.PosOrKwArg['sep' result required=false])
+    }
+    if name =? 'sort' {
+        let key = types.function_type([types.PosOrKwArg[none element]] [] none types.primitive('any' @nodes) [] @nodes)
+        let integer = types.node_at(nodes types.strip_refinement(element nodes))
+        let integer_key = integer is? types.Primitive and integer.name in? ['int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64']
+        kw.push(types.KwOnlyArg['key' key required=not integer_key])
+        kw.push(types.KwOnlyArg['reverse' types.primitive('bool' @nodes) required=false])
+    }
+    return types.function_type(pos kw none result [] @nodes)
+}
