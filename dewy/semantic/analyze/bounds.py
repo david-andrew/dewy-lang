@@ -957,6 +957,25 @@ class _BoundsValidator:
         A tracked field carries the same obligation as a named binding.
         """
         declared = self.declared_refinements.get(array_id)
+        if declared is None and isinstance(node.func, hir.ArrayMethod):
+            # A narrowed optional/general-union array still has a storage
+            # contract. Selecting its payload does not permit a mutation to
+            # discard the length predicates carried by that alternative.
+            binding = self.registry.by_id.get(array_id)
+            storage = binding.store_type if binding is not None else None
+            if storage is None and binding is not None:
+                annotation = binding.declaration.annotation if binding.declaration is not None else None
+                storage = annotation if annotation is not None else binding.type
+            if isinstance(storage, ty.TypeOr):
+                predicates = tuple(p for member in storage.items
+                                   if isinstance(member, ty.RefinedType) and isinstance(member.base, ty.ArrayType)
+                                   and member.base.element == node.func.array.type.element
+                                   for p in member.propositions)
+                if predicates:
+                    # Where several array alternatives overlap, requiring
+                    # their predicates is conservative. Do not assume that
+                    # merely selecting the array tag selected a fact arm.
+                    declared = ty.RefinedType(node.func.array.type, predicates)
         member = _member_invariant(node.func.array) if isinstance(node.func, hir.ArrayMethod) else ()
         propositions = (*(() if declared is None else declared.propositions), *member)
         required = _length_propositions_interval(propositions)

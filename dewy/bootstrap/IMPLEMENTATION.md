@@ -196,6 +196,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Runtime truncation counts require a nonnegative proof. Mutation obligations
   without a supported `$prototype` check remain compile errors, not internal
   assertions or unchecked operations.
+- Narrowed optional/general-union arrays keep their selected array
+  alternative through content mutation and loop iteration. Whole-binding
+  stores and place arguments still discard that selection. Mutating methods
+  use the selected array's declared storage shape and retain its length
+  obligations. Overlapping array alternatives with different predicates are
+  currently checked conservatively against all of those predicates; choosing
+  a union tag alone does not prove which predicate alternative held.
+  The focused mutation/length/loop regression batch passes 27 tests.
 - Iterator recognition uses the existing ambiguity normalization before
   binding loop targets, including `loop x in make().values` and guarded
   forms. Logical conditions can share either operand; binding targets retain

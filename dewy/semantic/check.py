@@ -4847,16 +4847,24 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # Facts established by the checked condition then hold at each entry
         # to the body, including iterator predicates.
         mutated_names = _mutated_binding_names(body_ast)
+        replaced_names = _mutated_binding_names(body_ast, replacements_only=True)
         for name in mutated_names:
             binding = ctx.binding_scopes.get(name)
             if binding is None:
                 continue
+            # Growing a narrowed array changes its contents/length, not its
+            # union tag. A whole-binding store or place argument may replace
+            # the value, so only those discard the selected array alternative.
+            held = ty.strip_refinement(ctx.refinements.get(binding.id, ty.TOP_TYPE))
+            array_view = replace(held, length=None) if name not in replaced_names and isinstance(held, ty.ArrayType) else None
             for binding_id in (binding.id, *ctx.binding_registry.routes_under(binding.id)):
                 ctx.refinements.pop(binding_id, None)
                 ctx.refinements.pop(_exclusion_key(binding_id), None)
                 ctx.length_bounds.pop(binding_id, None)
                 _drop_key_facts(ctx, dictionary_id=binding_id)
                 _drop_key_facts(ctx, key_id=binding_id)
+            if array_view is not None:
+                ctx.refinements[binding.id] = array_view
         # iterator clauses mixed with Boolean predicates (`loop i in 0.. and
         # i <? n and src[i] in? ws`): the iterators advance, then the
         # predicates are tested with the targets bound — the loop ends at the
@@ -8138,10 +8146,9 @@ def _apply_array_method_transition(
     else:  # reserve, sort: the length is unchanged
         new_exact = exact
         new_minimum = minimum
-    if new_exact is not None:
-        ctx.refinements[binding_id] = ty.ArrayType(element, new_exact)
-    else:
-        ctx.refinements.pop(binding_id, None)
+    # Mutation preserves the selected array alternative even when its new
+    # length is unknown (`array<T> | none` remains an array after `.push`).
+    ctx.refinements[binding_id] = ty.ArrayType(element, new_exact)
     ctx.length_bounds[binding_id] = max(new_minimum, 0)
 
 
@@ -8219,11 +8226,21 @@ def _iterated_container_names(condition: hir.AST) -> set[str]:
 _MUTATING_METHOD_NAMES = frozenset({*(_ARRAY_METHOD_NAMES - _READ_ONLY_ARRAY_METHOD_NAMES), 'add'})  # arrays, dictionaries, sets
 
 
-def _mutated_binding_names(ast: p0.AST) -> set[str]:
-    """Names a syntax tree may assign or grow (a conservative pre-scan)."""
+def _mutated_binding_names(ast: p0.AST, *, replacements_only: bool = False) -> set[str]:
+    """Names a syntax tree may replace or mutate (a conservative pre-scan).
+
+    A place argument may replace its storage. Array methods and indexed
+    stores change contents, but cannot change the receiver's union tag.
+    """
     names: set[str] = set()
 
     def walk(node: object) -> None:
+        if isinstance(node, p0.Prefix) and isinstance(node.op, t1.Operator) and node.op.symbol == '@':
+            target = node.item
+            while isinstance(target, p0.BinOp) and isinstance(target.op, (t1.Operator, t2.IndexJuxtapose)):
+                target = target.left
+            if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
+                names.add(target.item.name)
         if isinstance(node, p0.BinOp):
             left_name = (
                 node.left.item.name
@@ -8236,7 +8253,8 @@ def _mutated_binding_names(ast: p0.AST) -> set[str]:
             ):
                 names.add(left_name)
             if (
-                left_name is None
+                not replacements_only
+                and left_name is None
                 and isinstance(node.op, t1.Operator)
                 and node.op.symbol == '='
                 and isinstance(node.left, p0.BinOp)
@@ -8246,7 +8264,8 @@ def _mutated_binding_names(ast: p0.AST) -> set[str]:
                 # `d[k] = v` mutates the indexed binding (a dictionary or array).
                 names.add(node.left.left.item.name)
             if (
-                left_name is not None
+                not replacements_only
+                and left_name is not None
                 and isinstance(node.op, t1.Operator)
                 and node.op.symbol == '.'
                 and isinstance(node.right, p0.Atom)
@@ -8313,6 +8332,14 @@ def _tcr_array_method(
         else binding.type
     )
     declared = ty.strip_refinement(declared)   # `openers:array<Span length >=? 1>` is a growable array with a length invariant
+    if isinstance(declared, ty.TypeOr):
+        # The read selected an array alternative of optional/general-union
+        # storage. Use that alternative's store contract, not the read's
+        # transient exact length and not the union as if it were an array.
+        candidates = [ty.strip_refinement(member) for member in declared.items]
+        declared = next((member for member in candidates
+                         if isinstance(member, ty.ArrayType) and member.length is None
+                         and ctx.type_system.is_subtype(value.type, member)), declared)
     if not isinstance(declared, ty.ArrayType) or declared.length is not None:
         user_error(
             ctx.srcfile,
