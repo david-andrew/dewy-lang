@@ -1,7 +1,5 @@
 from reporting import SrcFile, Span, Pointer, Warning
-from p"t1.dewy" import Token1, TokenStream, TokenError, BasePrefix, Identifier1, Keyword1, Metatag1, Operator1, Whitespace1, Semicolon1, Bool1, Integer1, Real1, String1, StringChunk1, IString1, Block1, ParametricEscape1, BasedString1, append_node, node_at, lexical_error
 import p"t1.dewy" as compound
-
 import p"cli.dewy" as cli
 doc"""
 Post-tokenization preserves the hosted pass ordering. Each rewrite returns
@@ -10,18 +8,24 @@ lists by value. Keyword collection uses an explicit next position instead of
 mutating a cursor shared by recursive calls. See ../DESIGN_NOTES.md for the
 pending juxtaposition, operator-chain, and directive design decisions.
 """
-Juxtapose2 = type of Token1 & [kind='Juxtapose' options:array<string>]
-InvertedComparison2 = type of Token1 & [kind='InvertedComparisonOp' symbol:string]
-Broadcast2 = type of Token1 & [kind='BroadcastOp' op:addr]
-CombinedAssignment2 = type of Token1 & [kind='CombinedAssignmentOp' op:addr]
-OpFn2 = type of Token1 & [kind='OpFn' op:addr]
-Placeholder2 = type of Token1 & [kind='Placeholder']
-Chain2 = type of Token1 & [kind='Chain' items:array<addr>]
-KeywordExpr2 = type of Token1 & [kind='KeywordExpr' parts:array<addr>]
-Flow2 = type of Token1 & [kind='Flow' arms:array<addr> default:addr?=none]
-Directive2 = type of Token1 & [kind='Directive' name:string condition:addr?=none message:addr?=none]
-Collected2:type = [id:addr next:addr]
-Chunk2:type = [items:array<addr> next:addr]
+# Plain adjacency can mean call, index, or multiplication: sin(x), x[y], x(y).
+# Syntax can eliminate some alternatives, but only semantics can choose among
+# those remaining. One representation covers both definite and ambiguous jux.
+Juxtapose = type of compound.Token & [kind='Juxtapose' options:array<string>]
+InvertedComparison = type of compound.Token & [kind='InvertedComparisonOp' symbol:string]
+Broadcast = type of compound.Token & [kind='BroadcastOp' op:addr]
+CombinedAssignment = type of compound.Token & [kind='CombinedAssignmentOp' op:addr]
+OpFn = type of compound.Token & [kind='OpFn' op:addr]
+Placeholder = type of compound.Token & [kind='Placeholder']
+# Chains delimit expressions before precedence parsing. Keyword parts are
+# separate chains (e.g. an if condition and body); Flow groups the entire
+# if/else-if/else sequence without deciding its value type.
+Chain = type of compound.Token & [kind='Chain' items:array<addr>]
+KeywordExpr = type of compound.Token & [kind='KeywordExpr' parts:array<addr>]
+Flow = type of compound.Token & [kind='Flow' arms:array<addr> default:addr?=none]
+Directive = type of compound.Token & [kind='Directive' name:string condition:addr?=none message:addr?=none]
+Collected:type = [id:addr next:addr]
+Chunk:type = [items:array<addr> next:addr]
 const binary_symbols = set['+' '-' '*' '/' '//' '%' '^' '\\' '=?' '>?' '<?' '>=?' '<=?' 'in?' 'is?' 'isnt?' '<=>' '|' '&' '??' '=' '::' ':=' '|>' '<|' '=>' '->' '<->' '.' ',' ':' ':>' '<<' '>>' '<<<' '>>>' '<<!' '!>>' 'and' 'or' 'xor' 'nand' 'nor' 'xnor' 'as' 'in' 'transmute' 'of']
 const prefix_symbols = set['@' '~' 'not' '`' '+' '-' 'type of']
 const postfix_symbols = set['`' '?' 'or_throw']
@@ -31,49 +35,49 @@ const directives = set['assert' 'runtime_assert' 'expect' 'fail' 'abstract' 'bre
 const flows = set['if' 'loop' 'match']
 const no_stops:set<string> = set[]
 
-is_binary = (node:Token1 nodes:array<Token1>):>bool => {
-    if node is? Operator1 return node.symbol in? binary_symbols
-    if node is? Broadcast2 return is_binary(node_at(nodes node.op) nodes)
-    return node is? Juxtapose2 | CombinedAssignment2 | InvertedComparison2
+is_binary = (node:compound.Token nodes:array<compound.Token>):>bool => {
+    if node is? compound.Operator return node.symbol in? binary_symbols
+    if node is? Broadcast return is_binary(compound.node_at(nodes node.op) nodes)
+    return node is? Juxtapose | CombinedAssignment | InvertedComparison
 }
-is_prefix = (node:Token1 nodes:array<Token1>):>bool => {
-    if node is? Operator1 return node.symbol in? prefix_symbols
-    if node is? Broadcast2 return is_prefix(node_at(nodes node.op) nodes)
+is_prefix = (node:compound.Token nodes:array<compound.Token>):>bool => {
+    if node is? compound.Operator return node.symbol in? prefix_symbols
+    if node is? Broadcast return is_prefix(compound.node_at(nodes node.op) nodes)
     return false
 }
-is_postfix = (node:Token1 nodes:array<Token1>):>bool => {
-    if node is? Operator1 return node.symbol in? postfix_symbols
-    if node is? Broadcast2 return is_postfix(node_at(nodes node.op) nodes)
+is_postfix = (node:compound.Token nodes:array<compound.Token>):>bool => {
+    if node is? compound.Operator return node.symbol in? postfix_symbols
+    if node is? Broadcast return is_postfix(compound.node_at(nodes node.op) nodes)
     return false
 }
-is_atom = (node:Token1):>bool => node is? Identifier1 | Metatag1 | Bool1 | Integer1 | Real1 | String1 | IString1 | Block1 | BasedString1 | Semicolon1 | OpFn2 | Placeholder2 | KeywordExpr2 | Flow2 | Directive2
-is_symbol = (node:Token1 symbol:string):>bool => node is? Operator1 and node.symbol =? symbol
-is_identifier = (node:Token1 name:string):>bool => node is? Identifier1 and node.name =? name
-is_stop = (node:Token1 stop:set<string>):>bool => node is? Keyword1 and node.name in? stop
-is_directive = (node:Token1):>bool => node is? Metatag1 and node.name in? directives
-is_jux = (node:Token1 name:string):>bool => node is? Juxtapose2 and node.options.length =? 1 and node.options[0] =? name
+is_atom = (node:compound.Token):>bool => node is? compound.Identifier | compound.Metatag | compound.Bool | compound.Integer | compound.Real | compound.String | compound.IString | compound.Block | compound.BasedString | compound.Semicolon | OpFn | Placeholder | KeywordExpr | Flow | Directive
+is_symbol = (node:compound.Token symbol:string):>bool => node is? compound.Operator and node.symbol =? symbol
+is_identifier = (node:compound.Token name:string):>bool => node is? compound.Identifier and node.name =? name
+is_stop = (node:compound.Token stop:set<string>):>bool => node is? compound.Keyword and node.name in? stop
+is_directive = (node:compound.Token):>bool => node is? compound.Metatag and node.name in? directives
+is_jux = (node:compound.Token name:string):>bool => node is? Juxtapose and node.options.length =? 1 and node.options[0] =? name
 
-jux_options = (left:Token1 right:Token1 previous:Token1? nodes:array<Token1> srcfile:SrcFile):>array<string> => {
-    if left is? Semicolon1 return []
-    if right is? Semicolon1 {
+jux_options = (left:compound.Token right:compound.Token previous:compound.Token? nodes:array<compound.Token> srcfile:SrcFile):>array<string> => {
+    if left is? compound.Semicolon return []
+    if right is? compound.Semicolon {
         if not is_jux(left 'SemicolonJuxtapose') return ['SemicolonJuxtapose']
         return []
     }
-    if left is? Keyword1 | KeywordExpr2 | Flow2 or right is? Keyword1 | KeywordExpr2 | Flow2 return []
+    if left is? compound.Keyword | KeywordExpr | Flow or right is? compound.Keyword | KeywordExpr | Flow return []
     if is_identifier(left '...') { if is_atom(right) or is_prefix(right nodes) return ['EllipsisJuxtapose'] return [] }
     if is_identifier(right '...') { if is_atom(left) or is_postfix(left nodes) return ['EllipsisJuxtapose'] return [] }
     if is_identifier(left '..') { if is_atom(right) or is_prefix(right nodes) return ['RangeJuxtapose'] return [] }
     if is_identifier(right '..') { if is_atom(left) or is_postfix(left nodes) return ['RangeJuxtapose'] return [] }
-    if left is? Block1 and left.delims =? '<>' {
+    if left is? compound.Block and left.delims =? '<>' {
         if is_atom(right) and (previous is? none or not is_jux(previous 'TypeParamJuxtapose')) return ['TypeParamJuxtapose']
         return []
     }
-    if right is? Block1 and right.delims =? '<>' { if is_atom(left) return ['TypeParamJuxtapose'] return [] }
+    if right is? compound.Block and right.delims =? '<>' { if is_atom(left) return ['TypeParamJuxtapose'] return [] }
     let options:array<string> = []
     if is_atom(left) and is_atom(right) {
-        if left isnt? String1 | IString1 | BasedString1 | Bool1 | Integer1 | Real1 { options.push('CallJuxtapose') }
-        if left isnt? Bool1 | Integer1 | Real1 | OpFn2 and right isnt? String1 | IString1 | BasedString1 | Bool1 | Integer1 | Real1 | OpFn2 { options.push('IndexJuxtapose') }
-        if left isnt? String1 | IString1 | BasedString1 | Bool1 | OpFn2 | Placeholder2 and right isnt? String1 | IString1 | BasedString1 | Bool1 | Integer1 | Real1 | OpFn2 | Placeholder2 { options.push('MultiplyJuxtapose') }
+        if left isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real { options.push('CallJuxtapose') }
+        if left isnt? compound.Bool | compound.Integer | compound.Real | OpFn and right isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real | OpFn { options.push('IndexJuxtapose') }
+        if left isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | OpFn | Placeholder and right isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real | OpFn | Placeholder { options.push('MultiplyJuxtapose') }
         if options.length =? 0 {
             Warning[srcfile=srcfile title='Invalid types for juxtaposition'
                 pointers=[Pointer[span=Span[left.loc.stop right.loc.start] message="Juxtaposition ignored; these are separate expressions"]]].warn
@@ -82,132 +86,141 @@ jux_options = (left:Token1 right:Token1 previous:Token1? nodes:array<Token1> src
     return options
 }
 
-chain = (items:array<addr> @nodes:array<Token1>):>addr => {
+chain = (items:array<addr> @nodes:array<compound.Token>):>addr => {
     $runtime_assert items.length >? 0
-    let first = node_at(nodes items[0])
-    let last = node_at(nodes items[end])
-    return append_node(@nodes Chain2[loc=Span[first.loc.start last.loc.stop] items=items])
+    let first = compound.node_at(nodes items[0])
+    let last = compound.node_at(nodes items[end])
+    return compound.append_node(@nodes Chain[loc=Span[first.loc.start last.loc.stop] items=items])
 }
 
 # Recurse through containers without putting another Chain around an existing
 # Chain. That distinction matters when the final pass reaches keyword parts.
-rewrite_child = (id:addr pass:uint8 srcfile:SrcFile @nodes:array<Token1>):>addr | TokenError => {
-    let node = node_at(nodes id)
-    if node is? Block1 | ParametricEscape1 {
+rewrite_child = (id:addr pass:uint8 srcfile:SrcFile @nodes:array<compound.Token>):>addr | compound.TokenError => {
+    let node = compound.node_at(nodes id)
+    if node is? compound.Block | compound.ParametricEscape {
         let children = rewrite_list(node.inner pass srcfile @nodes)
-        if children is? TokenError return children
-        if node is? Block1 return append_node(@nodes Block1[loc=node.loc inner=children delims=node.delims base=node.base])
-        return append_node(@nodes ParametricEscape1[loc=node.loc inner=children])
+        if children is? compound.TokenError return children
+        if node is? compound.Block return compound.append_node(@nodes compound.Block[loc=node.loc inner=children delims=node.delims base=node.base])
+        return compound.append_node(@nodes compound.ParametricEscape[loc=node.loc inner=children])
     }
     let children:array<addr> = []
-    if node is? IString1 { children = node.content }
-    else if node is? Chain2 { children = node.items }
-    else if node is? KeywordExpr2 { children = node.parts }
-    else if node is? Flow2 { children = node.arms }
+    if node is? compound.IString { children = node.content }
+    else if node is? Chain { children = node.items }
+    else if node is? KeywordExpr { children = node.parts }
+    else if node is? Flow { children = node.arms }
     loop i in 0.. and i <? children.length {
         let changed = rewrite_child(children[i] pass srcfile @nodes)
-        if changed is? TokenError return changed
+        if changed is? compound.TokenError return changed
         children[i] = changed
     }
-    if node is? IString1 return append_node(@nodes IString1[loc=node.loc content=children])
-    if node is? Chain2 return append_node(@nodes Chain2[loc=node.loc items=children])
-    if node is? KeywordExpr2 return append_node(@nodes KeywordExpr2[loc=node.loc parts=children])
-    if node is? Flow2 {
+    if node is? compound.IString return compound.append_node(@nodes compound.IString[loc=node.loc content=children])
+    if node is? Chain return compound.append_node(@nodes Chain[loc=node.loc items=children])
+    if node is? KeywordExpr return compound.append_node(@nodes KeywordExpr[loc=node.loc parts=children])
+    if node is? Flow {
         let default = node.default
         if default isnt? none {
             let changed = rewrite_child(default pass srcfile @nodes)
-            if changed is? TokenError return changed
+            if changed is? compound.TokenError return changed
             default = changed
         }
-        return append_node(@nodes Flow2[loc=node.loc arms=children default=default])
+        return compound.append_node(@nodes Flow[loc=node.loc arms=children default=default])
     }
-    if node is? Directive2 {
+    if node is? Directive {
         let condition = node.condition
         let message = node.message
         if condition isnt? none {
             let changed = rewrite_child(condition pass srcfile @nodes)
-            if changed is? TokenError return changed
+            if changed is? compound.TokenError return changed
             condition = changed
         }
         if message isnt? none {
             let changed = rewrite_child(message pass srcfile @nodes)
-            if changed is? TokenError return changed
+            if changed is? compound.TokenError return changed
             message = changed
         }
-        return append_node(@nodes Directive2[loc=node.loc name=node.name condition=condition message=message])
+        return compound.append_node(@nodes Directive[loc=node.loc name=node.name condition=condition message=message])
     }
     return id
 }
 
-rewrite_list = (input:array<addr> pass:uint8 srcfile:SrcFile @nodes:array<Token1>):>array<addr> | TokenError => {
+# The ordering is semantic: remove whitespace (0), then insert adjacency (1),
+# supply voids at missing comma operands (2), combine type-of (3), inverted
+# comparisons (4), broadcast operators (5), and combined assignments (6).
+# Only then desugar partial operators (7), recognize operator functions (8)
+# and predicate placeholders (9), collect keywords/directives (10), and finish
+# expression chains (11). Each pass also visits nested containers.
+rewrite_list = (input:array<addr> pass:uint8 srcfile:SrcFile @nodes:array<compound.Token>):>array<addr> | compound.TokenError => {
     let items:array<addr> = []
     loop id in input {
         let changed = rewrite_child(id pass srcfile @nodes)
-        if changed is? TokenError return changed
-        let node = node_at(nodes changed)
-        if pass =? 0 and node is? Whitespace1 continue
+        if changed is? compound.TokenError return changed
+        let node = compound.node_at(nodes changed)
+        if pass =? 0 and node is? compound.Whitespace continue
         items.push(changed)
     }
     let output:array<addr> = []
     let i:addr = 0
     loop i <? items.length {
         let id = items[i]
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         if pass =? 1 {
             output.push(id)
             if i+1 <? items.length {
-                let right = node_at(nodes items[i+1])
+                let right = compound.node_at(nodes items[i+1])
                 if node.loc.stop =? right.loc.start {
-                    let previous:Token1? = none
-                    if output.length >? 1 { previous = node_at(nodes output[output.length-2]) }
+                    let previous:compound.Token? = none
+                    if output.length >? 1 { previous = compound.node_at(nodes output[output.length-2]) }
                     let options = jux_options(node right previous nodes srcfile)
-                    if options.length >? 0 { output.push(append_node(@nodes Juxtapose2[loc=Span[node.loc.stop node.loc.stop] options=options])) }
+                    if options.length >? 0 { output.push(compound.append_node(@nodes Juxtapose[loc=Span[node.loc.stop node.loc.stop] options=options])) }
                 }
             }
             i += 1
             continue
         }
         if pass =? 2 and is_symbol(node ',') {
-            if output.length =? 0 or is_symbol(node_at(nodes output[end]) ',') {
-                output.push(append_node(@nodes Identifier1[loc=Span[node.loc.start node.loc.start] name='void']))
+            if output.length =? 0 or is_symbol(compound.node_at(nodes output[end]) ',') {
+                output.push(compound.append_node(@nodes compound.Identifier[loc=Span[node.loc.start node.loc.start] name='void']))
             }
         }
         if i+1 <? items.length {
-            let right = node_at(nodes items[i+1])
+            let right = compound.node_at(nodes items[i+1])
             let loc = Span[node.loc.start right.loc.stop]
-            let replacement:Token1? = none
-            if pass =? 3 and is_identifier(node 'type') and is_symbol(right 'of') { replacement = Operator1[loc=loc symbol='type of'] }
-            if pass =? 4 and is_symbol(node 'not') and right is? Operator1 and right.symbol in? comparisons { replacement = InvertedComparison2[loc=loc symbol=right.symbol] }
-            if pass =? 5 and is_symbol(node '.') and (is_binary(right nodes) or is_prefix(right nodes)) { replacement = Broadcast2[loc=loc op=items[i+1]] }
-            if pass =? 6 and (is_binary(node nodes) or node is? Broadcast2) and is_symbol(right '=') { replacement = CombinedAssignment2[loc=loc op=id] }
-            if replacement isnt? none { output.push(append_node(@nodes replacement)) i += 2 continue }
+            let replacement:compound.Token? = none
+            if pass =? 3 and is_identifier(node 'type') and is_symbol(right 'of') { replacement = compound.Operator[loc=loc symbol='type of'] }
+            if pass =? 4 and is_symbol(node 'not') and right is? compound.Operator and right.symbol in? comparisons { replacement = InvertedComparison[loc=loc symbol=right.symbol] }
+            if pass =? 5 and is_symbol(node '.') and (is_binary(right nodes) or is_prefix(right nodes)) { replacement = Broadcast[loc=loc op=items[i+1]] }
+            if pass =? 6 and (is_binary(node nodes) or node is? Broadcast) and is_symbol(right '=') { replacement = CombinedAssignment[loc=loc op=id] }
+            if replacement isnt? none { output.push(compound.append_node(@nodes replacement)) i += 2 continue }
         }
-        if pass =? 7 and node is? Block1 and node.delims =? '()' and node.inner.length >=? 2 {
-            let op = node_at(nodes node.inner[0])
-            let following = node_at(nodes node.inner[1])
-            if (op is? InvertedComparison2 or op is? Operator1 and op.symbol in? partial_symbols) and following isnt? Semicolon1 {
-                let param = append_node(@nodes Identifier1[loc=op.loc name='__dewy_partial'])
-                let arrow = append_node(@nodes Operator1[loc=op.loc symbol='=>'])
+        if pass =? 7 and node is? compound.Block and node.delims =? '()' and node.inner.length >=? 2 {
+            # (.field) and (>? limit) stand for
+            # single-argument functions. Insert an explicit parameter/arrow
+            # before chain collection so ordinary expression parsing handles it.
+            let op = compound.node_at(nodes node.inner[0])
+            let following = compound.node_at(nodes node.inner[1])
+            if (op is? InvertedComparison or op is? compound.Operator and op.symbol in? partial_symbols) and following isnt? compound.Semicolon {
+                let param = compound.append_node(@nodes compound.Identifier[loc=op.loc name='__dewy_partial'])
+                let arrow = compound.append_node(@nodes compound.Operator[loc=op.loc symbol='=>'])
                 let inner:array<addr> = [param arrow param]
                 loop child in node.inner { inner.push(child) }
-                id = append_node(@nodes Block1[loc=node.loc inner=inner delims=node.delims base=node.base])
+                id = compound.append_node(@nodes compound.Block[loc=node.loc inner=inner delims=node.delims base=node.base])
             }
         }
-        if pass =? 8 and node is? Block1 and node.delims =? '()' and node.inner.length =? 1 {
-            let op = node_at(nodes node.inner[0])
-            if op is? Operator1 | Broadcast2 | CombinedAssignment2 { id = append_node(@nodes OpFn2[loc=node.loc op=node.inner[0]]) }
+        if pass =? 8 and node is? compound.Block and node.delims =? '()' and node.inner.length =? 1 {
+            let op = compound.node_at(nodes node.inner[0])
+            if op is? compound.Operator | Broadcast | CombinedAssignment { id = compound.append_node(@nodes OpFn[loc=node.loc op=node.inner[0]]) }
         }
-        if pass =? 9 and is_identifier(node '$') { id = append_node(@nodes Placeholder2[loc=node.loc]) }
-        if pass =? 10 and (node is? Keyword1 and node.name not=? 'else' or is_directive(node)) {
+        if pass =? 9 and is_identifier(node '$') { id = compound.append_node(@nodes Placeholder[loc=node.loc]) }
+        if pass =? 10 and (node is? compound.Keyword and node.name not=? 'else' or is_directive(node)) {
             let result = collect_atom(items i set['else'] srcfile @nodes)
-            if result is? TokenError return result
+            if result is? compound.TokenError return result
             output.push(result.id)
             i = result.next
             continue
         }
         if pass =? 11 {
             let result = collect_expr(items i no_stops srcfile @nodes)
-            if result is? TokenError return result
+            if result is? compound.TokenError return result
             output.push(result.id)
             i = result.next
             continue
@@ -216,74 +229,77 @@ rewrite_list = (input:array<addr> pass:uint8 srcfile:SrcFile @nodes:array<Token1
         i += 1
     }
     if pass =? 2 and output.length >? 0 {
-        let last = node_at(nodes output[end])
-        if is_symbol(last ',') { output.push(append_node(@nodes Identifier1[loc=Span[last.loc.stop last.loc.stop] name='void'])) }
+        let last = compound.node_at(nodes output[end])
+        if is_symbol(last ',') { output.push(compound.append_node(@nodes compound.Identifier[loc=Span[last.loc.stop last.loc.stop] name='void'])) }
     }
     return output
 }
 
-collect_chunk = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<Token1>):>Chunk2 | TokenError => {
+# Collection returns the next unread position alongside the completed value.
+# Recursive keyword collection therefore cannot accidentally advance its
+# caller's cursor twice or consume the caller's terminating else/keyword.
+collect_chunk = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<compound.Token>):>Chunk | compound.TokenError => {
     let i:addr = start
     let output:array<addr> = []
     loop i <? items.length {
-        let node = node_at(nodes items[i])
+        let node = compound.node_at(nodes items[i])
         if is_stop(node stop) or not is_prefix(node nodes) break
         output.push(items[i])
         i += 1
     }
-    if i >=? items.length return Chunk2[output i]
-    let node = node_at(nodes items[i])
-    if is_stop(node stop) or node is? Semicolon1 return Chunk2[output i]
-    if node is? Keyword1 or is_directive(node) {
+    if i >=? items.length return Chunk[output i]
+    let node = compound.node_at(nodes items[i])
+    if is_stop(node stop) or node is? compound.Semicolon return Chunk[output i]
+    if node is? compound.Keyword or is_directive(node) {
         let result = collect_atom(items i stop srcfile @nodes)
-        if result is? TokenError return result
+        if result is? compound.TokenError return result
         output.push(result.id)
         i = result.next
-        if is_directive(node) return Chunk2[output i]
+        if is_directive(node) return Chunk[output i]
     }
     else {
-        if not is_atom(node) return lexical_error(srcfile node.loc 'Expected expression')
+        if not is_atom(node) return compound.lexical_error(srcfile node.loc 'Expected expression')
         output.push(items[i])
         i += 1
     }
     loop i <? items.length {
-        let following = node_at(nodes items[i])
+        let following = compound.node_at(nodes items[i])
         if is_stop(following stop) or not is_postfix(following nodes) break
         output.push(items[i])
         i += 1
     }
-    return Chunk2[output i]
+    return Chunk[output i]
 }
-collect_expr = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<Token1>):>Collected2 | TokenError => {
-    if start >=? items.length return lexical_error(srcfile Span[srcfile.body.length srcfile.body.length] 'Expected expression')
-    let first = node_at(nodes items[start])
-    if first is? Semicolon1 return Collected2[chain([items[start]] @nodes) start+1]
+collect_expr = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<compound.Token>):>Collected | compound.TokenError => {
+    if start >=? items.length return compound.lexical_error(srcfile Span[srcfile.body.length srcfile.body.length] 'Expected expression')
+    let first = compound.node_at(nodes items[start])
+    if first is? compound.Semicolon return Collected[chain([items[start]] @nodes) start+1]
     let chunk = collect_chunk(items start stop srcfile @nodes)
-    if chunk is? TokenError return chunk
-    if chunk.items.length =? 0 return lexical_error(srcfile first.loc 'Expected expression')
+    if chunk is? compound.TokenError return chunk
+    if chunk.items.length =? 0 return compound.lexical_error(srcfile first.loc 'Expected expression')
     let output = chunk.items
     let i:addr = chunk.next
     loop i <? items.length {
-        let op = node_at(nodes items[i])
-        if is_stop(op stop) or op is? Semicolon1 or not is_binary(op nodes) break
+        let op = compound.node_at(nodes items[i])
+        if is_stop(op stop) or op is? compound.Semicolon or not is_binary(op nodes) break
         output.push(items[i])
         i += 1
         let next = collect_chunk(items i stop srcfile @nodes)
-        if next is? TokenError return next
+        if next is? compound.TokenError return next
         loop child in next.items { output.push(child) }
         i = next.next
     }
     if i >? 0 and i <? items.length {
-        if is_jux(node_at(nodes items[i-1]) 'SemicolonJuxtapose') and node_at(nodes items[i]) is? Semicolon1 { output.push(items[i]) i += 1 }
+        if is_jux(compound.node_at(nodes items[i-1]) 'SemicolonJuxtapose') and compound.node_at(nodes items[i]) is? compound.Semicolon { output.push(items[i]) i += 1 }
     }
-    return Collected2[chain(output @nodes) i]
+    return Collected[chain(output @nodes) i]
 }
 
-collect_atom = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<Token1>):>Collected2 | TokenError => {
+collect_atom = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<compound.Token>):>Collected | compound.TokenError => {
     $runtime_assert start <? items.length
-    let kw = node_at(nodes items[start])
-    if kw is? Metatag1 return collect_directive(items start stop srcfile @nodes)
-    if kw isnt? Keyword1 return lexical_error(srcfile kw.loc 'Expected keyword')
+    let kw = compound.node_at(nodes items[start])
+    if kw is? compound.Metatag return collect_directive(items start stop srcfile @nodes)
+    if kw isnt? compound.Keyword return compound.lexical_error(srcfile kw.loc 'Expected keyword')
     let i:addr = start+1
     let parts:array<addr> = [items[start]]
     if kw.name in? flows {
@@ -292,176 +308,176 @@ collect_atom = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @n
         i = start
         loop true {
             $runtime_assert i <? items.length
-            let arm_kw = node_at(nodes items[i])
+            let arm_kw = compound.node_at(nodes items[i])
             let arm_parts:array<addr> = [items[i]]
             let condition = collect_expr(items i+1 stop|set['else'] srcfile @nodes)
-            if condition is? TokenError return condition
+            if condition is? compound.TokenError return condition
             arm_parts.push(condition.id)
             let body = collect_expr(items condition.next stop|set['else'] srcfile @nodes)
-            if body is? TokenError return body
+            if body is? compound.TokenError return body
             arm_parts.push(body.id)
-            let last = node_at(nodes body.id)
-            arms.push(append_node(@nodes KeywordExpr2[loc=Span[arm_kw.loc.start last.loc.stop] parts=arm_parts]))
+            let last = compound.node_at(nodes body.id)
+            arms.push(compound.append_node(@nodes KeywordExpr[loc=Span[arm_kw.loc.start last.loc.stop] parts=arm_parts]))
             i = body.next
             if i >=? items.length break
-            let next = node_at(nodes items[i])
-            if next isnt? Keyword1 or next.name not=? 'else' break
+            let next = compound.node_at(nodes items[i])
+            if next isnt? compound.Keyword or next.name not=? 'else' break
             i += 1
             if i <? items.length {
-                let next = node_at(nodes items[i])
-                if next is? Keyword1 and next.name in? flows continue
+                let next = compound.node_at(nodes items[i])
+                if next is? compound.Keyword and next.name in? flows continue
             }
             let result = collect_expr(items i stop|set['else'] srcfile @nodes)
-            if result is? TokenError return result
+            if result is? compound.TokenError return result
             default = result.id
             i = result.next
             break
         }
         $runtime_assert arms.length >? 0
-        let last = node_at(nodes arms[end])
-        if default isnt? none { last = node_at(nodes default) }
-        return Collected2[append_node(@nodes Flow2[loc=Span[kw.loc.start last.loc.stop] arms=arms default=default]) i]
+        let last = compound.node_at(nodes arms[end])
+        if default isnt? none { last = compound.node_at(nodes default) }
+        return Collected[compound.append_node(@nodes Flow[loc=Span[kw.loc.start last.loc.stop] arms=arms default=default]) i]
     }
     if kw.name in? set['return' 'yield'] {
-        if i+1 <? items.length and is_jux(node_at(nodes items[i]) 'SemicolonJuxtapose') and node_at(nodes items[i+1]) is? Semicolon1 {
-            return Collected2[append_node(@nodes KeywordExpr2[loc=kw.loc parts=parts]) i+2]
+        if i+1 <? items.length and is_jux(compound.node_at(nodes items[i]) 'SemicolonJuxtapose') and compound.node_at(nodes items[i+1]) is? compound.Semicolon {
+            return Collected[compound.append_node(@nodes KeywordExpr[loc=kw.loc parts=parts]) i+2]
         }
-        if i <? items.length and node_at(nodes items[i]) is? Semicolon1 { return Collected2[append_node(@nodes KeywordExpr2[loc=kw.loc parts=parts]) i+1] }
+        if i <? items.length and compound.node_at(nodes items[i]) is? compound.Semicolon { return Collected[compound.append_node(@nodes KeywordExpr[loc=kw.loc parts=parts]) i+1] }
         let bare:bool = i >=? items.length
         if i <? items.length {
-            let following = node_at(nodes items[i])
+            let following = compound.node_at(nodes items[i])
             $runtime_assert kw.loc.stop <=? following.loc.start <=? srcfile.body.length
             bare = is_stop(following stop)
             loop char in srcfile.body[kw.loc.stop..following.loc.start) { if char is? '\n' | '\r\n' { bare = true } }
         }
-        if bare return Collected2[append_node(@nodes KeywordExpr2[loc=kw.loc parts=parts]) i]
+        if bare return Collected[compound.append_node(@nodes KeywordExpr[loc=kw.loc parts=parts]) i]
     }
     if kw.name in? set['break' 'continue'] {
         let loc = kw.loc
         if i <? items.length {
-            let tag = node_at(nodes items[i])
-            if tag is? Metatag1 { parts.push(chain([items[i]] @nodes)) loc = Span[kw.loc.start tag.loc.stop] i += 1 }
+            let tag = compound.node_at(nodes items[i])
+            if tag is? compound.Metatag { parts.push(chain([items[i]] @nodes)) loc = Span[kw.loc.start tag.loc.stop] i += 1 }
         }
-        return Collected2[append_node(@nodes KeywordExpr2[loc=loc parts=parts]) i]
+        return Collected[compound.append_node(@nodes KeywordExpr[loc=loc parts=parts]) i]
     }
-    if kw.name =? 'else' return lexical_error(srcfile kw.loc '`else` is not a match arm')
+    if kw.name =? 'else' return compound.lexical_error(srcfile kw.loc '`else` is not a match arm')
     let first_stop = stop
     if kw.name =? 'import' { first_stop = stop|set['from'] }
     if kw.name =? 'from' { first_stop = stop|set['import'] }
     let first = collect_expr(items i first_stop srcfile @nodes)
-    if first is? TokenError return first
+    if first is? compound.TokenError return first
     parts.push(first.id)
     i = first.next
     let needs_import:bool = kw.name =? 'from'
     let has_from:bool = false
-    if i <? items.length { has_from = is_stop(node_at(nodes items[i]) set['from']) }
+    if i <? items.length { has_from = is_stop(compound.node_at(nodes items[i]) set['from']) }
     if needs_import or kw.name =? 'import' and has_from {
-        if i >=? items.length return lexical_error(srcfile kw.loc 'Expected `import` after `from`')
-        if needs_import and not is_stop(node_at(nodes items[i]) set['import']) return lexical_error(srcfile kw.loc 'Expected `import` after `from`')
+        if i >=? items.length return compound.lexical_error(srcfile kw.loc 'Expected `import` after `from`')
+        if needs_import and not is_stop(compound.node_at(nodes items[i]) set['import']) return compound.lexical_error(srcfile kw.loc 'Expected `import` after `from`')
         parts.push(items[i])
         let second = collect_expr(items i+1 stop srcfile @nodes)
-        if second is? TokenError return second
+        if second is? compound.TokenError return second
         parts.push(second.id)
         i = second.next
     }
-    let last = node_at(nodes parts[end])
-    return Collected2[append_node(@nodes KeywordExpr2[loc=Span[kw.loc.start last.loc.stop] parts=parts]) i]
+    let last = compound.node_at(nodes parts[end])
+    return Collected[compound.append_node(@nodes KeywordExpr[loc=Span[kw.loc.start last.loc.stop] parts=parts]) i]
 }
 
-collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<Token1>):>Collected2 | TokenError => {
+collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<compound.Token>):>Collected | compound.TokenError => {
     $runtime_assert start <? items.length
-    let tag = node_at(nodes items[start])
-    if tag isnt? Metatag1 return lexical_error(srcfile tag.loc 'Expected directive')
+    let tag = compound.node_at(nodes items[start])
+    if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
     let i:addr = start+1
-    if tag.name =? 'breakpoint' return Collected2[append_node(@nodes Directive2[loc=tag.loc name=tag.name]) i]
+    if tag.name =? 'breakpoint' return Collected[compound.append_node(@nodes Directive[loc=tag.loc name=tag.name]) i]
     let ends_here:bool = i >=? items.length
     if i <? items.length {
-        let next = node_at(nodes items[i])
-        ends_here = is_stop(next stop) or next is? Semicolon1 | KeywordExpr2 or next is? Keyword1 and next.name not in? flows
+        let next = compound.node_at(nodes items[i])
+        ends_here = is_stop(next stop) or next is? compound.Semicolon | KeywordExpr or next is? compound.Keyword and next.name not in? flows
     }
     if ends_here {
-        if tag.name =? 'fail' return Collected2[append_node(@nodes Directive2[loc=tag.loc name=tag.name]) i]
-        return lexical_error(srcfile tag.loc "`${tag.name}` needs a condition")
+        if tag.name =? 'fail' return Collected[compound.append_node(@nodes Directive[loc=tag.loc name=tag.name]) i]
+        return compound.lexical_error(srcfile tag.loc "`${tag.name}` needs a condition")
     }
     let argument = collect_expr(items i stop srcfile @nodes)
-    if argument is? TokenError return argument
-    let arg = node_at(nodes argument.id)
-    if arg isnt? Chain2 return lexical_error(srcfile tag.loc 'Expected directive expression')
+    if argument is? compound.TokenError return argument
+    let arg = compound.node_at(nodes argument.id)
+    if arg isnt? Chain return compound.lexical_error(srcfile tag.loc 'Expected directive expression')
     let loc = Span[tag.loc.start arg.loc.stop]
-    if tag.name =? 'fail' return Collected2[append_node(@nodes Directive2[loc=loc name=tag.name message=argument.id]) argument.next]
-    if tag.name =? 'abstract' return Collected2[append_node(@nodes Directive2[loc=loc name=tag.name condition=argument.id]) argument.next]
+    if tag.name =? 'fail' return Collected[compound.append_node(@nodes Directive[loc=loc name=tag.name message=argument.id]) argument.next]
+    if tag.name =? 'abstract' return Collected[compound.append_node(@nodes Directive[loc=loc name=tag.name condition=argument.id]) argument.next]
     let condition_items:array<addr> = []
     let message_items:array<addr> = []
     let comma:bool = false
     loop id in arg.items {
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         if is_symbol(node ',') {
-            if comma return lexical_error(srcfile node.loc 'An assertion takes a condition and at most one message')
+            if comma return compound.lexical_error(srcfile node.loc 'An assertion takes a condition and at most one message')
             comma = true
         }
         else if comma { message_items.push(id) }
         else { condition_items.push(id) }
     }
-    if not comma return Collected2[append_node(@nodes Directive2[loc=loc name=tag.name condition=argument.id]) argument.next]
-    if condition_items.length =? 0 or message_items.length =? 0 return lexical_error(srcfile loc 'An assertion takes condition, message')
+    if not comma return Collected[compound.append_node(@nodes Directive[loc=loc name=tag.name condition=argument.id]) argument.next]
+    if condition_items.length =? 0 or message_items.length =? 0 return compound.lexical_error(srcfile loc 'An assertion takes condition, message')
     let real_message:bool = false
     loop id in message_items {
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         if not is_identifier(node 'void') or node.loc.start not=? node.loc.stop { real_message = true }
     }
-    if not real_message return lexical_error(srcfile loc 'An assertion takes condition, message')
+    if not real_message return compound.lexical_error(srcfile loc 'An assertion takes condition, message')
     let condition = chain(condition_items @nodes)
     let message = chain(message_items @nodes)
-    return Collected2[append_node(@nodes Directive2[loc=loc name=tag.name condition=condition message=message]) argument.next]
+    return Collected[compound.append_node(@nodes Directive[loc=loc name=tag.name condition=condition message=message]) argument.next]
 }
 
-postok = (srcfile:SrcFile):>TokenStream | TokenError => {
+postok = (srcfile:SrcFile):>compound.TokenStream | compound.TokenError => {
     let result = compound.tokenize(srcfile)
-    if result is? TokenError return result
+    if result is? compound.TokenError return result
     let nodes = result.nodes
     let roots = result.roots
     loop pass in [0..12) {
         let rewritten = rewrite_list(roots pass as uint8 srcfile @nodes)
-        if rewritten is? TokenError return rewritten
+        if rewritten is? compound.TokenError return rewritten
         roots = rewritten
     }
-    return TokenStream[nodes roots]
+    return compound.TokenStream[nodes roots]
 }
 
 # Structural output includes operator wrappers and directive slot presence.
-token_payload = (node:Token1):>string => {
-    if node is? Juxtapose2 return node.options.join('|')
-    if node is? InvertedComparison2 return node.symbol
-    if node is? Directive2 return "{node.name}:{node.condition isnt? none}:{node.message isnt? none}"
+token_payload = (node:compound.Token):>string => {
+    if node is? Juxtapose return node.options.join('|')
+    if node is? InvertedComparison return node.symbol
+    if node is? Directive return "{node.name}:{node.condition isnt? none}:{node.message isnt? none}"
     return compound.token_payload(node)
 }
-children_of = (node:Token1):>array<addr> => {
-    if node is? Block1 | ParametricEscape1 return node.inner
-    if node is? IString1 return node.content
-    if node is? Chain2 return node.items
-    if node is? KeywordExpr2 return node.parts
-    if node is? Broadcast2 | CombinedAssignment2 | OpFn2 return [node.op]
+children_of = (node:compound.Token):>array<addr> => {
+    if node is? compound.Block | compound.ParametricEscape return node.inner
+    if node is? compound.IString return node.content
+    if node is? Chain return node.items
+    if node is? KeywordExpr return node.parts
+    if node is? Broadcast | CombinedAssignment | OpFn return [node.op]
     let children:array<addr> = []
-    if node is? Flow2 {
+    if node is? Flow {
         children = node.arms
         if node.default isnt? none { children.push(node.default) }
     }
-    if node is? Directive2 {
+    if node is? Directive {
         if node.condition isnt? none { children.push(node.condition) }
         if node.message isnt? none { children.push(node.message) }
     }
     return children
 }
-dump_tree = (nodes:array<Token1> roots:array<addr> depth:addr):>void => {
+dump_tree = (nodes:array<compound.Token> roots:array<addr> depth:addr):>void => {
     loop id in roots {
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         printl"{depth}\t{node.kind}\t{node.loc.start}\t{node.loc.stop}\t{_quoted(token_payload(node))}"
         dump_tree(nodes children_of(node) depth+1)
     }
 }
-show_tree = (nodes:array<Token1> roots:array<addr> indent:string):>void => {
+show_tree = (nodes:array<compound.Token> roots:array<addr> indent:string):>void => {
     loop id in roots {
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         printl"{indent}{node.kind} {_quoted(token_payload(node))}"
         show_tree(nodes children_of(node) indent+'  ')
     }
@@ -469,13 +485,13 @@ show_tree = (nodes:array<Token1> roots:array<addr> indent:string):>void => {
 
 let run = (input:cli.Input):>int64 => {
     let result = postok(input.srcfile)
-    if result is? TokenError { result.fail }
+    if result is? compound.TokenError { result.fail }
     if input.dump { dump_tree(result.nodes result.roots 0) }
     else {
         let pointers:array<Pointer> = []
         loop id in result.roots {
-            let node = node_at(result.nodes id)
-            if node is? Whitespace1 continue
+            let node = compound.node_at(result.nodes id)
+            if node is? compound.Whitespace continue
             pointers.push(Pointer[span=node.loc message="{node.kind} {_quoted(token_payload(node))}"])
         }
         cli.show_tokens(input.srcfile pointers 't2')

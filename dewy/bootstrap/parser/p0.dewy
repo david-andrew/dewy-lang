@@ -1,8 +1,6 @@
 from reporting import SrcFile, Span, Pointer, Warning
-from p"t1.dewy" import Token1, TokenError, TokenStream, BasePrefix, Identifier1, Keyword1, StringChunk1, Block1, IString1, ParametricEscape1, Semicolon1, Operator1, append_node, node_at, lexical_error
-from p"t2.dewy" import Juxtapose2, InvertedComparison2, Broadcast2, CombinedAssignment2, Chain2, KeywordExpr2, Flow2, Directive2, is_binary, is_prefix, is_postfix, is_identifier, is_jux
+import p"t1.dewy" as compound
 import p"t2.dewy" as post
-
 import p"cli.dewy" as cli
 doc"""
 Initial parsing by binding-power reductions, preserving ambiguous
@@ -12,20 +10,24 @@ Unlike hosted ProtoAST, every intermediate item has an explicit nominal
 AST/token distinction. The hosted pending design notes are retained in
 ../DESIGN_NOTES.md, including operator chains and backtick preference.
 """
-AST0 = $abstract type of Token1
-Atom0 = type of AST0 & [kind='Atom' item:addr]
-BinOp0 = type of AST0 & [kind='BinOp' op:addr left:addr right:addr]
-Prefix0 = type of AST0 & [kind='Prefix' op:addr item:addr]
-Postfix0 = type of AST0 & [kind='Postfix' op:addr item:addr]
-Flat0 = type of AST0 & [kind='Flat' op:addr items:array<addr>]
-Ambiguous0 = type of AST0 & [kind='Ambiguous' candidates:array<addr>]
-Block0 = type of AST0 & [kind='Block' inner:array<addr> delims:string base:BasePrefix?=none]
-ParametricEscape0 = type of AST0 & [kind='ParametricEscape' inner:array<addr>]
-IString0 = type of AST0 & [kind='IString' content:array<addr>]
-KeywordExpr0 = type of AST0 & [kind='KeywordExpr' parts:array<addr>]
-Flow0 = type of AST0 & [kind='Flow' arms:array<addr> default:addr?=none]
-Directive0 = type of AST0 & [kind='AssertDirective' name:string condition:addr?=none message:addr?=none]
-Program:type = [nodes:array<Token1> root:addr]
+AST = $abstract type of compound.Token
+# Leaf tokens keep their literal/source metadata inside Atom. Containers get
+# their own AST variants rather than placing AST children into token fields.
+Atom = type of AST & [kind='Atom' item:addr]
+BinOp = type of AST & [kind='BinOp' op:addr left:addr right:addr]
+Prefix = type of AST & [kind='Prefix' op:addr item:addr]
+Postfix = type of AST & [kind='Postfix' op:addr item:addr]
+Flat = type of AST & [kind='Flat' op:addr items:array<addr>]
+# These alternatives are equally viable syntactically; their order is not a
+# preference. Typechecking must test them and diagnose any remaining ambiguity.
+Ambiguous = type of AST & [kind='Ambiguous' candidates:array<addr>]
+Block = type of AST & [kind='Block' inner:array<addr> delims:string base:compound.BasePrefix?=none]
+ParametricEscape = type of AST & [kind='ParametricEscape' inner:array<addr>]
+IString = type of AST & [kind='IString' content:array<addr>]
+KeywordExpr = type of AST & [kind='KeywordExpr' parts:array<addr>]
+Flow = type of AST & [kind='Flow' arms:array<addr> default:addr?=none]
+Directive = type of AST & [kind='AssertDirective' name:string condition:addr?=none message:addr?=none]
+Program:type = [nodes:array<compound.Token> root:addr]
 Associativity:type = 'left' | 'right' | 'prefix' | 'postfix' | 'flat' | 'fail'
 PrecedenceRow:type = const [assoc:Associativity operators:set<string>]
 # Highest precedence first; this is the hosted table, including its reserved
@@ -68,29 +70,28 @@ const precedence_rows:array<PrecedenceRow> = [
     [assoc="fail" operators=set["=" "::" ":=" "CombinedAssignmentOp"]]
     [assoc="left" operators=set["SemicolonJuxtapose"]]
 ]
-Power0:type = [left:array<int64> right:array<int64> assocs:array<Associativity>]
-Rank0:type = [op:addr side:int8 power:int64]
-Shift0:type = [direction:int8 left:addr?=none right:addr?=none]
-Work0:type = [items:array<addr> shifts:array<int8>]
-Reduction0:type = [id:addr start:addr stop:addr]
+Power:type = [left:array<int64> right:array<int64> assocs:array<Associativity>]
+Rank:type = [op:addr side:int8 power:int64]
+Shift:type = [direction:int8 left:addr?=none right:addr?=none]
+Work:type = [items:array<addr> shifts:array<int8>]
 
-operator_label = (node:Token1 nodes:array<Token1>):>string => {
-    if node is? Operator1 | InvertedComparison2 return node.symbol
-    if node is? CombinedAssignment2 return 'CombinedAssignmentOp'
-    if node is? Broadcast2 return operator_label(node_at(nodes node.op) nodes)
-    if node is? Juxtapose2 return node.options.join('|')
+operator_label = (node:compound.Token nodes:array<compound.Token>):>string => {
+    if node is? compound.Operator | post.InvertedComparison return node.symbol
+    if node is? post.CombinedAssignment return 'CombinedAssignmentOp'
+    if node is? post.Broadcast return operator_label(compound.node_at(nodes node.op) nodes)
+    if node is? post.Juxtapose return node.options.join('|')
     return node.kind
 }
-operator_equal = (a:Token1 b:Token1 nodes:array<Token1>):>bool => {
+operator_equal = (a:compound.Token b:compound.Token nodes:array<compound.Token>):>bool => {
     if a.kind not=? b.kind return false
-    if a is? Broadcast2 and b is? Broadcast2 return operator_equal(node_at(nodes a.op) node_at(nodes b.op) nodes)
-    if a is? CombinedAssignment2 and b is? CombinedAssignment2 return operator_equal(node_at(nodes a.op) node_at(nodes b.op) nodes)
+    if a is? post.Broadcast and b is? post.Broadcast return operator_equal(compound.node_at(nodes a.op) compound.node_at(nodes b.op) nodes)
+    if a is? post.CombinedAssignment and b is? post.CombinedAssignment return operator_equal(compound.node_at(nodes a.op) compound.node_at(nodes b.op) nodes)
     return operator_label(a nodes) =? operator_label(b nodes)
 }
-powers = (op:Token1 nodes:array<Token1>):>Power0 => {
+powers = (op:compound.Token nodes:array<compound.Token>):>Power => {
     let labels:array<string> = []
     labels.push(operator_label(op nodes))
-    if op is? Juxtapose2 { labels = op.options }
+    if op is? post.Juxtapose { labels = op.options }
     let left:array<int64> = []
     let right:array<int64> = []
     let assocs:array<Associativity> = []
@@ -112,68 +113,68 @@ powers = (op:Token1 nodes:array<Token1>):>Power0 => {
     }
     if left.length =? 0 { left.push(-1) }
     if right.length =? 0 { right.push(-1) }
-    return Power0[left right assocs]
+    return Power[left right assocs]
 }
 strictly_greater = (a:array<int64> b:array<int64>):>bool => {
     loop x in a { loop y in b { if x <=? y return false } }
     return true
 }
-operator_options = (id:addr @nodes:array<Token1>):>array<addr> => {
-    let op = node_at(nodes id)
-    if op isnt? Juxtapose2 return [id]
+operator_options = (id:addr @nodes:array<compound.Token>):>array<addr> => {
+    let op = compound.node_at(nodes id)
+    if op isnt? post.Juxtapose return [id]
     let result:array<addr> = []
-    loop option in op.options { result.push(append_node(@nodes Juxtapose2[loc=op.loc options=[option]])) }
+    loop option in op.options { result.push(compound.append_node(@nodes post.Juxtapose[loc=op.loc options=[option]])) }
     return result
 }
-combine_options = (ids:array<addr> @nodes:array<Token1>):>addr => {
+combine_options = (ids:array<addr> @nodes:array<compound.Token>):>addr => {
     $runtime_assert ids.length >? 0
     if ids.length =? 1 return ids[0]
-    let first = node_at(nodes ids[0])
+    let first = compound.node_at(nodes ids[0])
     let options:array<string> = []
     loop id in ids {
-        let op = node_at(nodes id)
-        if op is? Juxtapose2 { loop option in op.options { if option not in? options { options.push(option) } } }
+        let op = compound.node_at(nodes id)
+        if op is? post.Juxtapose { loop option in op.options { if option not in? options { options.push(option) } } }
     }
-    return append_node(@nodes Juxtapose2[loc=first.loc options=options])
+    return compound.append_node(@nodes post.Juxtapose[loc=first.loc options=options])
 }
 
 # Only branch when the two sides compete. Operators that bind on the same
 # side together remain a QJuxtapose, as in hosted p0's ShiftMeta groups.
-shift_options = (items:array<addr> position:addr @nodes:array<Token1>):>array<Shift0> => {
+shift_options = (items:array<addr> position:addr @nodes:array<compound.Token>):>array<Shift> => {
     $runtime_assert position <? items.length
-    let node = node_at(nodes items[position])
+    let node = compound.node_at(nodes items[position])
     let left:addr? = none
     let right:addr? = none
     if position >? 0 {
-        let candidate = node_at(nodes items[position-1])
-        if candidate isnt? AST0 { left = items[position-1] }
+        let candidate = compound.node_at(nodes items[position-1])
+        if candidate isnt? AST { left = items[position-1] }
     }
     if position+1 <? items.length {
-        let candidate = node_at(nodes items[position+1])
-        if candidate isnt? AST0 { right = items[position+1] }
+        let candidate = compound.node_at(nodes items[position+1])
+        if candidate isnt? AST { right = items[position+1] }
     }
-    if node is? Atom0 and node_at(nodes node.item) is? Semicolon1 {
-        if left is? none return [Shift0[0]]
-        if not is_jux(node_at(nodes left) 'SemicolonJuxtapose') return [Shift0[0]]
+    if node is? Atom and compound.node_at(nodes node.item) is? compound.Semicolon {
+        if left is? none return [Shift[0]]
+        if not post.is_jux(compound.node_at(nodes left) 'SemicolonJuxtapose') return [Shift[0]]
     }
-    let l:array<int64> = if left is? none [-1] else powers(node_at(nodes left) nodes).right
-    let r:array<int64> = if right is? none [-1] else powers(node_at(nodes right) nodes).left
-    if strictly_greater(l r) return [Shift0[-1]]
-    if strictly_greater(r l) return [Shift0[1]]
-    if left is? none or right is? none return [Shift0[0]]
-    let ranks:array<Rank0> = []
+    let l:array<int64> = if left is? none [-1] else powers(compound.node_at(nodes left) nodes).right
+    let r:array<int64> = if right is? none [-1] else powers(compound.node_at(nodes right) nodes).left
+    if strictly_greater(l r) return [Shift[-1]]
+    if strictly_greater(r l) return [Shift[1]]
+    if left is? none or right is? none return [Shift[0]]
+    let ranks:array<Rank> = []
     let left_options = operator_options(left @nodes)
     let right_options = operator_options(right @nodes)
     loop id in left_options {
-        let p = powers(node_at(nodes id) nodes)
-        loop bp in p.right { ranks.push(Rank0[id (-1) bp]) }
+        let p = powers(compound.node_at(nodes id) nodes)
+        loop bp in p.right { ranks.push(Rank[id (-1) bp]) }
     }
     loop id in right_options {
-        let p = powers(node_at(nodes id) nodes)
-        loop bp in p.left { ranks.push(Rank0[id 1 bp]) }
+        let p = powers(compound.node_at(nodes id) nodes)
+        loop bp in p.left { ranks.push(Rank[id 1 bp]) }
     }
     ranks.sort(key=(.power) reverse=true)
-    let result:array<Shift0> = []
+    let result:array<Shift> = []
     let i:addr = 0
     loop i <? ranks.length {
         let leader = ranks[i]
@@ -189,23 +190,27 @@ shift_options = (items:array<addr> position:addr @nodes:array<Token1>):>array<Sh
         if subordinate.length =? 0 continue
         let higher = combine_options(superior @nodes)
         let lower = combine_options(subordinate @nodes)
-        result.push(Shift0[direction=leader.side left=(if leader.side =? -1 higher else lower) right=(if leader.side =? 1 higher else lower)])
+        result.push(Shift[direction=leader.side left=(if leader.side =? -1 higher else lower) right=(if leader.side =? 1 higher else lower)])
     }
     return result
 }
-can_attach_left = (items:array<addr> position:addr nodes:array<Token1>):>bool => {
+# Decide whether an operator can have a left operand through intervening
+# postfix operators. A prefix-only operator or an expression separator blocks
+# that route. Hosted p0 uses this to prefer postfix backtick when both roles
+# fit; TODO: that preference is built into the algorithm, not just the table.
+can_attach_left = (items:array<addr> position:addr nodes:array<compound.Token>):>bool => {
     let i:addr = position
     loop i >? 0 {
         i -= 1
         $runtime_assert i <? items.length
-        let node = node_at(nodes items[i])
-        if node is? AST0 {
-            if node is? Atom0 and node_at(nodes node.item) is? Semicolon1 return false
+        let node = compound.node_at(nodes items[i])
+        if node is? AST {
+            if node is? Atom and compound.node_at(nodes node.item) is? compound.Semicolon return false
             return true
         }
-        if is_binary(node nodes) return false
-        let prefix = is_prefix(node nodes)
-        let postfix = is_postfix(node nodes)
+        if post.is_binary(node nodes) return false
+        let prefix = post.is_prefix(node nodes)
+        let postfix = post.is_postfix(node nodes)
         if prefix and not postfix return false
         if postfix and not prefix return true
         if not prefix and not postfix return false
@@ -213,17 +218,21 @@ can_attach_left = (items:array<addr> position:addr nodes:array<Token1>):>bool =>
     return false
 }
 
-reduce_work = (work:Work0 srcfile:SrcFile @nodes:array<Token1>):>array<addr> | TokenError => {
+# An operand's shift points at the neighboring operator that wins it. Reduce
+# only operators whose required operands point inward. Flat operators consume
+# a whole connected run; nonassociative ones diagnose nested uses instead of
+# arbitrarily choosing a tree. Repeating the pass leaves one expression.
+reduce_work = (work:Work srcfile:SrcFile @nodes:array<compound.Token>):>array<addr> | compound.TokenError => {
     let items = work.items
     let shifts = work.shifts
     $runtime_assert shifts.length =? items.length
     let output:array<addr> = []
     let i:addr = 0
     loop i <? items.length {
-        let node = node_at(nodes items[i])
-        if node is? AST0 { output.push(items[i]) i += 1 continue }
+        let node = compound.node_at(nodes items[i])
+        if node is? AST { output.push(items[i]) i += 1 continue }
         let p = powers(node nodes)
-        if p.assocs.length =? 0 return lexical_error(srcfile node.loc "No precedence is defined for `{operator_label(node nodes)}`")
+        if p.assocs.length =? 0 return compound.lexical_error(srcfile node.loc "No precedence is defined for `{operator_label(node nodes)}`")
         let left:addr? = none
         let right:addr? = none
         if i >? 0 and shifts[i-1] =? 1 { left = items[i-1] }
@@ -232,8 +241,8 @@ reduce_work = (work:Work0 srcfile:SrcFile @nodes:array<Token1>):>array<addr> | T
         if binary {
             $runtime_assert i >? 0 and i+1 <? items.length
             $runtime_assert left isnt? none and right isnt? none
-            let lhs = node_at(nodes left)
-            let rhs = node_at(nodes right)
+            let lhs = compound.node_at(nodes left)
+            let rhs = compound.node_at(nodes right)
             let loc = Span[lhs.loc.start rhs.loc.stop]
             let id:addr = 0
             if 'flat' in? p.assocs {
@@ -242,13 +251,13 @@ reduce_work = (work:Work0 srcfile:SrcFile @nodes:array<Token1>):>array<addr> | T
                 let first:addr = i-1
                 let last:addr = i+1
                 loop first >=? 2 {
-                    let prev = node_at(nodes items[first-1])
-                    if prev is? AST0 or not operator_equal(prev node nodes) break
+                    let prev = compound.node_at(nodes items[first-1])
+                    if prev is? AST or not operator_equal(prev node nodes) break
                     first -= 2
                 }
                 loop last+2 <? items.length {
-                    let next = node_at(nodes items[last+1])
-                    if next is? AST0 or not operator_equal(next node nodes) break
+                    let next = compound.node_at(nodes items[last+1])
+                    if next is? AST or not operator_equal(next node nodes) break
                     last += 2
                 }
                 if shifts[first] not=? 1 or shifts[last] not=? -1 { output.push(items[i]) i += 1 continue }
@@ -262,42 +271,42 @@ reduce_work = (work:Work0 srcfile:SrcFile @nodes:array<Token1>):>array<addr> | T
                 let dots:addr = 0
                 loop j <=? last {
                     $runtime_assert j <? items.length
-                    let child = node_at(nodes items[j])
-                    if child isnt? AST0 return lexical_error(srcfile node.loc 'Incomplete flat expression')
-                    if child is? Atom0 and is_identifier(node_at(nodes child.item) '..') { dots += 1 }
+                    let child = compound.node_at(nodes items[j])
+                    if child isnt? AST return compound.lexical_error(srcfile node.loc 'Incomplete flat expression')
+                    if child is? Atom and post.is_identifier(compound.node_at(nodes child.item) '..') { dots += 1 }
                     children.push(items[j])
                     j += 2
                 }
-                if is_jux(node 'RangeJuxtapose') and dots >? 1 return lexical_error(srcfile node.loc 'Multiple `..` tokens encountered in single range expression')
-                let first_node = node_at(nodes items[first])
-                let last_node = node_at(nodes items[last])
-                id = append_node(@nodes Flat0[loc=Span[first_node.loc.start last_node.loc.stop] op=items[i] items=children])
+                if post.is_jux(node 'RangeJuxtapose') and dots >? 1 return compound.lexical_error(srcfile node.loc 'Multiple `..` tokens encountered in single range expression')
+                let first_node = compound.node_at(nodes items[first])
+                let last_node = compound.node_at(nodes items[last])
+                id = compound.append_node(@nodes Flat[loc=Span[first_node.loc.start last_node.loc.stop] op=items[i] items=children])
                 i = last+1
             }
             else {
                 if 'fail' in? p.assocs {
-                    if lhs is? BinOp0 and operator_equal(node_at(nodes lhs.op) node nodes) return lexical_error(srcfile node.loc 'Non-associative operator nesting')
-                    if rhs is? BinOp0 and operator_equal(node_at(nodes rhs.op) node nodes) return lexical_error(srcfile node.loc 'Non-associative operator nesting')
+                    if lhs is? BinOp and operator_equal(compound.node_at(nodes lhs.op) node nodes) return compound.lexical_error(srcfile node.loc 'Non-associative operator nesting')
+                    if rhs is? BinOp and operator_equal(compound.node_at(nodes rhs.op) node nodes) return compound.lexical_error(srcfile node.loc 'Non-associative operator nesting')
                 }
                 $runtime_assert output.length >? 0
                 output.pop;
-                id = append_node(@nodes BinOp0[loc=loc op=items[i] left=left right=right])
+                id = compound.append_node(@nodes BinOp[loc=loc op=items[i] left=left right=right])
                 i += 2
             }
             output.push(id)
             continue
         }
         if left isnt? none and 'postfix' in? p.assocs {
-            let lhs = node_at(nodes left)
+            let lhs = compound.node_at(nodes left)
             $runtime_assert output.length >? 0
             output.pop;
-            output.push(append_node(@nodes Postfix0[loc=Span[lhs.loc.start node.loc.stop] op=items[i] item=left]))
+            output.push(compound.append_node(@nodes Postfix[loc=Span[lhs.loc.start node.loc.stop] op=items[i] item=left]))
             i += 1
             continue
         }
         if right isnt? none and 'prefix' in? p.assocs and not can_attach_left(items i nodes) {
-            let rhs = node_at(nodes right)
-            output.push(append_node(@nodes Prefix0[loc=Span[node.loc.start rhs.loc.stop] op=items[i] item=right]))
+            let rhs = compound.node_at(nodes right)
+            output.push(compound.append_node(@nodes Prefix[loc=Span[node.loc.start rhs.loc.stop] op=items[i] item=right]))
             i += 2
             continue
         }
@@ -307,22 +316,22 @@ reduce_work = (work:Work0 srcfile:SrcFile @nodes:array<Token1>):>array<addr> | T
     return output
 }
 
-reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<Token1>):>addr | TokenError => {
-    let alternatives:array<Work0> = []
-    alternatives.push(Work0[initial []])
+reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<compound.Token>):>addr | compound.TokenError => {
+    let alternatives:array<Work> = []
+    alternatives.push(Work[initial []])
     loop true {
         let progress:bool = false
-        let following:array<Work0> = []
+        let following:array<Work> = []
         loop alternative in alternatives {
             let zeros:array<int8> = [loop item in alternative.items 0 as int8]
-            let branches:array<Work0> = []
-            branches.push(Work0[alternative.items zeros])
+            let branches:array<Work> = []
+            branches.push(Work[alternative.items zeros])
             loop position in 0.. and position <? alternative.items.length {
-                let node = node_at(nodes alternative.items[position])
-                if node isnt? AST0 continue
+                let node = compound.node_at(nodes alternative.items[position])
+                if node isnt? AST continue
                 let options = shift_options(alternative.items position @nodes)
-                if options.length =? 0 return lexical_error(srcfile node.loc 'Unresolved operator binding powers')
-                let expanded:array<Work0> = []
+                if options.length =? 0 return compound.lexical_error(srcfile node.loc 'Unresolved operator binding powers')
+                let expanded:array<Work> = []
                 loop option in options {
                     loop branch in branches {
                         let items = branch.items
@@ -339,7 +348,7 @@ reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<Token1>):>addr 
                             $runtime_assert position+1 <? items.length
                             items[position+1] = right
                         }
-                        expanded.push(Work0[items shifts])
+                        expanded.push(Work[items shifts])
                     }
                 }
                 branches = expanded
@@ -347,9 +356,9 @@ reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<Token1>):>addr 
             if branches.length >? 1 { progress = true }
             loop branch in branches {
                 let reduced = reduce_work(branch srcfile @nodes)
-                if reduced is? TokenError return reduced
+                if reduced is? compound.TokenError return reduced
                 if reduced.length <? branch.items.length { progress = true }
-                following.push(Work0[reduced []])
+                following.push(Work[reduced []])
             }
         }
         alternatives = following
@@ -357,136 +366,136 @@ reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<Token1>):>addr 
     }
     let candidates:array<addr> = []
     loop alternative in alternatives {
-        if alternative.items.length not=? 1 return lexical_error(srcfile Span[0 0] 'Incomplete expression: missing operand or unsupported operator chain')
-        let node = node_at(nodes alternative.items[0])
-        if node isnt? AST0 return lexical_error(srcfile node.loc 'Expected an operand')
+        if alternative.items.length not=? 1 return compound.lexical_error(srcfile Span[0 0] 'Incomplete expression: missing operand or unsupported operator chain')
+        let node = compound.node_at(nodes alternative.items[0])
+        if node isnt? AST return compound.lexical_error(srcfile node.loc 'Expected an operand')
         candidates.push(alternative.items[0])
     }
-    if candidates.length =? 0 return lexical_error(srcfile Span[0 0] 'Expected expression')
+    if candidates.length =? 0 return compound.lexical_error(srcfile Span[0 0] 'Expected expression')
     if candidates.length =? 1 return candidates[0]
-    let first = node_at(nodes candidates[0])
+    let first = compound.node_at(nodes candidates[0])
     if candidates.length >? 50 { Warning[srcfile=srcfile title='Highly ambiguous expressions' pointers=[Pointer[span=first.loc message="{candidates.length} possible parses; add explicit operators to disambiguate"]]].warn }
-    return append_node(@nodes Ambiguous0[loc=first.loc candidates=candidates])
+    return compound.append_node(@nodes Ambiguous[loc=first.loc candidates=candidates])
 }
 
-parse_node = (id:addr srcfile:SrcFile @nodes:array<Token1>):>addr | TokenError => {
-    let node = node_at(nodes id)
-    if node is? Chain2 {
+parse_node = (id:addr srcfile:SrcFile @nodes:array<compound.Token>):>addr | compound.TokenError => {
+    let node = compound.node_at(nodes id)
+    if node is? post.Chain {
         let items:array<addr> = []
         loop child in node.items {
-            let token = node_at(nodes child)
-            if token is? Operator1 | Juxtapose2 | InvertedComparison2 | Broadcast2 | CombinedAssignment2 { items.push(child) }
+            let token = compound.node_at(nodes child)
+            if token is? compound.Operator | post.Juxtapose | post.InvertedComparison | post.Broadcast | post.CombinedAssignment { items.push(child) }
             else {
                 let parsed = parse_node(child srcfile @nodes)
-                if parsed is? TokenError return parsed
+                if parsed is? compound.TokenError return parsed
                 items.push(parsed)
             }
         }
         return reduce_chain(items srcfile @nodes)
     }
     let children:array<addr> = []
-    if node is? Block1 | ParametricEscape1 { children = node.inner }
-    else if node is? IString1 { children = node.content }
-    else if node is? KeywordExpr2 { children = node.parts }
-    else if node is? Flow2 { children = node.arms }
+    if node is? compound.Block | compound.ParametricEscape { children = node.inner }
+    else if node is? compound.IString { children = node.content }
+    else if node is? post.KeywordExpr { children = node.parts }
+    else if node is? post.Flow { children = node.arms }
     loop i in 0.. and i <? children.length {
-        let child = node_at(nodes children[i])
-        if child is? Keyword1 | StringChunk1 continue
+        let child = compound.node_at(nodes children[i])
+        if child is? compound.Keyword | compound.StringChunk continue
         let parsed = parse_node(children[i] srcfile @nodes)
-        if parsed is? TokenError return parsed
+        if parsed is? compound.TokenError return parsed
         children[i] = parsed
     }
-    if node is? Block1 return append_node(@nodes Block0[loc=node.loc inner=children delims=node.delims base=node.base])
-    if node is? ParametricEscape1 return append_node(@nodes ParametricEscape0[loc=node.loc inner=children])
-    if node is? IString1 return append_node(@nodes IString0[loc=node.loc content=children])
-    if node is? KeywordExpr2 return append_node(@nodes KeywordExpr0[loc=node.loc parts=children])
-    if node is? Flow2 {
+    if node is? compound.Block return compound.append_node(@nodes Block[loc=node.loc inner=children delims=node.delims base=node.base])
+    if node is? compound.ParametricEscape return compound.append_node(@nodes ParametricEscape[loc=node.loc inner=children])
+    if node is? compound.IString return compound.append_node(@nodes IString[loc=node.loc content=children])
+    if node is? post.KeywordExpr return compound.append_node(@nodes KeywordExpr[loc=node.loc parts=children])
+    if node is? post.Flow {
         let default = node.default
         if default isnt? none {
             let parsed = parse_node(default srcfile @nodes)
-            if parsed is? TokenError return parsed
+            if parsed is? compound.TokenError return parsed
             default = parsed
         }
-        return append_node(@nodes Flow0[loc=node.loc arms=children default=default])
+        return compound.append_node(@nodes Flow[loc=node.loc arms=children default=default])
     }
-    if node is? Directive2 {
+    if node is? post.Directive {
         let condition = node.condition
         let message = node.message
         if condition isnt? none {
             let parsed = parse_node(condition srcfile @nodes)
-            if parsed is? TokenError return parsed
+            if parsed is? compound.TokenError return parsed
             condition = parsed
         }
         if message isnt? none {
             let parsed = parse_node(message srcfile @nodes)
-            if parsed is? TokenError return parsed
+            if parsed is? compound.TokenError return parsed
             message = parsed
         }
-        return append_node(@nodes Directive0[loc=node.loc name=node.name condition=condition message=message])
+        return compound.append_node(@nodes Directive[loc=node.loc name=node.name condition=condition message=message])
     }
-    return append_node(@nodes Atom0[loc=node.loc item=id])
+    return compound.append_node(@nodes Atom[loc=node.loc item=id])
 }
-parse = (srcfile:SrcFile):>Program | TokenError => {
+parse = (srcfile:SrcFile):>Program | compound.TokenError => {
     let tokens = post.postok(srcfile)
-    if tokens is? TokenError return tokens
+    if tokens is? compound.TokenError return tokens
     let nodes = tokens.nodes
     let children:array<addr> = []
     loop id in tokens.roots {
         let parsed = parse_node(id srcfile @nodes)
-        if parsed is? TokenError return parsed
+        if parsed is? compound.TokenError return parsed
         children.push(parsed)
     }
     let loc = Span[0 0]
     if children.length >? 0 {
-        let first = node_at(nodes children[0])
-        let last = node_at(nodes children[end])
+        let first = compound.node_at(nodes children[0])
+        let last = compound.node_at(nodes children[end])
         loc = Span[first.loc.start last.loc.stop]
     }
-    let root = append_node(@nodes Block0[loc=loc inner=children delims='\{\}'])
+    let root = compound.append_node(@nodes Block[loc=loc inner=children delims='\{\}'])
     return Program[nodes root]
 }
 
-token_payload = (node:Token1):>string => {
-    if node is? Block0 return "{node.delims}:{if node.base is? none '' else node.base}"
-    if node is? Directive0 return "{node.name}:{node.condition isnt? none}:{node.message isnt? none}"
+token_payload = (node:compound.Token):>string => {
+    if node is? Block return "{node.delims}:{if node.base is? none '' else node.base}"
+    if node is? Directive return "{node.name}:{node.condition isnt? none}:{node.message isnt? none}"
     return post.token_payload(node)
 }
-children_of = (node:Token1):>array<addr> => {
-    if node is? Atom0 return [node.item]
-    if node is? BinOp0 return [node.op node.left node.right]
-    if node is? Prefix0 | Postfix0 return [node.op node.item]
-    if node is? Flat0 {
+children_of = (node:compound.Token):>array<addr> => {
+    if node is? Atom return [node.item]
+    if node is? BinOp return [node.op node.left node.right]
+    if node is? Prefix | Postfix return [node.op node.item]
+    if node is? Flat {
         let children:array<addr> = [node.op]
         loop id in node.items { children.push(id) }
         return children
     }
-    if node is? Ambiguous0 return node.candidates
-    if node is? Block0 | ParametricEscape0 return node.inner
-    if node is? IString0 return node.content
-    if node is? KeywordExpr0 return node.parts
+    if node is? Ambiguous return node.candidates
+    if node is? Block | ParametricEscape return node.inner
+    if node is? IString return node.content
+    if node is? KeywordExpr return node.parts
     let children:array<addr> = []
-    if node is? Flow0 {
+    if node is? Flow {
         children = node.arms
         if node.default isnt? none { children.push(node.default) }
         return children
     }
-    if node is? Directive0 {
+    if node is? Directive {
         if node.condition isnt? none { children.push(node.condition) }
         if node.message isnt? none { children.push(node.message) }
         return children
     }
     return post.children_of(node)
 }
-dump_tree = (nodes:array<Token1> roots:array<addr> depth:addr):>void => {
+dump_tree = (nodes:array<compound.Token> roots:array<addr> depth:addr):>void => {
     loop id in roots {
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         printl"{depth}\t{node.kind}\t{node.loc.start}\t{node.loc.stop}\t{_quoted(token_payload(node))}"
         dump_tree(nodes children_of(node) depth+1)
     }
 }
-show_tree = (nodes:array<Token1> roots:array<addr> indent:string):>void => {
+show_tree = (nodes:array<compound.Token> roots:array<addr> indent:string):>void => {
     loop id in roots {
-        let node = node_at(nodes id)
+        let node = compound.node_at(nodes id)
         printl"{indent}{node.kind} {_quoted(token_payload(node))} [{node.loc.start}..{node.loc.stop})"
         show_tree(nodes children_of(node) indent+'  ')
     }
@@ -494,7 +503,7 @@ show_tree = (nodes:array<Token1> roots:array<addr> indent:string):>void => {
 
 let run = (input:cli.Input):>int64 => {
     let result = parse(input.srcfile)
-    if result is? TokenError { result.fail }
+    if result is? compound.TokenError { result.fail }
     if input.dump { dump_tree(result.nodes [result.root] 0) }
     else { show_tree(result.nodes [result.root] '') }
     return 0
