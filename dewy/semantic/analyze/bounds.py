@@ -890,6 +890,7 @@ class _BoundsValidator:
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, current, validate=validate)
             self._eval(node.value, current, validate=validate)
+            self._forget_container_value(node.target.array, current)
             target = _strip_casts(node.target)
             if isinstance(target, hir.Index):
                 stored_into = _runtime_array_id(target.array, self.registry)
@@ -2102,6 +2103,8 @@ class _BoundsValidator:
             return Interval.exact(node.type.value)
         if isinstance(node, hir.Integer):
             return Interval.exact(node.value)
+        if isinstance(node, hir.ObjectLiteral) and node.integer_value is not None:
+            return Interval.exact(node.integer_value)
         if isinstance(node, hir.ExpressedIdentifier):
             interval = (
                 state.get(node.binding_id)
@@ -2267,6 +2270,7 @@ class _BoundsValidator:
         if isinstance(node, hir.IndexAssign):
             self._eval(node.target, state, validate=validate)
             self._eval(node.value, state, validate=validate)
+            self._forget_container_value(node.target.array, state)
             return None
         if isinstance(node, hir.StringIndex):
             self._eval(node.string, state, validate=validate)
@@ -2374,6 +2378,8 @@ class _BoundsValidator:
                     ))
                 if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
                     self._validate_length_invariant(node, array_id, state[key], state)
+            if name in {'push', 'insert', 'pop', 'truncate', 'clear', 'sort', 'reverse'}:
+                self._forget_container_value(node.func.array, state)
             return None
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
             # `[loop … value]`: the capture's push — the element's facts join the array's
@@ -2394,7 +2400,7 @@ class _BoundsValidator:
             ]
             for arg in node.kw_args.values():
                 self._eval(arg, state, validate=validate)
-            name = (
+            name = node.integer_operation or (
                 node.func.name
                 if isinstance(node.func, hir.ExpressedIdentifier)
                 else None
@@ -2410,7 +2416,14 @@ class _BoundsValidator:
                 self._apply_call_facts(state, node, None)   # what a single result promises of the arguments unconditionally
             result: Interval | None = None
             arithmetic = False
-            if name == '__unary_sub__' and len(arguments) == 1:
+            if name in ('identity', 'narrow') and len(arguments) == 1:
+                result = arguments[0]
+                if name == 'narrow':
+                    result = self._fit_type(result, node.type)
+                    if validate and result is None:
+                        assert isinstance(node.type, str)
+                        self._report_unfit(node, arguments[0], node.type)
+            elif name == '__unary_sub__' and len(arguments) == 1:
                 arithmetic = True
                 value = arguments[0]
                 if value is not None:
@@ -2423,7 +2436,10 @@ class _BoundsValidator:
                     )
             elif len(arguments) == 2 and name in _WORD_ARITHMETIC:
                 arithmetic = True
-                if validate and name in ('__floordiv__', '__mod__'):
+                if validate and name in ('__floordiv__', '__mod__') and node.integer_operation is None:
+                    # Library numeric calls already check their nonzero
+                    # divisor parameter. A nonzero tagged BigInt is not a
+                    # fixed-width interval and must not be reproved as one.
                     self._validate_divisor(node.pos_args[1], arguments[1], state)
                 result = self._binary_interval(
                     name,
@@ -2431,6 +2447,7 @@ class _BoundsValidator:
                     arguments[1],
                     node.type,
                     bound=self._difference_bound(node, state) if name == '__sub__' else None,
+                    floor=node.integer_operation is not None,
                 )
             refined_result = _call_result_refinement(node)
             if refined_result is not None:
@@ -2534,6 +2551,7 @@ class _BoundsValidator:
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             value = self._eval(node.value, state, validate=validate)
+            self._forget_container_value(node.target.value, state)
             assigned = sb.member_path(node.target)
             if assigned is not None:
                 root_id, path = assigned
@@ -2572,6 +2590,8 @@ class _BoundsValidator:
             return Interval.exact(node.type.value)
         if isinstance(node, hir.Integer):
             return Interval.exact(node.value)
+        if isinstance(node, hir.ObjectLiteral) and node.integer_value is not None:
+            return Interval.exact(node.integer_value)
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             return self._constant_expr(node.expr, seen)
         if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):
@@ -2583,19 +2603,21 @@ class _BoundsValidator:
             return self._constant_expr(node.items[0], seen)  # parentheses
         if not isinstance(node, hir.FunctionCall):
             return None
-        name = (
+        name = node.integer_operation or (
             node.func.name
             if isinstance(node.func, hir.ExpressedIdentifier)
             else None
         )
         arguments = [self._constant_expr(arg, seen) for arg in node.pos_args]
+        if len(arguments) == 1 and name in ('identity', 'narrow'):
+            return arguments[0] if name == 'identity' else self._fit_type(arguments[0], node.type)
         if len(arguments) == 1 and name == '__unary_sub__':
             value = arguments[0]
             if value is None or value.lower is None:
                 return None
             return Interval.exact(-value.lower)
         if len(arguments) == 2 and name is not None:
-            return self._binary_interval(name, arguments[0], arguments[1], node.type)
+            return self._binary_interval(name, arguments[0], arguments[1], node.type, floor=node.integer_operation is not None)
         return None
 
     def _difference_bound(self, node: hir.FunctionCall, state: State) -> Interval | None:
@@ -2621,11 +2643,12 @@ class _BoundsValidator:
         result_type: ty.Type,
         *,
         bound: Interval | None = None,
+        floor: bool = False,
     ) -> Interval | None:
         if bound is not None and (left is None or right is None):
             # the operands alone say nothing, the order fact still does
             return self._fit_type(bound, result_type)
-        result = self._binary_interval_plain(name, left, right, result_type, bound=bound)
+        result = self._binary_interval_plain(name, left, right, result_type, bound=bound, floor=floor)
         if result is not None and left is not None and right is not None and (left.capped or right.capped) and not result.capped:
             result = Interval(result.lower, result.upper, capped=True)
         return result
@@ -2638,6 +2661,7 @@ class _BoundsValidator:
         result_type: ty.Type,
         *,
         bound: Interval | None = None,
+        floor: bool = False,
     ) -> Interval | None:
         if left is None or right is None:
             return None
@@ -2672,7 +2696,7 @@ class _BoundsValidator:
             # numerator and largest in magnitude at the smallest divisor.
             divisors = [right.lower] if right.upper is None else [right.lower, right.upper]
             candidates = [
-                _truncate_divide(numerator, divisor)
+                numerator // divisor if floor else _truncate_divide(numerator, divisor)
                 for numerator in (left.lower, left.upper)
                 for divisor in divisors
             ]
@@ -2681,6 +2705,15 @@ class _BoundsValidator:
                 # truncating quotient to zero. The smallest divisor alone
                 # cannot establish a positive lower (or negative upper) bound.
                 candidates.append(0)
+                if floor and left.lower < 0:
+                    candidates.append(-1)
+            result = Interval(min(candidates), max(candidates))
+        elif (
+            floor and name == '__floordiv__'
+            and right.lower is not None and right.upper is not None and right.upper < 0
+            and left.lower is not None and left.upper is not None
+        ):
+            candidates = [a // b for a in (left.lower, left.upper) for b in (right.lower, right.upper)]
             result = Interval(min(candidates), max(candidates))
         elif (
             name == '__mod__'
@@ -2689,6 +2722,8 @@ class _BoundsValidator:
             and right.upper is not None
         ):
             result = Interval(0, right.upper - 1)
+        elif floor and name == '__mod__' and right.lower is not None and right.upper is not None and right.upper < 0:
+            result = Interval(right.lower + 1, 0)
         else:
             return None
         if bound is not None:
@@ -2738,6 +2773,22 @@ class _BoundsValidator:
                 if interval is not None and interval != UNKNOWN_INTERVAL:
                     route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
                     state[route_id] = interval
+
+    def _forget_container_value(self, node: hir.AST, state: State) -> None:
+        """A component write invalidates a containing value's numeric meaning.
+
+        Length and unrelated field facts survive; the mathematical integer
+        represented by a sign and limbs cannot survive editing either one.
+        """
+        node = _strip_casts(node)
+        binding_id = self._binding_id(node)
+        if binding_id is not None:
+            state.pop(binding_id, None)
+            _drop_index_facts(state, index_id=binding_id)
+        if isinstance(node, hir.MemberAccess):
+            self._forget_container_value(node.value, state)
+        elif isinstance(node, hir.Index):
+            self._forget_container_value(node.array, state)
 
     def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
         """Member routes under a reassigned binding or field lose their length and index facts."""
@@ -3839,7 +3890,7 @@ class _BoundsValidator:
             and len(condition.pos_args) == 2
         ):
             return refined
-        name = condition.func.name
+        name = condition.integer_operation or condition.func.name
         left, right = condition.pos_args
         decided = self._decide_comparison(
             name,
@@ -3950,6 +4001,8 @@ class _BoundsValidator:
         return refined
 
     def _binding_id(self, node: hir.AST) -> int | None:
+        if isinstance(node, hir.FunctionCall) and node.integer_operation in ('identity', 'narrow') and len(node.pos_args) == 1:
+            return self._binding_id(node.pos_args[0])
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
         measured = _sequence_of(node)

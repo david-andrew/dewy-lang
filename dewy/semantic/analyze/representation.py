@@ -73,7 +73,12 @@ class _RepresentationPass:
         binding = self.prelude[name]
         assert isinstance(binding.type, ty.FunctionType)
         func = hir.ExpressedIdentifier(loc, binding.type, binding.name, binding_id=binding.id)
-        return hir.FunctionCall(loc, binding.type.ret, func, args, {})
+        operation = next((op for op, helper in _BINARY.items() if helper == name), None)
+        if name in ('_bigint_from_int', '_bigint_from_int_nonzero'):
+            operation = 'identity'
+        elif name == '_bigint_neg':
+            operation = '__unary_sub__'
+        return hir.FunctionCall(loc, binding.type.ret, func, args, {}, integer_operation=operation)
 
     def _is_big(self, node: hir.AST) -> bool:
         return node.type == self.big_type or node.type == self.big_nonzero
@@ -108,7 +113,7 @@ class _RepresentationPass:
         return hir.ObjectLiteral(loc, self.big_nonzero, [
             hir.ObjectField(loc, 'sign', hir.Integer(loc, ty.IntegerLiteralType(sign), '0d', sign)),
             hir.ObjectField(loc, 'limbs', array),
-        ])
+        ], integer_value=value)
 
     def _note(self, loc: Span, message: str) -> None:
         self.notes.append(RepresentationNote(self.srcfile, loc, message))

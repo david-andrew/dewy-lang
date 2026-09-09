@@ -41,6 +41,20 @@ def test_native_value_bounds_match_hosted(tmp_path):
     saved = declare('saved', 'int64', number(7), const=True)
     alias = declare('alias', 'int64', saved, const=True)
     constants = [*references, saved, alias, number(-(10**80)), number(10**80)]
+    # Materialized numeric representations carry meaning independently of
+    # the library helper's symbol or the object's field spelling.
+    big = hir.ObjectLiteral(LOC, ty.ObjectType(()), [], integer_value=10**80)
+    helper = hir.ExpressedIdentifier(LOC, ty.FunctionType([], [], None, 'int'), 'library_helper')
+    constants.extend([
+        big,
+        hir.FunctionCall(LOC, 'int', helper, [big, number(1)], {}, integer_operation='__add__'),
+        hir.FunctionCall(LOC, 'int', helper, [number(17)], {}, integer_operation='identity'),
+        hir.FunctionCall(LOC, 'uint8', helper, [number(255)], {}, integer_operation='narrow'),
+        hir.FunctionCall(LOC, 'uint8', helper, [number(256)], {}, integer_operation='narrow'),
+        hir.FunctionCall(LOC, 'int', helper, [number(-10), number(3)], {}, integer_operation='__floordiv__'),
+        hir.FunctionCall(LOC, 'int', helper, [number(10), number(-3)], {}, integer_operation='__floordiv__'),
+        hir.FunctionCall(LOC, 'int', helper, [number(10), number(-3)], {}, integer_operation='__mod__'),
+    ])
     binary_type = ty.FunctionType([], [], None, 'int64')
     for name, a, b, result_type in [('__add__', 1, 2, 'int64'), ('__sub__', 0, 3, 'int64'),
                                     ('__mul__', 100, 100, 'int8'), ('__mul__', 10**40, 10**40, 'int'),

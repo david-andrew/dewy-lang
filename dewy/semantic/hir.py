@@ -326,6 +326,9 @@ class ObjectLiteral(AST):
     """A structural object value with source-order fields."""
 
     fields: list[ObjectField]
+    # Exact mathematical value of a compiler-materialized integer literal.
+    # User records with fields named `sign` and `limbs` do not acquire it.
+    integer_value: int | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -795,6 +798,9 @@ class FunctionCall(AST):
     pos_args: list[AST]
     kw_args: dict[str, AST]
     selected_method_index: int | None = None
+    # Numeric meaning retained when an operator is implemented by a library
+    # function. Never inferred from the spelling of a user-defined function.
+    integer_operation: str | None = field(default=None, kw_only=True)
     #TODO: spread args
 
 @dataclass

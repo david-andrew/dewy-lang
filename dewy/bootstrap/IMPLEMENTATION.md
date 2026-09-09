@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Hosted big-integer calls retain their mathematical operator in HIR, so
+  range guards and arithmetic evidence survive library lowering. Proven
+  `bigint` values now cross fixed-width boundaries (implicit or `as`) through
+  Dewy word-extraction helpers; unproven conversions remain errors. Unsigned
+  widening preserves all 64 bits. Component writes invalidate the numeric
+  facts of their containing value. Native HIR and constant/term analysis
+  carry the same metadata, including floor division for big integers.
 - The four parser phases were executable and parity-tested before this work.
 - Parser namespace/comment cleanup passes all 152 parser parity tests. Type
   minting now distinguishes same-spelling declarations across modules, and

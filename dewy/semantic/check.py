@@ -95,6 +95,8 @@ class Context:
     foreign_bindings: dict[int, str] = field(default_factory=dict)
     """Bindings this module did not declare (the prelude's, imports): binding id -> where it is from.
     Assignable only in their own module; here they are shadowed with `let`."""
+    prelude_bindings: dict[str, sb.Binding] = field(default_factory=dict)
+    """Original helper identities, unaffected by names shadowed in source."""
     grown_array_names: frozenset[str] = frozenset()  # names some `.push`/`.pop`/... targets
     target: str = 'x86_64'  # backend target: `$target`
     allow_place_expression: bool = False
@@ -330,6 +332,7 @@ def _typecheck_module(
         module_loader=module_loader,
         module_declared_names=set(),
         foreign_bindings={binding.id: 'the prelude' for binding in prelude_bindings.values()},
+        prelude_bindings=prelude_bindings,
         grown_array_names=_grown_array_names(block),
         target=target,
     )
@@ -9620,7 +9623,7 @@ def _bigint_literal(value: int, *, loc: Span, ctx: Context) -> hir.AST:
     return hir.ObjectLiteral(loc, nonzero, [
         hir.ObjectField(loc, 'sign', hir.Integer(loc, ty.IntegerLiteralType(sign), '0d', sign)),
         hir.ObjectField(loc, 'limbs', hir.ArrayLiteral(loc, ty.ArrayType('uint64', len(limbs)), limb_nodes)),
-    ])
+    ], integer_value=value)
 
 
 def _to_bigint(arg: hir.AST, *, ctx: Context, nonzero: bool = False) -> hir.AST:
@@ -9643,9 +9646,30 @@ def _to_bigint(arg: hir.AST, *, ctx: Context, nonzero: bool = False) -> hir.AST:
             'no big-integer conversion for this operand',
             Pointer(span=arg.loc, message=f'this has type `{type_to_dewy(arg.type)}`'),
         )
+    # Unsigned words must retain all 64 bits while widening.
+    layout = ty.fixed_integer_layout(ty.strip_refinement(arg.type))
+    if layout is not None and not layout[1]:
+        helper = '_bigint_from_uint_nonzero' if nonzero else '_bigint_from_uint'
+        return replace(_prelude_call(helper, [arg], loc=arg.loc, ctx=ctx), integer_operation='identity')
     if nonzero:
-        return _prelude_call('_bigint_from_int_nonzero', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx)
-    return _prelude_call('_bigint_from_int', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx)
+        return replace(_prelude_call('_bigint_from_int_nonzero', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx), integer_operation='identity')
+    return replace(_prelude_call('_bigint_from_int', [_as_int64(arg, ctx=ctx)], loc=arg.loc, ctx=ctx), integer_operation='identity')
+
+
+def _from_bigint(node: hir.AST, target: ty.Type, *, ctx: Context) -> hir.AST:
+    """A proof-checked numeric boundary, lowered by ordinary Dewy helpers.
+
+    The helper extracts low word bits. Bounds validation must establish the
+    mathematical range before this call can reach lowering; its name alone
+    grants no proof to a source call of the helper.
+    """
+    plain = ty.strip_refinement(target)
+    layout = ty.fixed_integer_layout(plain)
+    assert layout is not None
+    helper = '_bigint_to_int' if layout[1] else '_bigint_to_uint'
+    call = replace(_prelude_call(helper, [node], loc=node.loc, ctx=ctx), integer_operation='narrow')
+    result = call if call.type == plain else hir.ValueCast(node.loc, plain, call)
+    return _prove_refinements(result, target, ctx=ctx) if isinstance(target, ty.RefinedType) else result
 
 
 def _dispatch_bigint(
@@ -9694,7 +9718,7 @@ def _dispatch_bigint(
             if ty.integer_literal_fits(negated, 'int64') and not (expected is not None and _is_bigint(expected, ctx=ctx)):
                 return hir.Integer(loc, ty.IntegerLiteralType(negated), '0d', negated)
             return _bigint_literal(negated, loc=loc, ctx=ctx)
-        return _prelude_call('_bigint_neg', [_to_bigint(args[0], ctx=ctx)], loc=loc, ctx=ctx)
+        return replace(_prelude_call('_bigint_neg', [_to_bigint(args[0], ctx=ctx)], loc=loc, ctx=ctx), integer_operation=fname)
     if fname == '__truediv__':
         return None   # `big / x` is a rational: the rational dispatch builds it
     helper = _BIGINT_BINARY_FUNCTIONS.get(fname)
@@ -9727,7 +9751,7 @@ def _dispatch_bigint(
             return _bigint_literal(folded, loc=loc, ctx=ctx)
     divides = fname in {'__floordiv__', '__mod__'}
     operands = [_to_bigint(arg, ctx=ctx, nonzero=divides and index == 1) for index, arg in enumerate(args)]
-    return _prelude_call(helper, operands, loc=loc, ctx=ctx)
+    return replace(_prelude_call(helper, operands, loc=loc, ctx=ctx), integer_operation=fname)
 
 
 FIXED_TYPE_NAME = 'Fixed'
@@ -9780,7 +9804,12 @@ def _prelude_call(name: str, args: list[hir.AST], *, loc: Span, ctx: Context) ->
             'rationals need the prelude',
             Pointer(span=loc, message=f'`{name}` from `library/rational.dewy` is not in scope'),
         )
-    func = tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
+    binding = ctx.prelude_bindings.get(name)
+    func = (
+        hir.ExpressedIdentifier(loc, binding.type, binding.name, binding_id=binding.id)
+        if binding is not None and binding.type is not None
+        else tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
+    )
     if not isinstance(func.type, ty.FunctionType):
         raise ValueError(f'INTERNAL ERROR: prelude helper `{name}` is not a plain function')
     checked = [
@@ -15702,6 +15731,8 @@ def _explicit_value_conversion(
         if spelled is not None:
             return spelled
     source = node.type
+    if _is_bigint(source, ctx=ctx) and ty.fixed_integer_layout(ty.strip_refinement(target)) is not None:
+        return _from_bigint(node, target, ctx=ctx)
     target = _refine_binary_materialization_target(source, target)
     target = _refine_string_materialization_target(source, target)
     if source == target:
@@ -16095,6 +16126,8 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         candidates = [member for member in expected.items if ctx.type_system.is_subtype(node.type, member)]
         if len(candidates) == 1 and any(_is_prelude_number(candidates[0], name, ctx=ctx) for name in _NUMBER_OBJECT_NAMES):
             return check_against(node, candidates[0], ctx=ctx)
+    if _is_bigint(node.type, ctx=ctx) and ty.fixed_integer_layout(ty.strip_refinement(expected)) is not None:
+        return _from_bigint(node, expected, ctx=ctx)
     if _is_bigint(expected, ctx=ctx) and not _is_bigint(node.type, ctx=ctx):
         nonzero = _is_nonzero_form(expected, BIGINT_TYPE_NAME, ctx=ctx)
         constant = _constant_integer(_unwrap_parens(node), ctx=ctx)

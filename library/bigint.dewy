@@ -48,6 +48,30 @@ let _bigint_from_int = (value:int64):>BigInt => {
     return _bigint_from_int_nonzero(value)
 }
 
+let _bigint_from_uint_nonzero = (value:uint64 & ~0):>BigInt<sign =? 1> => {
+    let low:uint64 = value and _LIMB_MASK
+    let high:uint64 = value >> 32
+    if high =? 0 return [sign = 1 limbs = [low]]
+    return [sign = 1 limbs = [low high]]
+}
+let _bigint_from_uint = (value:uint64):>BigInt => {
+    if value =? 0 return 0
+    return _bigint_from_uint_nonzero(value)
+}
+
+# Extract the low word, preserving two's-complement bits for negatives.
+# These helpers deliberately make no range promise: the compiler only uses
+# them for a numeric conversion after proving the source fits its target.
+# Calling the helpers directly is an explicit low-bits operation.
+let _bigint_to_uint = (value:BigInt):>uint64 => {
+    if value =? 0 return 0
+    let word:uint64 = value.limbs[0] and _LIMB_MASK
+    if value.limbs.length >? 1 { word = word or (value.limbs[1] << 32) }
+    if value.sign <? 0 { word = 0 - word }
+    return word
+}
+let _bigint_to_int = (value:BigInt):>int64 => _bigint_to_uint(value) transmute int64
+
 let _bigint_limbs = (value:BigInt):>array<uint64> => {
     if value =? 0 { return [] }
     return value.limbs

@@ -31,6 +31,10 @@ sequence_id = (id:addr env:values.Environment @registry:bindings.Registry):>addr
 }
 binding_term = (id:addr env:values.Environment @registry:bindings.Registry):>facts.Term? => {
     let current = expressions.strip_casts(id env.nodes)
+    let numeric = hir.node_at(env.nodes current)
+    if numeric is? hir.FunctionCall and (numeric.integer_operation =? 'identity' or numeric.integer_operation =? 'narrow') and numeric.pos_args.length =? 1 {
+        return binding_term(numeric.pos_args[0] env @registry)
+    }
     let measured = expressions.sequence_of(current env.nodes)
     if measured isnt? none {
         let sequence = sequence_id(measured env @registry)

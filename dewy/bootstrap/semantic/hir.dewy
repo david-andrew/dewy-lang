@@ -225,6 +225,8 @@ ObjectField:type = [
 # A structural object value with source-order fields.
 ObjectLiteral = type of AST & [
     fields:array<ObjectField>
+    # Only compiler-materialized numeric literals carry a mathematical value.
+    integer_value:bigint?=none
 ]
 
 # A named field read from an object.
@@ -606,6 +608,8 @@ FunctionCall = type of AST & [
     pos_args:array<addr>
     kw_args:dict<string addr>
     selected_method_index:(addr)?=none
+    # Library lowering retains the operator's numeric meaning for proofs.
+    integer_operation:string?=none
 ]
 
 Partial = type of AST

@@ -41,11 +41,11 @@ result_width = (id:addr type_nodes:array<types.Type>):>ranges.Interval? => {
     if types.node_at(type_nodes id) isnt? types.Primitive return none
     return fixed_bounds(id type_nodes)
 }
-binary = (name:string left:ranges.Interval? right:ranges.Interval? result_type:addr type_nodes:array<types.Type> bound:ranges.Interval?=none):>ranges.Interval? => {
+binary = (name:string left:ranges.Interval? right:ranges.Interval? result_type:addr type_nodes:array<types.Type> bound:ranges.Interval?=none floor:bool=false):>ranges.Interval? => {
     if name isnt? ranges.Operation return none
     let width = result_width(result_type type_nodes)
     if bound isnt? none and (left is? none or right is? none) return ranges.fits(bound width)
-    return ranges.binary(name left right width bound)
+    return ranges.binary(name left right width bound floor)
 }
 
 binding_type = (binding:bindings.Binding nodes:array<hir.AST>):>addr? => {
@@ -121,6 +121,7 @@ constant_expr = (id:addr env:Environment @seen:set<addr>):>ranges.Interval? => {
     let value_type = types.node_at(env.types node.value_type)
     if value_type is? types.IntegerLiteralType return ranges.exact(value_type.value)
     if node is? hir.Integer return ranges.exact(node.value)
+    if node is? hir.ObjectLiteral and node.integer_value isnt? none return ranges.exact(node.integer_value)
     if node is? hir.ValueCast | hir.RepresentationCast return constant_expr(node.expr env @seen)
     if node is? hir.ArrayLength {
         let array_type = types.node_at(env.types hir.node_at(env.nodes node.array).value_type)
@@ -135,7 +136,12 @@ constant_expr = (id:addr env:Environment @seen:set<addr>):>ranges.Interval? => {
     if node isnt? hir.FunctionCall return none
     let function = hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier return none
-    if node.pos_args.length =? 1 and function.name =? '__unary_sub__' {
+    let operation = if node.integer_operation is? none function.name else node.integer_operation
+    if node.pos_args.length =? 1 and (operation =? 'identity' or operation =? 'narrow') {
+        let value = constant_expr(node.pos_args[0] env @seen)
+        return if operation =? 'identity' value else ranges.fits(value result_width(node.value_type env.types))
+    }
+    if node.pos_args.length =? 1 and operation =? '__unary_sub__' {
         let value = constant_expr(node.pos_args[0] env @seen)
         if value is? none return none
         let lower = value.lower
@@ -145,7 +151,7 @@ constant_expr = (id:addr env:Environment @seen:set<addr>):>ranges.Interval? => {
     if node.pos_args.length =? 2 {
         let left = constant_expr(node.pos_args[0] env @seen)
         let right = constant_expr(node.pos_args[1] env @seen)
-        return binary(function.name left right node.value_type env.types)
+        return binary(operation left right node.value_type env.types floor=node.integer_operation isnt? none)
     }
     return none
 }
