@@ -804,8 +804,6 @@ class _Lowerer(
             if not isinstance(param, hir.BoundParam):
                 lowered_pos.append(lower_param(param))
                 continue
-            if isinstance(param.type, ty.ObjectType):
-                self._target_error(literal, 'object parameter defaults')
             if (payload := ty.optional_payload(param.type)) is not None:
                 # a defaulted optional (`message:string? = none`): the incoming
                 # cell and a presence flag; absent, the default fills the cell
@@ -860,7 +858,11 @@ class _Lowerer(
                 binding_id=param.binding_id,
             )
             default = self._require_node(self._transform_node(param.value))
-            if isinstance(param.type, ty.ArrayType):
+            if isinstance(param.type, (ty.ArrayType, ty.ObjectType)):
+                # Select before dereferencing: an omitted aggregate argument
+                # is an ignored zero pointer. The ordinary value-flow path
+                # copies a supplied value and constructs a default lazily,
+                # retaining the same ownership rules as a local declaration.
                 selected = hir.Flow(
                     literal.loc,
                     param.type,

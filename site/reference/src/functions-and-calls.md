@@ -120,6 +120,12 @@ Ambiguous or unmatched calls are errors. Runtime multifunction values remain par
 
 ## Function Handles
 
+Record and container parameters may also have defaults, such as
+`(seen:set<int64> = set[])`. An omitted default is evaluated for each call;
+mutating that value does not affect the next call. An explicitly supplied
+record or container follows ordinary value-copy semantics, and its default
+is not evaluated.
+
 A bare function name is always a call: a function whose parameters all have defaults is called with none, and mentioning a function with required parameters without its arguments is an error rather than a reference. `@fn` selects the function binding as a first-class value instead:
 
 ```dewy
