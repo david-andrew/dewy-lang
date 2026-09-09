@@ -4,7 +4,7 @@ import pytest
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
-from dewy.semantic.errors import NotImplementedYet, UserError
+from dewy.semantic.errors import UserError
 
 SPAN = 'let Span:type = [start:int64 stop:int64 tags:array<int64>]\n'
 
@@ -37,9 +37,11 @@ def test_loop_variable_over_objects_is_a_read_only_borrow() -> None:
     _compile(SPAN + body % 'let mine:Span = s  mine.start = 40')
 
 
-def test_exact_array_fields_inside_growable_object_elements_are_not_supported_yet() -> None:
-    with pytest.raises(NotImplementedYet, match='arena-backed copy of an exact-length array'):
-        _compile(
-            'let Pair:type = [values:array<int64 length=2>]\n'
-            'let main = ():>int64 => { let xs:array<Pair> = []  xs.push([values=[1 2]])  return 0 }\n'
-        )
+def test_exact_array_fields_inside_growable_object_elements_compile() -> None:
+    # The runtime lifetime regression (including callee-owned source arrays)
+    # lives in test_nested_place_storage.py.
+    emitted = _compile(
+        'let Pair:type = [values:array<int64 length=2>]\n'
+        'let main = ():>int64 => { let xs:array<Pair> = []  xs.push([values=[1 2]])  return 0 }\n'
+    )
+    assert '_arena_alloc' in emitted
