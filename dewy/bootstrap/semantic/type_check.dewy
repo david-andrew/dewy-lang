@@ -253,10 +253,24 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session):>ar
     let result:array<types.PosOrKwArg> = []
     loop item in items {
         let row = tokens.node_at(source.nodes item)
+        let target_id = item
+        let default:addr? = none
+        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+            default = row.right target_id = row.left
+            row = tokens.node_at(source.nodes target_id)
+        }
         let place = false
-        if row is? parser.Prefix and syntax.is_operator(row.op '@' source.nodes) { place = true row = tokens.node_at(source.nodes row.item) }
-        let name = syntax.identifier(item source.nodes)
+        if row is? parser.Prefix and syntax.is_operator(row.op '@' source.nodes) {
+            place = true target_id = row.item
+            row = tokens.node_at(source.nodes target_id)
+        }
+        let name = syntax.identifier(target_id source.nodes)
         let type = types.primitive('any' @session.types)
+        if default isnt? none and name isnt? none {
+            let inferred = infer_default(default context @session)
+            if inferred is? Error return inferred
+            type = inferred
+        }
         if row is? parser.BinOp and syntax.is_operator(row.op ':' source.nodes) {
             let target = tokens.node_at(source.nodes row.left)
             let target_id = row.left
@@ -268,7 +282,7 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session):>ar
             type = declared
         }
         if name is? none return contexts.problem(item 'function type parameter requires a name' 'write this parameter as `name:type`' context session)
-        result.push(types.PosOrKwArg[name type place=place])
+        result.push(types.PosOrKwArg[name type required=default is? none place=place])
     }
     return result
 }

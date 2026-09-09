@@ -4,9 +4,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
-from dewy.semantic import check
+from dewy.semantic import check, ty
 from dewy.semantic.hir_display import type_to_dewy
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
@@ -23,16 +25,54 @@ CASES = [
     'let f=(x:int64|string):>int64 => if x is? int64 x else 0\nf(7)',
     'let f=(x:bool):>int64 => { if x return 1 return 2 }\nf(false)',
     'if true 1 else 2',
+    'let f=(x:int64|string):>bool => x is? int64 and x >? 0\nf(7)',
+    'let f=(x:int64|string):>bool => x isnt? int64 or x >? 0\nf(7)',
+    'let f=(x:bool y:bool):>bool => x nand y\nf(true false)',
+    'let f=(x:bool y:bool):>bool => x nor y\nf(true false)',
+    'let x:int64|string=1\n{ x="done" }\nx',
+    'let xs=[1 2]\nxs.length',
+    '"hello".length',
+    '[x=1 y=2]',
+    'let p=[x=1]\np.x=3\np.x',
+    'let f=(x:int64=3):>int64 => x\nf()',
+    'let x:int64=9\nlet f=(x:int64 y:int64=x+1):>int64 => y\nf(3)',
+    'let p:[x:int64 y:string]=[x=2 y="hi"]\np',
+    'let p=[x=1 y=2]\np.x',
+    'Point:type=[x:int64 y:int64]\nPoint[1 2]',
+    'Point:type=[x:int64 y:int64=3]\nlet p=Point[x=2]\np.y',
+    'Point:type=const [x:int64=2 y:int64=x+1]\nPoint[]',
+    'let seed:int64=4\nPoint:type=[x:int64=seed]\nlet f=(seed:string):>Point => Point[]\nf("shadow")',
 
+
+]
+
+
+ERROR_CASES = [
+    'let x:int64=1\nx="wrong"',
+    'const x=1\n{x=2}',
+    'let f=():>int64 => "wrong"\nf()',
+    'let f=(x:int64):>int64 => x\nf(x=1 x=2)',
+    '[x=1 x=2]',
+    'Point:type=[x:int64]\nPoint[y=1]',
+    'Point:type=[x:int64]\nPoint[]',
+    'Point:type=[x:int64]\nPoint[1 2]',
+    'Point:type=[x:int64 y:int64]\nPoint[1 x=2]',
+    'Point:type=const [x:int64]\nlet p=Point[1]\np.x=2',
 ]
 
 
 def test_native_source_values(tmp_path):
     expected = []
     for text in CASES:
+        ty.reset_program_brands()
         module, _ = check._typecheck_module(SrcFile(None, text))
         expected.append(type_to_dewy(module.type))
+    for text in ERROR_CASES:
+        ty.reset_program_brands()
+        with pytest.raises((check.UserError, check.TypeCheckError, check.NotImplementedYet)):
+            check._typecheck_module(SrcFile(None, text))
     cases = ' '.join(json.dumps(text).replace('{', r'\{') for text in CASES)
+    errors = ' '.join(json.dumps(text).replace('{', r'\{') for text in ERROR_CASES)
     source = tmp_path / 'check.dewy'
     source.write_text(f'''from reporting import SrcFile, Error
 import p"{ROOT / 'dewy/bootstrap/parser/p0.dewy'}" as parser
@@ -53,6 +93,20 @@ main = ():>int64 => {{
         let node = checking.node_at(module session)
         printl(display.type_to_dewy(node.value_type session.types))
     }}
+    let invalid:array<string> = [{errors}]
+    loop text in invalid {{
+        let source = SrcFile['fixture' text]
+        let parsed = parser.parse(source)
+        if parsed is? Error {{ parsed.fail return 1 }}
+        let session = contexts.Session[]
+        let lexical = contexts.begin(source parsed.nodes @session)
+        let environment = checking.begin(lexical @session)
+        let result = checking.block(parsed.root environment @session)
+        $runtime_assert result is? Error
+        $runtime_assert result.title not=? 'native checker implementation pending'
+        $runtime_assert result.pointers.length >? 0 and result.pointers[0].message.length >? 0
+        printl('rejected')
+    }}
     return 0
 }}
 ''')
@@ -61,4 +115,4 @@ main = ():>int64 => {{
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=90, check=False)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == expected
+    assert list(zip(CASES + ERROR_CASES, result.stdout.splitlines(), strict=True)) == list(zip(CASES + ERROR_CASES, expected + ['rejected'] * len(ERROR_CASES), strict=True))

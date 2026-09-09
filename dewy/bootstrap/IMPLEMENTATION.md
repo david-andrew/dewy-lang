@@ -30,7 +30,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  18 source programs. This is an intermediate HIR entry point, not yet a
+  35 source programs and 10 invalid programs. Short-circuit boolean HIR,
+  record construction and lexical defaults, member reads/stores, function
+  defaults, and enclosing-scope assignments now share this visitor. Known
+  sequence lengths remain singleton types. This is an intermediate HIR entry point, not yet a
   compiler driver: imports, the remaining value forms, proof validation,
   representation selection, and native emission are still required.
 - Hosted short-circuit continuations join mutations from the evaluated and

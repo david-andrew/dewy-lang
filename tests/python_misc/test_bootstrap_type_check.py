@@ -9,7 +9,7 @@ import pytest
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
-from dewy.semantic import check
+from dewy.semantic import check, ty
 from dewy.semantic.hir_display import type_to_dewy
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
@@ -54,6 +54,9 @@ ERROR_CASES = [
 
 
 def hosted_type(text):
+    # This harness enters below the program driver. Each native Session is a
+    # fresh program, so reset the hosted driver's compilation-owned brands too.
+    ty.reset_program_brands()
     source = SrcFile(None, text)
     root, _ = check._parse_module(source)
     context = check.Context(source)

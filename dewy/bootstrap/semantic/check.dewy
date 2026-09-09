@@ -1,4 +1,4 @@
-from reporting import Error
+from reporting import Error, Span
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"../parser/t2.dewy" as post
@@ -182,6 +182,10 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
     if node is? parser.Block {
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected)
         if node.delims =? '[]' {
+            loop item in node.inner {
+                let row = tokens.node_at(source.nodes item)
+                if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) return record_literal(id node env @session expected=expected)
+            }
             let target:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.strip_refinement(expected session.types))
             let element:addr? = if target is? types.ArrayType target.element else none
             if node.inner.length =? 0 and element is? none return problem(id 'cannot infer empty array element type' 'provide an array annotation' env session)
@@ -234,11 +238,19 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if target is? Error return target
             return expression(node.left env @session expected=target)
         }
+        if op =? '.' {
+            let receiver = expression(node.left env @session)
+            if receiver is? Error return receiver
+            let value = member(receiver node.right id env @session)
+            if value is? Error return value
+            return if expected is? none value else against(value expected id env @session)
+        }
         let adjacency = tokens.node_at(source.nodes node.op)
         if adjacency is? post.Juxtapose and adjacency.options.length >? 1 {
             let left = expression(node.left env @session)
             if left is? Error return left
             let value = node_at(left session)
+            if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             let type = types.node_at(session.types types.strip_refinement(value.value_type session.types))
             if type is? types.CallableType and 'CallJuxtapose' in? adjacency.options return call_syntax(left node.right id env @session expected=expected)
             if (type is? types.ArrayType|types.StringType|types.StringLiteralType or types.is_primitive(type 'string')) and 'IndexJuxtapose' in? adjacency.options return index_syntax(left node.right id env @session)
@@ -255,6 +267,8 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if op =? 'CallJuxtapose' {
             let func = expression(node.left env @session)
             if func is? Error return func
+            let value = node_at(func session)
+            if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             return call_syntax(func node.right id env @session expected=expected)
         }
         if op =? 'IndexJuxtapose' {
@@ -267,11 +281,27 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if operator isnt? none {
             let left = expression(node.left env @session)
             if left is? Error return left
-            let right = expression(node.right env @session)
+            let left_type = node_at(left session).value_type
+            let logical = op in? ['and' '&' 'or' '|' 'nand' 'nor'] and types.is_primitive(types.node_at(session.types left_type) 'bool')
+            let continues = op in? ['and' '&' 'nand']
+            let shortcut = if logical refined(left not continues env @session) else env
+            let right_env = if logical refined(left continues env @session) else env
+            let right = expression(node.right right_env @session)
             if right is? Error return right
             let func = identifier(operator id env @session)
             if func is? Error return func
-            return call(func [left right] [] id env @session expected=expected)
+            let value = call(func [left right] [] id right_env @session expected=expected)
+            if value is? Error return value
+            let result = node_at(value session)
+            if logical and result is? hir.FunctionCall and types.is_primitive(types.node_at(session.types result.value_type) 'bool') {
+                let operation:'and'|'or'|'nand'|'nor' = if op =? 'nand' 'nand' else if op =? 'nor' 'nor' else if continues 'and' else 'or'
+                let paths:array<Environment> = [shortcut right_env]
+                let first = node_at(left session)
+                if first is? hir.Bool { paths = [if first.value =? continues right_env else shortcut] }
+                join_reads(paths env @session)
+                return put(hir.ShortCircuit[node.loc result.value_type operation left right] @session)
+            }
+            return value
         }
     }
     if node is? parser.KeywordExpr and node.parts.length >? 0 {
@@ -307,9 +337,19 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         annotation = type
     }
     let name = syntax.identifier(target_id source.nodes)
-    if name is? none return pending(id 'destructuring or projected assignment' env session)
+    if name is? none {
+        if explicit or annotation isnt? none return pending(id 'destructuring declaration' env session)
+        let place = expression(target_id env @session)
+        if place is? Error return place
+        let member = node_at(place session)
+        if member isnt? hir.MemberAccess return pending(id 'this projected assignment target' env session)
+        if not member.mutable return problem(id 'cannot assign to an immutable field' member.name env session)
+        let value = expression(node.right env @session expected=member.value_type)
+        if value is? Error return value
+        return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) place value] @session)
+    }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
-    let existing = scope.names.get(name)
+    let existing = if explicit or annotation isnt? none scope.names.get(name) else declarations.lookup(name env.lexical session)
     if existing isnt? none and existing in? session.pending_aliases {
         let value = declarations.resolve_alias(existing @session)
         if value is? Error return value
@@ -452,16 +492,35 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
     let shape = dispatch.method_at(session.types resolved)
     let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state shape.ret]
     let parameters:array<hir.Param> = []
+    let source = contexts.source_at(env.lexical session)
+    let signature = tokens.node_at(source.nodes literal.left)
+    $runtime_assert signature is? parser.BinOp
+    let arguments = tokens.node_at(source.nodes signature.left)
+    let rows:array<addr> = if arguments is? parser.Block arguments.inner else [signature.left]
+    let position:addr = 0
     loop param in shape.pos_or_kw {
         $runtime_assert param.name isnt? none
         let scope = bindings.scope_at(session.scopes inner.lexical.scope)
         if param.name in? scope.names return problem(id 'duplicate function parameter' param.name env session)
+        # Defaults run in the callee but resolve in the defining outer scope,
+        # as in the hosted checker. BoundParam retains the checked expression
+        # without evaluating it while declaring the function.
+        $runtime_assert position <? rows.length
+        let row = tokens.node_at(source.nodes rows[position])
+        let default:addr? = none
+        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+            let value = expression(row.right env @session expected=param.value_type)
+            if value is? Error return value
+            default = value
+        }
+        position += 1
         let binding_id = bindings.allocate_param(@session.registry param.name param.value_type literal.loc)
         let binding = bindings.binding_at(session.registry binding_id)
         binding.store_type = param.value_type
         session.registry.by_id[binding_id] = binding
         bindings.bind(@session.scopes inner.lexical.scope param.name binding_id)
-        parameters.push(hir.Param[param.name param.value_type binding_id place=param.place])
+        if default is? none { parameters.push(hir.Param[param.name param.value_type binding_id place=param.place]) }
+        else { parameters.push(hir.BoundParam[param.name param.value_type binding_id value=default place=param.place]) }
     }
     let body = expression(literal.right inner @session expected=shape.ret)
     if body is? Error return body
@@ -603,4 +662,179 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
     if type is? types.ArrayType return put(hir.Index[syntax.loc type.element sequence index none] @session)
     if type is? types.StringType|types.StringLiteralType or types.is_primitive(type 'string') return put(hir.StringIndex[syntax.loc types.string_type(1 @session.types) sequence index none] @session)
     return problem(id 'index target is not an array or string' display.type_to_dewy(value.value_type session.types) env session)
+}
+
+# Field reads preserve their receiver expression. The route registry can later
+# attach stable fact identities without evaluating the receiver a second time.
+member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let name = syntax.identifier(name_id source.nodes)
+    if name is? none return problem(id 'member access needs a name' 'expected a field or method name' env session)
+    let value = node_at(receiver session)
+    let type = types.node_at(session.types types.unfold(types.strip_refinement(value.value_type session.types) session.types))
+    let loc = tokens.node_at(source.nodes id).loc
+    if type is? types.ObjectType {
+        let field = types.object_field(type name)
+        if field isnt? none return put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session)
+    }
+    if name =? 'length' {
+        let word = types.primitive('int64' @session.types)
+        if type is? types.ArrayType {
+            let result = if type.length is? none word else types.integer_literal(type.length @session.types)
+            return put(hir.ArrayLength[loc result receiver] @session)
+        }
+        if type is? types.StringType|types.StringLiteralType or types.is_primitive(type 'string') {
+            let length:addr? = none
+            if type is? types.StringType { length = type.length }
+            if type is? types.StringLiteralType { length = type.value.length }
+            let result = if length is? none word else types.integer_literal(length @session.types)
+            return put(hir.StringLength[loc result receiver] @session)
+        }
+    }
+    return pending(id "member `{name}` on `{display.type_to_dewy(value.value_type session.types)}`" env session)
+}
+
+# Record fields enter a fresh lexical scope in source order, so later values
+# can refer to earlier fields. These bindings identify the already evaluated
+# field values; they do not cause the initializer to run again.
+record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type]
+    let wanted:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
+    let fields:array<hir.ObjectField> = []
+    let layout:array<types.ObjectField> = []
+    loop row_id in node.inner {
+        let row = tokens.node_at(source.nodes row_id)
+        if row isnt? parser.BinOp or not syntax.is_operator(row.op '=' source.nodes) return problem(row_id 'mixed record and array literal' 'each record field needs a named value' env session)
+        let target = tokens.node_at(source.nodes row.left)
+        let name_id = row.left
+        let annotation:addr? = none
+        if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) {
+            name_id = target.left
+            let resolved = declarations.resolve(target.right inner.lexical @session)
+            if resolved is? Error return resolved
+            annotation = resolved
+        }
+        let name = syntax.identifier(name_id source.nodes)
+        if name is? none return problem(row_id 'record field needs a name' 'use `name=value` or `name:Type=value`' env session)
+        let scope = bindings.scope_at(session.scopes inner.lexical.scope)
+        if name in? scope.names return problem(row_id 'duplicate record field' name env session)
+        let field:types.ObjectField? = none
+        if wanted is? types.ObjectType {
+            field = types.object_field(wanted name)
+            if field is? none return problem(row_id 'unknown record field' name env session)
+            if annotation is? none { annotation = field.value_type }
+        }
+        let value = expression(row.right inner @session expected=annotation)
+        if value is? Error return value
+        if annotation is? none { value = widen(value row.right inner @session) }
+        if value is? Error return value
+        let type = if annotation is? none node_at(value session).value_type else annotation
+        if field isnt? none and field.refinement.length >? 0 {
+            let required = types.refined_type(type field.refinement @session.types)
+            value = against(value required row_id inner @session)
+            if value is? Error return value
+        }
+        let binding = bind_field(name type row.loc inner @session)
+        let mutable = if field is? none true else field.mutable
+        if wanted is? types.ObjectType and wanted.immutable { mutable = false }
+        fields.push(hir.ObjectField[row.loc name value binding mutable])
+        layout.push(if field is? none types.ObjectField[name type] else field)
+    }
+    if wanted is? types.ObjectType {
+        loop field in wanted.fields {
+            let scope = bindings.scope_at(session.scopes inner.lexical.scope)
+            if field.name not in? scope.names return problem(id 'missing record field' field.name env session)
+        }
+    }
+    let type = if wanted is? types.ObjectType and expected isnt? none types.strip_refinement(expected session.types) else types.object_type(layout none false [] [] @session.types)
+    let value = put(hir.ObjectLiteral[node.loc type fields] @session)
+    return if expected is? none value else against(value expected id env @session)
+}
+
+bind_field = (name:string type:addr loc:Span env:Environment @session:contexts.Session):>addr => {
+    let id = bindings.allocate(@session.registry none name 'value' loc)
+    let binding = bindings.binding_at(session.registry id)
+    binding.value_type = type binding.store_type = type
+    session.registry.by_id[id] = binding
+    bindings.bind(@session.scopes env.lexical.scope name id)
+    return id
+}
+
+# Constructor defaults retain their declaration's source and outer scope.
+# The completed earlier fields form the innermost scope in either source.
+# As in the hosted constructor, arguments bind slots first and field
+# initializers run in declaration order. Defaults only fill absent slots.
+construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    if constructor.value isnt? addr return pending(id 'generic type constructor inference' env session)
+    let type = types.unfold(constructor.value session.types)
+    let shape = types.node_at(session.types type)
+    if shape isnt? types.ObjectType return pending(id 'non-record type constructor' env session)
+    if shape.abstract return problem(id 'cannot construct an abstract type' display.type_to_dewy(type session.types) env session)
+    if shape.constructors.length >? 0 return pending(id 'user constructor overloads' env session)
+    let source = contexts.source_at(env.lexical session)
+    let arguments = tokens.node_at(source.nodes arguments_id)
+    let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type]
+    let given:dict<string addr> = []
+    let positional:array<addr> = []
+    loop item in items {
+        let row = tokens.node_at(source.nodes item)
+        let name:string? = none
+        let value_id = item
+        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+            name = syntax.identifier(row.left source.nodes)
+            value_id = row.right
+            if name is? none return problem(item 'constructor argument needs a field name' 'use `name=value`' env session)
+        } else {
+            positional.push(item)
+            continue
+        }
+        $runtime_assert name isnt? none
+        if name in? given return problem(item 'duplicate constructor field' name env session)
+        let field = types.object_field(shape name)
+        if field is? none return problem(item 'unknown constructor field' name env session)
+        given[name] = value_id
+    }
+    if positional.length >? shape.fields.length return problem(id 'too many constructor arguments' 'the type has fewer fields than positional arguments' env session)
+    loop i in 0.. and i <? positional.length and i <? shape.fields.length {
+        let name = shape.fields[i].name
+        if name in? given return problem(positional[i] 'duplicate constructor field' name env session)
+        given[name] = positional[i]
+    }
+    let fields:array<hir.ObjectField> = []
+    loop field in shape.fields {
+        let supplied = given.get(field.name)
+        let value:addr? = none
+        if supplied isnt? none {
+            let checked = expression(supplied inner @session expected=field.value_type)
+            if checked is? Error return checked
+            value = checked
+        } else {
+            if field.default is? none return problem(id 'missing constructor field' field.name env session)
+            $runtime_assert field.default <? session.syntax_refs.length
+            let reference = session.syntax_refs[field.default]
+            let scope = bindings.scope_at(session.scopes inner.lexical.scope)
+            let default_scope = bindings.push_scope(@session.scopes reference.scope)
+            loop [name binding] in scope.names { bindings.bind(@session.scopes default_scope name binding) }
+            let lexical = contexts.Context[reference.source default_scope]
+            let default_env = Environment[lexical env.state env.return_type]
+            let checked = expression(reference.node default_env @session expected=field.value_type)
+            if checked is? Error return checked
+            value = checked
+        }
+        $runtime_assert value isnt? none
+        if field.refinement.length >? 0 {
+            let required = types.refined_type(field.value_type field.refinement @session.types)
+            let checked = against(value required id env @session)
+            if checked is? Error return checked
+            value = checked
+        }
+        $runtime_assert value isnt? none
+        let binding = bind_field(field.name field.value_type node_at(value session).loc inner @session)
+        fields.push(hir.ObjectField[node_at(value session).loc field.name value binding field.mutable and not shape.immutable])
+    }
+    let loc = tokens.node_at(source.nodes id).loc
+    let value = put(hir.ObjectLiteral[loc type fields] @session)
+    return if expected is? none value else against(value expected id env @session)
 }
