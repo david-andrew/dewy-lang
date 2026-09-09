@@ -1,0 +1,48 @@
+import p"../hir.dewy" as hir
+import p"../bindings.dewy" as bindings
+
+doc"""
+A predicate describes the values it observed, not replacement values stored
+later in a short-circuit chain. Match analyze/predicate_effects.py: collect
+whole binding roots conservatively, then let the ordinary refinement visitor
+extract facts only from predicates whose inputs have survived.
+
+This is a local expression transfer, not the interprocedural effect summary.
+A place argument may be written; a nested function body has not run simply
+because its literal appeared. Projected writes invalidate their whole root.
+"""
+
+read_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
+    let result:set<addr> = set[]
+    let pending:array<addr> = [root]
+    loop pending.length >? 0 {
+        let node = hir.node_at(nodes pending.pop)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none { result.add(node.binding_id) }
+        loop child in hir.children(node) { pending.push(child) }
+    }
+    return result
+}
+mutated_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
+    let result:set<addr> = set[]
+    let pending:array<addr> = [root]
+    loop pending.length >? 0 {
+        let node = hir.node_at(nodes pending.pop)
+        if node is? hir.FunctionLiteral continue
+        let target:addr? = none
+        if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place { target = node.target }
+        else if node is? hir.DictStore|hir.DictRemove { target = node.keys }
+        else if node is? hir.FunctionCall {
+            let func = hir.node_at(nodes node.func)
+            if func is? hir.ArrayMethod and func.name not=? 'join' { target = func.array }
+            else if func is? hir.DictMethod and func.name in? ['add' 'clear' 'remove'] { target = func.dictionary }
+        }
+        if target isnt? none {
+            let path = bindings.access_path(target nodes facts=true)
+            let owner = hir.node_at(nodes path.root)
+            if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none { result.add(owner.binding_id) }
+        }
+        loop child in hir.children(node) { pending.push(child) }
+    }
+    return result
+}

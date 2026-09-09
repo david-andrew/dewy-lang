@@ -14,6 +14,7 @@ from typing import Callable, Literal, NoReturn, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
 from . import builtins, hir, ty
+from .analyze import predicate_effects
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span, Error
@@ -3643,8 +3644,11 @@ def _refine_condition_context(
     condition: hir.AST,
     *,
     truth: bool,
+    invalidated: frozenset[int] = frozenset(),
 ) -> Context:
     condition = _unwrap_parens(_strip_obligations(condition))
+    if not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
+        return replace(ctx, refinements=dict(ctx.refinements), length_bounds=dict(ctx.length_bounds), key_facts=dict(ctx.key_facts))
     if (
         isinstance(condition, hir.FunctionCall)
         and isinstance(condition.func, hir.ExpressedIdentifier)
@@ -3655,7 +3659,7 @@ def _refine_condition_context(
         # Negation swaps the two paths for every predicate, including
         # `not in?`. An early return on absence therefore proves presence
         # in the continuation just as the positive guard does in its body.
-        return _refine_condition_context(ctx, condition.pos_args[0], truth=not truth)
+        return _refine_condition_context(ctx, condition.pos_args[0], truth=not truth, invalidated=invalidated)
     refinements = dict(ctx.refinements)
     key_facts = dict(ctx.key_facts)  # facts are path-sensitive: every refined context owns its copy
     if isinstance(condition, hir.DictContains) and truth:
@@ -3730,18 +3734,19 @@ def _refine_condition_context(
         length_bounds[binding_id] = max(length_bounds.get(binding_id, 0), minimum)
         return replace(ctx, refinements=refinements, length_bounds=length_bounds, key_facts=key_facts)
     if isinstance(condition, hir.ShortCircuit):
+        before_right = invalidated | predicate_effects.mutated_bindings(condition.right)
         if condition.op == 'and' and truth:
-            left_ctx = _refine_condition_context(ctx, condition.left, truth=True)
-            return _refine_condition_context(left_ctx, condition.right, truth=True)
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=True, invalidated=before_right)
+            return _refine_condition_context(left_ctx, condition.right, truth=True, invalidated=invalidated)
         if condition.op == 'or' and not truth:
-            left_ctx = _refine_condition_context(ctx, condition.left, truth=False)
-            return _refine_condition_context(left_ctx, condition.right, truth=False)
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=False, invalidated=before_right)
+            return _refine_condition_context(left_ctx, condition.right, truth=False, invalidated=invalidated)
         if condition.op == 'nand' and not truth:
-            left_ctx = _refine_condition_context(ctx, condition.left, truth=True)
-            return _refine_condition_context(left_ctx, condition.right, truth=True)
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=True, invalidated=before_right)
+            return _refine_condition_context(left_ctx, condition.right, truth=True, invalidated=invalidated)
         if condition.op == 'nor' and truth:
-            left_ctx = _refine_condition_context(ctx, condition.left, truth=False)
-            return _refine_condition_context(left_ctx, condition.right, truth=False)
+            left_ctx = _refine_condition_context(ctx, condition.left, truth=False, invalidated=before_right)
+            return _refine_condition_context(left_ctx, condition.right, truth=False, invalidated=invalidated)
     return replace(ctx, refinements=refinements, key_facts=key_facts)
 
 

@@ -11,6 +11,7 @@ from .. import bindings as sb
 from .. import hir, ty
 from ..errors import UserError, user_error, user_warning
 from ..hir_display import type_to_dewy
+from . import predicate_effects
 
 
 @dataclass(frozen=True)
@@ -2932,12 +2933,12 @@ class _BoundsValidator:
             return 1
         return None
 
-    def _refine_after(self, state: State, left: hir.AST, right: hir.AST, *, right_truth: bool) -> State | None:
+    def _refine_after(self, state: State, left: hir.AST, right: hir.AST, *, right_truth: bool, invalidated: frozenset[int] = frozenset()) -> State | None:
         """Refine by `right` on the path where `left` decided nothing (its truth is the opposite of `right_truth`)."""
-        first = self._refine(state, left, truth=not right_truth)
+        first = self._refine(state, left, truth=not right_truth, invalidated=invalidated | predicate_effects.mutated_bindings(right))
         if first is None:
             return None
-        return self._refine(first, right, truth=right_truth)
+        return self._refine(first, right, truth=right_truth, invalidated=invalidated)
 
     def _join_alternatives(self, first: State | None, second: State | None) -> State | None:
         """The state after either of two possible paths (None marks an impossible path)."""
@@ -3888,8 +3889,11 @@ class _BoundsValidator:
         condition: hir.AST,
         *,
         truth: bool,
+        invalidated: frozenset[int] = frozenset(),
     ) -> State | None:
         refined = dict(state)
+        if not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
+            return refined
         if isinstance(condition, hir.Bool):
             return refined if condition.value == truth else None
         if isinstance(condition, hir.ShortCircuit):
@@ -3901,29 +3905,38 @@ class _BoundsValidator:
                     # established lets an earlier one say more
                     # (`start <=? last and last <? text.length`)
                     conjuncts = [*_conjuncts(condition.left), *_conjuncts(condition.right)]   # the root may be `nand`
+                    # Both proof passes describe the final values. A later
+                    # write makes an earlier predicate historical, including
+                    # during the second relational propagation pass.
+                    later_writes: list[frozenset[int]] = []
+                    writes = invalidated
+                    for conjunct in reversed(conjuncts):
+                        later_writes.append(writes)
+                        writes = writes | predicate_effects.mutated_bindings(conjunct)
+                    later_writes.reverse()
                     current: State | None = refined
                     for _pass in range(2):
-                        for conjunct in conjuncts:
-                            current = self._refine(current, conjunct, truth=True)
+                        for conjunct, changed in zip(conjuncts, later_writes):
+                            current = self._refine(current, conjunct, truth=True, invalidated=changed)
                             if current is None:
                                 return None
                     return current
                 # `a and b` false: either `a` was false, or `a` held and `b` was false
                 return self._join_alternatives(
-                    self._refine(refined, condition.left, truth=False),
-                    self._refine_after(refined, condition.left, condition.right, right_truth=False),
+                    self._refine(refined, condition.left, truth=False, invalidated=invalidated),
+                    self._refine_after(refined, condition.left, condition.right, right_truth=False, invalidated=invalidated),
                 )
             if condition.op in {'or', 'nor'}:
                 effective_truth = truth if condition.op == 'or' else not truth
                 if not effective_truth:
-                    left = self._refine(refined, condition.left, truth=False)
+                    left = self._refine(refined, condition.left, truth=False, invalidated=invalidated | predicate_effects.mutated_bindings(condition.right))
                     if left is None:
                         return None
-                    return self._refine(left, condition.right, truth=False)
+                    return self._refine(left, condition.right, truth=False, invalidated=invalidated)
                 # `a or b` true: either `a` held, or `a` was false and `b` held
                 return self._join_alternatives(
-                    self._refine(refined, condition.left, truth=True),
-                    self._refine_after(refined, condition.left, condition.right, right_truth=True),
+                    self._refine(refined, condition.left, truth=True, invalidated=invalidated),
+                    self._refine_after(refined, condition.left, condition.right, right_truth=True, invalidated=invalidated),
                 )
             return refined
         if isinstance(_strip_casts(condition), hir.FunctionCall) and _call_result_refinements(condition):

@@ -58,3 +58,31 @@ let bad = ():>int64 => {
 def test_conditional_value_proofs_do_not_hide_a_bad_arm_or_mutation(source):
     with pytest.raises(ReportException):
         codegen(SrcFile(None, source))
+
+
+@pytest.mark.parametrize('condition', [
+    'xs.length >? 0 and clear(@xs)',
+    'not (xs.length >? 0 nand clear(@xs))',
+    'not (xs.length <=? 0 or not clear(@xs))',
+    'xs.length <=? 0 nor not clear(@xs)',
+    '(xs.length >? 0 and clear(@xs)) and true',
+])
+def test_predicate_facts_expire_when_a_later_operand_mutates_the_subject(condition):
+    source = f'''let clear=(@xs:array<int64>):>bool => {{ xs.clear return true }}
+let bad=(@xs:array<int64>):>int64 => {{
+    if {condition} return xs[0]
+    return 0
+}}
+'''
+    with pytest.raises(ReportException):
+        codegen(SrcFile(None, source))
+
+
+def test_short_circuit_preserves_predicates_about_unmodified_subjects():
+    codegen(SrcFile(None, '''
+let clear=(@ys:array<int64>):>bool => { ys.clear return true }
+let first=(@xs:array<int64> @ys:array<int64>):>int64 => {
+    if xs.length >? 0 and clear(@ys) return xs[0]
+    return 0
+}
+'''))
