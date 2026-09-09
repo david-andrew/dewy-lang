@@ -12,6 +12,31 @@ from ..errors import NotImplementedYet, UserError
 from ..hir_display import type_to_dewy
 
 
+def _cannot_be_callable(type_: ty.TypeExpr, seen: frozenset[int] = frozenset()) -> bool:
+    type_ = ty.unfold(ty.strip_refinement(type_))
+    if id(type_) in seen:
+        return False
+    seen = seen | {id(type_)}
+    if isinstance(type_, ty.TypeOr):
+        return all(_cannot_be_callable(item, seen) for item in type_.items)
+    if isinstance(type_, ty.TypeAnd):
+        return any(_cannot_be_callable(item, seen) for item in type_.items)
+    if isinstance(type_, ty.TypeVariable):
+        return _cannot_be_callable(type_.bound, seen)
+    if isinstance(type_, (ty.ObjectType, ty.ArrayType, ty.StringType,
+                          ty.IntegerLiteralType, ty.StringLiteralType,
+                          ty.BinaryLiteralType, ty.RationalLiteralType,
+                          ty.DimensionType, ty.QuantityType, ty.ModuleType,
+                          ty.MetaType)):
+        return True
+    if isinstance(type_, str):
+        return type_ not in (ty.TOP_TYPE, ty.INFERRED_TYPE, 'function', 'multifunction', 'generator')
+    # Negations, unresolved names, and pending parameterized types retain the
+    # conservative path. This is a proof of non-callability, not a new subtype
+    # relation, and must not discard a possible callback alternative.
+    return False
+
+
 @dataclass(frozen=True)
 class CallableEffect:
     """Concrete callable alternatives supplied for one function parameter."""
@@ -764,6 +789,13 @@ class _InitializationChecker:
         parameters: dict[int, CallableEffect],
         seen: set[int],
     ) -> list[hir.FunctionLiteral] | None:
+        # Effects describe calls through the value itself. A record/array may
+        # contain callbacks, but it is not a callable argument; a later field
+        # or element read is checked using that read's own callable type.
+        # Following record-producing functions here can traverse every path
+        # through a recursive graph for a value that can never be called.
+        if _cannot_be_callable(node.type):
+            return []
         while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
             node = node.items[0]
         if isinstance(node, hir.ArrayMethod):

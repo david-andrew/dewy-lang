@@ -145,7 +145,32 @@ function_results = (id:addr checker:Checker):>array<addr> => {
 
 # A binding id and a node id live in different arenas. Keep separate visited
 # sets instead of inheriting Python's accidental shared integer namespace.
+cannot_be_callable = (id:addr nodes:array<types.Type> seen:set<addr>=set[]):>bool => {
+    let current = types.unfold(types.strip_refinement(id nodes) nodes)
+    if current in? seen return false
+    seen.add(current)
+    let type = types.node_at(nodes current)
+    if type is? types.TypeOr {
+        loop item in type.items { if not cannot_be_callable(item nodes seen) return false }
+        return true
+    }
+    if type is? types.TypeAnd {
+        loop item in type.items { if cannot_be_callable(item nodes seen) return true }
+        return false
+    }
+    if type is? types.TypeVariable return cannot_be_callable(type.bound nodes seen)
+    if type is? types.ObjectType | types.ArrayType | types.StringType | types.IntegerLiteralType | types.StringLiteralType | types.BinaryLiteralType | types.RationalLiteralType | types.DimensionType | types.QuantityType | types.ModuleType | types.MetaType return true
+    if type is? types.Primitive return type.name not in? ['any' 'untyped' 'function' 'multifunction' 'generator']
+    return false
+}
+
 callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> seen_nodes:set<addr> checker:Checker):>array<addr> | none => {
+    # Resolve only values that may themselves be called. Fields/elements of
+    # an aggregate have their own typed reads; the containing value carries
+    # no direct callback effect. Keep unions and unknown types conservative.
+    let value = hir.node_at(checker.nodes id)
+    if cannot_be_callable(value.value_type checker.type_nodes) return []
+
     let current = effects.unwrap(id checker.nodes)
     let node = hir.node_at(checker.nodes current)
     if node is? hir.ArrayMethod return []

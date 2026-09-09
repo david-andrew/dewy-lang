@@ -78,6 +78,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   path aliases, single initialization, missing exports, and import cycles.
   Target-selected imports, automatic prelude installation, dynamic path
   evaluation, and filesystem symlink identity remain driver work.
+- Hosted and native initialization analysis follow callback origins only for
+  values that may themselves be callable. Scalar and aggregate arguments,
+  including their non-callable unions, no longer expand every path through
+  recursive record producers. Callable fields and optional callbacks retain
+  their initialization checks. The focused hosted checks pass (34 existing
+  and graph tests plus two callback regressions), as does the 17-case native
+  initialization comparison.
 - Hosted union destinations preserve machine-integer to bigint payload
   conversion, including optional values evaluated once. Bigint's existing
   decimal formatter now participates in interpolation and `as string`,

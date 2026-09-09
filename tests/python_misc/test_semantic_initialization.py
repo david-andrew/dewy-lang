@@ -421,3 +421,55 @@ def test_main_may_take_argv_strings_only() -> None:
     check.typecheck_and_resolve(SrcFile(None, 'let main = (args:array<string>):>int64 => args.length'))
     with pytest.raises(UserError, match='array<string>'):
         check.typecheck_and_resolve(SrcFile(None, 'let main = (n:int64):>int64 => n'))
+
+
+def test_noncallable_result_fields_do_not_expand_every_producer_path(monkeypatch):
+    """A shared producer graph must stay bounded when a scalar field is passed.
+
+    Each level has two calls to the next producer. The last returns a parameter,
+    whose field origin is unknown: trying to find callback effects for its scalar
+    field previously explored all 2**18 paths before falling back to unknown.
+    """
+    from dewy.semantic.analyze import initialization
+
+    visits = 0
+    original = initialization._InitializationChecker._object_field_value
+
+    def counted(self, *args, **kwargs):
+        nonlocal visits
+        visits += 1
+        assert visits < 1000, 'scalar argument expanded the producer graph'
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(initialization._InitializationChecker, '_object_field_value', counted)
+    functions = [
+        f'let f{i}=(p:[x:int64] flag:bool):>[x:int64]=>if flag f{i+1}(p flag) else f{i+1}(p flag)'
+        for i in range(18)
+    ]
+    _check('\n'.join([
+        *functions,
+        'let f18=(p:[x:int64] flag:bool):>[x:int64]=>p',
+        'let consume=(x:int64):>void=>void',
+        'consume(f0([x=1] true).x)',
+    ]))
+
+
+def test_optional_callback_alternative_keeps_initialization_effects():
+    source = '''
+let invoke=(fn:(<():>int64>)|none):>int64=>if fn is? none 0 else fn()
+let first=():>int64=>later()
+invoke(@first)
+let later=():>int64=>42
+'''
+    with pytest.raises(UserError, match='`later` used before initialization'):
+        _check(source)
+
+
+def test_record_argument_does_not_hide_callback_field_effects():
+    source = '''
+let invoke=(record:[callback:<():>int64>]):>int64=>record.callback()
+invoke([callback=():>int64=>later()])
+let later=():>int64=>42
+'''
+    with pytest.raises(UserError, match='`later` used before initialization'):
+        _check(source)
