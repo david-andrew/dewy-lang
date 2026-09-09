@@ -1,0 +1,225 @@
+import p"ty.dewy" as types
+import p"propositions.dewy" as facts
+import p"type_queries.dewy" as views
+
+doc"""
+Source spellings for types and contracts, corresponding to hir_display.py.
+
+Unlike ty.describe's internal dump, these spellings retain callable names,
+place parameters, field invariants, and conditional proof arms. Named aliases
+stay named: diagnostics must not recursively unfold a recursive declaration.
+Generic type-alias values still await their checker representation; they will
+wrap this renderer with the alias's parameter list, as in the hosted version.
+"""
+
+# Iterate Unicode scalars, not graphemes: a quote or interpolation opener may
+# share its grapheme with a combining mark. Python repr is not Dewy syntax
+# either (notably its byte escapes). Keep this in step with string_to_dewy.
+string_to_dewy = (value:string):>string => {
+    const hex = '0123456789abcdef'
+    let parts:array<string> = ['"']
+    loop scalar in (value as array<uint32>) {
+        if scalar =? 34 { parts.push('\\"') }
+        else if scalar =? 92 { parts.push('\\\\') }
+        else if scalar =? 123 { parts.push(r'\{') }
+        else if scalar =? 8 { parts.push('\\b') }
+        else if scalar =? 9 { parts.push('\\t') }
+        else if scalar =? 10 { parts.push('\\n') }
+        else if scalar =? 12 { parts.push('\\f') }
+        else if scalar =? 13 { parts.push('\\r') }
+        else if scalar <? 32 {
+            let high = scalar // 16
+            let low = scalar % 16
+            $runtime_assert high <? hex.length and low <? hex.length
+            parts.push("\\u00{hex[high]}{hex[low]}")
+        } else {
+            $runtime_assert scalar <? 0x110000
+            parts.push(chr(scalar))
+        }
+    }
+    parts.push('"')
+    return parts.join
+}
+
+bound_to_dewy = (p:facts.Proposition nodes:array<types.Type>):>string => {
+    if p.tested_type isnt? none return type_to_dewy(p.tested_type nodes)
+    if p.term isnt? none return if p.term_projection =? 'length' "{p.term}.length" else p.term
+    return _bigint_as_string(p.value)
+}
+subject_to_dewy = (p:facts.Proposition):>string => {
+    let name = if facts.parameter(p) isnt? none facts.parameter(p) else facts.field(p)
+    if name isnt? none return if p.projection =? 'length' "{name}.length" else name
+    return if p.subject =? 'length' 'length' else 'i'
+}
+fact_to_dewy = (p:facts.Proposition nodes:array<types.Type>):>string => {
+    if p.axiom =? 'addr' return 'i => i fits the address space'
+    let op = if p.op =? 'not=?' 'not =?' else p.op
+    let subject = if p.subject =? 'self' 'i => i' else subject_to_dewy(p)
+    return "{subject} {op} {bound_to_dewy(p nodes)}"
+}
+facts_to_dewy = (items:array<facts.Proposition> nodes:array<types.Type>):>string => {
+    let parts:array<string> = []
+    loop p in items { parts.push(fact_to_dewy(p nodes)) }
+    return parts.join(' ')
+}
+
+# T<facts> describes the value; T & <facts> describes parameters. A boolean
+# can promise different facts on each arm, with unconditional facts in both.
+# Field invariants use the same rule without mutating the interned type table.
+refined_to_dewy = (base:addr props:array<facts.Proposition> nodes:array<types.Type>):>string => {
+    let node = types.node_at(nodes base)
+    let name = type_to_dewy(base nodes)
+    let remaining:array<facts.Proposition> = props
+    if node is? types.Primitive and views.has_proposition(props views.NAT) {
+        let named:array<facts.Proposition> = []
+        if node.name =? 'int64' and views.has_proposition(props views.ADDR) {
+            name = 'addr'
+            named = [views.NAT views.ADDR]
+        } else {
+            loop nat in views.nat_bases.keys {
+                if nat in? views.nat_bases and views.nat_bases[nat] =? node.name {
+                    name = nat
+                    named = [views.NAT]
+                }
+            }
+        }
+        remaining = []
+        loop p in props { if not views.has_proposition(named p) { remaining.push(p) } }
+    }
+    if types.is_primitive(node 'void') return "<{facts_to_dewy(remaining nodes)}>"
+    if types.is_primitive(node 'bool') {
+        let conditional = false
+        loop p in remaining { if p.when isnt? none { conditional = true } }
+        if conditional {
+            let parts:array<string> = []
+            loop arm in [true false] {
+                let arm_facts:array<facts.Proposition> = []
+                loop p in remaining { if p.when is? none or p.when =? arm { arm_facts.push(p) } }
+                let label = if arm 'true' else 'false'
+                parts.push(if arm_facts.length =? 0 label else "{label} & <{facts_to_dewy(arm_facts nodes)}>")
+            }
+            return parts.join(' | ')
+        }
+    }
+    let about_value:array<facts.Proposition> = []
+    let about_params:array<facts.Proposition> = []
+    loop p in remaining {
+        if facts.parameter(p) is? none { about_value.push(p) }
+        else { about_params.push(p) }
+    }
+    if about_value.length >? 0 {
+        let conditions = facts_to_dewy(about_value nodes)
+        if name.length >? 0 and name.endswith('>') { name = "{name[..name.length-1)} {conditions}>" }
+        else { name = "{name}<{conditions}>" }
+    }
+    if about_params.length >? 0 { name = "{name} & <{facts_to_dewy(about_params nodes)}>" }
+    return name
+}
+
+atom = (id:addr nodes:array<types.Type>):>string => {
+    let text = type_to_dewy(id nodes)
+    return if types.node_at(nodes id) is? types.TypeAnd | types.TypeOr | types.OverloadType "({text})" else text
+}
+function_to_dewy = (node:types.FunctionType nodes:array<types.Type>):>string => {
+    let generics:array<string> = []
+    loop param in node.type_params {
+        generics.push(if types.is_primitive(types.node_at(nodes param.bound) 'any') param.name else "{param.name} of {type_to_dewy(param.bound nodes)}")
+    }
+    let args:array<string> = []
+    loop arg in node.pos_or_kw {
+        let text = type_to_dewy(arg.value_type nodes)
+        if arg.name isnt? none { text = "{arg.name}:{text}" }
+        args.push(if arg.place "@{text}" else text)
+    }
+    if node.rest isnt? none or node.kw_only.length >? 0 {
+        args.push(if node.rest is? none '...' else "...{node.rest}")
+    }
+    loop arg in node.kw_only {
+        let text = "{arg.name}:{type_to_dewy(arg.value_type nodes)}"
+        args.push(if arg.place "@{text}" else text)
+    }
+    let signature = "({args.join(' ')})"
+    if node.pos_or_kw.length =? 1 and node.pos_or_kw[0].name is? none and node.kw_only.length =? 0 and node.rest is? none {
+        $runtime_assert args.length >? 0
+        signature = args[0]
+    }
+    let prefix = if generics.length =? 0 '' else "<{generics.join(' ')}>"
+    return "<{prefix}{signature}:>{type_to_dewy(node.ret nodes)}>"
+}
+
+type_to_dewy = (id:addr nodes:array<types.Type>):>string => {
+    let node = types.node_at(nodes id)
+    if node is? types.Primitive | types.TypeVariable | types.NamedType return node.name
+    if node is? types.IntegerLiteralType return _bigint_as_string(node.value)
+    if node is? types.RationalLiteralType return "{_bigint_as_string(node.numerator)}/{_bigint_as_string(node.denominator)}"
+    if node is? types.StringLiteralType return string_to_dewy(node.value)
+    if node is? types.BinaryLiteralType {
+        const hex = '0123456789abcdef'
+        let parts:array<string> = []
+        loop byte in node.value {
+            let high = byte // 16
+            let low = byte % 16
+            $runtime_assert high <? hex.length and low <? hex.length
+            parts.push("{hex[high]}{hex[low]}")
+        }
+        return "0x\"{parts.join}\""
+    }
+    if node is? types.PathLiteralType return "p{string_to_dewy(node.value)}"
+    if node is? types.PathType return 'Path'
+    if node is? types.MetaType return "type<{type_to_dewy(node.family nodes)}>"
+    if node is? types.ModuleType return 'module'
+    if node is? types.RefinedType {
+        if views.total_dict_key(id nodes) isnt? none {
+            let entry = views.container_entry_types(node.base nodes)
+            $runtime_assert entry isnt? none and entry.value isnt? none
+            return "totaldict<{type_to_dewy(entry.key nodes)} {type_to_dewy(entry.value nodes)}>"
+        }
+        return refined_to_dewy(node.base node.propositions nodes)
+    }
+    if node is? types.StringType return if node.length is? none 'string' else "string<length={node.length}>"
+    if node is? types.ArrayType {
+        let length = if node.length is? none '' else " length={node.length}"
+        return "array<{type_to_dewy(node.element nodes)}{length}>"
+    }
+    if node is? types.DimensionType {
+        let parts:array<string> = []
+        loop power in node.powers { parts.push(if power.exponent =? 1 power.name else "{power.name}^{_bigint_as_string(power.exponent)}") }
+        return if parts.length =? 0 'Dimensionless' else parts.join(' * ')
+    }
+    if node is? types.QuantityType return "{atom(node.number nodes)} * {type_to_dewy(node.dimension nodes)}"
+    if node is? types.TypeAnd | types.TypeOr | types.OverloadType {
+        let items = if node is? types.OverloadType node.methods else node.items
+        let parts:array<string> = []
+        loop item in items { parts.push(atom(item nodes)) }
+        return parts.join(if node is? types.TypeOr ' | ' else ' & ')
+    }
+    if node is? types.TypeNot {
+        let inner = type_to_dewy(node.item nodes)
+        return if types.node_at(nodes node.item) is? types.TypeAnd | types.TypeOr "~({inner})" else "~{inner}"
+    }
+    if node is? types.TypeParameterize | types.SequenceType {
+        let items = if node is? types.TypeParameterize node.args else node.items
+        let parts:array<string> = []
+        loop item in items { parts.push(type_to_dewy(item nodes)) }
+        let head = if node is? types.TypeParameterize atom(node.head nodes) else ''
+        return "{head}<{parts.join(' ')}>"
+    }
+    if node is? types.ObjectType {
+        if node.minted and node.brand isnt? none return node.brand
+        let entry = views.container_entry_types(id nodes)
+        if entry isnt? none {
+            if entry.value is? none return "set<{type_to_dewy(entry.key nodes)}>"
+            return "dict<{type_to_dewy(entry.key nodes)} {type_to_dewy(entry.value nodes)}>"
+        }
+        let fields:array<string> = []
+        loop field in node.fields {
+            let prefix = if field.mutable '' else 'const '
+            let text = if field.refinement.length =? 0 type_to_dewy(field.value_type nodes) else refined_to_dewy(field.value_type field.refinement nodes)
+            fields.push("{prefix}{field.name}:{text}")
+        }
+        let prefix = if node.immutable 'const ' else ''
+        return "{prefix}[{fields.join(' ')}]"
+    }
+    $runtime_assert node is? types.FunctionType
+    return function_to_dewy(node nodes)
+}

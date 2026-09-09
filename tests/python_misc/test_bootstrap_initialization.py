@@ -42,7 +42,7 @@ def type_builder(lines):
     cache = {}
 
     def optional(value):
-        return 'none' if value is None else json.dumps(value)
+        return 'none' if value is None else json.dumps(value, ensure_ascii=False).replace('{', r'\{')
 
     def propositions(items):
         return ' '.join(
@@ -63,7 +63,36 @@ def type_builder(lines):
         elif isinstance(value, ty.IntegerLiteralType):
             call = f'types.integer_literal(({value.value}) @type_nodes)'
         elif isinstance(value, ty.StringLiteralType):
-            call = f'types.string_literal({json.dumps(value.value)} @type_nodes)'
+            call = f'types.string_literal({optional(value.value)} @type_nodes)'
+        elif isinstance(value, ty.BinaryLiteralType):
+            call = f'types.binary_literal([{" ".join(map(str, value.value))}] @type_nodes)'
+        elif isinstance(value, ty.RationalLiteralType):
+            call = f'types.rational_literal(({value.numerator}) ({value.denominator}) @type_nodes)'
+        elif isinstance(value, ty.PathLiteralType):
+            call = f'types.path_type({optional(value.value)} [] @type_nodes)'
+        elif isinstance(value, ty.PathType):
+            call = 'types.path_type(none [] @type_nodes)'
+        elif isinstance(value, ty.TypeVariable):
+            call = f'types.type_variable({optional(value.name)} {build(value.bound)} @type_nodes)'
+        elif isinstance(value, ty.NamedType):
+            call = f'types.named_type({optional(value.name)} {len(cache)} @type_nodes)'
+        elif isinstance(value, ty.MetaType):
+            call = f'types.meta_type({build(value.family)} @type_nodes)'
+        elif isinstance(value, ty.ModuleType):
+            fields = ' '.join(f'types.ModuleField[{optional(f.name)} {build(f.type)} {f.binding_id}]' for f in value.fields)
+            call = f'types.module_type([{fields}] @type_nodes)'
+        elif isinstance(value, ty.DimensionType):
+            powers = ' '.join(f'types.DimensionPower[{optional(name)} ({power})]' for name, power in value.powers)
+            call = f'types.dimension([{powers}] @type_nodes)'
+        elif isinstance(value, ty.QuantityType):
+            call = f'types.quantity_type({build(value.number)} {build(value.dimension)} @type_nodes)'
+        elif isinstance(value, ty.TypeNot):
+            inner = build(value.type)
+            call = f'types.intern(@type_nodes types.TypeNot[key="not-{inner}" item={inner}])'
+        elif isinstance(value, ty.TypeParameterize):
+            call = f'types.parameterize({build(value.t)} [{" ".join(build(a) for a in value.args)}] @type_nodes)'
+        elif isinstance(value, ty.SequenceType):
+            call = f'types.sequence([{" ".join(build(a) for a in value.items)}] @type_nodes)'
         elif isinstance(value, ty.StringType):
             call = f'types.string_type({"none" if value.length is None else value.length} @type_nodes)'
         elif isinstance(value, ty.ArrayType):
