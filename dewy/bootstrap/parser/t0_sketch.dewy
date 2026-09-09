@@ -3,7 +3,9 @@ Alternative t0 design sketch: narrow context -> probe -> select -> finish.
 
 Implements layout/comments, identifiers, symbols, numbers, metatags, shifts,
 and ordinary/type/based block delimiters, including nesting and EOF errors.
-Strings and ExponentMarker are still ahead.
+Also implements quoted ordinary/raw/template strings, escapes, interpolation,
+parametric Unicode escapes, and ExponentMarker. Based strings, heredocs, and
+rest-of-file strings are still ahead.
 
 Targets immutable record types and construction-time sibling-field proofs:
 `const [...]` is a type of deeply immutable values, not compile-time evaluation.
@@ -103,29 +105,33 @@ shift_operators.sort(key=(.length) reverse=true)
 BlockKind:type = 'square' | 'round' | 'curly' | 'based'
 CloseSpelling:type = ']' | ')' | '\}'
 Opening:type = const [idx:addr loc:Span]
+QuoteEnd = type of any & const [text:nonemptystring]
+StringEnding:type = QuoteEnd # | HeredocEnd | EndOfFile
+StringMode:type = 'ordinary' | 'raw' | 'template'
+InterpolationKind:type = 'ordinary' | 'template' | 'unicode'
 
 # Individual tokenization contexts.
 Root = type of any & const [default_base:BasePrefix=base10]
 BlockBody = type of any & const [opening:Opening kind:BlockKind default_base:BasePrefix=base10]
 TypeBody = type of any & const [opening:Opening default_base:BasePrefix=base10]
 
-# Future string contexts retain the opener's location/index and a normalized
-# ending: QuoteEnd(text), HeredocEnd(text), or EndOfFile. Heredoc and rest-of-file
-# strings reuse these body contexts rather than introducing separate ones.
-# StringBody = type of any & const [opening:Opening ending:StringEnding]          # escapes and `{...}` interpolation
-# RawStringBody = type of any & const [opening:Opening ending:StringEnding]       # literal contents, no escapes/interpolation
-# TemplateStringBody = type of any & const [opening:Opening ending:StringEnding]  # escapes and `${...}` interpolation
-# BasedStringBody = type of any & const [opening:Opening ending:QuoteEnd base:BasePrefix]  # based digits, whitespace, comments; quoted ending only
+# The delimiter text is normalized at recognition, without a prefix such as r/t.
+StringBody = type of any & const [opening:Opening ending:StringEnding]
+RawStringBody = type of any & const [opening:Opening ending:StringEnding]
+TemplateStringBody = type of any & const [opening:Opening ending:StringEnding]
+# BasedStringBody = type of any & const [opening:Opening ending:QuoteEnd base:BasePrefix]
+# HeredocEnd(text) and EndOfFile will extend StringEnding; heredoc/rest-of-file
+# openers reuse these body contexts rather than introducing new context variants.
 
 
-# Context groups. String contexts will extend the relevant groups and Context
-# when implemented; general bodies are currently the complete set.
-NestedContext:type = BlockBody | TypeBody # | StringBody | RawStringBody | TemplateStringBody | BasedStringBody
-# These two groups stay unchanged: string contents are not general expressions.
+# Compound context groups. Keep the complete set last.
+NestedContext:type = BlockBody | TypeBody | StringBody | RawStringBody | TemplateStringBody # | BasedStringBody
 GeneralBodyContexts:type = Root | BlockBody | TypeBody
 BodyWithoutTypeContexts:type = Root | BlockBody
 WhitespaceOrCommentContexts:type = GeneralBodyContexts # | BasedStringBody
-Context:type = Root | BlockBody | TypeBody # | StringBody | RawStringBody | TemplateStringBody | BasedStringBody
+QuotedStringContexts:type = StringBody | RawStringBody | TemplateStringBody # | BasedStringBody
+EscapedStringContexts:type = StringBody | TemplateStringBody
+Context:type = Root | BlockBody | TypeBody | StringBody | RawStringBody | TemplateStringBody # | BasedStringBody
 
 # Tokens are completed output values. No recognizer protocol on the base type,
 # and no Number temporarily lacking its required prefix.
@@ -154,6 +160,16 @@ RightSquareBracket = type of Token
 RightParenthesis = type of Token
 RightCurlyBrace = type of Token
 RightAngleBracket = type of Token
+StringQuoteOpener = type of Token
+RawStringQuoteOpener = type of Token
+TemplateStringQuoteOpener = type of Token
+StringQuoteCloser = type of Token
+StringChars = type of Token
+RawStringChars = type of Token
+StringEscape = type of Token
+TemplateLeftCurlyBrace = type of Token
+ParametricStringEscape = type of Token
+ExponentMarker = type of Token & [power:Number]
 
 # A match is a small construction recipe. Minted variants preserve identity
 # even when their fields are identical. No full tokens or contexts are built.
@@ -171,7 +187,13 @@ OpenTypeMatch = type of any & MatchData
 # Retain the narrowed frame as evidence. finish never reads the current stack.
 CloseBlockMatch = type of any & MatchData & [spelling:CloseSpelling frame:BlockBody]
 CloseTypeMatch = type of any & MatchData & [frame:TypeBody]
-Candidate:type = WhitespaceMatch | LineCommentMatch | BlockCommentMatch | IdentifierMatch | SymbolMatch | NumberMatch | MetatagMatch | ShiftSymbolMatch | OpenBlockMatch | OpenTypeMatch | CloseBlockMatch | CloseTypeMatch
+OpenStringMatch = type of any & MatchData & [mode:StringMode ending:QuoteEnd]
+CloseStringMatch = type of any & MatchData & [opening:Opening]
+StringCharsMatch = type of any & MatchData & [raw:bool]
+StringEscapeMatch = type of any & MatchData
+InterpolationMatch = type of any & MatchData & [kind:InterpolationKind]
+ExponentMatch = type of any & MatchData & [power:NumberMatch]
+Candidate:type = WhitespaceMatch | LineCommentMatch | BlockCommentMatch | IdentifierMatch | SymbolMatch | NumberMatch | MetatagMatch | ShiftSymbolMatch | OpenBlockMatch | OpenTypeMatch | CloseBlockMatch | CloseTypeMatch | OpenStringMatch | CloseStringMatch | StringCharsMatch | StringEscapeMatch | InterpolationMatch | ExponentMatch
 
 Keep = type of any
 Push = type of any & [frame:NestedContext]
@@ -351,6 +373,109 @@ probe_type_closer = (src:nonemptystring ctx:TypeBody):>CloseTypeMatch? => {
     return none
 }
 
+# A run of N quotes opens with N quotes if odd, N/2 if even (empty strings).
+# Save the exact delimiter here; string-body probes never inspect opener tokens.
+probe_string_opener = (src:nonemptystring):>OpenStringMatch? => {
+    mode:StringMode = 'ordinary'
+    start:addr = 0
+    if src.startswith('r"') or src.startswith("r'") { mode = 'raw' start = 1 }
+    else if src.startswith('t"') or src.startswith("t'") { mode = 'template' start = 1 }
+    if start >=? src.length return none
+    quote = src[start]
+    if quote isnt? '"' | "'" return none
+    i:addr = start + 1
+    loop i <? src.length and src[i] =? quote { i += 1 }
+    count = i-start
+    length = if count % 2 =? 0 count//2 else count
+    if length <=? 0 return none
+    stop = start+length
+    if stop <=? start or stop >? src.length return none  # expose the slice bounds and nonemptiness
+    return OpenStringMatch[length=stop mode=mode ending=QuoteEnd[src[start..stop)]]
+}
+
+probe_string_closer = (src:nonemptystring ctx:QuotedStringContexts):>CloseStringMatch? => {
+    delimiter = ctx.ending.text
+    # The type promises this; nested named string refinements are not currently
+    # recovered on this read. Keep the invariant explicit until that is fixed.
+    $runtime_assert delimiter.length >? 0
+    if src.startswith(delimiter) {
+        return CloseStringMatch[length=delimiter.length opening=ctx.opening]
+    }
+    return none
+}
+
+probe_string_chars = (src:nonemptystring ctx:QuotedStringContexts):>StringCharsMatch? => {
+    i:addr = 0
+    loop i <? src.length {
+        if src[i..].startswith(ctx.ending.text) break
+        if ctx isnt? RawStringBody {
+            if src[i] =? '\\' break
+            if ctx is? StringBody and src[i] =? '\{' break
+            if ctx is? TemplateStringBody and src[i..].startswith('$\{') break
+        }
+        i += 1
+    }
+    if i =? 0 return none
+    return StringCharsMatch[length=i raw=(ctx is? RawStringBody)]
+}
+
+# Parametric escapes open ordinary expression blocks whose default base is hex.
+# These compete with simple escapes, but simple escapes explicitly decline \u{.
+probe_interpolation = (src:nonemptystring ctx:EscapedStringContexts):>InterpolationMatch? => {
+    if src.startswith('\\u\{') or src.startswith('\\U\{') {
+        return InterpolationMatch[length=3 kind='unicode']
+    }
+    if ctx is? StringBody and src.startswith('\{') return InterpolationMatch[length=1 kind='ordinary']
+    if ctx is? TemplateStringBody and src.startswith('$\{') return InterpolationMatch[length=2 kind='template']
+    return none
+}
+
+probe_string_escape = (src:nonemptystring srcfile:SrcFile offset:addr):>StringEscapeMatch? | TokenError => {
+    if not src.startswith('\\') return none
+    if src.length <? 2 {
+        return TokenError[
+            srcfile=srcfile title="Incomplete escape sequence at end of string"
+            pointers=[Pointer[span=Span[offset offset+src.length] message="Expected a character after the backslash"]]
+        ]
+    }
+    code = src[1]
+    if code is? 'x' | 'X' {
+        return TokenError[
+            srcfile=srcfile title="Hex byte escapes are not supported in Dewy strings"
+            pointers=[Pointer[span=Span[offset offset+2] message="Unsupported hex byte escape"]]
+            hint="Use a Unicode escape or a based byte string"
+        ]
+    }
+    if code is? 'u' | 'U' {
+        if src.length >=? 3 and src[2] =? '\{' return none
+        i:addr = 2
+        loop i <? src.length and i <? 6 and is_based_digit(src[i] base16) { i += 1 }
+        if i <? 6 {
+            return TokenError[
+                srcfile=srcfile title="Unicode escape sequence is too short"
+                pointers=[Pointer[span=Span[offset offset+i] message="Expected four hexadecimal digits after the escape code"]]
+                hint="Use four hex digits or a braced Unicode expression"
+            ]
+        }
+        return StringEscapeMatch[length=i]
+    }
+    # Includes predefined escapes, escaped newline, and the catch-all literal.
+    # t0 recognizes the source span; decoding the escaped value belongs to t1.
+    return StringEscapeMatch[length=2]
+}
+
+# The immediate previous token must be a Number (whitespace is not skipped).
+# Only that observation crosses the probe boundary, not an optional token.
+# Keep the nested NumberMatch and pass its own absolute offset to diagnostics.
+probe_exponent = (src:nonemptystring previous_is_number:bool base:BasePrefix srcfile:SrcFile offset:addr):>ExponentMatch? | TokenError => {
+    if not previous_is_number or src.length <? 2 return none
+    if src[0] not in? set'eEpP' return none
+    power = probe_number(src[1..] base srcfile offset+1)
+    if power is? TokenError return power
+    if power is? none return none
+    return ExponentMatch[length=power.length+1 power=power]
+}
+
 # Keep only maximal lengths, but retain all ties for precedence/ambiguity.
 # There is no sorting and no dependence on registration order for equal lengths.
 consider = (@best:array<Candidate> result:Candidate?):>void => {
@@ -364,7 +489,7 @@ consider = (@best:array<Candidate> result:Candidate?):>void => {
 
 # Context eligibility is established where calls happen, not in a returned
 # list of classes. The two groups overlap, so these are independent branches.
-probe_context = (src:nonemptystring ctx:Context srcfile:SrcFile offset:addr):>array<Candidate> | TokenError => {
+probe_context = (src:nonemptystring ctx:Context previous_is_number:bool srcfile:SrcFile offset:addr):>array<Candidate> | TokenError => {
     best:array<Candidate> = []
     if ctx is? WhitespaceOrCommentContexts {
         consider(@best probe_whitespace(src))
@@ -379,6 +504,10 @@ probe_context = (src:nonemptystring ctx:Context srcfile:SrcFile offset:addr):>ar
         number = probe_number(src ctx.default_base srcfile offset)
         if number is? TokenError return number
         consider(@best number)
+        exponent = probe_exponent(src previous_is_number ctx.default_base srcfile offset)
+        if exponent is? TokenError return exponent
+        consider(@best exponent)
+        consider(@best probe_string_opener(src))
         consider(@best probe_metatag(src))
         consider(@best probe_block_opener(src))
         consider(@best probe_type_opener(src))
@@ -392,16 +521,26 @@ probe_context = (src:nonemptystring ctx:Context srcfile:SrcFile offset:addr):>ar
     if ctx is? TypeBody {
         consider(@best probe_type_closer(src ctx))
     }
+    if ctx is? QuotedStringContexts {
+        consider(@best probe_string_closer(src ctx))
+        consider(@best probe_string_chars(src ctx))
+    }
+    if ctx is? EscapedStringContexts {
+        consider(@best probe_interpolation(src ctx))
+        escape = probe_string_escape(src srcfile offset)
+        if escape is? TokenError return escape
+        consider(@best escape)
+    }
     return best
 }
 
 # Only Identifier can be displaced by precedence in this subset. This encodes
-# the existing Python pairs (Symbol > Identifier, Number > Identifier), not a
+# the existing Python pairs (Symbol/Number/ExponentMarker > Identifier), not a
 # total ordering that would silently resolve other, potentially invalid ties.
 select = (matches:array<Candidate> srcfile:SrcFile offset:addr):>Candidate | TokenError => {
     beats_identifier = false
     loop m in matches {
-        if m is? SymbolMatch or m is? NumberMatch { beats_identifier = true }
+        if m is? SymbolMatch or m is? NumberMatch or m is? ExponentMatch { beats_identifier = true }
     }
     remaining:array<Candidate> = [
         loop m in matches
@@ -413,7 +552,7 @@ select = (matches:array<Candidate> srcfile:SrcFile offset:addr):>Candidate | Tok
             srcfile=srcfile
             title="No token matched"
             pointers=[Pointer[span=Span[offset offset] message="No implemented token starts here"]]
-            hint="Strings and exponent markers are not implemented in this sketch yet"
+            hint="Based strings, heredocs, and rest-of-file strings are not implemented in this sketch yet"
         ]
     }
     return TokenError[
@@ -449,6 +588,43 @@ finish = (m:Candidate srcfile:SrcFile loc:Span idx:addr):>Finished | TokenError 
         n:NumberMatch => Finished[token=Number[src loc idx n.prefix]]
         <MetatagMatch> => Finished[token=Metatag[src loc idx]]
         <ShiftSymbolMatch> => Finished[token=ShiftSymbol[src loc idx]]
+        e:ExponentMatch => Finished[token=ExponentMarker[
+            src loc idx Number[src Span[loc.start+1 loc.stop] idx e.power.prefix]
+        ]]
+        o:OpenStringMatch => {
+            opening = Opening[idx loc]
+            # Construct the token and its matching frame together in each arm.
+            match o.mode {
+                <'ordinary'> => Finished[
+                    token=StringQuoteOpener[src loc idx]
+                    action=Push[StringBody[opening o.ending]]
+                ]
+                <'raw'> => Finished[
+                    token=RawStringQuoteOpener[src loc idx]
+                    action=Push[RawStringBody[opening o.ending]]
+                ]
+                <'template'> => Finished[
+                    token=TemplateStringQuoteOpener[src loc idx]
+                    action=Push[TemplateStringBody[opening o.ending]]
+                ]
+            }
+        }
+        c:CloseStringMatch => Finished[token=StringQuoteCloser[src loc idx] action=Close[c.opening]]
+        c:StringCharsMatch => {
+            token:Token = if c.raw RawStringChars[src loc idx] else StringChars[src loc idx]
+            Finished[token=token]
+        }
+        <StringEscapeMatch> => Finished[token=StringEscape[src loc idx]]
+        o:InterpolationMatch => {
+            token:Token = match o.kind {
+                <'ordinary'> => LeftCurlyBrace[src loc idx]
+                <'template'> => TemplateLeftCurlyBrace[src loc idx]
+                <'unicode'> => ParametricStringEscape[src loc idx]
+            }
+            base:BasePrefix = if o.kind =? 'unicode' base16 else base10
+            frame = BlockBody[opening=Opening[idx loc] kind='curly' default_base=base]
+            Finished[token=token action=Push[frame]]
+        }
         o:OpenBlockMatch => {
             token:Token = match o.kind {
                 <'square'> => LeftSquareBracket[src loc idx]
@@ -512,7 +688,12 @@ tokenize = (srcfile:SrcFile):>Tokenization | TokenError => {
     src = srcfile.body
     i:addr = 0
     loop i <? src.length {
-        candidates = probe_context(src[i..] stack[end] srcfile i)
+        previous_is_number = false
+        if tokens.length >? 0 {
+            previous = tokens[end]
+            previous_is_number = previous is? Number
+        }
+        candidates = probe_context(src[i..] stack[end] previous_is_number srcfile i)
         if candidates is? TokenError return candidates
         winner = select(candidates srcfile i)
         if winner is? TokenError return winner
@@ -568,6 +749,9 @@ tokenize = (srcfile:SrcFile):>Tokenization | TokenError => {
                 }
                 else if frame is? TypeBody {
                     Pointer[span=frame.opening.loc message="Unclosed type body; expected `>`"]
+                }
+                else if frame is? QuotedStringContexts {
+                    Pointer[span=frame.opening.loc message="Unclosed string; expected {_quoted(frame.ending.text)}"]
                 }
             }
         ]
