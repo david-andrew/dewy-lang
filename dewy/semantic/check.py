@@ -801,6 +801,16 @@ def _sink_ambiguity(ast: p0.AST) -> p0.AST:
     return ast
 
 
+def _source_items(ast: p0.AST) -> list[p0.AST]:
+    """Normalize each row before deciding whether it binds a name.
+
+    A call/product ambiguity inside `name=make().field` does not make the
+    argument positional or turn the field into a value-less assignment.
+    The operand's competing readings remain for ordinary type resolution.
+    """
+    return [_sink_ambiguity(item) for item in (ast.inner if isinstance(ast, p0.Block) else [ast])]
+
+
 _ASSERT_LOGICAL_OPERATORS = {'and', 'or', 'nand', 'nor', 'xor', 'xnor'}
 _ASSERT_COMPARISON_OPERATORS = {'=?', '>?', '<?', '>=?', '<=?', 'is?', 'isnt?', 'in?'}
 
@@ -5423,7 +5433,7 @@ def _assert_failure_report(
         return hir.Integer(loc, ty.IntegerLiteralType(value), '0d', value)
 
     def call(name: str, *arguments: hir.AST) -> hir.FunctionCall:
-        return _checked_call(tcr_identifier(t1.Identifier(loc, name), ctx=ctx), list(arguments), loc=loc, ctx=ctx)
+        return _checked_call(_compiler_helper(name, loc=loc, ctx=ctx), list(arguments), loc=loc, ctx=ctx)
 
     body = ctx.srcfile.body
     line_start = body.rfind('\n', 0, condition_ast.loc.start) + 1
@@ -5447,7 +5457,7 @@ def _assert_failure_report(
     else:
         message = text('this condition was false')
     dim_stop = byte_offset(message_ast.loc.stop) if message_ast is not None else condition_stop
-    report_alias = ctx.binding_scopes.get('Report')
+    report_alias = ctx.prelude_bindings.get('Report') or ctx.binding_scopes.get('Report')
     if report_alias is None or report_alias.type_value is None:
         not_implemented(ctx.srcfile, loc, f'`${ast.name}` without the prelude (`Report` is not available)')
     report_type = ty.unfold(report_alias.type_value)
@@ -9287,6 +9297,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         return _tcr_loop_capture(block, kind='array', expected=expected, ctx=ctx)
 
     if block.kind == '[]':
+        block = replace(block, inner=_source_items(block))
         arrows = [item for item in block.inner if _is_top_level_arrow(item)]
         if arrows and len(arrows) != len([item for item in block.inner if _spread_operand(item) is None]):
             user_error(
@@ -9873,20 +9884,19 @@ def _is_rational(type_: ty.Type, *, ctx: Context) -> bool:
     return _is_big_rational(type_, ctx=ctx) or _is_word_rational(type_, ctx=ctx)
 
 
+def _compiler_helper(name: str, *, loc: Span, ctx: Context) -> hir.AST:
+    """Resolve a generated reference without capturing a user's local name."""
+    binding = ctx.prelude_bindings.get(name)
+    if binding is not None and binding.type is not None:
+        return hir.ExpressedIdentifier(loc, binding.type, binding.name, binding_id=binding.id)
+    if name not in ctx.declarations:
+        user_error(ctx.srcfile, 'compiler helper needs the prelude', Pointer(span=loc, message=f'`{name}` is not in scope'))
+    return tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
+
+
 def _prelude_call(name: str, args: list[hir.AST], *, loc: Span, ctx: Context) -> hir.FunctionCall:
     """Call a prelude function by name with already-checked arguments."""
-    binding = ctx.prelude_bindings.get(name)
-    if binding is None and name not in ctx.declarations:
-        user_error(
-            ctx.srcfile,
-            'numeric operations need the prelude',
-            Pointer(span=loc, message=f'the numeric helper `{name}` is not in scope'),
-        )
-    func = (
-        hir.ExpressedIdentifier(loc, binding.type, binding.name, binding_id=binding.id)
-        if binding is not None and binding.type is not None
-        else tcr_identifier(t1.Identifier(loc, name), ctx=ctx)
-    )
+    func = _compiler_helper(name, loc=loc, ctx=ctx)
     if not isinstance(func.type, ty.FunctionType):
         raise ValueError(f'INTERNAL ERROR: prelude helper `{name}` is not a plain function')
     checked = [
@@ -12794,6 +12804,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
     the field, and the default may refer to earlier fields by name.
     """
 
+    item = _sink_ambiguity(item)
     mutable = True
     if (
         isinstance(item, p0.KeywordExpr)
@@ -14261,6 +14272,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     rest_args: hir.Param|hir.BoundParam|None = None
 
     def collect_param(item: p0.AST, *, position_only: bool = False) -> hir.Param | hir.BoundParam:
+        item = _sink_ambiguity(item)
         def mark_place(
             param: hir.Param | hir.BoundParam,
             loc: Span,
@@ -14370,7 +14382,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case _:
                 not_implemented(ctx.srcfile, item.loc, f'{type(item).__name__} in function signature')
 
-    for item in signature.inner:
+    for item in _source_items(signature):
         match item:
             case p0.Atom(item=t1.Identifier(name='...')):
                 if saw_rest:
@@ -14416,10 +14428,7 @@ def parse_call_arguments(
     method: ty.FunctionType | None = None,
 ) -> tuple[list[hir.AST], dict[str, hir.AST], list[str | None]]:
     """Typecheck call args while retaining their left-to-right binding order."""
-    if isinstance(right, p0.Block):
-        items = list(right.inner)
-    else:
-        items = [right]
+    items = _source_items(right)
 
     pos_args: list[hir.AST] = []
     kw_args: dict[str, hir.AST] = {}
@@ -15151,7 +15160,7 @@ def _tcr_type_constructor_call(
     overload = _select_constructor_overload(left, object_type, right, ctx=ctx)
     if overload is not None:
         return tcr_function_call(overload, right, ctx=ctx)
-    items = right.inner if isinstance(right, p0.Block) else [right]
+    items = _source_items(right)
     given: dict[str, p0.AST] = {}
     positional: list[p0.AST] = []
     for item in items:
