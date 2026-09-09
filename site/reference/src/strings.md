@@ -41,7 +41,7 @@ let message = "item {index}: {value}"
 let combined = "{left}{right}"
 ```
 
-A field's value converts the way `value as string` does: numbers, booleans, and strings directly, a declared type through its conversion method `__as__ = ():>string => …` (see [`as`](types-and-conversions.md#as)) — user-defined formatting participates in the general conversion protocol rather than a string-only hook — and a container or an object without one as its literal syntax (see [Printing](#printing)). A field whose type cannot convert is an error.
+A field's value converts the way `value as string` does: numbers, booleans, and strings directly, a declared type through its conversion method `__as__ = ():>string => …` (see [`as`](types-and-conversions.md#as)) — user-defined formatting participates in the general conversion protocol rather than a string-only hook — and a container or an object without one as its literal syntax (see [Printing](#printing)). A field whose type cannot convert is an error. Big integers have a decimal string form, including inside optional values and containers.
 
 An implementation may stream the literal chunks and converted fields directly to a consumer such as `printl`, or materialize a string value when the surrounding context needs one. That representation choice is not observable.
 
@@ -65,7 +65,7 @@ let main = ():>int64 => {
 }
 ```
 
-Because printing is `as string`, an array of graphemes prints as the text they form (`printl(["a" "b"])` writes `ab`), as [`as`](types-and-conversions.md#as) converts it. A value that cannot convert — a member of an optional type, a container whose members are containers, or a number object inside a structure (they print, but have no string form yet) — is an error where it is printed. An interpolated argument is written part by part rather than built into one string first; that representation choice is not observable. Printing a structure is for looking at values: its exact text is not a stable format.
+Because printing is `as string`, an array of graphemes prints as the text they form (`printl(["a" "b"])` writes `ab`), as [`as`](types-and-conversions.md#as) converts it. A value that cannot convert — a member of an optional type, a container whose members are containers, or a rational/fixed number object inside a structure (those print, but have no string form yet) — is an error where it is printed. An interpolated argument is written part by part rather than built into one string first; that representation choice is not observable. Printing a structure is for looking at values: its exact text is not a stable format.
 
 ## Searching, Splitting, and Trimming
 

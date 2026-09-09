@@ -45,6 +45,12 @@ let byte = (n:bigint):>uint8 | none => {
 }
 ```
 
+A `bigint` converts to decimal text with `as string` and in interpolation.
+The retained text uses the same digits and sign as printing, including zero;
+optional big integers render `none` when absent. Integer values also retain
+the required conversion when stored in `bigint | none`: a present machine
+word becomes a big integer, and absence remains absence.
+
 Arithmetic, comparisons, `//`, `%`, `^`, and `/` (an exact `rational`) apply to big integers. A `bigint` is `0 | [sign:-1|1 limbs:array<uint64 length >? 0>]`: zero is its own case rather than a sign value, so no negative zero and no zero with limbs is representable (canonical limbs — no leading zeros — remain the constructors' convention). `if x =? 0` / `x not=? 0` narrow between the two cases like `is?`, `bigint & ~0` names the nonzero form, and a big divisor must have it: `a // b`, `a % b`, and `a / b` need `if b not=? 0 { … }` or a `b:bigint & ~0` parameter (`cannot prove the divisor is nonzero` otherwise); a word divisor is proven the way any `int64 & ~0` argument is.
 
 ```dewy

@@ -486,7 +486,7 @@ def _debug_formatter_declarations(module: hir.Block, *, formatters: bool, ctx: C
         if not formatters:
             continue
         number, _dimension = _number_and_dimension(type_)
-        if _number_object(ty.strip_refinement(number), ctx=ctx) is not None:
+        if _number_object(ty.strip_refinement(number), ctx=ctx) not in (None, BIGINT_TYPE_NAME):
             continue   # prints through its own arm but has no string form yet
         if spelled not in by_type:
             by_type[spelled] = _debug_formatter(spelled, _is_string_type(type_) or ty.string_valued(type_), declarations, ctx=ctx)
@@ -1104,6 +1104,9 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
         if member == 'none':
             return hir.String(loc, ty.StringLiteralType('none'), 'none')
         narrowed = replace(value, type=member)
+        converted = _conversion_method_call(narrowed, ty.StringType(), loc, ctx=ctx)
+        if converted is not None:
+            return converted
         structural = _structure_string(narrowed, loc, ctx=ctx)   # an object member: its literal syntax
         if structural is not None:
             return structural
@@ -1223,8 +1226,12 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
     The conversion protocol for declared types: a zero-argument method
     `__as__ = ():>T => …` says how a value converts to `T`; `x as T` and
     string interpolation (`T` = `string`) call it. Nothing about a type's
-    name or shape is special — `Path` converts to its text this way.
+    name or shape is special — `Path` converts to its text this way. Numeric
+    library representations use their registered role, as arithmetic does;
+    bigint's existing decimal formatter also handles its separate zero arm.
     """
+    if _is_string_type(target) and _is_bigint(ty.strip_refinement(value.type), ctx=ctx):
+        return _prelude_call('_bigint_as_string', [value], loc=loc, ctx=ctx)
     unfolded = ty.unfold(ty.strip_refinement(value.type))
     if not isinstance(unfolded, ty.ObjectType):
         return None
@@ -14888,6 +14895,8 @@ def _unconvertible_part(type_: ty.TypeExpr, *, ctx: Context, seen: frozenset[str
     """The type — a member, a field, or `type_` itself — that keeps a value of
     `type_` from converting to string as a structure, else None."""
     plain = ty.strip_refinement(type_)
+    if _is_bigint(plain, ctx=ctx):
+        return None
     if _is_string_type(plain) or ty.string_valued(plain) or plain == 'bool' or isinstance(plain, ty.IntegerLiteralType) or (isinstance(plain, str) and plain in _MATERIALIZED_INTEGERS):
         return None
     if isinstance(plain, (ty.FunctionType, ty.OverloadType)):
