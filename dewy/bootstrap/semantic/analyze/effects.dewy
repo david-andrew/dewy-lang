@@ -1,0 +1,394 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+
+doc"""
+Transitive effects on aggregate parameters, corresponding to analyze/effects.py.
+
+An effect names a field/index route into a parameter. A stored prefix covers
+everything below it. Value arguments read caller storage: mutation by the
+callee happens on its own value. Only place arguments carry the callee's
+writes and escapes back into the caller. Unknown callees conservatively do
+everything to each place argument.
+
+The finite route depth makes recursive calls converge. Absence of an effect
+is a guarantee; presence says only that it may happen. Lowering can use a
+read-only summary to borrow a value at a call boundary instead of copying it.
+"""
+
+const MAX_ROUTE_DEPTH:addr = 8
+Effect:type = 'read' | 'mutate' | 'rebind' | 'escape'
+Route:type = const [steps:array<string>]
+ParameterEffects:type = [
+    reads:array<Route>=[] mutates:array<Route>=[]
+    rebinds:array<Route>=[] escapes:array<Route>=[]
+]
+FunctionEffects:type = [literal:addr params:dict<addr ParameterEffects>]
+ProgramEffects:type = [by_literal:dict<addr FunctionEffects> by_param_binding:dict<addr ParameterEffects>]
+Analysis:type = [
+    literals:array<addr>=[] declares:dict<addr addr>=[]
+    reassigned:set<addr>=set[] param_ids:set<addr>=set[]
+    effects:dict<addr FunctionEffects>=[]
+]
+ResolvedRoute:type = [binding_id:addr route:Route inner:array<addr>]
+ArgumentPair:type = const [argument:addr parameter:addr?]
+Pairing:type = [target:addr pairs:array<ArgumentPair>]
+
+writes = (summary:ParameterEffects):>bool => summary.mutates.length >? 0 or summary.rebinds.length >? 0
+read_only = (summary:ParameterEffects):>bool => not writes(summary) and summary.escapes.length =? 0
+
+add_route = (@routes:array<Route> route:Route):>bool => {
+    let steps = route.steps
+    if steps.length >? MAX_ROUTE_DEPTH { steps.truncate(MAX_ROUTE_DEPTH) }
+    loop stored in routes { if bindings.path_starts_with(steps stored.steps) return false }
+    let remaining:array<Route> = []
+    loop stored in routes {
+        if not bindings.path_starts_with(stored.steps steps) { remaining.push(stored) }
+    }
+    remaining.push(Route[steps])
+    routes = remaining
+    return true
+}
+record = (binding_id:addr kind:Effect route:Route @params:dict<addr ParameterEffects>):>bool => {
+    if binding_id not in? params return false
+    let summary = params[binding_id]
+    let changed:bool = false
+    if kind =? 'read' { changed = add_route(@summary.reads route) }
+    else if kind =? 'mutate' { changed = add_route(@summary.mutates route) }
+    else if kind =? 'rebind' { changed = add_route(@summary.rebinds route) }
+    else { changed = add_route(@summary.escapes route) }
+    if changed { params[binding_id] = summary }
+    return changed
+}
+opaque = (binding_id:addr route:Route @params:dict<addr ParameterEffects>):>bool => {
+    let changed:bool = false
+    let kinds:array<Effect> = ['read' 'mutate' 'rebind' 'escape']
+    loop kind in kinds { if record(binding_id kind route @params) { changed = true } }
+    return changed
+}
+translated = (binding_id:addr summary:ParameterEffects prefix:Route @params:dict<addr ParameterEffects>):>bool => {
+    let changed:bool = false
+    let kinds:array<Effect> = ['read' 'mutate' 'rebind' 'escape']
+    loop kind in kinds {
+        let routes = summary.reads
+        if kind =? 'mutate' { routes = summary.mutates }
+        else if kind =? 'rebind' { routes = summary.rebinds }
+        else if kind =? 'escape' { routes = summary.escapes }
+        loop route in routes {
+            let steps = prefix.steps
+            loop step in route.steps { steps.push(step) }
+            if record(binding_id kind Route[steps] @params) { changed = true }
+        }
+    }
+    return changed
+}
+
+literal_params = (literal:hir.FunctionLiteral):>array<hir.Param> => {
+    let params:array<hir.Param> = []
+    loop p in literal.pos_or_kw_args { params.push(p) }
+    loop p in literal.kw_only_args { params.push(p) }
+    if literal.rest_args isnt? none { params.push(literal.rest_args) }
+    return params
+}
+unwrap = (id:addr nodes:array<hir.AST>):>addr => {
+    let current:addr = id
+    loop true {
+        let node = hir.node_at(nodes current)
+        if node isnt? hir.Block or node.scoped or node.items.length not=? 1 return current
+        current = node.items[0]
+    }
+}
+
+collect = (root:addr nodes:array<hir.AST>):>Analysis => {
+    let analysis = Analysis[]
+    let pending:array<addr> = [root]
+    let seen:set<addr> = set[]
+    loop pending.length >? 0 {
+        let id = pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node = hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral {
+            analysis.literals.push(id)
+            let params:dict<addr ParameterEffects> = []
+            let declared = literal_params(node)
+            loop param in declared {
+                if param.binding_id is? none continue
+                analysis.param_ids.add(param.binding_id)
+                params[param.binding_id] = ParameterEffects[]
+            }
+            analysis.effects[id] = FunctionEffects[id params]
+        }
+        else if node is? hir.Declare and node.binding_id isnt? none { analysis.declares[node.binding_id] = id }
+        else if node is? hir.Assign {
+            let target = hir.node_at(nodes node.target)
+            $runtime_assert target is? hir.ExpressedIdentifier
+            if target.binding_id isnt? none { analysis.reassigned.add(target.binding_id) }
+        }
+        # Reverse for the stack so traversal retains source declaration order.
+        let children = hir.children(node)
+        loop children.length >? 0 { pending.push(children.pop) }
+    }
+    return analysis
+}
+
+flatten_callable = (id:addr seen:set<addr> analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
+    let current = unwrap(id nodes)
+    let node = hir.node_at(nodes current)
+    if node is? hir.FunctionLiteral return [current]
+    if node is? hir.OverloadedFunction {
+        let result:array<addr> = []
+        loop alternate in node.alternates {
+            let resolved = flatten_callable(alternate seen analysis nodes)
+            if resolved is? none return none
+            loop target in resolved { result.push(target) }
+        }
+        return result
+    }
+    if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
+    let binding_id = node.binding_id
+    if binding_id in? seen or binding_id in? analysis.param_ids or binding_id in? analysis.reassigned return none
+    if binding_id not in? analysis.declares return none
+    let declared = hir.node_at(nodes analysis.declares[binding_id])
+    $runtime_assert declared is? hir.Declare
+    seen.add(binding_id)
+    return flatten_callable(declared.expr seen analysis nodes)
+}
+direct_targets = (call:hir.FunctionCall analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
+    let targets = flatten_callable(call.func set[] analysis nodes)
+    if targets is? none return none
+    if call.selected_method_index isnt? none {
+        let selected = call.selected_method_index
+        if selected >=? targets.length return none
+        return [targets[selected]]
+    }
+    if targets.length =? 0 return none
+    # With no recorded overload selection, conservatively merge every target.
+    return targets
+}
+pair_arguments = (call:hir.FunctionCall literal:hir.FunctionLiteral):>array<ArgumentPair> | none => {
+    let named:dict<string hir.Param> = []
+    let positional:array<hir.Param> = []
+    loop p in literal.pos_or_kw_args {
+        named[p.name] = p
+        if p.name not in? call.kw_args { positional.push(p) }
+    }
+    loop p in literal.kw_only_args { named[p.name] = p }
+    let pairs:array<ArgumentPair> = []
+    loop i in 0.. and i <? call.pos_args.length {
+        let parameter:addr? = none
+        if i <? positional.length { parameter = positional[i].binding_id }
+        else if literal.rest_args is? none return none
+        pairs.push(ArgumentPair[call.pos_args[i] parameter])
+    }
+    loop name in call.kw_args.keys {
+        if name not in? named return none
+        if name not in? call.kw_args return none
+        let parameter = named[name]
+        pairs.push(ArgumentPair[call.kw_args[name] parameter.binding_id])
+    }
+    return pairs
+}
+
+resolve_route = (id:addr params:dict<addr ParameterEffects> nodes:array<hir.AST>):>ResolvedRoute | none => {
+    let current:addr = id
+    let reverse_steps:array<string> = []
+    let inner:array<addr> = []
+    loop true {
+        current = unwrap(current nodes)
+        let node = hir.node_at(nodes current)
+        if node is? hir.MemberAccess { reverse_steps.push(node.name) current = node.value continue }
+        if node is? hir.Index { reverse_steps.push('[]') inner.push(node.index) current = node.array continue }
+        if node isnt? hir.ExpressedIdentifier or node.binding_id is? none or node.binding_id not in? params return none
+        let steps:array<string> = []
+        loop reverse_steps.length >? 0 { steps.push(reverse_steps.pop) }
+        return ResolvedRoute[node.binding_id Route[steps] inner]
+    }
+}
+
+visit_all = (ids:array<addr> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    let changed:bool = false
+    loop id in ids { if visit(id @params analysis nodes type_nodes) { changed = true } }
+    return changed
+}
+visit_route = (id:addr kind:Effect suffix:array<string> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    let resolved = resolve_route(id params nodes)
+    if resolved is? none return visit(id @params analysis nodes type_nodes)
+    let steps = resolved.route.steps
+    loop step in suffix { steps.push(step) }
+    let changed = record(resolved.binding_id kind Route[steps] @params)
+    if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+    return changed
+}
+
+visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    if params.length =? 0 return false
+    let node = hir.node_at(nodes id)
+    if node is? hir.FunctionCall return visit_call(node @params analysis nodes type_nodes)
+    if node is? hir.IndexAssign | hir.MemberAssign {
+        let target = hir.node_at(nodes node.target)
+        let changed:bool = false
+        if target is? hir.Index {
+            changed = visit_route(target.array 'mutate' ['[]'] @params analysis nodes type_nodes)
+            if visit(target.index @params analysis nodes type_nodes) { changed = true }
+        }
+        else {
+            $runtime_assert target is? hir.MemberAccess
+            changed = visit_route(target.value 'mutate' [target.name] @params analysis nodes type_nodes)
+        }
+        if visit(node.value @params analysis nodes type_nodes) { changed = true }
+        return changed
+    }
+    if node is? hir.Assign | hir.IteratorExpression {
+        let target = hir.node_at(nodes node.target)
+        $runtime_assert target is? hir.ExpressedIdentifier
+        let changed:bool = false
+        if target.binding_id isnt? none { changed = record(target.binding_id 'rebind' Route[[]] @params) }
+        let value = if node is? hir.Assign node.value else node.iterable
+        if visit(value @params analysis nodes type_nodes) { changed = true }
+        return changed
+    }
+    if node is? hir.MemberAccess {
+        let value_type = types.node_at(type_nodes node.value_type)
+        if value_type is? types.CallableType {
+            # A runtime function-valued field captures its receiver. Reading
+            # it may expose sibling fields to mutation through that capture.
+            let resolved = resolve_route(node.value params nodes)
+            if resolved is? none return visit(node.value @params analysis nodes type_nodes)
+            let changed = opaque(resolved.binding_id resolved.route @params)
+            if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+            return changed
+        }
+    }
+    if node is? hir.Index | hir.MemberAccess {
+        let resolved = resolve_route(id params nodes)
+        if resolved is? none return visit_all(hir.children(node) @params analysis nodes type_nodes)
+        let changed = record(resolved.binding_id 'read' resolved.route @params)
+        if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+        return changed
+    }
+    if node is? hir.ArrayLength return visit_route(node.array 'read' [] @params analysis nodes type_nodes)
+    if node is? hir.DictStore | hir.DictRemove {
+        let changed = visit_route(node.keys 'mutate' [] @params analysis nodes type_nodes)
+        let values = node.values
+        if values isnt? none {
+            if visit_route(values 'mutate' [] @params analysis nodes type_nodes) { changed = true }
+        }
+        let key = node.key
+        if key isnt? none { if visit(key @params analysis nodes type_nodes) { changed = true } }
+        if node is? hir.DictStore and node.value isnt? none {
+            if visit(node.value @params analysis nodes type_nodes) { changed = true }
+        }
+        if node is? hir.DictRemove and node.default isnt? none {
+            if visit(node.default @params analysis nodes type_nodes) { changed = true }
+        }
+        return changed
+    }
+    if node is? hir.RepresentationCast | hir.Place {
+        let value = if node is? hir.Place node.target else node.expr
+        let resolved = resolve_route(value params nodes)
+        if resolved is? none {
+            if node is? hir.Place return false
+            return visit(value @params analysis nodes type_nodes)
+        }
+        let changed:bool = false
+        if node is? hir.Place { changed = opaque(resolved.binding_id resolved.route @params) }
+        else {
+            # Until cast aliasing is modeled, a view may retain its source.
+            changed = record(resolved.binding_id 'read' resolved.route @params)
+            if record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
+        }
+        if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+        return changed
+    }
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id is? none return false
+        return record(node.binding_id 'read' Route[[]] @params)
+    }
+    return visit_all(hir.children(node) @params analysis nodes type_nodes)
+}
+
+visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    let function = hir.node_at(nodes call.func)
+    let arguments = call.pos_args
+    loop argument in call.kw_args.values { arguments.push(argument) }
+    if function is? hir.ArrayMethod {
+        let changed = visit_route(function.array 'mutate' [] @params analysis nodes type_nodes)
+        if visit_all(arguments @params analysis nodes type_nodes) { changed = true }
+        return changed
+    }
+    let changed = visit(call.func @params analysis nodes type_nodes)
+    let targets = direct_targets(call analysis nodes)
+    let pairings:array<Pairing> = []
+    let known:bool = targets isnt? none
+    if targets isnt? none {
+        loop id in targets {
+            let target = hir.node_at(nodes id)
+            $runtime_assert target is? hir.FunctionLiteral
+            let pairs = pair_arguments(call target)
+            if pairs is? none { known = false break }
+            pairings.push(Pairing[id pairs])
+        }
+    }
+    loop argument in arguments {
+        let node = hir.node_at(nodes argument)
+        if node isnt? hir.Place {
+            if visit_route(argument 'read' [] @params analysis nodes type_nodes) { changed = true }
+            continue
+        }
+        let resolved = resolve_route(node.target params nodes)
+        if resolved is? none {
+            let target = hir.node_at(nodes node.target)
+            if visit_all(hir.children(target) @params analysis nodes type_nodes) { changed = true }
+            continue
+        }
+        if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+        if not known {
+            if opaque(resolved.binding_id resolved.route @params) { changed = true }
+            continue
+        }
+        loop pairing in pairings {
+            let parameter:addr? = none
+            loop pair in pairing.pairs { if pair.argument =? argument { parameter = pair.parameter break } }
+            let summary:ParameterEffects? = none
+            if parameter isnt? none and pairing.target in? analysis.effects {
+                let callee = analysis.effects[pairing.target]
+                summary = callee.params.get(parameter)
+            }
+            if summary is? none {
+                if opaque(resolved.binding_id resolved.route @params) { changed = true }
+            }
+            else if translated(resolved.binding_id summary resolved.route @params) { changed = true }
+        }
+    }
+    return changed
+}
+
+analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>ProgramEffects => {
+    let analysis = collect(root nodes)
+    # These are may-effects: each iteration can only add coverage. Accumulate
+    # into the previous summary rather than rebuilding and comparing whole
+    # dictionaries. Prefix normalization plus MAX_ROUTE_DEPTH bounds the
+    # ascending chain, including recursive calls through projected places.
+    let changed:bool = true
+    loop changed {
+        changed = false
+        loop id in analysis.literals {
+            if id not in? analysis.effects continue
+            let summary = analysis.effects[id]
+            let literal = hir.node_at(nodes id)
+            $runtime_assert literal is? hir.FunctionLiteral
+            if visit(literal.body @summary.params analysis nodes type_nodes) {
+                analysis.effects[id] = summary
+                changed = true
+            }
+        }
+    }
+    let by_param:dict<addr ParameterEffects> = []
+    loop summary in analysis.effects.values {
+        loop binding_id in summary.params.keys {
+            if binding_id in? summary.params { by_param[binding_id] = summary.params[binding_id] }
+        }
+    }
+    return ProgramEffects[analysis.effects by_param]
+}

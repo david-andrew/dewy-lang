@@ -1,0 +1,227 @@
+import p"../propositions.dewy" as facts
+
+doc"""
+Inclusive integer intervals for flow-sensitive bounds analysis.
+
+An absent endpoint means infinity in that direction. The endpoint values
+are arbitrary-precision integers: the analysis must describe an overflowing
+word result before deciding whether to represent it by a word or a bigint.
+`capped` records reliance on the target address-space axiom, for the report.
+It is provenance, not part of interval equality or an extra constraint.
+
+Intersection adds evidence. A union is the smallest interval covering both
+paths (it does not preserve holes). Widening drops an endpoint that moves
+outward so a loop's ascending sequence of facts reaches a fixed point.
+"""
+
+Interval:type = const [lower:bigint? upper:bigint? capped:bool=false]
+const UNKNOWN = Interval[none none]
+const EMPTY = Interval[1 0]
+exact = (value:bigint):>Interval => Interval[value value]
+is_empty = (value:Interval):>bool => value.lower isnt? none and value.upper isnt? none and value.lower >? value.upper
+same_endpoint = (left:bigint? right:bigint?):>bool => {
+    if left is? none return right is? none
+    if right is? none return false
+    return left =? right
+}
+same_bounds = (left:Interval right:Interval):>bool => same_endpoint(left.lower right.lower) and same_endpoint(left.upper right.upper)
+
+maximum_lower = (left:bigint? right:bigint?):>bigint? => {
+    if left is? none return right
+    if right is? none return left
+    return if left >? right left else right
+}
+minimum_upper = (left:bigint? right:bigint?):>bigint? => {
+    if left is? none return right
+    if right is? none return left
+    return if left <? right left else right
+}
+shift_endpoint = (value:bigint? by:bigint):>bigint? => {
+    if value is? none return none
+    return value + by
+}
+intersect = (left:Interval right:Interval):>Interval => Interval[
+    maximum_lower(left.lower right.lower)
+    minimum_upper(left.upper right.upper)
+    left.capped or right.capped
+]
+union = (left:Interval right:Interval):>Interval => {
+    let lower:bigint? = none
+    let upper:bigint? = none
+    if left.lower isnt? none and right.lower isnt? none { lower = if left.lower <? right.lower left.lower else right.lower }
+    if left.upper isnt? none and right.upper isnt? none { upper = if left.upper >? right.upper left.upper else right.upper }
+    return Interval[lower upper left.capped or right.capped]
+}
+widen = (previous:Interval current:Interval):>Interval => {
+    let lower:bigint? = none
+    let upper:bigint? = none
+    if previous.lower isnt? none and current.lower isnt? none and current.lower >=? previous.lower { lower = previous.lower }
+    if previous.upper isnt? none and current.upper isnt? none and current.upper <=? previous.upper { upper = previous.upper }
+    return Interval[lower upper previous.capped or current.capped]
+}
+
+# A single excluded value can only tighten an endpoint; an interior hole is
+# represented separately by the fact state (notably a nonzero fact).
+exclude = (interval:Interval value:bigint):>Interval | none => {
+    if interval.lower isnt? none and interval.upper isnt? none and interval.lower =? value and interval.upper =? value return none
+    if interval.lower isnt? none and interval.lower =? value return Interval[value + 1 interval.upper interval.capped]
+    if interval.upper isnt? none and interval.upper =? value return Interval[interval.lower value - 1 interval.capped]
+    return interval
+}
+propositions_interval = (propositions:array<facts.Proposition> subject:string='self'):>Interval | none => {
+    let lower:bigint? = none
+    let upper:bigint? = none
+    loop proposition in propositions {
+        if proposition.subject not=? subject continue
+        lower = maximum_lower(lower facts.lower_bound(proposition))
+        upper = minimum_upper(upper facts.upper_bound(proposition))
+    }
+    if lower is? none and upper is? none return none
+    return Interval[lower upper]
+}
+
+# true/false is a settled comparison; none means these intervals alone do
+# not decide it. Neither an unknown endpoint nor overlapping ranges justify
+# selecting a branch at compile time.
+less = (left:Interval right:Interval strict:bool):>bool? => {
+    if left.upper isnt? none and right.lower isnt? none {
+        if (strict and left.upper <? right.lower) or (not strict and left.upper <=? right.lower) return true
+    }
+    if left.lower isnt? none and right.upper isnt? none {
+        if (strict and left.lower >=? right.upper) or (not strict and left.lower >? right.upper) return false
+    }
+    return none
+}
+decide = (op:facts.Operator left:Interval? right:Interval?):>bool? => {
+    if left is? none or right is? none return none
+    if op =? '<?' return less(left right true)
+    if op =? '>?' return less(right left true)
+    if op =? '<=?' return less(left right false)
+    if op =? '>=?' return less(right left false)
+    if op =? '=?' or op =? 'not=?' {
+        let equal:bool? = none
+        if left.lower isnt? none and same_endpoint(left.lower left.upper) and right.lower isnt? none and same_endpoint(right.lower right.upper) {
+            equal = left.lower =? right.lower
+        }
+        else if less(left right true) =? true or less(right left true) =? true { equal = false }
+        if equal is? none return none
+        return if op =? '=?' equal else not equal
+    }
+    return none
+}
+constraint = (op:facts.Operator other:Interval truth:bool):>Interval? => {
+    if op =? '<?' {
+        if truth return Interval[none shift_endpoint(other.upper (-1))]
+        return Interval[other.lower none]
+    }
+    if op =? '<=?' {
+        if truth return Interval[none other.upper]
+        return Interval[shift_endpoint(other.lower 1) none]
+    }
+    if op =? '>?' {
+        if truth return Interval[shift_endpoint(other.lower 1) none]
+        return Interval[none other.upper]
+    }
+    if op =? '>=?' {
+        if truth return Interval[other.lower none]
+        return Interval[none shift_endpoint(other.upper (-1))]
+    }
+    if (op =? '=?' and truth) or (op =? 'not=?' and not truth) return other
+    return none
+}
+
+# Arithmetic computes mathematical bounds first. The caller supplies the
+# chosen machine representation's interval; abstract integers supply none.
+# Losing a width proof means no word interval, not wrapping these endpoints.
+fits = (interval:Interval? word:Interval?):>Interval? => {
+    if interval is? none or word is? none return interval
+    if interval.lower is? none or interval.upper is? none return none
+    if word.lower isnt? none and interval.lower <? word.lower return none
+    if word.upper isnt? none and interval.upper >? word.upper return none
+    return interval
+}
+add = (left:Interval right:Interval):>Interval => {
+    let lower:bigint? = none
+    let upper:bigint? = none
+    if left.lower isnt? none and right.lower isnt? none { lower = left.lower + right.lower }
+    if left.upper isnt? none and right.upper isnt? none { upper = left.upper + right.upper }
+    return Interval[lower upper left.capped or right.capped]
+}
+subtract = (left:Interval right:Interval):>Interval => {
+    let lower:bigint? = none
+    let upper:bigint? = none
+    if left.lower isnt? none and right.upper isnt? none { lower = left.lower - right.upper }
+    if left.upper isnt? none and right.lower isnt? none { upper = left.upper - right.lower }
+    return Interval[lower upper left.capped or right.capped]
+}
+cover = (values:array<bigint>):>Interval => {
+    $runtime_assert values.length >? 0
+    let lower = values[0]
+    let upper = lower
+    loop value in values {
+        if value <? lower { lower = value }
+        if value >? upper { upper = value }
+    }
+    return Interval[lower upper]
+}
+multiply = (left:Interval right:Interval):>Interval => {
+    if left.lower is? none or left.upper is? none or right.lower is? none or right.upper is? none return UNKNOWN
+    return cover([left.lower * right.lower left.lower * right.upper left.upper * right.lower left.upper * right.upper])
+}
+truncate_divide = (numerator:bigint divisor:bigint & ~0):>bigint => {
+    # Word division currently truncates; bigint's // has floor semantics.
+    # Keep this analysis operation explicit rather than accidentally inheriting
+    # the representation chosen for the compiler's own endpoint integers.
+    let magnitude = if numerator <? 0 (-numerator) else numerator
+    let denominator = if divisor <? 0 (-divisor) else divisor
+    $runtime_assert denominator not=? 0
+    let quotient = magnitude // denominator
+    return if (numerator <? 0) not=? (divisor <? 0) (-quotient) else quotient
+}
+
+Operation:type = '__add__' | '__sub__' | '__mul__' | '__floordiv__' | '__mod__' | '__lshift__' | '__rshift__'
+binary = (operation:Operation left:Interval? right:Interval? word:Interval?=none bound:Interval?=none):>Interval? => {
+    if left is? none or right is? none return fits(bound word)
+    let result:Interval? = none
+    if operation =? '__add__' { result = add(left right) }
+    else if operation =? '__sub__' { result = subtract(left right) }
+    else if operation =? '__mul__' { result = multiply(left right) }
+    else if operation =? '__rshift__' {
+        let lower:bigint? = none
+        let upper:bigint? = none
+        if left.lower isnt? none { lower = if left.lower <? 0 left.lower else 0 }
+        if left.upper isnt? none { upper = if left.upper >? 0 left.upper else 0 }
+        result = Interval[lower upper]
+    }
+    else if operation =? '__lshift__' and right.lower isnt? none and same_endpoint(right.lower right.upper) {
+        $runtime_assert right.lower >=? 0
+        let factor:bigint = 1
+        let remaining = right.lower
+        loop remaining >? 0 { factor *= 2 remaining -= 1 }
+        result = multiply(left exact(factor))
+    }
+    else if operation =? '__floordiv__' and right.lower isnt? none and right.lower >? 0 and left.lower isnt? none and left.upper isnt? none {
+        let divisors:array<bigint> = [right.lower]
+        if right.upper isnt? none { divisors.push(right.upper) }
+        let candidates:array<bigint> = []
+        let numerators:array<bigint> = [left.lower left.upper]
+        loop numerator in numerators {
+            loop divisor in divisors {
+                $runtime_assert divisor not=? 0
+                candidates.push(truncate_divide(numerator divisor))
+            }
+        }
+        # An unbounded positive divisor can make either sign's quotient zero.
+        # This is a mathematical bound, not an assumed machine-width cap.
+        if right.upper is? none { candidates.push(0) }
+        result = cover(candidates)
+    }
+    else if operation =? '__mod__' and right.lower isnt? none and right.lower >? 0 and right.upper isnt? none {
+        result = Interval[0 right.upper - 1]
+    }
+    if result is? none return none
+    if bound isnt? none { result = intersect(result bound) }
+    result = fits(result word)
+    if result is? none return none
+    return Interval[result.lower result.upper result.capped or left.capped or right.capped]
+}

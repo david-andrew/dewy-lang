@@ -1,0 +1,861 @@
+from reporting import Span, SrcFile
+import p"../parser/t0.dewy" as lex
+import p"ty.dewy" as types
+
+doc"""
+Checked high-level IR, corresponding to semantic/hir.py. Each expression has
+its resolved type and source location. Children refer into the HIR arena;
+type references refer into the separate type arena. Binding identity is
+independent of either table and survives lowering and source-name shadowing.
+
+Defaults and generic source remain syntax until checking requests them.
+Generic bodies are checked per instantiation; they are never lowered as an
+uninstantiated function. The following includes the hosted placeholder nodes
+and planned call forms, without claiming those features already lower.
+"""
+
+GenericSource:type = const [literal:addr context:addr params:array<types.GenericParam>]
+FieldBinding:type = const [id:addr name:string]
+RangeStep:type = const [first:addr second:addr]
+IteratorFormulaToken:type = addr | 'and' | 'or' | 'xor' | 'nand' | 'nor' | 'xnor'
+const TEST_ENTRY_NAME = '__dewy_test_main'
+
+AST = $abstract type of [
+    loc:Span
+    value_type:addr
+]
+
+Void = type of AST
+
+# Evaluate ``item`` for its effects without expressing its value.
+Suppress = type of AST & [
+    item:addr
+]
+
+# The first-class singleton value denoting absence.
+NoneValue = type of AST
+
+# The canonical inhabitant of a unit-like nominal error type (`type` is its name).
+ErrorValue = type of AST & [
+    name:string
+]
+
+# A generic function declaration (`type` is its FunctionType with type
+# parameters). Bodies are checked per instantiation; the instances are
+# ordinary hoisted functions, so this node itself is never lowered.
+GenericFunction = type of AST & [
+    name:string
+    source:GenericSource
+]
+
+# ``receiver.name`` on an exception-bearing receiver ``V… | X…``: the
+# member is read from an ordinary alternative, an exception alternative is
+# forwarded unchanged. ``type`` is ``R… | X…``. ``name``/``binding_id`` name
+# the hidden binding holding the receiver; ``field`` is the member.
+ForwardingAccess = type of AST & [
+    value:addr
+    field:string
+    name:string
+    binding_id:addr
+    exception_type:addr
+]
+
+# ``value or_throw``: return the exception alternative from the enclosing
+# function, else continue with the ordinary alternatives (``type``).
+#
+# ``name``/``binding_id`` identify the hidden binding that holds the tested
+# value; ``propagated`` is that binding read as its exception alternatives,
+# already converted to the function's result type.
+OrThrow = type of AST & [
+    value:addr
+    name:string
+    binding_id:addr
+    exception_type:addr
+    propagated:addr
+]
+
+Return = type of AST & [
+    item:(addr)?=none
+]
+
+# One boolean conditional arm in an ordered flow chain.
+IfArm = type of AST & [
+    condition:addr
+    body:addr
+]
+
+# One loop arm whose condition is boolean or a stateful iterator.
+LoopArm = type of AST & [
+    condition:addr
+    body:addr
+]
+
+# An ordered `if`/`loop` chain with an optional final default body.
+Flow = type of AST & [
+    arms:array<addr>
+    default:(addr)?=none
+]
+
+# A generic metatag declared throughout its containing lexical scope.
+ScopeMetatag = type of AST & [
+    name:string=''
+]
+
+# ``value`` must satisfy ``refined``'s propositions: proven by the bounds analysis
+# from facts (intervals, nonzero guards, length facts), reported like an assertion
+# otherwise. Transparent to lowering (it lowers ``value``).
+Obligation = type of AST & [
+    value:addr
+    refined:addr
+    description:string
+]
+
+# A compile-time `$assert`: the analyses must prove ``condition``; nothing is lowered.
+Assert = type of AST & [
+    condition:addr
+    source:string
+    message:(string)?=none
+    runtime:bool=false
+    dimmed:(Span)?=none
+    expect:bool=false
+]
+
+# Exit an enclosing loop, optionally selected through a scope metatag.
+Break = type of AST & [
+    label:(string)?=none
+    loop_levels:addr=0
+]
+
+# Continue an enclosing loop, optionally selected through a scope metatag.
+Continue = type of AST & [
+    label:(string)?=none
+    loop_levels:addr=0
+]
+
+# A lazy boolean logical operator selected through operator dispatch.
+ShortCircuit = type of AST & [
+    op:'and' | 'or' | 'nand' | 'nor'
+    left:addr
+    right:addr
+]
+
+# A runtime `is?` or `isnt?` test against a type expression.
+TypeTest = type of AST & [
+    value:addr
+    test_type:addr
+    negated:bool
+]
+
+Declare = type of AST & [
+    decltype:'let' | 'const'
+    name:string
+    annotation:addr?
+    expr:addr
+    binding_id:(addr)?=none
+]
+
+ExpressedIdentifier = type of AST & [
+    name:string
+    binding_id:(addr)?=none
+]
+
+# A mutable binding or projected field/index passed by reference with ``@``.
+Place = type of AST & [
+    target:addr
+]
+
+# Assignment statement; compound operators remain explicit until MIR lowering.
+Assign = type of AST & [
+    target:addr
+    op:string
+    value:addr
+]
+
+Bool = type of AST & [
+    value:bool
+]
+
+# A boolean folded from a compile-time `$target` comparison.
+#
+# Flows conditioned on one select arms during checking: dead arms are
+# skipped entirely, so they may import target-specific files.
+TargetBool = type of Bool
+
+# A boolean the checker decided from static types: `x is? T` when `x`'s
+# type is `T` (or cannot be). A flow conditioned on one checks only the
+# live arm — in a generic instance, the arm written for this type — with
+# its ordinary scope.
+DecidedBool = type of Bool
+
+Integer = type of AST & [
+    prefix:lex.BasePrefix
+    value:bigint
+]
+
+# An exact compile-time rational (optionally dimensioned).
+#
+# Never lowered: runtime uses materialize it through the prelude's
+# `_rational_make` during checking; `const` bindings holding one are elided.
+RationalConstant = type of AST & [
+    numerator:bigint
+    denominator:bigint
+]
+
+# A one-dimensional homogeneous array value. An item may be a ``Spread``
+# of another array, in which case the literal's length is the sum (runtime
+# when a spread operand's length is not known).
+ArrayLiteral = type of AST & [
+    items:array<addr>
+]
+
+# ``xs...`` inside an array literal: every element of ``value`` in order.
+Spread = type of AST & [
+    value:addr
+]
+
+# One initialized field of an object literal.
+ObjectField:type = [
+    loc:Span
+    name:string
+    value:addr
+    binding_id:(addr)?=none
+    mutable:bool=true
+]
+
+# A structural object value with source-order fields.
+ObjectLiteral = type of AST & [
+    fields:array<ObjectField>
+]
+
+# A named field read from an object.
+MemberAccess = type of AST & [
+    value:addr
+    name:string
+    mutable:bool=true
+]
+
+# Mutation of one object field.
+MemberAssign = type of AST & [
+    target:addr
+    value:addr
+]
+
+# `value.method`: a type's method with its receiver; only ever called (see `tcr_function_call`).
+BoundMethod = type of AST & [
+    function:addr
+    receiver:(addr)?
+]
+
+# A compile-time type used as a named alias.
+TypeValue = type of AST & [
+    value:addr
+    name:(string)?=none
+]
+
+# A minted type as a runtime value of `type<Family>`: its brand id.
+BrandValue = type of AST & [
+    brand:string
+]
+
+# `typeof(value)`: the minted type a value carries, as a `type<Family>` value (its brand word).
+TypeOf = type of AST & [
+    value:addr
+]
+
+# A compile-time namespace for one imported source module.
+ModuleNamespace = type of AST & [
+    name:string
+]
+
+# The element count of an array value.
+ArrayLength = type of AST & [
+    array:addr
+]
+
+# A dictionary read.
+#
+# ``d[key]`` is *proven*: the key is known to be present (from a guard, a
+# store, the literal, or iteration) and the type is ``V``. A proving
+# ``key in? d`` guard or store may hand over the entry position it found
+# (``position`` names that hidden local; ``static_position`` is a literal
+# entry), so the value is read without a second search. ``d.get(key)`` is
+# unproven and yields ``V | none``, or ``V`` with ``default``.
+DictLookup = type of AST & [
+    keys:addr
+    values:addr
+    key:addr
+    proven:bool=false
+    position:(string)?=none
+    static_position:(addr)?=none
+    default:(addr)?=none
+]
+
+# ``d[key] = value``: replace the value of an existing key, else append
+# the entry (insertion order is the entry order). ``position`` names the
+# hidden local receiving the entry's index, so a following ``d[key]`` reads
+# it directly.
+DictStore = type of AST & [
+    keys:addr
+    values:(addr)?
+    key:addr
+    value:(addr)?
+    position:(string)?=none
+    # ``values``/``value`` are None for a set (`s.add(key)`).
+]
+
+# ``key in? d`` on a dictionary. ``position`` names the hidden local that
+# receives the found index when the test directly guards an ``if`` arm, so
+# the guarded ``d[key]`` reuses the search.
+DictContains = type of AST & [
+    keys:addr
+    key:addr
+    position:(string)?=none
+]
+
+# ``d.pop(key)`` (proven key): remove the entry, shifting later entries
+# down so insertion order is kept, and yield its value. ``d.clear`` is the
+# same node with ``key`` None. ``position``/``static_position`` locate the
+# entry as for lookups.
+DictRemove = type of AST & [
+    keys:addr
+    values:(addr)?
+    key:(addr)?
+    position:(string)?=none
+    static_position:(addr)?=none
+    default:(addr)?=none
+    # `d.pop(key default=v)`: the key need not be proven; `v` results when it is absent.
+    lenient:bool=false
+    # A set's `pop(key default=v)`: no proof needed; the member (or `v`) results. A set's
+    #     plain `pop(key)` yields the removed member.
+]
+
+# A fresh value of a container's entries: ``d.keys`` is a ``set<K>``,
+# ``d.values`` an ``array<V>`` (insertion order), ``s.values`` an
+# ``array<T>``. The container is compacted first if removals left dead
+# entries.
+DictView = type of AST & [
+    dictionary:addr
+    name:string
+]
+
+# A new set from two sets of the same element type: ``union`` (`|`/`or`),
+# ``intersection`` (`&`/`and`), ``difference`` (`-`), or ``symmetric``
+# difference (`xor`); or a new dictionary from two dictionaries (``union``
+# only: `d1 | d2`, the right value winning for shared keys, left order kept).
+SetAlgebra = type of AST & [
+    op:string
+    left:addr
+    right:addr
+]
+
+# The `keys` or `values` entry array of a dictionary for iteration: the
+# dictionary is compacted first when removals left dead entries, so the
+# array holds exactly the live entries in insertion order.
+DictEntries = type of AST & [
+    dictionary:addr
+    name:string
+]
+
+# A compiler-provided method bound to a dictionary value (``get``).
+#
+# ``type`` is the method's FunctionType; the call becomes a ``DictLookup``.
+DictMethod = type of AST & [
+    dictionary:addr
+    name:string
+]
+
+# A compiler-provided method bound to a named array binding.
+#
+# ``type`` is the method's FunctionType; calling it mutates the receiver in
+# place (``push``, ``pop``, ``clear``, ``reserve``), as if ``array`` were a
+# Dewy object type defining these methods.
+ArrayMethod = type of AST & [
+    array:addr
+    name:string
+]
+
+# A scoped `name in iterable` expression advanced by an enclosing loop.
+IteratorExpression = type of AST & [
+    target:addr
+    iterable:addr
+    first:bigint
+    step:bigint
+    last:(bigint)?
+    count:(bigint)?
+    guarded:bool=false
+    # A right-unbounded counter whose loop guard bounds it strictly by a
+    #     word-sized value (`loop i in 0.. and i <? n`): it never passes `int64.max`.
+]
+
+# Eager iterator leaves and a postfix logical formula over their indices.
+MultiIteratorExpression = type of AST & [
+    iterators:array<addr>
+    formula:array<IteratorFormulaToken>
+    repeats_when_exhausted:bool
+]
+
+# A scalar array read validated by the semantic bounds pass.
+Index = type of AST & [
+    array:addr
+    index:addr
+    constant_index:(addr)?
+]
+
+# Mutation of one statically proven array element.
+IndexAssign = type of AST & [
+    target:addr
+    value:addr
+]
+
+String = type of AST & [
+    content:string
+]
+
+# The value of `$target` for the current compilation.
+TargetString = type of String
+
+# A source string whose expression fields have been typechecked.
+#
+# The node is a semantic value, but targets may specialize consumers such as
+# ``print`` without first materializing one contiguous runtime string.
+InterpolatedString = type of AST & [
+    parts:array<addr>
+]
+
+BasedString = type of AST & [
+    prefix:lex.BasePrefix
+    digits:string
+    content:array<uint8>
+    include_path:(string)?=none
+    # When set, the bytes come from this file (`__include_bytes__(p"…")`):
+    #     the target embeds the file instead of the spelled-out literal.
+]
+
+StringLength = type of AST & [
+    string:addr
+]
+
+StringIndex = type of AST & [
+    string:addr
+    index:addr
+    constant_index:(addr)?
+]
+
+StringSlice = type of AST & [
+    string:addr
+    range:addr
+]
+
+StringEqual = type of AST & [
+    left:addr
+    right:addr
+    negated:bool=false
+]
+
+StringConcat = type of AST & [
+    left:addr
+    right:addr
+]
+
+# Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target.
+ValueCast = type of AST & [
+    expr:addr
+]
+
+# A conversion that materializes a value in a different representation.
+RepresentationCast = type of AST & [
+    expr:addr
+]
+
+# Bit-preserving reinterpretation. `type` is the target type.
+Transmute = type of AST & [
+    expr:addr
+]
+
+Param = type of [
+    name:string
+    value_type:addr
+    binding_id:(addr)?=none
+    position_only:bool=false
+    place:bool=false
+]
+
+BoundParam = type of Param & [
+    value:addr
+]
+
+FunctionLiteral = type of AST & [
+    pos_or_kw_args:array<Param>
+    kw_only_args:array<Param>
+    rest_args:Param?
+    rettype:addr
+    body:addr
+    object_receiver:bool=false
+    object_fields:array<FieldBinding>=[]
+    object_type:addr?=none
+    source:(SrcFile)?=none
+    # The file the literal (and so every span in its body) was written in:
+    #     debug locations point there. None for compiler-synthesized functions.
+]
+
+# A callable value formed by combining callable operands with `&`.
+OverloadedFunction = type of AST & [
+    alternates:array<addr>
+]
+
+# Function signature and call-binding design
+# ==========================================
+#
+# Required parameters before `...` are positional-or-keyword. Call arguments
+# are processed from left to right:
+#
+# 1. A positional argument binds the first parameter still available by
+#    position.
+# 2. A named argument binds the parameter with that name and removes it from
+#    the remaining positional sequence.
+# 3. One call cannot supply the same parameter twice.
+#
+# For example:
+#
+#     let combine = (a b=10 c) => [a b c]
+#
+#     combine(1 2 3)       # a=1, b=2,  c=3
+#     combine(1 c=3)       # a=1, b=10, c=3
+#     combine(b=2 1 3)     # b=2, then a=1 and c=3
+#     combine(1 3)         # error: a=1, b=3, required c is missing
+#
+# A signature default is a per-call fallback. It does not bind the parameter
+# when the function is defined, and it does not remove that parameter's
+# positional slot. A normal call evaluates the default separately if the
+# parameter is still unset after all explicit arguments have been processed.
+# This gives mutable defaults a fresh value for each call.
+#
+# Partial evaluation uses the same argument-ordering rule, but an explicitly
+# supplied value is evaluated and saved when the `@function(...)` expression is
+# evaluated. That parameter then leaves the resulting function's positional
+# sequence. Its name remains available for a later explicit replacement.
+# Defaults that have not been needed yet remain per-call fallbacks rather than
+# being evaluated during partial evaluation.
+#
+#     let configured = @combine(b=20)  # 20 is evaluated and saved now
+#     configured(1 3)                  # a=1, b=20, c=3
+#     configured(1 3 b=30)             # explicitly replaces saved b
+#
+# A bare `...` closes the positional sequence without collecting arguments.
+# Parameters after it are keyword-only: those without defaults are required,
+# while those with defaults are optional.
+#
+#     let render = (value ... width:int64 theme="light") => {...}
+#     render(text width=80)
+#
+# The planned `...rest` form both closes the positional sequence and captures
+# otherwise unmatched positional and named arguments. The captured arguments
+# form an opaque bundle intended for forwarding, not direct inspection.
+#
+#     let wrapper = (a b ...rest trace=false) => {
+#         log(trace)
+#         target(a b ...rest)
+#     }
+#
+# Forwarding the same bundle to more than one function is valid only when every
+# destination accepts every captured argument. Dewy deliberately does not split
+# one captured bundle among several destinations; arguments that need different
+# destinations should be named explicitly in the wrapper signature.
+#
+# Source signatures require local names for all parameters. Because parameter
+# names and type names are both ordinary identifiers, a bare identifier is
+# always a parameter name rather than an unnamed type annotation. Wrapping one
+# parameter in `<>` makes it position-only:
+#
+#     let increment = (<value:int64>) => value + 1
+#
+# Here `value` is available in the body but callers cannot write `value=...`.
+# The same required, annotated, and defaulted parameter forms work inside `<>`;
+# only their availability by name at the call site changes.
+#
+# Destructured parameters are also planned. An unannotated `[a b c]` parameter
+# could accept an array by position or an object by field name; an explicit
+# annotation removes that ambiguity:
+#
+#     [a b]:[a:int b:string]       # object fields matched by name
+#     [a b]:<int string>           # fixed sequence matched by position
+#     [a b ...items]:array<int>    # array prefix plus remaining elements
+#
+# Generic parameters can be understood as declarations in a scope surrounding
+# the function signature and body:
+#
+#     let F = <T of number U V>(a:T b:T u:U v:V):>T => {...}
+#
+# is conceptually equivalent to:
+#
+#     let F = {
+#         let T:type = generic_param(root=number)
+#         let U:type = generic_param()
+#         let V:type = generic_param()
+#         (a:T b:T u:U v:V):>T => {...}
+#     }
+
+# A checked call to a function value or overload set.
+#
+# ``selected_method_index`` is populated only when ``func`` has
+# ``OverloadType``. It indexes the original ordered method set, allowing
+# target lowering to select the matching concrete function without repeating
+# generic instantiation or dispatch.
+FunctionCall = type of AST & [
+    func:addr
+    pos_args:array<addr>
+    kw_args:dict<string addr>
+    selected_method_index:(addr)?=none
+]
+
+Partial = type of AST
+
+Block = type of AST & [
+    items:array<addr>
+    scoped:bool
+]
+
+TypeBlock = type of AST & [
+    items:array<addr>
+]
+
+Range = type of AST & [
+    bounds:('[]' | '[)' | '(]' | '()')?
+    step_pair:(RangeStep)?
+    left:(addr)?
+    right:(addr)?
+]
+
+# A runtime membership test, optionally with a normalized static step.
+RangeMembership = type of AST & [
+    value:addr
+    range:addr
+    first:(bigint)?=none
+    step:(bigint)?=none
+    last:(bigint)?=none
+    count:(bigint)?=none
+]
+
+# primary language types to make hir nodes from:
+# [named literals]
+# - none
+# - void
+# - untyped
+# - noreturn
+# - extern
+# - intrinsic
+# - new
+# - end
+#
+# [primitives]
+# - bool
+# - int
+# - rational
+# - float
+# - string
+# - istring
+# - ellipsis
+#
+# [type expressions]
+# - range<T> start, end, step. can we use generics to make inner elements have the same type?
+# - iterator
+# - iterator expression
+# - function
+# - array
+# - dict
+# - bidict
+# - object
+# - type block
+# - parameterization
+# - generic declaration
+# - expression sequence...
+# - unpack
+# - collect
+# - flow
+# - if
+# - loop
+# - (match) ... tbd
+# - assignment (`=` or `::` runtime or comptile bool flag)
+# - declare (`let` or `const`, `:=`)
+# - binop
+# - prefix op
+# - postfix op
+# - suppress
+
+node_at = (nodes:array<AST> id:addr):>AST => {
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+
+append_node = (@nodes:array<AST> node:AST):>addr<i => i <? nodes.length> => {
+    let id = nodes.length
+    nodes.push(node)
+    return id
+}
+
+# Immediate expression children in evaluation/source order. Types, source
+# syntax, parameter metadata, and binding ids are not HIR children. As in
+# the hosted walker, function bodies are children but default parameter
+# syntax is not; analyses decide when to enter a nested function body.
+children = (node:AST):>array<addr> => {
+    let result:array<addr> = []
+    if node is? Void | NoneValue | ErrorValue | GenericFunction | ScopeMetatag | Break | Continue | ExpressedIdentifier | Bool | TargetBool | DecidedBool | Integer | RationalConstant | TypeValue | BrandValue | ModuleNamespace | String | TargetString | BasedString | Partial {
+        return result
+    }
+    if node is? Suppress {
+        result.push(node.item)
+        return result
+    }
+    if node is? ForwardingAccess | Obligation | TypeTest | Spread | MemberAccess | TypeOf {
+        result.push(node.value)
+        return result
+    }
+    if node is? OrThrow {
+        result.push(node.value)
+        result.push(node.propagated)
+        return result
+    }
+    if node is? Return {
+        if node.item isnt? none { result.push(node.item) }
+        return result
+    }
+    if node is? IfArm | LoopArm {
+        result.push(node.condition)
+        result.push(node.body)
+        return result
+    }
+    if node is? Flow {
+        loop child in node.arms { result.push(child) }
+        if node.default isnt? none { result.push(node.default) }
+        return result
+    }
+    if node is? Assert {
+        result.push(node.condition)
+        return result
+    }
+    if node is? ShortCircuit | SetAlgebra | StringEqual | StringConcat {
+        result.push(node.left)
+        result.push(node.right)
+        return result
+    }
+    if node is? Declare | ValueCast | RepresentationCast | Transmute {
+        result.push(node.expr)
+        return result
+    }
+    if node is? Place {
+        result.push(node.target)
+        return result
+    }
+    if node is? Assign | MemberAssign | IndexAssign {
+        result.push(node.target)
+        result.push(node.value)
+        return result
+    }
+    if node is? ArrayLiteral | Block | TypeBlock {
+        loop child in node.items { result.push(child) }
+        return result
+    }
+    if node is? ObjectLiteral {
+        loop field in node.fields { result.push(field.value) }
+        return result
+    }
+    if node is? BoundMethod {
+        result.push(node.function)
+        if node.receiver isnt? none { result.push(node.receiver) }
+        return result
+    }
+    if node is? ArrayLength | ArrayMethod {
+        result.push(node.array)
+        return result
+    }
+    if node is? DictLookup {
+        result.push(node.keys)
+        result.push(node.values)
+        result.push(node.key)
+        if node.default isnt? none { result.push(node.default) }
+        return result
+    }
+    if node is? DictStore {
+        result.push(node.keys)
+        if node.values isnt? none { result.push(node.values) }
+        result.push(node.key)
+        if node.value isnt? none { result.push(node.value) }
+        return result
+    }
+    if node is? DictContains {
+        result.push(node.keys)
+        result.push(node.key)
+        return result
+    }
+    if node is? DictRemove {
+        result.push(node.keys)
+        if node.values isnt? none { result.push(node.values) }
+        if node.key isnt? none { result.push(node.key) }
+        if node.default isnt? none { result.push(node.default) }
+        return result
+    }
+    if node is? DictView | DictEntries | DictMethod {
+        result.push(node.dictionary)
+        return result
+    }
+    if node is? IteratorExpression {
+        result.push(node.target)
+        result.push(node.iterable)
+        return result
+    }
+    if node is? MultiIteratorExpression {
+        loop child in node.iterators { result.push(child) }
+        return result
+    }
+    if node is? Index {
+        result.push(node.array)
+        result.push(node.index)
+        return result
+    }
+    if node is? InterpolatedString {
+        loop child in node.parts { result.push(child) }
+        return result
+    }
+    if node is? StringLength {
+        result.push(node.string)
+        return result
+    }
+    if node is? StringIndex {
+        result.push(node.string)
+        result.push(node.index)
+        return result
+    }
+    if node is? StringSlice {
+        result.push(node.string)
+        result.push(node.range)
+        return result
+    }
+    if node is? FunctionLiteral {
+        result.push(node.body)
+        return result
+    }
+    if node is? OverloadedFunction {
+        loop child in node.alternates { result.push(child) }
+        return result
+    }
+    if node is? FunctionCall {
+        result.push(node.func)
+        loop child in node.pos_args { result.push(child) }
+        loop child in node.kw_args.values { result.push(child) }
+        return result
+    }
+    if node is? Range {
+        if node.step_pair isnt? none { result.push(node.step_pair.first) result.push(node.step_pair.second) }
+        if node.left isnt? none { result.push(node.left) }
+        if node.right isnt? none { result.push(node.right) }
+        return result
+    }
+    if node is? RangeMembership {
+        result.push(node.value)
+        result.push(node.range)
+        return result
+    }
+    # A newly added HIR variant must make its traversal policy explicit.
+    printl("internal compiler error: no HIR traversal for {node.typename}")
+    exit(101)
+}

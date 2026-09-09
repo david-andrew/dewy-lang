@@ -1,0 +1,102 @@
+import p"ty.dewy" as types
+
+doc"""
+Program-local minted type registry, corresponding to the USER_BRAND tables
+and brand helpers in hosted semantic/ty.py. Registration order is source
+minting order. Derived descriptions of an existing type are not new mints.
+
+The runtime brand word is a preorder number, starting at one; zero denotes
+an unbranded structural object. Every family's descendants occupy one half-
+open interval, so `is? Parent` can lower to a range comparison. These numbers
+are assigned after the program's mints are known, independently of binding
+and type-arena indices.
+"""
+
+Brand:type = const [name:string value_type:addr parent:string? abstract:bool]
+Registry:type = [entries:array<Brand>=[]]
+NumberedBrand:type = const [name:string first:addr end:addr]
+
+lookup = (name:string registry:Registry):>Brand? => {
+    loop entry in registry.entries { if entry.name =? name return entry }
+    return none
+}
+register = (id:addr @registry:Registry nodes:array<types.Type>):>void => {
+    let node = types.node_at(nodes id)
+    $runtime_assert node is? types.ObjectType and node.minted and node.brand isnt? none
+    $runtime_assert lookup(node.brand registry) is? none
+    let parent_name:string? = none
+    if node.parent isnt? none {
+        let parent = types.node_at(nodes node.parent)
+        if parent is? types.ObjectType and parent.minted {
+            $runtime_assert parent.brand isnt? none and lookup(parent.brand registry) isnt? none
+            parent_name = parent.brand
+        }
+    }
+    registry.entries.push(Brand[node.brand id parent_name node.abstract])
+}
+children = (name:string registry:Registry):>array<string> => {
+    let result:array<string> = []
+    loop entry in registry.entries { if entry.parent =? name { result.push(entry.name) } }
+    return result
+}
+descendants = (name:string registry:Registry):>array<string> => {
+    let result:array<string> = [name]
+    let immediate = children(name registry)
+    loop child in immediate {
+        let nested = descendants(child registry)
+        loop item in nested { result.push(item) }
+    }
+    return result
+}
+ancestry = (name:string registry:Registry):>array<string> => {
+    let result:array<string> = [name]
+    let current = lookup(name registry)
+    loop current isnt? none and current.parent isnt? none {
+        result.push(current.parent)
+        current = lookup(current.parent registry)
+    }
+    return result
+}
+root = (name:string registry:Registry):>string => {
+    let chain = ancestry(name registry)
+    $runtime_assert chain.length >? 0
+    return chain[chain.length - 1]
+}
+concrete = (name:string registry:Registry):>bool => {
+    let entry = lookup(name registry)
+    return entry is? none or not entry.abstract
+}
+
+number_family = (name:string registry:Registry @next:addr @output:array<NumberedBrand>):>void => {
+    let first = next
+    next += 1
+    let immediate = children(name registry)
+    loop child in immediate { number_family(child registry @next @output) }
+    output.push(NumberedBrand[name first next])
+}
+numbered = (registry:Registry):>array<NumberedBrand> => {
+    let output:array<NumberedBrand> = []
+    let next:addr = 1
+    loop entry in registry.entries {
+        if entry.parent is? none { number_family(entry.name registry @next @output) }
+    }
+    return output
+}
+
+# Most-specific brands must be tried first when selecting a dynamic method
+# or printing a descendant through an ancestor view. Preserve registration
+# order among equally deep families, like the hosted stable sort.
+most_specific_first = (names:array<string> registry:Registry):>array<string> => {
+    let result:array<string> = []
+    loop name in names {
+        let chain = ancestry(name registry)
+        let at:addr<i => i <=? result.length> = 0
+        loop at <? result.length {
+            let prior = ancestry(result[at] registry)
+            if chain.length >? prior.length break
+            at += 1
+        }
+        result.insert(name idx=at)
+    }
+    return result
+}

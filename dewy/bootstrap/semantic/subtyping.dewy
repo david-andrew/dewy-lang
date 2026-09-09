@@ -1,0 +1,540 @@
+import p"ty.dewy" as types
+
+doc"""
+The hosted subtype rule is emptiness: S is a subtype of T when S & ~T is
+empty. Normalize to disjunctive normal form, meet each clause's positive
+atoms, then see whether a negative atom excludes that meet.
+
+Structured types meet at the same atom boundary. Refinement applicability
+uses the base type; actual propositions are obligations at the checking
+boundary, not permission to assume a predicate from a type annotation.
+"""
+
+Link:type = const [child:string parent:string]
+
+# Nominal inheritance is separate from numeric promotion. A cross-branch
+# arithmetic conversion must not silently introduce a subtype edge.
+nominal_subtype = (child:string parent:string links:array<Link>):>bool => {
+    if child =? parent return true
+    let frontier:array<string> = [child]
+    let seen:set<string> = set[child]
+    loop frontier.length >? 0 {
+        let current = frontier.pop
+        loop link in links {
+            if link.child not=? current continue
+            if link.parent =? parent return true
+            if link.parent not in? seen {
+                seen.add(link.parent)
+                frontier.push(link.parent)
+            }
+        }
+    }
+    return false
+}
+
+IntegerLayout:type = const [name:string bits:uint8 signed:bool]
+const integer_layouts:array<IntegerLayout> = [
+    ['int8' 8 true] ['int16' 16 true] ['int32' 32 true] ['int64' 64 true]
+    ['uint8' 8 false] ['uint16' 16 false] ['uint32' 32 false] ['uint64' 64 false]
+]
+
+integer_fits = (value:bigint target:string):>bool => {
+    if target =? 'int' return true
+    if target =? 'uint' return value >=? 0
+    loop layout in integer_layouts {
+        if layout.name not=? target continue
+        let bits:addr = layout.bits
+        if layout.signed { bits -= 1 }
+        let limit:bigint = 1
+        loop i in 0.. and i <? bits { limit *= 2 }
+        if layout.signed return -limit <=? value <? limit
+        return 0 <=? value <? limit
+    }
+    return false
+}
+
+# Structural atoms also have nominal umbrellas. A sequence is consumable as
+# a generator; whether <int int> is a generator<int> remains a hosted TODO.
+umbrella = (node:types.Type):>string? => {
+    if node is? types.ArrayType return 'array'
+    if node is? types.StringType | types.StringLiteralType return 'string'
+    if node is? types.IntegerLiteralType return 'int'
+    if node is? types.RationalLiteralType return 'rational'
+    if node is? types.SequenceType return 'generator'
+    if node is? types.FunctionType return 'function'
+    if node is? types.OverloadType return 'multifunction'
+    if node is? types.ObjectType | types.NamedType return 'object'
+    return none
+}
+
+# A minted child carries its parent's ordered prefix. The hosted relation
+# allows a strengthened field type; the layout prefix still fixes offsets.
+field_prefix = (child:types.ObjectType parent:types.ObjectType):>bool => {
+    if child.fields.length <? parent.fields.length return false
+    loop i in 0.. and i <? parent.fields.length {
+        $runtime_assert i <? child.fields.length
+        if child.fields[i].name not=? parent.fields[i].name return false
+    }
+    return true
+}
+brand_descends = (child:types.ObjectType parent:types.ObjectType nodes:array<types.Type>):>bool => {
+    if not child.minted or not parent.minted or not field_prefix(child parent) return false
+    if child.brand =? parent.brand return true
+    let next = child.parent
+    loop next isnt? none {
+        let node = types.node_at(nodes next)
+        if node isnt? types.ObjectType or not node.minted return false
+        if node.brand =? parent.brand return true
+        next = node.parent
+    }
+    return false
+}
+same_fields = (a:types.ObjectType b:types.ObjectType nodes:array<types.Type>):>bool => {
+    if a.fields.length not=? b.fields.length return false
+    loop i in 0.. and i <? a.fields.length {
+        $runtime_assert i <? b.fields.length
+        let af = a.fields[i]
+        let bf = b.fields[i]
+        if af.name not=? bf.name or af.mutable not=? bf.mutable or not types.same_type(af.value_type bf.value_type nodes) return false
+    }
+    return true
+}
+brand_carries = (child:types.ObjectType structure:types.ObjectType nodes:array<types.Type>):>bool => {
+    if not child.minted or structure.brand isnt? none return false
+    let root = child
+    loop root.parent isnt? none {
+        let parent = types.node_at(nodes root.parent)
+        if parent isnt? types.ObjectType or not parent.minted break
+        root = parent
+    }
+    # The whole root structure is carried, not arbitrary structural width
+    # subtyping. The brand word follows that root's fields in the layout.
+    if root.fields.length not=? structure.fields.length return false
+    loop i in 0.. and i <? root.fields.length {
+        $runtime_assert i <? structure.fields.length
+        let a = root.fields[i]
+        let b = structure.fields[i]
+        if a.name not=? b.name or not types.same_type(a.value_type b.value_type nodes) return false
+    }
+    return true
+}
+object_subtype = (a:types.ObjectType b:types.ObjectType nodes:array<types.Type>):>bool => {
+    if a.immutable and not b.immutable return false
+    if b isnt? types.PathType and a.brand =? b.brand and same_fields(a b nodes) return true
+    return brand_descends(a b nodes) or brand_carries(a b nodes)
+}
+path_implies = (a:types.PathType b:types.ObjectType links:array<Link> @nodes:array<types.Type>):>bool => {
+    if a is? types.PathLiteralType and b is? types.PathLiteralType return a.value =? b.value
+    if a.fields.length not=? b.fields.length return false
+    loop i in 0.. and i <? a.fields.length {
+        $runtime_assert i <? b.fields.length
+        let af = a.fields[i]
+        let bf = b.fields[i]
+        if af.name not=? bf.name or af.mutable not=? bf.mutable or not is_subtype(af.value_type bf.value_type links @nodes) return false
+    }
+    return true
+}
+
+string_literal_implies = (value:string target:types.Type nodes:array<types.Type> links:array<Link>):>bool => {
+    if target is? types.StringLiteralType return value =? target.value
+    if target is? types.StringType return target.length is? none or target.length =? value.length
+    if target is? types.Primitive {
+        if target.name in? set['char' 'grapheme'] return value.length =? 1
+        return nominal_subtype('string' target.name links)
+    }
+    if target is? types.ArrayType {
+        let element = types.node_at(nodes target.element)
+        if element isnt? types.Primitive return false
+        let length:addr = value.length
+        if element.name =? 'uint8' {
+            let bytes = value as array<uint8>
+            length = bytes.length
+        }
+        else if element.name =? 'uint32' {
+            let scalars = value as array<uint32>
+            length = scalars.length
+        }
+        else if element.name not in? set['char' 'grapheme' 'string'] return false
+        return target.length is? none or target.length =? length
+    }
+    return false
+}
+
+atom_implies = (a_id:addr b_id:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+    if types.same_type(a_id b_id nodes) return true
+    let a = types.node_at(nodes a_id)
+    let b = types.node_at(nodes b_id)
+    if types.is_primitive(b 'any') return true
+    if a is? types.TypeVariable return is_subtype(a.bound b_id links @nodes)
+    if b is? types.TypeVariable return false
+    if a is? types.NamedType or b is? types.NamedType return atom_implies(types.unfold(a_id nodes) types.unfold(b_id nodes) links @nodes)
+    if a is? types.RefinedType return is_subtype(a.base b_id links @nodes)
+    if b is? types.RefinedType return is_subtype(a_id b.base links @nodes)
+    if a is? types.PathType and b is? types.ObjectType return path_implies(a b links @nodes)
+    if a is? types.ObjectType and b is? types.ObjectType return object_subtype(a b nodes)
+    if a is? types.MetaType and b is? types.MetaType {
+        let af = types.node_at(nodes a.family)
+        let bf = types.node_at(nodes b.family)
+        if af isnt? types.ObjectType or bf isnt? types.ObjectType return false
+        return brand_descends(af bf nodes)
+    }
+    if a is? types.Primitive and b is? types.Primitive return nominal_subtype(a.name b.name links)
+    if a is? types.IntegerLiteralType and b is? types.Primitive return integer_fits(a.value b.name) or nominal_subtype('int' b.name links)
+    if a is? types.RationalLiteralType and b is? types.Primitive return nominal_subtype('rational' b.name links)
+    if a is? types.BinaryLiteralType {
+        if b isnt? types.ArrayType return false
+        return types.is_primitive(types.node_at(nodes b.element) 'uint8') and (b.length is? none or b.length =? a.value.length)
+    }
+    if a is? types.DimensionType return false
+    if a is? types.QuantityType {
+        if b isnt? types.QuantityType or a.dimension not=? b.dimension return false
+        return is_subtype(a.number b.number links @nodes)
+    }
+    if a is? types.StringLiteralType return string_literal_implies(a.value b nodes links)
+    if a is? types.StringType {
+        if b is? types.StringType return b.length is? none or a.length =? b.length
+        if b is? types.Primitive {
+            if b.name in? set['char' 'grapheme'] return a.length =? 1
+            return nominal_subtype('string' b.name links)
+        }
+    }
+    if a is? types.Primitive and b is? types.StringType {
+        if a.name not in? set['string' 'char' 'grapheme'] return false
+        return b.length is? none or a.name in? set['char' 'grapheme'] and b.length =? 1
+    }
+    if a is? types.ArrayType and b is? types.ArrayType {
+        let element_fits:bool = types.same_type(a.element b.element nodes)
+        let ae = types.node_at(nodes a.element)
+        let be = types.node_at(nodes b.element)
+        if ae is? types.StringType and ae.length isnt? none {
+            if types.is_primitive(be 'string') or be is? types.StringType and be.length is? none { element_fits = true }
+        }
+        return element_fits and (b.length is? none or a.length =? b.length)
+    }
+    if a is? types.SequenceType and b is? types.SequenceType {
+        if a.items.length not=? b.items.length return false
+        loop i in 0.. and i <? a.items.length {
+            if not is_subtype(a.items[i] b.items[i] links @nodes) return false
+        }
+        return true
+    }
+    if a is? types.CallableType and b is? types.CallableType return callable_subtype(a b links @nodes)
+    let a_nominal = umbrella(a)
+    let b_nominal = umbrella(b)
+    if a_nominal isnt? none and b is? types.Primitive return nominal_subtype(a_nominal b.name links)
+    if a_nominal isnt? none or b_nominal isnt? none return false
+
+    # Generic type applications are covariant in the hosted v1 type algebra.
+    # Bare F can accept F<A>, but cannot invent an argument for a required F<A>.
+    let a_head:addr = a_id
+    let b_head:addr = b_id
+    let a_args:array<addr> = []
+    let b_args:array<addr> = []
+    if a is? types.TypeParameterize { a_head = a.head a_args = a.args }
+    if b is? types.TypeParameterize { b_head = b.head b_args = b.args }
+    let ah = types.node_at(nodes a_head)
+    let bh = types.node_at(nodes b_head)
+    if ah isnt? types.Primitive or bh isnt? types.Primitive return false
+    if not nominal_subtype(ah.name bh.name links) return false
+    if b_args.length =? 0 return true
+    if a_args.length not=? b_args.length return false
+    loop i in 0.. and i <? a_args.length {
+        if not is_subtype(a_args[i] b_args[i] links @nodes) return false
+    }
+    return true
+}
+
+meet_atoms = (a_id:addr b_id:addr links:array<Link> @nodes:array<types.Type>):>addr? => {
+    if types.same_type(a_id b_id nodes) return a_id
+    let a = types.node_at(nodes a_id)
+    let b = types.node_at(nodes b_id)
+    if a is? types.NamedType or b is? types.NamedType {
+        let au = types.unfold(a_id nodes)
+        let bu = types.unfold(b_id nodes)
+        let met = meet_atoms(au bu links @nodes)
+        if met is? none return none
+        if a is? types.NamedType and types.same_type(met au nodes) return a_id
+        if b is? types.NamedType and types.same_type(met bu nodes) return b_id
+        return met
+    }
+    if a is? types.RefinedType {
+        let met = meet_atoms(a.base b_id links @nodes)
+        if met isnt? none and types.same_type(met a.base nodes) return a_id
+        return none
+    }
+    if b is? types.RefinedType {
+        let met = meet_atoms(b.base a_id links @nodes)
+        if met isnt? none and types.same_type(met b.base nodes) return b_id
+        return none
+    }
+    # The hosted positive meet still treats distinct callable atoms as
+    # disjoint; signature coverage belongs to implication below. Preserve
+    # that v1 limitation rather than silently inventing overload intersections.
+    if a is? types.CallableType and b is? types.CallableType return none
+    if a is? types.QuantityType and b is? types.QuantityType {
+        if a.dimension not=? b.dimension return none
+        let number = types.intersect([a.number b.number] @nodes)
+        if is_empty(number links @nodes) return none
+        return types.quantity_type(number a.dimension @nodes)
+    }
+    if a is? types.IntegerLiteralType | types.RationalLiteralType | types.StringLiteralType | types.BinaryLiteralType {
+        if atom_implies(a_id b_id links @nodes) return a_id
+        return none
+    }
+    if b is? types.IntegerLiteralType | types.RationalLiteralType | types.StringLiteralType | types.BinaryLiteralType {
+        if atom_implies(b_id a_id links @nodes) return b_id
+        return none
+    }
+    if a is? types.SequenceType and b is? types.SequenceType {
+        if a.items.length not=? b.items.length return none
+        let items:array<addr> = []
+        loop i in 0.. and i <? a.items.length {
+            let item = types.intersect([a.items[i] b.items[i]] @nodes)
+            if is_empty(item links @nodes) return none
+            items.push(item)
+        }
+        return types.sequence(items @nodes)
+    }
+    if a is? types.ArrayType and b is? types.ArrayType {
+        # Writable array element types remain invariant even though ordinary
+        # generic TypeParameterize arguments below are covariant.
+        if not types.same_type(a.element b.element nodes) return none
+        if a.length is? none return b_id
+        if b.length is? none or a.length =? b.length return a_id
+        return none
+    }
+    if atom_implies(a_id b_id links @nodes) return a_id
+    if atom_implies(b_id a_id links @nodes) return b_id
+    if a is? types.TypeParameterize and b is? types.TypeParameterize {
+        let head = meet_atoms(a.head b.head links @nodes)
+        if head is? none or a.args.length not=? b.args.length return none
+        let args:array<addr> = []
+        loop i in 0.. and i <? a.args.length {
+            let arg = types.intersect([a.args[i] b.args[i]] @nodes)
+            if is_empty(arg links @nodes) return none
+            args.push(arg)
+        }
+        return types.parameterize(head args @nodes)
+    }
+    return none
+}
+
+clause_is_empty = (clause:types.Clause links:array<Link> @nodes:array<types.Type>):>bool => {
+    let met:addr = types.primitive('any' @nodes)
+    loop literal in clause.literals {
+        if not literal.positive continue
+        let next = meet_atoms(met literal.item links @nodes)
+        if next is? none return true
+        met = next
+    }
+    let atom = types.node_at(nodes met)
+    if types.is_primitive(atom 'never') return true
+    # Open world: merely excluding some named types does not empty any.
+    if types.is_primitive(atom 'any') return false
+    loop literal in clause.literals {
+        if not literal.positive and atom_implies(met literal.item links @nodes) return true
+    }
+    return false
+}
+
+is_empty = (id:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+    let clauses = types.normalize(id @nodes)
+    loop clause in clauses { if not clause_is_empty(clause links @nodes) return false }
+    return true
+}
+
+is_subtype = (source:addr target:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+    let excluded = types.negate(target @nodes)
+    let difference = types.intersect([source excluded] @nodes)
+    return is_empty(difference links @nodes)
+}
+
+# Joining checked values has no subsequent obligation boundary. A refined
+# target's base may be applicable to a call, but a join must never obtain
+# the target's predicates merely by asking that applicability question.
+covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:array<types.Type>):>bool => {
+    let pair = "{member}:{other}"
+    if pair in? seen return true
+    seen.add(pair)
+    let m_id = types.unfold(member nodes)
+    let o_id = types.unfold(other nodes)
+    let m = types.node_at(nodes m_id)
+    let o = types.node_at(nodes o_id)
+    if o is? types.RefinedType {
+        if m isnt? types.RefinedType return false
+        loop required in o.propositions {
+            let key = types.propositions_key([required] true nodes)
+            let found:bool = false
+            loop actual in m.propositions {
+                if types.propositions_key([actual] true nodes) =? key { found = true break }
+            }
+            if not found return false
+        }
+        return covered(m.base o.base seen links @nodes)
+    }
+    if m is? types.RefinedType return covered(m.base o_id seen links @nodes)
+    if m is? types.ObjectType and o is? types.ObjectType {
+        loop required in o.fields {
+            let actual = types.object_field(m required.name)
+            if actual is? none return false
+            loop p in required.refinement {
+                let key = types.propositions_key([p] true nodes)
+                let found:bool = false
+                loop q in actual.refinement {
+                    if types.propositions_key([q] true nodes) =? key { found = true break }
+                }
+                if not found return false
+            }
+            if not covered(actual.value_type required.value_type seen links @nodes) return false
+        }
+    }
+    else if m is? types.ArrayType and o is? types.ArrayType {
+        if not covered(m.element o.element seen links @nodes) return false
+    }
+    else if o is? types.CallableType | types.TypeParameterize | types.TypeAnd | types.TypeOr | types.TypeNot | types.SequenceType | types.MetaType | types.QuantityType | types.TypeVariable {
+        # More variance/obligation rules are needed before these alternatives
+        # can absorb one another. Preserve the hosted conservative boundary.
+        return types.same_type(m_id o_id nodes)
+    }
+    return is_subtype(m_id o_id links @nodes)
+}
+
+join = (items:array<addr> links:array<Link> @nodes:array<types.Type>):>addr => {
+    # Hosted limitation: syntactic union deduplicates equal record shapes
+    # before `covered` sees their possibly different field predicates. A
+    # future correction must reconcile those contracts, not preserve one
+    # alternative's proof metadata merely because its fields have equal types.
+    let combined = types.union(items @nodes)
+    let node = types.node_at(nodes combined)
+    let members:array<addr> = [combined]
+    if node is? types.TypeOr { members = node.items }
+    let kept:array<addr> = []
+    loop member in members {
+        let absorbed:bool = false
+        loop other in kept { if covered(member other set[] links @nodes) { absorbed = true break } }
+        if absorbed continue
+        let remaining:array<addr> = []
+        loop other in kept { if not covered(other member set[] links @nodes) { remaining.push(other) } }
+        remaining.push(member)
+        kept = remaining
+    }
+    return types.union(kept @nodes)
+}
+
+# F can stand in for G when it accepts G's calls and returns a subtype of
+# G's result. Defaults and keyword names affect the call shape; source
+# parameter bodies and default expressions do not participate here.
+function_subtype = (f:types.FunctionType g:types.FunctionType links:array<Link> @nodes:array<types.Type>):>bool => {
+    if f.pos_or_kw.length not=? g.pos_or_kw.length return false
+    loop i in 0.. and i <? f.pos_or_kw.length {
+        let fp = f.pos_or_kw[i]
+        let gp = g.pos_or_kw[i]
+        if gp.name isnt? none and fp.name not=? gp.name return false
+        if fp.place not=? gp.place return false
+        if not gp.required and fp.required return false
+        if not is_subtype(gp.value_type fp.value_type links @nodes) return false
+    }
+    loop gk in g.kw_only {
+        let matched:bool = false
+        loop fk in f.kw_only {
+            if fk.name not=? gk.name continue
+            if fk.place not=? gk.place return false
+            if not gk.required and fk.required return false
+            if not is_subtype(gk.value_type fk.value_type links @nodes) return false
+            matched = true
+            break
+        }
+        if matched continue
+        loop fp in f.pos_or_kw {
+            if fp.name not=? gk.name continue
+            if fp.place not=? gk.place or not gk.required return false
+            if not is_subtype(gk.value_type fp.value_type links @nodes) return false
+            matched = true
+            break
+        }
+        if not matched and f.rest is? none return false
+    }
+    loop fk in f.kw_only {
+        if not fk.required continue
+        let accepted:bool = false
+        loop gk in g.kw_only { if gk.name =? fk.name { accepted = true break } }
+        loop gp in g.pos_or_kw { if gp.name =? fk.name { accepted = true break } }
+        if not accepted return false
+    }
+    return is_subtype(f.ret g.ret links @nodes)
+}
+
+callable_subtype = (f:types.CallableType g:types.CallableType links:array<Link> @nodes:array<types.Type>):>bool => {
+    let fs:array<types.FunctionType> = []
+    let gs:array<types.FunctionType> = []
+    if f is? types.FunctionType { fs.push(f) }
+    else {
+        loop id in f.methods {
+            let method = types.node_at(nodes id)
+            $runtime_assert method is? types.FunctionType
+            fs.push(method)
+        }
+    }
+    if g is? types.FunctionType { gs.push(g) }
+    else {
+        loop id in g.methods {
+            let method = types.node_at(nodes id)
+            $runtime_assert method is? types.FunctionType
+            gs.push(method)
+        }
+    }
+    # Every required alternative must be covered by some provided method.
+    loop gm in gs {
+        let covered:bool = false
+        loop fm in fs { if function_subtype(fm gm links @nodes) { covered = true break } }
+        if not covered return false
+    }
+    return true
+}
+
+# The hosted primitive graph, in declaration order. Promotion rules are
+# installed separately by the semantic checker.
+const default_links:array<Link> = [
+    ["never" "any"]
+    ["exception" "any"]
+    ["type" "any"]
+    ["none" "exception"]
+    ["error" "exception"]
+    ["ellipsis" "any"]
+    ["end" "any"]
+    ["new" "any"]
+    ["bool" "any"]
+    ["number" "any"]
+    ["real" "number"]
+    ["rational" "real"]
+    ["int" "rational"]
+    ["uint" "int"]
+    ["uint8" "uint"]
+    ["uint16" "uint"]
+    ["uint32" "uint"]
+    ["uint64" "uint"]
+    ["int8" "int"]
+    ["int16" "int"]
+    ["int32" "int"]
+    ["int64" "int"]
+    ["float" "real"]
+    ["float32" "float"]
+    ["float64" "float"]
+    ["complex" "number"]
+    ["quaternion" "number"]
+    ["function" "any"]
+    ["multifunction" "any"]
+    ["generator" "any"]
+    ["iterator" "any"]
+    ["multiiterator" "any"]
+    ["range" "any"]
+    ["multirange" "any"]
+    ["array" "any"]
+    ["dict" "any"]
+    ["set" "any"]
+    ["object" "any"]
+    ["string" "any"]
+    ["grapheme" "string"]
+    ["char" "grapheme"]
+    ["ID" "any"]
+]

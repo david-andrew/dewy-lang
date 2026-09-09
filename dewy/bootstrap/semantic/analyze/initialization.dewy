@@ -1,0 +1,525 @@
+from reporting import SrcFile, Error, Pointer
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"effects.dewy" as effects
+
+doc"""
+Source-order initialization of checked HIR, before target-specific lowering.
+
+A declaration makes its binding available after evaluating its initializer.
+Creating a function checks defaults, but reading captures waits until a call.
+At that point we follow the concrete callable arguments; an indirect call
+uses the compatible functions in the program when its origin is unknown.
+
+Successful checks retain their actual entry-state dependencies and recursive
+assumptions. Unrelated caller locals do not prevent reuse. This is essential
+for shared call graphs: repeatedly traversing every path would be exponential.
+"""
+
+CallableEffect:type = const [targets:array<addr>]
+MemberRoute:type = const [binding_id:addr path:array<string>]
+CheckFrame:type = [function_id:addr available:set<addr> required:set<addr>=set[] assumed_calls:set<addr>=set[]]
+CheckedCall:type = const [key:string required:set<addr> assumed_calls:set<addr>]
+Checker:type = [
+    nodes:array<hir.AST> type_nodes:array<types.Type>
+    registry:bindings.Registry srcfile:SrcFile
+    functions:array<addr>=[]
+    reassigned_callables:set<addr>=set[] reassigned_objects:set<addr>=set[]
+    reassigned_members:array<MemberRoute>=[]
+    frames:array<CheckFrame>=[] checked:array<CheckedCall>=[]
+    # Keep the first diagnostic as a value. Recursive helpers unwind without
+    # exiting the process, so checking remains usable by analysis/test tools.
+    problem:Error?=none
+]
+
+record_requirements = (required:set<addr> assumed:set<addr> @checker:Checker):>void => {
+    loop i in 0.. and i <? checker.frames.length {
+        let frame = checker.frames[i]
+        loop id in required { if id in? frame.available { frame.required.add(id) } }
+        loop id in assumed { if id not=? frame.function_id { frame.assumed_calls.add(id) } }
+        checker.frames[i] = frame
+    }
+}
+member_key = (id:addr nodes:array<hir.AST>):>MemberRoute | none => {
+    let current = id
+    let reversed:array<string> = []
+    loop true {
+        let node = hir.node_at(nodes current)
+        if node is? hir.MemberAccess { reversed.push(node.name) current = node.value continue }
+        if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
+        let path:array<string> = []
+        loop reversed.length >? 0 { path.push(reversed.pop) }
+        return MemberRoute[node.binding_id path]
+    }
+}
+member_was_reassigned = (id:addr checker:Checker):>bool => {
+    let key = member_key(id checker.nodes)
+    if key is? none return false
+    if key.binding_id in? checker.reassigned_objects return true
+    loop changed in checker.reassigned_members {
+        if changed.binding_id =? key.binding_id and bindings.path_starts_with(key.path changed.path) return true
+    }
+    return false
+}
+collect = (root:addr @checker:Checker):>void => {
+    let pending:array<addr> = [root]
+    let seen:set<addr> = set[]
+    loop pending.length >? 0 {
+        let id = pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node = hir.node_at(checker.nodes id)
+        if node is? hir.FunctionLiteral { checker.functions.push(id) }
+        if node is? hir.Assign {
+            let target = hir.node_at(checker.nodes node.target)
+            $runtime_assert target is? hir.ExpressedIdentifier
+            if target.binding_id isnt? none {
+                let value_type = types.node_at(checker.type_nodes target.value_type)
+                if value_type is? types.CallableType { checker.reassigned_callables.add(target.binding_id) }
+                if value_type is? types.ObjectType { checker.reassigned_objects.add(target.binding_id) }
+            }
+        }
+        if node is? hir.MemberAssign {
+            let key = member_key(node.target checker.nodes)
+            if key isnt? none { checker.reassigned_members.push(key) }
+        }
+        let children = hir.children(node)
+        loop children.length >? 0 { pending.push(children.pop) }
+    }
+}
+
+compatible_functions = (value_type:addr checker:Checker):>array<addr> | none => {
+    let target = types.node_at(checker.type_nodes value_type)
+    if target isnt? types.FunctionType return none
+    let result:array<addr> = []
+    loop id in checker.functions {
+        let function = hir.node_at(checker.nodes id)
+        let candidate = types.node_at(checker.type_nodes function.value_type)
+        if candidate isnt? types.FunctionType or candidate.type_params.length >? 0 continue
+        if candidate.pos_or_kw.length not=? target.pos_or_kw.length continue
+        if not types.same_type(candidate.ret target.ret checker.type_nodes) continue
+        let matches:bool = true
+        loop i in 0.. and i <? target.pos_or_kw.length {
+            if not types.same_type(candidate.pos_or_kw[i].value_type target.pos_or_kw[i].value_type checker.type_nodes) { matches = false break }
+        }
+        if matches { result.push(id) }
+    }
+    return result
+}
+valued = (id:addr checker:Checker):>bool => {
+    let node = hir.node_at(checker.nodes id)
+    let value_type = types.node_at(checker.type_nodes node.value_type)
+    return value_type isnt? types.Primitive or (value_type.name not=? 'void' and value_type.name not=? 'never')
+}
+function_results = (id:addr checker:Checker):>array<addr> => {
+    let node = hir.node_at(checker.nodes id)
+    if node is? hir.Return { if node.item isnt? none return [node.item] return [] }
+    if node is? hir.Block {
+        let returned:array<addr> = []
+        loop item in node.items {
+            let found = function_results(item checker)
+            loop value in found { returned.push(value) }
+        }
+        if returned.length >? 0 return returned
+        loop item in node.items { if valued(item checker) { returned.push(item) } }
+        return returned
+    }
+    if node is? hir.Flow {
+        let result:array<addr> = []
+        loop arm_id in node.arms {
+            let arm = hir.node_at(checker.nodes arm_id)
+            $runtime_assert arm is? hir.IfArm | hir.LoopArm
+            let found = function_results(arm.body checker)
+            loop value in found { result.push(value) }
+        }
+        if node.default isnt? none {
+            let found = function_results(node.default checker)
+            loop value in found { result.push(value) }
+        }
+        return result
+    }
+    if valued(id checker) return [id]
+    return []
+}
+
+# A binding id and a node id live in different arenas. Keep separate visited
+# sets instead of inheriting Python's accidental shared integer namespace.
+callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> seen_nodes:set<addr> checker:Checker):>array<addr> | none => {
+    let current = effects.unwrap(id checker.nodes)
+    let node = hir.node_at(checker.nodes current)
+    if node is? hir.ArrayMethod return []
+    if node is? hir.FunctionLiteral return [current]
+    if node is? hir.OverloadedFunction {
+        let result:array<addr> = []
+        loop alternate in node.alternates {
+            let found = callable_targets(alternate parameters seen seen_nodes checker)
+            if found is? none return none
+            loop target in found { result.push(target) }
+        }
+        return result
+    }
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id is? none return []
+        let parameter = parameters.get(node.binding_id)
+        if parameter isnt? none return parameter.targets
+        if node.binding_id in? seen return []
+        let binding = bindings.binding_at(checker.registry node.binding_id)
+        if binding.kind =? 'function' and binding.function isnt? none return [binding.function]
+        if binding.declaration is? none or node.binding_id in? checker.reassigned_callables return none
+        seen.add(node.binding_id)
+        let declaration = hir.node_at(checker.nodes binding.declaration)
+        $runtime_assert declaration is? hir.Declare
+        return callable_targets(declaration.expr parameters seen seen_nodes checker)
+    }
+    if node is? hir.Block {
+        let values:array<addr> = []
+        loop item in node.items { if valued(item checker) { values.push(item) } }
+        if values.length not=? 1 return none
+        return callable_targets(values[0] parameters seen seen_nodes checker)
+    }
+    if node is? hir.Flow {
+        let bodies:array<addr> = []
+        loop arm_id in node.arms {
+            let arm = hir.node_at(checker.nodes arm_id)
+            $runtime_assert arm is? hir.IfArm | hir.LoopArm
+            bodies.push(arm.body)
+        }
+        if node.default isnt? none { bodies.push(node.default) }
+        let result:array<addr> = []
+        loop body in bodies {
+            let found = callable_targets(body parameters seen seen_nodes checker)
+            if found is? none return none
+            loop target in found { result.push(target) }
+        }
+        return result
+    }
+    if node is? hir.FunctionCall {
+        let producers = callable_targets(node.func parameters seen seen_nodes checker)
+        if producers is? none return none
+        let result:array<addr> = []
+        loop producer in producers {
+            if producer in? seen_nodes continue
+            let visited = seen_nodes
+            visited.add(producer)
+            let literal = hir.node_at(checker.nodes producer)
+            $runtime_assert literal is? hir.FunctionLiteral
+            let values = function_results(literal.body checker)
+            loop value in values {
+                let found = callable_targets(value parameters seen visited checker)
+                if found is? none return none
+                loop target in found { result.push(target) }
+            }
+        }
+        return result
+    }
+    if node is? hir.Index {
+        let array = hir.node_at(checker.nodes node.array)
+        if array is? hir.ExpressedIdentifier {
+            if array.binding_id is? none or array.binding_id in? seen return none
+            let binding = checker.registry.by_id.get(array.binding_id)
+            if binding is? none or binding.declaration is? none return none
+            let declaration = hir.node_at(checker.nodes binding.declaration)
+            $runtime_assert declaration is? hir.Declare
+            array = hir.node_at(checker.nodes declaration.expr)
+            seen.add(binding.id)
+        }
+        if array isnt? hir.ArrayLiteral return none
+        loop item in array.items { if hir.node_at(checker.nodes item) is? hir.Spread return none }
+        let items = array.items
+        if node.constant_index isnt? none and node.constant_index <? items.length {
+            $runtime_assert node.constant_index >=? 0
+            items = [items[node.constant_index]]
+        }
+        let result:array<addr> = []
+        loop item in items {
+            let found = callable_targets(item parameters seen seen_nodes checker)
+            if found is? none return none
+            loop target in found { result.push(target) }
+        }
+        return result
+    }
+    if node is? hir.MemberAccess {
+        if member_was_reassigned(current checker) return none
+        let field = object_field_value(node.value node.name parameters seen seen_nodes checker)
+        if field isnt? none return callable_targets(field parameters seen seen_nodes checker)
+    }
+    return none
+}
+object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> seen:set<addr> seen_nodes:set<addr> checker:Checker):>addr? => {
+    let current = effects.unwrap(id checker.nodes)
+    let node = hir.node_at(checker.nodes current)
+    if node is? hir.ObjectLiteral {
+        loop field in node.fields { if field.name =? name return field.value }
+        return none
+    }
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id is? none or node.binding_id in? seen or node.binding_id in? checker.reassigned_objects return none
+        let binding = checker.registry.by_id.get(node.binding_id)
+        if binding is? none or binding.declaration is? none or node.binding_id in? checker.reassigned_callables return none
+        let declaration = hir.node_at(checker.nodes binding.declaration)
+        $runtime_assert declaration is? hir.Declare
+        seen.add(node.binding_id)
+        return object_field_value(declaration.expr name parameters seen seen_nodes checker)
+    }
+    if node is? hir.FunctionCall {
+        if current in? seen_nodes return none
+        seen_nodes.add(current)
+        let producers = callable_targets(node.func parameters seen seen_nodes checker)
+        if producers is? none return none
+        loop producer in producers {
+            let literal = hir.node_at(checker.nodes producer)
+            $runtime_assert literal is? hir.FunctionLiteral
+            let results = function_results(literal.body checker)
+            loop result in results {
+                let field = object_field_value(result name parameters seen seen_nodes checker)
+                if field isnt? none return field
+            }
+        }
+    }
+    return none
+}
+
+require_initialized = (node:hir.ExpressedIdentifier initialized:set<addr> @checker:Checker):>void => {
+    if node.binding_id is? none return void
+    if node.binding_id in? initialized { record_requirements(set[node.binding_id] set[] @checker) return void }
+    let binding = bindings.binding_at(checker.registry node.binding_id)
+    checker.problem = Error[
+        srcfile=checker.srcfile title="`{binding.name}` used before initialization"
+        pointers=[Pointer[node.loc "`{binding.name}` may be accessed here before it is initialized"] Pointer[binding.loc "`{binding.name}` is initialized here"]]
+        hint='move the declaration before the call that can reach this use'
+    ]
+}
+check_defaults = (function:hir.FunctionLiteral initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+    let current = initialized
+    let params = effects.literal_params(function)
+    loop param in params { if param is? hir.BoundParam { current = check_eager(param.value current parameters stack @checker) } }
+    return current
+}
+check_block = (block:hir.Block initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+    let current = initialized
+    loop id in block.items {
+        if checker.problem isnt? none return current
+        let item = hir.node_at(checker.nodes id)
+        if item is? hir.Declare {
+            let expr = hir.node_at(checker.nodes item.expr)
+            if expr is? hir.FunctionLiteral { current = check_defaults(expr current parameters stack @checker) }
+            else { current = check_eager(item.expr current parameters stack @checker) }
+            if item.binding_id isnt? none { current.add(item.binding_id) }
+        }
+        else { current = check_eager(id current parameters stack @checker) }
+    }
+    return current
+}
+check_children = (children:array<addr> initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+    let current = initialized
+    loop id in children { current = check_eager(id current parameters stack @checker) }
+    return current
+}
+check_eager = (id:addr initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+    if checker.problem isnt? none return initialized
+    let node = hir.node_at(checker.nodes id)
+    if node is? hir.ExpressedIdentifier { require_initialized(node initialized @checker) return initialized }
+    if node is? hir.FunctionLiteral return check_defaults(node initialized parameters stack @checker)
+    if node is? hir.Block {
+        let current = check_block(node initialized parameters stack @checker)
+        return if node.scoped initialized else current
+    }
+    if node is? hir.Declare {
+        let current = check_eager(node.expr initialized parameters stack @checker)
+        if node.binding_id isnt? none { current.add(node.binding_id) }
+        return current
+    }
+    if node is? hir.FunctionCall {
+        let current = check_children(hir.children(node) initialized parameters stack @checker)
+        let targets = callable_targets(node.func parameters set[] set[] checker)
+        if targets is? none {
+            let function = hir.node_at(checker.nodes node.func)
+            targets = compatible_functions(function.value_type checker)
+        }
+        if targets is? none {
+            if checker.problem is? none {
+                let function = hir.node_at(checker.nodes node.func)
+                checker.problem = Error[srcfile=checker.srcfile title='callable initialization effect is not resolved' pointers=[Pointer[function.loc 'the possible callable values are not known here']]]
+            }
+            return current
+        }
+        loop target in targets { check_function(target current node.pos_args node.kw_args parameters stack @checker) }
+        return current
+    }
+    if node is? hir.Flow {
+        let current = initialized
+        let reached:bool = false
+        loop arm_id in node.arms {
+            let arm = hir.node_at(checker.nodes arm_id)
+            $runtime_assert arm is? hir.IfArm | hir.LoopArm
+            let condition = hir.node_at(checker.nodes arm.condition)
+            if condition is? hir.IteratorExpression | hir.MultiIteratorExpression {
+                let iterators:array<addr> = [arm.condition]
+                if condition is? hir.MultiIteratorExpression { iterators = condition.iterators }
+                let body_initialized = current
+                loop iterator_id in iterators {
+                    let iterator = hir.node_at(checker.nodes iterator_id)
+                    $runtime_assert iterator is? hir.IteratorExpression
+                    current = check_eager(iterator.iterable current parameters stack @checker)
+                }
+                body_initialized = current
+                loop iterator_id in iterators {
+                    let iterator = hir.node_at(checker.nodes iterator_id)
+                    $runtime_assert iterator is? hir.IteratorExpression
+                    let target = hir.node_at(checker.nodes iterator.target)
+                    $runtime_assert target is? hir.ExpressedIdentifier
+                    if target.binding_id isnt? none { body_initialized.add(target.binding_id) }
+                }
+                check_eager(arm.body body_initialized parameters stack @checker);
+                continue
+            }
+            current = check_eager(arm.condition current parameters stack @checker)
+            if condition is? hir.Bool and not condition.value continue
+            check_eager(arm.body current parameters stack @checker);
+            if condition is? hir.Bool and condition.value { reached = true break }
+        }
+        if node.default isnt? none and not reached { check_eager(node.default current parameters stack @checker); }
+        return current
+    }
+    if node is? hir.ShortCircuit {
+        let current = check_eager(node.left initialized parameters stack @checker)
+        let left = hir.node_at(checker.nodes node.left)
+        let skip:bool = false
+        if left is? hir.Bool {
+            skip = ((node.op =? 'and' or node.op =? 'nand') and not left.value) or ((node.op =? 'or' or node.op =? 'nor') and left.value)
+        }
+        if not skip { check_eager(node.right current parameters stack @checker); }
+        return current
+    }
+    if node is? hir.IteratorExpression return check_eager(node.iterable initialized parameters stack @checker)
+    if node is? hir.MultiIteratorExpression {
+        let current = initialized
+        loop iterator_id in node.iterators {
+            let iterator = hir.node_at(checker.nodes iterator_id)
+            $runtime_assert iterator is? hir.IteratorExpression
+            current = check_eager(iterator.iterable current parameters stack @checker)
+        }
+        return current
+    }
+    if node is? hir.ObjectLiteral {
+        let current = initialized
+        loop field in node.fields {
+            current = check_eager(field.value current parameters stack @checker)
+            if field.binding_id isnt? none { current.add(field.binding_id) }
+        }
+        return initialized
+    }
+    let children = hir.children(node)
+    if node is? hir.Range {
+        let unique:array<addr> = []
+        let seen:set<addr> = set[]
+        loop child in children { if child not in? seen { seen.add(child) unique.push(child) } }
+        children = unique
+    }
+    return check_children(children initialized parameters stack @checker)
+}
+
+# Cache keys use binding ids in sorted order, retaining target order. This
+# serializes identity only; it is not an equality test on callable bodies.
+call_key = (function:addr parameters:dict<addr CallableEffect>):>string => {
+    let ids:array<addr> = []
+    loop id in parameters.keys { ids.push(id) }
+    ids.sort
+    let parts:array<string> = ["{function}"]
+    loop id in ids {
+        if id not in? parameters continue
+        let effect = parameters[id]
+        parts.push("p{id}")
+        loop target in effect.targets { parts.push("n{target}") }
+    }
+    return parts.join(':')
+}
+subset = (left:set<addr> right:set<addr>):>bool => {
+    loop id in left { if id not in? right return false }
+    return true
+}
+check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:dict<string addr> outer_parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>void => {
+    if checker.problem isnt? none return void
+    if id in? stack { record_requirements(set[] set[id] @checker) return void }
+    let function = hir.node_at(checker.nodes id)
+    $runtime_assert function is? hir.FunctionLiteral
+    let available = initialized
+    loop field in function.object_fields { available.add(field.id) }
+    let parameter_effects:dict<addr CallableEffect> = []
+    let params = function.pos_or_kw_args
+    loop param in function.kw_only_args { params.push(param) }
+    loop i in 0.. and i <? params.length {
+        let param = params[i]
+        if param.binding_id is? none continue
+        available.add(param.binding_id)
+        let argument:addr? = none
+        if i <? function.pos_or_kw_args.length and i <? arguments.length { argument = arguments[i] }
+        else { argument = keywords.get(param.name) }
+        if argument is? none and param is? hir.BoundParam { argument = param.value }
+        if argument isnt? none {
+            let targets = callable_targets(argument outer_parameters set[] set[] checker)
+            if targets isnt? none { parameter_effects[param.binding_id] = CallableEffect[targets] }
+        }
+    }
+    if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { available.add(function.rest_args.binding_id) }
+    let key = call_key(id parameter_effects)
+    loop checked in checker.checked {
+        if checked.key =? key and subset(checked.required available) and subset(checked.assumed_calls stack) {
+            record_requirements(checked.required checked.assumed_calls @checker)
+            return void
+        }
+    }
+    checker.frames.push(CheckFrame[id available])
+    stack.add(id)
+    let body = hir.node_at(checker.nodes function.body)
+    if body is? hir.Block { check_block(body available parameter_effects stack @checker); }
+    else { check_eager(function.body available parameter_effects stack @checker); }
+    $runtime_assert checker.frames.length >? 0
+    let frame = checker.frames.pop
+    if checker.problem is? none { checker.checked.push(CheckedCall[key frame.required frame.assumed_calls]) }
+}
+
+main_error = (declaration:hir.Declare title:string message:string @checker:Checker):>void => {
+    if checker.problem isnt? none return void
+    checker.problem = Error[srcfile=checker.srcfile title=title pointers=[Pointer[declaration.loc message]]]
+}
+validate_main = (declaration:hir.Declare @checker:Checker):>void => {
+    let function = hir.node_at(checker.nodes declaration.expr)
+    if function isnt? hir.FunctionLiteral {
+        main_error(declaration '`main` must be a function' 'automatic invocation requires this entrypoint shape' @checker)
+        return void
+    }
+    let argv_ok:bool = false
+    if function.pos_or_kw_args.length =? 1 and function.kw_only_args.length =? 0 and function.rest_args is? none {
+        let param = function.pos_or_kw_args[0]
+        let value_type = types.node_at(checker.type_nodes param.value_type)
+        if value_type is? types.ArrayType and value_type.length is? none and not param.place {
+            let element = types.node_at(checker.type_nodes value_type.element)
+            argv_ok = element is? types.StringType or (element is? types.Primitive and element.name =? 'string')
+        }
+    }
+    if (function.pos_or_kw_args.length >? 0 or function.kw_only_args.length >? 0 or function.rest_args isnt? none) and not argv_ok {
+        main_error(declaration '`main` must take no arguments or one `array<string>` argument' 'the root entrypoint receives the command line as `array<string>`' @checker)
+    }
+    let result = types.node_at(checker.type_nodes function.rettype)
+    let valid:bool = result is? types.IntegerLiteralType
+    if result is? types.Primitive { valid = result.name in? ['void' 'never' 'int' 'uint' 'uint8' 'uint16' 'uint32' 'uint64' 'int8' 'int16' 'int32' 'int64'] }
+    if not valid { main_error(declaration '`main` must return an integer or `void`' "`main` returns `{types.describe(function.rettype checker.type_nodes)}`" @checker) }
+}
+validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry srcfile:SrcFile):>Error? => {
+    let checker = Checker[nodes type_nodes registry srcfile]
+    collect(root @checker)
+    let block = hir.node_at(nodes root)
+    $runtime_assert block is? hir.Block
+    let initialized = check_block(block set[] [] set[] @checker)
+    if checker.problem isnt? none return checker.problem
+    loop id in block.items {
+        let declaration = hir.node_at(nodes id)
+        if declaration isnt? hir.Declare or declaration.name not=? 'main' continue
+        validate_main(declaration @checker)
+        if checker.problem is? none { check_function(declaration.expr initialized [] [] [] set[] @checker) }
+        break
+    }
+    return checker.problem
+}

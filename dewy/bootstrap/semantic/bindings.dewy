@@ -1,0 +1,168 @@
+from reporting import Span
+import p"hir.dewy" as hir
+
+doc"""
+Stable declaration identities, lexical lookup, and projected storage routes.
+
+A name is a lookup key in a scope, not a value's identity. Shadowing allocates
+a fresh binding; importing or looking up the same declaration retains its
+binding. Parser and HIR nodes already have stable arena indices, so this port
+does not need the hosted registry's keepalive objects for Python id() keys.
+"""
+
+BindingKind:type = 'value' | 'function' | 'overload' | 'param'
+Binding:type = [
+    id:addr
+    name:string
+    kind:BindingKind
+    loc:Span
+    value_type:addr?=none
+    # Place parameters keep the caller's store contract through forwarding
+    # and mutation, separately from a read's current flow facts.
+    store_type:addr?=none
+    type_value:addr?=none
+    declaration:addr?=none
+    function:addr?=none
+    syntax:addr?=none
+    literal_path_parameter:string?=none
+    read_only_reason:string?=none
+    nominal_name:string?=none
+    route_root:addr?=none
+]
+
+# Generic instances retain the defining source and call context so a later
+# representation pass can instantiate again when an integer becomes bigint.
+GenericInstance:type = [generic:addr type_arguments:dict<string addr> context:addr]
+Route:type = const [id:addr root:addr path:array<string>]
+Registry:type = [
+    next_id:addr=1
+    # Keep validation-only route allocation separate from declaration ids.
+    # The hosted bounds pass packs ids in 20 bits; retain its route range for
+    # now. The native fact representation must not silently truncate an id.
+    next_route_id:addr=524288
+    by_id:dict<addr Binding>=[]
+    by_syntax:dict<addr addr>=[]
+    routes:array<Route>=[]
+    generic_instances:dict<addr GenericInstance>=[]
+]
+
+binding_at = (registry:Registry id:addr):>Binding => {
+    let binding = registry.by_id.get(id)
+    $runtime_assert binding isnt? none
+    return binding
+}
+
+allocate = (@registry:Registry syntax:addr? name:string kind:BindingKind loc:Span):>addr => {
+    let id = registry.next_id
+    registry.next_id += 1
+    registry.by_id[id] = Binding[id=id name=name kind=kind loc=loc syntax=syntax]
+    if syntax isnt? none { registry.by_syntax[syntax] = id }
+    return id
+}
+
+allocate_param = (@registry:Registry name:string value_type:addr loc:Span):>addr => {
+    let id = allocate(@registry none name 'param' loc)
+    let binding = binding_at(registry id)
+    binding.value_type = value_type
+    registry.by_id[id] = binding
+    return id
+}
+
+path_starts_with = (path:array<string> prefix:array<string>):>bool => {
+    if path.length <? prefix.length return false
+    loop i in 0.. and i <? prefix.length { if path[i] not=? prefix[i] return false }
+    return true
+}
+
+route_id = (@registry:Registry root:addr path:array<string> value_type:addr loc:Span):>addr => {
+    loop route in registry.routes {
+        if route.root =? root and route.path.length =? path.length and path_starts_with(route.path path) return route.id
+    }
+    let owner = binding_at(registry root)
+    let id = registry.next_route_id
+    registry.next_route_id += 1
+    registry.by_id[id] = Binding[id=id name="{owner.name}.{path.join('.')}" kind='value' loc=loc value_type=value_type route_root=root]
+    registry.routes.push(Route[id=id root=root path=path])
+    return id
+}
+
+routes_under = (registry:Registry root:addr prefix:array<string>):>array<addr> => {
+    let output:array<addr> = []
+    loop route in registry.routes {
+        if route.root =? root and path_starts_with(route.path prefix) { output.push(route.id) }
+    }
+    return output
+}
+
+# Contexts refer to lexical scopes in an arena. Branch facts can be copied
+# independently while all branches still resolve the same declaration ids.
+Scope:type = [parent:addr?=none names:dict<string addr>=[]]
+push_scope = (@scopes:array<Scope> parent:addr?):>addr<i => i <? scopes.length> => {
+    let id = scopes.length
+    scopes.push(Scope[parent=parent])
+    return id
+}
+scope_at = (scopes:array<Scope> id:addr):>Scope => {
+    $runtime_assert id <? scopes.length
+    return scopes[id]
+}
+lookup = (scopes:array<Scope> scope:addr name:string):>addr? => {
+    let current:addr? = scope
+    loop current isnt? none {
+        let frame = scope_at(scopes current)
+        let binding = frame.names.get(name)
+        if binding isnt? none return binding
+        current = frame.parent
+    }
+    return none
+}
+bind = (@scopes:array<Scope> scope:addr name:string binding:addr):>void => {
+    $runtime_assert scope <? scopes.length
+    let frame = scopes[scope]
+    frame.names[name] = binding
+    scopes[scope] = frame
+}
+
+# Access decomposition has an explicit view policy. A value cast can preserve
+# sequence identity for a length proof without preserving a storage location
+# for assignment. `transmute` is deliberately opaque to both policies.
+AccessPath:type = [root:addr steps:array<addr>]
+access_path = (id:addr nodes:array<hir.AST> facts:bool=false forwarding:bool=false):>AccessPath => {
+    let current:addr = id
+    let reversed:array<addr> = []
+    loop true {
+        let node = hir.node_at(nodes current)
+        if facts and node is? hir.ValueCast | hir.RepresentationCast { current = node.expr continue }
+        if facts and node is? hir.Obligation { current = node.value continue }
+        if node is? hir.MemberAccess { reversed.push(current) current = node.value continue }
+        if forwarding and node is? hir.ForwardingAccess { reversed.push(current) current = node.value continue }
+        if node is? hir.Index { reversed.push(current) current = node.array continue }
+        break
+    }
+    let steps:array<addr> = []
+    loop reversed.length >? 0 { steps.push(reversed.pop) }
+    return AccessPath[root=current steps=steps]
+}
+
+member_fields = (path:AccessPath nodes:array<hir.AST>):>array<string> | none => {
+    let names:array<string> = []
+    loop id in path.steps {
+        let step = hir.node_at(nodes id)
+        if step is? hir.MemberAccess { names.push(step.name) }
+        else if step is? hir.ForwardingAccess { names.push(step.field) }
+        else return none
+    }
+    return names
+}
+
+array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
+    let path = access_path(id nodes facts=true)
+    let root = hir.node_at(nodes path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
+    let fields = member_fields(path nodes)
+    if fields is? none return none
+    if fields.length =? 0 return root.binding_id
+    if root.binding_id not in? registry.by_id return none
+    let node = hir.node_at(nodes id)
+    return route_id(@registry root.binding_id fields node.value_type node.loc)
+}

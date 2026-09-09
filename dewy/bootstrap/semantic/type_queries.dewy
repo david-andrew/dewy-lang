@@ -1,0 +1,214 @@
+import p"ty.dewy" as types
+import p"propositions.dewy" as facts
+import p"subtyping.dewy" as subtyping
+
+doc"""
+Shared type views used by checking, bounds analysis, and representation.
+
+A representation query must distinguish a literal's applicability from its
+storage: accepting `2` as bigint does not make every singleton an object.
+These views inspect declared structure; subtyping remains a separate operation.
+"""
+
+string_valued = (id:addr nodes:array<types.Type>):>bool => {
+    let node = types.node_at(nodes id)
+    if node is? types.RefinedType return string_valued(node.base nodes)
+    if node is? types.TypeOr {
+        loop member in node.items { if not string_valued(member nodes) return false }
+        return true
+    }
+    return node is? types.StringType | types.StringLiteralType or
+        (node is? types.Primitive and node.name in? ['string' 'grapheme' 'char'])
+}
+
+canonical_entry = (id:addr @nodes:array<types.Type>):>addr => {
+    let node = types.node_at(nodes id)
+    if node is? types.StringType | types.StringLiteralType return types.primitive('string' @nodes)
+    return id
+}
+# Dictionaries and sets share insertion-ordered keys and the compact hash
+# table (removed-entry hashes, probe slots, live count). Only dict has values.
+container_type = (key:addr value:addr? @nodes:array<types.Type>):>addr => {
+    let word = types.primitive('int64' @nodes)
+    let words = types.array_type(word none @nodes)
+    let fields:array<types.ObjectField> = [types.ObjectField['keys' types.array_type(canonical_entry(key @nodes) none @nodes)]]
+    if value isnt? none { fields.push(types.ObjectField['values' types.array_type(canonical_entry(value @nodes) none @nodes)]) }
+    fields.push(types.ObjectField['hashes' words])
+    fields.push(types.ObjectField['indices' words])
+    fields.push(types.ObjectField['live' word])
+    return types.object_type(fields (if value is? none 'set' else 'dict') false [] [] @nodes)
+}
+dict_type = (key:addr value:addr @nodes:array<types.Type>):>addr => container_type(key value @nodes)
+set_type = (element:addr @nodes:array<types.Type>):>addr => container_type(element none @nodes)
+EntryTypes:type = const [key:addr value:addr?=none]
+container_entry_types = (id:addr nodes:array<types.Type>):>EntryTypes? => {
+    let node = types.node_at(nodes types.strip_refinement(id nodes))
+    if node isnt? types.ObjectType return none
+    if node.brand not=? 'dict' and node.brand not=? 'set' return none
+    let key_field = types.object_field(node 'keys')
+    $runtime_assert key_field isnt? none
+    let keys = types.node_at(nodes key_field.value_type)
+    $runtime_assert keys is? types.ArrayType
+    if node.brand =? 'set' return EntryTypes[keys.element]
+    let value_field = types.object_field(node 'values')
+    $runtime_assert value_field isnt? none
+    let values = types.node_at(nodes value_field.value_type)
+    $runtime_assert values is? types.ArrayType
+    return EntryTypes[keys.element values.element]
+}
+total_dict_type = (key:addr value:addr @nodes:array<types.Type>):>addr =>
+    types.refined_type(dict_type(key value @nodes) [facts.Proposition[subject='keys' op='=?' tested_type=key]] @nodes)
+total_dict_key = (id:addr nodes:array<types.Type>):>addr? => {
+    let node = types.node_at(nodes id)
+    if node isnt? types.RefinedType return none
+    let entry = container_entry_types(node.base nodes)
+    if entry is? none return none
+    if entry.value is? none return none
+    loop proposition in node.propositions {
+        if proposition.subject =? 'keys' and proposition.tested_type isnt? none return proposition.tested_type
+    }
+    return none
+}
+# Return the literal type ids, retaining the distinction between integer and
+# string values without boxing them in another compiler-internal union.
+finite_members = (id:addr nodes:array<types.Type>):>array<addr> | none => {
+    let resolved = types.unfold(id nodes)
+    let node = types.node_at(nodes resolved)
+    let items:array<addr> = if node is? types.TypeOr node.items else [resolved]
+    let output:array<addr> = []
+    loop member in items {
+        let literal = types.unfold(member nodes)
+        if types.node_at(nodes literal) isnt? types.StringLiteralType | types.IntegerLiteralType return none
+        output.push(literal)
+    }
+    return output
+}
+
+const NAT = facts.Proposition[subject='self' op='>=?']
+const ADDR = facts.Proposition[subject='self' op='<?' axiom='addr']
+const nat_bases:dict<string string> = ['nat' -> 'int' 'nat8' -> 'int8' 'nat16' -> 'int16' 'nat32' -> 'int32' 'nat64' -> 'int64']
+has_proposition = (items:array<facts.Proposition> item:facts.Proposition):>bool => {
+    loop candidate in items { if facts.identity_key(candidate) =? facts.identity_key(item) return true }
+    return false
+}
+addr_type = (@nodes:array<types.Type>):>addr => types.refined_type(types.primitive('int64' @nodes) [NAT ADDR] @nodes)
+nat_type = (name:string @nodes:array<types.Type>):>addr => {
+    $runtime_assert name in? nat_bases
+    return types.refined_type(types.primitive(nat_bases[name] @nodes) [NAT] @nodes)
+}
+is_addr = (id:addr nodes:array<types.Type>):>bool => {
+    let node = types.node_at(nodes id)
+    return node is? types.RefinedType and types.is_primitive(types.node_at(nodes node.base) 'int64') and
+        has_proposition(node.propositions NAT) and has_proposition(node.propositions ADDR)
+}
+named_refinement = (id:addr nodes:array<types.Type>):>array<facts.Proposition> => {
+    if is_addr(id nodes) return [NAT ADDR]
+    let node = types.node_at(nodes id)
+    if node is? types.RefinedType and has_proposition(node.propositions NAT) {
+        let base = types.node_at(nodes node.base)
+        if base is? types.Primitive {
+            loop name in nat_bases.keys { if name in? nat_bases and nat_bases[name] =? base.name return [NAT] }
+        }
+    }
+    return []
+}
+# Results shed call-specific evidence but keep the facts that spell their
+# type's name (`addr`, `nat64`). Runtime storage sheds both kinds of facts.
+strip_member = (id:addr preserve_name:bool @nodes:array<types.Type>):>addr => {
+    let node = types.node_at(nodes id)
+    if node isnt? types.RefinedType return id
+    if not preserve_name return node.base
+    let named = named_refinement(id nodes)
+    return if named.length =? 0 node.base else types.refined_type(node.base named @nodes)
+}
+strip_members = (id:addr preserve_name:bool @nodes:array<types.Type>):>addr => {
+    let node = types.node_at(nodes id)
+    if node isnt? types.TypeOr return strip_member(id preserve_name @nodes)
+    let members:array<addr> = []
+    loop member in node.items { members.push(strip_member(member preserve_name @nodes)) }
+    return types.union(members @nodes)
+}
+strip_result_refinement = (id:addr @nodes:array<types.Type>):>addr => strip_members(id true @nodes)
+strip_all_refinements = (id:addr @nodes:array<types.Type>):>addr => strip_members(id false @nodes)
+optional = (id:addr @nodes:array<types.Type>):>addr => types.union([id types.primitive('none' @nodes)] @nodes)
+optional_payload = (id:addr @nodes:array<types.Type>):>addr? => {
+    if types.node_at(nodes id) isnt? types.TypeOr return none
+    let node = types.node_at(nodes strip_all_refinements(id @nodes))
+    if node isnt? types.TypeOr return none
+    let payloads:array<addr> = []
+    let has_none = false
+    let strings = true
+    loop member in node.items {
+        if types.is_primitive(types.node_at(nodes member) 'none') { has_none = true }
+        else { payloads.push(member) strings = strings and string_valued(member nodes) }
+    }
+    if not has_none return none
+    if payloads.length =? 1 return payloads[0]
+    if payloads.length >? 0 and strings return types.union(payloads @nodes)
+    return none
+}
+
+# Tags use structural keys, not arena ids or Python repr. Their exact numeric
+# order is internal; every spelling of the same alternatives must agree.
+# None stays tag zero, aligning general unions with optional cells.
+MemberKey:type = const [id:addr key:string]
+canonical_members = (members:array<addr> nodes:array<types.Type>):>array<addr> => {
+    let ordered:array<MemberKey> = []
+    loop member in members {
+        let key = if types.is_primitive(types.node_at(nodes member) 'none') '' else types.shape_of(member nodes)
+        let current = MemberKey[member key]
+        ordered.push(current)
+        let i = ordered.length - 1
+        loop i >? 0 and i <? ordered.length {
+            if not types.name_before(current.key ordered[i-1].key) break
+            let previous = ordered[i-1]
+            ordered[i-1] = current
+            ordered[i] = previous
+            i -= 1
+        }
+    }
+    let output:array<addr> = []
+    loop member in ordered { output.push(member.id) }
+    return output
+}
+enum_members = (id:addr nodes:array<types.Type>):>array<addr> | none => {
+    let node = types.node_at(nodes types.strip_refinement(id nodes))
+    if node isnt? types.TypeOr return none
+    if node.items.length <? 2 return none
+    let integer = false
+    loop member in node.items {
+        let item = types.node_at(nodes member)
+        if item is? types.IntegerLiteralType { integer = true }
+        else if item isnt? types.StringLiteralType return none
+    }
+    if not integer return none  # unions of strings remain ordinary handles
+    return canonical_members(node.items nodes)
+}
+runtime_union_members = (id:addr @nodes:array<types.Type>):>array<addr> | none => {
+    if types.node_at(nodes id) isnt? types.TypeOr return none
+    let plain = strip_all_refinements(id @nodes)
+    let node = types.node_at(nodes plain)
+    if node isnt? types.TypeOr return none
+    if optional_payload(plain @nodes) isnt? none or enum_members(plain nodes) isnt? none or string_valued(plain nodes) return none
+    return canonical_members(node.items nodes)
+}
+fixed_integer_layout = (id:addr nodes:array<types.Type>):>subtyping.IntegerLayout? => {
+    let node = types.node_at(nodes types.strip_refinement(id nodes))
+    if node isnt? types.Primitive return none
+    loop layout in subtyping.integer_layouts { if layout.name =? node.name return layout }
+    return none
+}
+IntegerBounds:type = const [minimum:bigint maximum:bigint]
+fixed_integer_bounds = (id:addr nodes:array<types.Type>):>IntegerBounds? => {
+    let layout = fixed_integer_layout(id nodes)
+    if layout is? none return none
+    let bits:addr = layout.bits
+    if layout.signed { bits -= 1 }
+    let limit:bigint = 1
+    loop i in 0.. and i <? bits { limit *= 2 }
+    return IntegerBounds[(if layout.signed (-limit) else 0) limit-1]
+}
+is_zero_arg_function = (id:addr nodes:array<types.Type>):>bool => {
+    let node = types.node_at(nodes id)
+    return node is? types.FunctionType and node.pos_or_kw.length =? 0 and node.kw_only.length =? 0 and node.rest is? none
+}

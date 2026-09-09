@@ -1,0 +1,231 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../type_queries.dewy" as views
+import p"../propositions.dewy" as facts
+import p"../bindings.dewy" as bindings
+
+doc"""
+The HIR views shared by bounds transfer and proof obligations.
+
+Casts can preserve a value's identity for a fact without preserving its
+storage location. Call contracts belong to the selected overload; looking
+at a union of all possible signatures would grant facts the call never made.
+"""
+
+strip_casts = (id:addr nodes:array<hir.AST>):>addr => {
+    let current = id
+    loop true {
+        let node = hir.node_at(nodes current)
+        if node is? hir.ValueCast | hir.RepresentationCast { current = node.expr }
+        else if node is? hir.Obligation { current = node.value }
+        else return current
+    }
+}
+call_function_type = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>types.FunctionType? => {
+    let node = hir.node_at(nodes strip_casts(id nodes))
+    if node isnt? hir.FunctionCall return none
+    let callable = types.node_at(type_nodes hir.node_at(nodes node.func).value_type)
+    let selected = node.selected_method_index
+    if callable is? types.OverloadType and selected isnt? none {
+        $runtime_assert selected <? callable.methods.length
+        callable = types.node_at(type_nodes callable.methods[selected])
+    }
+    return if callable is? types.FunctionType callable else none
+}
+call_result_refinements = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>array<types.RefinedType> => {
+    let signature = call_function_type(id nodes type_nodes)
+    if signature is? none return []
+    let result = types.node_at(type_nodes signature.ret)
+    if result is? types.RefinedType return [result]
+    let output:array<types.RefinedType> = []
+    if result is? types.TypeOr {
+        loop member in result.items {
+            let node = types.node_at(type_nodes member)
+            if node is? types.RefinedType { output.push(node) }
+        }
+    }
+    return output
+}
+argument_value = (id:addr nodes:array<hir.AST>):>addr => {
+    let node = hir.node_at(nodes id)
+    return if node is? hir.Place node.target else id
+}
+call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types.Type>):>addr? => {
+    let signature = call_function_type(id nodes type_nodes)
+    let call = hir.node_at(nodes strip_casts(id nodes))
+    if signature is? none or call isnt? hir.FunctionCall return none
+    if name in? call.kw_args return argument_value(call.kw_args[name] nodes)
+    loop i in 0.. and i <? signature.pos_or_kw.length {
+        if signature.pos_or_kw[i].name =? name {
+            if i <? call.pos_args.length return argument_value(call.pos_args[i] nodes)
+            return none
+        }
+    }
+    return none
+}
+object_of = (id:addr nodes:array<types.Type>):>types.ObjectType? => {
+    let node = types.node_at(nodes types.unfold(types.strip_refinement(id nodes) nodes))
+    if node is? types.ObjectType return node
+    if node isnt? types.TypeOr return none
+    let object:types.ObjectType? = none
+    loop member in node.items {
+        let item = types.node_at(nodes member)
+        if item is? types.ObjectType {
+            if object isnt? none return none
+            object = item
+        }
+    }
+    return object
+}
+
+member_invariant = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>array<facts.Proposition> => {
+    let node = hir.node_at(nodes strip_casts(id nodes))
+    let name:string = ''
+    let receiver:addr = 0
+    if node is? hir.MemberAccess { name = node.name receiver = node.value }
+    else if node is? hir.ForwardingAccess {
+        if not types.is_primitive(types.node_at(type_nodes node.exception_type) 'never') return []
+        name = node.field receiver = node.value
+    } else return []
+    let receiver_type = hir.node_at(nodes receiver).value_type
+    let object = object_of(receiver_type type_nodes)
+    let output:array<facts.Proposition> = []
+    if object isnt? none {
+        let field = types.object_field(object name)
+        if field isnt? none { output = field.refinement }
+    } else {
+        # A forwarded common field may carry only the invariants every
+        # alternative declares. A missing field contributes no guarantees.
+        let union = types.node_at(type_nodes types.unfold(types.strip_refinement(receiver_type type_nodes) type_nodes))
+        if union is? types.TypeOr {
+            let first = true
+            loop member in union.items {
+                let alternative = object_of(types.unfold(member type_nodes) type_nodes)
+                if alternative is? none { output.clear break }
+                let field = types.object_field(alternative name)
+                if field is? none { output.clear break }
+                if first { output = field.refinement first = false }
+                else {
+                    let shared:array<facts.Proposition> = []
+                    loop proposition in output {
+                        if views.has_proposition(field.refinement proposition) { shared.push(proposition) }
+                    }
+                    output = shared
+                }
+            }
+        }
+    }
+    let narrowed = types.node_at(type_nodes types.unfold(node.value_type type_nodes))
+    if narrowed is? types.RefinedType {
+        loop proposition in narrowed.propositions {
+            if proposition.term is? none and facts.field(proposition) is? none { output.push(proposition) }
+        }
+    }
+    # Enclosing field contracts also constrain descendants, e.g.
+    # denominator:bigint<sign =? 1> promises q.denominator.sign =? 1.
+    let suffix = name
+    let parent = hir.node_at(nodes strip_casts(receiver nodes))
+    loop parent is? hir.MemberAccess {
+        let owner = object_of(hir.node_at(nodes parent.value).value_type type_nodes)
+        if owner isnt? none {
+            let field = types.object_field(owner parent.name)
+            if field isnt? none {
+                loop p in field.refinement {
+                    if facts.field(p) =? suffix {
+                        output.push(facts.Proposition[subject=(if p.projection =? 'length' 'length' else 'self') op=p.op value=p.value term=p.term term_id=p.term_id])
+                    }
+                }
+            }
+        }
+        suffix = "{parent.name}.{suffix}"
+        parent = hir.node_at(nodes strip_casts(parent.value nodes))
+    }
+    return output
+}
+
+sequence_of = (id:addr nodes:array<hir.AST>):>addr? => {
+    let node = hir.node_at(nodes strip_casts(id nodes))
+    if node is? hir.ArrayLength return node.array
+    if node is? hir.StringLength return node.string
+    return none
+}
+value_flow_of = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>addr? => {
+    let current = strip_casts(id nodes)
+    loop true {
+        let node = hir.node_at(nodes current)
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 { current = strip_casts(node.items[0] nodes) continue }
+        if node isnt? hir.Flow return none
+        let result = types.node_at(type_nodes node.value_type)
+        if types.is_primitive(result 'void') or types.is_primitive(result 'never') return none
+        loop arm in node.arms { if hir.node_at(nodes arm) is? hir.LoopArm return none }
+        return current
+    }
+}
+
+word_bound = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    let type_id = hir.node_at(nodes id).value_type
+    let value = types.node_at(type_nodes type_id)
+    if value is? types.IntegerLiteralType return -(0d9223372036854775808 as bigint) <=? value.value <=? (0d9223372036854775807 as bigint)
+    let layout = views.fixed_integer_layout(type_id type_nodes)
+    return layout isnt? none and (layout.bits <? 64 or (layout.bits =? 64 and layout.signed))
+}
+below_word_max = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    if sequence_of(id nodes) isnt? none return true  # address-space length cap
+    let type_id = hir.node_at(nodes id).value_type
+    let value = types.node_at(type_nodes type_id)
+    if value is? types.IntegerLiteralType return value.value <? (0d9223372036854775807 as bigint)
+    let layout = views.fixed_integer_layout(type_id type_nodes)
+    return layout isnt? none and (if layout.signed layout.bits <? 64 else layout.bits <? 63)
+}
+is_target = (id:addr binding:addr nodes:array<hir.AST>):>bool => {
+    let node = hir.node_at(nodes strip_casts(id nodes))
+    return node is? hir.ExpressedIdentifier and node.binding_id =? binding
+}
+predicate_bounds_counter = (id:addr target:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+    let node = hir.node_at(nodes id)
+    if node is? hir.ShortCircuit and node.op =? 'and' return predicate_bounds_counter(node.left target nodes type_nodes) or predicate_bounds_counter(node.right target nodes type_nodes)
+    if node isnt? hir.FunctionCall return false
+    if node.pos_args.length not=? 2 return false
+    let function = hir.node_at(nodes node.func)
+    if function isnt? hir.ExpressedIdentifier return false
+    let left = node.pos_args[0]
+    let right = node.pos_args[1]
+    if function.name =? '__lt__' return is_target(left target nodes) and word_bound(right nodes type_nodes)
+    if function.name =? '__gt__' return is_target(right target nodes) and word_bound(left nodes type_nodes)
+    if function.name =? '__le__' return is_target(left target nodes) and below_word_max(right nodes type_nodes)
+    if function.name =? '__ge__' return is_target(right target nodes) and below_word_max(left nodes type_nodes)
+    return false
+}
+
+# Conservative pre-scan: assignments and writable calls invalidate entry
+# facts before checking loops, so an incoming length cannot fold a guard
+# whose body later changes that length. Traversal also reaches nested bodies.
+assigned_binding_ids = (root:addr nodes:array<hir.AST>):>set<addr> => {
+    let found:set<addr> = set[]
+    let visited:set<addr> = set[]
+    let pending:array<addr> = [root]
+    loop pending.length >? 0 {
+        let id = pending.pop
+        if id in? visited continue
+        visited.add(id)
+        let node = hir.node_at(nodes id)
+        let target:addr? = none
+        if node is? hir.Assign | hir.IndexAssign | hir.MemberAssign | hir.Place { target = node.target }
+        else if node is? hir.DictStore | hir.DictRemove { target = node.keys }
+        else if node is? hir.FunctionCall {
+            let function = hir.node_at(nodes node.func)
+            if function is? hir.ArrayMethod { target = function.array }
+            else if function is? hir.DictMethod { target = function.dictionary }
+        }
+        if target isnt? none {
+            let path = bindings.access_path(target nodes)
+            let owner = hir.node_at(nodes path.root)
+            if owner is? hir.ExpressedIdentifier {
+                let binding = owner.binding_id
+                if binding isnt? none { found.add(binding) }
+            }
+        }
+        loop child in hir.children(node) { pending.push(child) }
+    }
+    return found
+}

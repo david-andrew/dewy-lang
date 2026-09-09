@@ -1,0 +1,290 @@
+import p"ty.dewy" as types
+import p"subtyping.dewy" as subtyping
+
+doc"""
+Call-shape matching and overload dispatch, corresponding to TypeSystem's
+call operations in semantic/ty.py. Matching a shape produces argument pairs;
+both generic inference and concrete acceptance consume those same pairs.
+
+The caller has already processed source arguments left to right, removing
+named slots from the remaining positional sequence. This layer operates on
+that normalized call, retaining each method's original declaration index.
+"""
+
+Promotion:type = const [left:string right:string result:string]
+System:type = [links:array<subtyping.Link> promotions:array<Promotion>=[]]
+ArgumentPair:type = const [formal:addr actual:addr]
+ShapeMatch:type = [pairs:array<ArgumentPair>]
+Inference:type = [bindings:dict<string addr>=[] contextual:set<string>=set[]]
+Candidate:type = const [index:addr method:addr]
+DispatchResult:type = [method:addr method_index:addr promote_pos:array<addr?>]
+DispatchError:type = [message:string]
+
+method_at = (nodes:array<types.Type> id:addr):>types.FunctionType => {
+    let method = types.node_at(nodes id)
+    $runtime_assert method is? types.FunctionType
+    return method
+}
+
+# An explicit promotion crosses representation branches. It is not a new
+# subtype edge and is never used by the ordinary type relation.
+promote_type = (a:addr b:addr system:System @nodes:array<types.Type>):>addr? => {
+    let left = types.node_at(nodes a)
+    let right = types.node_at(nodes b)
+    if left isnt? types.Primitive or right isnt? types.Primitive return none
+    if a =? b return a
+    loop layout in subtyping.integer_layouts {
+        if left.name in? set['int' 'uint'] and right.name =? layout.name return b
+        if right.name in? set['int' 'uint'] and left.name =? layout.name return a
+    }
+    if subtyping.nominal_subtype(left.name right.name system.links) return b
+    if subtyping.nominal_subtype(right.name left.name system.links) return a
+    loop rule in system.promotions {
+        if left.name =? rule.left and right.name =? rule.right or left.name =? rule.right and right.name =? rule.left {
+            return types.primitive(rule.result @nodes)
+        }
+    }
+    return none
+}
+
+match_shape = (method:types.FunctionType pos:array<addr> kw:dict<string addr>):>ShapeMatch | none => {
+    if pos.length >? method.pos_or_kw.length and method.rest is? none return none
+    let pairs:array<ArgumentPair> = []
+    loop i in 0.. and i <? pos.length and i <? method.pos_or_kw.length {
+        pairs.push(ArgumentPair[method.pos_or_kw[i].value_type pos[i]])
+    }
+    loop [name actual] in kw {
+        let matched:bool = false
+        loop i in 0.. and i <? method.pos_or_kw.length {
+            let param = method.pos_or_kw[i]
+            if param.name not=? name continue
+            if i <? pos.length return none
+            pairs.push(ArgumentPair[param.value_type actual])
+            matched = true
+            break
+        }
+        if matched continue
+        loop param in method.kw_only {
+            if param.name not=? name continue
+            pairs.push(ArgumentPair[param.value_type actual])
+            matched = true
+            break
+        }
+        if not matched and method.rest is? none return none
+    }
+    loop i in 0.. and i <? method.pos_or_kw.length {
+        let param = method.pos_or_kw[i]
+        if i <? pos.length or not param.required continue
+        if param.name is? none return none
+        if param.name not in? kw return none
+    }
+    loop param in method.kw_only { if param.required and param.name not in? kw return none }
+    return ShapeMatch[pairs=pairs]
+}
+
+call_accepted_concrete = (method:types.FunctionType pos:array<addr> kw:dict<string addr> system:System @nodes:array<types.Type>):>bool => {
+    let shape = match_shape(method pos kw)
+    if shape is? none return false
+    loop pair in shape.pairs { if not subtyping.is_subtype(pair.actual pair.formal system.links @nodes) return false }
+    return true
+}
+
+bind_type_variable = (name:string actual:addr @inference:Inference system:System @nodes:array<types.Type>):>bool => {
+    let current = inference.bindings.get(name)
+    if current is? none { inference.bindings[name] = actual return true }
+    if name in? inference.contextual return subtyping.is_subtype(actual current system.links @nodes)
+    let c = types.node_at(nodes current)
+    let a = types.node_at(nodes actual)
+    if types.same_type(current actual nodes) {
+        # Repeated singleton operands do not constrain a computed result to
+        # that singleton: `1 + 1` must have an ordinary integer result type.
+        if c is? types.IntegerLiteralType { inference.bindings[name] = types.primitive('int' @nodes) }
+        else if c is? types.StringLiteralType { inference.bindings[name] = types.string_type(none @nodes) }
+        else if c is? types.BinaryLiteralType { inference.bindings[name] = types.array_type(types.primitive('uint8' @nodes) c.value.length @nodes) }
+        return true
+    }
+    if c is? types.IntegerLiteralType and a is? types.IntegerLiteralType {
+        inference.bindings[name] = types.primitive('int' @nodes)
+        return true
+    }
+    if c is? types.StringLiteralType and a is? types.StringLiteralType {
+        inference.bindings[name] = types.string_type(none @nodes)
+        return true
+    }
+    if c is? types.BinaryLiteralType and a is? types.BinaryLiteralType {
+        if c.value.length not=? a.value.length return false
+        inference.bindings[name] = types.array_type(types.primitive('uint8' @nodes) c.value.length @nodes)
+        return true
+    }
+    if c is? types.IntegerLiteralType | types.StringLiteralType | types.BinaryLiteralType and subtyping.is_subtype(current actual system.links @nodes) {
+        inference.bindings[name] = actual
+        return true
+    }
+    if a is? types.IntegerLiteralType | types.StringLiteralType | types.BinaryLiteralType and subtyping.is_subtype(actual current system.links @nodes) return true
+    if (c is? types.StringType or types.is_primitive(c 'string')) and (a is? types.StringType or types.is_primitive(a 'string')) return true
+    let common = promote_type(current actual system @nodes)
+    if common is? none return false
+    inference.bindings[name] = common
+    return true
+}
+
+variable_name = (id:addr variables:set<string> nodes:array<types.Type>):>string? => {
+    let node = types.node_at(nodes id)
+    if node is? types.Primitive | types.TypeVariable and node.name in? variables return node.name
+    return none
+}
+
+match_parameter = (formal:addr actual:addr variables:set<string> @inference:Inference system:System @nodes:array<types.Type>):>bool => {
+    let name = variable_name(formal variables nodes)
+    if name isnt? none return bind_type_variable(name actual @inference system @nodes)
+    let p = types.node_at(nodes formal)
+    let a = types.node_at(nodes actual)
+    if p is? types.RefinedType return match_parameter(p.base actual variables @inference system @nodes)
+    if p is? types.ObjectType and a is? types.ObjectType and p.brand =? a.brand {
+        if p.fields.length not=? a.fields.length return false
+        loop i in 0.. and i <? p.fields.length {
+            $runtime_assert i <? a.fields.length
+            let pf = p.fields[i]
+            let af = a.fields[i]
+            if pf.name not=? af.name or not match_parameter(pf.value_type af.value_type variables @inference system @nodes) return false
+        }
+        return true
+    }
+    if p is? types.ArrayType and a is? types.ArrayType {
+        if p.length isnt? none and p.length not=? a.length return false
+        return match_parameter(p.element a.element variables @inference system @nodes)
+    }
+    if p is? types.FunctionType and a is? types.FunctionType and p.type_params.length =? 0 {
+        if p.pos_or_kw.length not=? a.pos_or_kw.length return false
+        loop i in 0.. and i <? p.pos_or_kw.length {
+            if not match_parameter(p.pos_or_kw[i].value_type a.pos_or_kw[i].value_type variables @inference system @nodes) return false
+        }
+        return match_parameter(p.ret a.ret variables @inference system @nodes)
+    }
+    if p is? types.TypeOr and a isnt? types.TypeOr {
+        let vars:array<addr> = []
+        let covered:bool = false
+        loop child in p.items {
+            if variable_name(child variables nodes) isnt? none { vars.push(child) }
+            else if subtyping.is_subtype(actual child system.links @nodes) { covered = true }
+        }
+        if vars.length =? 1 and not covered return match_parameter(vars[0] actual variables @inference system @nodes)
+    }
+    return subtyping.is_subtype(actual formal system.links @nodes)
+}
+
+infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>Inference | none => {
+    let shape = match_shape(method pos kw)
+    if shape is? none return none
+    let variables:set<string> = set[]
+    loop param in method.type_params { variables.add(param.name) }
+    let inference = Inference[]
+    let ret_name = variable_name(method.ret variables nodes)
+    if expected isnt? none and ret_name isnt? none {
+        inference.bindings[ret_name] = expected
+        inference.contextual.add(ret_name)
+    }
+    loop pair in shape.pairs {
+        let actual = types.strip_refinement(pair.actual nodes)
+        if not match_parameter(pair.formal actual variables @inference system @nodes) return none
+    }
+    loop param in method.type_params {
+        let actual = inference.bindings.get(param.name)
+        if actual is? none return none
+        if not subtyping.is_subtype(actual param.bound system.links @nodes) return none
+    }
+    return inference
+}
+
+try_instantiate_for_call = (id:addr pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>addr? => {
+    let method = method_at(nodes id)
+    let concrete:addr = id
+    if method.type_params.length >? 0 {
+        let inference = infer_type_args(method pos kw expected system @nodes)
+        if inference is? none return none
+        concrete = types.substitute_function(method inference.bindings true @nodes)
+    }
+    if call_accepted_concrete(method_at(nodes concrete) pos kw system @nodes) return concrete
+    return none
+}
+
+applicable = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>array<Candidate> => {
+    let output:array<Candidate> = []
+    loop index in 0.. and index <? methods.length {
+        let concrete = try_instantiate_for_call(methods[index] pos kw expected system @nodes)
+        if concrete isnt? none { output.push(Candidate[index concrete]) }
+    }
+    return output
+}
+
+more_specific = (m1:types.FunctionType m2:types.FunctionType system:System @nodes:array<types.Type>):>bool => {
+    if m1.pos_or_kw.length not=? m2.pos_or_kw.length return false
+    let strict:bool = false
+    loop i in 0.. and i <? m1.pos_or_kw.length {
+        let a = m1.pos_or_kw[i].value_type
+        let b = m2.pos_or_kw[i].value_type
+        if not subtyping.is_subtype(a b system.links @nodes) return false
+        if not subtyping.is_subtype(b a system.links @nodes) { strict = true }
+    }
+    return strict
+}
+
+match_best_function = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>DispatchResult | DispatchError => {
+    let apps = applicable(methods pos kw expected system @nodes)
+    let promote_pos:array<addr?> = []
+    loop arg in pos { promote_pos.push(none) }
+    if apps.length =? 0 and pos.length >? 0 {
+        let common:addr? = pos[0]
+        loop arg in pos { if common isnt? none { common = promote_type(common arg system @nodes) } }
+        if common isnt? none {
+            let promoted:array<addr> = []
+            loop arg in pos { promoted.push(common) }
+            apps = applicable(methods promoted kw expected system @nodes)
+            if apps.length >? 0 {
+                promote_pos = []
+                loop arg in pos { promote_pos.push(if arg =? common none else common) }
+            }
+        }
+    }
+    if apps.length =? 0 {
+        let shown:array<string> = []
+        loop arg in pos { shown.push("`{types.describe(arg nodes)}`") }
+        let named:array<string> = []
+        loop [name arg] in kw { named.push(" {name}=`{types.describe(arg nodes)}`") }
+        return DispatchError["no overload takes ({shown.join(', ')}){named.join('')}"]
+    }
+    let winners:array<Candidate> = []
+    loop candidate in apps {
+        let shadowed:bool = false
+        loop other in apps {
+            if other.index =? candidate.index continue
+            if more_specific(method_at(nodes other.method) method_at(nodes candidate.method) system @nodes) { shadowed = true break }
+        }
+        if not shadowed { winners.push(candidate) }
+    }
+    # The exact-number preference joins this step when the rational/fixed
+    # representation atoms are ported. It precedes the contextual return
+    # preference in the hosted checker (not merely a default-width choice).
+    if winners.length >? 1 and expected isnt? none {
+        let by_result:array<Candidate> = []
+        loop candidate in winners {
+            if subtyping.is_subtype(method_at(nodes candidate.method).ret expected system.links @nodes) { by_result.push(candidate) }
+        }
+        if by_result.length =? 1 { winners = by_result }
+    }
+    if winners.length >? 1 {
+        let by_default:array<Candidate> = []
+        loop candidate in winners {
+            let method = method_at(nodes candidate.method)
+            let fits:bool = true
+            loop i in 0.. and i <? pos.length and i <? method.pos_or_kw.length {
+                if types.node_at(nodes pos[i]) is? types.IntegerLiteralType and not types.is_primitive(types.node_at(nodes method.pos_or_kw[i].value_type) 'int64') { fits = false break }
+            }
+            if fits { by_default.push(candidate) }
+        }
+        if by_default.length =? 1 { winners = by_default }
+    }
+    if winners.length not=? 1 return DispatchError["ambiguous call among {apps.length} applicable methods"]
+    let winner = winners[0]
+    return DispatchResult[method=winner.method method_index=winner.index promote_pos=promote_pos]
+}

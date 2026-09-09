@@ -1,0 +1,216 @@
+import p"ty.dewy" as types
+import p"dispatch.dewy" as dispatch
+
+doc"""
+Builtin operator names and signatures, corresponding to semantic/builtins.py.
+
+Binary operators resolve like calls to system-provided methods. These tables
+say which calls exist; lowering still owns their target implementations.
+TODO: an operators module could collect spelling, dispatch, and emission
+metadata together once those interfaces settle.
+
+The hosted file also sketches future range/multirange and iterator overloads,
+backtick cycling, unary multiply/divide/plus, and a solve operator. Those are
+not active signatures. In particular its historical `T / T -> T` sketch is
+superseded by exact rational division, and zero divisors now require a proof
+instead of implicitly producing an error alternative. Preserve those pending
+families without accidentally enabling the obsolete signatures.
+"""
+
+const binary_operators:dict<string string> = [
+    '+' -> '__add__' '-' -> '__sub__' '*' -> '__mul__'
+    '/' -> '__truediv__' '//' -> '__floordiv__' '%' -> '__mod__' '^' -> '__pow__'
+    '=?' -> '__eq__' '>?' -> '__gt__' '<?' -> '__lt__' '>=?' -> '__ge__' '<=?' -> '__le__'
+    'and' -> '__and__' '&' -> '__and__' 'or' -> '__or__' '|' -> '__or__'
+    'xor' -> '__xor__' 'nand' -> '__nand__' 'nor' -> '__nor__' 'xnor' -> '__xnor__'
+    '>>' -> '__rshift__' '<<' -> '__lshift__'
+]
+const inverted_comparisons:dict<string string> = [
+    '=?' -> '__ne__' '>?' -> '__le__' '<?' -> '__ge__' '>=?' -> '__lt__' '<=?' -> '__gt__'
+]
+const prefix_operators:dict<string string> = ['~' -> '__not__' 'not' -> '__not__' '-' -> '__unary_sub__']
+const postfix_operators:dict<string string> = []
+# TODO: ordinary indexing may eventually resolve `x[y]` through __index__.
+
+binary_generic = (bound:addr @nodes:array<types.Type> ret:addr?=none):>addr => {
+    let variable = types.primitive('T' @nodes)
+    let result:addr = variable
+    if ret isnt? none { result = ret }
+    return types.function_type([types.PosOrKwArg['left' variable] types.PosOrKwArg['right' variable]] [] none result [types.GenericParam['T' bound]] @nodes)
+}
+binary_concrete = (arg:addr ret:addr @nodes:array<types.Type>):>addr => types.function_type([
+    types.PosOrKwArg['left' arg] types.PosOrKwArg['right' arg]
+] [] none ret [] @nodes)
+unary_generic = (bound:addr @nodes:array<types.Type>):>addr => {
+    let variable = types.primitive('T' @nodes)
+    return types.function_type([types.PosOrKwArg['item' variable]] [] none variable [types.GenericParam['T' bound]] @nodes)
+}
+bitwise_overload = (@nodes:array<types.Type> callable_overload:bool=false):>addr => {
+    let integer = types.primitive('int' @nodes)
+    let boolean = types.primitive('bool' @nodes)
+    let methods:array<addr> = [binary_generic(integer @nodes) binary_concrete(boolean boolean @nodes)]
+    if callable_overload {
+        let callable = types.union([types.primitive('function' @nodes) types.primitive('multifunction' @nodes)] @nodes)
+        let multiple = types.primitive('multifunction' @nodes)
+        methods.push(binary_concrete(callable multiple @nodes))
+    }
+    return types.overload_type(methods @nodes)
+}
+intrinsic = (params:array<addr> ret:addr @nodes:array<types.Type>):>addr => {
+    let positional:array<types.PosOrKwArg> = []
+    loop param in params { positional.push(types.PosOrKwArg[none param]) }
+    return types.function_type(positional [] none ret [] @nodes)
+}
+
+# Host/UI intrinsics exchange words, including handles. Their availability
+# for a target is checked later; this table is the common source signature.
+const word_intrinsic_arities:dict<string addr> = [
+    "__i64_to_f32_bits__" -> 1
+    "__i64_to_f64_bits__" -> 1
+    "__f32_bits_to_i64__" -> 1
+    "__f64_bits_to_i64__" -> 1
+    "__host_log__" -> 2
+    "__host_exit__" -> 1
+    "__host_time__" -> 0
+    "__host_random__" -> 0
+    "__dom_set_text__" -> 2
+    "__dom_append__" -> 2
+    "__dom_clear__" -> 0
+    "__dom_append_int__" -> 1
+    "__log_int__" -> 1
+    "__canvas_init__" -> 2
+    "__canvas_width__" -> 0
+    "__canvas_height__" -> 0
+    "__canvas_present__" -> 0
+    "__canvas_set_aspect_lock__" -> 1
+    "__frame_count__" -> 0
+    "__frame_time__" -> 0
+    "__window_width__" -> 0
+    "__window_height__" -> 0
+    "__pointer_x__" -> 0
+    "__pointer_y__" -> 0
+    "__pointer_down__" -> 0
+    "__pointer_buttons__" -> 0
+    "__pointer_wheel__" -> 0
+    "__key_down__" -> 2
+    "__key_pressed__" -> 2
+    "__key_released__" -> 2
+    "__audio_init__" -> 3
+    "__audio_play__" -> 0
+    "__audio_sample_rate__" -> 0
+    "__audio_stream_init__" -> 2
+    "__audio_stream_write__" -> 0
+    "__audio_stream_needs_samples__" -> 0
+    "__webgl_init__" -> 4
+    "__webgl_uniform1i__" -> 3
+    "__webgl_uniform2i__" -> 4
+    "__webgl_uniform1iv__" -> 4
+    "__webgl_uniform2iv__" -> 4
+    "__webgl_render__" -> 0
+    "__gpu_init__" -> 2
+    "__gpu_set_viewport__" -> 2
+    "__gpu_clear__" -> 3
+    "__gpu_set_perspective_frustum__" -> 6
+    "__gpu_set_view_matrix__" -> 1
+    "__gpu_set_texture__" -> 1
+    "__gpu_set_blend__" -> 1
+    "__gpu_set_depth_test__" -> 1
+    "__gpu_set_depth_write__" -> 1
+    "__gpu_set_line_width__" -> 1
+    "__gpu_submit__" -> 3
+    "__gpu_overlay_begin__" -> 2
+    "__gpu_overlay_end__" -> 0
+    "__gpu_create_texture__" -> 5
+    "__gpu_present__" -> 0
+    "__gpu_window_width__" -> 0
+    "__gpu_window_height__" -> 0
+    "__audio_queue_init__" -> 2
+    "__audio_queue_push__" -> 2
+    "__audio_queue_size__" -> 0
+]
+
+word_intrinsic = (arity:addr word:addr @nodes:array<types.Type>):>addr => {
+    let args:array<addr> = []
+    loop i in 0.. and i <? arity { args.push(word) }
+    return intrinsic(args word @nodes)
+}
+
+intrinsic_types = (@nodes:array<types.Type>):>dict<string addr> => {
+    let result:dict<string addr> = []
+    let any = types.primitive('any' @nodes)
+    let word = types.primitive('int64' @nodes)
+    let unsigned = types.primitive('uint64' @nodes)
+    let integer = types.primitive('int' @nodes)
+    let boolean = types.primitive('bool' @nodes)
+    let nothing = types.primitive('void' @nodes)
+    let never = types.primitive('never' @nodes)
+    loop signed in [true false] {
+        let prefix = if signed 'i' else 'u'
+        let type_prefix = if signed 'int' else 'uint'
+        loop bits in [8 16 32 64] {
+            let value = types.primitive("{type_prefix}{bits}" @nodes)
+            result["__load_{prefix}{bits}__"] = intrinsic([any] value @nodes)
+            result["__store_{prefix}{bits}__"] = intrinsic([value any] nothing @nodes)
+        }
+    }
+    result['__load__'] = intrinsic([any] word @nodes)
+    result['__store__'] = intrinsic([word any] nothing @nodes)
+    result['__alloca__'] = intrinsic([word] word @nodes)
+    result['__static_alloca__'] = intrinsic([word] word @nodes)
+    result['__breakpoint__'] = intrinsic([] nothing @nodes)
+    result['__signed_shr__'] = types.function_type([types.PosOrKwArg['left' word] types.PosOrKwArg['right' integer]] [] none word [] @nodes)
+    loop name in ['__unsigned_idiv__' '__unsigned_mod__'] { result[name] = intrinsic([unsigned unsigned] unsigned @nodes) }
+    loop name in ['__unsigned_lt__' '__unsigned_gt__' '__unsigned_lte__' '__unsigned_gte__'] { result[name] = intrinsic([unsigned unsigned] boolean @nodes) }
+    result['__static_words__'] = types.function_type([types.PosOrKwArg[none any]] [] 'words' word [] @nodes)
+    loop name in word_intrinsic_arities.keys {
+        if name not in? word_intrinsic_arities continue
+        let arity = word_intrinsic_arities[name]
+        result[name] = word_intrinsic(arity word @nodes)
+    }
+    loop arity in 0.. and arity <? 7 {
+        result["__syscall{arity}__"] = word_intrinsic(arity + 1 word @nodes)
+    }
+    # A preceding syscall exits; this asserts no continuation and lowers to
+    # an infinite loop that will never execute.
+    result['__unreachable__'] = intrinsic([] never @nodes)
+    return result
+}
+
+definitions = (@nodes:array<types.Type>):>dict<string addr> => {
+    let result = intrinsic_types(@nodes)
+    let number = types.primitive('number' @nodes)
+    let integer = types.primitive('int' @nodes)
+    let natural = types.primitive('uint' @nodes)
+    let boolean = types.primitive('bool' @nodes)
+    let any = types.primitive('any' @nodes)
+    let variable = types.primitive('T' @nodes)
+    let string = types.string_type(none @nodes)
+    result['__add__'] = types.overload_type([binary_generic(number @nodes) binary_concrete(string string @nodes)] @nodes)
+    loop name in ['__sub__' '__mul__'] { result[name] = binary_generic(number @nodes) }
+    loop name in ['__floordiv__' '__mod__'] { result[name] = binary_generic(integer @nodes) }
+    let shift = types.function_type([types.PosOrKwArg['left' variable] types.PosOrKwArg['right' natural]] [] none variable [types.GenericParam['T' integer]] @nodes)
+    loop name in ['__lshift__' '__rshift__'] { result[name] = shift }
+    loop name in ['__eq__' '__ne__'] { result[name] = binary_generic(any @nodes ret=boolean) }
+    loop name in ['__gt__' '__lt__' '__ge__' '__le__'] { result[name] = binary_generic(number @nodes ret=boolean) }
+    result['__and__'] = bitwise_overload(@nodes callable_overload=true)
+    loop name in ['__or__' '__xor__' '__nand__' '__nor__' '__xnor__'] { result[name] = bitwise_overload(@nodes) }
+    result['__unary_sub__'] = unary_generic(number @nodes)
+    let boolean_not = types.function_type([types.PosOrKwArg['item' boolean]] [] none boolean [] @nodes)
+    result['__not__'] = types.overload_type([unary_generic(integer @nodes) boolean_not] @nodes)
+    return result
+}
+
+type_aliases = (@nodes:array<types.Type>):>dict<string addr> => {
+    let result:dict<string addr> = []
+    # Physical dimensions have no runtime value. The prelude combines these
+    # compile-time factors with a chosen numeric representation.
+    loop name in ['Time' 'Length' 'Mass' 'Current' 'Temperature' 'Amount' 'Luminosity' 'Angle'] {
+        result[name] = types.dimension([types.DimensionPower[name 1]] @nodes)
+    }
+    return result
+}
+# Cross-branch promotion stays distinct from inheritance. Along-edge cases
+# already follow the subtype graph; these are only the explicit extra rules.
+const promotions:array<dispatch.Promotion> = [
+    ['int' 'float' 'float'] ['int' 'float32' 'float32'] ['int' 'float64' 'float64']
+]

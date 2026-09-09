@@ -1,0 +1,570 @@
+import p"propositions.dewy" as facts
+
+doc"""
+Type expressions and their Boolean algebra, corresponding to semantic/ty.py.
+
+Types describe values; void and untyped describe expression/checking states
+and do not participate in the value-type hierarchy. In particular, noreturn
+is an effect, not an alternative to never.
+
+The table interns completed descriptions. References are stable indices, so
+recursive aliases can later refer to a separately resolved binding without
+constructing cyclic mutable objects. A key encodes structure, not subtyping:
+union construction preserves order, while a semantic join may absorb members.
+"""
+
+# `key` identifies a stored description, including declaration metadata.
+# `shape` overrides that key for structural equality. Defaults, method bodies,
+# and resolved proof bindings must survive interning even though the hosted
+# language deliberately excludes them from type equality.
+Type = $abstract type of [key:string shape:string?=none]
+Primitive = type of Type & [name:string]
+TypeAnd = type of Type & [items:array<addr>]
+TypeOr = type of Type & [items:array<addr>]
+TypeNot = type of Type & [item:addr]
+TypeParameterize = type of Type & [head:addr args:array<addr>]
+TypeVariable = type of Type & [name:string bound:addr]
+SequenceType = type of Type & [items:array<addr>]
+ArrayType = type of Type & [element:addr length:addr?=none]
+StringType = type of Type & [length:addr?=none]
+# Literal values must span the full language integer domain even while the
+# seed compiler cannot yet choose a bigint representation for an abstract-int
+# object field. This explicit representation does not cap source literals.
+IntegerLiteralType = type of Type & [value:bigint]
+StringLiteralType = type of Type & [value:string]
+BinaryLiteralType = type of Type & [value:array<uint8>]
+RationalLiteralType = type of Type & [numerator:bigint denominator:bigint & ~0]
+
+# Dimensions are compile-time data with no runtime representation. Zero
+# exponents disappear and powers are sorted by name. A quantity keeps the
+# chosen numeric representation separate from its dimension.
+DimensionPower:type = const [name:string exponent:bigint]
+DimensionType = type of Type & [powers:array<DimensionPower>]
+QuantityType = type of Type & [number:addr dimension:addr]
+
+# These slots describe a callable's accepted shape, not the parameters of a
+# checked function body. A missing name means position-only; a default makes
+# a slot optional. Place arguments must agree exactly on both sides of a
+# callable relation, since the callee may write through them.
+PosOrKwArg:type = const [name:string? value_type:addr required:bool=true place:bool=false]
+KwOnlyArg:type = const [name:string value_type:addr required:bool place:bool=false]
+GenericParam:type = const [name:string bound:addr]
+FunctionType = type of Type & [
+    pos_or_kw:array<PosOrKwArg>
+    kw_only:array<KwOnlyArg>
+    rest:string?
+    ret:addr
+    type_params:array<GenericParam>
+]
+# Alternatives retain declaration order. Dispatch later records which one
+# won, so lowering never has to infer a function's identity from its shape.
+OverloadType = type of Type & [methods:array<addr>]
+CallableType:type = FunctionType | OverloadType
+
+ObjectField:type = const [
+    name:string value_type:addr mutable:bool=true
+    # Parser-arena id; evaluated only when a constructor needs this default.
+    default:addr?=none
+    # Field invariants are proved on construction/store and assumed on read.
+    refinement:array<facts.Proposition>=[]
+]
+MethodSpec:type = const [
+    name:string literal:addr binding_id:addr?=none place_self:bool=false
+    # An inherited method compiles once, for its declaring owner.
+    owner:string?=none static:bool=false
+]
+ObjectType = type of Type & [
+    fields:array<ObjectField> brand:string?=none
+    methods:array<MethodSpec>=[] constructors:array<addr>=[]
+    # const records preserve sibling-field invariants for their lifetime.
+    immutable:bool=false
+    # Minting metadata belongs to this compilation, not process globals.
+    # A root mint points at its unbranded source structure; child mints point
+    # at their nominal parent. Compiler families such as dict are not mints.
+    minted:bool=false parent:addr?=none abstract:bool=false
+]
+PathType = type of ObjectType
+PathLiteralType = type of PathType & [value:string]
+RefinedType = type of Type & [base:addr propositions:array<facts.Proposition>]
+NamedType = type of Type & [name:string alias_id:addr target:addr?=none]
+MetaType = type of Type & [family:addr]
+ModuleField:type = const [name:string value_type:addr binding_id:addr type_value:addr?=none]
+ModuleType = type of Type & [fields:array<ModuleField>]
+
+# A clause is a conjunction of signed atoms; the outer list is a disjunction.
+# No clauses means never. One empty clause means any. Negation stops at atoms:
+# it must not turn array<T> into array<~T> or negate a function's parameters.
+SignedAtom:type = [positive:bool item:addr]
+Clause:type = [literals:array<SignedAtom>]
+
+node_at = (nodes:array<Type> id:addr):>Type => {
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+
+shape_of = (id:addr nodes:array<Type>):>string => {
+    let node = node_at(nodes id)
+    return if node.shape is? none node.key else node.shape
+}
+same_type = (a:addr b:addr nodes:array<Type>):>bool => a =? b or shape_of(a nodes) =? shape_of(b nodes)
+shapes_key = (items:array<addr> nodes:array<Type>):>string => {
+    let parts:array<string> = []
+    loop id in items { parts.push(_quoted(shape_of(id nodes))) }
+    return parts.join(',')
+}
+contains_type = (items:array<addr> id:addr nodes:array<Type>):>bool => {
+    loop other in items { if same_type(other id nodes) return true }
+    return false
+}
+
+# Return evidence about the current table on both paths, including reuse.
+# Interning avoids assigning new identities to structurally equal descriptions.
+intern = (@nodes:array<Type> value:Type):>addr<i => i <? nodes.length> => {
+    loop i in 0.. and i <? nodes.length {
+        if nodes[i].key =? value.key return i
+    }
+    let id = nodes.length
+    nodes.push(value)
+    return id
+}
+
+primitive = (name:string @nodes:array<Type>):>addr => intern(@nodes Primitive[key="P{_quoted(name)}" name=name])
+integer_literal = (value:bigint @nodes:array<Type>):>addr => intern(@nodes IntegerLiteralType[key="I{_bigint_as_string(value)}" value=value])
+string_literal = (value:string @nodes:array<Type>):>addr => intern(@nodes StringLiteralType[key="S{_quoted(value)}" value=value])
+binary_literal = (value:array<uint8> @nodes:array<Type>):>addr => {
+    let parts:array<string> = []
+    loop byte in value { parts.push("{byte}") }
+    return intern(@nodes BinaryLiteralType[key="B{parts.join(',')}" value=value])
+}
+rational_literal = (numerator:bigint denominator:bigint & ~0 @nodes:array<Type>):>addr => {
+    let value = _bigrational_make(numerator denominator)
+    if value =? 0 return intern(@nodes RationalLiteralType[key='L0/1' numerator=0 denominator=1])
+    let key = "L{_bigint_as_string(value.numerator)}/{_bigint_as_string(value.denominator)}"
+    return intern(@nodes RationalLiteralType[key=key numerator=value.numerator denominator=value.denominator])
+}
+
+# Canonical name order follows Unicode scalars, matching the hosted table.
+# This is a compiler-internal ordering, not a new source comparison operator.
+name_before = (left:string right:string):>bool => {
+    let a = left as array<uint32>
+    let b = right as array<uint32>
+    loop i in 0.. and i <? a.length and i <? b.length {
+        if a[i] <? b[i] return true
+        if a[i] >? b[i] return false
+    }
+    return a.length <? b.length
+}
+
+dimension = (powers:array<DimensionPower> @nodes:array<Type>):>addr => {
+    let combined:dict<string bigint> = []
+    let names:array<string> = []
+    loop power in powers {
+        if power.name in? combined { combined[power.name] += power.exponent }
+        else {
+            combined[power.name] = power.exponent
+            let at:addr<i => i <=? names.length> = 0
+            loop at <? names.length {
+                if name_before(power.name names[at]) break
+                at += 1
+            }
+            names.insert(power.name idx=at)
+        }
+    }
+    let normalized:array<DimensionPower> = []
+    let parts:array<string> = []
+    loop name in names {
+        let exponent = combined.get(name default=0)
+        if exponent =? 0 continue
+        normalized.push(DimensionPower[name exponent])
+        parts.push("{_quoted(name)}:{_bigint_as_string(exponent)}")
+    }
+    return intern(@nodes DimensionType[key="D{parts.join(';')}" powers=normalized])
+}
+
+dimension_at = (id:addr nodes:array<Type>):>DimensionType => {
+    let node = node_at(nodes id)
+    $runtime_assert node is? DimensionType
+    return node
+}
+multiply_dimensions = (left:addr right:addr @nodes:array<Type>):>addr => {
+    let powers = dimension_at(left nodes).powers
+    let other = dimension_at(right nodes)
+    loop power in other.powers { powers.push(power) }
+    return dimension(powers @nodes)
+}
+divide_dimensions = (left:addr right:addr @nodes:array<Type>):>addr => {
+    let powers = dimension_at(left nodes).powers
+    let other = dimension_at(right nodes)
+    loop power in other.powers { powers.push(DimensionPower[power.name (-power.exponent)]) }
+    return dimension(powers @nodes)
+}
+power_dimension = (base:addr exponent:bigint @nodes:array<Type>):>addr => {
+    let powers:array<DimensionPower> = []
+    let original = dimension_at(base nodes)
+    loop power in original.powers { powers.push(DimensionPower[power.name (power.exponent * exponent)]) }
+    return dimension(powers @nodes)
+}
+quantity_type = (number:addr dim:addr @nodes:array<Type>):>addr => intern(@nodes QuantityType[key="U{number}:{dim}" shape="U{shapes_key([number dim] nodes)}" number=number dimension=dim])
+
+items_key = (items:array<addr>):>string => {
+    let pieces:array<string> = []
+    loop id in items { pieces.push("{id}") }
+    return pieces.join(',')
+}
+
+is_primitive = (node:Type name:string):>bool => node is? Primitive and node.name =? name
+
+# Smart constructors flatten their own connective, discard duplicates, and
+# apply identity/annihilator laws. They deliberately do not consult subtyping:
+# int64 | int remains a syntactic union until a semantic join asks to simplify.
+combine = (items:array<addr> conjunction:bool @nodes:array<Type>):>addr => {
+    let identity = if conjunction 'any' else 'never'
+    let annihilator = if conjunction 'never' else 'any'
+    let flat:array<addr> = []
+    loop id in items {
+        let node = node_at(nodes id)
+        if is_primitive(node identity) continue
+        if is_primitive(node annihilator) return primitive(annihilator @nodes)
+        let children:array<addr> = [id]
+        if conjunction and node is? TypeAnd { children = node.items }
+        if not conjunction and node is? TypeOr { children = node.items }
+        loop child in children { if not contains_type(flat child nodes) { flat.push(child) } }
+    }
+    if flat.length =? 0 return primitive(identity @nodes)
+    if flat.length =? 1 return flat[0]
+    if conjunction return intern(@nodes TypeAnd[key="A{items_key(flat)}" shape="A{shapes_key(flat nodes)}" items=flat])
+    return intern(@nodes TypeOr[key="O{items_key(flat)}" shape="O{shapes_key(flat nodes)}" items=flat])
+}
+intersect = (items:array<addr> @nodes:array<Type>):>addr => combine(items true @nodes)
+union = (items:array<addr> @nodes:array<Type>):>addr => combine(items false @nodes)
+
+# Parentheses are nonsemantic for expressed values: (1 (2 3)) expresses three
+# values. A generator value is one value, so only SequenceType is flattened.
+sequence = (items:array<addr> @nodes:array<Type>):>addr => {
+    let flat:array<addr> = []
+    loop id in items {
+        let node = node_at(nodes id)
+        if node is? SequenceType { loop child in node.items { flat.push(child) } }
+        else { flat.push(id) }
+    }
+    if flat.length =? 0 return primitive('void' @nodes)
+    if flat.length =? 1 return flat[0]
+    return intern(@nodes SequenceType[key="Q{items_key(flat)}" shape="Q{shapes_key(flat nodes)}" items=flat])
+}
+
+array_type = (element:addr length:addr? @nodes:array<Type>):>addr => intern(@nodes ArrayType[key="R{element}:{length}" shape="R{shapes_key([element] nodes)}:{length}" element=element length=length])
+string_type = (length:addr? @nodes:array<Type>):>addr => intern(@nodes StringType[key="T{length}" length=length])
+parameterize = (head:addr args:array<addr> @nodes:array<Type>):>addr => intern(@nodes TypeParameterize[key="G{head}:{items_key(args)}" shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args])
+
+type_variable = (name:string bound:addr @nodes:array<Type>):>addr => intern(@nodes TypeVariable[key="V{_quoted(name)}:{bound}" shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
+
+function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:array<Type>):>addr => {
+    let slots:array<string> = []
+    let shapes:array<string> = []
+    loop p in pos {
+        let name = if p.name is? none 'none' else _quoted(p.name)
+        slots.push("P{name}:{p.value_type}:{p.required}:{p.place}")
+        shapes.push("P{name}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}")
+    }
+    loop p in kw {
+        slots.push("K{_quoted(p.name)}:{p.value_type}:{p.required}:{p.place}")
+        shapes.push("K{_quoted(p.name)}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}")
+    }
+    loop p in params {
+        slots.push("G{_quoted(p.name)}:{p.bound}")
+        shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}")
+    }
+    let rest_key = if rest is? none 'none' else _quoted(rest)
+    let key = "F{slots.join(';')}:R{rest_key}:T{ret}"
+    let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}"
+    return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params])
+}
+overload_type = (methods:array<addr> @nodes:array<Type>):>addr => intern(@nodes OverloadType[key="M{items_key(methods)}" shape="M{shapes_key(methods nodes)}" methods=methods])
+
+propositions_key = (props:array<facts.Proposition> structural:bool nodes:array<Type>):>string => {
+    let parts:array<string> = []
+    loop p in props {
+        let key = if structural facts.identity_key(p) else facts.storage_key(p)
+        # Resolved type indices may identify descriptions with different
+        # defaults but the same shape. Replace that one field for equality.
+        if structural and p.tested_type isnt? none {
+            let scalar = facts.Proposition[p.subject p.op p.value p.projection p.term p.term_id p.term_projection none p.when p.subject_id p.axiom]
+            key = "{facts.identity_key(scalar)}:{shapes_key([p.tested_type] nodes)}"
+        }
+        parts.push(_quoted(key))
+    }
+    return parts.join(';')
+}
+refined_type = (base:addr propositions:array<facts.Proposition> @nodes:array<Type>):>addr => {
+    let key = "E{base}:{propositions_key(propositions false nodes)}"
+    let shape = "E{shapes_key([base] nodes)}:{propositions_key(propositions true nodes)}"
+    return intern(@nodes RefinedType[key=key shape=shape base=base propositions=propositions])
+}
+strip_refinement = (id:addr nodes:array<Type>):>addr => {
+    let node = node_at(nodes id)
+    return if node is? RefinedType node.base else id
+}
+
+# Object field order and mutability are structural. Constructor defaults,
+# field proof bindings, methods, and constructor overload ids are retained
+# in the stored description but do not make two layouts different types.
+object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:array<MethodSpec> constructors:array<addr> @nodes:array<Type> minted:bool=false parent:addr?=none abstract:bool=false):>addr => {
+    let parts:array<string> = []
+    let shapes:array<string> = []
+    loop f in fields {
+        parts.push("{_quoted(f.name)}:{f.value_type}:{f.mutable}:{f.default}:{propositions_key(f.refinement false nodes)}")
+        shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.mutable}")
+    }
+    let method_keys:array<string> = []
+    loop m in methods {
+        let owner = if m.owner is? none 'none' else _quoted(m.owner)
+        method_keys.push("{_quoted(m.name)}:{m.literal}:{m.binding_id}:{m.place_self}:{owner}:{m.static}")
+    }
+    let brand_key = if brand is? none 'none' else _quoted(brand)
+    let key = "J{brand_key}:{immutable}:{parts.join(';')}:{method_keys.join(';')}:{items_key(constructors)}:{minted}:{parent}:{abstract}"
+    let shape = "J{brand_key}:{immutable}:{shapes.join(';')}"
+    return intern(@nodes ObjectType[key=key shape=shape fields=fields brand=brand immutable=immutable methods=methods constructors=constructors minted=minted parent=parent abstract=abstract])
+}
+object_field = (node:ObjectType name:string):>ObjectField? => {
+    loop f in node.fields { if f.name =? name return f }
+    return none
+}
+object_method = (node:ObjectType name:string):>MethodSpec? => {
+    loop m in node.methods { if m.name =? name return m }
+    return none
+}
+object_invariants = (node:ObjectType):>array<facts.Proposition> => {
+    let props:array<facts.Proposition> = []
+    loop f in node.fields {
+        loop p in f.refinement {
+            if facts.parameter(p) isnt? none or p.tested_type isnt? none continue
+            props.push(facts.Proposition[subject=".{f.name}" op=p.op value=p.value term=p.term term_id=p.term_id term_projection=p.term_projection axiom=p.axiom])
+        }
+    }
+    return props
+}
+
+path_type = (value:string? methods:array<MethodSpec> @nodes:array<Type>):>addr => {
+    let element = if value is? none string_type(none @nodes) else string_literal(value @nodes)
+    let base = object_type([ObjectField['path' element]] none false methods [] @nodes)
+    let description = node_at(nodes base)
+    $runtime_assert description is? ObjectType
+    let key = "K{description.key}"
+    let shape = "K{shape_of(base nodes)}"
+    if value is? none return intern(@nodes PathType[key=key shape=shape fields=description.fields methods=methods])
+    return intern(@nodes PathLiteralType[key=key shape=shape fields=description.fields methods=methods value=value])
+}
+
+named_type = (name:string alias_id:addr @nodes:array<Type>):>addr => intern(@nodes NamedType[key="Y{alias_id}" name=name alias_id=alias_id])
+resolve_alias = (id:addr target:addr @nodes:array<Type>):>void => {
+    $runtime_assert id <? nodes.length
+    let node = nodes[id]
+    $runtime_assert node is? NamedType
+    # Resolution changes the target, not the recursive reference's identity.
+    nodes[id] = NamedType[key=node.key name=node.name alias_id=node.alias_id target=target]
+}
+unfold = (id:addr nodes:array<Type>):>addr => {
+    let node = node_at(nodes id)
+    if node isnt? NamedType return id
+    $runtime_assert node.target isnt? none
+    return node.target
+}
+meta_type = (family:addr @nodes:array<Type>):>addr => intern(@nodes MetaType[key="H{family}" shape="H{shapes_key([family] nodes)}" family=family])
+module_type = (fields:array<ModuleField> @nodes:array<Type>):>addr => {
+    let parts:array<string> = []
+    let shapes:array<string> = []
+    loop f in fields {
+        parts.push("{_quoted(f.name)}:{f.value_type}:{f.binding_id}:{f.type_value}")
+        let value = if f.type_value is? none 'none' else shapes_key([f.type_value] nodes)
+        shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.binding_id}:{value}")
+    }
+    return intern(@nodes ModuleType[key="Z{parts.join(';')}" shape="Z{shapes.join(';')}" fields=fields])
+}
+module_field = (node:ModuleType name:string):>ModuleField? => {
+    loop f in node.fields { if f.name =? name return f }
+    return none
+}
+
+# Substitute free names, respecting generic binders inside a nested callable.
+# Instantiating the outer method is a separate operation: it removes that
+# method's binder before substitution rather than accidentally shadowing it.
+substitute = (id:addr bindings:dict<string addr> @nodes:array<Type>):>addr => {
+    let node = node_at(nodes id)
+    if node is? Primitive | TypeVariable return bindings.get(node.name default=id)
+    if node is? TypeNot return negate(substitute(node.item bindings @nodes) @nodes)
+    if node is? RefinedType return refined_type(substitute(node.base bindings @nodes) node.propositions @nodes)
+    if node is? PathType return id
+    if node is? ObjectType {
+        let fields:array<ObjectField> = []
+        loop f in node.fields { fields.push(ObjectField[f.name substitute(f.value_type bindings @nodes) f.mutable f.default f.refinement]) }
+        return object_type(fields node.brand node.immutable node.methods node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
+    }
+    if node is? ArrayType return array_type(substitute(node.element bindings @nodes) node.length @nodes)
+    if node is? QuantityType return quantity_type(substitute(node.number bindings @nodes) node.dimension @nodes)
+    if node is? TypeAnd | TypeOr | SequenceType | OverloadType {
+        let original = if node is? OverloadType node.methods else node.items
+        let items:array<addr> = []
+        loop child in original { items.push(substitute(child bindings @nodes)) }
+        if node is? TypeAnd return intersect(items @nodes)
+        if node is? TypeOr return union(items @nodes)
+        if node is? SequenceType return sequence(items @nodes)
+        return overload_type(items @nodes)
+    }
+    if node is? TypeParameterize {
+        let head = substitute(node.head bindings @nodes)
+        let args:array<addr> = []
+        loop arg in node.args { args.push(substitute(arg bindings @nodes)) }
+        return parameterize(head args @nodes)
+    }
+    if node is? FunctionType return substitute_function(node bindings false @nodes)
+    return id
+}
+
+substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:array<Type>):>addr => {
+    let inner = bindings
+    let params = node.type_params
+    if instantiate { params = [] }
+    else { loop param in params { if param.name in? inner { inner.pop(param.name); } } }
+    let pos:array<PosOrKwArg> = []
+    let kw:array<KwOnlyArg> = []
+    loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes) p.required p.place]) }
+    loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes) p.required p.place]) }
+    let ret = substitute(node.ret inner @nodes)
+    return function_type(pos kw node.rest ret params @nodes)
+}
+
+# De Morgan's laws put not only on atoms. A type constructor is itself an atom
+# here; its arguments are normalized independently, never complemented merely
+# because the outer constructor was complemented.
+negate = (id:addr @nodes:array<Type>):>addr => {
+    let node = node_at(nodes id)
+    if is_primitive(node 'any') return primitive('never' @nodes)
+    if is_primitive(node 'never') return primitive('any' @nodes)
+    if node is? TypeNot return to_nnf(node.item @nodes)
+    if node is? TypeAnd | TypeOr {
+        let items:array<addr> = []
+        loop child in node.items { items.push(negate(child @nodes)) }
+        return combine(items (node is? TypeOr) @nodes)
+    }
+    return intern(@nodes TypeNot[key="N{id}" shape="N{shapes_key([id] nodes)}" item=id])
+}
+
+to_nnf = (id:addr @nodes:array<Type>):>addr => {
+    let node = node_at(nodes id)
+    if node is? TypeNot return negate(node.item @nodes)
+    if node is? TypeAnd | TypeOr | SequenceType {
+        let items:array<addr> = []
+        loop child in node.items { items.push(to_nnf(child @nodes)) }
+        if node is? SequenceType return sequence(items @nodes)
+        return combine(items (node is? TypeAnd) @nodes)
+    }
+    if node is? ArrayType return array_type(to_nnf(node.element @nodes) node.length @nodes)
+    if node is? QuantityType return quantity_type(to_nnf(node.number @nodes) node.dimension @nodes)
+    if node is? PathType return id
+    if node is? ObjectType {
+        let fields:array<ObjectField> = []
+        loop f in node.fields { fields.push(ObjectField[f.name to_nnf(f.value_type @nodes) f.mutable f.default f.refinement]) }
+        return object_type(fields node.brand node.immutable node.methods node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
+    }
+    if node is? TypeParameterize {
+        let head = to_nnf(node.head @nodes)
+        let args:array<addr> = []
+        loop arg in node.args { args.push(to_nnf(arg @nodes)) }
+        return parameterize(head args @nodes)
+    }
+    return id
+}
+
+distribute = (left:array<Clause> right:array<Clause>):>array<Clause> => {
+    let output:array<Clause> = []
+    loop a in left {
+        loop b in right {
+            let literals = a.literals
+            loop item in b.literals { literals.push(item) }
+            output.push(Clause[literals=literals])
+        }
+    }
+    return output
+}
+
+dnf = (id:addr nodes:array<Type>):>array<Clause> => {
+    let node = node_at(nodes id)
+    if is_primitive(node 'never') return []
+    if is_primitive(node 'any') return [Clause[literals=[]]]
+    if node is? TypeNot return [Clause[literals=[SignedAtom[false node.item]]]]
+    if node is? TypeOr {
+        let clauses:array<Clause> = []
+        loop child in node.items { loop clause in dnf(child nodes) { clauses.push(clause) } }
+        return clauses
+    }
+    if node is? TypeAnd {
+        let clauses:array<Clause> = [Clause[literals=[]]]
+        loop child in node.items { clauses = distribute(clauses dnf(child nodes)) }
+        return clauses
+    }
+    return [Clause[literals=[SignedAtom[true id]]]]
+}
+
+normalize = (id:addr @nodes:array<Type>):>array<Clause> => {
+    let normalized = to_nnf(id @nodes)
+    return dnf(normalized nodes)
+}
+
+describe = (id:addr nodes:array<Type>):>string => {
+    let node = node_at(nodes id)
+    if node is? Primitive return node.name
+    if node is? NamedType return node.name
+    if node is? RefinedType return "refined<{describe(node.base nodes)} {propositions_key(node.propositions true nodes)}>"
+    if node is? MetaType return "type<{describe(node.family nodes)}>"
+    if node is? PathLiteralType return "path({_quoted(node.value)})"
+    if node is? PathType return 'path'
+    if node is? ObjectType {
+        let fields:array<string> = []
+        loop f in node.fields {
+            let mutable = if f.mutable '' else 'const '
+            fields.push("{mutable}{f.name}:{describe(f.value_type nodes)}")
+        }
+        let brand = if node.brand is? none '' else "{node.brand} "
+        let immutable = if node.immutable 'const ' else ''
+        return "{brand}{immutable}[{fields.join(' ')}]"
+    }
+    if node is? ModuleType {
+        let fields:array<string> = []
+        loop f in node.fields { fields.push("{f.name}:{describe(f.value_type nodes)}@{f.binding_id}") }
+        return "module[{fields.join(' ')}]"
+    }
+    if node is? IntegerLiteralType return _bigint_as_string(node.value)
+    if node is? RationalLiteralType return "{_bigint_as_string(node.numerator)}/{_bigint_as_string(node.denominator)}"
+    if node is? BinaryLiteralType {
+        let bytes:array<string> = []
+        loop byte in node.value { bytes.push("{byte}") }
+        return "bytes[{bytes.join(',')}]"
+    }
+    if node is? DimensionType {
+        let parts:array<string> = []
+        loop power in node.powers { parts.push("{power.name}^{_bigint_as_string(power.exponent)}") }
+        return "dimension[{parts.join(' ')}]"
+    }
+    if node is? QuantityType return "quantity<{describe(node.number nodes)} {describe(node.dimension nodes)}>"
+    if node is? StringLiteralType return "{_quoted(node.value)}"
+    if node is? StringType { if node.length is? none return 'string' return "string<length={node.length}>" }
+    if node is? ArrayType {
+        let element = describe(node.element nodes)
+        if node.length is? none return "array<{element}>"
+        return "array<{element} length={node.length}>"
+    }
+    if node is? TypeNot return "~({describe(node.item nodes)})"
+    if node is? TypeAnd | TypeOr | SequenceType {
+        let parts:array<string> = []
+        loop child in node.items { parts.push(describe(child nodes)) }
+        let separator = if node is? TypeAnd ' & ' else if node is? TypeOr ' | ' else ' '
+        return "({parts.join(separator)})"
+    }
+    if node is? TypeParameterize {
+        let args:array<string> = []
+        loop arg in node.args { args.push(describe(arg nodes)) }
+        return "{describe(node.head nodes)}<{args.join(' ')}>"
+    }
+    if node is? TypeVariable return node.name
+    return node.key
+}

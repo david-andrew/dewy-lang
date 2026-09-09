@@ -1,0 +1,185 @@
+import p"intervals.dewy" as ranges
+import p"../propositions.dewy" as propositions
+
+doc"""
+The bounds pass's relational fact store.
+
+The hosted pass packs several kinds of facts into negative integers with
+20/21-bit binding fields. Here the kinds and terms are explicit descriptions;
+only their dictionary keys are serialized. A value and its length have
+separate identities, and no binding count can overflow into another kind.
+
+A missing entry means no evidence. Vacuous is different: every predicate
+about an element of an empty array holds. It participates in joins as the
+absence of a constraint, never as an unknown numeric range.
+"""
+
+Term:type = const [binding_id:addr projection:propositions.Projection='value']
+Fact = $abstract type of [key:string]
+Value = type of Fact & [term:Term]
+Index = type of Fact & [index:addr sequence:addr]
+Nonzero = type of Fact & [subject:addr]
+Order = type of Fact & [smaller:Term larger:Term]
+Remainder = type of Fact & [subject:Term upper:Term offset:addr]
+Entry:type = const [fact:Fact interval:ranges.Interval]
+State:type = dict<string Entry>
+Vacuous = type of []
+Evidence:type = ranges.Interval | Vacuous | none
+Context:type = [
+    cap:bigint
+    # Declared scalar contracts constrain loop widening. An element route's
+    # root records which array makes its predicates vacuous when empty.
+    widths:dict<addr ranges.Interval>=[]
+    element_roots:dict<addr addr>=[]
+]
+term_key = (term:Term):>string => "{term.projection}:{term.binding_id}"
+same_term = (left:Term right:Term):>bool => left.binding_id =? right.binding_id and left.projection =? right.projection
+value = (term:Term):>Value => Value[key="v:{term_key(term)}" term=term]
+index = (subject:addr sequence:addr):>Index => Index[key="i:{subject}:{sequence}" index=subject sequence=sequence]
+nonzero = (subject:addr):>Nonzero => Nonzero[key="n:{subject}" subject=subject]
+order = (smaller:Term larger:Term):>Order => Order[key="o:{term_key(smaller)}:{term_key(larger)}" smaller=smaller larger=larger]
+remainder = (subject:Term upper:Term offset:addr):>Remainder => Remainder[key="r:{term_key(subject)}:{term_key(upper)}:{offset}" subject=subject upper=upper offset=offset]
+
+lookup = (state:State fact:Fact):>ranges.Interval? => {
+    let entry = state.get(fact.key)
+    if entry is? none return none
+    return entry.interval
+}
+put = (@state:State fact:Fact interval:ranges.Interval):>void => { state[fact.key] = Entry[fact interval] }
+set_value = (@state:State term:Term interval:ranges.Interval?):>void => {
+    let fact = value(term)
+    if interval is? none or ranges.same_bounds(interval ranges.UNKNOWN) {
+        if fact.key in? state { state.pop(fact.key); }
+    }
+    else { put(@state fact interval) }
+}
+known = (state:State term:Term context:Context):>ranges.Interval? => {
+    let found = lookup(state value(term))
+    if found isnt? none return found
+    if term.projection =? 'length' return ranges.Interval[0 context.cap true]
+    return none
+}
+
+# Whole-value writes remove facts that mention that value; length changes
+# remove relations to the sequence's length. Element writes may leave length
+# alone. The caller selects the changed term from the storage route.
+mentions = (fact:Fact term:Term):>bool => {
+    if fact is? Value return same_term(fact.term term)
+    if fact is? Nonzero return term.projection =? 'value' and fact.subject =? term.binding_id
+    if fact is? Index {
+        return (term.projection =? 'value' and fact.index =? term.binding_id) or (term.projection =? 'length' and fact.sequence =? term.binding_id)
+    }
+    if fact is? Order return same_term(fact.smaller term) or same_term(fact.larger term)
+    if fact is? Remainder {
+        return same_term(fact.subject term) or same_term(fact.upper term) or (term.projection =? 'value' and fact.offset =? term.binding_id)
+    }
+    return false
+}
+forget = (@state:State term:Term):>void => {
+    let removed:array<string> = []
+    loop entry in state.values { if mentions(entry.fact term) { removed.push(entry.fact.key) } }
+    loop key in removed { if key in? state { state.pop(key); } }
+}
+
+vacuous = (state:State fact:Fact context:Context):>bool => {
+    let subject:Term? = none
+    if fact is? Remainder { subject = fact.subject }
+    else if fact is? Order { subject = fact.smaller }
+    else if fact is? Index { subject = Term[fact.index] }
+    else if fact is? Nonzero { subject = Term[fact.subject] }
+    if subject is? none or subject.projection not=? 'value' return false
+    let root = context.element_roots.get(subject.binding_id)
+    if root is? none return false
+    let length = lookup(state value(Term[root 'length']))
+    return length isnt? none and ranges.same_bounds(length ranges.exact(0))
+}
+implied = (state:State fact:Fact context:Context):>Evidence => {
+    if vacuous(state fact context) return Vacuous
+    if fact isnt? Order return none
+    let smaller = known(state fact.smaller context)
+    let larger = known(state fact.larger context)
+    if smaller is? none or larger is? none or smaller.upper is? none or larger.lower is? none return none
+    let gap = larger.lower - smaller.upper
+    if gap <? 0 return none
+    return ranges.Interval[gap none]
+}
+evidence = (state:State fact:Fact context:Context):>Evidence => {
+    let found = lookup(state fact)
+    if found isnt? none return found
+    return implied(state fact context)
+}
+
+join = (states:array<State> context:Context):>State => {
+    let candidates:dict<string Entry> = []
+    loop state in states { loop entry in state.values { candidates[entry.fact.key] = entry } }
+    let result:State = []
+    loop candidate in candidates.values {
+        let combined:ranges.Interval? = none
+        let present:bool = true
+        loop state in states {
+            let part = evidence(state candidate.fact context)
+            if part is? none { present = false break }
+            if part is? Vacuous continue
+            if combined is? none { combined = part }
+            else { combined = ranges.union(combined part) }
+        }
+        if present { put(@result candidate.fact if combined is? none candidate.interval else combined) }
+    }
+    return result
+}
+narrow = (head:State candidate:State context:Context):>State => {
+    let result:State = []
+    loop entry in head.values {
+        let other = evidence(candidate entry.fact context)
+        if other is? none continue
+        if other is? Vacuous { put(@result entry.fact entry.interval) }
+        else { put(@result entry.fact ranges.intersect(entry.interval other)) }
+    }
+    return result
+}
+widen = (previous:State current:State context:Context):>State => {
+    let result:State = []
+    loop entry in current.values {
+        let old = lookup(previous entry.fact)
+        if old is? none {
+            let implicit = implied(previous entry.fact context)
+            if implicit is? Vacuous { put(@result entry.fact entry.interval) }
+            else if implicit isnt? none { put(@result entry.fact ranges.widen(implicit entry.interval)) }
+            continue
+        }
+        let interval = ranges.widen(old entry.interval)
+        let fact = entry.fact
+        if fact is? Value {
+            if fact.term.projection =? 'length' {
+                let lower:bigint = 0
+                let upper = context.cap
+                if interval.lower isnt? none { lower = interval.lower }
+                if interval.upper isnt? none { upper = interval.upper }
+                interval = ranges.Interval[lower upper]
+            }
+            else {
+                let width = context.widths.get(fact.term.binding_id)
+                if width isnt? none { interval = ranges.intersect(interval width) }
+            }
+        }
+        put(@result fact interval)
+    }
+    return result
+}
+
+# Preserve the same affine relations as the hosted pass. Other relations
+# are forgotten by the assignment, then this set is restored. In particular,
+# a weakening that makes the known gap negative supplies no bound to retain.
+shifted = (state:State term:Term shift:bigint):>State => {
+    let result:State = []
+    loop entry in state.values {
+        if entry.interval.lower is? none continue
+        let fact = entry.fact
+        let eligible:bool = false
+        if fact is? Order { eligible = same_term(fact.smaller term) }
+        if fact is? Remainder { eligible = term.projection =? 'value' and fact.offset =? term.binding_id }
+        let gap = entry.interval.lower - shift
+        if eligible and gap >=? 0 { put(@result fact ranges.Interval[gap none]) }
+    }
+    return result
+}

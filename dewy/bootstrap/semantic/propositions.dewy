@@ -1,0 +1,92 @@
+doc"""
+Liquid refinement conditions, corresponding to semantic/ty.py's Proposition.
+
+A proposition's spelling and its resolved binding identities serve different
+purposes. Two declarations can spell the same contract with different local
+parameter bindings. Proofs must nevertheless refer to those actual bindings,
+never to another variable that happens to have the same name.
+
+Type tests hold a type-arena index. Keeping that index opaque here avoids a
+cycle between the type algebra and the descriptions of its refinements.
+"""
+
+Operator:type = 'is?' | 'isnt?' | '=?' | 'not=?' | '<?' | '>=?' | '<=?' | '>?'
+Projection:type = 'value' | 'length'
+Proposition:type = const [
+    # self: the value; length: its length; .field: an object field;
+    # @parameter: a fact about a function parameter (possibly a place).
+    subject:string
+    op:Operator
+    value:bigint=0
+    projection:Projection='value'
+    # A nonconstant bound: a named binding's value or length. `value` is
+    # unused when this is present. Resolution adds term_id without changing
+    # the source contract's identity.
+    term:string?=none
+    term_id:addr?=none
+    term_projection:Projection='length'
+    tested_type:addr?=none
+    # true/false means the proposition is conditional on that boolean
+    # result; none means it holds unconditionally.
+    when:bool?=none
+    subject_id:addr?=none
+    # addr is an address-space axiom, not a source numeric bound. Its cap
+    # comes from the target; it does not claim a particular storage width.
+    axiom:string?=none
+]
+
+parameter = (p:Proposition):>string? => {
+    if p.subject.startswith('@') return p.subject[1..]
+    return none
+}
+field = (p:Proposition):>string? => {
+    if p.subject.startswith('.') return p.subject[1..]
+    return none
+}
+is_length = (p:Proposition):>bool => p.subject =? 'length' or (field(p) isnt? none and p.projection =? 'length')
+
+negated = (p:Proposition):>Proposition => {
+    const opposite:totaldict<Operator Operator> = [
+        'is?' -> 'isnt?' 'isnt?' -> 'is?'
+        '=?' -> 'not=?' 'not=?' -> '=?'
+        '<?' -> '>=?' '>=?' -> '<?' '<=?' -> '>?' '>?' -> '<=?'
+    ]
+    let when = if p.when is? none none else not p.when
+    return Proposition[p.subject opposite[p.op] p.value p.projection p.term p.term_id p.term_projection p.tested_type when p.subject_id p.axiom]
+}
+
+# These helpers only decide constant scalar bounds. Term and type predicates
+# are proved by the checker with the current binding/route state.
+holds = (p:Proposition value:bigint):>bool => {
+    $runtime_assert p.term is? none and p.tested_type is? none
+    if p.axiom isnt? none return value >=? 0
+    if p.op =? '>?' return value >? p.value
+    if p.op =? '>=?' return value >=? p.value
+    if p.op =? '<?' return value <? p.value
+    if p.op =? '<=?' return value <=? p.value
+    if p.op =? '=?' return value =? p.value
+    $runtime_assert p.op =? 'not=?'
+    return value not=? p.value
+}
+lower_bound = (p:Proposition):>bigint | none => {
+    if p.term isnt? none or p.tested_type isnt? none or parameter(p) isnt? none or p.axiom isnt? none return none
+    if p.op =? '>?' return p.value + 1
+    if p.op =? '>=?' or p.op =? '=?' return p.value
+    return none
+}
+upper_bound = (p:Proposition):>bigint | none => {
+    if p.term isnt? none or p.tested_type isnt? none or parameter(p) isnt? none or p.axiom isnt? none return none
+    if p.op =? '<?' return p.value - 1
+    if p.op =? '<=?' or p.op =? '=?' return p.value
+    return none
+}
+
+# `identity_key` follows the hosted comparison: resolved ids are excluded.
+# `storage_key` includes them so interning never discards proof provenance.
+# Type ids are replaced with structural identities by the type comparator.
+identity_key = (p:Proposition):>string => {
+    let term = if p.term is? none 'none' else _quoted(p.term)
+    let axiom = if p.axiom is? none 'none' else _quoted(p.axiom)
+    return "{_quoted(p.subject)}:{p.op}:{_bigint_as_string(p.value)}:{p.projection}:{term}:{p.term_projection}:{p.tested_type}:{p.when}:{axiom}"
+}
+storage_key = (p:Proposition):>string => "{identity_key(p)}:{p.term_id}:{p.subject_id}"

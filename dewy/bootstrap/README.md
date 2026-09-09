@@ -1,7 +1,10 @@
-# Bootstrap parser
+# Bootstrap compiler
 
-The bootstrap implements the parsing pipeline in Dewy, using the hosted
-`dewy/parser/{t0,t1,t2,p0}.py` stages as its behavioral reference.
+The parsing pipeline is implemented in Dewy, using the hosted
+`dewy/parser/{t0,t1,t2,p0}.py` stages as its behavioral reference. Semantic
+analysis and code generation are being ported in executable slices; the
+whole Dewy compiler is not yet self-hosting. See
+[IMPLEMENTATION.md](IMPLEMENTATION.md) for the current boundary.
 
 ## Implementation progress
 
@@ -50,6 +53,17 @@ Errors go through the Dewy reporting library and exit unsuccessfully.
   enumeration order of ambiguous alternatives may differ; it carries no
   preference.
 
+The semantic port uses separate modules for type descriptions, propositions,
+subtyping and joins, overload dispatch, builtin tables, HIR, bindings, and minted families.
+Type references point into a compilation-owned arena. Stored descriptions
+retain defaults, methods, and resolved proof bindings; structural equality
+compares their separate shape keys. A recursive alias has a stable identity
+and a target filled in after its declaration resolves.
+
+Minted families are also compilation-owned. The brand registry assigns
+preorder intervals after registration, so a runtime test of a parent covers
+all its descendants without tying runtime tags to source binding ids.
+
 Spans in this implementation count graphemes, matching Dewy string indexing
 and the Dewy reporting library. Hosted Python spans count code points. These
 coordinates differ for combining sequences and CRLF. String chunks inside
@@ -77,25 +91,25 @@ an interpolated string have synthetic spans; hosted chunks have no spans.
   programs, and diagnose operators without precedence instead of raising a
   Python `KeyError`.
 
-## Questions for a later language-design pass
+## Array contracts and index evidence
 
-No new language syntax is introduced by this port. Two existing areas would
-benefit from clearer rules or stronger support:
+The next compiler pass is tracked in [IMPLEMENTATION.md](IMPLEMENTATION.md).
+It uses existing refinement syntax for the two approved areas below:
 
-1. **Declared array type versus current length fact.** Today
-   `let xs:array<int64> = [1]` can become fixed-length unless a recognized
-   growth operation appears. Replacing it with an array of another length
-   can then fail. A clearer rule would retain `array<int64>` as the binding's
-   contract and track `length = 1` as a fact until replacement or mutation.
-   The parser uses empty builders plus `push`, or initializes from a flow,
-   where it needs a runtime-length contract; the compiler's policy is not
-   changed here.
+1. **Declared array type versus current length fact.**
+   `let xs:array<int64> = [1]` keeps `array<int64>` as its store contract.
+   Its current length is a fact, invalidated or updated by replacement and
+   mutation. Explicit exact-length annotations remain restrictions on stores;
+   immutable declarations may safely retain their initializer's exact shape.
 2. **Indices tied to an arena.** `addr` establishes a position, but not that
    it belongs to a particular `nodes` array. `node_at(nodes id)` therefore
-   checks `id < nodes.length`. A future dependent index contract could make
-   that relationship explicit and remove repeated checks. It would need
-   clear behavior when an array is replaced or truncated; this pass does not
-   add such a feature or assume those facts.
+   checks `id < nodes.length`. `append_node` now promises
+   `addr<i => i <? nodes.length>` about the updated arena. Direct consumers
+   can use this evidence; it survives growth and value copies, but not
+   truncation, replacement, or a mutable call without a preserving contract.
+   Stored child lists still use `addr`, so reading arbitrary child references
+   still checks their bounds. Bounds evidence alone does not prove semantic
+   provenance or make an index valid for an unrelated arena.
 
 The implementation also exposes existing optimization opportunities: reduce
 copies of read-only nominal values, avoid retaining superseded rewrite nodes,
@@ -109,7 +123,11 @@ nodes for later phases to interpret.
 
 ## Validation
 
-The full suite passes: **1701 passed, 10 skipped** (`.venv/bin/pytest -q -n 6`).
+The latest full suite passed with **1757 passed, 10 skipped**. See
+[IMPLEMENTATION.md](IMPLEMENTATION.md) for changes verified since that run.
+Native semantic tests compare type algebra, dispatch, bindings, minting,
+parameter effects, source-order initialization, intervals, and relational
+fact states, shared type queries, and HIR fact views with the hosted implementations.
 Native parity tests cover all bootstrap fixtures, explicit ambiguous parses,
 reserved operators, CLI behavior, Unicode/grapheme coordinates, and parsing
 all four parser-stage source files through both t2 and p0. The native p0
