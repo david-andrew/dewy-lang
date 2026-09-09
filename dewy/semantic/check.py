@@ -8563,6 +8563,11 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 ty.set_type(key_type) if name == 'keys'
                 else ty.ArrayType(value_type if value_type is not None else key_type, None)
             )
+            # Producing the fresh view compacts the source first. Membership
+            # survives, but remembered indices and physical entry lengths do
+            # not: a later lookup must search the live table again.
+            _forget_positions(dictionary, ctx=ctx)
+            _invalidate_dict_lengths(dictionary, ctx=ctx)
             return hir.DictView(binop.loc, view_type, dictionary, name)
     if name in {'get', 'pop', 'clear', 'add'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
