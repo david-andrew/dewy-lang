@@ -33,6 +33,117 @@ class ModuleRecord:
 _validated_prelude_modules: set[tuple[Path, int, str]] = set()
 
 
+class _ResidentPrelude:
+    """The checked prelude kept live in the process, loaded from its pickle once.
+
+    Restoring the prelude means building some hundred thousand objects, which
+    was two thirds of a small compile; a compile that starts from the same
+    objects instead pays nothing. A compile *adds* to that state — bindings,
+    module records, named types, generic instances, the instance names it
+    writes into a generic's defining scope — and ``rollback`` takes those
+    additions back before the next compile starts (the prelude's own bindings
+    get their `declaration`/`function` re-pointed at each compile's renamed
+    copy, which is the same value every time). `DEWY_NO_RESIDENT_PRELUDE=1`
+    reloads the pickle for every compile, the old way.
+    """
+
+    def __init__(self, state: dict, registries: dict, validated: set, cache_path: Path) -> None:
+        self.state = state
+        self.registries = registries
+        self.validated = validated
+        stat = cache_path.stat()
+        self.stamp = (stat.st_size, stat.st_mtime_ns)   # the entry as loaded: a rewritten (or corrupted) file is loaded again
+        registry = state['registry']
+        self.next_id = registry.next_id
+        self.next_route_id = registry.next_route_id
+        self.records = dict(state['records'])
+        self.order = list(state['order'])
+        self.notes = list(state['representation_notes'])
+        system = state['type_system']
+        self.named_types = set(system._named_types)
+        self.type_parents = {name: set(parents) for name, parents in system._type_parents.items()}
+        self.type_children = {name: set(children) for name, children in system._type_children.items()}
+        self.promote_rules = dict(system._promote_rules)
+        # every generic the prelude declares: its instances so far, and the
+        # scope of its defining module (an instantiation writes its name there)
+        self.generics: list[tuple[hir.GenericSource, dict, dict, dict]] = []
+        seen: set[int] = set()
+        for record in self.order:
+            for source in _generic_sources(record.root, seen):
+                context = source.context
+                self.generics.append((
+                    source,
+                    dict(source.instances),
+                    dict(context.declarations.maps[0]),
+                    dict(context.binding_scopes.maps[0]),
+                ))
+
+    def rollback(self) -> None:
+        state = self.state
+        registry = state['registry']
+        if registry.next_id != self.next_id:
+            for binding_id in [item for item in registry.by_id if item >= self.next_id]:
+                del registry.by_id[binding_id]
+            for key in [key for key, binding in registry.by_syntax.items() if binding.id >= self.next_id]:
+                del registry.by_syntax[key]
+            registry.next_id = self.next_id
+        if registry.next_route_id != self.next_route_id:
+            for route_id in [item for item in registry.route_paths if item >= self.next_route_id]:
+                path = registry.route_paths.pop(route_id)
+                for root_id, routes in registry.routes_by_root.items():
+                    if route_id in routes:
+                        routes.remove(route_id)
+                registry.route_ids = {key: value for key, value in registry.route_ids.items() if value != route_id}
+            registry.next_route_id = self.next_route_id
+        state['records'].clear()
+        state['records'].update(self.records)
+        state['order'][:] = self.order
+        state['representation_notes'][:] = self.notes
+        state['finished_roots'].clear()
+        system = state['type_system']
+        system._named_types.clear()
+        system._named_types.update(self.named_types)
+        system._type_parents.clear()
+        system._type_parents.update({name: set(parents) for name, parents in self.type_parents.items()})
+        system._type_children.clear()
+        system._type_children.update({name: set(children) for name, children in self.type_children.items()})
+        system._promote_rules.clear()
+        system._promote_rules.update(self.promote_rules)
+        for source, instances, declarations, scopes in self.generics:
+            source.instances.clear()
+            source.instances.update(instances)
+            source.context.declarations.maps[0].clear()
+            source.context.declarations.maps[0].update(declarations)
+            source.context.binding_scopes.maps[0].clear()
+            source.context.binding_scopes.maps[0].update(scopes)
+
+
+def _generic_sources(value: object, seen: set[int]) -> list[hir.GenericSource]:
+    """Every `GenericFunction`'s source under a checked tree."""
+    from dataclasses import fields, is_dataclass
+    found: list[hir.GenericSource] = []
+    if id(value) in seen:
+        return found
+    if isinstance(value, hir.GenericFunction):
+        seen.add(id(value))
+        found.append(value.source)
+        return found
+    if is_dataclass(value) and not isinstance(value, type) and isinstance(value, hir.AST):
+        seen.add(id(value))
+        for field_ in fields(value):
+            found.extend(_generic_sources(getattr(value, field_.name), seen))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            found.extend(_generic_sources(item, seen))
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.extend(_generic_sources(item, seen))
+    return found
+
+
+_resident_preludes: dict[Path, _ResidentPrelude] = {}
+
+
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
@@ -55,9 +166,11 @@ class ModuleCompiler:
         self.finished_roots: dict[int, hir.Block] = {}
 
     def _ensure_prelude(self) -> None:
+        from . import check
         if self.prelude_loaded:
             return
         if self._restore_checked_prelude():
+            check.reset_synthesized_names()   # the program's names start where they would after a fresh check
             return
         self.prelude_loaded = True
         for path in prelude_files(self.target):
@@ -72,6 +185,7 @@ class ModuleCompiler:
                     )
                 self.prelude_bindings[name] = binding
         self._store_checked_prelude()
+        check.reset_synthesized_names()   # the prelude's dictionary and key names are its own; the program's start over
 
     # ---- the checked-prelude cache ----
     # Checking the prelude's modules costs ~0.85 s of a ~1 s warm compile,
@@ -101,6 +215,7 @@ class ModuleCompiler:
         return Path('__dewycache__') / 'prelude' / f'{self.target}-{digest.hexdigest()[:24]}.pickle'
 
     def _restore_checked_prelude(self) -> bool:
+        import os
         import pickle
         if self.records or self.registry.by_id:
             # a `$no_prelude` module was checked first and lives in this
@@ -109,12 +224,26 @@ class ModuleCompiler:
         cache_path = self._checked_prelude_path()
         if cache_path is None or not cache_path.is_file():
             return False
-        try:
-            state, nominal_types, validated = pickle.loads(cache_path.read_bytes())
-        except Exception:
-            return False   # a stale or corrupt entry: check the prelude and rewrite it
-        if not (isinstance(nominal_types, dict) and 'nominal' in nominal_types and 'brands' in nominal_types):
-            return False   # an entry from before the registries were stored: check the prelude and rewrite it
+        resident = _resident_preludes.get(cache_path)
+        stat = cache_path.stat()
+        if resident is not None and resident.stamp != (stat.st_size, stat.st_mtime_ns):
+            del _resident_preludes[cache_path]
+            resident = None
+        if resident is not None:
+            # the state a compile in this process already loaded: what that
+            # compile added is rolled back, and the same objects serve again
+            resident.rollback()
+            state, nominal_types, validated = resident.state, resident.registries, resident.validated
+        else:
+            try:
+                state, nominal_types, validated = pickle.loads(cache_path.read_bytes())
+            except Exception:
+                return False   # a stale or corrupt entry: check the prelude and rewrite it
+            if not (isinstance(nominal_types, dict) and 'nominal' in nominal_types and 'brands' in nominal_types):
+                return False   # an entry from before the registries were stored: check the prelude and rewrite it
+            if not os.environ.get('DEWY_NO_RESIDENT_PRELUDE'):
+                _resident_preludes.clear()   # one prelude per process (a different target or a changed library replaces it)
+                _resident_preludes[cache_path] = _ResidentPrelude(state, nominal_types, validated, cache_path)
         for name in self._PRELUDE_STATE_FIELDS:
             setattr(self, name, state[name])
         # the brand registries a minted type lives in (`let Warning = type of Report & […]` in the prelude)
@@ -516,6 +645,7 @@ def typecheck_program(
     check.pending_brand_matches.clear()
     check.debug_formatters.clear()
     check.debug_variable_types.clear()
+    check.reset_synthesized_names()
     bounds.last_cap_notes.clear()
     ty.reset_program_brands()   # the program's minted brands: a closed world per compile
     compiler = ModuleCompiler(srcfile, target, test=test, debug=debug)

@@ -27,5 +27,9 @@ pythonpath = ["."]
 testpaths = ["tests"]
 # parallel by default (pytest-xdist); `-n 0` runs serially for debugging. Tests
 # are grouped by file so the ones that compile the same fixture share a worker
-# and never race on its `__dewycache__` artifacts.
+# and never race on its `__dewycache__` artifacts (tests/conftest.py orders the
+# big files first so no worker is left running one alone at the end).
 addopts = "-n auto --dist loadfile"
+markers = [
+    "slow: an integration test that spawns the CLI, a debugger, or an installer; `-m 'not slow'` for the everyday gate",
+]

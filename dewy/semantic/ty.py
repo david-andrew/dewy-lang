@@ -441,6 +441,7 @@ USER_ABSTRACT_BRANDS: set[str] = set()
 
 
 def reset_program_brands() -> None:
+    USER_NOMINAL_TYPES.clear()   # the prelude's come back with the restored prelude (or its check); a program's are its own
     USER_BRANDS.clear()
     USER_BRAND_PARENTS.clear()
     USER_BRAND_TYPES.clear()

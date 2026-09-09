@@ -20,6 +20,8 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.frontend import EntryPointOptions, entry_point
 
+pytestmark = pytest.mark.slow   # spawns processes: the CLI, a debugger, an installer
+
 repo = Path(__file__).resolve().parents[2]
 
 PROGRAM = '''let Hit = type of any & [length:uint64 name:string]

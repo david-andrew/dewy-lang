@@ -1762,7 +1762,7 @@ def _drop_key_facts(ctx: Context, *, dictionary_id: int | None = None, key_id: i
             del ctx.key_facts[fact_key]
 
 
-_key_position_counter = count(1)
+_key_position_counter = count(1)   # reset per compile (`reset_synthesized_names`), so a compile's names do not depend on earlier compiles in the process
 
 
 def _new_key_position_name() -> str:
@@ -6859,6 +6859,13 @@ def _resolve_type_alias(binding: sb.Binding, *, ctx: Context) -> ty.TypeAliasVal
 
 
 _dict_literal_counter = count(1)
+
+
+def reset_synthesized_names() -> None:
+    """Start the per-program name counters over: the same program spells the same names in every process."""
+    global _key_position_counter, _dict_literal_counter
+    _key_position_counter = count(1)
+    _dict_literal_counter = count(1)
 
 
 def _dict_literal_block(ast: p0.AST) -> p0.Block | None:

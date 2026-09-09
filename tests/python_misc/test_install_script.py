@@ -6,6 +6,10 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.slow   # spawns processes: the CLI, a debugger, an installer
+
 REPO_ROOT = Path(__file__).parents[2]
 
 

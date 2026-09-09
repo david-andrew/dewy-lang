@@ -17,6 +17,8 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 from test_cleanparse_udewy_e2e import x86_64_toolchain_available
 
+pytestmark = pytest.mark.slow   # spawns processes: the CLI, a debugger, an installer
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 needs_toolchain = pytest.mark.skipif(not x86_64_toolchain_available(), reason='needs the x86_64 toolchain')
 

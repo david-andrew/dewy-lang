@@ -12,6 +12,8 @@ from dewy.semantic import check, hir
 from dewy.semantic.errors import UserError
 from udewy.frontend import EntryPointOptions, entry_point
 
+pytestmark = pytest.mark.slow   # spawns processes: the CLI, a debugger, an installer
+
 here = Path(__file__).parent
 repo = here.parent.parent
 
