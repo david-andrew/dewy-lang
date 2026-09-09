@@ -6954,6 +6954,10 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
         pending_methods=ctx.pending_methods,   # the caller's types' methods, declared on first use
         object_strings=ctx.object_strings,
         synthesized=ctx.synthesized,
+        # A prelude generic can precede the numeric libraries in source
+        # order. Its concrete instantiation uses this compilation's complete
+        # helper identities without importing the caller's lexical names.
+        prelude_bindings=ctx.prelude_bindings or defining.prelude_bindings,
     )
     for param in source.params:
         alias = instance_ctx.binding_registry.allocate_param(param.name, ty.TYPE_TYPE, generic.loc)
@@ -9835,13 +9839,13 @@ def _is_rational(type_: ty.Type, *, ctx: Context) -> bool:
 
 def _prelude_call(name: str, args: list[hir.AST], *, loc: Span, ctx: Context) -> hir.FunctionCall:
     """Call a prelude function by name with already-checked arguments."""
-    if name not in ctx.declarations:
+    binding = ctx.prelude_bindings.get(name)
+    if binding is None and name not in ctx.declarations:
         user_error(
             ctx.srcfile,
-            'rationals need the prelude',
-            Pointer(span=loc, message=f'`{name}` from `library/rational.dewy` is not in scope'),
+            'numeric operations need the prelude',
+            Pointer(span=loc, message=f'the numeric helper `{name}` is not in scope'),
         )
-    binding = ctx.prelude_bindings.get(name)
     func = (
         hir.ExpressedIdentifier(loc, binding.type, binding.name, binding_id=binding.id)
         if binding is not None and binding.type is not None
@@ -12245,6 +12249,12 @@ def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | Non
     return None   # `:> <(x:int64):>int64>` is a type in a type block, as before
 
 
+def _function_result_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
+    """A signature and a literal interpret their result annotation alike."""
+    facts = _void_facts_annotation(ast, ctx=ctx)
+    return facts if facts is not None else ast_to_type(ast, ctx=ctx)
+
+
 def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     """FunctionType for a function literal whose params and return type are fully annotated, else None.
 
@@ -12770,7 +12780,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
                 _function_type_args(item.left.right, ctx=ctx),
                 [],
                 None,
-                ast_to_type(item.right, ctx=ctx),
+                _function_result_type(item.right, ctx=ctx),
             ),
             mutable,
         )
@@ -14055,7 +14065,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 _function_type_args(ast.left, ctx=ctx),
                 [],
                 None,
-                ast_to_type(ast.right, ctx=ctx),
+                _function_result_type(ast.right, ctx=ctx),
             )
 
         case p0.BinOp(op=t1.Operator(symbol='*')):
