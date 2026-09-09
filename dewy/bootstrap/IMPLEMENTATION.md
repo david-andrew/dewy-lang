@@ -137,6 +137,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   relational changes for push, insert, pop, truncate, and clear. Its native
   comparison exercises exact, ranged, and unknown lengths/counts against the
   hosted HIR evaluator; validation and element transfer stay separate.
+- `semantic/analyze/length_proofs.dewy` connects relational evidence to
+  expression bounds, in both directions. Its native comparison agrees with
+  the hosted pass on 10,800 queries covering arithmetic offsets, end-relative
+  indices, transmutation, remainder facts, and contracts on slice results.
+  The evaluator supplies an interval snapshot at the query site; proof
+  search does not evaluate effectful expressions again. These snapshots must
+  not survive a change to the flow state. The full evaluator remains pending.
 - The supporting hosted fixes include dictionary field stores, field-valued
   key facts with invalidation, runtime set literals, and optional array
   returns through the existing aggregate ownership path. Loop conditions

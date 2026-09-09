@@ -1,0 +1,141 @@
+import p"../hir.dewy" as hir
+import p"../bindings.dewy" as bindings
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"element_facts.dewy" as elements
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+
+doc"""
+Proofs relating an expression's value to a sequence's current length.
+
+The evaluator supplies the intervals it has established for this query's
+expressions. This is a snapshot at the query site, not a cache reusable
+after assignments or calls. Keeping evaluation outside the proof search
+avoids evaluating effectful HIR again while trying alternative proofs.
+A missing interval contributes no evidence; symbolic proofs can still hold.
+
+Both directions are needed: `count <=? src.length` bounds a consumed prefix,
+whereas `radix =? alphabet.length` needs the upper and lower proofs together.
+Failing to establish a bound means unknown, not that its opposite is true.
+"""
+
+Context:type = const [
+    env:values.Environment
+    relations:relations.Context
+    intervals:dict<addr ranges.Interval>
+]
+subject = (id:addr context:Context @registry:bindings.Registry):>facts.Term? => {
+    let named = terms.binding_term(id context.env @registry)
+    if named isnt? none return named
+    let route = elements.route_of(id context.env @registry)
+    return if route is? none none else facts.Term[route]
+}
+nonnegative = (id:addr state:facts.State context:Context):>bool => {
+    let interval = relations.interval_of(facts.Term[id] state context.relations)
+    return interval.lower isnt? none and interval.lower >=? 0
+}
+
+# `sequence.length - expression >= gap`: an order/index fact, an end-relative
+# offset, arithmetic that preserves a bound, a remainder fact for a sum, or
+# a function result whose contract names the actual sequence argument.
+upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context @registry:bindings.Registry):>bool => {
+    let current = expressions.strip_casts(id context.env.nodes)
+    let node = hir.node_at(context.env.nodes current)
+    if node is? hir.Transmute {
+        # Reinterpreting signed bits preserves this number only after its
+        # source has been shown nonnegative. The cast alone is not a proof.
+        let inner = context.intervals.get(node.expr)
+        if inner isnt? none and inner.lower isnt? none and inner.lower >=? 0 {
+            return upper(node.expr sequence gap state context @registry)
+        }
+        return false
+    }
+    let length = facts.Term[sequence 'length']
+    let named = subject(current context @registry)
+    if named isnt? none and relations.ordered(named length gap state context.relations) return true
+    let offset = terms.length_offset(current sequence context.env @registry)
+    if offset isnt? none and offset >=? gap return true
+    let minimum = relations.minimum_length(sequence state context.relations)
+    let interval = context.intervals.get(current)
+    if interval isnt? none and interval.upper isnt? none and interval.upper <=? minimum-gap return true
+    if node is? hir.FunctionCall and node.pos_args.length =? 2 {
+        let function = hir.node_at(context.env.nodes node.func)
+        if function is? hir.ExpressedIdentifier {
+            if function.name =? '__sub__' {
+                let constant = values.constant(node.pos_args[1] context.env)
+                if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) and constant.lower >=? 0 {
+                    return upper(node.pos_args[0] sequence gap-constant.lower state context @registry)
+                }
+            }
+            else if function.name =? '__add__' {
+                loop side in 0..1 {
+                    let value = if side =? 0 node.pos_args[0] else node.pos_args[1]
+                    let other = if side =? 0 node.pos_args[1] else node.pos_args[0]
+                    let constant = values.constant(other context.env)
+                    if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) and constant.lower >=? 0 {
+                        return upper(value sequence gap+constant.lower state context @registry)
+                    }
+                }
+                let left = terms.binding_term(node.pos_args[0] context.env @registry)
+                let right = terms.binding_term(node.pos_args[1] context.env @registry)
+                if left isnt? none and right isnt? none and left.projection =? 'value' and right.projection =? 'value' {
+                    loop entry in state.values {
+                        let fact = entry.fact
+                        let bound = entry.interval.lower
+                        if fact is? facts.Remainder and bound isnt? none {
+                            let matches = (facts.same_term(fact.subject left) and fact.offset =? right.binding_id) or (facts.same_term(fact.subject right) and fact.offset =? left.binding_id)
+                            if matches and relations.ordered(fact.upper length gap-bound state context.relations) return true
+                        }
+                    }
+                }
+            }
+        }
+    }
+    loop promise in terms.call_facts(current 'self' context.env @registry) {
+        if promise.direction not=? 'upper' continue
+        if promise.offset isnt? none and not nonnegative(promise.offset state context) continue
+        # A slice result is at most upper-offset-gap. Dropping offset is
+        # justified only when that offset is itself known nonnegative.
+        if relations.ordered(promise.upper length gap-promise.gap state context.relations) return true
+    }
+    return false
+}
+
+# `expression - sequence.length >= gap`: intervals above the known maximum,
+# the length plus a constant, a named order fact, or a lower result promise.
+lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context @registry:bindings.Registry):>bool => {
+    let current = expressions.strip_casts(id context.env.nodes)
+    let node = hir.node_at(context.env.nodes current)
+    let length = facts.Term[sequence 'length']
+    let known = facts.lookup(state facts.value(length))
+    if known isnt? none and known.upper isnt? none {
+        let interval = context.intervals.get(current)
+        if interval isnt? none and interval.lower isnt? none and interval.lower-known.upper >=? gap return true
+    }
+    let measured = expressions.sequence_of(current context.env.nodes)
+    if measured isnt? none and terms.sequence_id(measured context.env @registry) =? sequence return gap <=? 0
+    if node is? hir.FunctionCall and node.pos_args.length =? 2 {
+        let function = hir.node_at(context.env.nodes node.func)
+        if function is? hir.ExpressedIdentifier and (function.name =? '__add__' or function.name =? '__sub__') {
+            loop side in 0..1 {
+                if side =? 1 and function.name =? '__sub__' break
+                let value = if side =? 0 node.pos_args[0] else node.pos_args[1]
+                let other = if side =? 0 node.pos_args[1] else node.pos_args[0]
+                let constant = values.constant(other context.env)
+                if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) {
+                    let shift = if function.name =? '__add__' constant.lower else -constant.lower
+                    return lower(value sequence gap-shift state context @registry)
+                }
+            }
+        }
+    }
+    let named = subject(current context @registry)
+    if named isnt? none and relations.ordered(length named gap state context.relations) return true
+    loop promise in terms.call_facts(current 'self' context.env @registry) {
+        if promise.direction =? 'lower' and promise.offset is? none and facts.same_term(promise.upper length) and promise.gap >=? gap return true
+    }
+    return false
+}
