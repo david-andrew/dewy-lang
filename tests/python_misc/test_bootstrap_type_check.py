@@ -110,6 +110,7 @@ main = ():>int64 => {{
         }}
         let value = checking.resolve(root.inner[root.inner.length - 1] context @session)
         $runtime_assert value is? Error
+        $runtime_assert value.pointers.length >? 0 and value.pointers[0].message.length >? 0
         printl('rejected')
     }}
     return 0

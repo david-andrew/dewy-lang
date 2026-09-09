@@ -22,9 +22,13 @@ Source:type = const [srcfile:SrcFile nodes:array<tokens.Token>]
 SyntaxRef:type = const [source:addr node:addr scope:addr]
 Context:type = const [source:addr scope:addr refinement_subject:string?=none immutable_record:bool=false]
 PendingAlias:type = const [expression:SyntaxRef]
+# Current read alternatives are separate from each binding's store contract.
+# A branch copies this state; declaration/type/HIR identities remain shared.
+ReadState:type = [types:dict<addr addr>=[]]
 Session:type = [
     target:targets.Target=$target
     sources:array<Source>=[]
+    read_states:array<ReadState>=[]
     syntax_refs:array<SyntaxRef>=[]
     types:array<types.Type>=[]
     hir:array<hir.AST>=[]
@@ -54,7 +58,10 @@ syntax_ref = (id:addr context:Context @session:Session):>addr => {
 problem = (id:addr title:string message:string context:Context session:Session hint:string=''):>Error => {
     let source = source_at(context session)
     let node = tokens.node_at(source.nodes id)
-    return Error[srcfile=source.srcfile title=title pointers=[Pointer[span=node.loc message=message]] hint=hint]
+    # Build the nested pointer before entering Report's field scope: its
+    # own default `message` must not hide this function's pointer message.
+    let pointer = Pointer[span=node.loc message=message]
+    return Error[srcfile=source.srcfile title=title pointers=[pointer] hint=hint]
 }
 unsupported = (id:addr detail:string context:Context session:Session):>Error => problem(id 'native checker implementation pending' detail context session)
 child = (context:Context @session:Session):>Context => {

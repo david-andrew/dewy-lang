@@ -25,6 +25,21 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- `semantic/check.dewy` begins the source value visitor: stable runtime
+  bindings, literals/arrays, builtin dispatch, contextual conversions and
+  refinement obligations, typed and forward-declared functions, returns,
+  conditional expressions, and type-test narrowing. Branch read alternatives
+  are separate from declared store contracts. Its first comparison covers
+  18 source programs. This is an intermediate HIR entry point, not yet a
+  compiler driver: imports, the remaining value forms, proof validation,
+  representation selection, and native emission are still required.
+- Hosted short-circuit continuations join mutations from the evaluated and
+  skipped paths. Bounds evaluation composes value blocks and conditional
+  expressions without replaying effects; scoped expression blocks share the
+  existing conditional-result lowering. Named argument/field classification
+  retains ambiguities inside their values, and synthesized assertion helpers
+  resolve their original prelude binding rather than a shadowing local name.
+
 - `semantic/context.dewy` owns source modules, syntax references, lexical
   scopes, types, HIR, and mint registries for one compilation. Deferred
   defaults and methods retain their defining source and scope.
