@@ -1,0 +1,42 @@
+# `const [...]` is an immutable record: a value whose contents never change
+# after construction (not a compile-time one). Nothing writes through it — no
+# field, no member's in-place mutation, no place taken of a field — while the
+# binding may be replaced whole; a writable value may become one (copied),
+# never the other way round. A field may relate to an earlier sibling
+# (`radix =? alphabet.length`): proven when the record is built, for the
+# default and for an explicit value, and known wherever the record is read.
+BaseInfo:type = const [
+    alphabet:string<2 <=? length <=? uint8.max>
+    case_sensitive:bool
+    extra_chars:dict<string int8?>
+    radix:uint8<radix =? alphabet.length> = alphabet.length
+]
+const BASE_SPECS: totaldict<'0b' | '0x' | '0g' BaseInfo> = [
+    '0b' -> ['01' true []]
+    '0x' -> ['0123456789abcdef' false ['-'->62 '='->none] 16]
+    '0g' -> ['0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' true ['-'->62 '_'->63 '='->none]]
+]
+Opening:type = const [idx:addr loc:string]
+Frame = type of any & const [opening:Opening kind:'square' | 'round']   # a minted immutable record
+let last_digit = (info:BaseInfo):>string => info.alphabet[info.radix - 1]     # radix = alphabet.length: the index is in bounds
+let with_alphabet = (s:string<2 <=? length <=? uint8.max>):>BaseInfo => BaseInfo[s false []]   # a runtime alphabet within the bounds
+let describe = (f:Frame):>string => "{f.kind} at {f.opening.idx}"
+let main = ():>int64 => {
+    let hex = BASE_SPECS['0x']
+    let bin = BaseInfo['01' true []]
+    let oct = with_alphabet("01234567")
+    let mut:[alphabet:string case_sensitive:bool extra_chars:dict<string int8?> radix:uint8] = [alphabet="ab" case_sensitive=true extra_chars=[] radix=2]   # a writable record of the same shape…
+    let frozen:BaseInfo = mut                                                   # …becomes the immutable one (copied)
+    mut.radix = 5                                                               # the writable original is still writable
+    let copy = hex                                                              # a copy is the same immutable type
+    let frames:array<Frame> = [Frame[opening=Opening[idx=3 loc="[.."] kind='square']]
+    frames.push(Frame[opening=Opening[idx=9 loc="(.."] kind='round'])          # the container changes; its records do not
+    let current:BaseInfo = bin
+    current = hex                                                               # whole-value replacement of a binding
+    let total:int64 = 0
+    loop f in frames { total += f.opening.idx }
+    if hex.radix =? 16 and bin.radix =? 2 and oct.radix =? 8 and frozen.radix =? 2 and mut.radix =? 5 and copy.radix =? 16 and current.radix =? 16
+        and last_digit(hex) =? 'f' and last_digit(BASE_SPECS['0g']) =? '/' and last_digit(oct) =? '7'
+        and describe(frames[1]) =? "round at 9" and total =? 12 return 42
+    return 1
+}

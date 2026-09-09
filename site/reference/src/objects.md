@@ -39,6 +39,32 @@ copy.saved = true             # original.saved remains false
 
 Nested array and object fields recursively follow the same value rule.
 
+## Immutable Records
+
+`const [...]` in a type position is an *immutable record*: a runtime value whose contents never change after it is built. It is not a compile-time value, and it is not the `const` binding declaration: the binding may still be replaced whole. Nothing writes through such a value — not a field, not a member changed in place (an array's `push`, a dictionary's store or `pop`), not a place taken of a field (`@info.radix`), and not a method of the record that assigns a field (refused where the method is declared). The barrier holds through copies, containers, unions, and function boundaries, because the qualifier is part of the type: `const [x:int64]` and `[x:int64]` are different types. A writable record of the same shape may be used where the immutable one is expected (the value is copied there), never the reverse, so a writable contract cannot be handed an immutable value. A copy of a member taken out with `let` is an ordinary value again. `type of any & const [...]` mints an immutable nominal type, and a child of an immutable parent is immutable.
+
+What cannot change stays proven, which is what the qualifier is for: a field of an immutable record may relate to an earlier sibling — `radix:uint8<radix =? alphabet.length>` — and the relation is checked when the record is built (for the default and for an explicit value; a wrong explicit value is refuted) and known wherever the record is read afterwards. A writable record refuses such an invariant: either field could be assigned later.
+
+<!-- dewy-example: compiler -->
+```dewy
+BaseInfo:type = const [
+    alphabet:string<2 <=? length <=? uint8.max>
+    case_sensitive:bool
+    radix:uint8<radix =? alphabet.length> = alphabet.length     # a sibling invariant, with its default
+]
+let hex = BaseInfo['0123456789abcdef' false]                   # radix defaults to 16, proven equal to the length
+let bin = BaseInfo['01' true 2]                                # an explicit radix is checked the same way
+let last_digit = (info:BaseInfo):>string => info.alphabet[info.radix - 1]   # in bounds: radix is the alphabet's length
+let main = ():>int64 => {
+    let current:BaseInfo = bin
+    current = hex                                              # the binding is replaced whole; its contents never change
+    if last_digit(current) =? 'f' and bin.radix =? 2 return 0
+    return 1
+}
+```
+
+`info.radix = 8`, `info.alphabet = "01"`, or `bump(@info.radix)` in `last_digit` would each be refused as a write through an immutable record; `BaseInfo['01' true 3]` is refuted at construction.
+
 ## Constructors
 
 Calling an object type constructs a value of it. The field list is the constructor's signature, read exactly like a function's: positional arguments fill fields in declaration order, keyword arguments name them, and a field declared with a default (`name:type = default`) may be left out — a default may refer to earlier fields by name.

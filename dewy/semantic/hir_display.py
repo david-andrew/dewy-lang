@@ -81,7 +81,7 @@ def type_to_dewy(t: ty.Type) -> str:
             f'{"const " if not field.mutable else ""}{field.name}:{type_to_dewy(ty.RefinedType(field.type, field.refinement) if field.refinement else field.type)}'
             for field in t.fields
         )   # a field's invariant is part of the type (`[start:addr stop:addr]`): synthesized code keeps it
-        return f'[{fields}]'
+        return f'{"const " if t.immutable else ""}[{fields}]'
     if isinstance(t, ty.FunctionType):
         return _function_type_to_dewy(t)
     if isinstance(t, ty.OverloadType):

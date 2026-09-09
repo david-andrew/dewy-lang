@@ -61,6 +61,7 @@ class Context:
     began (0 at module level): the scopes above it are the function's own,
     which is what `$breakpoint` shows."""
     refinements: dict[int, ty.Type] = field(default_factory=dict)
+    immutable_record: bool = False   # the `[...]` being read is under `const`: an immutable record (not its nested type expressions)
     refinement_subject: str | None = None
     """The name being annotated (`d:int64<d not=? 0>`): inside its type's
     parameterize blocks a comparison on that name is a refinement of the value."""
@@ -5654,6 +5655,12 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         else:
             self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, _RECEIVER))
             method.place_self = _body_mutates_members(body, visible)
+            if method.place_self and isinstance(alias.type_value, ty.ObjectType) and alias.type_value.immutable:
+                user_error(
+                    ctx.srcfile,
+                    f'method `{method.name}` changes an immutable record',
+                    Pointer(span=loc, message=f'`{alias.name}` is `const [...]`: its contents never change, so a method cannot assign or mutate a field'),
+                )
             if method.place_self:
                 self_name = p0.Prefix(loc, t1.Operator(loc, '@'), self_name)
             self_param = p0.BinOp(loc, t1.Operator(loc, ':'), self_name, p0.Atom(loc, t1.Identifier(loc, alias.name)))
@@ -5750,6 +5757,44 @@ def _declaration_pointers(binding: sb.Binding) -> list[Pointer]:
     if binding.declaration is None:
         return []
     return [Pointer(span=binding.declaration.loc, message='const declaration is here')]
+
+
+def _immutable_reason(node: hir.AST) -> str | None:
+    """Why a write through ``node`` is refused: the path reaches through a record
+    of an immutable type (`const [...]`), whose contents never change — a field,
+    a member's in-place mutation, a place taken of a field, an element."""
+    current = node
+    while True:
+        if isinstance(current, (hir.MemberAccess, hir.ForwardingAccess)):
+            owner = ty.unfold(ty.strip_refinement(current.value.type))
+            owners = owner.items if isinstance(owner, ty.TypeOr) else [owner]
+            for candidate in owners:
+                candidate = ty.unfold(ty.strip_refinement(candidate))
+                if isinstance(candidate, ty.ObjectType) and candidate.immutable:
+                    return f'`{current.name if isinstance(current, hir.MemberAccess) else current.field}` is a field of an immutable record (`{type_to_dewy(candidate)}`)'
+            current = current.value
+            continue
+        if isinstance(current, hir.Index):
+            current = current.array
+            continue
+        if isinstance(current, hir.Block) and not current.scoped and len(current.items) == 1:
+            current = current.items[0]
+            continue
+        if isinstance(current, (hir.ValueCast, hir.RepresentationCast, hir.Transmute, hir.Obligation)):
+            current = current.expr if not isinstance(current, hir.Obligation) else current.value
+            continue
+        return None
+
+
+def _refuse_immutable_write(node: hir.AST, loc: Span, what: str, *, ctx: Context) -> None:
+    reason = _immutable_reason(node)
+    if reason is not None:
+        user_error(
+            ctx.srcfile,
+            f'cannot {what} of an immutable record',
+            Pointer(span=loc, message=reason),
+            hint='an immutable record (`const [...]`) is replaced whole, never changed in place: build a new one, or copy the member out with `let` and change the copy',
+        )
 
 
 def _read_only_reason(binding: sb.Binding | None) -> str | None:
@@ -6380,7 +6425,8 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
         ty.USER_BRAND_PARENTS[name] = ancestor
     else:
         ty.USER_BRAND_PARENTS.pop(name, None)
-    minted = ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods))
+    immutable = any(isinstance(item, ty.ObjectType) and item.immutable for item in operands)   # `type of any & const [...]`, or an immutable parent
+    minted = ty.ObjectType(tuple(fields), brand=name, methods=tuple(methods), immutable=immutable)
     ty.USER_BRAND_TYPES[name] = minted
     if abstract:
         ty.USER_ABSTRACT_BRANDS.add(name)   # `$abstract`: values only of its children
@@ -7857,13 +7903,14 @@ def _tcr_object_literal(
         field_type = binding.type or value.type
         # a field invariant is not part of the literal's shape — except the facts that are a type's name (`addr`, `nat64`)
         types.append(ty.ObjectField(name, ty.strip_refinement(field_type), mutable, refinement=ty.named_refinement(field_type)))
-    object_type = ty.ObjectType(tuple(types))
+    # a literal built where an immutable record is expected is that record: what it holds never changes
+    object_type = ty.ObjectType(tuple(types), immutable=expected_object.immutable if expected_object is not None else False)
     if expected_object is not None:
         check_against(
             hir.ObjectLiteral(block.loc, object_type, fields),
             # a literal in a minted type's context is its construction form:
             # the fields are checked structurally and the value takes the brand
-            ty.ObjectType(expected_object.fields, methods=expected_object.methods) if ty.user_branded(expected_object) else expected_object,
+            ty.ObjectType(expected_object.fields, methods=expected_object.methods, immutable=expected_object.immutable) if ty.user_branded(expected_object) else expected_object,
             ctx=ctx,
         )
         object_type = expected_object
@@ -8123,6 +8170,7 @@ def _tcr_array_method(
                 'cannot mutate a field of a const binding',
                 Pointer(span=value.loc, message=f'`{root.name}` {reason}'),
             )
+        _refuse_immutable_write(value, value.loc, 'mutate a member', ctx=ctx)
         if value.type.length is not None:
             user_error(
                 ctx.srcfile,
@@ -8321,6 +8369,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                         'cannot mutate a const dictionary',
                         Pointer(span=binop.left.loc, message=f'`{root.name}` {reason}'),
                     )
+                _refuse_immutable_write(dictionary, binop.left.loc, 'mutate a dictionary member', ctx=ctx)
             return hir.DictMethod(binop.loc, signature, dictionary, name)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
@@ -8422,6 +8471,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             f'cannot take the place of const object field `{name}`',
             Pointer(span=binop.loc, message='this field is const'),
         )
+    _refuse_immutable_write(access, binop.loc, 'take the place of a field', ctx=ctx)
     return hir.Place(binop.loc, field.type, access)
 
 
@@ -10597,6 +10647,7 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
                 'function handles and partial application with `@`',
             )
         binding = _member_root_binding(target, ctx=ctx)
+        _refuse_immutable_write(target, prefix.loc, 'pass a member', ctx=ctx)
         if binding is not None:
             if (reason := _read_only_reason(binding)) is not None:
                 user_error(
@@ -11669,6 +11720,7 @@ def tcr_assignment_target(
                     Pointer(span=access.value.loc, message=f'`{binding.name}` {reason}'),
                     *_declaration_pointers(binding),
                 )
+            _refuse_immutable_write(access, target.loc, 'assign a field', ctx=ctx)
             return access
         if isinstance(target.op, t2.QJuxtapose):
             index_op = next(
@@ -11692,6 +11744,10 @@ def tcr_assignment_target(
                         message='convert to a mutable array representation first',
                     ),
                 )
+            if isinstance(resolved, hir.DictLookup):
+                # `obj.d[k] = v`: a store into a dictionary reached through a field
+                _refuse_immutable_write(resolved.keys, target.loc, 'store into a dictionary member', ctx=ctx)
+                not_implemented(ctx.srcfile, target.loc, 'storing into a dictionary reached through a field (`obj.d[k] = v`; a dictionary binding takes `d[k] = v`)')
             assert isinstance(resolved, hir.Index)
             root = resolved.array
             while True:
@@ -11709,6 +11765,7 @@ def tcr_assignment_target(
                     root = root.expr
                     continue
                 break
+            _refuse_immutable_write(resolved, target.loc, 'assign an element of a member', ctx=ctx)
             if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
                 binding = ctx.binding_registry.by_id[root.binding_id]
                 if (reason := _read_only_reason(binding)) is not None:
@@ -13117,6 +13174,35 @@ def _prove_refinements(node: hir.AST, refined: ty.RefinedType, *, ctx: Context) 
     pending: list[ty.Proposition] = []
     for proposition in refined.propositions:
         fact: int | None
+        if proposition.term is not None and proposition.term_id is None and proposition.field is not None:
+            # a field's relation to a sibling (`radix =? alphabet.length`): decided on
+            # the literal being built, by its fields' facts; a value of the type
+            # already carries it (the relation held when that value was built)
+            literal = _strip_obligations(node)
+            while isinstance(literal, (hir.ValueCast, hir.RepresentationCast)) or (isinstance(literal, hir.Block) and not literal.scoped and len(literal.items) == 1):
+                literal = literal.expr if isinstance(literal, (hir.ValueCast, hir.RepresentationCast)) else literal.items[0]
+            sibling = next((f for f in literal.fields if f.name == proposition.term), None) if isinstance(literal, hir.ObjectLiteral) else None
+            if sibling is not None and sibling.binding_id is not None:
+                pending.append(replace(proposition, term_id=sibling.binding_id))
+                continue
+            owner = ty.unfold(ty.strip_refinement(node.type))
+            sibling_field = owner.field(proposition.term) if isinstance(owner, ty.ObjectType) else None
+            if sibling_field is not None and isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess)):
+                # a writable value becoming the immutable record (`let frozen:BaseInfo = mut`): its
+                # fields' facts decide the relation, by their member routes
+                route = sb.array_route_id(hir.MemberAccess(node.loc, sibling_field.type, node, proposition.term, True), ctx.binding_registry)
+                if route is not None:
+                    pending.append(replace(proposition, term_id=route))
+            continue
+        if proposition.term is not None and proposition.term_id is None and proposition.param is None:
+            # a field's own value against a sibling (`radix:uint8<radix =? alphabet.length> = alphabet.length`,
+            # checked while the record is built): the sibling is the field binding in scope
+            sibling_binding = ctx.binding_scopes.get(proposition.term)
+            if sibling_binding is not None:
+                pending.append(replace(proposition, term_id=sibling_binding.id))
+                continue
+            if ctx.refinement_subject is not None or not ctx.function_boundary_labels:
+                continue   # the type's declaration: the relation is proven at every construction, where the sibling is bound
         if (proposition.term is not None and proposition.term_id is None) or (proposition.param is not None and proposition.subject_id is None):
             # a fact naming another binding is only resolved on a function's result
             # (and its parameters' annotations); elsewhere it would be inert
@@ -13294,6 +13380,36 @@ def _proposition_type(ast: p0.AST, *, ctx: Context) -> ty.Type | None:
         not_implemented(ctx.srcfile, ast.loc, 'a compound proposition as a type (write the arms: `true & <…> | false & <…>`)')
     fact = facts[0]
     return _refined('bool', [replace(fact, when=True), replace(fact.negated(), when=False)])
+
+
+def _object_type_with_qualifier(object_type: ty.Type, immutable: bool, block: p0.AST, *, ctx: Context) -> ty.Type:
+    """A record type as declared: `const [...]` marks it immutable, and a field
+    invariant naming a sibling field (`radix:uint8<radix =? alphabet.length>`)
+    must name an earlier field of an immutable record — a relation between
+    fields that can change is no invariant."""
+    if not isinstance(object_type, ty.ObjectType):
+        return object_type
+    if immutable:
+        object_type = replace(object_type, immutable=True)
+    for index, field_ in enumerate(object_type.fields):
+        earlier = {f.name for f in object_type.fields[:index]}
+        for proposition in field_.refinement:
+            if proposition.term is None or proposition.field is not None:
+                continue
+            if proposition.term not in earlier:
+                user_error(
+                    ctx.srcfile,
+                    f'`{field_.name}` names `{proposition.term}`, which is not an earlier field',
+                    Pointer(span=block.loc, message=f'a field invariant may name a sibling field declared before it; the fields before `{field_.name}` are {", ".join(f"`{name}`" for name in sorted(earlier)) or "none"}'),
+                )
+            if not object_type.immutable:
+                user_error(
+                    ctx.srcfile,
+                    f'`{field_.name}` relates to `{proposition.term}` in a writable record',
+                    Pointer(span=block.loc, message=f'`{field_.name}` or `{proposition.term}` could be assigned later, so the relation would not hold'),
+                    hint='make the record immutable: `const [...]` (a value whose contents never change after construction)',
+                )
+    return object_type
 
 
 def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
@@ -13474,7 +13590,13 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             return ty.BinaryLiteralType(packed)
         case p0.Atom(item=t1.Bool()):
             not_implemented(ctx.srcfile, ast.loc, 'a boolean literal type (use `bool`)')
+        case p0.KeywordExpr(parts=[t1.Keyword(name='const'), p0.Block(kind='[]') as block]):
+            # `const [...]`: an immutable record — a value whose contents never change,
+            # not a compile-time one; sibling invariants may live on its fields
+            return ast_to_type(block, ctx=replace(ctx, immutable_record=True))
         case p0.Block(kind='[]', inner=items):
+            immutable = ctx.immutable_record
+            ctx = replace(ctx, immutable_record=False)   # a nested record type is its own (the barrier still covers writes through this one)
             seen: dict[str, Span] = {}
             fields: list[ty.ObjectField] = []
             methods: list[ty.MethodSpec] = []
@@ -13503,7 +13625,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                         Pointer(span=previous, message='the earlier member is here'),
                     )
                 seen[member_name] = item.loc
-            return ty.ObjectType(tuple(fields), methods=tuple(methods))
+            return _object_type_with_qualifier(ty.ObjectType(tuple(fields), methods=tuple(methods)), immutable, ast, ctx=ctx)
 
         case p0.BinOp(
             op=t2.TypeParamJuxtapose(),
@@ -15667,6 +15789,8 @@ def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Propo
                 p.op,
                 p.value,
                 of='length' if p.subject == 'length' or (p.field is not None and p.of == 'length') else 'value',
+                term=p.term,
+                term_of=p.term_of,
                 axiom=p.axiom,
             )
             for p in field.refinement

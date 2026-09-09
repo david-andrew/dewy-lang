@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections import defaultdict
 from typing import Literal
 
@@ -273,6 +273,13 @@ class ObjectType:
     """Methods declared in the type; not part of structural identity."""
     constructors: list[int] = field(default_factory=list, compare=False, hash=False)
     """Binding ids of `&=` constructor overloads, in declaration order."""
+    immutable: bool = False
+    """`const [...]`: a record whose contents never change after construction —
+    no field write, no in-place mutation of a member, no place taken through
+    it. Part of the type: a writable record is not this type (though a
+    writable value may become one, copied), and this type is not a writable
+    record. Sibling-field invariants (`radix =? alphabet.length`) live only on
+    such records: what cannot change stays proven."""
 
     def method(self, name: str) -> 'MethodSpec | None':
         return next((m for m in self.methods if m.name == name), None)
@@ -280,7 +287,7 @@ class ObjectType:
     def invariants(self) -> list['Proposition']:
         """The field refinements as field-subject propositions on the object."""
         return [
-            Proposition(f'.{f.name}', p.op, p.value, term=p.term, term_id=p.term_id, axiom=p.axiom)
+            Proposition(f'.{f.name}', p.op, p.value, term=p.term, term_id=p.term_id, term_of=p.term_of, axiom=p.axiom)
             for f in self.fields
             for p in f.refinement
             if p.param is None and p.type_ is None
@@ -1407,6 +1414,11 @@ class TypeSystem:
                 return a
             return a if a.length == b.length else None
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
+            if a.immutable != b.immutable and replace(a, immutable=False) == replace(b, immutable=False):
+                # the same record, writable and not: a writable value may be
+                # used as the immutable record (it is copied there), never the
+                # other way round — the writable one is the subtype
+                return a if not a.immutable else b
             if a == b or user_brand_descends(a, b) or user_brand_carries(a, b):
                 return a
             return b if user_brand_descends(b, a) or user_brand_carries(b, a) else None
@@ -1553,6 +1565,8 @@ class TypeSystem:
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
+            if not a.immutable and b.immutable and replace(a, immutable=True) == b:
+                return True   # a writable record may be used as the immutable one (it is copied there); never the reverse
             return a == b or user_brand_descends(a, b) or user_brand_carries(a, b)
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b
@@ -2330,13 +2344,8 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
     if isinstance(t, (PathType, PathLiteralType)):
         return t
     if isinstance(t, ObjectType):
-        return ObjectType(
-            tuple(
-                ObjectField(field.name, to_nnf(field.type), field.mutable)
-                for field in t.fields
-            ),
-            t.brand,
-        )
+        # the fields normalized; the rest of the record (brand, methods, `const [...]`) as it was
+        return replace(t, fields=tuple(replace(field, type=to_nnf(field.type)) for field in t.fields))
     if isinstance(t, (ModuleType, MetaType)):
         return t
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
@@ -2470,17 +2479,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
     if isinstance(t, ArrayType):
         return ArrayType(substitute_type(t.element, bindings), t.length)
     if isinstance(t, ObjectType):
-        return ObjectType(
-            tuple(
-                ObjectField(
-                    field.name,
-                    substitute_type(field.type, bindings),
-                    field.mutable,
-                )
-                for field in t.fields
-            ),
-            t.brand,
-        )
+        return replace(t, fields=tuple(replace(field, type=substitute_type(field.type, bindings)) for field in t.fields))
     if isinstance(t, TypeAnd):
         return TypeAnd([substitute_type(x, bindings) for x in t.items])
     if isinstance(t, TypeOr):

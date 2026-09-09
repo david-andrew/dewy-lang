@@ -112,6 +112,7 @@ LOWERED_CASES = [
     ('object_result_flows.dewy', 42),
     ('empty_dicts.dewy', 42),
     ('same_name_arms.dewy', 42),
+    ('immutable_records.dewy', 42),
     ('array_moves.dewy', 42),
     ('array_rebind.dewy', 42),
     ('string_regions.dewy', 42),

@@ -256,6 +256,7 @@ class ModuleCompiler:
         return True
 
     def _store_checked_prelude(self) -> None:
+        import os
         import pickle
         if not all(record.prelude for record in self.records.values()):
             return   # a user module is already in this compiler's state
@@ -266,7 +267,7 @@ class ModuleCompiler:
         validated = {key for key in _validated_prelude_modules if key[2] == self.target}
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = cache_path.with_name(f'{cache_path.name}.{id(self)}.tmp')
+            tmp = cache_path.with_name(f'{cache_path.name}.{os.getpid()}.{id(self)}.tmp')   # per process: parallel test workers store the same entry at once
             registries = {
                 'nominal': dict(ty.USER_NOMINAL_TYPES), 'brands': set(ty.USER_BRANDS), 'parents': dict(ty.USER_BRAND_PARENTS),
                 'types': dict(ty.USER_BRAND_TYPES), 'abstract': set(ty.USER_ABSTRACT_BRANDS),

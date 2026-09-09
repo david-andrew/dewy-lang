@@ -137,7 +137,7 @@ def test_a_fact_on_a_local_names_a_binding_in_scope() -> None:
 def test_a_parameter_fact_may_name_a_sibling_parameter() -> None:
     take = 'let take = (src:string n:uint64<v => v <=? src.length>):>string => src[0..n)\n'   # `n` is in bounds by contract
     _check(take + 'let main = ():>int64 => { let text:string = "world!"  let k:uint64 = 9  if k <=? text.length { let h = take(text k) }  return 0 }\n')
-    with pytest.raises(UserError, match='cannot prove refinement'):   # nothing bounds `k` by `text`
+    with pytest.raises(UserError, match='refinement refuted'):   # `k` is 9 and `text` is 6 long: the intervals leave no room
         _check(take + 'let main = ():>int64 => { let text:string = "world!"  let k:uint64 = 9  let h = take(text k)  return 0 }\n')
     with pytest.raises(UserError, match='cannot prove refinement'):   # a term needs a binding to name
         _check(take + 'let main = ():>int64 => { let k:uint64 = 2  let h = take("abc" k)  return 0 }\n')

@@ -1119,6 +1119,17 @@ class _BoundsValidator:
                         lower_side, upper_side = (subject_interval, term_interval) if direction == 'upper' else (term_interval, subject_interval)
                         held = lower_side is not None and lower_side.upper is not None and upper_side.lower is not None and upper_side.lower - lower_side.upper >= gap
                 if not held:
+                    # not established — refuted when the intervals leave no room (`radix=3` beside `alphabet='01'`)
+                    subject_interval = self._eval(subject_node, state, validate=False)
+                    if proposition.term_of == 'length':
+                        term_interval: Interval | None = _known_interval(state, _length_key(proposition.term_id), self.max_length)
+                    else:
+                        term_interval = self._binding_interval(state, proposition.term_id)
+                    if subject_interval is not None and term_interval is not None:
+                        if direction == 'upper' and term_interval.upper is not None and subject_interval.lower is not None and term_interval.upper - subject_interval.lower < gap:
+                            return False
+                        if direction == 'lower' and subject_interval.upper is not None and term_interval.lower is not None and subject_interval.upper - term_interval.lower < gap:
+                            return False
                     return None
             return True
         refined_result = _call_result_refinement(value)
@@ -1151,6 +1162,83 @@ class _BoundsValidator:
         if name == '__ne__' and proposition.value == 0 and proposition.subject != 'length':
             return True if self._nonzero_proven(subject_node, subject, state) else None
         return None
+
+    def _field_declared_interval(self, node: hir.MemberAccess, state: State) -> Interval | None:
+        """What a field read is known to be from its declaration: the range of
+        its width (`radix:uint8` is `[0, 255]`), narrowed by its relations to
+        sibling fields on an immutable record (`radix =? alphabet.length` with
+        `alphabet:string<2 <=? length <=? uint8.max>` is `[2, 255]`)."""
+        object_type = _object_of(node.value.type)
+        field = object_type.field(node.name) if object_type is not None else None
+        if field is None:
+            return None
+        interval: Interval | None = None
+        layout = ty.fixed_integer_layout(field.type)
+        if layout is not None:
+            width, signed = layout
+            interval = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+        if not object_type.immutable:
+            return interval
+        located = sb.member_path(node)
+        if located is None:
+            return interval
+        root_id, path = located
+        directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}
+        for proposition in field.refinement:
+            if proposition.term is None or proposition.field is not None or proposition.op not in directions:
+                continue
+            sibling = object_type.field(proposition.term)
+            if sibling is None:
+                continue
+            term_route = self.registry.route_id(root_id, (*path[:-1], sibling.name), sibling.type, node.loc)
+            if proposition.term_of == 'length':
+                term_interval = _known_interval(state, _length_key(term_route), self.max_length)
+                declared_length = _length_propositions_interval(sibling.refinement)
+                if declared_length is not None:
+                    term_interval = term_interval.intersect(declared_length)
+            else:
+                term_interval = state.get(term_route, UNKNOWN_INTERVAL)
+                declared_value = self._bounds_of(sibling.refinement)
+                if declared_value is not None:
+                    term_interval = term_interval.intersect(declared_value)
+            for direction, gap in directions[proposition.op]:
+                if direction == 'upper' and term_interval.upper is not None:
+                    bound = Interval(None, term_interval.upper - gap)
+                elif direction == 'lower' and term_interval.lower is not None:
+                    bound = Interval(term_interval.lower + gap, None)
+                else:
+                    continue
+                interval = bound if interval is None else interval.intersect(bound)
+        return interval
+
+    def _seed_sibling_relations(self, node: hir.MemberAccess, state: State) -> None:
+        """`info.radix` on an immutable record declaring `radix =? alphabet.length`:
+        the relation between the two member routes is a fact wherever the record
+        is read (its contents never changed since it was built and proven)."""
+        object_type = _object_of(node.value.type)
+        if object_type is None or not object_type.immutable:
+            return
+        located = sb.member_path(node)
+        if located is None:
+            return
+        root_id, path = located
+        directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}
+        for field in object_type.fields:
+            if field.name != node.name and not any(p.term == node.name for p in field.refinement):
+                continue   # the field read, and the fields that relate to it
+            for proposition in field.refinement:
+                if proposition.term is None or proposition.field is not None or proposition.op not in directions:
+                    continue
+                sibling = object_type.field(proposition.term)
+                if sibling is None:
+                    continue
+                subject = self.registry.route_id(root_id, (*path[:-1], field.name), field.type, node.loc)
+                term_route = self.registry.route_id(root_id, (*path[:-1], sibling.name), sibling.type, node.loc)
+                term = _length_key(term_route) if proposition.term_of == 'length' else term_route
+                for direction, gap in directions[proposition.op]:
+                    smaller, larger = (subject, term) if direction == 'upper' else (term, subject)
+                    key = _order_key(smaller, larger)
+                    state[key] = state.get(key, Interval(None, None)).intersect(Interval(gap, None))
 
     def _seed_field_proposition(self, root_id: int, proposition: ty.Proposition, base: ty.Type, state: State, loc: Span) -> None:
         """A field-subject proposition (`.sign =? 1`, `.denominator.sign =? 1`) as facts on the member route."""
@@ -2297,10 +2385,14 @@ class _BoundsValidator:
         if isinstance(node, hir.MemberAccess):
             self._eval(node.value, state, validate=validate)
             route_id = sb.array_route_id(node, self.registry)
+            self._seed_sibling_relations(node, state)
             interval = state.get(route_id) if route_id is not None else None
             declared = self._bounds_of(_member_invariant(node))
             if declared is not None:
                 interval = declared if interval is None else interval.intersect(declared)
+            width = self._field_declared_interval(node, state)   # the field's width, and its sibling relations
+            if width is not None:
+                interval = width if interval is None else interval.intersect(width)
             return interval
         if isinstance(node, hir.ForwardingAccess):
             # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
@@ -2497,6 +2589,10 @@ class _BoundsValidator:
             ):
                 route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
                 state[_length_key(route_id)] = Interval.exact(field_value.value.type.length)
+            elif _is_runtime_string(field.type) and self._string_length(_strip_casts(field_value.value).type) is not None:
+                # `[alphabet="ab" …]`: the string field's grapheme count is a fact until it is assigned
+                route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
+                state[_length_key(route_id)] = Interval.exact(self._string_length(_strip_casts(field_value.value).type))
             elif isinstance(field.type, ty.ObjectType):
                 self._seed_field_routes(root_id, field.type, field_value.value, field_path, state)
             elif isinstance(field.type, str) and ty.fixed_integer_layout(field.type) is not None:
@@ -2687,6 +2783,12 @@ class _BoundsValidator:
     def _lower_bounded_by_length(self, node: hir.AST, sequence_id: int, gap: int, state: State) -> bool:
         """`node - sequence.length >= gap`: the length itself plus a constant, or a term above the length."""
         node = _strip_casts(node)
+        known = state.get(_length_key(sequence_id))
+        if known is not None and known.upper is not None:
+            # a value at or above the length's known maximum (`radix=2` beside `alphabet='01'`)
+            interval = self._eval(node, state, validate=False)
+            if interval is not None and interval.lower is not None and interval.lower - known.upper >= gap:
+                return True
         if _sequence_of(node) is not None and _runtime_array_id(_sequence_of(node), self.registry) == sequence_id:   # type: ignore[arg-type]
             return gap <= 0
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:

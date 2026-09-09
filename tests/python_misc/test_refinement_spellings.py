@@ -78,7 +78,7 @@ def test_field_subjects_refine_object_values() -> None:
         codegen(SrcFile(None, value + 'let a = value([top=1 bottom=0])\n'))
     with pytest.raises(UserError, match='cannot prove refinement') as info:
         codegen(SrcFile(None, value + 'let f = (r:Ratio):>int64 => value(r)\n'))
-    assert '`r.bottom` has no known bound' in str(info.value)
+    assert '`r.bottom` lies in [-9223372036854775808, 9223372036854775807]' in str(info.value)   # a field read is known to its width
     with pytest.raises(UserError, match='refinement refuted') as info:  # the assigned field is exactly 0
         codegen(SrcFile(None, value + 'let f = (r:Ratio):>int64 => { if r.bottom >? 0 { r.bottom = 0  return value(r) }  return 0 }\n'))
     assert '`r.bottom` is 0' in str(info.value)
