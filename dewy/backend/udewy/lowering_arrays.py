@@ -14,7 +14,6 @@ from ...reporting import Span
 from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
-    MoveNote,
     ARRAY_ARENA_DESCRIPTOR,
     ARRAY_BORROWED_STATIC,
     ARRAY_CAPACITY_OFFSET,
@@ -34,6 +33,7 @@ from .lowering_shared import (
     ArrayParameterAnalysis,
     ArrayRepresentation,
     ArrayUse,
+    MoveNote,
     _Binding,
     _FunctionDef,
     _Scope,
@@ -1730,7 +1730,7 @@ class _ArrayLowering:
         arguments = self._method_keyword_arguments(node)
         key_function = arguments.get('key')
         reverse = arguments.get('reverse')
-        _, signed = self._array_element_layout(element_type, node)
+        self._array_element_layout(element_type, node)
         one = self._int64_literal(loc, 1)
         zero = self._int64_literal(loc, 0)
         word_ops = ty.FunctionType(
@@ -2767,8 +2767,9 @@ class _ArrayLowering:
         loc: Span,
     ) -> hir.AST:
         if element_type == 'bool':
-            loaded = self._intrinsic_call('__load_u8__', [address], 'uint8', loc)
-            return hir.Transmute(loc, 'bool', loaded)
+            # µDewy's true is an all-ones word. Use the ordinary signed
+            # boolean field load so a stored 0xff becomes -1, not 255.
+            return self._value_load(address, element_type, loc)
         layout = ty.fixed_integer_layout(element_type)
         if layout is None:
             loaded = self._intrinsic_call('__load_i64__', [address], 'int64', loc)

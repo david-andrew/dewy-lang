@@ -14,7 +14,6 @@ from ...reporting import Span
 from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
-    CopyNote,
     ARGC_NAME,
     ARGV_NAME,
     ARRAY_BORROWED_STATIC,
@@ -31,9 +30,11 @@ from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
     STRING_DATA_OFFSET,
     STRING_DESCRIPTOR_SIZE,
-    STRING_OWNER_OFFSET,
     STRING_GRAPHEME_LENGTH_OFFSET,
+    STRING_OWNER_OFFSET,
     STRING_START_OFFSET,
+    CopyNote,
+    LoopRegion,
     StringResultBound,
 )
 from .runtime_unicode import (
@@ -1107,9 +1108,18 @@ class _StringLowering:
         self._string_bound_in_progress.add(key)
         literal = function.literal
         returned = self._returned_string_expressions(literal)
+        reached: list[hir.AST] = []
+        self._reached_string_nodes(
+            returned, self._local_initializers(literal),
+            {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]},
+            expressions=reached,
+        )
         local_cache: dict[int, StringResultBound | None] = {}
         bound: StringResultBound | None = StringResultBound(0, (), False)
-        materialized = False
+        # Storage needs do not disappear when capacity is unknown. In
+        # particular, a conditional's other arm or a local initializer can
+        # prevent a size formula while this arm still builds frame bytes.
+        materialized = any(isinstance(expr, (hir.InterpolatedString, hir.StringConcat)) for expr in reached)
         for expr in returned:
             expr_bound = self._string_value_bound(expr, literal, local_cache)
             if expr_bound is not None and expr_bound.materialized:
@@ -1132,10 +1142,7 @@ class _StringLowering:
             # by its default, so that path also needs a destination.
             bound = None
             materialized = True
-        if materialized or any(
-            isinstance(self._unwrap_transparent(expr), (hir.InterpolatedString, hir.StringConcat))
-            for expr in returned
-        ):
+        if materialized:
             self.string_result_needs_dest.add(key)
             if bound is None:
                 # no capacity formula (a field's string, a slice of one): the result
@@ -2638,7 +2645,7 @@ class _StringLowering:
                 return replace(entry.region, loc=loc)
         return self._frame_region(loc)
 
-    def _lower_loop_body(self, arm: hir.LoopArm, *, entry: 'LoopRegion | None' = None) -> hir.AST:
+    def _lower_loop_body(self, arm: hir.LoopArm, *, entry: LoopRegion | None = None) -> hir.AST:
         """Lower a loop arm's body inside its own string region: strings the
         body builds that stay within the iteration are given back at its end
         (the block's fall-through, `continue`, `break`); the region itself is
@@ -2699,11 +2706,12 @@ class _StringLowering:
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
         return self._reached_string_nodes(self._returned_string_expressions(literal), candidates, params)
 
-    def _reached_string_nodes(self, roots: list[hir.AST], candidates: dict[int, list[hir.AST]], params: set[int | None], identifiers: list[hir.ExpressedIdentifier] | None = None) -> set[int]:
+    def _reached_string_nodes(self, roots: list[hir.AST], candidates: dict[int, list[hir.AST]], params: set[int | None], identifiers: list[hir.ExpressedIdentifier] | None = None, *, expressions: list[hir.AST] | None = None) -> set[int]:
         """Every expression the string values of ``roots`` may come from: through casts,
         views' sources, locals' initializers and assigned values, string arguments of
         calls (a callee may return an argument's descriptor), flows' arms, and parts.
-        The identifiers met on the way are appended to ``identifiers`` when given."""
+        The identifiers met on the way are appended to ``identifiers`` when given;
+        ``expressions`` collects the same traversal for storage classification."""
         reached: set[int] = set()
 
         def mark(expr: hir.AST) -> None:
@@ -2711,6 +2719,8 @@ class _StringLowering:
             if id(expr) in reached:
                 return
             reached.add(id(expr))
+            if expressions is not None:
+                expressions.append(expr)
             if isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
                 mark(expr.expr)
             elif isinstance(expr, (hir.StringSlice, hir.StringIndex)):
@@ -2841,7 +2851,16 @@ class _StringLowering:
             if isinstance(expr, hir.FunctionCall):
                 if isinstance(expr.func, hir.ArrayMethod):
                     return expr.func.name == 'join'   # a region string (owner 0) or, returned, an arena one (1)
-                return isinstance(expr.func, hir.ExpressedIdentifier) and not (expr.func.name.startswith('__') and expr.func.name.endswith('__'))
+                # A destination-ABI call fills this frame's descriptor and
+                # region. It is not a movable arena result: returning the
+                # local must copy it before the frame and descriptor expire.
+                # Optional/union calls still own their string payloads, so
+                # this test deliberately does not require a string result.
+                return (
+                    id(expr) not in self.string_result_call_targets
+                    and isinstance(expr.func, hir.ExpressedIdentifier)
+                    and not (expr.func.name.startswith('__') and expr.func.name.endswith('__'))
+                )
             if isinstance(expr, (hir.StringSlice, hir.StringIndex, hir.InterpolatedString)):
                 return True   # a view (region: 0; returned: an arena view, 2) or a frame interpolation (0)
             if isinstance(expr, hir.Flow):

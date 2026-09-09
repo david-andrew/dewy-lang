@@ -840,3 +840,89 @@ let main = ():>int64 => {
     monkeypatch.chdir(tmp_path)
     assert entry_point(path, []) == 0
     assert capfd.readouterr().out == '9\n2\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_recursive_string_rendering_keeps_each_result(tmp_path, monkeypatch, capfd):
+    emitted = codegen(SrcFile(None, '''
+Node = type of [name:string children:array<addr>=[]]
+let render = (id:addr nodes:array<Node>):>string => {
+    # A materialized branch selects the destination ABI for render.
+    # atom must not move its local frame descriptor back to its own caller.
+    if id =? 99 return "{id}"
+    $runtime_assert id <? nodes.length
+    let node = nodes[id]
+    if node.children.length =? 0 return node.name
+    let parts:array<string> = []
+    loop child in node.children { parts.push(atom(child nodes)) }
+    return parts.join(' | ')
+}
+let atom = (id:addr nodes:array<Node>):>string => {
+    let text = render(id nodes)
+    $runtime_assert id <? nodes.length
+    return if nodes[id].children.length >? 0 "({text})" else text
+}
+let decorate = (input:string):>string => {
+    let text = input
+    if text.length >? 0 { text = "{text[..text.length-1)} tail>" }
+    return text
+}
+let main = ():>int64 => {
+    let nodes:array<Node> = [Node['first'] Node['second'] Node['group' [0 1]] Node['outer' [0 2]]]
+    printl(render(3 nodes))
+    printl(decorate('head>'))
+    return 0
+}
+'''))
+    path = tmp_path / 'recursive_string_rendering.udewy'
+    path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == 'first | (first | second)\nhead tail>\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_optional_boolean_fields_match_both_runtime_arms(tmp_path, monkeypatch, capfd):
+    emitted = codegen(SrcFile(None, '''
+Fact:type = const [label:string when:bool?]
+let main = ():>int64 => {
+    let facts:array<Fact> = [Fact['yes' true] Fact['no' false] Fact['always' none]]
+    loop arm in [true false] {
+        loop fact in facts {
+            if fact.when is? none or fact.when =? arm { printl("{arm}:{fact.label}") }
+        }
+    }
+    return 0
+}
+'''))
+    path = tmp_path / 'optional_boolean_fields.udewy'
+    path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == 'true:yes\ntrue:always\nfalse:no\nfalse:always\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_string_result_from_optional_local_keeps_its_bytes(tmp_path, monkeypatch, capfd):
+    emitted = codegen(SrcFile(None, '''
+Info:type = const [subject:string length:bool]
+let parameter = (p:Info):>string? => if p.subject.startswith('@') p.subject[1..] else none
+let field = (p:Info):>string? => if p.subject.startswith('.') p.subject[1..] else none
+let subject = (p:Info):>string => {
+    let name = if parameter(p) isnt? none parameter(p) else field(p)
+    if name isnt? none return if p.length "{name}.length" else name
+    return 'i'
+}
+let suffix = (p:Info):>string => { let pieces:array<string> = [p.subject] return pieces.join }
+let render = (p:Info):>string => "<{subject(p)} {suffix(p)}>"
+let main = ():>int64 => {
+    let items:array<Info> = [Info['.end' true] Info['@start' false] Info['self' true]]
+    loop item in items { printl(render(item)) }
+    return 0
+}
+'''))
+    path = tmp_path / 'optional_local_string_result.udewy'
+    path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == '<end.length .end>\n<start @start>\n<i self>\n'
