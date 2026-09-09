@@ -393,6 +393,26 @@ class _DictLowering:
                 self._declare(result, default, loc, parts.value_type),
                 self._if(found, [self._assign(result, value_at(position), loc)], loc),
             ], result
+        members = ty.runtime_union_members(node.type)
+        if members is not None:
+            # Adding `none` to a union-valued dictionary element can produce
+            # more than two alternatives (bigint is already zero | object).
+            # Broaden the stored value's cell into the result union, copying
+            # aggregate payloads through the normal prepared storage trees.
+            cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('dict_value'))
+            cell_word = replace(cell, type='int64')
+            element = self._name('dict_element', loc)
+            found_body = [
+                self._declare(element, replace(value_at(position), type='int64'), loc),
+                *self._union_write(cell_word, replace(element, type=parts.value_type), members),
+            ]
+            return [
+                *prelude, *key_prelude, *search,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._union_cell_allocation(members, loc)),
+                *self._union_prepare_trees(cell_word, members, loc),
+                *self._union_write(cell_word, hir.NoneValue(loc, 'none'), members),
+                self._if(found, found_body, loc),
+            ], cell
         payload = ty.optional_payload(node.type)
         if payload is None:
             raise TypeError('INTERNAL ERROR: dictionary lookup is not optional')

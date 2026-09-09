@@ -788,3 +788,34 @@ let main = ():>int64 => {
     monkeypatch.chdir(tmp_path)
     assert entry_point(path, []) == 0
     assert capfd.readouterr().out == 'premade1post\npregivenpost\nmade2\nouterpremade3post\n3\n'
+
+
+@pytest.mark.skipif(not x86_64_toolchain_available(), reason='as/ld not available')
+def test_dictionary_get_broadens_union_values_and_copies_payloads(tmp_path, monkeypatch, capfd):
+    emitted = codegen(SrcFile(None, '''
+let describe = (value:bigint | none):>string => if value is? none 'missing' else _bigint_as_string(value)
+let main = ():>int64 => {
+    let numbers:dict<addr bigint> = [0 -> 0 1 -> 1267650600228229401496703205376 2 -> (-1267650600228229401496703205376)]
+    let zero = numbers.get(0)
+    let positive = numbers.get(1)
+    let negative = numbers.get(2)
+    let missing = numbers.get(3)
+    numbers.clear
+    printl(describe(zero))
+    printl(describe(positive))
+    printl(describe(negative))
+    printl(describe(missing))
+    let entries:dict<string string | int64> = ['text' -> 'found' 'number' -> 42]
+    let text = entries.get('text')
+    let number = entries.get('number')
+    entries.clear
+    if text is? string { printl(text) } else { return 1 }
+    if number is? int64 { printl(number) } else { return 2 }
+    return 0
+}
+'''))
+    path = tmp_path / 'union_dictionary_get.udewy'
+    path.write_text(emitted)
+    monkeypatch.chdir(tmp_path)
+    assert entry_point(path, []) == 0
+    assert capfd.readouterr().out == '0\n1267650600228229401496703205376\n-1267650600228229401496703205376\nmissing\nfound\n42\n'
