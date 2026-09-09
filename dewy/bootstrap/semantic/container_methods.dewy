@@ -1,0 +1,24 @@
+import p"ty.dewy" as types
+import p"type_queries.dewy" as views
+
+# Container method signatures are independent of the current membership
+# facts. The call visitor checks those facts after binding the arguments:
+# `get` is optional, a plain `pop` needs a proven key, and a default permits
+# a missing key. Clearing/removing a declared total dictionary is rejected.
+signature = (name:string entry:views.EntryTypes @nodes:array<types.Type>):>addr => {
+    let key = types.PosOrKwArg['key' entry.key]
+    let value = if entry.value is? none entry.key else entry.value
+    let optional = types.union([value types.primitive('none' @nodes)] @nodes)
+    let pos:array<types.PosOrKwArg> = []
+    let kw:array<types.KwOnlyArg> = []
+    let result = types.primitive('void' @nodes)
+    if name =? 'get' {
+        pos = [key types.PosOrKwArg['default' value false]]
+        result = optional
+    } else if name =? 'pop' {
+        pos = [key]
+        kw = [types.KwOnlyArg['default' if entry.value is? none optional else value false]]
+        result = value
+    } else if name =? 'add' { pos = [key] }
+    return types.function_type(pos kw none result [] @nodes)
+}

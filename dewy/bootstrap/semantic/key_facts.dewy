@@ -1,0 +1,82 @@
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"bindings.dewy" as bindings
+
+doc"""
+Evidence that a particular current key occurs in a particular container.
+
+Constant identities use interned literal types, retaining the distinction
+between strings, integers, and booleans. Variable keys use declaration or
+member-route identities, so changing the key invalidates its evidence even
+when its source spelling stays the same. A missing position still proves
+membership; it merely requires the runtime lookup to search again.
+"""
+
+Literal = type of const [value:addr]
+Binding = type of const [id:addr]
+Total = type of const []
+Identity:type = Literal|Binding|Total
+Fact:type = const [container:addr key:Identity position:string?=none static_position:addr?=none]
+same = (left:Identity right:Identity):>bool => {
+    if left is? Literal and right is? Literal return left.value =? right.value
+    if left is? Binding and right is? Binding return left.id =? right.id
+    return left is? Total and right is? Total
+}
+identity = (id:addr nodes:array<hir.AST> @registry:bindings.Registry @type_nodes:array<types.Type>):>Identity? => {
+    let node = hir.node_at(nodes id)
+    if node is? hir.Obligation return identity(node.value nodes @registry @type_nodes)
+    if node is? hir.ValueCast|hir.RepresentationCast return identity(node.expr nodes @registry @type_nodes)
+    if node is? hir.String return Literal[types.string_literal(node.content @type_nodes)]
+    if node is? hir.Integer return Literal[types.integer_literal(node.value @type_nodes)]
+    if node is? hir.Bool return Literal[types.primitive(if node.value 'true' else 'false' @type_nodes)]
+    let binding = bindings.array_route_id(id nodes @registry)
+    return if binding is? none none else Binding[binding]
+}
+find = (facts:array<Fact> container:addr key:Identity):>Fact? => {
+    loop fact in facts { if fact.container =? container and same(fact.key key) return fact }
+    return none
+}
+record = (@facts:array<Fact> fact:Fact):>void => {
+    loop i in 0.. and i <? facts.length {
+        let prior = facts[i]
+        if prior.container =? fact.container and same(prior.key fact.key) { facts[i] = fact return void }
+    }
+    facts.push(fact)
+}
+forget = (facts:array<Fact> container:addr?=none key:Identity?=none changed:addr?=none):>array<Fact> => {
+    let result:array<Fact> = []
+    loop fact in facts {
+        if changed isnt? none and (fact.container =? changed or (fact.key is? Binding and fact.key.id =? changed)) continue
+        if container isnt? none and fact.container =? container and (key is? none or same(fact.key key)) continue
+        result.push(fact)
+    }
+    return result
+}
+forget_positions = (facts:array<Fact> container:addr):>array<Fact> => {
+    let result:array<Fact> = []
+    loop fact in facts { result.push(if fact.container =? container Fact[fact.container fact.key] else fact) }
+    return result
+}
+intersect = (left:array<Fact> right:array<Fact>):>array<Fact> => {
+    let result:array<Fact> = []
+    loop fact in left {
+        let other = find(right fact.container fact.key)
+        if other is? none continue
+        let position = if fact.position =? other.position fact.position else none
+        let static_position = if fact.static_position =? other.static_position fact.static_position else none
+        result.push(Fact[fact.container fact.key position static_position])
+    }
+    return result
+}
+
+# Removing one constant cannot remove a different constant. A binding key
+# can equal any of them, though: identity distinguishes declarations, not
+# their runtime values. A tombstone keeps surviving entries in their slots.
+after_removal = (facts:array<Fact> container:addr removed:Identity?):>array<Fact> => {
+    let result:array<Fact> = []
+    loop fact in facts {
+        if fact.container not=? container { result.push(fact) continue }
+        if removed is? Literal and fact.key is? Literal and not same(removed fact.key) { result.push(fact) }
+    }
+    return result
+}

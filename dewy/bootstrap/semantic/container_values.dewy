@@ -1,0 +1,64 @@
+from reporting import Span
+import p"context.dewy" as contexts
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"type_queries.dewy" as views
+import p"key_facts.dewy" as keys
+
+doc"""
+Checked container values share the hosted insertion-order representation.
+
+Keys and values are growable arrays, with hashes and probe slots prepared
+lazily. The source visitor supplies checked, homogeneous entry arrays; this
+module builds the record and derives literal membership evidence. Runtime
+deduplication, stores, and removals use the ordinary container HIR operations.
+"""
+
+literal = (loc:Span type:addr key_array:addr value_array:addr? @session:contexts.Session):>addr => {
+    let node = hir.node_at(session.hir key_array)
+    let shape = types.node_at(session.types node.value_type)
+    $runtime_assert shape is? types.ArrayType and shape.length isnt? none
+    let fields:array<hir.ObjectField> = [hir.ObjectField[loc 'keys' key_array]]
+    if value_array isnt? none { fields.push(hir.ObjectField[loc 'values' value_array]) }
+    let empty_type = types.array_type(types.primitive('int64' @session.types) 0 @session.types)
+    let hashes = hir.append_node(@session.hir hir.ArrayLiteral[loc empty_type []])
+    let indices = hir.append_node(@session.hir hir.ArrayLiteral[loc empty_type []])
+    let live_type = types.integer_literal(shape.length @session.types)
+    let live = hir.append_node(@session.hir hir.Integer[loc live_type '0d' shape.length])
+    fields.push(hir.ObjectField[loc 'hashes' hashes])
+    fields.push(hir.ObjectField[loc 'indices' indices])
+    fields.push(hir.ObjectField[loc 'live' live])
+    return hir.append_node(@session.hir hir.ObjectLiteral[loc type fields])
+}
+Arrays:type = const [keys:addr values:addr?=none]
+arrays = (value:addr @session:contexts.Session):>Arrays => {
+    let node = hir.node_at(session.hir value)
+    let entry = views.container_entry_types(node.value_type session.types)
+    $runtime_assert entry isnt? none
+    let key_type = types.array_type(entry.key none @session.types)
+    let key_array = hir.append_node(@session.hir hir.MemberAccess[node.loc key_type value 'keys' true])
+    let value_array:addr? = none
+    if entry.value isnt? none {
+        let value_type = types.array_type(entry.value none @session.types)
+        value_array = hir.append_node(@session.hir hir.MemberAccess[node.loc value_type value 'values' true])
+    }
+    return Arrays[key_array value_array]
+}
+literal_facts = (container:addr value:addr @session:contexts.Session):>array<keys.Fact> => {
+    let node = hir.node_at(session.hir value)
+    if node is? hir.Obligation return literal_facts(container node.value @session)
+    if node is? hir.ValueCast|hir.RepresentationCast return literal_facts(container node.expr @session)
+    let result:array<keys.Fact> = []
+    if node isnt? hir.ObjectLiteral return result
+    if views.container_entry_types(node.value_type session.types) is? none return result
+    loop field in node.fields {
+        if field.name not=? 'keys' continue
+        let array = hir.node_at(session.hir field.value)
+        if array isnt? hir.ArrayLiteral return result
+        loop i in 0.. and i <? array.items.length {
+            let identity = keys.identity(array.items[i] session.hir @session.registry @session.types)
+            if identity isnt? none { keys.record(@result keys.Fact[container identity static_position=i]) }
+        }
+    }
+    return result
+}

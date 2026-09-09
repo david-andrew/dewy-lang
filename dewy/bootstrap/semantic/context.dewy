@@ -8,6 +8,7 @@ import p"brands.dewy" as brands
 import p"subtyping.dewy" as subtyping
 import p"builtins.dewy" as builtins
 import p"syntax_normalization.dewy" as normalization
+import p"key_facts.dewy" as keys
 
 doc"""
 Compilation-owned arenas and the lexical context of a semantic visit.
@@ -25,12 +26,13 @@ Context:type = const [source:addr scope:addr refinement_subject:string?=none imm
 PendingAlias:type = const [expression:SyntaxRef]
 # Current read alternatives are separate from each binding's store contract.
 # A branch copies this state; declaration/type/HIR identities remain shared.
-ReadState:type = [types:dict<addr addr>=[]]
+ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
 Session:type = [
     target:targets.Target=$target
     sources:array<Source>=[]
     read_states:array<ReadState>=[]
     prepared_imports:set<addr>=set[]
+    next_key_position:addr=0
     syntax_refs:array<SyntaxRef>=[]
     types:array<types.Type>=[]
     hir:array<hir.AST>=[]

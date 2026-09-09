@@ -20,6 +20,10 @@ import p"loop_syntax.dewy" as loop_syntax
 import p"type_queries.dewy" as views
 import p"analyze/value_bounds.dewy" as constants
 import p"analyze/hir_facts.dewy" as hir_facts
+import p"key_facts.dewy" as keys
+import p"container_methods.dewy" as container_methods
+import p"container_values.dewy" as container_values
+import p"container_state.dewy" as container_state
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -71,6 +75,12 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let node = node_at(value session)
     let target = types.node_at(session.types expected)
     if target is? types.RefinedType {
+        let total = views.total_dict_key(expected session.types)
+        if total isnt? none {
+            let error = prove_total(value total id env @session)
+            if error isnt? none return error
+            return against(value target.base id env @session)
+        }
         let checked = against(value target.base id env @session)
         if checked is? Error return checked
         return put(hir.Obligation[node.loc node_at(checked session).value_type checked expected display.type_to_dewy(expected session.types)] @session)
@@ -175,6 +185,11 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     if func is? hir.ExpressedIdentifier and shape is? types.FunctionType and shape.type_params.length >? 0 {
         callee = put(hir.ExpressedIdentifier[func.loc matched.method func.name func.binding_id] @session)
     }
+    if func is? hir.DictMethod {
+        let result = container_call(func args kwargs id env @session)
+        if result is? Error return result
+        return if expected is? none result else against(result expected id env @session)
+    }
     if func is? hir.ArrayMethod {
         let error = array_transition(func args kwargs id env @session)
         if error isnt? none return error
@@ -213,6 +228,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         if node.delims =? '[]' {
+            let entry = if expected is? none none else views.container_entry_types(expected session.types)
+            if entry isnt? none and entry.value isnt? none return container_literal(id node env @session expected=expected)
+            loop item in node.inner {
+                let row = tokens.node_at(source.nodes item)
+                if row is? parser.BinOp and syntax.symbol(row.op source.nodes) in? ['->' '<->'] return container_literal(id node env @session expected=expected)
+            }
             loop item in node.inner {
                 let row = tokens.node_at(source.nodes item)
                 if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) return record_literal(id node env @session expected=expected)
@@ -220,19 +241,8 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let target:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.strip_refinement(expected session.types))
             let element:addr? = if target is? types.ArrayType target.element else none
             if node.inner.length =? 0 and element is? none return problem(id 'cannot infer empty array element type' 'provide an array annotation' env session)
-            let items:array<addr> = []
-            let item_types:array<addr> = []
-            loop item in node.inner {
-                let checked = expression(item env @session expected=element)
-                if checked is? Error return checked
-                if element is? none { checked = widen(checked item env @session) }
-                if checked is? Error return checked
-                items.push(checked) item_types.push(node_at(checked session).value_type)
-            }
-            if element is? none { element = subtyping.join(item_types session.links @session.types) }
-            $runtime_assert element isnt? none
-            let type = types.array_type(element node.inner.length @session.types)
-            let value = put(hir.ArrayLiteral[node.loc type items] @session)
+            let value = container_array(node.inner element id env @session)
+            if value is? Error return value
             return if expected is? none value else against(value expected id env @session)
         }
         if node.delims =? '\{}' return block(id env @session scoped=true expected=expected)
@@ -290,6 +300,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             return if expected is? none value else against(value expected id env @session)
         }
         let adjacency = tokens.node_at(source.nodes node.op)
+        if adjacency is? post.Juxtapose and syntax.identifier(node.left source.nodes) =? 'set' and declarations.lookup('set' env.lexical session) is? none {
+            let body = tokens.node_at(source.nodes node.right)
+            if body is? parser.Block and body.delims =? '[]' return container_literal(id body env @session expected=expected is_set=true)
+            return pending(id 'set conversion through the string/array library helpers' env session)
+        }
         if adjacency is? post.Juxtapose and adjacency.options.length >? 1 {
             let left = expression(node.left env @session call_target=true)
             if left is? Error return left
@@ -297,7 +312,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             let type = types.node_at(session.types types.strip_refinement(value.value_type session.types))
             if type is? types.CallableType and 'CallJuxtapose' in? adjacency.options return call_syntax(left node.right id env @session expected=expected)
-            if (type is? types.ArrayType|types.StringType|types.StringLiteralType or types.is_primitive(type 'string')) and 'IndexJuxtapose' in? adjacency.options return index_syntax(left node.right id env @session)
+            if (type is? types.ArrayType|types.StringType|types.StringLiteralType or types.is_primitive(type 'string') or views.container_entry_types(value.value_type session.types) isnt? none) and 'IndexJuxtapose' in? adjacency.options return index_syntax(left node.right id env @session)
             let number = types.primitive('number' @session.types)
             if 'MultiplyJuxtapose' in? adjacency.options and subtyping.is_subtype(value.value_type number session.links @session.types) {
                 let right = expression(node.right env @session)
@@ -319,6 +334,22 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let sequence = expression(node.left env @session)
             if sequence is? Error return sequence
             return index_syntax(sequence node.right id env @session)
+        }
+        if op in? ['in?' 'not in?'] {
+            let key = expression(node.left env @session)
+            if key is? Error return key
+            let container = expression(node.right env @session)
+            if container is? Error return container
+            let entry = views.container_entry_types(node_at(container session).value_type session.types)
+            if entry is? none return pending(id 'membership on this non-container type' env session)
+            let checked = against(key entry.key node.left env @session)
+            if checked is? Error return checked
+            let arrays = container_values.arrays(container @session)
+            let result = put(hir.DictContains[node.loc types.primitive('bool' @session.types) arrays.keys checked position=key_position(@session)] @session)
+            if op =? 'in?' return result
+            let negate = identifier('__not__' id env @session)
+            if negate is? Error return negate
+            return call(negate [result] [] id env @session)
         }
         let operator = builtins.binary_operators.get(op)
         if op =? 'not=?' { operator = '__ne__' }
@@ -422,6 +453,14 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     let name = syntax.identifier(target_id source.nodes)
     if name is? none {
         if explicit or annotation isnt? none return pending(id 'destructuring declaration' env session)
+        if target is? parser.BinOp {
+            let adjacency = tokens.node_at(source.nodes target.op)
+            if adjacency is? post.Juxtapose and 'IndexJuxtapose' in? adjacency.options {
+                let container = expression(target.left env @session)
+                if container is? Error return container
+                if views.container_entry_types(node_at(container session).value_type session.types) isnt? none return container_index(container target.right id env @session store=node.right)
+            }
+        }
         let place = expression(target_id env @session)
         if place is? Error return place
         let member = node_at(place session)
@@ -435,6 +474,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         }
         let value = expression(node.right env @session expected=member.value_type)
         if value is? Error return value
+        container_state.replaced(place env.state @session)
         return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) place value] @session)
     }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
@@ -459,6 +499,9 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if value is? Error return value
         let target = identifier(name target_id env @session)
         if target is? Error return target
+        container_state.changed(existing env.state @session)
+        container_state.seed(existing value env.state @session)
+        container_state.seed_fields(existing value env.state @session)
         set_read_type(existing node_at(value session).value_type env @session)
         return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' value] @session)
     }
@@ -476,6 +519,8 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     if constant { binding.read_only_reason = 'const binding' }
     session.registry.by_id[binding_id] = binding
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
+    container_state.seed(binding_id value env.state @session)
+    container_state.seed_fields(binding_id value env.state @session)
     let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id] @session)
     binding.declaration = declared
     if checked is? hir.FunctionLiteral { binding.function = value }
@@ -580,6 +625,7 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
     if resolved is? Error return resolved
     let shape = dispatch.method_at(session.types resolved)
     let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state shape.ret]
+    container_state.set_facts(inner.state container_state.inherited(env.state session) @session)
     let parameters:array<hir.Param> = []
     let source = contexts.source_at(env.lexical session)
     let signature = tokens.node_at(source.nodes literal.left)
@@ -648,6 +694,10 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         let func = node_at(node.func session)
         if func is? hir.ExpressedIdentifier and func.name =? '__not__' return refined(node.pos_args[0] not truth result @session invalidated=invalidated)
     }
+    if node is? hir.DictContains and truth {
+        let array = node_at(node.keys session)
+        if array is? hir.MemberAccess { container_state.remember(array.value node.key result.state @session position=node.position) }
+    }
     if node is? hir.TypeTest {
         let value = node_at(node.value session)
         if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {
@@ -676,6 +726,12 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
         loop [binding type] in session.read_states[exit.state].types { names.add(binding) }
     }
     let joined = contexts.ReadState[]
+    let first = true
+    loop exit in exits {
+        let current = container_state.facts(exit.state session)
+        joined.keys = if first current else keys.intersect(joined.keys current)
+        first = false
+    }
     loop binding in names {
         let alternatives:array<addr> = []
         loop exit in exits {
@@ -736,6 +792,7 @@ call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:
     let source = contexts.source_at(env.lexical session)
     let arguments = tokens.node_at(source.nodes arguments_id)
     let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
+    let signature = types.node_at(session.types node_at(function session).value_type)
     let positional:array<addr> = []
     let keyword:dict<string addr> = []
     loop item in items {
@@ -744,12 +801,22 @@ call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:
             let name = syntax.identifier(row.left source.nodes)
             if name is? none return problem(item 'named argument needs a name' 'use `name=value`' env session)
             if name in? keyword return problem(item 'duplicate named argument' name env session)
-            let value = expression(row.right env @session allow_place=true)
+            let wanted:addr? = none
+            if signature is? types.FunctionType and signature.type_params.length =? 0 {
+                loop param in signature.pos_or_kw { if param.name =? name and not param.place { wanted = param.value_type } }
+                loop param in signature.kw_only { if param.name =? name and not param.place { wanted = param.value_type } }
+            }
+            let value = expression(row.right env @session expected=wanted allow_place=true)
             if value is? Error return value
             keyword[name] = value
         } else {
             if keyword.length >? 0 return pending(item 'interleaved named and positional argument normalization' env session)
-            let value = expression(item env @session allow_place=true)
+            let wanted:addr? = none
+            if signature is? types.FunctionType and signature.type_params.length =? 0 and positional.length <? signature.pos_or_kw.length {
+                let param = signature.pos_or_kw[positional.length]
+                if not param.place { wanted = param.value_type }
+            }
+            let value = expression(item env @session expected=wanted allow_place=true)
             if value is? Error return value
             positional.push(value)
         }
@@ -758,6 +825,7 @@ call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:
 }
 
 index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    if views.container_entry_types(node_at(sequence session).value_type session.types) isnt? none return container_index(sequence index_id id env @session)
     let source = contexts.source_at(env.lexical session)
     let arguments = tokens.node_at(source.nodes index_id)
     let item = index_id
@@ -791,6 +859,8 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
         let binding = bindings.binding_at(session.registry field.binding_id)
         return put(hir.ExpressedIdentifier[loc field.value_type binding.name field.binding_id] @session)
     }
+    let entry = views.container_entry_types(value.value_type session.types)
+    if entry isnt? none return container_member(receiver entry name id env @session)
     if type is? types.ObjectType {
         let field = types.object_field(type name)
         if field isnt? none return put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session)
@@ -979,6 +1049,7 @@ place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
         else if binding.value_type isnt? none { store_type = binding.value_type }
         value = put(hir.ExpressedIdentifier[target.loc store_type target.name target.binding_id] @session)
     }
+    container_state.replaced(value env.state @session)
     if binding.value_type isnt? none { set_read_type(binding.id binding.value_type env @session) }
     let loc = contexts.node_at(id env.lexical session).loc
     return put(hir.Place[loc store_type value] @session)
@@ -1296,6 +1367,7 @@ invalidate_loop_names = (names:set<string> replacements:set<string> env:Environm
     loop name in names {
         let id = declarations.lookup(name env.lexical session)
         if id is? none continue
+        container_state.changed(id env.state @session)
         let current = read_type(id env session)
         let binding = bindings.binding_at(session.registry id)
         let declared = if binding.store_type is? none binding.value_type else binding.store_type
@@ -1401,4 +1473,229 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
     invalidate_loop_names(changed replaced env @session)
     let checked_arm = put(hir.LoopArm[arm.loc type condition body] @session)
     return put(hir.Flow[contexts.node_at(id env.lexical session).loc type [checked_arm]] @session)
+}
+
+# Literal keys and values are separate homogeneous arrays, matching the
+# insertion-order HIR representation. The entry expressions still check in
+# source order within each array, as in the hosted implementation.
+container_array = (items:array<addr> wanted:addr? id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let values:array<addr> = []
+    let element = wanted
+    loop item in items {
+        let checked = expression(item env @session expected=wanted)
+        if checked is? Error return checked
+        if wanted is? none { checked = widen(checked item env @session) }
+        if checked is? Error return checked
+        let current = node_at(checked session).value_type
+        if element is? none { element = current }
+        else if wanted is? none {
+            if subtyping.is_subtype(current element session.links @session.types) {}
+            else if subtyping.is_subtype(element current session.links @session.types) { element = current }
+            else return problem(item 'container elements differ in type' 'annotate the container to select one element type' env session)
+        }
+        values.push(checked)
+    }
+    if element is? none return problem(id 'empty container needs an element type' 'provide a container annotation' env session)
+    let converted:array<addr> = []
+    loop value in values {
+        let checked = against(value element id env @session)
+        if checked is? Error return checked
+        converted.push(checked)
+    }
+    let loc = contexts.node_at(id env.lexical session).loc
+    return put(hir.ArrayLiteral[loc types.array_type(element converted.length @session.types) converted] @session)
+}
+container_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none is_set:bool=false):>addr|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let annotation = if expected is? none none else views.container_entry_types(expected session.types)
+    let key_nodes:array<addr> = []
+    let value_nodes:array<addr> = []
+    if is_set { key_nodes = node.inner }
+    else {
+        loop row_id in node.inner {
+            let row = tokens.node_at(source.nodes row_id)
+            if row isnt? parser.BinOp return problem(row_id 'dictionary literal needs pairs' 'write `key -> value` for every entry' env session)
+            let op = syntax.symbol(row.op source.nodes)
+            if op =? '<->' return pending(row_id 'bidirectional dictionary literals' env session)
+            if op not=? '->' return problem(row_id 'dictionary literal needs pairs' 'write `key -> value` for every entry' env session)
+            key_nodes.push(row.left) value_nodes.push(row.right)
+        }
+    }
+    let checked_keys = container_array(key_nodes if annotation is? none none else annotation.key id env @session)
+    if checked_keys is? Error return checked_keys
+    let key_array:addr = checked_keys
+    let key_node = node_at(key_array session)
+    $runtime_assert key_node is? hir.ArrayLiteral
+    let key_type = types.node_at(session.types key_node.value_type)
+    $runtime_assert key_type is? types.ArrayType
+    let value_array:addr? = none
+    let value_type:addr? = none
+    if not is_set {
+        let array = container_array(value_nodes if annotation is? none none else annotation.value id env @session)
+        if array is? Error return array
+        value_array = array
+        let type = types.node_at(session.types node_at(array session).value_type)
+        $runtime_assert type is? types.ArrayType
+        value_type = type.element
+    } else {
+        # Constant members collapse now. General values need the ordinary
+        # array-to-set library call, including its once-only evaluation.
+        let seen:array<keys.Identity> = []
+        let distinct:array<addr> = []
+        loop item in key_node.items {
+            let identity = keys.identity(item session.hir @session.registry @session.types)
+            if identity isnt? keys.Literal return pending(id 'runtime set literal materialization through the generic array-to-set helper' env session)
+            let duplicate = false
+            loop prior in seen { if keys.same(prior identity) { duplicate = true break } }
+            if not duplicate { seen.push(identity) distinct.push(item) }
+        }
+        key_array = put(hir.ArrayLiteral[node.loc types.array_type(key_type.element distinct.length @session.types) distinct] @session)
+    }
+    let type = views.container_type(key_type.element value_type @session.types)
+    let value = container_values.literal(node.loc type key_array value_array @session)
+    return if expected is? none value else against(value expected id env @session)
+}
+container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let loc = contexts.node_at(id env.lexical session).loc
+    let is_set = entry.value is? none
+    if name =? 'length' {
+        return put(hir.MemberAccess[loc types.primitive('int64' @session.types) receiver 'live' false] @session)
+    }
+    if name in? ['keys' 'values'] {
+        if is_set and name =? 'keys' return problem(id 'sets have no keys' 'use `.values` for the members as an array' env session)
+        container_state.forget_positions(receiver env.state @session)
+        let type = if name =? 'keys' views.set_type(entry.key @session.types) else types.array_type(if entry.value is? none entry.key else entry.value none @session.types)
+        return put(hir.DictView[loc type receiver name] @session)
+    }
+    if (name =? 'get' and not is_set) or name in? ['pop' 'clear'] or (name =? 'add' and is_set) {
+        if name not=? 'get' {
+            let target = writable_container(receiver id env @session)
+            if target is? Error return target
+            let node = node_at(receiver session)
+            let binding = container_state.route(receiver @session)
+            let declared = if binding is? none none else bindings.binding_at(session.registry binding).store_type
+            let total = views.total_dict_key(node.value_type session.types)
+            if declared isnt? none and total is? none { total = views.total_dict_key(declared session.types) }
+            if total isnt? none and name in? ['pop' 'clear'] return problem(id 'cannot remove keys from a total dictionary' 'its type promises every key remains present' env session)
+        }
+        return put(hir.DictMethod[loc container_methods.signature(name entry @session.types) receiver name] @session)
+    }
+    return problem(id 'unknown container member' name env session)
+}
+writable_container = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let path = bindings.access_path(value session.hir)
+    let root = node_at(path.root session)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'container mutation needs a named place' 'bind the container before changing it' env session)
+    let binding = bindings.binding_at(session.registry root.binding_id)
+    if binding.read_only_reason isnt? none return problem(id 'cannot mutate a constant container' binding.name env session)
+    loop step in path.steps {
+        let node = node_at(step session)
+        if node isnt? hir.MemberAccess return pending(id 'container mutation through an indexed place' env session)
+        if not node.mutable return problem(id 'cannot mutate an immutable container field' node.name env session)
+    }
+    return value
+}
+container_call = (method:hir.DictMethod args:array<addr> kwargs:dict<string addr> id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let entry = views.container_entry_types(node_at(method.dictionary session).value_type session.types)
+    $runtime_assert entry isnt? none
+    let arrays = container_values.arrays(method.dictionary @session)
+    let loc = contexts.node_at(id env.lexical session).loc
+    if method.name =? 'clear' {
+        container_state.removed(method.dictionary none env.state @session)
+        return put(hir.DictRemove[loc types.primitive('void' @session.types) arrays.keys arrays.values none] @session)
+    }
+    let key = if args.length >? 0 args[0] else kwargs.get('key')
+    $runtime_assert key isnt? none
+    let default = if args.length >? 1 args[1] else kwargs.get('default')
+    if method.name =? 'get' {
+        $runtime_assert entry.value isnt? none and arrays.values isnt? none
+        let result = if default is? none views.optional(entry.value @session.types) else entry.value
+        return put(hir.DictLookup[loc result arrays.keys arrays.values key default=default] @session)
+    }
+    if method.name =? 'add' {
+        container_state.forget_positions(method.dictionary env.state @session)
+        let position = key_position(@session)
+        container_state.remember(method.dictionary key env.state @session position=position)
+        return put(hir.DictStore[loc types.primitive('void' @session.types) arrays.keys none key none position=position] @session)
+    }
+    let fact = container_state.proven(method.dictionary key env.state @session)
+    if fact is? none and default is? none return problem(id 'container key is not proven present' 'guard the pop with `in?`, or supply `default=...`' env session)
+    let result = if entry.value is? none entry.key else entry.value
+    if entry.value is? none and default isnt? none {
+        # The signature accepts an optional default, but a supplied member
+        # still gives a nonoptional result. Discard only the argument's
+        # contextual wrapper, preserving the type of an actually optional
+        # source value (which cannot stand in for a definite member).
+        let original = default
+        loop true {
+            let value = node_at(original session)
+            if value is? hir.RepresentationCast|hir.ValueCast { original = value.expr }
+            else break
+        }
+        if node_at(original session) is? hir.NoneValue {
+            default = original
+            result = views.optional(entry.key @session.types)
+        } else {
+            let checked = against(original entry.key id env @session)
+            if checked is? Error return checked
+            default = checked
+        }
+    }
+    container_state.removed(method.dictionary key env.state @session)
+    return put(hir.DictRemove[loc result arrays.keys arrays.values key position=if fact is? none none else fact.position static_position=if fact is? none none else fact.static_position default=default lenient=entry.value is? none and default isnt? none] @session)
+}
+key_position = (@session:contexts.Session):>string => {
+    let position = session.next_key_position
+    session.next_key_position += 1
+    return "__dewy_key_pos_{position}"
+}
+container_index = (receiver:addr index_id:addr id:addr env:Environment @session:contexts.Session store:addr?=none):>addr|Error => {
+    let source = contexts.source_at(env.lexical session)
+    let indices = tokens.node_at(source.nodes index_id)
+    if indices isnt? parser.Block or indices.inner.length not=? 1 return problem(id 'dictionary index needs one key' 'write `dictionary[key]`' env session)
+    let entry = views.container_entry_types(node_at(receiver session).value_type session.types)
+    $runtime_assert entry isnt? none
+    if entry.value is? none return problem(id 'sets do not have indexed values' 'use membership, add, or pop' env session)
+    let key = expression(indices.inner[0] env @session expected=entry.key)
+    if key is? Error return key
+    let arrays = container_values.arrays(receiver @session)
+    $runtime_assert arrays.values isnt? none
+    let loc = contexts.node_at(id env.lexical session).loc
+    if store isnt? none {
+        let target = writable_container(receiver id env @session)
+        if target is? Error return target
+        let value = expression(store env @session expected=entry.value)
+        if value is? Error return value
+        container_state.forget_positions(receiver env.state @session)
+        let position = key_position(@session)
+        container_state.remember(receiver key env.state @session position=position)
+        return put(hir.DictStore[loc types.primitive('void' @session.types) arrays.keys arrays.values key value position=position] @session)
+    }
+    let fact = container_state.proven(receiver key env.state @session)
+    if fact is? none return problem(id 'dictionary key is not proven present' 'guard the read with `in?`, or use `get` for an optional value' env session)
+    return put(hir.DictLookup[loc entry.value arrays.keys arrays.values key true fact.position fact.static_position] @session)
+}
+
+prove_total = (value:addr key_type:addr id:addr env:Environment @session:contexts.Session):>Error? => {
+    let members = views.finite_members(key_type session.types)
+    if members is? none return problem(id 'total dictionary needs a finite key type' display.type_to_dewy(key_type session.types) env session)
+    let literal = container_values.literal_facts(0 value @session)
+    let complete = true
+    loop member in members {
+        if keys.find(literal 0 keys.Literal[member]) is? none { complete = false break }
+    }
+    if complete return none
+    let binding = container_state.route(value @session)
+    let node = node_at(value session)
+    let known = views.total_dict_key(node.value_type session.types)
+    if binding isnt? none {
+        let declared = bindings.binding_at(session.registry binding).store_type
+        if known is? none and declared isnt? none { known = views.total_dict_key(declared session.types) }
+        if known is? none and keys.find(container_state.facts(env.state session) binding keys.Total[]) isnt? none {
+            let entry = views.container_entry_types(node.value_type session.types)
+            if entry isnt? none { known = entry.key }
+        }
+    }
+    if known isnt? none and subtyping.is_subtype(key_type known session.links @session.types) return none
+    return problem(id 'cannot prove the dictionary has every key' 'provide a literal covering the key type or an already-total dictionary' env session)
 }

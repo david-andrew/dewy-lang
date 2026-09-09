@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  69 source programs and 30 invalid programs. Short-circuit boolean HIR,
+  92 source programs and 47 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -50,6 +50,17 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Each candidate checks in an isolated compilation snapshot; exactly one
   successful candidate commits its bindings, types, HIR, and facts. Computed
   fields now work in declarations, defaults, constructors, and iterators.
+  Dictionary literals, constant set literals, entry stores/lookups, membership
+  guards, `get`/`pop`/`clear`/`add`, and fresh container views now enter the
+  shared HIR. Literal and copied membership facts have stable key identities;
+  branches intersect them and writes expire affected binding/member routes.
+  Total dictionaries prove finite key coverage at their conversion boundary.
+  Concrete call signatures contextualize literal arguments, including finite
+  dictionary key types. Homogeneous array inference uses the same entry checker.
+  The comparison checks lookup proof/slot metadata and removal optionality too.
+  Runtime set conversion, container iteration, and generic library calls remain
+  separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
+  and `container_methods.dewy` keep those transfers outside the source visitor.
   This is an intermediate HIR entry point, not yet a
   compiler driver: the remaining value forms, proof validation,
   representation selection, and native emission are still required.

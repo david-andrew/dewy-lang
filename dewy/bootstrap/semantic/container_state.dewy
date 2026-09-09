@@ -1,0 +1,141 @@
+import p"context.dewy" as contexts
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"bindings.dewy" as bindings
+import p"type_queries.dewy" as views
+import p"key_facts.dewy" as keys
+import p"container_values.dewy" as values
+import p"subtyping.dewy" as subtyping
+
+# Membership belongs to the current values of both a container and its key.
+# Projected replacement forgets the affected subtree, while an entry store
+# keeps other keys present but drops positions that a resize might move.
+facts = (state:addr session:contexts.Session):>array<keys.Fact> => {
+    $runtime_assert state <? session.read_states.length
+    return session.read_states[state].keys
+}
+set_facts = (state:addr current:array<keys.Fact> @session:contexts.Session):>void => {
+    $runtime_assert state <? session.read_states.length
+    let reads = session.read_states[state]
+    reads.keys = current
+    session.read_states[state] = reads
+}
+route = (value:addr @session:contexts.Session):>addr? => bindings.array_route_id(value session.hir @session.registry)
+changed = (binding:addr state:addr @session:contexts.Session):>void => {
+    let current = keys.forget(facts(state session) changed=binding)
+    let owner = binding
+    let prefix:array<string> = []
+    loop item in session.registry.routes {
+        if item.id =? binding { owner = item.root prefix = item.path break }
+    }
+    loop child in bindings.routes_under(session.registry owner prefix) { current = keys.forget(current changed=child) }
+    set_facts(state current @session)
+}
+replaced = (value:addr state:addr @session:contexts.Session):>void => {
+    let binding = route(value @session)
+    if binding isnt? none { changed(binding state @session) }
+}
+remember = (container:addr key:addr state:addr @session:contexts.Session position:string?=none static_position:addr?=none):>void => {
+    let binding = route(container @session)
+    let identity = keys.identity(key session.hir @session.registry @session.types)
+    if binding is? none or identity is? none return void
+    let current = facts(state session)
+    keys.record(@current keys.Fact[binding identity position static_position])
+    set_facts(state current @session)
+}
+proven = (container:addr key:addr state:addr @session:contexts.Session):>keys.Fact? => {
+    let binding = route(container @session)
+    let identity = keys.identity(key session.hir @session.registry @session.types)
+    if binding isnt? none and identity isnt? none {
+        let found = keys.find(facts(state session) binding identity)
+        if found isnt? none return found
+    }
+    let value = hir.node_at(session.hir container)
+    let total = views.total_dict_key(value.value_type session.types)
+    if binding isnt? none {
+        let declared = bindings.binding_at(session.registry binding).store_type
+        if total is? none and declared isnt? none { total = views.total_dict_key(declared session.types) }
+        if total is? none and keys.find(facts(state session) binding keys.Total[]) isnt? none {
+            let entry = views.container_entry_types(value.value_type session.types)
+            if entry isnt? none { total = entry.key }
+        }
+    }
+    if total isnt? none and subtyping.is_subtype(hir.node_at(session.hir key).value_type total session.links @session.types) return keys.Fact[if binding is? none 0 else binding keys.Total[]]
+    return none
+}
+forget_positions = (container:addr state:addr @session:contexts.Session):>void => {
+    let binding = route(container @session)
+    if binding isnt? none { set_facts(state keys.forget_positions(facts(state session) binding) @session) }
+}
+removed = (container:addr key:addr? state:addr @session:contexts.Session):>void => {
+    let binding = route(container @session)
+    if binding is? none return void
+    let current = facts(state session)
+    if key is? none { current = keys.forget(current container=binding) }
+    else {
+        let identity = keys.identity(key session.hir @session.registry @session.types)
+        current = keys.after_removal(current binding identity)
+    }
+    set_facts(state current @session)
+}
+seed = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
+    let current = facts(state session)
+    let source = route(value @session)
+    if source isnt? none {
+        loop fact in facts(state session) {
+            if fact.container =? source { keys.record(@current keys.Fact[binding fact.key fact.position fact.static_position]) }
+        }
+    }
+    let literal = values.literal_facts(binding value @session)
+    loop fact in literal { keys.record(@current fact) }
+    let entry = views.container_entry_types(hir.node_at(session.hir value).value_type session.types)
+    if entry isnt? none and entry.value isnt? none {
+        let members = views.finite_members(entry.key session.types)
+        if members isnt? none {
+            let complete = true
+            loop member in members { if keys.find(literal binding keys.Literal[member]) is? none { complete = false break } }
+            if complete { keys.record(@current keys.Fact[binding keys.Total[]]) }
+        }
+    }
+    set_facts(state current @session)
+}
+# A function may run after any later mutation of its enclosing scope. Only
+# literal facts of immutable root bindings survive into a function body.
+inherited = (state:addr session:contexts.Session):>array<keys.Fact> => {
+    let result:array<keys.Fact> = []
+    loop fact in facts(state session) {
+        let binding = session.registry.by_id.get(fact.container)
+        if binding isnt? none and binding.route_root is? none and binding.read_only_reason =? 'const binding' {
+            if fact.key is? keys.Literal|keys.Total { result.push(fact) }
+        }
+    }
+    return result
+}
+
+# Field routes carry their initializer's exact array lengths. This is also
+# where a container nested in a record gets its own membership identity.
+seed_fields = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
+    let node = hir.node_at(session.hir value)
+    if node is? hir.Obligation { seed_fields(binding node.value state @session) return void }
+    if node is? hir.ValueCast|hir.RepresentationCast { seed_fields(binding node.expr state @session) return void }
+    if node isnt? hir.ObjectLiteral return void
+    let owner = binding
+    let path:array<string> = []
+    loop route in session.registry.routes { if route.id =? binding { owner = route.root path = route.path break } }
+    let shape = types.node_at(session.types types.strip_refinement(node.value_type session.types))
+    if shape isnt? types.ObjectType return void
+    loop field in node.fields {
+        let declared = types.object_field(shape field.name)
+        if declared is? none continue
+        let member_path = path
+        member_path.push(field.name)
+        let child = bindings.route_id(@session.registry owner member_path declared.value_type field.loc)
+        let field_value = hir.node_at(session.hir field.value)
+        $runtime_assert state <? session.read_states.length
+        let reads = session.read_states[state]
+        reads.types[child] = field_value.value_type
+        session.read_states[state] = reads
+        seed(child field.value state @session)
+        seed_fields(child field.value state @session)
+    }
+}

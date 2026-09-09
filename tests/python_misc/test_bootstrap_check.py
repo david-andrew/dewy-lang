@@ -16,6 +16,30 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    "let d=['a' -> 1 'b' -> 2]\nd['b']",
+    "let d:dict<string int64>=[]\nd['a']=7\nd['a']",
+    "let d=['a' -> 1]\nd.get('z')",
+    "let d=['a' -> 1]\nd.get('z' 9)",
+    "let d=['a' -> 1 'b' -> 2]\nd.pop('a');\nd['b']",
+    "let d=['a' -> 1]\nd.pop('z' default=9)",
+    "let d=['a' -> 1]\nd.clear\nd.length",
+    "let d=['a' -> 1]\nlet k:string='b'\nif k in? d {d[k];}",
+    "let d:dict<string int64>=[]\nlet k:string='a'\nif k in? d {d[k]=1} else {d[k]=2}\nd[k]",
+    "let d=['a' -> 1]\nlet copy=d\ncopy['a']",
+    "const d=['a' -> 1]\nlet f=():>int64=>d['a']\nf()",
+    "let d=['a' -> 1]\nd.keys",
+    "let d=['a' -> 1]\nd.values",
+    'let s=set[1 2 2]\ns.length',
+    'let s:set<int64>=set[]\ns.add(7)\ns.pop(7)',
+    'let s=set[1 2]\ns.pop(3 default=none)',
+    'let s=set[1 2]\ns.pop(3 default=9)',
+    'let s=set[1 2]\ns.values',
+    'let s=set[1 2]\n2 in? s',
+    "let d:totaldict<'a'|'b' int64>=['a' -> 1 'b' -> 2]\nlet k:'a'|'b'='a'\nd[k]",
+    "let f=(d:totaldict<'a'|'b' int64> k:'a'|'b'):>int64=>d[k]\nf(['a' -> 1 'b' -> 2] 'b')",
+    "let p=[entries=['a' -> 1]]\np.entries['a']",
+    "let p:[entries:dict<string int64>]=[entries=[]]\np.entries['a']=4\np.entries['a']",
+
     'let make=():>[x:int64] => [x=7]\nlet x=make().x\nx',
     'let make=():>[x:int64] => [x=7]\nlet p=[x=make().x]\np.x',
     'let make=():>[x:int64] => [x=7]\nP:type=[x:int64]\nP[x=make().x]',
@@ -83,6 +107,24 @@ CASES = [
 
 
 ERROR_CASES = [
+    "[1 'mixed']",
+    "['a' -> 1 'b' -> 'mixed']",
+    'set[]',
+    "let d=['a' -> 1]\nd['b']",
+    "let d=['a' -> 1]\nd.clear\nd['a']",
+    "let d=['a' -> 1]\nlet k:string='a'\nif k in? d {k='b' d[k];}",
+    "let d=['a' -> 1]\nlet k:string='a'\nd.pop(k default=0);\nd['a']",
+    "let d=['a' -> 1]\nlet k:string='a'\nif k in? d {d.pop('a'); d[k];}",
+    "let d=['a' -> 1]\nlet f=():>int64=>d['a']",
+    "let d:totaldict<'a'|'b' int64>=['a' -> 1]",
+    "let d:totaldict<'a'|'b' int64>=['a' -> 1 'b' -> 2]\nd.clear",
+    "const d=['a' -> 1]\nd['a']=2",
+    'const s=set[1]\ns.add(2)',
+    'let s=set[1]\ns[1]',
+    'let s=set[1]\ns.keys',
+    'let s=set[1]\ns.pop(2)',
+    "let d=['a' -> 1]\nlet k:string='b'\nif true {d[k]=2}\nd[k]",
+
     'break', 'continue',
     'loop true { let f=():>void => {break} }',
     'loop i in ..3 {}',
@@ -121,6 +163,15 @@ def loop_summary(node):
     parts = []
     if isinstance(node, hir.LoopArm):
         parts.append(f'loop:{type_to_dewy(node.type)};')
+    if isinstance(node, hir.DictLookup):
+        slot = 'none' if node.static_position is None else str(node.static_position)
+        parts.append(f'lookup:{type_to_dewy(node.type)}:{str(node.proven).lower()}:{str(node.position is not None).lower()}:{slot};')
+    if isinstance(node, hir.DictRemove):
+        parts.append(f'remove:{type_to_dewy(node.type)}:{str(node.default is not None).lower()}:{str(node.lenient).lower()};')
+    if isinstance(node, hir.DictStore):
+        parts.append(f'store:{"set" if node.values is None else "dict"};')
+    if isinstance(node, hir.DictView):
+        parts.append(f'view:{node.name};')
     if isinstance(node, hir.IteratorExpression):
         last = 'none' if node.last is None else str(node.last)
         count = 'none' if node.count is None else str(node.count)
@@ -155,6 +206,13 @@ loop_summary = (id:addr session:contexts.Session):>string => {{
     let node=checking.node_at(id session)
     let parts:array<string>=[]
     if node is? hir.LoopArm {{ parts.push("loop:{{display.type_to_dewy(node.value_type session.types)}};") }}
+    if node is? hir.DictLookup {{
+        let slot = if node.static_position is? none 'none' else "{{node.static_position}}"
+        parts.push("lookup:{{display.type_to_dewy(node.value_type session.types)}}:{{node.proven}}:{{node.position isnt? none}}:{{slot}};")
+    }}
+    if node is? hir.DictRemove {{ parts.push("remove:{{display.type_to_dewy(node.value_type session.types)}}:{{node.default isnt? none}}:{{node.lenient}};") }}
+    if node is? hir.DictStore {{ parts.push(if node.values is? none 'store:set;' else 'store:dict;') }}
+    if node is? hir.DictView {{ parts.push("view:{{node.name}};") }}
     if node is? hir.IteratorExpression {{
         let target=checking.node_at(node.target session)
         let last=if node.last is? none 'none' else "{{node.last}}"
