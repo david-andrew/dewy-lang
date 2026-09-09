@@ -1,0 +1,204 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+
+doc"""
+Named terms and the relationships promised by function results.
+
+A contract names the callee's parameters. Substituting the actual arguments
+must retain their binding identities, including projected fields and slice
+endpoints. `eat(src[i..j)) <=? (src[i..j)).length` describes `j - i`, not
+`src.length`. Only an upper bound survives this slice substitution: a lower
+bound on the window does not imply the same lower bound on its source.
+
+Route allocation is explicit through the registry place. The source/type
+environment supplies constant evidence and is otherwise read-only.
+"""
+
+sequence_id = (id:addr env:values.Environment @registry:bindings.Registry):>addr? => {
+    let current = expressions.strip_casts(id env.nodes)
+    let node = hir.node_at(env.nodes current)
+    let type = types.node_at(env.types node.value_type)
+    let runtime = (type is? types.ArrayType | types.StringType and type.length is? none) or types.is_primitive(type 'string')
+    if not runtime return none
+    return bindings.array_route_id(current env.nodes @registry)
+}
+binding_term = (id:addr env:values.Environment @registry:bindings.Registry):>facts.Term? => {
+    let current = expressions.strip_casts(id env.nodes)
+    let measured = expressions.sequence_of(current env.nodes)
+    if measured isnt? none {
+        let sequence = sequence_id(measured env @registry)
+        return if sequence is? none none else facts.Term[sequence 'length']
+    }
+    let node = hir.node_at(env.nodes current)
+    if node is? hir.ExpressedIdentifier {
+        return if node.binding_id is? none none else facts.Term[node.binding_id]
+    }
+    if node is? hir.MemberAccess {
+        let route = bindings.array_route_id(current env.nodes @registry)
+        return if route is? none none else facts.Term[route]
+    }
+    return none
+}
+
+Offset:type = const [term:facts.Term shift:bigint]
+offset_term = (id:addr env:values.Environment @registry:bindings.Registry):>Offset? => {
+    let current = expressions.strip_casts(id env.nodes)
+    let binding = binding_term(current env @registry)
+    if binding isnt? none return Offset[binding 0]
+    let node = hir.node_at(env.nodes current)
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return none
+    let function = hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier return none
+    if function.name not=? '__add__' and function.name not=? '__sub__' return none
+    let left = node.pos_args[0]
+    let right = node.pos_args[1]
+    let constant = values.constant(right env)
+    let affine = offset_term(left env @registry)
+    if affine isnt? none and constant isnt? none and constant.lower isnt? none and constant.upper isnt? none and constant.lower =? constant.upper {
+        return Offset[affine.term affine.shift + (if function.name =? '__add__' constant.lower else -constant.lower)]
+    }
+    if function.name =? '__add__' {
+        constant = values.constant(left env)
+        affine = offset_term(right env @registry)
+        if affine isnt? none and constant isnt? none and constant.lower isnt? none and constant.upper isnt? none and constant.lower =? constant.upper {
+            return Offset[affine.term affine.shift + constant.lower]
+        }
+    }
+    return none
+}
+
+# `end` has already become a subtraction here. Retain the hosted restriction
+# to nonnegative subtractions; arbitrary affine expressions are not assumed
+# to be valid end-relative indices merely because their algebra cancels.
+length_offset = (id:addr sequence:addr env:values.Environment @registry:bindings.Registry):>bigint? => {
+    let node = hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return none
+    let function = hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier or function.name not=? '__sub__' return none
+    let constant = values.constant(node.pos_args[1] env)
+    if constant is? none or constant.lower is? none or constant.upper is? none or constant.lower not=? constant.upper or constant.lower <? 0 return none
+    let left = node.pos_args[0]
+    let measured = expressions.sequence_of(left env.nodes)
+    let inner:bigint = 0
+    if measured isnt? none {
+        if sequence_id(measured env @registry) not=? sequence return none
+    } else {
+        let previous = length_offset(left sequence env @registry)
+        if previous is? none return none
+        inner = previous
+    }
+    let total = inner + constant.lower
+    return if total >=? 1 total else none
+}
+
+Window:type = const [upper:facts.Term offset:addr adjust:bigint]
+slice_bounds = (id:addr env:values.Environment @registry:bindings.Registry):>Window? => {
+    let node = hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    if node isnt? hir.StringSlice return none
+    let range = hir.node_at(env.nodes node.range)
+    $runtime_assert range is? hir.Range
+    let left = range.left
+    if left is? none return none
+    let bounds = if range.bounds is? none '[]' else range.bounds
+    if not bounds.startswith('[') return none
+    let sequence = sequence_id(node.string env @registry)
+    let offset = binding_term(left env @registry)
+    if sequence is? none or offset is? none or offset.projection not=? 'value' return none
+    let right = range.right
+    if right is? none return Window[facts.Term[sequence 'length'] offset.binding_id 0]
+    if bounds.endswith(']') {
+        let last = length_offset(right sequence env @registry)
+        if last isnt? none and last =? 1 return Window[facts.Term[sequence 'length'] offset.binding_id 0]
+    }
+    if bounds.endswith(')') {
+        let measured = expressions.sequence_of(right env.nodes)
+        if measured isnt? none and sequence_id(measured env @registry) =? sequence {
+            return Window[facts.Term[sequence 'length'] offset.binding_id 0]
+        }
+    }
+    let end = binding_term(right env @registry)
+    if end is? none or end.projection not=? 'value' return none
+    return Window[end offset.binding_id (if bounds.endswith(']') 1 else 0)]
+}
+
+Direction:type = 'upper' | 'lower'
+Bound:type = const [direction:Direction gap:bigint]
+directions = (op:propositions.Operator):>array<Bound> => {
+    if op =? '<?' return [Bound['upper' 1]]
+    if op =? '<=?' return [Bound['upper' 0]]
+    if op =? '>?' return [Bound['lower' 1]]
+    if op =? '>=?' return [Bound['lower' 0]]
+    if op =? '=?' return [Bound['upper' 0] Bound['lower' 0]]
+    return []
+}
+CallFact:type = const [upper:facts.Term offset:addr? gap:bigint direction:Direction]
+call_facts = (id:addr subject:string env:values.Environment @registry:bindings.Registry):>array<CallFact> => {
+    let output:array<CallFact> = []
+    loop refined in expressions.call_result_refinements(id env.nodes env.types) {
+        loop p in refined.propositions {
+            if p.term is? none or p.subject not=? subject or propositions.field(p) isnt? none continue
+            let supplied = expressions.call_argument(id p.term env.nodes env.types)
+            if supplied is? none continue
+            let argument = expressions.strip_casts(supplied env.nodes)
+            let term:facts.Term? = none
+            let offset:addr? = none
+            let adjust:bigint = 0
+            let upper_only = false
+            if p.term_projection =? 'value' { term = binding_term(argument env @registry) }
+            else {
+                let sequence = sequence_id(argument env @registry)
+                if sequence isnt? none { term = facts.Term[sequence 'length'] }
+                else {
+                    let window = slice_bounds(argument env @registry)
+                    upper_only = true
+                    if window isnt? none { term = window.upper offset = window.offset adjust = window.adjust }
+                    else {
+                        let node = hir.node_at(env.nodes argument)
+                        if node is? hir.StringSlice {
+                            let range = hir.node_at(env.nodes node.range)
+                            $runtime_assert range is? hir.Range
+                            if range.left is? none and range.right isnt? none {
+                                let end = binding_term(range.right env @registry)
+                                if end isnt? none and end.projection =? 'value' {
+                                    term = end
+                                    adjust = if range.bounds is? none or range.bounds.endswith(']') 1 else 0
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if term is? none continue
+            loop bound in directions(p.op) {
+                if not upper_only or bound.direction =? 'upper' {
+                    output.push(CallFact[term offset bound.gap-adjust bound.direction])
+                }
+            }
+        }
+    }
+    return output
+}
+
+# Store the symbolic part of a result contract. Concrete interval tightening
+# belongs to the evaluator, which also knows literal argument lengths.
+seed = (@state:facts.State subject:facts.Term promises:array<CallFact> context:relations.Context):>void => {
+    loop promise in promises {
+        let bound = ranges.Interval[promise.gap none]
+        if promise.direction =? 'lower' { facts.put(@state facts.order(promise.upper subject) bound) }
+        else if promise.offset is? none { facts.put(@state facts.order(subject promise.upper) bound) }
+        else {
+            let offset = relations.interval_of(facts.Term[promise.offset] state context)
+            if offset.lower isnt? none and offset.lower >=? 0 {
+                facts.put(@state facts.remainder(subject promise.upper promise.offset) bound)
+                if promise.gap >=? 0 { facts.put(@state facts.order(subject promise.upper) bound) }
+            }
+        }
+    }
+}
