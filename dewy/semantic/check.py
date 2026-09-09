@@ -4635,6 +4635,49 @@ def _tcr_loop_iterator(
     return condition, iterator_ctx
 
 
+def _join_continuation_facts(
+    ctx: Context,
+    paths: list[dict[int, ty.Type]],
+    bounds: list[dict[int, int]],
+    keys: list[dict],
+) -> None:
+    """Join the current facts of paths that actually reach a continuation."""
+    joined: dict[int, ty.Type] = {}
+    length_minimums: dict[int, int] = {}
+    for binding_id in set.intersection(*(set(path) for path in paths)):
+        types = [path[binding_id] for path in paths]
+        if all(isinstance(item, ty.ArrayType) for item in types):
+            # exact-length refinements join to one exact length, or
+            # to a proven minimum when the paths disagree
+            arrays = cast(list[ty.ArrayType], types)
+            lengths = {array.length for array in arrays}
+            if len(lengths) == 1:
+                joined[binding_id] = arrays[0]
+            elif None not in lengths:
+                length_minimums[binding_id] = min(cast(set[int], lengths))
+            continue
+        # a member below another (`A` under its family `T`, after `if x is? A { … }`)
+        # is absorbed: the join is `T`, one object pointer — not a tagged union of the two
+        joined[binding_id] = _in_declared_order(ctx.type_system.join(*types), binding_id, ctx=ctx)
+    ctx.refinements.clear()
+    ctx.refinements.update(joined)
+    joined_bounds: dict[int, int] = {}
+    for binding_id in set.intersection(*(set(path) for path in bounds)):
+        joined_bounds[binding_id] = min(path[binding_id] for path in bounds)
+    for binding_id, minimum in length_minimums.items():
+        joined_bounds[binding_id] = max(joined_bounds.get(binding_id, 0), minimum)
+    ctx.length_bounds.clear()
+    ctx.length_bounds.update(joined_bounds)
+    # a key stays proven only on every path; a shared position only
+    # when every path found it at the same local
+    joined_keys: dict = {}
+    for fact_key in set.intersection(*(set(path) for path in keys)):
+        positions = {path[fact_key] for path in keys}
+        joined_keys[fact_key] = positions.pop() if len(positions) == 1 else (None, None)
+    ctx.key_facts.clear()
+    ctx.key_facts.update(joined_keys)
+
+
 def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.AST:
     """Typecheck supported structured `if` and while-style `loop` flows."""
     if not ast.arms:
@@ -4817,40 +4860,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             # items, so updating it in place narrows the code after the flow.
             # A binding stays refined only when every continuing path refines
             # it; the joined type is the union of the per-path types.
-            joined: dict[int, ty.Type] = {}
-            length_minimums: dict[int, int] = {}
-            for binding_id in set.intersection(*(set(path) for path in continuing_paths)):
-                types = [path[binding_id] for path in continuing_paths]
-                if all(isinstance(item, ty.ArrayType) for item in types):
-                    # exact-length refinements join to one exact length, or
-                    # to a proven minimum when the paths disagree
-                    arrays = cast(list[ty.ArrayType], types)
-                    lengths = {array.length for array in arrays}
-                    if len(lengths) == 1:
-                        joined[binding_id] = arrays[0]
-                    elif None not in lengths:
-                        length_minimums[binding_id] = min(cast(set[int], lengths))
-                    continue
-                # a member below another (`A` under its family `T`, after `if x is? A { … }`)
-                # is absorbed: the join is `T`, one object pointer — not a tagged union of the two
-                joined[binding_id] = _in_declared_order(ctx.type_system.join(*types), binding_id, ctx=ctx)
-            ctx.refinements.clear()
-            ctx.refinements.update(joined)
-            joined_bounds: dict[int, int] = {}
-            for binding_id in set.intersection(*(set(path) for path in continuing_bounds)):
-                joined_bounds[binding_id] = min(path[binding_id] for path in continuing_bounds)
-            for binding_id, minimum in length_minimums.items():
-                joined_bounds[binding_id] = max(joined_bounds.get(binding_id, 0), minimum)
-            ctx.length_bounds.clear()
-            ctx.length_bounds.update(joined_bounds)
-            # a key stays proven only on every path; a shared position only
-            # when every path found it at the same local
-            joined_keys: dict = {}
-            for fact_key in set.intersection(*(set(path) for path in continuing_keys)):
-                positions = {path[fact_key] for path in continuing_keys}
-                joined_keys[fact_key] = positions.pop() if len(positions) == 1 else (None, None)
-            ctx.key_facts.clear()
-            ctx.key_facts.update(joined_keys)
+            _join_continuation_facts(ctx, continuing_paths, continuing_bounds, continuing_keys)
         else:
             # Everything diverges: the continuation is unreachable, keep the
             # all-conditions-false state.
@@ -11788,6 +11798,9 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             right_ctx = _refine_condition_context(ctx, left, truth=True)
         elif symbol in {'or', '|', 'nor'}:
             right_ctx = _refine_condition_context(ctx, left, truth=False)
+    shortcut_ctx = None
+    if right_ctx is not ctx:
+        shortcut_ctx = _refine_condition_context(ctx, left, truth=symbol in {'or', '|', 'nor'})
     right = typecheck_and_resolve_inner(
         binop.right,
         ctx=right_ctx,
@@ -11886,6 +11899,17 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             and len(result.func.type.pos_or_kw) == 2
             and all(param.type == 'bool' for param in result.func.type.pos_or_kw)
         ):
+            if shortcut_ctx is not None:
+                paths = [shortcut_ctx, right_ctx]
+                if isinstance(left, hir.Bool):
+                    continues = left.value == (short_circuit_ops[binop.op.symbol] in {'and', 'nand'})
+                    paths = [right_ctx if continues else shortcut_ctx]
+                _join_continuation_facts(
+                    ctx,
+                    [dict(path.refinements) for path in paths],
+                    [dict(path.length_bounds) for path in paths],
+                    [dict(path.key_facts) for path in paths],
+                )
             return hir.ShortCircuit(
                 result.loc,
                 result.type,

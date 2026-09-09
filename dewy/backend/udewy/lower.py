@@ -4922,6 +4922,14 @@ class _Lowerer(
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
             prelude, expr = self._extract_expression(node.expr)
             return prelude, replace(node, expr=expr)
+        if isinstance(node, hir.Block) and node.scoped:
+            # A value block is one always-selected branch. Reuse the flow
+            # result boundary (including aggregate/optional storage), since
+            # µDewy does not admit a block directly as a call operand.
+            flow = hir.Flow(node.loc, node.type, [hir.IfArm(
+                node.loc, node.type, hir.Bool(node.loc, 'bool', True), node,
+            )], None)
+            return self._extract_expression(flow)
         if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
             prelude, item = self._extract_expression(node.items[0])
             return prelude, replace(node, items=[item])

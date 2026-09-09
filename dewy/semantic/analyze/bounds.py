@@ -2081,6 +2081,75 @@ class _BoundsValidator:
         for level, states in source.items():
             target.setdefault(level, []).extend(states)
 
+    def _eval_value_body(self, node: hir.AST, state: State, *, validate: bool) -> Interval | None:
+        """Evaluate a value block once, retaining its statements' effects."""
+        if not isinstance(node, hir.Block):
+            if node.type == ty.BOTTOM_TYPE:
+                updated = self._analyze(node, state, validate=validate)
+                state.clear()
+                state.update(updated)
+                return None
+            return self._eval(node, state, validate=validate)
+        result: Interval | None = None
+        local_ids = {
+            item.binding_id for item in node.items
+            if isinstance(item, hir.Declare) and item.binding_id is not None
+        }
+        for item in node.items:
+            if item.type in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+                updated = self._analyze(item, state, validate=validate)
+                state.clear()
+                state.update(updated)
+            else:
+                result = self._eval(item, state, validate=validate)
+            if item.type == ty.BOTTOM_TYPE:
+                break
+        if node.scoped:
+            for binding_id in local_ids:
+                state.pop(binding_id, None)
+        return result
+
+    def _eval_value_flow(self, node: hir.Flow, state: State, *, validate: bool) -> Interval | None:
+        """A conditional expression joins both its value and its exit state.
+
+        In particular, wrapping it in a call argument or obligation must not
+        erase the arms' bounds or evaluate effectful arms a second time.
+        Binding conditionals separately retain richer relational facts.
+        """
+        remaining: State | None = dict(state)
+        exits: list[State] = []
+        values: list[Interval | None] = []
+        for arm in node.arms:
+            if remaining is None:
+                break
+            self._eval(arm.condition, remaining, validate=validate)
+            selected = self._refine(remaining, arm.condition, truth=True)
+            if selected is not None:
+                value = self._eval_value_body(arm.body, selected, validate=validate)
+                if arm.body.type != ty.BOTTOM_TYPE:
+                    exits.append(selected)
+                    values.append(value)
+            remaining = self._refine(remaining, arm.condition, truth=False)
+        if remaining is not None:
+            if node.default is not None:
+                value = self._eval_value_body(node.default, remaining, validate=validate)
+                if node.default.type != ty.BOTTOM_TYPE:
+                    exits.append(remaining)
+                    values.append(value)
+            else:
+                exits.append(remaining)
+                values.append(None)
+        if exits:
+            state.clear()
+            state.update(self._join_states(exits))
+        if not values or any(value is None for value in values):
+            return None
+        known = [value for value in values if value is not None]
+        result = known[0]
+        for value in known[1:]:
+            result = result.union(value)
+        return result
+
     def _eval(
         self,
         node: hir.AST,
@@ -2088,8 +2157,15 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> Interval | None:
-        if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
-            return self._eval(node.items[0], state, validate=validate)  # parentheses
+        if isinstance(node, hir.Block):
+            return self._eval_value_body(node, state, validate=validate)
+        if isinstance(node, hir.Flow):
+            if any(isinstance(arm, hir.LoopArm) for arm in node.arms):
+                updated = self._analyze_flow(node, state, validate=validate)
+                state.clear()
+                state.update(updated)
+                return None
+            return self._eval_value_flow(node, state, validate=validate)
         if isinstance(node, hir.Suppress):
             self._eval(node.item, state, validate=validate)
             return None
@@ -2463,16 +2539,18 @@ class _BoundsValidator:
             return result
         if isinstance(node, hir.ShortCircuit):
             self._eval(node.left, state, validate=validate)
-            # the right operand only runs when the left decided nothing yet:
-            # under `and` the left was true, under `or` it was false
-            if node.op in {'and', 'nand'}:
-                right_state = self._refine(state, node.left, truth=True)
-            elif node.op in {'or', 'nor'}:
-                right_state = self._refine(state, node.left, truth=False)
-            else:
-                right_state = dict(state)
+            # The right runs only on the continuing path. Join its effects
+            # with the path that short-circuited; do not discard mutations
+            # merely because the boolean result itself needs no interval.
+            continuing_truth = node.op in {'and', 'nand'}
+            right_state = self._refine(state, node.left, truth=continuing_truth)
+            shortcut_state = self._refine(state, node.left, truth=not continuing_truth)
             if right_state is not None:
                 self._eval(node.right, right_state, validate=validate)
+            joined = self._join_alternatives(shortcut_state, right_state)
+            if joined is not None:
+                state.clear()
+                state.update(joined)
             return None
         if isinstance(node, hir.RangeMembership):
             self._eval(node.value, state, validate=validate)
