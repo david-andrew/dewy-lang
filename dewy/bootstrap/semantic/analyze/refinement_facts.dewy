@@ -1,0 +1,175 @@
+from reporting import Span
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+
+doc"""
+Turn established type contracts into current flow evidence.
+
+These functions assume a contract has already been checked at the boundary
+where a value acquired its type. They do not prove an obligation. Assignments
+discard or transform the old evidence before the stored contract is seeded
+again. A later mutation does not prevent using a fact before that mutation.
+
+Immutable records also retain relationships between sibling fields: reading
+`info.radix` may recover `info.radix =? info.alphabet.length`. Mutable records
+cannot recover such relationships merely from their construction history.
+"""
+
+Context:type = const [env:values.Environment word_type:addr]
+Declared:type = dict<addr types.RefinedType>
+
+seed_length = (@state:facts.State subject:addr p:propositions.Proposition cap:bigint):>void => {
+    let lower = propositions.lower_bound(p)
+    let upper = propositions.upper_bound(p)
+    if lower is? none and upper is? none return
+    let key = facts.value(facts.Term[subject 'length'])
+    let found = facts.lookup(state key)
+    let known = if found is? none values.length_default(cap) else found
+    let bound = ranges.Interval[(if lower is? none 0 else lower) (if upper is? none cap else upper)]
+    facts.put(@state key ranges.intersect(known bound))
+}
+seed_field = (@state:facts.State root:addr p:propositions.Proposition base:addr context:Context loc:Span @registry:bindings.Registry):>void => {
+    let field = propositions.field(p)
+    $runtime_assert field isnt? none
+    let path = field.split('.')
+    let current = base
+    loop name in path {
+        let object = expressions.object_of(current context.env.types)
+        let declared:types.ObjectField? = none
+        if object isnt? none { declared = types.object_field(object name) }
+        current = if declared is? none context.word_type else declared.value_type
+    }
+    let subject = bindings.route_id(@registry root path current loc)
+    if p.projection =? 'length' { seed_length(@state subject p context.env.cap) return }
+    let lower = propositions.lower_bound(p)
+    let upper = propositions.upper_bound(p)
+    let bound:ranges.Interval? = none
+    if lower isnt? none or upper isnt? none { bound = ranges.Interval[lower upper] }
+    if p.axiom =? 'addr' { bound = ranges.Interval[0 context.env.cap-1 true] }
+    if bound isnt? none {
+        let key = facts.value(facts.Term[subject])
+        let known = facts.lookup(state key)
+        facts.put(@state key ranges.intersect((if known is? none ranges.UNKNOWN else known) bound))
+    }
+    if p.op =? 'not=?' and p.value =? 0 { facts.put(@state facts.nonzero(subject) ranges.exact(1)) }
+}
+seed_term = (@state:facts.State subject:addr p:propositions.Proposition context:Context):>void => {
+    if p.term_id is? none or p.subject not=? 'self' return
+    let target = facts.Term[p.term_id p.term_projection]
+    loop bound in terms.directions(p.op) {
+        let key = if bound.direction =? 'upper' facts.order(facts.Term[subject] target) else facts.order(target facts.Term[subject])
+        facts.put(@state key ranges.Interval[bound.gap none])
+        if bound.direction =? 'upper' and p.term_projection =? 'length' {
+            # A length-related bound also supplies the target's address-space
+            # cap, so a guarded counter can be represented by a machine word.
+            let capped = ranges.Interval[none context.env.cap-bound.gap true]
+            let known = values.binding_interval(facts.Term[subject] state context.env)
+            facts.put(@state facts.value(facts.Term[subject]) ranges.intersect(known capped))
+        }
+    }
+}
+seed_binding = (@state:facts.State @declared:Declared subject:addr refined:types.RefinedType context:Context loc:Span @registry:bindings.Registry):>void => {
+    declared[subject] = refined
+    loop p in refined.propositions {
+        if p.term isnt? none { seed_term(@state subject p context) continue }
+        if propositions.field(p) isnt? none { seed_field(@state subject p refined.base context loc @registry) continue }
+        if p.subject =? 'self' and p.op =? 'not=?' and p.value =? 0 { facts.put(@state facts.nonzero(subject) ranges.exact(1)) }
+        else if p.subject =? 'length' { seed_length(@state subject p context.env.cap) }
+    }
+    let bound = values.bounds_of(refined.propositions context.env.cap)
+    if bound isnt? none {
+        let known = values.binding_interval(facts.Term[subject] state context.env)
+        facts.set_value(@state facts.Term[subject] ranges.intersect(known bound))
+    }
+}
+seed_parameters = (@state:facts.State @declared:Declared function:hir.FunctionLiteral context:Context @registry:bindings.Registry):>void => {
+    let parameters = function.pos_or_kw_args
+    loop parameter in function.kw_only_args { parameters.push(parameter) }
+    loop parameter in parameters {
+        let type = types.node_at(context.env.types parameter.value_type)
+        let id = parameter.binding_id
+        if type is? types.RefinedType and id isnt? none { seed_binding(@state @declared id type context function.loc @registry) }
+    }
+}
+
+Member:type = const [object:types.ObjectType root:addr path:array<string>]
+locate = (node:hir.MemberAccess env:values.Environment):>Member? => {
+    let object = expressions.object_of(hir.node_at(env.nodes node.value).value_type env.types)
+    if object is? none return none
+    let path = bindings.access_path(node.value env.nodes)
+    let root = hir.node_at(env.nodes path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
+    let existing = bindings.member_fields(path env.nodes)
+    if existing is? none return none
+    let fields:array<string> = existing
+    fields.push(node.name)
+    return Member[object root.binding_id fields]
+}
+sibling_path = (path:array<string> name:string):>array<string> => {
+    $runtime_assert path.length >? 0
+    let result = path
+    result[result.length-1] = name
+    return result
+}
+seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment @registry:bindings.Registry):>void => {
+    let member = locate(node env)
+    if member is? none or not member.object.immutable return
+    loop field in member.object.fields {
+        let related = field.name =? node.name
+        loop p in field.refinement { if p.term =? node.name { related = true } }
+        if not related continue
+        loop p in field.refinement {
+            if p.term is? none or propositions.field(p) isnt? none continue
+            let directions = terms.directions(p.op)
+            if directions.length =? 0 continue
+            let sibling = types.object_field(member.object p.term)
+            if sibling is? none continue
+            let subject = bindings.route_id(@registry member.root sibling_path(member.path field.name) field.value_type node.loc)
+            let bound = bindings.route_id(@registry member.root sibling_path(member.path sibling.name) sibling.value_type node.loc)
+            let target = facts.Term[bound p.term_projection]
+            loop direction in directions {
+                let key = if direction.direction =? 'upper' facts.order(facts.Term[subject] target) else facts.order(target facts.Term[subject])
+                let previous = facts.lookup(state key)
+                facts.put(@state key ranges.intersect((if previous is? none ranges.UNKNOWN else previous) ranges.Interval[direction.gap none]))
+            }
+        }
+    }
+}
+
+field_interval = (node:hir.MemberAccess state:facts.State env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
+    let object = expressions.object_of(hir.node_at(env.nodes node.value).value_type env.types)
+    if object is? none return none
+    let field = types.object_field(object node.name)
+    if field is? none return none
+    let interval = values.fixed_bounds(field.value_type env.types)
+    if not object.immutable return interval
+    let member = locate(node env)
+    if member is? none return interval
+    loop p in field.refinement {
+        if p.term is? none or propositions.field(p) isnt? none or terms.directions(p.op).length =? 0 continue
+        let sibling = types.object_field(object p.term)
+        if sibling is? none continue
+        let route = bindings.route_id(@registry member.root sibling_path(member.path sibling.name) sibling.value_type node.loc)
+        let known = facts.lookup(state facts.value(facts.Term[route p.term_projection]))
+        let fallback = if p.term_projection =? 'length' values.length_default(env.cap) else ranges.UNKNOWN
+        let term = if known is? none fallback else known
+        let declared = if p.term_projection =? 'length' ranges.propositions_interval(sibling.refinement 'length') else values.bounds_of(sibling.refinement env.cap)
+        if declared isnt? none { term = ranges.intersect(term declared) }
+        # The same comparison rule handles both bounds of equality. Match the
+        # hosted field view's provenance: these are the declared field bounds,
+        # rather than an arithmetic result newly relying on the length cap.
+        let constrained = ranges.constraint(p.op term true)
+        if constrained isnt? none and not ranges.same_bounds(constrained ranges.UNKNOWN) {
+            let bound = ranges.Interval[constrained.lower constrained.upper]
+            interval = if interval is? none bound else ranges.intersect(interval bound)
+        }
+    }
+    return interval
+}
