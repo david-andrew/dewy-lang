@@ -35,3 +35,25 @@ let main=():>int64 => {
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ['2', '2', '2', '2']
+
+
+def test_const_container_captures_keep_membership_without_caller_slots(tmp_path):
+    source = '''
+let seed=['a' -> 1 'b' -> 2 'c' -> 3]
+seed.pop('a');
+const saved=seed
+let read=():>int64 => saved['b']
+let view=():>void => {let values=saved.values}
+let main=():>int64 => {
+    printl(read())
+    view()
+    printl(read())
+    return 0
+}
+'''
+    output = tmp_path / 'captured_views.udewy'
+    output.write_text(codegen(SrcFile(None, source)))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ['2', '2']

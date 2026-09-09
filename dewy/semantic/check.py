@@ -1883,16 +1883,19 @@ def _dictionary_fact_id(dictionary: hir.AST, *, ctx: Context) -> int | None:
 
 
 def _const_key_facts(ctx: Context) -> dict:
-    """The proven keys of `const` dictionaries, which a function body inherits:
-    a `const` is never stored into, so its literal's entries stay where they are."""
+    """A const container's membership survives into a function body.
+
+    Its slot positions do not: a logically read-only view may compact copied
+    tombstones, and a caller's hidden search temporary is not a callee local.
+    """
     inherited: dict = {}
-    for fact_key, fact in ctx.key_facts.items():
+    for fact_key in ctx.key_facts:
         dictionary_id = fact_key[0]
         binding = ctx.binding_registry.by_id.get(dictionary_id)
         if binding is None and dictionary_id in ctx.binding_registry.route_paths:
             continue   # a member route: its root may be reassigned
         if binding is not None and binding.declaration is not None and binding.declaration.decltype == 'const':
-            inherited[fact_key] = fact
+            inherited[fact_key] = (None, None)
     return inherited
 
 
