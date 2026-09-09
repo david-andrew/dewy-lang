@@ -1372,29 +1372,16 @@ def _complete_binding(
     if isinstance(declaration.expr, hir.FunctionLiteral):
         binding.function = declaration.expr
     ctx.binding_scopes[declaration.name] = binding
-    _seed_container_facts(declaration, ctx=ctx)
+    _seed_literal_facts(declaration, ctx=ctx)
     return declaration
 
 
-def _seed_container_facts(declaration: hir.Declare, *, ctx: Context) -> None:
-    """A dictionary or set declared from a literal starts with its members proven at their entries."""
-    if declaration.binding_id is None:
+def _seed_literal_facts(declaration: hir.Declare, *, ctx: Context) -> None:
+    """A literal's field lengths and container members belong to its new binding."""
+    if declaration.binding_id is None or declaration.expr is None:
         return
-    literal = _unwrap_parens(declaration.expr)
-    while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
-        literal = literal.expr
-    if not (isinstance(literal, hir.ObjectLiteral) and ty.container_entry_types(literal.type) is not None):
-        return
-    declared = ty.strip_refinement(declaration.annotation) if declaration.annotation is not None else literal.type
-    _seed_field_routes(declaration.binding_id, declared, literal, (), ctx=ctx)
-    dictionary = hir.ExpressedIdentifier(declaration.loc, literal.type, declaration.name, binding_id=declaration.binding_id)
-    keys_literal = literal.fields[0].value
-    while isinstance(keys_literal, (hir.RepresentationCast, hir.ValueCast)):
-        keys_literal = keys_literal.expr
-    if isinstance(keys_literal, hir.ArrayLiteral):
-        for index, key in enumerate(keys_literal.items):
-            _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
-        _record_literal_totality(dictionary, keys_literal, ctx=ctx)
+    declared = declaration.annotation if declaration.annotation is not None else declaration.expr.type
+    _seed_field_routes(declaration.binding_id, declared, declaration.expr, (), ctx=ctx)
 
 
 def _record_literal_totality(dictionary: hir.AST, keys_literal: hir.ArrayLiteral, *, ctx: Context) -> None:
@@ -1800,17 +1787,29 @@ def _seed_field_routes(
     *,
     ctx: Context,
 ) -> None:
-    """Record exact lengths of growable array fields initialized by an object literal.
+    """Seed a literal's lengths and key proofs at its binding/member routes.
 
-    `let bag:Bag = [items = [1 2]]` gives the route `bag.items` the same
-    exact-length refinement a named growable array gets from its initializer.
+    `bag.items` and `bag.entries` receive the same initial evidence as named
+    arrays and dictionaries. Replacing any enclosing object invalidates those
+    routes together; a nested literal needs no separate declaration special case.
     """
-    declared = ty.strip_refinement(declared)
+    declared = ty.unfold(ty.strip_refinement(declared))
     literal = _unwrap_parens(expr)
     while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
         literal = literal.expr
     if not (isinstance(declared, ty.ObjectType) and isinstance(literal, hir.ObjectLiteral)):
         return
+    if ty.container_entry_types(declared) is not None:
+        route_id = ctx.binding_registry.route_id(root_id, path, declared, literal.loc) if path else root_id
+        binding = ctx.binding_registry.by_id[root_id]
+        dictionary = hir.ExpressedIdentifier(literal.loc, declared, binding.name, binding_id=route_id)
+        keys_literal = _unwrap_parens(literal.fields[0].value)
+        while isinstance(keys_literal, (hir.RepresentationCast, hir.ValueCast)):
+            keys_literal = keys_literal.expr
+        if isinstance(keys_literal, hir.ArrayLiteral):
+            for index, key in enumerate(keys_literal.items):
+                _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
+            _record_literal_totality(dictionary, keys_literal, ctx=ctx)
     for field_value in literal.fields:
         field = declared.field(field_value.name)
         if field is None:
@@ -1825,7 +1824,7 @@ def _seed_field_routes(
             route_id = ctx.binding_registry.route_id(root_id, field_path, field.type, field_value.loc)
             ctx.refinements[route_id] = ty.ArrayType(field.type.element, field_value.value.type.length)
             ctx.length_bounds[route_id] = field_value.value.type.length
-        elif isinstance(field.type, ty.ObjectType):
+        elif isinstance(ty.unfold(ty.strip_refinement(field.type)), ty.ObjectType):
             _seed_field_routes(root_id, field.type, field_value.value, field_path, ctx=ctx)
 
 
@@ -7534,14 +7533,6 @@ def _tcr_dict_declare(
     ctx.declarations[name] = dict_object
     ctx.binding_scopes[name] = binding
     _seed_field_routes(binding.id, dict_object, literal, (), ctx=ctx)
-    dictionary = hir.ExpressedIdentifier(loc, dict_object, name, binding_id=binding.id)
-    keys_literal = literal.fields[0].value
-    while isinstance(keys_literal, (hir.RepresentationCast, hir.ValueCast)):
-        keys_literal = keys_literal.expr
-    if isinstance(keys_literal, hir.ArrayLiteral):
-        for index, key in enumerate(keys_literal.items):
-            _record_key_fact(dictionary, key, ctx=ctx, static_position=index)
-        _record_literal_totality(dictionary, keys_literal, ctx=ctx)
     return declaration
 
 

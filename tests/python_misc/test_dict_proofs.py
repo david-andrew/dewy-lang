@@ -223,3 +223,20 @@ def test_negated_membership_proof_still_expires_on_mutation():
     with pytest.raises(UserError, match='not proven present'):
         _check("let entries:dict<string int64> = []\nlet key:string = 'a'\n"
                'if key not in? entries return 0\nentries.clear\nlet value = entries[key]')
+
+
+@pytest.mark.parametrize('declaration', [
+    "let p=[entries=['a' -> 1]]",
+    "let p:[entries:dict<string int64>]=[entries=['a' -> 1]]",
+    "Box:type=const [entries:dict<string int64>]\nlet p=Box[['a' -> 1]]",
+])
+def test_nested_container_literals_seed_member_routes(declaration):
+    root = _check(declaration + "\nlet value=p.entries['a']")
+    lookup, = _lookups(root)
+    assert lookup.proven and lookup.static_position == 0
+
+
+def test_replacing_an_enclosing_record_expires_literal_key_proofs():
+    for replacement in ("p=[entries=['b' -> 2]]", "p.entries=['b' -> 2]"):
+        with pytest.raises(UserError, match='key is not proven present'):
+            _check("let p=[entries=['a' -> 1]]\n" + replacement + "\nlet value=p.entries['a']")
