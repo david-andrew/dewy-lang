@@ -102,6 +102,42 @@ class Context:
     allow_place_expression: bool = False
     # TODO: etc stuff
 
+
+class _DefaultScope:
+    """Keep a default's lexical environment outside generic dataclass walks.
+
+    Type and HIR walkers must not recurse into an entire compilation through
+    a field's default metadata. Pickle preserves it in the checked-prelude
+    cache; cloning an expression retains its original lexical identities.
+    """
+    def __init__(self, context: Context):
+        self.context = context
+
+    def __deepcopy__(self, memo: dict):
+        return self
+
+
+def _field_default_context(field_: ty.ObjectField, expression: p0.AST, ctx: Context) -> Context:
+    if field_.default is not expression or not isinstance(field_.default_scope, _DefaultScope):
+        return ctx
+    defining = field_.default_scope.context
+    return replace(
+        ctx,
+        srcfile=defining.srcfile,
+        # Earlier fields belong to this particular construction. All other
+        # names, including namespace imports, belong to the declaration.
+        declarations=ChainMap(ctx.declarations.maps[0], *defining.declarations.maps),
+        binding_scopes=ChainMap(ctx.binding_scopes.maps[0], *defining.binding_scopes.maps),
+        module_namespaces=defining.module_namespaces,
+        type_alias_asts=defining.type_alias_asts,
+        resolving_type_aliases=defining.resolving_type_aliases,
+        named_types=defining.named_types,
+        module=defining.module,
+        foreign_bindings=defining.foreign_bindings,
+        prelude_bindings=defining.prelude_bindings,
+    )
+
+
 def typecheck_and_resolve(
     srcfile: SrcFile,
     *,
@@ -6452,7 +6488,7 @@ def _merge_object_fields(
                 ctx.srcfile, 'intersection weakens a field',
                 Pointer(span=loc, message=f'`{field_.name}: {type_to_dewy(given_type)}` does not fit the earlier `{type_to_dewy(previous.type)}`'),
             )
-        fields[index] = replace(previous, default=field_.default) if bare_default else field_
+        fields[index] = replace(previous, default=field_.default, default_scope=field_.default_scope) if bare_default else field_
 
 
 def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Context) -> ty.ObjectType | None:
@@ -7969,7 +8005,8 @@ def _tcr_object_literal(
             value = prechecked  # a field copied in by a spread
         else:
             assert value_ast is not None
-            value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
+            value_context = _field_default_context(expected_object.fields[index], value_ast, ctx) if expected_object is not None else ctx
+            value = typecheck_and_resolve_inner(value_ast, ctx=value_context, expected=field_expected)
         require_valued(value.type, ctx.srcfile, value.loc, 'object field')
         if isinstance(value.type, (ty.FunctionType, ty.OverloadType)) and not isinstance(
             value,
@@ -12716,7 +12753,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
         and item.left.op.symbol == ':'
     ):
         declared = _object_type_member(item.left, ctx=ctx)
-        return replace(declared, mutable=mutable, default=item.right)
+        return replace(declared, mutable=mutable, default=item.right, default_scope=_DefaultScope(ctx))
     if (
         isinstance(item, p0.BinOp)
         and isinstance(item.op, t1.Operator)
@@ -12779,11 +12816,11 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
             and isinstance(target.left.item, t1.Identifier)
         ):
             declared_type = _value_type(ast_to_type(target.right, ctx=ctx), loc=target.right.loc, ctx=ctx)
-            return ty.ObjectField(target.left.item.name, ty.strip_refinement(declared_type), mutable, default=item.right)
+            return ty.ObjectField(target.left.item.name, ty.strip_refinement(declared_type), mutable, default=item.right, default_scope=_DefaultScope(ctx))
         if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
             value = typecheck_and_resolve_inner(item.right, ctx=ctx)
             inferred = _widen_type_argument(value.type, loc=item.right.loc, ctx=ctx)
-            return ty.ObjectField(target.item.name, inferred, mutable, default=item.right)
+            return ty.ObjectField(target.item.name, inferred, mutable, default=item.right, default_scope=_DefaultScope(ctx))
     user_error(
         ctx.srcfile,
         'object type fields must be `name:type`',

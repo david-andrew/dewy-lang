@@ -239,6 +239,8 @@ class ObjectField:
     """An invariant on the field's value (`denominator:int64<denominator >? 0>`):
     proven wherever a value of the object type is made or the field is stored,
     assumed wherever it is read. Outside structural identity, like ``default``."""
+    default_scope: object = field(default=None, compare=False, hash=False, repr=False, kw_only=True)
+    """Opaque lexical environment of the default, separate from caller fields."""
 
 
 @dataclass
