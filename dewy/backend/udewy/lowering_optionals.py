@@ -995,11 +995,19 @@ class _OptionalLowering:
         for index, arm in enumerate(node.arms):
             condition_prelude, condition = self._prepare_condition(arm.condition)
             if condition_prelude:
-                if isinstance(arm, hir.LoopArm) or index > 0:
+                if isinstance(arm, hir.LoopArm):
                     self._target_error(
                         arm.condition,
                         'union flow condition requiring extracted statements',
                     )
+                if index > 0:
+                    # a later arm whose condition needs statements (`match mode { <'round'> => … }`
+                    # comparing strings): the rest of the chain is a nested flow in the `else`,
+                    # where those statements run after the earlier tests failed (as `_lower_flow` does)
+                    rest = replace(node, arms=list(node.arms[index:]))
+                    nested_prelude, nested = self._lower_union_flow(rest, cell, members, prepared=prepared)
+                    default = hir.Block(node.loc, ty.VOID_TYPE, [*nested_prelude, nested], True)
+                    return prelude, replace(node, type=ty.VOID_TYPE, arms=arms, default=default)
                 prelude.extend(condition_prelude)
             arms.append(
                 replace(

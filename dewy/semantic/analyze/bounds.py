@@ -772,6 +772,13 @@ class _BoundsValidator:
                 known = self._string_length(_strip_casts(node.expr).type)
                 if known is not None:
                     current[_length_key(node.binding_id)] = Interval.exact(known)
+            if node.binding_id is not None and isinstance(_strip_casts(node.expr), hir.MemberAccess) and (declared is None or _is_runtime_string(declared) or isinstance(declared, ty.ArrayType)):
+                # `let delimiter = ctx.ending.text` with `text:nonemptystring`: the member's
+                # length bound (its declared refinement, or a fact on its route) is the binding's
+                member_length = self._length_interval(_strip_casts(node.expr), current)
+                if member_length is not None:
+                    key = _length_key(node.binding_id)
+                    current[key] = current.get(key, self._length_default()).intersect(member_length)
             if isinstance(node.expr, hir.FunctionLiteral):
                 self._analyze_function(node.expr, validate=validate, enclosing=current)
             elif isinstance(node.expr, hir.OverloadedFunction):
@@ -993,12 +1000,13 @@ class _BoundsValidator:
             return Interval.exact(known)
         if isinstance(_strip_casts(node), hir.StringSlice):
             return self._slice_length_interval(_strip_casts(node), state)
+        # `limbs:array<uint64 length >? 0>`, `text:nonemptystring`: the field's declared
+        # length bound is a fact on every read, tracked route or not (`ctx.ending.text`)
+        declared = _length_propositions_interval(_member_invariant(node))
         sequence_id = _runtime_array_id(node, self.registry)
         if sequence_id is None:
-            return None
+            return None if declared is None else self._length_default().intersect(declared)
         interval = state.get(_length_key(sequence_id), self._length_default())
-        # `limbs:array<uint64 length >? 0>`: the field's declared length bound is a fact on every read
-        declared = _length_propositions_interval(_member_invariant(node))
         return interval if declared is None else interval.intersect(declared)
 
     def _slice_length_interval(self, node: hir.StringSlice, state: State) -> Interval | None:
@@ -2069,12 +2077,9 @@ class _BoundsValidator:
         if isinstance(node, hir.ArrayLength):
             self._eval(node.array, state, validate=validate)
             if isinstance(node.array.type, ty.ArrayType):
-                length = node.array.type.length
-                if length is not None:
-                    return Interval.exact(length)
-                array_id = _runtime_array_id(node.array, self.registry)
-                if array_id is not None:
-                    return state.get(_length_key(array_id), self._length_default())
+                interval = self._length_interval(node.array, state)   # exact, a route's fact, a field's declared bound
+                if interval is not None:
+                    return interval
                 return self._length_default()
             return None
         if isinstance(node, hir.ArrayMethod):
@@ -2131,13 +2136,9 @@ class _BoundsValidator:
             return interval
         if isinstance(node, hir.StringLength):
             self._eval(node.string, state, validate=validate)
-            length = self._string_length(node.string.type)
-            if length is not None:
-                return Interval.exact(length)
-            string_id = _runtime_array_id(node.string, self.registry)
-            if string_id is not None:
-                return state.get(_length_key(string_id), self._length_default())
-            return self._length_default()
+            # an exact length, a slice's, a route's fact, a field's declared bound (`ctx.ending.text` as `nonemptystring`)
+            interval = self._length_interval(node.string, state)
+            return interval if interval is not None else self._length_default()
         if isinstance(node, hir.Index):
             self._eval(node.array, state, validate=validate)
             interval = self._eval(node.index, state, validate=validate)

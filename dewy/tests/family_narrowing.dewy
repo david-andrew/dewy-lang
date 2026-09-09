@@ -1,0 +1,29 @@
+# A value of an abstract family stays one object pointer through narrowing:
+# after `if x is? A { … }` the paths join to the family again (the branded
+# member is absorbed, not unioned into a tagged cell), so the next test reads
+# the brand from the object as the first one did. And a nested field read
+# keeps its declared refinement: `ctx.ending.text` is a `nonemptystring`, so
+# its length is at least 1 whether read directly or copied to a binding first.
+let nonemptystring:type = string<length >? 0>
+let PositiveLength:type = addr<(>? 0)>
+let MatchData:type = [length:PositiveLength]
+T = $abstract type of any & [n:int64]
+A = type of T
+B = type of T & [a:A]
+let inspect = (x:T):>int64 => {
+    if x is? A { printl"A" }
+    if x is? B return 42
+    return 0
+}
+QuoteEnd = type of any & const [text:nonemptystring]
+StringBody = type of any & const [ending:QuoteEnd]
+let closer = (ctx:StringBody):>MatchData => {
+    let delimiter = ctx.ending.text
+    return [length=delimiter.length]
+}
+let closer2 = (ctx:StringBody):>MatchData => [length=ctx.ending.text.length]
+let main = ():>int64 => {
+    let m = closer(StringBody[ending=QuoteEnd[text='"']])
+    if m.length not=? 1 or closer2(StringBody[ending=QuoteEnd[text="'''"]]).length not=? 3 return 1
+    return inspect(B[1 A[2]])
+}

@@ -41,6 +41,7 @@ let _set_output_stderr = (enabled:bool):>void => {
     _stderr_output = enabled
     return void
 }
+let _output_to_stderr = ():>bool => _stderr_output   # where printing goes now (a report restores it after rendering)
 
 # Output capture (the test runner): while enabled, everything printed —
 # stdout and stderr alike — is appended to `_captured` instead of written,

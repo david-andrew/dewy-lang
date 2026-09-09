@@ -1419,9 +1419,9 @@ class TypeSystem:
                 # used as the immutable record (it is copied there), never the
                 # other way round — the writable one is the subtype
                 return a if not a.immutable else b
-            if a == b or user_brand_descends(a, b) or user_brand_carries(a, b):
+            if a == b or ((user_brand_descends(a, b) or user_brand_carries(a, b)) and not (a.immutable and not b.immutable)):
                 return a
-            return b if user_brand_descends(b, a) or user_brand_carries(b, a) else None
+            return b if (user_brand_descends(b, a) or user_brand_carries(b, a)) and not (b.immutable and not a.immutable) else None
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a if a == b else None
         if isinstance(a, MetaType) and isinstance(b, MetaType):
@@ -1567,6 +1567,8 @@ class TypeSystem:
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):
             if not a.immutable and b.immutable and replace(a, immutable=True) == b:
                 return True   # a writable record may be used as the immutable one (it is copied there); never the reverse
+            if a.immutable and not b.immutable:
+                return False  # an immutable descendant is not its writable ancestor: `@p:P` could write through it
             return a == b or user_brand_descends(a, b) or user_brand_carries(a, b)
         if isinstance(a, ModuleType) and isinstance(b, ModuleType):
             return a == b

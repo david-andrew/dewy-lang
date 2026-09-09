@@ -50,6 +50,8 @@ def test_the_qualifier_is_part_of_the_type() -> None:
     ("let Counter:type = const [n:int64 bump = () => { n += 1 }]\n", 'changes an immutable record'),
     ("let Pair:type = [a:string b:uint8<b =? a.length> = a.length]\n", 'in a writable record'),
     ("let Pair:type = const [b:uint8<b =? a.length> a:string]\n", 'not an earlier field'),
+    ("P = type of any & [n:int64]\nC = type of P & const []\nlet bump = (@p:P) => { p.n = 99 }\nlet f = ():>int64 => { let c = C[1]  bump(@c)  return c.n }\n", 'no matching method'),   # an immutable descendant is not its writable ancestor
+    ("A:type = const [n:int64]\nB:type = A & [extra:int64]\nlet f = ():>int64 => { let b:B = [1 2]  b.n = 99  return b.n }\n", 'assign a field of an immutable record'),   # intersection keeps the contract
 ])
 def test_writes_through_an_immutable_record_and_broken_invariants_are_refused(body: str, message: str) -> None:
     with pytest.raises((TypeCheckError, UserError), match=message):

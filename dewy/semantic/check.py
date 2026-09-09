@@ -4698,7 +4698,10 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     elif None not in lengths:
                         length_minimums[binding_id] = min(cast(set[int], lengths))
                     continue
-                joined[binding_id] = _in_declared_order(ty.union(*types), binding_id, ctx=ctx)
+                # a member below another (`A` under its family `T`, after `if x is? A { … }`)
+                # is absorbed: the join is `T`, one object pointer — not a tagged union of the two
+                absorbed = [item for item in types if not any(item != other and ctx.type_system.is_subtype(item, other) for other in types)]
+                joined[binding_id] = _in_declared_order(ty.union(*absorbed), binding_id, ctx=ctx)
             ctx.refinements.clear()
             ctx.refinements.update(joined)
             joined_bounds: dict[int, int] = {}
@@ -6326,7 +6329,8 @@ def _intersect_object_types(operands: list[ty.TypeExpr], *, loc: Span, ctx: Cont
             fields[existing_index] = field_
         methods.extend(item.methods)
     brand = branded[0].brand if branded else None
-    return ty.ObjectType(tuple(fields), brand=brand, methods=tuple(methods))
+    immutable = any(isinstance(item, ty.ObjectType) and item.immutable for item in flattened)   # `A & [extra:int64]` with `A` immutable: the contract stays
+    return ty.ObjectType(tuple(fields), brand=brand, methods=tuple(methods), immutable=immutable)
 
 
 def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, extras: list[ty.TypeExpr], *, ctx: Context, nominal_parent: str | None = None, abstract: bool = False) -> ty.ObjectType:

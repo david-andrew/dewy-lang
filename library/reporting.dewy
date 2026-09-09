@@ -695,6 +695,7 @@ let Report:type = [
 
     # render to stderr against `src` (`warn` and `fail` use the report's own `srcfile`)
     render = (src:SrcFile) => {
+        let previous = _output_to_stderr()   # a warning must not leave ordinary printing on stderr
         _set_output_stderr(true)
         let theme = Theme(use_color and _stderr_is_terminal())
         let severity_color:string = theme.severity_color(severity)
@@ -711,6 +712,7 @@ let Report:type = [
         if pointers.length =? 0 {
             # nothing points into the source: a summary report has no excerpt
             print_trailer(theme)
+            _set_output_stderr(previous)
             return void
         }
         let segments:array<Segment> = layout(src theme)
@@ -748,13 +750,17 @@ let Report:type = [
         gutter(digits)
         print"╰───\n"
         print_trailer(theme)
+        _set_output_stderr(previous)
         return void
     }
 
     # a warning's usual end: render, and a blank line after it
     warn = () => {
+        let previous = _output_to_stderr()
         render(srcfile)
-        print"\n"
+        _set_output_stderr(true)
+        print"\n"                      # the report's trailing blank line, on stderr with it
+        _set_output_stderr(previous)   # ordinary printing goes on where it was
     }
 
     # render, then stop the program with status 1 (what `.throw()` does at the top of the compiler)

@@ -1,0 +1,22 @@
+# A union-valued flow whose later arms compare strings (a `match` on a
+# string-literal union) needs statements before those tests: the rest of the
+# chain nests in the `else`, as a word-valued flow already did.
+Opening:type = const [idx:addr]
+Block = type of any & const [opening:Opening kind:'square' | 'round']
+TypeBody = type of any & const [opening:Opening]
+NestedContext:type = Block | TypeBody
+let open = (mode:'square' | 'round' | 'type' idx:addr):>NestedContext => {
+    frame:NestedContext = match mode {
+        <'square'> => Block[opening=Opening[idx] kind='square']
+        <'round'> => Block[opening=Opening[idx] kind='round']
+        <'type'> => TypeBody[opening=Opening[idx]]
+    }
+    return frame
+}
+let main = ():>int64 => {
+    let a = open('round' 3)
+    let b = open('type' 5)
+    let c = open('square' 1)
+    if a is? Block and b is? TypeBody and c is? Block and a.opening.idx + b.opening.idx + c.opening.idx =? 9 and a.kind =? 'round' and c.kind =? 'square' return 42
+    return 1
+}
