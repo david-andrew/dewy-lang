@@ -26,6 +26,22 @@ def test_refined_results_are_proven_at_returns_and_assumed_at_calls() -> None:
         _compile('let bad = ():>int64<i => i >=? 1> => 0\n')
 
 
+def test_result_length_relation_preserves_the_comparison_direction() -> None:
+    source = '''let above = (src:array<int64>):>int64<n => n >? src.length> => src.length + 1
+let main = ():>int64 => {
+    let xs:array<int64> = [10 20]
+    let n = above(xs)
+    let bounded:int64<n => CONDITION> = n
+    return bounded
+}
+'''
+    # The result is at least three; treating every length contract as an
+    # upper bound used to accept this false proof (and reject the valid one).
+    with pytest.raises(REFUTED, match='refinement refuted|cannot prove refinement'):
+        _compile(source.replace('CONDITION', 'n <=? 2'))
+    _compile(source.replace('CONDITION', 'n >=? 3'))
+
+
 def test_field_invariants_are_proven_on_construction_and_stores() -> None:
     _compile(RATIO + 'let r = Ratio(1 2)\nlet s:Ratio = [top=3 bottom=4]\n')
     _compile(RATIO + 'let make = (top:int64 bottom:int64):>Ratio => { if bottom >? 0 { return Ratio(top bottom) }  return Ratio(top 1) }\n')

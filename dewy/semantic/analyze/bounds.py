@@ -2997,13 +2997,19 @@ class _BoundsValidator:
         """`let length = eat(src[i..])`: the call's promise as facts on the binding."""
         for refined in _call_result_refinements(value):
             for proposition in refined.propositions:
-                if proposition.term is None or proposition.subject != 'self':
+                if (proposition.term is None or proposition.subject != 'self'
+                        or proposition.term_of != 'length'):
                     continue
                 argument = _call_argument(value, proposition.term)
                 known = self._length_interval(argument, state) if argument is not None else None
-                if known is not None and known.upper is not None:
-                    # a sequence of known length: the promise is a plain bound
-                    bound = Interval(None, known.upper - (1 if proposition.op == '<?' else 0))
+                comparison = {'<?': '__lt__', '<=?': '__le__', '>?': '__gt__', '>=?': '__ge__', '=?': '__eq__'}.get(proposition.op)
+                if known is not None and comparison is not None:
+                    # Substitute the argument's length using the same rule as
+                    # a guard. A lower-bound promise must never become an
+                    # upper bound just because the length has a known maximum.
+                    bound = self._comparison_constraint(comparison, known, True)
+                    if bound is None:
+                        continue
                     state[subject] = self._binding_interval(state, subject).intersect(bound)
         for key, facts in ((subject, self._call_term_facts(value)), (_length_key(subject), self._call_length_facts(value))):
             for upper, offset_id, gap, direction in facts:
