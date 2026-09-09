@@ -16181,6 +16181,51 @@ def _brand_value(node: hir.AST, expected: ty.Type | None, *, ctx: Context) -> hi
     return hir.BrandValue(node.loc, ty.MetaType(minted), minted.brand)
 
 
+def _union_bigint_materialization(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST | None:
+    """Preserve an integer-to-bigint conversion when its destination is a union.
+
+    Subtyping describes possible values, not how a machine word becomes the
+    bigint object's limbs. An optional source evaluates once; only its present
+    arm performs the ordinary conversion. Existing word alternatives require
+    no conversion and keep their representation (no new overload preference).
+    """
+    if not isinstance(expected, ty.TypeOr) or _is_bigint(expected, ctx=ctx):
+        return None
+    payload = ty.optional_payload(node.type)
+    source = payload if payload is not None else node.type
+    if not _integer_valued(source):
+        return None
+    if any(_integer_valued(member) and ctx.type_system.is_subtype(source, member) for member in expected.items):
+        return None
+    binding = ctx.binding_scopes.get(BIGINT_TYPE_NAME)
+    if binding is None or binding.type_value is None:
+        return None
+    bigint = binding.type_value
+    members = bigint.items if isinstance(bigint, ty.TypeOr) else [bigint]
+    if not all(member in expected.items for member in members):
+        return None
+    # A second numeric object representation needs the ordinary dispatch
+    # choice; widening a union does not silently prefer bigint over it.
+    if any(_is_prelude_number(member, name, ctx=ctx) for member in expected.items
+           for name in _NUMBER_OBJECT_NAMES if name != BIGINT_TYPE_NAME):
+        return None
+    if payload is None:
+        return check_against(node, bigint, ctx=ctx)
+    if not ctx.type_system.is_subtype('none', expected):
+        return None
+    temporary = ctx.binding_registry.allocate(node, f'__dewy_union_value_{ctx.binding_registry.next_id}', 'value', node.loc)
+    temporary.type = node.type
+    declaration = hir.Declare(node.loc, ty.VOID_TYPE, 'const', temporary.name, node.type, node, binding_id=temporary.id)
+    temporary.declaration = declaration
+    value = hir.ExpressedIdentifier(node.loc, node.type, temporary.name, binding_id=temporary.id)
+    present = replace(value, type=payload)
+    converted = check_against(present, bigint, ctx=ctx)
+    absent = hir.NoneValue(node.loc, 'none')
+    condition = hir.TypeTest(node.loc, 'bool', value, 'none', False)
+    flow = hir.Flow(node.loc, expected, [hir.IfArm(node.loc, 'none', condition, absent)], converted)
+    return hir.Block(node.loc, expected, [declaration, flow], True)
+
+
 def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
     if isinstance(expected, ty.RefinedType):
         checked = check_against(node, expected.base, ctx=ctx)
@@ -16195,6 +16240,9 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         return node
     if node.type == ty.BOTTOM_TYPE:
         return node  # unreachable; vacuously satisfies any expectation
+    materialized_union = _union_bigint_materialization(node, expected, ctx=ctx)
+    if materialized_union is not None:
+        return materialized_union
     if isinstance(expected, ty.TypeOr) and _refined_members(expected):
         # a value meeting a union with a refined member (`uint64<n => n <=? src.length> | none`):
         # the member it is carries the obligation — subtyping alone never assumes a refinement
