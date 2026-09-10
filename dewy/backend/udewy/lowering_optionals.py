@@ -859,6 +859,17 @@ class _OptionalLowering:
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
+            if (not prepared and ty.optional_payload(value.type) is not None
+                    and isinstance(value, hir.FunctionCall)
+                    and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+                # An ordinary optional call returns an owned handle cell, as
+                # does this destination. Transfer its payload instead of
+                # cloning it and abandoning the original. Prepared general
+                # unions may point into caller-frame trees and still copy.
+                return [*prelude,
+                        self._intrinsic_call('__store_i64__', [self._optional_tag(source_word, value.loc), cell], ty.VOID_TYPE, value.loc),
+                        self._store_i64_field(cell, 8, self._load_i64_field(source_word, 8, value.loc), value.loc),
+                        self._store_i64_field(source_word, 8, self._int64_literal(value.loc, 0), value.loc)]
             dead_temporary = isinstance(value, hir.FunctionCall) and prepared
             return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared, move=dead_temporary)]
         source_members = self._field_union_members(value.type)

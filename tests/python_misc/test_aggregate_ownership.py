@@ -459,3 +459,37 @@ let main=():>int64=>{{
     cursors = run(source, tmp_path).splitlines()
     assert len(cursors) == 13
     assert len(set(cursors[2:])) == 1, cursors
+
+
+@pytest.mark.parametrize('array', [False, True])
+def test_optional_call_binding_takes_ownership_without_abandoning_payload(array, tmp_path):
+    result_type = 'array<string>' if array else 'Box'
+    value = 'words' if array else 'Box[words]'
+    read = 'own' if array else 'own.words'
+    original = 'maybe' if array else 'maybe.words'
+    source = f'''
+Box:type=[words:array<string>]
+let make=():>{result_type}|none=>{{
+    let number:int64=42
+    let words:array<string>=["value-{{number}}"]
+    return {value}
+}}
+let exercise=():>void=>{{
+    let maybe=make()
+    $runtime_assert maybe is? {result_type}
+    let own=maybe
+    $runtime_assert {read}.length =? 1
+    {read}[0]="changed"
+    let words={original}
+    $runtime_assert words.length =? 1
+    $runtime_assert words[0]=?"value-42"
+}}
+let main=():>int64=>{{
+    exercise(); exercise();
+    loop i in 0..12 {{exercise(); printl(_arena_cursor)}}
+    return 0
+}}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
