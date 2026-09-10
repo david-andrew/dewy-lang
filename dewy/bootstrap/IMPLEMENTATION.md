@@ -74,7 +74,8 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   values. The type-algebra comparison and source numeric-boundary cases pass,
   including ordinary `int` loop indices compared with `addr` parameters.
 
-- Hosted type tests release discarded optional/union call payloads after
+- Hosted type tests release discarded optional/union and ordinary record
+  call payloads after
   evaluating their boolean result. An owned optional call result transfers
   into another handle cell without abandoning an earlier copy. Repeated-call
   ownership checks verify stable arena usage and independent retained copies.
@@ -88,8 +89,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   now release their temporary read states and return collectors; generic
   declarations retain their defining state ids. Nested rollback/replay and
   reclamation checks pass, together with 158 valid source comparisons and 86
-  rejection cases. A new paired build is in progress. This is implementation
-  work, not a new language-design decision.
+  rejection cases. Profiling subsequently found two additional retained-value
+  paths: testing a returned record's type and reading a returned record's
+  field. Both now release the receiver's owned fields, including dynamic
+  descendants, after its result is consumed. The ownership suite passes 34
+  tests, including retained strings/nested arrays, skipped short-circuit
+  calls and repeated loop conditions. A new paired build is in progress.
+  This is implementation work, not a new language-design decision.
 
 - Source readers avoid copying complete token forests for individual nodes.
   Bounds analysis shares immutable module inputs across binding/refinement

@@ -10,6 +10,14 @@ storage: accepting `2` as bigint does not make every singleton an object.
 These views inspect declared structure; subtyping remains a separate operation.
 """
 
+integer_valued = (id:addr nodes:array<types.Type>):>bool => {
+    let plain=types.strip_refinement(id nodes)
+    let node=types.node_at(nodes plain)
+    return node is? types.IntegerLiteralType or
+        (node is? types.Primitive and node.name in? ['int' 'uint']) or
+        fixed_integer_layout(plain nodes) isnt? none
+}
+
 string_valued = (id:addr nodes:array<types.Type>):>bool => {
     let node = types.node_at(nodes id)
     if node is? types.RefinedType return string_valued(node.base nodes)
@@ -141,7 +149,10 @@ strip_all_refinements = (id:addr @nodes:array<types.Type>):>addr => strip_member
 optional = (id:addr @nodes:array<types.Type>):>addr => types.union([id types.primitive('none' @nodes)] @nodes)
 optional_payload = (id:addr @nodes:array<types.Type>):>addr? => {
     if types.node_at(nodes id) isnt? types.TypeOr return none
-    let node = types.node_at(nodes strip_all_refinements(id @nodes))
+    # Normalization may append a type. Finish that mutation before reading
+    # the arena: call arguments otherwise observe the earlier array value.
+    let normalized = strip_all_refinements(id @nodes)
+    let node = types.node_at(nodes normalized)
     if node isnt? types.TypeOr return none
     let payloads:array<addr> = []
     let has_none = false

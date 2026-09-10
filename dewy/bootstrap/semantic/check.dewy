@@ -162,6 +162,21 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
         }
     }
     if not subtyping.is_subtype(node.value_type expected session.links @session.types) {
+        # A union with one machine-integer member supplies that member's
+        # representation, just as a plain word expectation does. Convert and
+        # prove its refinements before packing the union; subtyping alone
+        # cannot materialize an abstract loop index into `addr | none`.
+        if target is? types.TypeOr and views.integer_valued(node.value_type session.types) {
+            let words:array<addr>=[]
+            loop member in target.items {
+                if views.fixed_integer_layout(types.strip_refinement(member session.types) session.types) isnt? none {words.push(member)}
+            }
+            if words.length =? 1 {
+                let converted=against(value words[0] id env @session)
+                if converted is? Error return converted
+                return put(hir.RepresentationCast[node.loc expected converted] @session)
+            }
+        }
         # Crossing fixed widths is a value conversion, not a subtype edge.
         # Preserve the cast for bounds analysis to prove (including signed
         # to unsigned and narrowing conversions); do not transmute the bits.
@@ -393,8 +408,10 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
             return put(hir.Block[loc boolean [left.declaration right.declaration test] false] @session)
         }
         if other_node is? types.TypeOr {
-            let left_members=types.node_at(session.types views.strip_all_refinements(union_id @session.types))
-            let right_members=types.node_at(session.types views.strip_all_refinements(other_type @session.types))
+            let left_type=views.strip_all_refinements(union_id @session.types)
+            let right_type=views.strip_all_refinements(other_type @session.types)
+            let left_members=types.node_at(session.types left_type)
+            let right_members=types.node_at(session.types right_type)
             $runtime_assert left_members is? types.TypeOr and right_members is? types.TypeOr
             let matching=left_members.items.length =? right_members.items.length
             loop member in left_members.items {if not types.contains_type(right_members.items member session.types) {matching=false}}
@@ -695,7 +712,8 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
                 let row = contexts.node_at(item env.lexical session)
                 if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) return record_literal(id node env @session expected=expected)
             }
-            let target:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
+            let target_type=if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
+            let target:types.Type = types.node_at(session.types target_type)
             if target is? types.ObjectType and expected isnt? none {
                 let constructor=hir.TypeValue[node.loc types.primitive('type' @session.types) types.strip_refinement(expected session.types) display.type_to_dewy(expected session.types)]
                 return construct(constructor id id env @session expected=expected)
@@ -4208,7 +4226,8 @@ loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session ex
     if checked is? Error return checked
     let values=capture_values(checked session)
     if values.length =? 0 return problem(id 'this loop expresses no value to capture' 'end the body with the value to collect' env session)
-    let target=types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
+    let target_type=if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
+    let target=types.node_at(session.types target_type)
     let entries=if expected is? none none else views.container_entry_types(expected session.types)
     let element:addr?=if is_set and entries isnt? none entries.key else if target is? types.ArrayType target.element else none
     if element is? none {

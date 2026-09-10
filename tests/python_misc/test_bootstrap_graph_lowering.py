@@ -39,6 +39,9 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let main=():>int64=>{let position:addr|none=none loop i in 0.. and i <? 2 {position=i} return if position is? none 0 else position+41}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let number:int64=42 let value:uint8|none=number return if value is? none 0 else value as int64}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let number:uint8=42 let value:uint64|none=number return if value is? none 0 else if value =? 42 42 else 0}'}, 42),
         ({'entry.dewy': 'let count=(arity:addr):>int64=>{let n:int64=0 loop i in 0.. and i <? arity {n+=1} return n}\nlet main=():>int64=>count(2)+40'}, 42),
 
         ({
@@ -102,6 +105,8 @@ main=(argv:array<string>):>int64=>{{
     assert str(bad / 'dependency.dewy') in result.stderr
 
     for index, (body, title) in enumerate([
+        ('let read=(value:int64):>int64=>{let narrow:uint8|none=value return 0}', 'cannot prove this integer fits'),
+        ('let main=():>int64=>{let position:addr|none=-1 return 0}', 'refinement refuted'),
         ('let f=(n:int64):>int64=>{ $assert n >? 0\nreturn n }', 'cannot prove assertion'),
         ('let main=(n:int64):>int64=>n', '`main` must take no arguments'),
         ('let x:int=9223372036854775807\nlet main=():>int=>x+1', 'cannot prove this integer fits'),

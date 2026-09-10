@@ -2,6 +2,9 @@
 import test_bootstrap_check as source_values
 
 CASES = [
+    'let choose=(limit:addr):>addr|none=>{let position:addr|none=none loop i in 0.. and i <? limit {position=i break} return position}',
+    'let convert=(value:int64):>uint8|none=>value',
+    'let convert=(value:uint8):>uint64|none=>value',
     'let add=(value:int):>int=>value+1\nadd(2)',
     'let narrow=(value:int):>uint32=>value as uint32\nnarrow(7)',
     'let negative=(value:int64 & ~0):>bool=>value <? 0\nnegative(-1)',
