@@ -1,0 +1,185 @@
+from reporting import Error, Pointer, SrcFile
+import p"emit.dewy" as emit
+import p"program.dewy" as program
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/type_queries.dewy" as views
+import p"../../semantic/builtins.dewy" as builtins
+
+doc"""
+Legalize validated semantic HIR into concrete µDewy function units.
+
+Binding ids choose symbols, so source shadowing and imported names cannot
+silently capture each other during hoisting. Input nodes remain immutable;
+the output arena has its own indices and shares only the type arena values.
+
+This first slice handles scalar storage and ordinary function/control flow.
+Aggregate representations, captures, defaults, place parameters, and proof
+node removal belong to subsequent legalization steps. Until those exist,
+reaching them returns a diagnostic rather than emitting an unsafe program.
+"""
+State:type = [
+    input:emit.Input
+    source:SrcFile
+    nodes:array<hir.AST>=[]
+    type_nodes:array<types.Type>=[]
+    symbols:dict<addr string>=[]
+    problem:Error?=none
+]
+Result:type = const [program:program.Program input:emit.Input]
+put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)
+reject = (node:hir.AST detail:string @state:State):>addr => {
+    if state.problem is? none {state.problem=Error[srcfile=state.source title='native lowering implementation pending' pointers=[Pointer[node.loc detail]]]}
+    return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+}
+symbol = (name:string binding:addr? @state:State):>string => {
+    if binding is? none return name
+    let existing=state.symbols.get(binding)
+    if existing isnt? none return existing
+    # Intrinsics have no runtime declarations; discovery preinstalls symbols
+    # for every source declaration, including a declaration shadowing one.
+    return name
+}
+runtime_type = (id:addr node:hir.AST @state:State):>addr => {
+    let plain=types.strip_refinement(id state.input.types)
+    let type=types.node_at(state.input.types plain)
+    if type is? types.IntegerLiteralType {
+        if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {reject(node 'arbitrary-precision integer storage' @state);}
+        return types.primitive('int64' @state.type_nodes)
+    }
+    if type is? types.Primitive {
+        if type.name in? ['int' 'uint'] return types.primitive(if type.name =? 'int' 'int64' else 'uint64' @state.type_nodes)
+        if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.input.types) isnt? none return plain
+    }
+    if type is? types.FunctionType {
+        if type.type_params.length >? 0 or type.kw_only.length >? 0 or type.rest isnt? none {reject(node 'generic, keyword-only, or rest function signatures' @state);}
+        let arguments:array<types.PosOrKwArg>=[]
+        loop argument in type.pos_or_kw {arguments.push(types.PosOrKwArg[argument.name runtime_type(argument.value_type node @state) argument.required argument.place])}
+        return types.function_type(arguments [] none runtime_type(type.ret node @state) [] @state.type_nodes)
+    }
+    reject(node 'selecting a concrete representation for this value type' @state);
+    return types.primitive('void' @state.type_nodes)
+}
+
+# Discover before lowering any initializer/body, preserving forward function
+# references. A later capture pass can use the same binding-to-symbol map.
+discover = (id:addr @state:State):>void => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Declare and node.binding_id isnt? none {state.symbols[node.binding_id]="__dewy_binding_{node.binding_id}_{node.name}"}
+    if node is? hir.FunctionLiteral {
+        loop parameter in node.pos_or_kw_args {
+            if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}"}
+        }
+    }
+    loop child in hir.children(node) {discover(child @state)}
+}
+items = (ids:array<addr> @state:State):>array<addr> => {
+    let result:array<addr>=[]
+    loop id in ids {result.push(expression(id @state))}
+    return result
+}
+expression = (id:addr @state:State):>addr => {
+    let node=hir.node_at(state.input.nodes id)
+    if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+    if node is? hir.ValueCast return expression(node.expr @state)
+    if node is? hir.Suppress return expression(node.item @state)
+    if node is? hir.GenericFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+    let type=runtime_type(node.value_type node @state)
+    if node is? hir.Void return put(hir.Void[node.loc type] @state)
+    if node is? hir.Integer return put(hir.Integer[node.loc type node.prefix node.value] @state)
+    if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
+    if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc type symbol(node.name node.binding_id @state) node.binding_id] @state)
+    if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
+    if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else expression(node.item @state)] @state)
+    if node is? hir.Declare {
+        if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'hoisting a local function and its captures' @state)
+        let value=expression(node.expr @state)
+        let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
+        return put(hir.Declare[node.loc type node.decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
+    }
+    if node is? hir.Assign {
+        let target=expression(node.target @state)
+        let value=expression(node.value @state)
+        if node.op not=? '=' {
+            if node.op.length <? 2 return reject(node 'invalid compound assignment spelling' @state)
+            let operator=node.op[0..node.op.length-1)
+            let name=builtins.binary_operators.get(operator)
+            if name is? none return reject(node 'this compound assignment operator' @state)
+            let operand_type=hir.node_at(state.nodes target).value_type
+            let signature=types.function_type([types.PosOrKwArg[none operand_type] types.PosOrKwArg[none operand_type]] [] none operand_type [] @state.type_nodes)
+            let function=put(hir.ExpressedIdentifier[node.loc signature name] @state)
+            value=put(hir.FunctionCall[node.loc operand_type function [target value] []] @state)
+        }
+        return put(hir.Assign[node.loc type target '=' value] @state)
+    }
+    if node is? hir.FunctionCall {
+        if node.kw_args.length >? 0 return reject(node 'ordered keyword argument legalization' @state)
+        let args=items(node.pos_args @state)
+        let callee=hir.node_at(state.input.nodes node.func)
+        let function:addr=0
+        if callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? state.symbols) and (callee.name in? emit.binary or callee.name in? emit.prefix) {
+            # Builtin overloads have already converted their operands. Their
+            # concrete runtime signature records the selected word width;
+            # the original overload set has no runtime representation.
+            let parameters:array<types.PosOrKwArg>=[]
+            loop argument in args {parameters.push(types.PosOrKwArg[none hir.node_at(state.nodes argument).value_type])}
+            let signature=types.function_type(parameters [] none type [] @state.type_nodes)
+            function=put(hir.ExpressedIdentifier[callee.loc signature callee.name callee.binding_id] @state)
+        } else {function=expression(node.func @state)}
+        return put(hir.FunctionCall[node.loc type function args [] node.selected_method_index node.integer_operation] @state)
+    }
+    if node is? hir.ShortCircuit return put(hir.ShortCircuit[node.loc type node.op expression(node.left @state) expression(node.right @state)] @state)
+    if node is? hir.Block return put(hir.Block[node.loc type items(node.items @state) node.scoped] @state)
+    if node is? hir.IfArm return put(hir.IfArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
+    if node is? hir.LoopArm return put(hir.LoopArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
+    if node is? hir.Flow return put(hir.Flow[node.loc type items(node.arms @state) if node.default is? none none else expression(node.default @state)] @state)
+    if node is? hir.Break return put(hir.Break[node.loc type node.label node.loop_levels] @state)
+    if node is? hir.Continue return put(hir.Continue[node.loc type node.label node.loop_levels] @state)
+    return reject(node "{node.typename} legalization" @state)
+}
+function = (node:hir.FunctionLiteral @state:State):>addr => {
+    if node.kw_only_args.length >? 0 or node.rest_args isnt? none return reject(node 'function parameter legalization' @state)
+    let arguments:array<hir.Param>=[]
+    loop argument in node.pos_or_kw_args {
+        if argument is? hir.BoundParam or argument.place return reject(node 'default and place parameter legalization' @state)
+        arguments.push(hir.Param[symbol(argument.name argument.binding_id @state) runtime_type(argument.value_type node @state) argument.binding_id argument.position_only false])
+    }
+    let body=expression(node.body @state)
+    return put(hir.FunctionLiteral[node.loc runtime_type(node.value_type node @state) arguments [] none runtime_type(node.rettype node @state) body source=node.source] @state)
+}
+
+lower = (root:addr input:emit.Input source:SrcFile):>Result|Error => {
+    let state=State[input source type_nodes=input.types]
+    let block=hir.node_at(input.nodes root)
+    if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
+    discover(root @state)
+    let functions:array<program.Function>=[]
+    let globals:array<addr>=[]
+    let startup:array<addr>=[]
+    let main:string?=none
+    let void_type=types.primitive('void' @state.type_nodes)
+    loop id in block.items {
+        let node=hir.node_at(input.nodes id)
+        if node is? hir.Declare {
+            let value=hir.node_at(input.nodes node.expr)
+            if value is? hir.GenericFunction continue
+            let name=symbol(node.name node.binding_id @state)
+            if value is? hir.FunctionLiteral {
+                functions.push(program.Function[name function(value @state)])
+                if node.name =? 'main' {main=name}
+                continue
+            }
+            let declared=expression(id @state)
+            let declaration=hir.node_at(state.nodes declared)
+            if declaration isnt? hir.Declare continue
+            let type=declaration.annotation
+            $runtime_assert type isnt? none
+            let zero=if types.is_primitive(types.node_at(state.type_nodes type) 'bool') put(hir.Bool[node.loc type false] @state) else put(hir.Integer[node.loc type '0d' 0] @state)
+            globals.push(put(hir.Declare[node.loc void_type 'let' name type zero node.binding_id] @state))
+            let target=put(hir.ExpressedIdentifier[node.loc type name node.binding_id] @state)
+            startup.push(put(hir.Assign[node.loc void_type target '=' declaration.expr] @state))
+        } else {startup.push(expression(id @state))}
+    }
+    if state.problem isnt? none return state.problem
+    return Result[program.Program[functions globals startup main needs_startup=true source=source] emit.Input[state.nodes state.type_nodes]]
+}
