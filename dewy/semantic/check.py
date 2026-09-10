@@ -5846,24 +5846,28 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         assert isinstance(literal, p0.BinOp)
         params, result, body = _function_literal_parts(literal)
         visible = (members | {'typename'}) - _parameter_names(params) - _local_names(body)   # `typename` reads the instance's, like a field
-        parts[method.name] = (params, result, body, visible, _referenced_members(body, visible))
-    instance_level = {name for name, (_p, _r, _b, _v, refs) in parts.items() if refs & (field_names | {'typename'})}
+        # An overload's name identifies its callable group, not its body.
+        # Keep the source parts per declaration so `__as__ &= ...` does not
+        # replace the result annotation and body of every earlier target.
+        parts[id(method)] = (params, result, body, visible, _referenced_members(body, visible))
+    instance_level = {method.name for method in own if parts[id(method)][4] & (field_names | {'typename'})}
     instance_level |= {m.name for m in object_type.methods if m.binding_id is not None and not m.static}
     changed = True
     while changed:
         changed = False
-        for name, (_p, _r, _b, _v, refs) in parts.items():
+        for method in own:
+            name, refs = method.name, parts[id(method)][4]
             if name not in instance_level and refs & instance_level:
                 instance_level.add(name)
                 changed = True
-    statics = {name for name in parts if name not in instance_level}
+    statics = {method.name for method in own if method.name not in instance_level}
     # callees before callers, so a call to another method resolves to a declared function
     ordered: list = []
     remaining = list(own)
     while remaining:
         progressed = False
         for method in list(remaining):
-            refs = parts[method.name][4]
+            refs = parts[id(method)][4]
             if any(other.name in refs for other in remaining if other is not method):
                 continue
             ordered.append(method)
@@ -5875,7 +5879,7 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
     for method in ordered:
         literal = method.literal
         assert isinstance(literal, p0.BinOp)
-        params, result, body, visible, _refs = parts[method.name]
+        params, result, body, visible, _refs = parts[id(method)]
         loc = literal.loc
         if method.name in statics:
             method.static = True
@@ -6640,6 +6644,7 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                 fields, item.fields, loc=rhs.loc, ctx=ctx,
                 owner=binding.name, default_only=default_only,
             )
+            replaced_names: set[str] = set()
             for method in item.methods:
                 slot = next((index for index, existing in enumerate(fields) if existing.name == method.name), None)
                 if slot is not None and isinstance(fields[slot].type, ty.FunctionType):
@@ -6651,13 +6656,20 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                     literal = method.literal
                     assert isinstance(literal, p0.BinOp)
                     fields[slot] = replace(fields[slot], default=_slot_forwarder(literal, binding.name, method.name, ctx=ctx))
-                inherited = next((index for index, existing in enumerate(methods) if existing.name == method.name), None)
                 if method.owner is None:
                     method.owner = binding.name   # declared here (an aliased structure's methods keep their owner)
-                if inherited is not None:
-                    methods[inherited] = method   # a child's method overrides the parent's
+                inherited = next((index for index, existing in enumerate(methods) if existing.name == method.name), None)
+                if method.name in replaced_names:
+                    # Further declarations in this structure extend its own
+                    # overload group, rather than overriding its first body.
+                    last = max(index for index, existing in enumerate(methods) if existing.name == method.name)
+                    methods.insert(last + 1, method)
+                elif inherited is not None:
+                    methods[:] = [existing for existing in methods if existing.name != method.name]
+                    methods.insert(inherited, method)   # a child's group overrides the parent's
                 else:
                     methods.append(method)
+                replaced_names.add(method.name)
             continue
         not_implemented(
             ctx.srcfile,
