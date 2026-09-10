@@ -1,0 +1,71 @@
+from reporting import SrcFile, Error, Pointer
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"predicate_facts.dewy" as predicates
+import p"expression_intervals.dewy" as intervals
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+import p"length_proofs.dewy" as lengths
+import p"index_checks.dewy" as indices
+
+# Endpoints address boundaries: an exclusive end of zero and an inclusive
+# end of -1 both describe an empty prefix. The opening delimiter shifts the
+# first boundary independently of the closing delimiter's last boundary.
+shifted = (interval:ranges.Interval? delta:bigint):>ranges.Interval => {
+    if interval is? none return ranges.UNKNOWN
+    return ranges.Interval[ranges.shift_endpoint(interval.lower delta) ranges.shift_endpoint(interval.upper delta)]
+}
+endpoint = (id:addr? interval:ranges.Interval? delta:bigint first:bool sequence:addr minimum:bigint state:facts.State @data:predicates.Data):>bool => {
+    if id is? none return true
+    let limit=minimum+(if first 1 else 0)
+    let gap=delta+(if first 0 else 1)
+    let lowest:bigint=if delta >=? 0 0 else -1
+    let width=values.fixed_bounds(hir.node_at(data.env.nodes id).value_type data.env.types)
+    let unsigned=width isnt? none and width.lower isnt? none and width.lower >=? 0
+    let lower=interval isnt? none and interval.lower isnt? none and interval.lower+delta >=? lowest
+    let stable=intervals.stable(id data.snapshot data.env.nodes)
+    if (unsigned or lower) and stable {
+        let context=lengths.Context[data.env data.relations data.snapshot.numbers]
+        if lengths.upper(id sequence gap state context @data.registry) return true
+    }
+    if not lower return false
+    if interval isnt? none and interval.upper isnt? none and interval.upper+delta <? limit return true
+    let saved=data.snapshot.terms.get(id)
+    if saved isnt? none {
+        if saved.shift =? 0 and saved.term.projection =? 'value' and facts.index(saved.term.binding_id sequence).key in? state return true
+        if relations.ordered(saved.term facts.Term[sequence 'length'] gap+saved.shift state data.relations) return true
+    }
+    if not stable return false
+    let offset=terms.length_offset(id sequence data.env @data.registry)
+    if offset is? none return false
+    let effective=offset-delta
+    return effective >=? 1 and minimum-effective >=? (if first 0 else -1)
+}
+check = (node:hir.StringSlice state:facts.State srcfile:SrcFile @data:predicates.Data):>Error? => {
+    let range=hir.node_at(data.env.nodes node.range)
+    $runtime_assert range is? hir.Range
+    if range.left is? none and range.right is? none return none
+    let bounds=if range.bounds is? none '[]' else range.bounds
+    let opening:bigint=if bounds.startswith('(') 1 else 0
+    let closing:bigint=if bounds.endswith(')') (-1) else 0
+    let length=intervals.exact_length(hir.node_at(data.env.nodes node.string).value_type data.env)
+    let left=if range.left is? none ranges.exact(0) else data.snapshot.numbers.get(range.left)
+    let right:ranges.Interval?=none
+    if range.right isnt? none {right=data.snapshot.numbers.get(range.right)}
+    else if length isnt? none {right=ranges.exact(length-1)}
+    let sequence=data.snapshot.sequences.get(node.string)
+    if length is? none and sequence isnt? none {
+        let measured=data.snapshot.lengths.get(node.string)
+        let minimum:bigint=if measured is? none or measured.lower is? none 0 else measured.lower
+        if endpoint(range.left left opening true sequence minimum state @data) and endpoint(range.right right closing false sequence minimum state @data) return none
+    }
+    let first=shifted(left opening)
+    let last=shifted(right closing)
+    if length isnt? none and first.lower isnt? none and first.upper isnt? none and last.lower isnt? none and last.upper isnt? none {
+        if first.lower >=? 0 and first.upper <=? length and last.lower >=? -1 and last.upper <? length return none
+    }
+    return Error[srcfile=srcfile title='string slice is not proven in bounds' pointers=[Pointer[span=range.loc message="effective endpoint intervals are `{indices.known_interval(first)}` and `{indices.known_interval(last)}`"]] hint='establish that both endpoints stay within the string boundaries']
+}
