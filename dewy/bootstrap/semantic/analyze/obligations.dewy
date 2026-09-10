@@ -1,0 +1,236 @@
+from reporting import Error, Pointer, SrcFile
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../type_queries.dewy" as views
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"expression_intervals.dewy" as intervals
+import p"predicate_facts.dewy" as predicates
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+import p"length_proofs.dewy" as lengths
+
+doc"""
+Discharge checked HIR's refinement obligations from established evidence.
+
+true proves a proposition, false refutes it, and none leaves it undecided.
+Only true discharges a boundary. Conditional return promises are checked on
+the corresponding result path, and hold vacuously when that path is dead.
+
+Field subjects use the literal's evaluated field when available, otherwise
+the field's storage route and declared contract. This avoids manufacturing
+new expression nodes merely to ask a question about an existing value.
+"""
+
+Subject:type = const [expression:addr? interval:ranges.Interval? term:facts.Term?]
+direct = (id:addr projection:propositions.Projection state:facts.State data:predicates.Data):>Subject => {
+    if projection =? 'value' {
+        let value=predicates.operand(id state data)
+        return Subject[id value.interval value.term]
+    }
+    let interval=data.snapshot.lengths.get(id)
+    let sequence=data.snapshot.sequences.get(id)
+    let term=if sequence is? none none else facts.Term[sequence 'length']
+    if term isnt? none {interval=intervals.meet(interval relations.interval_of(term state data.relations))}
+    return Subject[id interval term]
+}
+
+field_subject = (value:addr path:array<string> projection:propositions.Projection state:facts.State @data:predicates.Data):>Subject => {
+    let current:addr?=value
+    let type=hir.node_at(data.env.nodes value).value_type
+    let loc=hir.node_at(data.env.nodes value).loc
+    let access=bindings.access_path(value data.env.nodes facts=true)
+    let owner=hir.node_at(data.env.nodes access.root)
+    let root=if owner is? hir.ExpressedIdentifier owner.binding_id else none
+    let existing=bindings.member_fields(access data.env.nodes)
+    let route:array<string>=if existing is? none [] else existing
+    if not intervals.stable(value data.snapshot data.env.nodes) {root=none}
+    let declared:array<propositions.Proposition>=[]
+    loop name in path {
+        let found:addr?=none
+        if current isnt? none {
+            let literal=hir.node_at(data.env.nodes expressions.strip_casts(current data.env.nodes))
+            if literal is? hir.ObjectLiteral {
+                loop field in literal.fields {if field.name =? name {found=field.value break}}
+            }
+        }
+        if found isnt? none {
+            current=found
+            type=hir.node_at(data.env.nodes found).value_type
+            access=bindings.access_path(found data.env.nodes facts=true)
+            owner=hir.node_at(data.env.nodes access.root)
+            root=if owner is? hir.ExpressedIdentifier owner.binding_id else none
+            if not intervals.stable(found data.snapshot data.env.nodes) {root=none}
+            existing=bindings.member_fields(access data.env.nodes)
+            route=if existing is? none [] else existing
+            declared=[]
+            continue
+        }
+        let object=expressions.object_of(type data.env.types)
+        if object is? none return Subject[none none none]
+        let field=types.object_field(object name)
+        if field is? none return Subject[none none none]
+        type=field.value_type
+        declared=field.refinement
+        current=none
+        route.push(name)
+    }
+    if current isnt? none return direct(current projection state data)
+    let term:facts.Term?=none
+    if root isnt? none {term=facts.Term[bindings.route_id(@data.registry root route type loc) projection]}
+    let known=if term is? none none else facts.lookup(state facts.value(term))
+    let contract=if projection =? 'length' ranges.propositions_interval(declared 'length') else values.bounds_of(declared data.env.cap)
+    if projection =? 'length' {
+        let exact=intervals.exact_length(type data.env)
+        let width=if exact is? none values.length_default(data.env.cap) else ranges.exact(exact)
+        return Subject[none intervals.meet(intervals.meet(known contract) width) term]
+    }
+    return Subject[none intervals.meet(intervals.meet(known contract) values.fixed_bounds(type data.env.types)) term]
+}
+subject = (p:propositions.Proposition value:addr state:facts.State @data:predicates.Data):>Subject => {
+    let field=propositions.field(p)
+    if field isnt? none return field_subject(value field.split('.') p.projection state @data)
+    return direct(value (if p.subject =? 'length' 'length' else 'value') state data)
+}
+excludes_zero = (props:array<propositions.Proposition>):>bool => {
+    loop p in props {if p.subject =? 'self' and p.term is? none and p.op =? 'not=?' and p.value =? 0 return true}
+    return false
+}
+nonzero = (id:addr interval:ranges.Interval? state:facts.State data:predicates.Data):>bool => {
+    if interval isnt? none and ((interval.lower isnt? none and interval.lower >? 0) or (interval.upper isnt? none and interval.upper <? 0)) return true
+    let saved=data.snapshot.terms.get(id)
+    if saved isnt? none and saved.shift =? 0 and saved.term.projection =? 'value' and facts.nonzero(saved.term.binding_id).key in? state return true
+    if excludes_zero(expressions.member_invariant(id data.env.nodes data.env.types)) return true
+    let signature=expressions.call_function_type(id data.env.nodes data.env.types)
+    if signature isnt? none {
+        let result=types.node_at(data.env.types signature.ret)
+        if result is? types.RefinedType and excludes_zero(result.propositions) return true
+    }
+    let node=hir.node_at(data.env.nodes expressions.strip_casts(id data.env.nodes))
+    if node is? hir.FunctionCall and node.pos_args.length =? 1 {
+        let function=hir.node_at(data.env.nodes node.func)
+        if function is? hir.ExpressedIdentifier and function.name =? '__unary_sub__' {
+            return nonzero(node.pos_args[0] data.snapshot.numbers.get(node.pos_args[0]) state data)
+        }
+    }
+    return false
+}
+position = (id:addr state:facts.State data:predicates.Data):>bool => {
+    let node=hir.node_at(data.env.nodes expressions.strip_casts(id data.env.nodes))
+    if views.is_addr(node.value_type data.env.types) or expressions.sequence_of(id data.env.nodes) isnt? none return true
+    loop promised in expressions.call_result_refinements(id data.env.nodes data.env.types) {
+        loop p in promised.propositions {if p.axiom =? 'addr' return true}
+    }
+    let value=predicates.operand(id state data)
+    if value.interval isnt? none and value.interval.upper isnt? none and value.interval.upper <=? data.env.cap return true
+    if node is? hir.FunctionCall and node.pos_args.length =? 2 {
+        let function=hir.node_at(data.env.nodes node.func)
+        if function is? hir.ExpressedIdentifier and function.name in? ['__add__' '__sub__'] {
+            return position(node.pos_args[0] state data) and position(node.pos_args[1] state data)
+        }
+    }
+    if value.term is? none return false
+    loop entry in state.values {
+        let fact=entry.fact
+        if fact is? facts.Index and value.term.projection =? 'value' and fact.index =? value.term.binding_id return true
+        if fact is? facts.Value and fact.term.projection =? 'length' and relations.ordered(value.term fact.term 0 state data.relations) return true
+    }
+    return false
+}
+
+verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<addr> @data:predicates.Data):>bool? => {
+    let target=subject(p value state @data)
+    if p.axiom =? 'addr' {
+        if target.interval isnt? none and target.interval.upper isnt? none and target.interval.upper <=? data.env.cap return true
+        return if target.expression isnt? none and position(target.expression state data) true else none
+    }
+    let parameter=propositions.parameter(p)
+    if parameter isnt? none {
+        if p.subject_id is? none return none
+        let term=facts.Term[p.subject_id p.projection]
+        target=Subject[none relations.interval_of(term state data.relations) term]
+    }
+    if p.term isnt? none {
+        if p.term_id is? none return none
+        let directions=terms.directions(p.op)
+        if directions.length =? 0 return none
+        let term=facts.Term[p.term_id p.term_projection]
+        let bound=relations.interval_of(term state data.relations)
+        loop direction in directions {
+            let upper=direction.direction =? 'upper'
+            let held=false
+            if target.term isnt? none {
+                held=if upper relations.ordered(target.term term direction.gap state data.relations) else relations.ordered(term target.term direction.gap state data.relations)
+            }
+            if not held and target.expression isnt? none and p.term_projection =? 'length' and intervals.stable(target.expression data.snapshot data.env.nodes) {
+                if p.subject =? 'length' and propositions.field(p) is? none {
+                    let sliced=hir.node_at(data.env.nodes expressions.strip_casts(target.expression data.env.nodes))
+                    if sliced is? hir.StringSlice and upper and direction.gap <=? 0 {
+                        held=data.snapshot.sequences.get(sliced.string) =? p.term_id
+                    }
+                }
+                else {
+                    let context=lengths.Context[data.env data.relations data.snapshot.numbers]
+                    held=if upper lengths.upper(target.expression p.term_id direction.gap state context @data.registry) else lengths.lower(target.expression p.term_id direction.gap state context @data.registry)
+                }
+            }
+            if not held {
+                let smaller=if upper target.interval else bound
+                let larger=if upper bound else target.interval
+                if smaller isnt? none and larger isnt? none {
+                    if smaller.upper isnt? none and larger.lower isnt? none and larger.lower-smaller.upper >=? direction.gap {held=true}
+                    else if smaller.lower isnt? none and larger.upper isnt? none and larger.upper-smaller.lower <? direction.gap return false
+                }
+            }
+            if not held return none
+        }
+        return true
+    }
+    if parameter is? none {
+        loop result in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+            if views.has_proposition(result.propositions p) return true
+        }
+        let node=hir.node_at(data.env.nodes expressions.strip_casts(value data.env.nodes))
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id not in? assigned {
+            let binding=data.registry.by_id.get(node.binding_id)
+            if binding isnt? none and binding.declaration isnt? none {
+                let declaration=hir.node_at(data.env.nodes binding.declaration)
+                if declaration is? hir.Declare and declaration.annotation isnt? none {
+                    let annotation=types.node_at(data.env.types declaration.annotation)
+                    if annotation is? types.RefinedType and views.has_proposition(annotation.propositions p) return true
+                }
+            }
+        }
+    }
+    let interval=target.interval
+    let excludes=target.expression isnt? none and nonzero(target.expression interval state data)
+    if interval isnt? none and excludes {interval=ranges.exclude(interval 0)}
+    let decided=ranges.decide(p.op interval ranges.exact(p.value))
+    if decided isnt? none return decided
+    if p.op =? 'not=?' and p.value =? 0 and p.subject not=? 'length' and excludes return true
+    return none
+}
+
+describe = (p:propositions.Proposition):>string => {
+    let name=if p.subject =? 'self' 'value' else p.subject
+    let right=if p.term is? none _bigint_as_string(p.value) else "{p.term}{if p.term_projection =? 'length' '.length' else ''}"
+    return "{name} {p.op} {right}"
+}
+check = (node:hir.Obligation state:facts.State assigned:set<addr> srcfile:SrcFile @data:predicates.Data):>Error? => {
+    let refined=types.node_at(data.env.types node.refined)
+    $runtime_assert refined is? types.RefinedType
+    loop p in refined.propositions {
+        let current:facts.State?=state
+        if p.when isnt? none {current=predicates.refine(state node.value p.when @data)}
+        if current is? none continue
+        let decided=verdict(p node.value current assigned @data)
+        if decided =? true continue
+        let condition=if p.when is? none '' else " when the result is {p.when}"
+        return Error[srcfile=srcfile title=(if decided =? false 'refinement refuted' else 'cannot prove refinement') pointers=[Pointer[span=hir.node_at(data.env.nodes node.value).loc message="`{describe(p)}` is required{condition}"]] hint='establish it with a guard, or check it with `$runtime_assert`']
+    }
+    return none
+}

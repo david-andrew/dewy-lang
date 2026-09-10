@@ -87,6 +87,7 @@ exact_length = (id:addr env:values.Environment):>bigint? => {
     let node=types.node_at(env.types types.unfold(types.strip_refinement(id env.types) env.types))
     if node is? types.ArrayType|types.StringType return node.length
     if node is? types.StringLiteralType return node.value.length
+    if types.is_primitive(node 'char') or types.is_primitive(node 'grapheme') return 1
     return none
 }
 length = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
