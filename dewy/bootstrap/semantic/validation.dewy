@@ -12,6 +12,7 @@ import p"analyze/relations.dewy" as relations
 import p"analyze/fact_state.dewy" as facts
 import p"analyze/expression_intervals.dewy" as intervals
 import p"analyze/representation.dewy" as representation
+import p"runtime_reports.dewy" as runtime_reports
 
 # Bounds validation precedes representation selection. Library foundations
 # cannot fall back to the BigInt helpers they are themselves defining.
@@ -86,6 +87,12 @@ validate = (@engine:modules.Engine):>Result|Error => {
         if checked is? Error return checked
         loop warning in checked.warnings {result.warnings.push(warning)}
         loop note in checked.notes {result.notes.push(note)}
+    }
+    # Install diagnostic helper calls after all user proof obligations have
+    # been decided. Graph assembly can then retain the reachable reporters.
+    loop module in loaded {
+        let error=runtime_reports.lower(module.root engine.prelude_bindings @engine.session)
+        if error isnt? none return error
     }
     return result
 }

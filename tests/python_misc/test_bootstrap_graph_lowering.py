@@ -2,6 +2,8 @@
 import subprocess
 from pathlib import Path
 
+from test_bootstrap_lowering import ARENA
+
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
@@ -18,8 +20,10 @@ import p"{ROOT / 'dewy/bootstrap/semantic/modules.dewy'}" as modules
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/graph.dewy'}" as graph
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/program.dewy'}" as program
 main=(argv:array<string>):>int64=>{{
-    $runtime_assert argv.length =? 2
-    let engine=modules.Engine[]
+    $runtime_assert argv.length >=? 2
+    let prelude:array<string>=[]
+    loop i in 2.. and i <? argv.length {{prelude.push(argv[i])}}
+    let engine=modules.Engine[prelude_files=prelude]
     let entry=modules.load(argv[1] @engine)
     if entry is? Error {{entry.fail}}
     let lowered=graph.lower_validated(entry @engine)
@@ -86,3 +90,40 @@ main=(argv:array<string>):>int64=>{{
         result = subprocess.run([binary, path], capture_output=True, text=True, timeout=60, check=False)
         assert result.returncode != 0, body
         assert title in result.stderr, result.stdout + result.stderr
+
+    # A small reporting prelude checks the compiler/library boundary without
+    # depending on every operation used by the full diagnostic renderer yet.
+    reporting = tmp_path / 'runtime-reporting.dewy'
+    reporting.write_text(ARENA + '''
+Path:type=[path:string]
+let p=(path:string):>Path=>[path=path]
+Report:type=[start:int64 stop:int64 dim_stop:int64 message:string]
+let _assertion_report=(start:addr stop:addr dim_stop:addr message:string):>Report=>[start stop dim_stop message]
+let _expectation_report=(start:addr stop:addr dim_stop:addr message:string):>Report=>[start stop dim_stop message]
+let write=(text:string):>void=>{
+    let bytes=text as array<uint8>
+    __syscall3__(1 2 __load_i64__(bytes) bytes.length);
+}
+let _assertion_render=(report:Report path:string row:int64 line:string):>void=>{write(report.message);}
+let _expect_failed=():>void=>{}
+let exit=(code:int64):>never=>{__syscall1__(60 code); __unreachable__()}
+''')
+    for index, (value, expected, stderr) in enumerate([(0, 101, 'once:failed'), (1, 42, '')]):
+        source = tmp_path / f'runtime-assert-{index}.dewy'
+        source.write_text(f'''
+let positive=(n:int64):>bool=>n>?0
+let message=():>string=>{{write('once:'); return 'failed'}}
+let exit=(code:int64):>int64=>77
+let main=():>int64=>{{
+    $runtime_assert positive({value}), message()
+    return 42
+}}
+''')
+        lowered = subprocess.run([binary, source, reporting], capture_output=True, text=True, timeout=90, check=False)
+        assert lowered.returncode == 0, lowered.stdout + lowered.stderr
+        output = source.with_suffix('.udewy')
+        output.write_text(lowered.stdout)
+        assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+        run = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10, check=False)
+        assert run.returncode == expected, run.stdout + run.stderr
+        assert run.stderr == stderr

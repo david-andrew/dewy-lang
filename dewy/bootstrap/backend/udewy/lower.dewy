@@ -270,6 +270,15 @@ expression = (id:addr @state:State):>addr => {
         if callee is? hir.ArrayMethod return array_method_call(node callee @state)
         let function:addr=0
         if node.kw_args.length =? 0 and callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? state.symbols) and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics) {
+            if callee.name =? '__unreachable__' {
+                # µDewy has no unreachable opcode. As in the hosted backend,
+                # an empty infinite loop closes a path after an exit syscall.
+                let empty=types.primitive('void' @state.type_nodes)
+                let yes=put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) true] @state)
+                let body=put(hir.Block[node.loc empty [] true] @state)
+                let arm=put(hir.LoopArm[node.loc empty yes body] @state)
+                return put(hir.Flow[node.loc empty [arm] none] @state)
+            }
             # Builtins and intrinsics have already converted their operands. Their
             # concrete runtime signature records the selected word width;
             # the original overload set has no runtime representation.

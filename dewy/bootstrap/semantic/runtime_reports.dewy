@@ -1,0 +1,84 @@
+from reporting import Error, Pointer
+import p"context.dewy" as contexts
+import p"bindings.dewy" as bindings
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+
+# Runtime failures become ordinary calls to the installed reporting library.
+# Resolve the compiler's helper identities, so a source declaration named
+# `exit` or `_assertion_report` cannot intercept an assertion's failure path.
+# This runs after proof checking: the diagnostic's own source offsets are
+# compiler-generated constants, and it must not create fresh user obligations.
+helper = (name:string arguments:array<addr> node:hir.RuntimeFailure helpers:dict<string addr> @session:contexts.Session):>addr|Error => {
+    let id=helpers.get(name)
+    if id is? none return Error[srcfile=node.srcfile title='runtime reporting needs the prelude' pointers=[Pointer[node.loc "the helper `{name}` is unavailable"]]]
+    let binding=bindings.binding_at(session.registry id)
+    let signature=binding.value_type
+    if signature is? none return Error[srcfile=node.srcfile title='runtime reporting helper has no signature']
+    let type=types.node_at(session.types signature)
+    if type isnt? types.FunctionType or type.pos_or_kw.length not=? arguments.length return Error[srcfile=node.srcfile title='runtime reporting helper has an incompatible signature']
+    let function=hir.append_node(@session.hir hir.ExpressedIdentifier[node.loc signature name id])
+    return hir.append_node(@session.hir hir.FunctionCall[node.loc type.ret function arguments []])
+}
+text = (value:string node:hir.RuntimeFailure @session:contexts.Session):>addr => hir.append_node(@session.hir hir.String[node.loc types.string_literal(value @session.types) value])
+integer = (value:int64 node:hir.RuntimeFailure @session:contexts.Session):>addr => hir.append_node(@session.hir hir.Integer[node.loc types.primitive('int64' @session.types) '0d' value])
+
+materialize = (node:hir.RuntimeFailure helpers:dict<string addr> @session:contexts.Session):>addr|Error => {
+    let span=if node.condition is? none node.loc else hir.node_at(session.hir node.condition).loc
+    let source=node.srcfile
+    let line=source.line_of(span.start)
+    let begin=source.line_start(line)
+    let limit=source.line_end(line)
+    let stop=if span.stop <? limit span.stop else limit
+    let dim=if node.dimmed is? none stop else if node.dimmed.stop <? limit node.dimmed.stop else limit
+    # Source geometry is already expressed in Dewy graphemes, the same units
+    # used by Report. Keep Unicode columns and a SrcFile's first-row offset.
+    $runtime_assert begin <=? limit and limit <=? source.body.length
+    let contents=source.body[begin..limit)
+    let supplied=node.message
+    let message:addr=if supplied is? none text(if node.mode =? 'fail' 'the test reached `$fail`' else 'this condition was false' node @session) else supplied
+    let report=helper(if node.mode =? 'assert' '_assertion_report' else '_expectation_report' [integer(span.start-begin node @session) integer(stop-begin node @session) integer(dim-begin node @session) message] node helpers @session)
+    if report is? Error return report
+    let type=hir.node_at(session.hir report).value_type
+    let name="__dewy_assert_report_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' node.loc)
+    let empty=types.primitive('void' @session.types)
+    let declaration=hir.append_node(@session.hir hir.Declare[node.loc empty 'let' name type report binding_id])
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=type binding.store_type=type binding.declaration=declaration
+    session.registry.by_id[binding_id]=binding
+    let value=hir.append_node(@session.hir hir.ExpressedIdentifier[node.loc type name binding_id])
+    let rendered=helper('_assertion_render' [value text(source.path node @session) integer(source.first_row+line node @session) text(contents node @session)] node helpers @session)
+    if rendered is? Error return rendered
+    let body:array<addr>=[declaration rendered]
+    # TODO: expose the guard's saved operand values as report notes. Keep
+    # side effects single-evaluation; rebuilding the condition here is wrong.
+    if node.mode =? 'assert' {
+        let exit=helper('exit' [integer(101 node @session)] node helpers @session)
+        if exit is? Error return exit
+        body.push(exit)
+    } else {
+        let failed=helper('_expect_failed' [] node helpers @session)
+        if failed is? Error return failed
+        body.push(failed)
+        body.push(hir.append_node(@session.hir hir.Return[node.loc types.primitive('never' @session.types) none]))
+    }
+    return hir.append_node(@session.hir hir.Block[node.loc types.primitive('never' @session.types) body true])
+}
+lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(session.hir id)
+        loop child in hir.children(node) {pending.push(child)}
+        if node isnt? hir.RuntimeFailure continue
+        let result=materialize(node helpers @session)
+        if result is? Error return result
+        $runtime_assert id <? session.hir.length
+        session.hir[id]=hir.node_at(session.hir result)
+    }
+    return none
+}
