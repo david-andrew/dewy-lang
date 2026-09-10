@@ -70,7 +70,12 @@ conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AS
 # A place parameter can refer to caller storage that also has a global name.
 # Conservatively exclude callees with ambient writes/unknown callbacks. The
 # semantic parameter summaries alone cannot establish that global boundary.
-ambient_writers = (plan:captures.Plan nodes:array<hir.AST> opaque_only:bool=false):>set<addr> => {
+word_value = (id:addr type_nodes:array<types.Type>):>bool => {
+    let type=types.node_at(type_nodes types.unfold(types.strip_refinement(id type_nodes) type_nodes))
+    if type is? types.IntegerLiteralType return type.value >=? -9223372036854775808 and type.value <=? 18446744073709551615
+    return type is? types.Primitive and type.name in? ['int' 'uint' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64' 'bool' 'true' 'false' 'none']
+}
+ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false):>set<addr> => {
     let dirty:set<addr>=set[]
     loop [id function] in plan.functions {
         if not opaque_only {loop binding in function.writes {if binding in? plan.globals {dirty.add(id)}}}
@@ -84,7 +89,10 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> opaque_only:bool=fals
             seen.add(child)
             let node=hir.node_at(nodes child)
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
-            if node is? hir.Transmute {dirty.add(id)}
+            # Reinterpreting scalar bits does not expose aggregate storage.
+            # Pointer/aggregate transmutes and raw memory calls still prevent
+            # borrowing: they can escape or mutate an otherwise read-only value.
+            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {dirty.add(id)}
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
                 if callee is? hir.ExpressedIdentifier {
@@ -109,11 +117,11 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> opaque_only:bool=fals
 }
 analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan):>dict<addr set<addr>> => {
     let summaries=effects.analyze_effects(root nodes type_nodes)
-    let dirty=ambient_writers(plan nodes)
+    let dirty=ambient_writers(plan nodes type_nodes)
     # Raw address operations and unknown callbacks can expose storage even
     # without a declared place. They always require the ordinary value copy;
     # writes to unrelated globals only matter for an aliasing place source.
-    let opaque=ambient_writers(plan nodes opaque_only=true)
+    let opaque=ambient_writers(plan nodes type_nodes opaque_only=true)
     let places:set<addr>=set[]
     loop id in plan.functions.keys {
         let literal=hir.node_at(nodes id)
