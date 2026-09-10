@@ -98,3 +98,62 @@ let main=():>int64=>{
 }
 '''
     run(source, tmp_path)
+
+
+@pytest.mark.parametrize('optional', [False, True])
+def test_local_union_payload_copies_and_replacements_reuse_storage(optional, tmp_path):
+    source = '''
+Bag:type=[values:array<int64>]
+Other:type=[text:string]
+Payload:type=Bag|Other
+let snapshot=(value:array<Payload>):>int64=>{
+    $runtime_assert value.length >? 0
+    let first:Payload=value[0]
+    first=first
+    let copy:Payload=first
+    first=Other["empty"]
+    first=copy
+    if first is? Bag return first.values.length
+    return 0
+}
+let main=():>int64=>{
+    let value:array<Payload>=[Bag[[loop i in 0..128 {i}]]]
+    loop i in 0..20 {
+        $runtime_assert snapshot(value) =? 129
+        printl(_arena_cursor)
+    }
+    return 0
+}
+'''
+    if optional:
+        source = source.replace('Payload:type=Bag|Other', 'Payload:type=Bag|none').replace('first=Other["empty"]', 'first=none')
+    cursors = run(source, tmp_path).splitlines()
+    assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_returning_a_local_union_keeps_its_payload_alive(tmp_path):
+    source = '''
+Bag:type=[values:array<int64>]
+Payload:type=Bag|string|none
+let make=(number:int64):>Payload=>{
+    let result:Payload=Bag[[number number+1]]
+    if number <? 0 {result="value-{number}"}
+    return result
+}
+let inspect=(number:int64):>int64=>{
+    let result=make(number)
+    if result is? Bag return result.values.length
+    if result is? string return result.length
+    return 0
+}
+let main=():>int64=>{
+    loop i in 0..20 {
+        $runtime_assert inspect(42) =? 2
+        $runtime_assert inspect(-1) =? 8
+        printl(_arena_cursor)
+    }
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(set(cursors[2:])) == 1, cursors

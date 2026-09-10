@@ -366,6 +366,7 @@ class _Lowerer(
         self.consumed_string_values: set[int] = set()   # call nodes whose string result a binding, a return, or a store takes over (not temporaries)
         self.temporary_array_elements: dict[str, ty.TypeExpr] = {}   # array temporaries' element types, by temp name
         self.owned_cells: dict[str, tuple[ty.TypeExpr, ...]] = {}   # optional/union locals (and match temporaries) whose string payload is released at scope exit
+        self.owned_aggregate_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         self.local_initializers: dict[int, list[hir.AST]] = {}   # every local's initializers and assigned values (`_local_initializers`), this function
         self.returned_string_nodes: set[int] = set()   # string expressions a `return` may hand out (`_returned_string_node_ids`)
         self.array_element_targets: set[int] = set()   # iterator targets over arrays of strings
@@ -1002,6 +1003,7 @@ class _Lowerer(
         self.owned_strings = set()
         self.owned_raw_arrays = {}
         self.owned_cells = {}
+        self.owned_aggregate_cells = {}
         self.frame_region = None
         self.loop_regions = []
         self.loop_region_headers = []
@@ -3213,58 +3215,33 @@ class _Lowerer(
             blocks = isinstance(self._unwrap_transparent(node.expr), hir.ArrayLiteral)
             self.owned_raw_arrays[node.name] = (exact.length, exact.element, blocks)
 
-    def _moved_or_cloned_cell_return(self, item: hir.AST, result: hir.AST, members: tuple[ty.TypeExpr | None, ...]) -> list[hir.AST]:
-        """After an optional/union value is written into the caller's result cell:
-        `return maybe` of an owning cell moves its payload (the local's payload
-        word is emptied so its exit release leaves the string alone); a value
-        that reaches an owning cell or string local otherwise (`let other =
-        maybe; return other`) gets its string payload cloned for the caller."""
-        source = self._unwrap_transparent(item)
-        loc = item.loc
-        if isinstance(source, hir.ExpressedIdentifier) and source.name in self.owned_cells:
-            return [self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._int64_binary('__add__', replace(source, type='int64'), self._int64_literal(loc, 8), loc)], ty.VOID_TYPE, loc)]
-        kinds = self._string_sources(item)
-        if not any(kind in ('owning', 'element', 'unknown', 'fresh') for kind, _ in kinds):
-            return []   # static or a call's: the caller's already
-        # (`fresh` — a decode, an interpolation, a view — is a descriptor in this
-        # frame's string region, which is released on exit: it is cloned too)
-        statements: list[hir.AST] = []
-        tag = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'result_tag').name)
-        statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(result, loc)))
-        for index, member in enumerate(members):
-            if member is None or not self._is_string_valued(member):
-                continue
-            payload = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'result_payload').name)
-            length = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'result_length').name)
-            copy, copied = self._string_from_bytes(self._string_data_start(payload, loc), length, loc)
-            statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                loc, ty.VOID_TYPE, self._tag_is(tag, member, loc),
-                hir.Block(loc, ty.VOID_TYPE, [
-                    hir.Declare(loc, ty.VOID_TYPE, 'let', payload.name, 'int64', self._load_i64_field(result, 8, loc)),
-                    hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(payload, STRING_BYTE_LENGTH_OFFSET, loc)),
-                    *copy,
-                    self._store_i64_field(result, 8, replace(copied, type='int64'), loc),
-                ], True),
-            )], None))
+    def _replace_owned_cell(self, cell: hir.ExpressedIdentifier, value: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool) -> list[hir.AST]:
+        """Compute the replacement before releasing the previous payload.
+
+        The RHS can read the destination directly, through a field, or in a
+        call. An unprepared temporary gives it an independent value even when
+        the destination has a different prepared tree layout.
+        """
+        temporary = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('replacement'))
+        statements = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', temporary.name, 'int64', self._optional_allocation(loc)),
+            *self._union_write(temporary, value, members, prepared=False),
+            *self._release_cell_payload(cell, members, loc, prepared=prepared, strings=cell.name in self.owned_cells),
+        ]
+        if prepared:
+            statements.extend(self._union_copy_cell(cell, temporary, members, loc, prepared=True))
+            statements.extend(self._release_cell_payload(temporary, members, loc))
+        else:
+            # Both cells own handles: transferring the two words is sufficient.
+            statements.extend([
+                self._intrinsic_call('__store_i64__', [self._optional_tag(temporary, loc), cell], ty.VOID_TYPE, loc),
+                self._store_i64_field(cell, 8, self._load_i64_field(temporary, 8, loc), loc),
+            ])
         return statements
 
     def _release_cell_string_payload(self, cell: hir.ExpressedIdentifier, members: tuple[ty.TypeExpr, ...], loc) -> list[hir.AST]:
-        """Give back the string payload an optional/union cell holds, by its member tag and the string's owner word."""
-        word = replace(cell, type='int64')
-        tag = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'cell_tag').name)
-        statements: list[hir.AST] = [hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(word, loc))]
-        for index, member in enumerate(members):
-            if not self._is_string_valued(member):
-                continue
-            payload = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'cell_payload').name)
-            statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                loc, ty.VOID_TYPE, self._tag_is(tag, member, loc),
-                hir.Block(loc, ty.VOID_TYPE, [
-                    hir.Declare(loc, ty.VOID_TYPE, 'let', payload.name, 'int64', self._load_i64_field(word, 8, loc)),
-                    self._release_string_by_owner(payload, loc),
-                ], True),
-            )], None))
-        return statements
+        """Release only string alternatives of a possibly borrowed match cell."""
+        return self._release_cell_payload(cell, tuple(member for member in members if self._is_string_valued(member)), loc)
 
     def _release_raw_array_members(self, word: hir.ExpressedIdentifier, length: int, element: ty.TypeExpr, blocks: bool, loc) -> list[hir.AST]:
         """Give back what an exact-length stack array's elements own: each string by
@@ -3457,9 +3434,9 @@ class _Lowerer(
         ends every scope inside the loop it leaves. Names are unique within
         a function, so the lowered tree's blocks are the scopes.
         """
-        if (not self.owned_array_names and not self.owned_objects and not self.owned_strings and not self.owned_raw_arrays and not self.owned_cells and not exit_statements) or not isinstance(body, hir.Block):
+        if (not self.owned_array_names and not self.owned_objects and not self.owned_strings and not self.owned_raw_arrays and not self.owned_cells and not self.owned_aggregate_cells and not exit_statements) or not isinstance(body, hir.Block):
             return body
-        owned_names = self.owned_array_names | self.owned_strings | set(self.owned_raw_arrays) | set(self.owned_cells)
+        owned_names = self.owned_array_names | self.owned_strings | set(self.owned_raw_arrays) | set(self.owned_cells) | set(self.owned_aggregate_cells)
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]], moved: str | None = None) -> list[hir.AST]:
@@ -3470,6 +3447,9 @@ class _Lowerer(
                         continue   # `return s`: the caller takes the string over
                     if local.name in self.owned_strings:
                         released.append(self._release_string_by_owner(local, local.loc))
+                    elif local.name in self.owned_aggregate_cells:
+                        members, prepared = self.owned_aggregate_cells[local.name]
+                        released.extend(self._release_cell_payload(local, members, local.loc, prepared=prepared, strings=local.name in self.owned_cells))
                     elif local.name in self.owned_cells:
                         released.extend(self._release_cell_string_payload(local, self.owned_cells[local.name], local.loc))
                     elif local.name in self.owned_raw_arrays:
@@ -3579,7 +3559,6 @@ class _Lowerer(
                         raise TypeError('INTERNAL ERROR: missing optional result payload')
                     items.extend(self._lower_result_statements(lambda: [
                         *self._optional_write(replace(self.current_optional_result, type='int64'), item, payload),
-                        *self._moved_or_cloned_cell_return(item, replace(self.current_optional_result, type='int64'), ('none', payload)),
                         hir.Return(item.loc, ty.BOTTOM_TYPE, hir.Void(item.loc, ty.VOID_TYPE)),
                     ]))
                     continue
@@ -3615,7 +3594,6 @@ class _Lowerer(
                 raise TypeError('INTERNAL ERROR: missing optional result payload')
             statements = self._lower_result_statements(lambda: [
                 *self._optional_write(replace(self.current_optional_result, type='int64'), node, payload),
-                *self._moved_or_cloned_cell_return(node, replace(self.current_optional_result, type='int64'), ('none', payload)),
                 hir.Return(node.loc, ty.BOTTOM_TYPE, hir.Void(node.loc, ty.VOID_TYPE)),
             ])
         elif self.current_object_result is not None:
@@ -3841,8 +3819,10 @@ class _Lowerer(
                     annotation='int64',
                     expr=self._union_cell_allocation(members, node.loc),
                 )
-                if node.binding_id is not None and node.binding_id in self.owning_string_bindings and not self.lowering_module_startup:
-                    self.owned_cells[node.name] = members   # a call's union: a string payload is released at scope exit
+                if any(self._union_member_kind(member) != 'word' for member in members):
+                    self.owned_aggregate_cells[node.name] = (members, True)
+                if any(self._is_string_valued(member) for member in members):
+                    self.owned_cells[node.name] = members   # union stores independently own their string payloads
                 return [
                     declaration,
                     *self._union_prepare_trees(cell, members, node.loc),
@@ -3862,8 +3842,10 @@ class _Lowerer(
                     annotation='int64',
                     expr=self._optional_allocation(node.loc),
                 )
-                if node.binding_id is not None and node.binding_id in self.owning_string_bindings and not self.lowering_module_startup:
-                    self.owned_cells[node.name] = ('none', payload)   # a call's optional string: its payload is released at scope exit
+                if self._union_member_kind(payload, prepared=False) != 'word' and not self.lowering_module_startup:
+                    self.owned_aggregate_cells[node.name] = (('none', payload), False)
+                if self._is_string_valued(payload) and not self.lowering_module_startup:
+                    self.owned_cells[node.name] = ('none', payload)   # optional stores use the same ownership rule
                 return [
                     declaration,
                     *self._optional_write(cell, node.expr, payload),
@@ -4056,8 +4038,8 @@ class _Lowerer(
                     )
                     prologue.extend(self._union_prepare_trees(cell, members, node.loc))
                     self.union_globals_initialized.add(node.target.binding_id)
-                if node.target.name in self.owned_cells:
-                    prologue.extend(self._release_cell_string_payload(node.target, members, node.loc))   # the old payload goes back (the new value is written after)
+                if node.target.name in self.owned_aggregate_cells or node.target.name in self.owned_cells:
+                    return [*prologue, *self._replace_owned_cell(cell, node.value, members, node.loc, prepared=True)]
                 return [*prologue, *self._union_write(cell, node.value, members)]
             payload = (
                 self.optional_payloads.get(node.target.binding_id)
@@ -4085,8 +4067,8 @@ class _Lowerer(
                     )
                     self.optional_globals_initialized.add(node.target.binding_id)
                 value = node.value
-                if node.target.name in self.owned_cells:
-                    statements.extend(self._release_cell_string_payload(node.target, self.owned_cells[node.target.name], node.loc))   # the old payload goes back
+                if node.target.name in self.owned_aggregate_cells or node.target.name in self.owned_cells:
+                    return [*statements, *self._replace_owned_cell(cell, value, ('none', payload), node.loc, prepared=False)]
                 statements.extend(self._optional_write(cell, value, payload))
                 return statements
             if self._is_string_valued(node.target.type) and self._has_arena():
@@ -4151,14 +4133,12 @@ class _Lowerer(
                     payload = ty.optional_payload(function_type)
                 if payload is None:
                     raise TypeError('INTERNAL ERROR: missing optional result payload')
-                moved_cell = self._moved_or_cloned_cell_return(node.item, replace(self.current_optional_result, type='int64'), ('none', payload))
                 return [
                     *self._optional_write(
                         replace(self.current_optional_result, type='int64'),
                         node.item,
                         payload,
                     ),
-                    *moved_cell,
                     hir.Return(node.loc, ty.BOTTOM_TYPE, hir.Void(node.loc, ty.VOID_TYPE)),
                 ]
             if node.item is None:

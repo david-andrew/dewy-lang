@@ -519,7 +519,7 @@ class _OptionalLowering:
         the container owns, with no prepared trees (object members are handles)."""
         if isinstance(element, str):
             return False
-        members = ty.runtime_union_members(ty.strip_refinement(element))
+        members = self._field_union_members(ty.strip_refinement(element))
         if members is None:
             return False
         return all(
@@ -530,7 +530,7 @@ class _OptionalLowering:
     def _union_element_value(self, node: hir.AST, element_type: ty.Type) -> tuple[list[hir.AST], hir.AST]:
         """A value stored into a union-element container: a fresh 16-byte arena cell."""
         loc = node.loc
-        members = ty.runtime_union_members(ty.strip_refinement(element_type))
+        members = self._field_union_members(ty.strip_refinement(element_type))
         assert members is not None
         name = self._new_array_name('union_cell')
         cell = hir.ExpressedIdentifier(loc, 'int64', name)
@@ -542,7 +542,7 @@ class _OptionalLowering:
 
     def _copy_union_element(self, source_value: hir.AST, target_address: hir.AST, element_type: ty.Type, loc: Span) -> list[hir.AST]:
         """A copy of a container's union element: its own arena cell, the active member copied."""
-        members = ty.runtime_union_members(ty.strip_refinement(element_type))
+        members = self._field_union_members(ty.strip_refinement(element_type))
         assert members is not None
         name = self._new_array_name('union_copy')
         cell = hir.ExpressedIdentifier(loc, 'int64', name)

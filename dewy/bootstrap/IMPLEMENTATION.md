@@ -31,8 +31,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   discarded elements; optional string-array copies own independent strings.
   Thirty focused union/string tests and a further 61 ownership/object/binary
   checks pass. Repeated record and union-array copies reuse released arena
-  storage after warmup. Prepared local union payloads still need equivalent
-  ownership tracking; the full prelude memory measurement is being repeated.
+  storage after warmup. Local union cleanup distinguishes prepared frame roots
+  from owned handles; replacements compute their value before releasing the
+  old payload. Optional record elements use the existing owned-cell layout.
+  String returns use the union copy rule without a second copy/transfer path.
+  A further 148 container/string regressions and 27 focused local/recursive
+  checks pass (including the updated return-copy assertion). The full prelude
+  still checks in 240 seconds after the first cleanup changes; larger memory
+  measurements are being repeated with local-cell cleanup included.
 
 - Native module assembly retains dependency initialization order and binding
   identities, emits each loaded module once, and selects only the entry

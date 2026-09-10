@@ -76,7 +76,7 @@ def test_an_array_result_nothing_keeps_is_released_after_its_statement() -> None
     assert re.search(rf'if {temp.group(1)} =\? 0 \{{', count) and re.search(rf'__load_i64__\({temp.group(1)} \+ 40\) =\? 1', count)
 
 
-def test_an_optional_local_owns_a_calls_string_payload_and_return_moves_it() -> None:
+def test_optional_locals_and_returns_own_independent_string_payloads() -> None:
     source = (
         HEAD
         + 'let choose = (flag:bool):>string|none => if flag join2("a" "b") else none\n'
@@ -88,8 +88,9 @@ def test_an_optional_local_owns_a_calls_string_payload_and_return_moves_it() -> 
     moved = _function(emitted, 'moved')
     # the payload is released by member tag and owner word …
     assert re.search(r'let __dewy_string_cell_tag_\d+:int64 = __load_i64__\(maybe\)', moved)
-    # … except that `return maybe` empties the local's payload word first (the caller owns it now)
-    assert '__store_i64__(0 maybe + 8)' in moved
+    # Return storage already receives an independent clone. Releasing the
+    # original must not be suppressed by an obsolete ownership-transfer marker.
+    assert '__dewy_string_clone(' in moved and '_arena_release(' in moved
+    assert '__store_i64__(0 maybe + 8)' not in moved
     aliased = _function(emitted, 'aliased')
-    # a return reaching `maybe` through `other` clones the payload into the result cell
-    assert re.search(r'let __dewy_string_result_tag_\d+:int64', aliased) and re.search(r'let __dewy_string_result_payload_\d+:int64', aliased)
+    assert '__dewy_string_clone(' in aliased and '_arena_release(' in aliased

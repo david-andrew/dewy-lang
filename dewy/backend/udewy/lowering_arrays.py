@@ -1238,11 +1238,11 @@ class _ArrayLowering:
         empty = self._typed_equality(string, self._int64_literal(loc, 0), 'int64', loc)
         return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, empty, hir.Block(loc, ty.VOID_TYPE, [], True))], by_owner)
 
-    def _release_unprepared_cell_payload(self, cell: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span) -> list[hir.AST]:
-        """Release the active value of an inline/container cell.
+    def _release_cell_payload(self, cell: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool = False, strings: bool = True) -> list[hir.AST]:
+        """Release the active value according to the cell's storage contract.
 
-        These cells own aggregate handles, unlike prepared local/result cells
-        whose payload can point into frame storage. Recursive aliases use the
+        Inline/container cells own aggregate handles. Prepared local/result
+        cells instead keep fixed-layout roots in frame storage. Recursive aliases use the
         cached object release helper, keeping both layouts and code finite.
         A zero payload is an emptied slot after an ownership transfer.
         """
@@ -1253,7 +1253,8 @@ class _ArrayLowering:
             unfolded = ty.unfold(ty.strip_refinement(member))
             release: list[hir.AST] = []
             if self._is_string_valued(member):
-                release.append(self._release_string_by_owner(payload, loc))
+                if strings:
+                    release.append(self._release_string_by_owner(payload, loc))
             elif isinstance(unfolded, ty.ArrayType):
                 element = unfolded.element
                 release.extend(self._release_owned_array(
@@ -1265,7 +1266,8 @@ class _ArrayLowering:
             elif isinstance(unfolded, ty.ObjectType):
                 size, _offsets = self._object_layout(unfolded, hir.Void(loc, ty.VOID_TYPE))
                 release.extend(self._release_object_members(payload, unfolded, loc))
-                release.append(self._arena_release_call(payload, self._int64_literal(loc, size), loc))
+                if self._union_member_kind(member, prepared=prepared) == 'handle':
+                    release.append(self._arena_release_call(payload, self._int64_literal(loc, size), loc))
             if release:
                 arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, release, True)))
         if not arms:
@@ -1314,7 +1316,7 @@ class _ArrayLowering:
                 cell = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
                 cell_declare, cell_ident = local('field_cell', cell)
                 statements.append(cell_declare)
-                statements.extend(self._release_unprepared_cell_payload(cell_ident, members, loc))
+                statements.extend(self._release_cell_payload(cell_ident, members, loc))
             elif isinstance(unfolded, ty.ObjectType):
                 nested = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
                 nested_declare, nested_ident = local('field_object', nested)
@@ -1374,7 +1376,7 @@ class _ArrayLowering:
         data_declare, data = local('cell_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         cell_declare, cell = local('cell', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
-        body: list[hir.AST] = [cell_declare, *self._release_unprepared_cell_payload(cell, members, loc)]
+        body: list[hir.AST] = [cell_declare, *self._release_cell_payload(cell, members, loc)]
         body.append(self._arena_release_call(cell, self._int64_literal(loc, 16), loc))
         body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)))
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)

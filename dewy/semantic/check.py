@@ -9279,6 +9279,7 @@ def _optional_container_element(type_: ty.Type) -> bool:
         payload == 'bool'
         or ty.fixed_integer_layout(payload) is not None
         or ty.string_valued(payload)
+        or isinstance(ty.unfold(payload), ty.ObjectType)
     )
 
 
