@@ -25,14 +25,16 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- Native legalization executes 53 source programs through native checking,
+- Native legalization executes 59 source programs through native checking,
   lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
   handles scalar arrays with independent declaration/assignment copies,
   keyword-ordered argument copies, callee defaults, arena-backed returns and
   globals, and push/pop/insert/reserve/truncate/clear. The allocator is the
   existing prelude implementation, selected by binding identity. A separate
-  stress case verifies growth through 100 byte elements. Aggregate elements,
-  frame/arena lifetime optimization and release insertion remain pending.
+  stress case verifies growth through 100 byte elements. Arrays also own record,
+  nested-array, and callable elements. Cached monomorphic copy helpers handle
+  recursive minted record hierarchies without expanding the compiler stack.
+  Frame/arena lifetime optimization and release insertion remain pending.
   These tests enter below the full proof driver; they are not a public
   unchecked compilation route.
 
@@ -55,8 +57,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 - Profiling found whole-source token copies in declaration and member reads.
   Scoped read helpers removed those copies from the expression/type visitors;
   the source type comparison passes, and the same full-prelude diagnostic
-  went from approximately 499 seconds to 297 seconds. Full-prelude checking
-  beyond that contextual-lambda gap is in progress.
+  went from approximately 499 seconds to 297 seconds. Concrete type tests now
+  select generic branches with the existing DecidedBool HIR; five accepted
+  and two rejected native cases pass. Selected blocks keep their lexical
+  scope, and an effectful operand is never discarded by this optimization.
+  Full-prelude checking is progressing through reporting and I/O; expression
+  conversion parity and the complete proof driver remain in progress.
 
 - BigInt aliases and annotated numeric boundaries use the prelude's own type.
   Exact constants materialize into canonical base-2^32 limbs; signed and
