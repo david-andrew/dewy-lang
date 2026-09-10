@@ -9238,6 +9238,7 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
             type_ in ty.FIXED_INTEGER_TYPES
             or type_ in {'bool', 'string', 'grapheme', 'char'}
         )
+        or ty.enum_members(type_) is not None  # literal enums occupy one tag word
         or ty.string_valued(type_)   # a union of string literals: string handles
         or _optional_container_element(type_)
         or _union_container_element(type_)
@@ -10714,6 +10715,17 @@ def _dispatch_builtin(
     """Resolve a builtin dunder call and apply any selected promotions."""
     if expected is not None:
         expected = ty.strip_all_refinements(expected)   # the operator computes the base type; the facts are the return's to prove
+    # A finite set of integer operands is not closed under arithmetic. Its
+    # tag storage also differs from an integer word, so decode before builtin
+    # dispatch rather than inferring the enum as the operation's result type.
+    numeric_args = []
+    for arg in args:
+        members = ty.enum_members(arg.type)
+        if members is not None and all(isinstance(member, ty.IntegerLiteralType) for member in members):
+            if all(ty.integer_literal_fits(member.value, 'int64') for member in members):
+                arg = check_against(arg, 'int64', ctx=ctx)
+        numeric_args.append(arg)
+    args = numeric_args
     arg_types = [
         require_valued(
             arg.type,
@@ -15908,6 +15920,8 @@ def _explicit_value_conversion(
     target = _refine_string_materialization_target(source, target)
     if source == target:
         return node
+    if ty.enum_members(source) is not None and ty.fixed_integer_layout(target) is not None:
+        return check_against(node, target, ctx=ctx)
     if (
         isinstance(source, ty.BinaryLiteralType)
         and isinstance(target, ty.TypeOr)
@@ -16386,6 +16400,10 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         # a singleton (or a narrower enum) meeting an enum: the value is the
         # member's tag word — the lowering converts
         return hir.RepresentationCast(node.loc, expected, node)
+    if node_enum is not None and ty.fixed_integer_layout(expected) is not None and ctx.type_system.is_subtype(node.type, expected):
+        # Numeric value conversion decodes the enum's tag. Mere subtyping
+        # cannot substitute its physical tag word for the member's integer.
+        return hir.ValueCast(node.loc, expected, node)
     if node_enum is not None and _is_string_type(expected) and ctx.type_system.is_subtype(node.type, expected):
         # an enum meeting a string: the member's text
         return hir.RepresentationCast(node.loc, expected, node)

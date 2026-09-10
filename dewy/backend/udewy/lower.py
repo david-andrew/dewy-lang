@@ -4227,7 +4227,16 @@ class _Lowerer(
         stripped = ty.strip_refinement(value.type)
         index = ty.enum_member_index(members, stripped) if isinstance(stripped, (ty.StringLiteralType, ty.IntegerLiteralType)) else None
         if index is not None:
-            return [], self._int64_literal(loc, index)
+            # Knowing which literal a call returns does not erase the call.
+            # Retain evaluation before replacing its result by the enum tag.
+            if isinstance(value, (hir.Integer, hir.String)):
+                return [], self._int64_literal(loc, index)
+            prelude, evaluated = self._extract_expression(value)
+            if not isinstance(evaluated, (hir.Integer, hir.String, hir.Bool, hir.ExpressedIdentifier)):
+                held = self._new_optional_name('enum_source')
+                prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', held,
+                    self._lower_runtime_value_type(evaluated.type), evaluated))
+            return prelude, self._int64_literal(loc, index)
         source = self._enum_of(value)
         if source is None:
             self._target_error(value, 'a value that is not a member of the enum it is stored into')
@@ -4250,6 +4259,32 @@ class _Lowerer(
         flow = hir.Flow(loc, 'int64', arms, self._int64_literal(loc, mapping[-1][1]))
         flow_prelude, result = self._extract_expression(flow)
         return [*prelude, *flow_prelude], result
+
+    def _enum_numeric_of(
+        self, value: hir.AST, members: tuple[ty.TypeExpr, ...], target: ty.Type,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Decode a literal enum's tag before a numeric value conversion."""
+        loc = value.loc
+        system = ty.TypeSystem()
+        choices = [
+            (index, member) for index, member in enumerate(members)
+            if isinstance(member, ty.IntegerLiteralType)
+            and system.is_subtype(member, value.type)
+        ]
+        if not choices:
+            self._target_error(value, 'an enum without an integer member in this view')
+        prelude, word = self._enum_word_of(value, members)
+        held = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('enum_number'))
+        prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', word))
+        arms = [
+            hir.IfArm(loc, target,
+                self._typed_equality(held, self._int64_literal(loc, index), 'int64', loc),
+                hir.Integer(loc, target, t0.base10, member.value))
+            for index, member in choices[:-1]
+        ]
+        fallback = hir.Integer(loc, target, t0.base10, choices[-1][1].value)
+        steps, result = self._extract_expression(hir.Flow(loc, target, arms, fallback))
+        return [*prelude, *steps], result
 
     def _enum_text_of(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> tuple[list[hir.AST], hir.AST]:
         """An enum word as the text of its member (a select over the literals)."""
@@ -4398,6 +4433,11 @@ class _Lowerer(
                     (m for m in members if system.is_subtype(node.type, m)),
                     None,
                 )
+                if member is None and self._is_string_valued(node.type):
+                    # Several string-literal alternatives share one payload
+                    # representation. A narrowed string union reads that same
+                    # descriptor even though no single literal covers the view.
+                    member = 'string'
                 if member is None and node.type == 'int64':
                     # not a member: the lowering's own retyping (`replace(node,
                     # type='int64')`) of a `0 | [...]` cell — the cell address
@@ -4985,6 +5025,10 @@ class _Lowerer(
                 place_postlude,
             )
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
+            if isinstance(node, hir.ValueCast) and ty.fixed_integer_layout(node.type) is not None:
+                enum = self._enum_of(node.expr)
+                if enum is not None:
+                    return self._enum_numeric_of(node.expr, enum, node.type)
             prelude, expr = self._extract_expression(node.expr)
             return prelude, replace(node, expr=expr)
         if isinstance(node, hir.Block) and node.scoped:

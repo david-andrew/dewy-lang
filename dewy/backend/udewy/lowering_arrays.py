@@ -1436,6 +1436,8 @@ class _ArrayLowering:
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
         """A value to store into a growable array: objects (and non-literal strings) are copied into the arena (value semantics)."""
+        if (members := ty.enum_members(element_type)) is not None:
+            return self._enum_word_of(node, members)
         if isinstance(element_type, ty.ArrayType):
             # a nested array element: an independent arena-backed handle
             # (released with the owner's elements only one level deep so far)
@@ -1456,6 +1458,7 @@ class _ArrayLowering:
         """Elements copied as one word: scalars and immutable string handles."""
         return (
             element == 'bool'
+            or ty.enum_members(element) is not None
             or ty.fixed_integer_layout(element) is not None
             or isinstance(element, (ty.FunctionType, ty.MetaType))   # a function value is its code address; a type value its brand id
             or self._is_string_valued(element)
@@ -1466,6 +1469,7 @@ class _ArrayLowering:
         """Elements copied as one word: scalars and immutable string handles."""
         return (
             element == 'bool'
+            or ty.enum_members(element) is not None
             or ty.fixed_integer_layout(element) is not None
             or isinstance(element, (ty.FunctionType, ty.MetaType))   # a function value is its code address; a type value its brand id
             or cls._is_string_valued(element)
@@ -2552,6 +2556,8 @@ class _ArrayLowering:
         node: hir.AST,
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
+        if (members := ty.enum_members(element_type)) is not None:
+            return self._enum_word_of(node, members)
         if self._is_optional_element(element_type):
             # before the literal shortcut: `1` stored into `array<int64|none>` is a cell
             return self._optional_element_value(node, element_type)
@@ -2708,6 +2714,8 @@ class _ArrayLowering:
         node: hir.AST,
     ) -> tuple[int, bool]:
         element_type = ty.unfold(element_type)   # `array<Node>` inside `Node`: object handles
+        if ty.enum_members(element_type) is not None:
+            return 8, True
         if element_type == 'bool':
             return 1, False
         layout = ty.fixed_integer_layout(element_type)
@@ -2771,6 +2779,7 @@ class _ArrayLowering:
         return (
             array_type.length == 0
             or element_type == 'bool'
+            or ty.enum_members(element_type) is not None
             or ty.fixed_integer_layout(element_type) is not None
             or isinstance(element_type, ty.FunctionType)
             or (
