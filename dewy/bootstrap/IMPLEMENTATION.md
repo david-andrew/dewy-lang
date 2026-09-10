@@ -25,7 +25,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- Native legalization executes 42 source programs through native checking,
+- Native legalization executes 53 source programs through native checking,
   lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
   handles scalar arrays with independent declaration/assignment copies,
   keyword-ordered argument copies, callee defaults, arena-backed returns and
@@ -39,7 +39,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 - Native layout queries match the hosted layouts for primitive and nested
   fields, scalar/handle array strides, inline union cells, and brand storage
   through parent and structural views. Descriptors use typed byte offsets.
-  Record lowering is being tested against those layouts.
+  Record lowering now executes nested fields, independent scalar-array
+  members, callable fields, parent/child type tests and copies, and record
+  parameters/results. Dynamic copies use the selected brand's field schema,
+  preserving child fields without reading the reserved size of a larger sibling.
 
 - Contextual function expectations now supply unannotated lambda parameter
   types before checking their bodies, including array sort keys. Explicit
@@ -71,11 +74,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   prelude through BigRational now checks natively. Remaining portable
   libraries and target services are under investigation.
 
-- The latest full regression run exposed four failures: one retained container
-  slice lifetime bug and three outdated code-generation expectations. Those
-  are fixed; all 288 tests in the affected ownership/execution groups pass.
-  Returning a string view's container provenance is necessary even when its
-  descriptor also requires temporary storage.
+- The full regression suite at the type-product checkpoint passed with
+  **1,948 passed and 23 skipped**. Subsequent array/record lowering and source
+  checker changes have the focused verification above. The earlier retained
+  container-slice lifetime bug and outdated code-generation expectations are
+  fixed and included in that full run.
 
 - Native µDewy emission accepts lowered HIR expressions, statements, function
   units, globals, ordered startup, and an entry wrapper. Twenty-two expression
