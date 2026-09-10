@@ -25,13 +25,29 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- The paired native build is now executable through
-  `tools/bootstrap_native.sh`. Its first Dewy attempt reached the compiler's
-  own semantic sources and stopped on optional-value interpolation in
-  proposition keys. This remains an implementation gap, not a verified
-  self-build. `tools/package_native.sh` requires matching generations,
-  binary checksums and unchanged source inputs; packaging tests use fixtures,
-  and the public installer has not switched to an unverified native release.
+- The paired native build is executable through `tools/bootstrap_native.sh`.
+  Native checks of the compiler's own semantic sources exposed optional-value
+  interpolation and compound dictionary stores. Optional/union interpolation
+  now passes graph execution, including evaluating effectful parts once.
+  Compound stores pass source comparison and the full lowering execution
+  suite, including a key-producing call evaluated once. The paired self-build
+  remains unverified. `tools/package_native.sh` requires matching generations, binary
+  checksums and unchanged source inputs; packaging tests use fixtures, and
+  the public installer has not switched to an unverified native release.
+
+- Source readers avoid copying complete token forests for individual nodes.
+  Bounds analysis shares immutable module inputs across binding/refinement
+  queries, recursive negation and ordinary index proofs. Changing interval
+  observations remain separate from the reusable index context. Normalizing
+  an already-normal constructor retains its existing identity, and type
+  equality compares identity fields without copying escaping strings.
+  Module-import, predicate/bounds, length/index, slice/obligation and
+  type-algebra comparisons pass.
+
+- Hosted compound dictionary assignments retain evidence for the captured
+  key across the RHS. Changing the original key binding no longer incorrectly
+  proves that its new value is present; literal-key stores can reestablish
+  membership after an RHS removal. Both cases are regression tested.
 
 - BigInt source arithmetic and fixed-width conversions match 27 accepted
   and three rejected hosted source cases. Six bounds comparisons verify
