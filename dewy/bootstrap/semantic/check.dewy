@@ -1922,7 +1922,7 @@ place_fits = (actual:addr required:addr @session:contexts.Session):>bool => {
 
 array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let receiver_node = node_at(receiver session)
-    let declared:addr = receiver_node.value_type
+    let declared:addr = store_type(receiver @session)
     if name not=? 'join' {
         let path = bindings.access_path(receiver session.hir)
         let root = node_at(path.root session)
