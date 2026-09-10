@@ -25,7 +25,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- Native legalization executes 59 source programs through native checking,
+- Native legalization executes 73 source programs through native checking,
   lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
   handles scalar arrays with independent declaration/assignment copies,
   keyword-ordered argument copies, callee defaults, arena-backed returns and
@@ -34,9 +34,21 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   stress case verifies growth through 100 byte elements. Arrays also own record,
   nested-array, and callable elements. Cached monomorphic copy helpers handle
   recursive minted record hierarchies without expanding the compiler stack.
+  Immutable strings retain UTF-8 bytes and grapheme boundaries through
+  indexing, half-open/nested slices, comparisons, arrays, fields, and returns;
+  converting to a byte array makes an independent mutable value.
   Frame/arena lifetime optimization and release insertion remain pending.
   These tests enter below the full proof driver; they are not a public
   unchecked compilation route.
+
+- Ambiguous-expression transactions checkpoint mutable checking state while
+  retaining the session's read-only source forests. All 156 valid and 86
+  rejected source comparisons pass, including slice-bound metadata. The
+  hosted seed also moves runtime-sized compiler copies into its existing
+  function region, including parameter-copy prologues. This fixes stack
+  exhaustion from multi-megabyte value copies without changing explicit
+  source `__alloca__` calls. Thirty-one ownership/region regressions pass,
+  including large arrays and records under a 1 MiB native stack limit.
 
 - Native layout queries match the hosted layouts for primitive and nested
   fields, scalar/handle array strides, inline union cells, and brand storage
