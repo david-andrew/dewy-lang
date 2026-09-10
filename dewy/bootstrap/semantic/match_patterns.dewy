@@ -1,0 +1,304 @@
+from reporting import Error, Warning, Pointer
+import p"../parser/p0.dewy" as parser
+import p"context.dewy" as contexts
+import p"syntax.dewy" as syntax
+import p"type_check.dewy" as declarations
+import p"bindings.dewy" as bindings
+import p"ty.dewy" as types
+import p"subtyping.dewy" as subtyping
+import p"brands.dewy" as brands
+import p"value_sets.dewy" as values
+import p"type_display.dewy" as display
+import p"type_queries.dewy" as views
+
+doc"""
+A match arm's pattern is a parameter signature, as in semantic/match.md.
+Resolve its types once, in the lexical scope of the arm. Coverage is separate
+from executing its tests: an integer guard may cover a proper interval, and
+several guarded record fields remain conservative for exhaustiveness.
+
+A bare name binds every value, even when it shadows a type. `<T>` tests a
+type without a binding; `name:T` both tests and binds. Sequence patterns
+refer to their child syntax until paired with the corresponding subjects.
+"""
+Field:type = const [name:string test:addr?=none]
+Pattern:type = const [
+    syntax:addr
+    kind:'any'|'type'|'object'|'sequence'
+    name:string?=none
+    test:addr?=none
+    fields:array<Field>=[]
+    items:array<addr>=[]
+]
+resolve_type = (id:addr name:string? context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let scope=contexts.Context[context.source context.scope name context.immutable_record]
+    return declarations.resolve(id scope @session)
+}
+parse = (id:addr context:contexts.Context @session:contexts.Session):>Pattern|Error => {
+    let source=contexts.source_at(context session)
+    let node=contexts.node_at(id context session)
+    let name=syntax.identifier(id source.nodes)
+    if name isnt? none {
+        if name not=? '_' {
+            let existing=bindings.lookup(session.scopes context.scope name)
+            let message="`{name}` matches everything"
+            let hint="the idiomatic catch-all is `_`; write `{name}:T` to bind with a type, or `<{name}>` to match a type"
+            if existing isnt? none {
+                let binding=bindings.binding_at(session.registry existing)
+                if binding.type_value isnt? none {
+                    message="`{name}` names a type here; this arm matches everything and binds the value as `{name}`"
+                    hint="write `<{name}>` to match the type, `value:{name}` to bind it, or `_` for the catch-all"
+                } else {
+                    message="`{name}` shadows the enclosing `{name}`; this arm matches everything"
+                    hint="write `{name}:T` to bind with a type, or `_` for the catch-all"
+                }
+            }
+            let pointer=Pointer[span=node.loc message=message]
+            session.warnings.push(Warning[srcfile=source.srcfile title='bare name in a match arm binds the whole value' pointers=[pointer] hint=hint])
+        }
+        return Pattern[id 'any' name=name]
+    }
+    if node is? parser.Block and node.delims =? '<>' {
+        if node.inner.length not=? 1 return contexts.problem(id 'match arm type block holds one type' 'write `<T>`' context session)
+        let test=resolve_type(node.inner[0] none context @session)
+        if test is? Error return test
+        return Pattern[id 'type' test=test]
+    }
+    if node is? parser.BinOp and syntax.is_operator(node.op ':' source.nodes) {
+        let binding=syntax.identifier(node.left source.nodes)
+        if binding isnt? none {
+            let test=resolve_type(node.right binding context @session)
+            if test is? Error return test
+            return Pattern[id 'type' name=binding test=test]
+        }
+    }
+    if node is? parser.Block and node.delims =? '[]' {
+        let fields:array<Field>=[]
+        loop item in node.inner {
+            let binding=syntax.identifier(item source.nodes)
+            if binding isnt? none {fields.push(Field[binding]) continue}
+            let field=contexts.node_at(item context session)
+            if field is? parser.BinOp and syntax.is_operator(field.op ':' source.nodes) {
+                let field_name=syntax.identifier(field.left source.nodes)
+                if field_name isnt? none {
+                    let test=resolve_type(field.right field_name context @session)
+                    if test is? Error return test
+                    fields.push(Field[field_name test])
+                    continue
+                }
+            }
+            return contexts.problem(item 'object pattern fields are `name` or `name:type`' 'not a field pattern' context session)
+        }
+        return Pattern[id 'object' fields=fields]
+    }
+    if node is? parser.Block and node.delims =? '()' return Pattern[id 'sequence' items=node.inner]
+    return contexts.problem(id 'unsupported match pattern' 'patterns are `name:T`, `<T>`, `name`, `[fields]`, or `(patterns)`' context session)
+}
+
+FieldCoverage:type = [domain:values.Values covered:values.Values=[]]
+Member:type = [
+    value_type:addr
+    domain:values.Values?
+    covered:values.Values=[]
+    full:bool=false
+    fields:dict<string FieldCoverage>=[]
+    brands:(set<string>)?=none
+    covered_brands:set<string>=set[]
+]
+Coordinate:type = [members:array<Member>]
+family = (id:addr nodes:array<types.Type>):>addr? => {
+    let base=types.unfold(types.strip_refinement(id nodes) nodes)
+    let node=types.node_at(nodes base)
+    if node is? types.MetaType return node.family
+    if node is? types.ObjectType and node.minted return base
+    return none
+}
+concrete_brands = (name:string registry:brands.Registry):>set<string> => {
+    let result:set<string>=set[]
+    loop child in brands.descendants(name registry) {if brands.concrete(child registry) {result.add(child)}}
+    return result
+}
+full = (member:Member):>bool => {
+    if member.full return true
+    if member.brands isnt? none {
+        if member.brands.length =? 0 return false
+        loop brand in member.brands {if brand not in? member.covered_brands return false}
+        return true
+    }
+    if member.domain isnt? none return values.covers(member.covered member.domain)
+    loop [name field] in member.fields {if values.covers(field.covered field.domain) return true}
+    return false
+}
+begin = (id:addr session:contexts.Session):>array<Member> => {
+    let base=types.strip_refinement(id session.types)
+    let type=types.node_at(session.types base)
+    let members:array<addr>=if type is? types.TypeOr type.items else [id]
+    let result:array<Member>=[]
+    loop member in members {
+        let family_id=family(member session.types)
+        let brand_domain:(set<string>)?=none
+        if family_id isnt? none {
+            let shape=types.node_at(session.types family_id)
+            $runtime_assert shape is? types.ObjectType and shape.brand isnt? none
+            brand_domain=concrete_brands(shape.brand session.brands)
+        }
+        result.push(Member[member values.integer_domain(member session.types) brands=brand_domain])
+    }
+    return result
+}
+all_full = (coverage:array<Member>):>bool => {
+    loop member in coverage {if not full(member) return false}
+    return true
+}
+# Coordinate sets retain the original domains; each arm starts with fresh
+# coverage. A product never inherits a different arm's covered coordinates.
+Product:type = const [coordinates:array<Coordinate>]
+fresh = (coverage:array<Member>):>array<Member> => {
+    let result:array<Member>=[]
+    loop member in coverage {result.push(Member[member.value_type member.domain brands=member.brands])}
+    return result
+}
+contains_member = (previous:Member current:Member):>bool => {
+    if full(previous) return true
+    if full(current) return false
+    if current.domain isnt? none return values.covers(previous.covered current.covered)
+    if current.brands isnt? none {
+        loop brand in current.covered_brands {if brand not in? previous.covered_brands return false}
+        return true
+    }
+    if current.fields.length =? 0 return true
+    loop [name field] in current.fields {
+        let prior=previous.fields.get(name)
+        if prior isnt? none and values.covers(prior.covered field.covered) return true
+    }
+    return false
+}
+contains_product = (previous:Product current:Product):>bool => {
+    $runtime_assert previous.coordinates.length =? current.coordinates.length
+    loop i in 0.. and i <? current.coordinates.length {
+        $runtime_assert i <? previous.coordinates.length
+        let before=previous.coordinates[i].members
+        let after=current.coordinates[i].members
+        $runtime_assert before.length =? after.length
+        loop j in 0.. and j <? after.length {
+            $runtime_assert j <? before.length
+            if not contains_member(before[j] after[j]) return false
+        }
+    }
+    return true
+}
+cover_member = (pattern:Pattern @member:Member @session:contexts.Session):>bool => {
+    if full(member) return false
+    if pattern.kind =? 'any' {member.full=true return true}
+    if pattern.kind =? 'type' {
+        $runtime_assert pattern.test isnt? none
+        let declared=types.node_at(session.types pattern.test)
+        let base=types.strip_refinement(pattern.test session.types)
+        let guarded=declared is? types.RefinedType and declared.propositions.length >? 0
+        let member_base=types.strip_refinement(member.value_type session.types)
+        let tested=types.node_at(session.types types.unfold(base session.types))
+        if member.brands isnt? none and tested is? types.ObjectType and tested.minted and not guarded {
+            let family_id=family(member_base session.types)
+            $runtime_assert family_id isnt? none and tested.brand isnt? none
+            if subtyping.is_subtype(family_id base session.links @session.types) {member.full=true return true}
+            if subtyping.is_subtype(base family_id session.links @session.types) {
+                let admitted=concrete_brands(tested.brand session.brands)
+                let changed=false
+                loop brand in admitted {if brand not in? member.covered_brands {member.covered_brands.add(brand) changed=true}}
+                return changed
+            }
+            return false
+        }
+        let domain=values.integer_domain(pattern.test session.types)
+        if member.domain isnt? none and domain isnt? none {
+            let related=subtyping.is_subtype(member_base base session.links @session.types) or subtyping.is_subtype(base member_base session.links @session.types)
+            if not related and types.node_at(session.types base) isnt? types.IntegerLiteralType return false
+            let admitted=values.intersect(member.domain domain)
+            let combined=values.union(member.covered admitted)
+            let changed=not values.same(combined member.covered)
+            member.covered=combined
+            return changed
+        }
+        if not subtyping.is_subtype(member_base base session.links @session.types) or guarded return false
+        member.full=true
+        return true
+    }
+    if pattern.kind =? 'object' {
+        let shape=types.node_at(session.types types.unfold(member.value_type session.types))
+        if shape isnt? types.ObjectType return false
+        let constrained:array<Field>=[]
+        loop field in pattern.fields {
+            if types.object_field(shape field.name) is? none return false
+            if field.test isnt? none {constrained.push(field)}
+        }
+        if constrained.length =? 0 {member.full=true return true}
+        if constrained.length not=? 1 return false
+        let field=constrained[0]
+        let slot=types.object_field(shape field.name)
+        $runtime_assert slot isnt? none and field.test isnt? none
+        let declared=if slot.refinement.length =? 0 slot.value_type else types.refined_type(slot.value_type slot.refinement @session.types)
+        let domain=values.integer_domain(declared session.types)
+        let admitted=values.integer_domain(field.test session.types)
+        if domain is? none or admitted is? none return false
+        let previous=member.fields.get(field.name FieldCoverage[domain])
+        let combined=values.union(previous.covered admitted)
+        let changed=not values.same(combined previous.covered)
+        member.fields[field.name]=FieldCoverage[previous.domain combined]
+        return changed
+    }
+    return false
+}
+cover = (pattern:Pattern @coverage:array<Member> @session:contexts.Session):>bool => {
+    let changed=false
+    loop i in 0.. and i <? coverage.length {
+        let member=coverage[i]
+        if cover_member(pattern @member @session) {changed=true}
+        coverage[i]=member
+    }
+    return changed
+}
+# Object patterns must select a unique record alternative before any field
+# reads are formed; having the same field names in two alternatives is not
+# an implicit merge of their contracts.
+object_member = (id:addr fields:array<Field> nodes:array<types.Type>):>addr? => {
+    let type=types.node_at(nodes types.strip_refinement(id nodes))
+    let members:array<addr>=if type is? types.TypeOr type.items else [id]
+    let selected:addr?=none
+    loop candidate in members {
+        let base=views.structural_base(candidate nodes)
+        let shape=types.node_at(nodes base)
+        if shape isnt? types.ObjectType continue
+        let contains=true
+        loop field in fields {if types.object_field(shape field.name) is? none {contains=false break}}
+        if contains {
+            if selected isnt? none return none
+            selected=base
+        }
+    }
+    return selected
+}
+
+# Match exhaustiveness over minted families is provisional until the whole
+# module graph has loaded: a later import may mint another concrete child.
+validate = (session:contexts.Session):>Error? => {
+    loop pending in session.pending_brand_matches {
+        let concrete=concrete_brands(pending.brand session.brands)
+        loop child in concrete {
+            if child not in? pending.covered return contexts.problem(pending.syntax 'match is not exhaustive' "`{child}` was minted after this match was checked" pending.context session)
+        }
+    }
+    return none
+}
+uncovered = (member:Member session:contexts.Session):>string => {
+    let name=display.type_to_dewy(member.value_type session.types)
+    if member.brands isnt? none {
+        loop brand in member.brands {
+            if brand not in? member.covered_brands return "`{brand}` (a `{name}`)"
+        }
+    }
+    if member.domain isnt? none and member.covered.length >? 0 {
+        let missing=values.first_uncovered(member.covered member.domain)
+        if missing isnt? none return "value `{missing}` of `{name}`"
+    }
+    return "`{name}`"
+}

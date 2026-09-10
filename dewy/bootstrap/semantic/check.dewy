@@ -24,6 +24,8 @@ import p"key_facts.dewy" as keys
 import p"container_methods.dewy" as container_methods
 import p"container_values.dewy" as container_values
 import p"container_state.dewy" as container_state
+import p"match_patterns.dewy" as patterns
+import p"propositions.dewy" as propositions
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -109,8 +111,16 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
 }
 widen = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let node = node_at(value session)
-    if node is? hir.Integer return against(value types.primitive('int64' @session.types) id env @session)
-    if node is? hir.String return against(value types.primitive('string' @session.types) id env @session)
+    let type=types.node_at(session.types node.value_type)
+    if type is? types.IntegerLiteralType return against(value types.primitive('int64' @session.types) id env @session)
+    if type is? types.StringLiteralType return against(value types.primitive('string' @session.types) id env @session)
+    if type is? types.TypeAnd {
+        # A negative branch fact is not a new mutable variable's store
+        # contract. A copy keeps the family's structure and may later hold
+        # the excluded descendant, just as a fresh hosted `let` can.
+        let storage=views.structural_base(node.value_type session.types)
+        if storage not=? node.value_type return against(value storage id env @session)
+    }
     return value
 }
 identifier = (name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
@@ -245,7 +255,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
                 let row = tokens.node_at(source.nodes item)
                 if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) return record_literal(id node env @session expected=expected)
             }
-            let target:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.strip_refinement(expected session.types))
+            let target:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
+            if target is? types.ObjectType and expected isnt? none {
+                let constructor=hir.TypeValue[node.loc types.primitive('type' @session.types) types.strip_refinement(expected session.types) display.type_to_dewy(expected session.types)]
+                return construct(constructor id id env @session expected=expected)
+            }
             let element:addr? = if target is? types.ArrayType target.element else none
             if node.inner.length =? 0 and element is? none return problem(id 'cannot infer empty array element type' 'provide an array annotation' env session)
             let value = container_array(node.inner element id env @session)
@@ -830,41 +844,75 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
             if keyword is? tokens.Keyword and keyword.name =? 'loop' return loop_flow(id arm env @session)
         }
     }
-    let remaining = fork(env @session)
-    let arms:array<addr> = []
-    let results:array<addr> = []
-    let exits:array<Environment> = []
+    let specs:array<FlowSpec>=[]
+    let prelude:array<addr>=[]
+    let has_match=false
+    let match_total=false
+    let uncovered:string?=none
     loop arm_id in node.arms {
-        let arm = tokens.node_at(source.nodes arm_id)
+        let arm=tokens.node_at(source.nodes arm_id)
         if arm isnt? parser.KeywordExpr or arm.parts.length not=? 3 return pending(arm_id 'this conditional arm' env session)
-        let keyword = tokens.node_at(source.nodes arm.parts[0])
-        if keyword isnt? tokens.Keyword or keyword.name not=? 'if' return pending(arm_id 'loop transfer and iterator checking' env session)
-        let condition = expression(arm.parts[1] remaining @session expected=types.primitive('bool' @session.types))
+        let keyword=tokens.node_at(source.nodes arm.parts[0])
+        if keyword isnt? tokens.Keyword return pending(arm_id 'this conditional keyword' env session)
+        if keyword.name =? 'match' {
+            has_match=true
+            let plan=match_plan(arm env @session)
+            if plan is? Error return plan
+            loop spec in plan.specs {specs.push(spec)}
+            loop declaration in plan.prelude {prelude.push(declaration)}
+            match_total=match_total or plan.total
+            loop coordinate in plan.coverage {
+                loop member in coordinate.members {
+                    if not patterns.full(member) and uncovered is? none {uncovered=patterns.uncovered(member session)}
+                    if plan.total and node.default is? none and member.brands isnt? none and not member.full {
+                        let family=patterns.family(member.value_type session.types)
+                        $runtime_assert family isnt? none
+                        let shape=types.node_at(session.types family)
+                        $runtime_assert shape is? types.ObjectType and shape.brand isnt? none
+                        session.pending_brand_matches.push(contexts.PendingBrandMatch[env.lexical arm_id shape.brand member.covered_brands])
+                    }
+                }
+            }
+        } else if keyword.name =? 'if' {specs.push(FlowSpec[arm_id arm.parts[2] condition=arm.parts[1]])}
+        else return pending(arm_id 'loop transfer and iterator checking in this flow chain' env session)
+    }
+    if has_match and not match_total and node.default is? none return problem(id 'match is not exhaustive' if uncovered is? none 'the arms do not cover the scrutinee' else "{uncovered} is not handled by any arm" env session)
+    let remaining=fork(env @session)
+    let arms:array<addr>=[]
+    let results:array<addr>=[]
+    let exits:array<Environment>=[]
+    loop spec in specs {
+        let condition=if spec.condition is? none match_condition(spec remaining @session) else expression(spec.condition remaining @session expected=types.primitive('bool' @session.types))
         if condition is? Error return condition
         hoist_condition(condition @session)
-        let positive = refined(condition true remaining @session)
-        let body = expression(arm.parts[2] positive @session expected=expected)
+        let positive=refined(condition true remaining @session)
+        let body=if spec.condition is? none match_body(spec positive @session expected=expected) else expression(spec.body positive @session expected=expected)
         if body is? Error return body
-        if expected is? none { body = widen(body arm.parts[2] positive @session) }
-        if body is? Error return body
-        let type = node_at(body session).value_type
-        arms.push(put(hir.IfArm[arm.loc type condition body] @session))
-        if not types.is_primitive(types.node_at(session.types type) 'never') { results.push(type) exits.push(positive) }
-        remaining = refined(condition false remaining @session)
+        let type=node_at(body session).value_type
+        arms.push(put(hir.IfArm[contexts.node_at(spec.syntax env.lexical session).loc type condition body] @session))
+        if not types.is_primitive(types.node_at(session.types type) 'never') {results.push(type) exits.push(positive)}
+        remaining=refined(condition false remaining @session)
     }
-    let default:addr? = none
-    if node.default isnt? none {
-        let checked = expression(node.default remaining @session expected=expected)
+    let default:addr?=none
+    if match_total and node.default is? none {
+        $runtime_assert arms.length >? 0
+        let last=node_at(arms.pop session)
+        $runtime_assert last is? hir.IfArm
+        default=last.body
+    } else if node.default isnt? none {
+        let checked=expression(node.default remaining @session expected=expected)
         if checked is? Error return checked
-        if expected is? none { checked = widen(checked node.default remaining @session) }
-        if checked is? Error return checked
-        default = checked
-        let type = node_at(checked session).value_type
-        if not types.is_primitive(types.node_at(session.types type) 'never') { results.push(type) exits.push(remaining) }
-    } else { exits.push(remaining) }
+        default=checked
+        let type=node_at(checked session).value_type
+        if not types.is_primitive(types.node_at(session.types type) 'never') {results.push(type) exits.push(remaining)}
+    } else {exits.push(remaining)}
     join_reads(exits env @session)
-    let type = if node.default is? none types.primitive('void' @session.types) else subtyping.join(results session.links @session.types)
-    return put(hir.Flow[node.loc type arms default] @session)
+    let type=if default is? none types.primitive('void' @session.types) else flow_value_type(results id env @session)
+    if type is? Error return type
+    let value=if arms.length =? 0 and default isnt? none default else put(hir.Flow[node.loc type arms default] @session)
+    if prelude.length =? 0 return value
+    prelude.push(value)
+    return put(hir.Block[node.loc node_at(value session).value_type prelude false] @session)
 }
 
 call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
@@ -1002,9 +1050,12 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
     let source = contexts.source_at(env.lexical session)
     let name = syntax.identifier(name_id source.nodes)
     if name is? none return problem(id 'member access needs a name' 'expected a field or method name' env session)
+    return member_named(receiver name id env @session)
+}
+member_named = (receiver:addr name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let value = node_at(receiver session)
-    let type = types.node_at(session.types types.unfold(types.strip_refinement(value.value_type session.types) session.types))
-    let loc = tokens.node_at(source.nodes id).loc
+    let type = types.node_at(session.types views.structural_base(value.value_type session.types))
+    let loc = contexts.node_at(id env.lexical session).loc
     if type is? types.ModuleType {
         let field = namespaces.field(type name)
         if field is? none return problem(id 'module does not export this name' name env session)
@@ -2160,4 +2211,292 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
     let held = refined(condition true env @session)
     join_reads([held] env @session)
     return put(hir.Block[node.loc empty [obligation flow] false] @session)
+}
+
+# A flow specification keeps source bodies unevaluated while all match
+# patterns establish reachability and exhaustiveness. Scrutinees which are
+# not named storage are evaluated once, in the flow's prelude.
+FlowSpec:type = const [syntax:addr body:addr condition:addr?=none patterns:array<patterns.Pattern>=[] subjects:array<addr>=[]]
+MatchPlan:type = const [specs:array<FlowSpec> prelude:array<addr> total:bool coverage:array<patterns.Coordinate>]
+match_bind = (name:string value:addr id:addr env:Environment @session:contexts.Session hidden:bool=false):>addr|Error => {
+    let loc=contexts.node_at(id env.lexical session).loc
+    # Pattern bindings are sequential declarations, including repeated `_`
+    # parameters. A later binding shadows the earlier name, not its HIR id.
+    let checked=if hidden value else widen(value id env @session)
+    if checked is? Error return checked
+    let type=node_at(checked session).value_type
+    let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=type binding.store_type=type
+    let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name none checked binding_id] @session)
+    binding.declaration=declaration
+    session.registry.by_id[binding_id]=binding
+    bindings.bind(@session.scopes env.lexical.scope name binding_id)
+    set_read_type(binding_id type env @session)
+    container_state.seed(binding_id checked env.state @session)
+    container_state.seed_fields(binding_id checked env.state @session)
+    return declaration
+}
+match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):>MatchPlan|Error => {
+    $runtime_assert arm.parts.length =? 3
+    let scrutinee=contexts.node_at(arm.parts[1] env.lexical session)
+    let elements:array<addr>=if scrutinee is? parser.Block and scrutinee.delims =? '()' and scrutinee.inner.length not=? 1 scrutinee.inner else [arm.parts[1]]
+    let subjects:array<addr>=[]
+    let prelude:array<addr>=[]
+    let coverage:array<patterns.Coordinate>=[]
+    loop element in elements {
+        let checked=expression(element env @session)
+        if checked is? Error return checked
+        let value:addr=checked
+        let node=node_at(value session)
+        if types.is_primitive(types.node_at(session.types node.value_type) 'void') return problem(element 'match scrutinee must have a value' 'void does not supply a value to match' env session)
+        if node isnt? hir.ExpressedIdentifier {
+            let declared=match_bind("__dewy_match_{session.registry.next_id}" value element env @session hidden=true)
+            if declared is? Error return declared
+            prelude.push(declared)
+            let binding=node_at(declared session)
+            $runtime_assert binding is? hir.Declare
+            value=put(hir.ExpressedIdentifier[node.loc node.value_type binding.name binding.binding_id] @session)
+        }
+        subjects.push(value)
+        coverage.push(patterns.Coordinate[patterns.begin(node_at(value session).value_type session)])
+    }
+    let clauses=contexts.node_at(arm.parts[2] env.lexical session)
+    let rows:array<addr>=if clauses is? parser.Block and clauses.delims =? '\{}' clauses.inner else [arm.parts[2]]
+    if rows.length =? 0 return problem(arm.parts[2] 'match needs at least one arm' 'empty arm group' env session)
+    let specs:array<FlowSpec>=[]
+    let products:array<patterns.Product>=[]
+    let total=false
+    loop row in rows {
+        let clause=contexts.node_at(row env.lexical session)
+        if clause isnt? parser.BinOp or not syntax.is_operator(clause.op '=>' contexts.source_at(env.lexical session).nodes) return problem(row 'match arm must be `pattern => body`' 'not an arm' env session)
+        let parsed=patterns.parse(clause.left env.lexical @session)
+        if parsed is? Error return parsed
+        let selected:array<patterns.Pattern>=[]
+        if parsed.kind =? 'sequence' {
+            if parsed.items.length not=? subjects.length return problem(clause.left 'sequence match arm arity' 'the pattern and scrutinee must have the same number of values' env session)
+            loop element in parsed.items {
+                let pattern=patterns.parse(element env.lexical @session)
+                if pattern is? Error return pattern
+                if pattern.kind =? 'sequence' return problem(element 'a sequence pattern needs a sequence scrutinee' 'this scrutinee element is one value' env session)
+                selected.push(pattern)
+            }
+        } else {
+            if subjects.length not=? 1 return problem(clause.left 'sequence match arm arity' 'the pattern and scrutinee must have the same number of values' env session)
+            selected.push(parsed)
+        }
+        if total return problem(clause.left 'unreachable match arm' 'earlier arms already cover every value' env session)
+        let progressed=false
+        let complete=true
+        let possible=true
+        let arm_complete=true
+        let admitted:array<patterns.Coordinate>=[]
+        loop i in 0.. and i <? selected.length {
+            $runtime_assert i <? coverage.length
+            let member=coverage[i].members
+            let fresh=patterns.fresh(member)
+            if patterns.cover(selected[i] @member @session) {progressed=true}
+            if not patterns.all_full(member) {complete=false}
+            coverage[i]=patterns.Coordinate[member]
+            if not patterns.cover(selected[i] @fresh @session) {possible=false}
+            if not patterns.all_full(fresh) {arm_complete=false}
+            admitted.push(patterns.Coordinate[fresh])
+        }
+        if subjects.length >? 1 {
+            let product=patterns.Product[admitted]
+            if not possible return problem(clause.left 'unreachable match arm' 'the pattern admits no value' env session)
+            loop previous in products {
+                if patterns.contains_product(previous product) return problem(clause.left 'unreachable match arm' 'an earlier arm already covers this product' env session)
+            }
+            total=arm_complete
+            products.push(product)
+        } else {
+            if not progressed return problem(clause.left 'unreachable match arm' 'earlier arms already cover these values' env session)
+            total=complete
+        }
+        specs.push(FlowSpec[row clause.right patterns=selected subjects=subjects])
+    }
+    return MatchPlan[specs prelude total coverage]
+}
+# Refresh named reads with this arm's alternatives while preserving their
+# binding identities. A shadowing pattern name must not redirect a subject.
+match_read = (id:addr env:Environment @session:contexts.Session):>addr => {
+    let node=node_at(id session)
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        let type=read_type(node.binding_id env session)
+        $runtime_assert type isnt? none
+        return put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @session)
+    }
+    return id
+}
+MatchTest:type = const [conditions:array<addr> environment:Environment]
+match_test = (subject:addr pattern:patterns.Pattern env:Environment @session:contexts.Session):>MatchTest|Error => {
+    if pattern.kind =? 'any' return MatchTest[[] env]
+    let current=env
+    let conditions:array<addr>=[]
+    let base:addr?=none
+    let props:array<propositions.Proposition>=[]
+    if pattern.kind =? 'type' {
+        $runtime_assert pattern.test isnt? none
+        base=types.strip_refinement(pattern.test session.types)
+        let declared=types.node_at(session.types pattern.test)
+        if declared is? types.RefinedType {props=declared.propositions}
+    } else if pattern.kind =? 'object' {
+        base=patterns.object_member(node_at(match_read(subject current @session) session).value_type pattern.fields session.types)
+        if base is? none return problem(pattern.syntax 'object pattern does not select one member' 'the field names must identify exactly one record alternative' env session)
+    } else return problem(pattern.syntax 'a sequence pattern needs a sequence scrutinee' 'the scrutinee is one value' env session)
+    $runtime_assert base isnt? none
+    let value=match_read(subject current @session)
+    let type=node_at(value session).value_type
+    let loc=contexts.node_at(pattern.syntax env.lexical session).loc
+    if not subtyping.is_subtype(types.strip_refinement(type session.types) base session.links @session.types) {
+        let condition=put(hir.TypeTest[loc types.primitive('bool' @session.types) value base false] @session)
+        let target=types.node_at(session.types base)
+        if target is? types.IntegerLiteralType {
+            let literal=put(hir.Integer[loc base '0d' target.value] @session)
+            let function=identifier('__eq__' pattern.syntax current @session)
+            if function is? Error return function
+            let tested=call(function [value literal] [] pattern.syntax current @session)
+            if tested is? Error return tested
+            condition=tested
+        }
+        conditions.push(condition)
+        current=refined(condition true current @session)
+    }
+    loop proposition in props {
+        let value=match_read(subject current @session)
+        let field=propositions.field(proposition)
+        if field isnt? none {
+            loop name in field.split('.') {
+                let accessed=member_named(value name pattern.syntax current @session)
+                if accessed is? Error return accessed
+                value=accessed
+            }
+        }
+        if proposition.subject =? 'length' or proposition.projection =? 'length' {
+            let accessed=member_named(value 'length' pattern.syntax current @session)
+            if accessed is? Error return accessed
+            value=accessed
+        }
+        if proposition.term isnt? none or proposition.tested_type isnt? none return pending(pattern.syntax 'nonconstant match refinement tests' env session)
+        let name=builtins.binary_operators.get(proposition.op)
+        if proposition.op =? 'not=?' {name='__ne__'}
+        if name is? none return pending(pattern.syntax 'this match refinement test' env session)
+        let function=identifier(name pattern.syntax current @session)
+        if function is? Error return function
+        let constant=put(hir.Integer[loc types.integer_literal(proposition.value @session.types) '0d' proposition.value] @session)
+        let guard=call(function [value constant] [] pattern.syntax current @session)
+        if guard is? Error return guard
+        conditions.push(guard)
+        current=refined(guard true current @session)
+    }
+    if pattern.kind =? 'object' {
+        loop field in pattern.fields {
+            if field.test is? none continue
+            let value=member_named(match_read(subject current @session) field.name pattern.syntax current @session)
+            if value is? Error return value
+            let tested=match_test(value patterns.Pattern[pattern.syntax 'type' name=field.name test=field.test] current @session)
+            if tested is? Error return tested
+            loop condition in tested.conditions {conditions.push(condition)}
+            current=tested.environment
+        }
+    }
+    return MatchTest[conditions current]
+}
+match_condition = (spec:FlowSpec env:Environment @session:contexts.Session):>addr|Error => {
+    let current=env
+    let conditions:array<addr>=[]
+    loop i in 0.. and i <? spec.patterns.length {
+        $runtime_assert i <? spec.subjects.length
+        let tested=match_test(spec.subjects[i] spec.patterns[i] current @session)
+        if tested is? Error return tested
+        loop condition in tested.conditions {conditions.push(condition)}
+        current=tested.environment
+    }
+    let loc=contexts.node_at(spec.syntax env.lexical session).loc
+    let bool=types.primitive('bool' @session.types)
+    if conditions.length =? 0 return put(hir.Bool[loc bool true] @session)
+    let combined=conditions[0]
+    let i:addr=1
+    loop i <? conditions.length {combined=put(hir.ShortCircuit[loc bool 'and' combined conditions[i]] @session) i += 1}
+    return combined
+}
+match_body = (spec:FlowSpec env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let inner=Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let declarations:array<addr>=[]
+    # Read all subjects before introducing names, so binding a parameter named
+    # like another scrutinee cannot redirect its lexical identity.
+    loop i in 0.. and i <? spec.patterns.length {
+        $runtime_assert i <? spec.subjects.length
+        let pattern=spec.patterns[i]
+        let value=match_read(spec.subjects[i] inner @session)
+        if pattern.name isnt? none {
+            let declared=match_bind(pattern.name value pattern.syntax inner @session)
+            if declared is? Error return declared
+            declarations.push(declared)
+        }
+        if pattern.kind =? 'object' {
+            loop field in pattern.fields {
+                let checked=member_named(value field.name pattern.syntax inner @session)
+                if checked is? Error return checked
+                let accessed:addr=checked
+                if field.test isnt? none {
+                    # The arm's runtime tests established this field's selected
+                    # alternative. Binding the field copies that checked read.
+                    let field_node=node_at(accessed session)
+                    let selected=select_type(field_node.value_type field.test true @session)
+                    accessed=put(hir.ValueCast[field_node.loc selected accessed] @session)
+                }
+                let declared=match_bind(field.name accessed pattern.syntax inner @session)
+                if declared is? Error return declared
+                declarations.push(declared)
+            }
+        }
+    }
+    let syntax=contexts.node_at(spec.body inner.lexical session)
+    let value=if syntax is? parser.Block and syntax.delims =? '\{}' block(spec.body inner @session expected=expected) else expression(spec.body inner @session expected=expected)
+    if value is? Error return value
+    let node=node_at(value session)
+    declarations.push(value)
+    return put(hir.Block[node.loc node.value_type declarations true] @session)
+}
+# Flow results describe the common value boundary, not the syntax of each
+# arm. Equal singleton results stay exact; different integer singletons use
+# a word, while string alternatives retain their enum-like union.
+flow_value_type = (results:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    if results.length =? 0 return types.primitive('never' @session.types)
+    let has_void=false
+    let has_value=false
+    let same=true
+    let same_base=true
+    let integers=true
+    let first=results[0]
+    let base=types.strip_refinement(first session.types)
+    let literals:array<bigint>=[]
+    let words:array<addr>=[]
+    loop result in results {
+        if types.is_primitive(types.node_at(session.types result) 'void') {has_void=true} else {has_value=true}
+        if not types.same_type(first result session.types) {same=false}
+        if not types.same_type(base types.strip_refinement(result session.types) session.types) {same_base=false}
+        let node=types.node_at(session.types result)
+        if node is? types.IntegerLiteralType {literals.push(node.value)}
+        else {integers=false words.push(types.strip_refinement(result session.types))}
+    }
+    if has_void and has_value return problem(id 'conditional branches disagree on whether they produce a value' 'suppress unwanted values with a semicolon or give every continuing branch a value' env session)
+    if has_void return types.primitive('void' @session.types)
+    if same return first
+    if same_base return base
+    if integers return types.primitive('int64' @session.types)
+    if literals.length >? 0 and words.length >? 0 {
+        let word=words[0]
+        let same_word=true
+        loop type in words {if not types.same_type(word type session.types) {same_word=false}}
+        let bounds=views.fixed_integer_bounds(word session.types)
+        if same_word and bounds isnt? none {
+            let fits=true
+            loop value in literals {if value <? bounds.minimum or value >? bounds.maximum {fits=false}}
+            if fits return word
+        }
+    }
+    return subtyping.join(results session.links @session.types)
 }

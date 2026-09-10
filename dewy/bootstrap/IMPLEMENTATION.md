@@ -25,6 +25,17 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native match checking now resolves typed, catch-all, record, and sequence
+  signatures into ordinary conditional HIR, evaluates non-name scrutinees
+  once, and scopes pattern bindings to their arms. Thirty-five valid and
+  twenty-two invalid programs agree with the hosted checker, including
+  integer guards and holes, late minted descendants, and correlated tuple
+  patterns. Both implementations now keep each tuple arm's product separate;
+  the hosted fix also executes mixed-pair fallbacks in its native regression.
+  A shared flow-result rule handles literal/block results and rejects mixed
+  void/value branches. Positional record arguments use their expected shape,
+  and excluding a descendant preserves its family's readable structure.
+
 - Native assertion checking covers `$assert`, `$runtime_assert`, `$expect`,
   and `$fail`, with compile obligations, failure-only messages, continuation
   facts, and collected warnings. Nineteen accepted and fourteen rejected

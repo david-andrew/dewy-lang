@@ -305,16 +305,22 @@ def loop_summary(node):
     return ''.join(parts)
 
 
-def test_native_source_values(tmp_path):
+def test_native_source_values(tmp_path, *, validate_matches=False):
     expected = []
     for text in CASES:
         ty.reset_program_brands()
+        check.pending_brand_matches.clear()
         module, context = check._typecheck_module(SrcFile(None, text))
+        if validate_matches:
+            check.validate_brand_matches()
         expected.append(type_to_dewy(module.type) + "|" + loop_summary(module) + "|instances:" + ",".join(type_to_dewy(item.expr.type) for item in context.generic_instances))
     for text in ERROR_CASES:
         ty.reset_program_brands()
+        check.pending_brand_matches.clear()
         with pytest.raises((check.UserError, check.TypeCheckError, check.NotImplementedYet)):
             check._typecheck_module(SrcFile(None, text))
+            if validate_matches:
+                check.validate_brand_matches()
     cases = ' '.join(json.dumps(text).replace('{', r'\{') for text in CASES)
     errors = ' '.join(json.dumps(text).replace('{', r'\{') for text in ERROR_CASES)
     source = tmp_path / 'check.dewy'
@@ -324,6 +330,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
 import p"{ROOT / 'dewy/bootstrap/semantic/check.dewy'}" as checking
 import p"{ROOT / 'dewy/bootstrap/semantic/type_display.dewy'}" as display
 import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
+import p"{ROOT / 'dewy/bootstrap/semantic/match_patterns.dewy'}" as patterns
 loop_summary = (id:addr session:contexts.Session):>string => {{
     let node=checking.node_at(id session)
     let parts:array<string>=[]
@@ -368,6 +375,10 @@ main = ():>int64 => {{
         let environment = checking.begin(lexical @session)
         let module = checking.module(parsed.root environment @session)
         if module is? Error {{ module.render(source) failures += 1 continue }}
+        if {str(validate_matches).lower()} {{
+            let error=patterns.validate(session)
+            if error isnt? none {{error.fail return 1}}
+        }}
         let node = checking.node_at(module session)
         let instances:array<string>=[]
         loop item in session.hoisted {{
@@ -386,6 +397,10 @@ main = ():>int64 => {{
         let lexical = contexts.begin(source parsed.nodes @session)
         let environment = checking.begin(lexical @session)
         let result = checking.module(parsed.root environment @session)
+        if {str(validate_matches).lower()} and result isnt? Error {{
+            let error=patterns.validate(session)
+            if error isnt? none {{result=error}}
+        }}
         $runtime_assert result is? Error
         $runtime_assert result.title not=? 'native checker implementation pending'
         $runtime_assert result.pointers.length >? 0 and result.pointers[0].message.length >? 0

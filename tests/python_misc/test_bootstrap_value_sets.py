@@ -77,6 +77,6 @@ main = ():>int64 => {{
     output = source.with_suffix('.udewy')
     output.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30)
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == expected

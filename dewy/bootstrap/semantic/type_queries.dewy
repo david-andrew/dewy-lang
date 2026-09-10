@@ -212,3 +212,20 @@ is_zero_arg_function = (id:addr nodes:array<types.Type>):>bool => {
     let node = types.node_at(nodes id)
     return node is? types.FunctionType and node.pos_or_kw.length =? 0 and node.kw_only.length =? 0 and node.rest is? none
 }
+
+# Excluding a descendant narrows the possible values, not the remaining
+# family's field layout. Keep exclusions in the read type and use this view
+# only to locate structure. Multiple positive conjuncts still need their
+# ordinary composition rules; this is not a general intersection erasure.
+structural_base = (id:addr nodes:array<types.Type>):>addr => {
+    let base=types.unfold(types.strip_refinement(id nodes) nodes)
+    let node=types.node_at(nodes base)
+    if node isnt? types.TypeAnd return base
+    let positive:addr?=none
+    loop member in node.items {
+        if types.node_at(nodes member) is? types.TypeNot continue
+        if positive isnt? none return base
+        positive=member
+    }
+    return if positive is? none base else structural_base(positive nodes)
+}

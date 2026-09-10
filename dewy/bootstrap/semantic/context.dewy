@@ -23,6 +23,7 @@ scope; all allocations explicitly update the Session place.
 Source:type = const [srcfile:SrcFile nodes:array<tokens.Token>]
 SyntaxRef:type = const [source:addr node:addr scope:addr]
 Context:type = const [source:addr scope:addr refinement_subject:string?=none immutable_record:bool=false]
+PendingBrandMatch:type = const [context:Context syntax:addr brand:string covered:set<string>]
 PendingAlias:type = const [expression:SyntaxRef]
 # Current read alternatives are separate from each binding's store contract.
 # A branch copies this state; declaration/type/HIR identities remain shared.
@@ -30,6 +31,7 @@ ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
 Session:type = [
     # Checking collects diagnostics; the invocation decides how to render them.
     warnings:array<Warning>=[]
+    pending_brand_matches:array<PendingBrandMatch>=[]
     target:targets.Target=$target
     sources:array<Source>=[]
     read_states:array<ReadState>=[]

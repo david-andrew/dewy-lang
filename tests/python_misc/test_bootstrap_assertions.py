@@ -148,7 +148,7 @@ main = ():>int64 => {{
     output = source.with_suffix('.udewy')
     output.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=120)
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=120, check=False)
     (tmp_path / 'native-output.txt').write_text(result.stdout)
     (tmp_path / 'expected-output.txt').write_text('\n'.join(expected + ['rejected'] * len(ERRORS)) + '\n')
     assert result.returncode == 0, result.stderr

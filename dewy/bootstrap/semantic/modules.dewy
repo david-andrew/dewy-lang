@@ -8,6 +8,7 @@ import p"syntax.dewy" as syntax
 import p"bindings.dewy" as bindings
 import p"ty.dewy" as types
 import p"hir.dewy" as hir
+import p"match_patterns.dewy" as patterns
 
 doc"""
 File-relative source modules, corresponding to semantic/modules.py.
@@ -144,6 +145,10 @@ load = (path:string @engine:Engine):>addr|Error => {
     # Recursive loads balance their own entries, including error returns.
     $runtime_assert engine.loading.length >? 0
     engine.loading.pop;
+    if result isnt? Error and engine.loading.length =? 0 {
+        let error=patterns.validate(engine.session)
+        if error isnt? none return error
+    }
     return result
 }
 load_source = (path:string @engine:Engine):>addr|Error => {
