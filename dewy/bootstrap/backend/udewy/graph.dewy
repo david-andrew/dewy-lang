@@ -1,0 +1,83 @@
+from reporting import SrcFile, Error
+import p"../../semantic/modules.dewy" as modules
+import p"../../semantic/source_views.dewy" as sources
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+import p"lower.dewy" as lower
+import p"layouts.dewy" as layouts
+import p"emit.dewy" as emit
+
+# Module loading installs dependencies before their importer and gives a
+# physical source one root. Preserve that order for initialization while
+# retaining binding ids for names that happen to be spelled alike.
+# This is an assembly/legalization boundary for a validated graph. The full
+# invocation still owns initialization, bounds, and representation analysis;
+# assembling checked HIR alone does not authorize source code generation.
+Prepared:type = const [root:addr entry:addr? source:SrcFile source_by_item:dict<addr SrcFile>]
+
+# Functions do not execute at declaration. Keep those reachable from startup,
+# the explicit entry binding, and runtime helpers needed by legalization.
+# Traversing HIR references handles callbacks and mutually recursive bodies
+# without relying on spelling or on which declaration was visited first.
+visit = (id:addr functions:dict<addr addr> nodes:array<hir.AST> @seen:set<addr> @live:set<addr>):>void => {
+    if id in? seen return void
+    seen.add(id)
+    let node=hir.node_at(nodes id)
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        let declaration=functions.get(node.binding_id)
+        if declaration isnt? none {
+            live.add(node.binding_id)
+            visit(declaration functions nodes @seen @live)
+        }
+    }
+    loop child in hir.children(node) {visit(child functions nodes @seen @live)}
+}
+assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):>Prepared => {
+    let module=modules.module_at(entry engine)
+    let source=sources.srcfile(module.context engine.session)
+    let main=module.exports.get('main')
+    let items:array<addr>=[]
+    let source_by_item:dict<addr SrcFile>=[]
+    let functions:dict<addr addr>=[]
+    loop loaded in engine.modules {
+        let origin=sources.srcfile(loaded.context engine.session)
+        let root=hir.node_at(engine.session.hir loaded.root)
+        $runtime_assert root is? hir.Block
+        loop id in root.items {
+            items.push(id) source_by_item[id]=origin
+            let declaration=hir.node_at(engine.session.hir id)
+            if declaration is? hir.Declare and declaration.binding_id isnt? none {
+                if hir.node_at(engine.session.hir declaration.expr) is? hir.FunctionLiteral {functions[declaration.binding_id]=id}
+            }
+        }
+    }
+    let seen:set<addr>=set[]
+    let live:set<addr>=set[]
+    let roots=required_bindings
+    if main isnt? none {roots.push(main)}
+    loop binding in roots {
+        let declaration=functions.get(binding)
+        if declaration isnt? none {live.add(binding) visit(declaration functions engine.session.hir @seen @live)}
+    }
+    loop id in items {
+        let declaration=hir.node_at(engine.session.hir id)
+        if declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? functions continue
+        visit(id functions engine.session.hir @seen @live)
+    }
+    let kept:array<addr>=[]
+    loop id in items {
+        let declaration=hir.node_at(engine.session.hir id)
+        if declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? functions and declaration.binding_id not in? live continue
+        kept.push(id)
+    }
+    let original=hir.node_at(engine.session.hir module.root)
+    let root=hir.append_node(@engine.session.hir hir.Block[original.loc types.primitive('void' @engine.session.types) kept true])
+    return Prepared[root main source source_by_item]
+}
+lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
+    let allocator=engine.prelude_bindings.get('_arena_alloc')
+    let required:array<addr>=[]
+    if allocator isnt? none {required.push(allocator)}
+    let prepared=assemble(entry @engine required_bindings=required)
+    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item)
+}

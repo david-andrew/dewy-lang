@@ -25,6 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native module assembly retains dependency initialization order and binding
+  identities, emits each loaded module once, and selects only the entry
+  module's `main`. Reachability keeps callbacks and recursive functions while
+  omitting unused function bodies. Four compiled graph cases cover shared
+  dependencies, same-spelled functions, imported `main`, and unused bodies;
+  an unsupported imported body reports its own source path. This remains a
+  legalization kernel until the complete proof driver is connected.
+
 - The function-region/checkpoint regression suite passes 1,954 tests, with
   23 skipped. Two code-shape assertions now expect region-backed dynamic
   copies; the remaining quota-interrupted tests passed on disk-backed storage.

@@ -1113,7 +1113,7 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
     return put(hir.FunctionLiteral[node.loc runtime_type(node.value_type node @state) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[]):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr SrcFile>=[]):>Result|Error => {
     let state=State[input source type_nodes=input.types allocator=allocator layout_context=layout_context brand_numbers=brands.numbered(layout_context.brands)]
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
@@ -1124,6 +1124,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let main:string?=none
     let void_type=types.primitive('void' @state.type_nodes)
     loop id in block.items {
+        state.source=source_by_item.get(id source)
         let node=hir.node_at(input.nodes id)
         if node is? hir.Declare {
             let value=hir.node_at(input.nodes node.expr)
@@ -1133,7 +1134,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             let name=symbol(node.name node.binding_id @state)
             if value is? hir.FunctionLiteral {
                 functions.push(program.Function[name function(value @state)])
-                if node.name =? 'main' {main=name}
+                if entry_binding isnt? none and node.binding_id =? entry_binding or entry_binding is? none and infer_entry and node.name =? 'main' {main=name}
                 continue
             }
             if aggregate(value.value_type state) and state.allocator is? none {reject(node 'global aggregates need the prelude arena allocator' @state); continue}
@@ -1149,6 +1150,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         } else {startup.push(expression(id @state))}
     }
     if state.problem isnt? none return state.problem
+    if entry_binding isnt? none and main is? none return Error[srcfile=source title='the entry binding is not a concrete function']
     loop function in state.generated {functions.push(function)}
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source] emit.Input[state.nodes state.type_nodes])
     return Result[normalized.program normalized.input]
