@@ -129,7 +129,15 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
             return put(hir.FunctionCall[call.loc call.value_type call.func call.pos_args call.kw_args call.selected_method_index 'identity'] @session)
         }
     }
-    if not subtyping.is_subtype(node.value_type expected session.links @session.types) return problem(id 'type mismatch' "`{display.type_to_dewy(node.value_type session.types)}` does not fit `{display.type_to_dewy(expected session.types)}`" env session)
+    if not subtyping.is_subtype(node.value_type expected session.links @session.types) {
+        # Crossing fixed widths is a value conversion, not a subtype edge.
+        # Preserve the cast for bounds analysis to prove (including signed
+        # to unsigned and narrowing conversions); do not transmute the bits.
+        if views.fixed_integer_layout(types.strip_refinement(node.value_type session.types) session.types) isnt? none and views.fixed_integer_layout(expected session.types) isnt? none return put(hir.ValueCast[node.loc expected value] @session)
+        let promoted=dispatch.promote_type(types.strip_refinement(node.value_type session.types) expected dispatch.System[session.links builtins.promotions] @session.types)
+        if promoted =? expected return put(hir.ValueCast[node.loc expected value] @session)
+        return problem(id 'type mismatch' "`{display.type_to_dewy(node.value_type session.types)}` does not fit `{display.type_to_dewy(expected session.types)}`" env session)
+    }
     if node.value_type =? expected return value
     let actual = types.node_at(session.types node.value_type)
     if actual is? types.BinaryLiteralType return put(hir.RepresentationCast[node.loc text_shapes.materialization_target(node.value_type expected @session.types) value] @session)
@@ -399,7 +407,19 @@ library_call = (name:string arguments:array<addr> id:addr env:Environment @sessi
     return call(function arguments [] id env @session expected=expected)
 }
 
+# Every value expression meets its expected type at this boundary. Individual
+# forms still use the expectation to infer constructors, lambdas, and calls;
+# completing an index/member/flow must not silently bypass the conversion.
+# Keep an already emitted refinement obligation rather than duplicating it.
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
+    let value=expression_inner(id env @session expected=expected call_target=call_target allow_place=allow_place)
+    if value is? Error or expected is? none return value
+    let node=node_at(value session)
+    if node.value_type =? expected or node is? hir.Obligation and node.refined =? expected return value
+    return against(value expected id env @session)
+}
+
+expression_inner = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)
     if node is? parser.Directive return directive(id node env @session)
     if node is? parser.Ambiguous return ambiguous(id node env @session expected=expected call_target=call_target allow_place=allow_place)
