@@ -70,6 +70,10 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    # Growing a descriptor moves its element handles and returns only the
+    # obsolete data block. The allocator must be able to reuse that block.
+    ('let main=():>int64=>{let values:array<int64>=[40] let old=__load_i64__(values) values.push(2) let reused=_arena_alloc(8) return if reused =? old values[0]+values[1] else 0}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40] let saved=values values.push(2) let reused=_arena_alloc(8) __store_i64__(99 reused) return saved[0]+values[1]}', 42),
     ('let identity=(values:array<int64>):>array<int64>=>values\nlet main=():>int64=>{let values:array<int64>=[42] let pointer=__load_i64__(identity(values)) __store_i64__(99 pointer) return values[0]}', 42),
     ('Box:type=[values:array<int64>]\nlet identity=(box:Box):>Box=>box\nlet main=():>int64=>{let box=Box[[42]] let pointer=__load_i64__(identity(box).values) __store_i64__(99 pointer) return box.values[0]}', 42),
 
@@ -253,7 +257,10 @@ main = (argv:array<string>):>int64 => {{
     let root=checking.module(parsed.root env @session)
     if root is? Error {{root.fail}}
     let allocator=bindings.lookup(session.scopes env.lexical.scope '_arena_alloc')
-    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator layout_context=layouts.Context[session.brands])
+    let helpers:dict<string addr>=[]
+    let release=bindings.lookup(session.scopes env.lexical.scope '_arena_release')
+    if release isnt? none {{helpers['_arena_release']=release}}
+    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator layout_context=layouts.Context[session.brands] runtime_helpers=helpers)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)
     if code is? Error {{code.fail}}

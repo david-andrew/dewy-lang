@@ -80,7 +80,7 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
     let allocator=engine.prelude_bindings.get('_arena_alloc')
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
-    loop name in ['_utf8_boundaries' 'exit'] {
+    loop name in ['_utf8_boundaries' 'exit' '_arena_release'] {
         let helper=engine.prelude_bindings.get(name)
         if helper isnt? none {required.push(helper)}
     }
@@ -97,7 +97,7 @@ compile = (entry:addr @engine:modules.Engine):>Compilation|Error => {
     let allocator=engine.prelude_bindings.get('_arena_alloc')
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
-    loop name in ['_utf8_boundaries' 'exit'] {
+    loop name in ['_utf8_boundaries' 'exit' '_arena_release'] {
         let helper=engine.prelude_bindings.get(name)
         if helper isnt? none {required.push(helper)}
     }

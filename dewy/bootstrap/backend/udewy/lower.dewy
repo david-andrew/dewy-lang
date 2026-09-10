@@ -310,8 +310,9 @@ expression = (id:addr @state:State):>addr => {
 # Scalar arrays use the hosted six-word descriptors. Without a runtime
 # allocator they stay within one function frame. The driver can supply the
 # prelude allocator binding for independent values that cross frames or grow.
-# Copies own their elements recursively. Arena release/reuse insertion
-# remains a subsequent lifetime pass.
+# Copies own their elements recursively. Growth returns the old owned byte
+# buffer to the arena; element handles move into the replacement buffer.
+# Releasing complete values at their last use remains a lifetime pass.
 array_type = (id:addr state:State):>types.ArrayType? => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
     return if type is? types.ArrayType type else none
@@ -381,7 +382,7 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
     let size=word_op('__mul__' length word(stride node @state) node @state)
     let data=snapshot(allocation(size node @state) @prefix @state)
     let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
-    let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(0 node @state)]
+    let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(if state.allocator is? none 0 else 1 node @state)]
     let offset:addr=0
     loop value in fields {
         prefix.push(intrinsic('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state))
@@ -1078,8 +1079,19 @@ array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:S
     let source=snapshot(read_word(descriptor layouts.array_descriptor.data node @state) @body @state)
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @body @state)
     body.push(counted_bytes(source data word(0 node @state) word_op('__mul__' length word(stride node @state) node @state) node @state))
+    # Descriptor ownership describes the data buffer independently of the
+    # descriptor's own lifetime. Static/frame views must never be released.
+    let release=state.runtime_helpers.get('_arena_release')
+    if release isnt? none {
+        let name=state.symbols.get(release)
+        if name is? none return reject(node 'the arena release helper is absent from the lowered graph' @state)
+        let owned=intrinsic('__eq__' [read_word(descriptor layouts.array_descriptor.owner node @state) word(1 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let freed=intrinsic(name [source word_op('__mul__' capacity word(stride node @state) node @state)] types.primitive('void' @state.type_nodes) node @state)
+        body.push(conditional(owned freed node @state))
+    }
     body.push(store_word(data descriptor layouts.array_descriptor.data node @state))
     body.push(store_word(next descriptor layouts.array_descriptor.capacity node @state))
+    body.push(store_word(word(1 node @state) descriptor layouts.array_descriptor.owner node @state))
     let condition=intrinsic('__lt__' [capacity required] types.primitive('bool' @state.type_nodes) node @state)
     prefix.push(conditional(condition sequence(body node @state) node @state))
     return sequence(prefix node @state)
