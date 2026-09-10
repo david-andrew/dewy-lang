@@ -50,6 +50,9 @@ operand = (id:addr state:facts.State data:Data):>comparisons.Operand => {
 }
 
 apply_call = (state:facts.State call:addr truth:bool? @data:Data member:types.RefinedType?=none):>facts.State? => {
+    # Most calls have no result promises. Do not snapshot the whole checked
+    # module and its fact tables merely to discover an empty contract list.
+    if member is? none and expressions.call_result_refinements(call data.env.nodes data.env.types).length =? 0 return state
     let context=calls.Context[data.env data.relations data.snapshot]
     let applied=calls.apply(state call truth context @data.registry member=member)
     let current=applied.state
