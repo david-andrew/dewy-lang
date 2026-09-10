@@ -461,7 +461,9 @@ let read = ():>int64 => {
 
     left_adapter = emitted.index('__store_i64__(left __dewy_array_1)')
     right_adapter = emitted.index('__store_i64__(right __dewy_array_2)')
-    call = emitted.index('return sum(__dewy_array_1 __dewy_array_2)')
+    # Lowering may hold an earlier handle in a scalar temporary before
+    # preparing the next adapter. Both adapters must precede the call.
+    call = emitted.index('return sum(')
     assert left_adapter < right_adapter < call
 
 

@@ -115,6 +115,7 @@ class _ObjectLowering:
         self,
         call: hir.FunctionCall,
         arg: hir.AST,
+        position: int | str,
     ) -> tuple[list[hir.AST], hir.AST]:
         """Lower one object-typed value argument of ``call``.
 
@@ -128,7 +129,7 @@ class _ObjectLowering:
             route = self._storage_field_route(arg)
             if route is not None and any(
                 self._storage_routes_overlap(route, place)
-                for place in self._call_place_argument_routes(call)
+                for place in self._call_place_argument_routes(call, position)
             ):
                 return self._clone_object_value(arg, arg.type)
         return self._extract_object_pointer(arg)

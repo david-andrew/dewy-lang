@@ -119,6 +119,54 @@ let main=():>int64=>{
     assert result.stdout == b'9\n'
 
 
+def test_an_earlier_call_finishes_before_a_later_record_initializer(tmp_path):
+    binary = _build(tmp_path, '''Bag:type=[value:int64]
+let change=(@bag:Bag):>int64=>{bag.value=9 return 1}
+let read=(index:int64 after:Bag):>int64=>index+after.value
+let main=():>int64=>{
+    let bag=Bag[7]
+    printl(read(change(@bag) Bag[bag.value]))
+    return 0
+}
+''')
+    result = subprocess.run([binary], capture_output=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == b'10\n'
+
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='native Linux process memory limit')
+@pytest.mark.parametrize('object_argument', [False, True])
+def test_completed_argument_mutations_do_not_force_later_copies(tmp_path, object_argument):
+    parameter = 'after:Bag' if object_argument else 'after:array<Entry>'
+    items = 'after.items' if object_argument else 'after'
+    argument = 'bag' if object_argument else 'bag.items'
+    binary = _build(tmp_path, '''Entry:type=[value:int64]
+Bag:type=[items:array<Entry> calls:int64=0]
+let step=(@bag:Bag):>int64=>{bag.calls += 1 return 0}
+let read=(unused:int64 PARAMETER):>int64=>{
+    $runtime_assert ITEMS.length >? 0
+    return ITEMS[0].value
+}
+let main=():>int64=>{
+    let bag=Bag[[]]
+    loop i in 0..511 {bag.items.push(Entry[7])}
+    let total:int64=0
+    loop i in 0..99999 {total += read(step(@bag) ARGUMENT)}
+    printl(total)
+    printl(bag.calls)
+    return 0
+}
+'''.replace('PARAMETER', parameter).replace('ITEMS', items).replace('ARGUMENT', argument))
+
+    def limit_memory():
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (128 * 1024**2, 128 * 1024**2))
+
+    result = subprocess.run([binary], capture_output=True, timeout=10, check=False, preexec_fn=limit_memory)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == b'700000\n100000\n'
+
+
 @pytest.mark.skipif(sys.platform != 'linux', reason='native Linux process memory limit')
 @pytest.mark.parametrize('object_argument', [False, True])
 def test_disjoint_field_places_do_not_force_value_copies(tmp_path, object_argument):

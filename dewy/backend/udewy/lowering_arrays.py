@@ -295,16 +295,29 @@ class _ArrayLowering:
         return left[0] == right[0] and all(a == b for a, b in zip(left[1], right[1]))
 
     @classmethod
-    def _call_place_argument_routes(cls, call: hir.FunctionCall) -> set[tuple[int, tuple[str, ...]]]:
+    def _call_place_argument_routes(cls, call: hir.FunctionCall, position: int | str) -> set[tuple[int, tuple[str, ...]]]:
         """Storage exposed by places during argument evaluation or the call.
 
         A later argument may itself call a mutator: `read(box.items f(@box))`
-        must retain the earlier array value before evaluating `f`.
+        must retain the earlier array value before evaluating `f`. A nested
+        call in an earlier argument has already finished; only direct place
+        arguments remain exposed during the enclosing call.
         """
         from ...semantic.analyze.effects import _iter_children
 
         routes: set[tuple[int, tuple[str, ...]]] = set()
-        pending = [*call.pos_args, *call.kw_args.values()]
+        arguments = [*enumerate(call.pos_args), *call.kw_args.items()]
+        pending: list[hir.AST] = []
+        after = False
+        for key, argument in arguments:
+            if after:
+                pending.append(argument)
+            elif isinstance(argument, hir.Place):
+                route = cls._storage_field_route(argument.target)
+                if route is not None:
+                    routes.add(route)
+            if key == position:
+                after = True
         seen: set[int] = set()
         while pending:
             argument = pending.pop()
@@ -324,11 +337,11 @@ class _ArrayLowering:
         self.array_call_boundary_analyses = {}
         for call in self.array_calls:
             function = self._direct_call_function(call)
-            place_routes = self._call_place_argument_routes(call)
             for position, argument, parameter in self._call_array_arguments(
                 call,
                 function,
             ):
+                place_routes = self._call_place_argument_routes(call, position)
                 source = self._array_argument_binding(argument)
                 source_id = (
                     source.semantic_id
