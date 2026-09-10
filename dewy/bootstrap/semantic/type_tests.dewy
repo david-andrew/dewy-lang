@@ -1,0 +1,52 @@
+import p"ty.dewy" as types
+import p"subtyping.dewy" as subtyping
+
+# Closed input alternatives can settle a type test. `any` supplies no such
+# evidence. Objects have an exact field list; two unrelated layouts cannot
+# describe the same record, while nominal error records still belong to the
+# primitive exception family. This is the hosted type-test decision rule.
+members = (id:addr nodes:array<types.Type>):>array<addr> => {
+    let plain=types.strip_refinement(id nodes)
+    let type=types.node_at(nodes plain)
+    return if type is? types.TypeOr type.items else [plain]
+}
+disjoint = (left:addr right:addr links:array<subtyping.Link> @nodes:array<types.Type>):>bool => {
+    loop a in members(left nodes) {
+        loop b in members(right nodes) {
+            let x=types.node_at(nodes types.unfold(a nodes))
+            let y=types.node_at(nodes types.unfold(b nodes))
+            if x is? types.ObjectType and y is? types.ObjectType {
+                if subtyping.is_subtype(a b links @nodes) or subtyping.is_subtype(b a links @nodes) return false
+            } else if x is? types.ObjectType or y is? types.ObjectType {
+                if subtyping.is_subtype(a b links @nodes) or subtyping.is_subtype(b a links @nodes) return false
+            } else {
+                let overlap=types.intersect([a b] @nodes)
+                if not subtyping.is_empty(overlap links @nodes) return false
+            }
+        }
+    }
+    return true
+}
+# Applicability alone erases refinement obligations. A constant true result
+# must instead retain those proofs; distribute a union target before using
+# the existing proof-aware coverage relation.
+covers = (value:addr tested:addr links:array<subtyping.Link> @nodes:array<types.Type>):>bool => {
+    let required=types.node_at(nodes types.unfold(tested nodes))
+    if required is? types.TypeOr {
+        loop member in required.items {if covers(value member links @nodes) return true}
+        return false
+    }
+    return subtyping.covered(value tested set[] links @nodes)
+}
+decide = (value:addr tested:addr links:array<subtyping.Link> @nodes:array<types.Type>):>bool? => {
+    let variants=members(value nodes)
+    let all=true
+    loop variant in variants {
+        let type=types.node_at(nodes types.strip_refinement(variant nodes))
+        if types.is_primitive(type 'any') or types.is_primitive(type 'untyped') return none
+        if not covers(variant tested links @nodes) {all=false}
+    }
+    if all return true
+    if disjoint(value tested links @nodes) return false
+    return none
+}

@@ -31,6 +31,7 @@ import p"type_names.dewy" as type_names
 import p"function_contracts.dewy" as contracts
 import p"text_shapes.dewy" as text_shapes
 import p"target_values.dewy" as target_values
+import p"type_tests.dewy" as type_tests
 import p"integer_ranges.dewy" as integer_ranges
 import p"binary_literals.dewy" as binary_literals
 import p"numeric_literals.dewy" as numeric_literals
@@ -498,6 +499,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if operand is? Error return operand
             let target=target_values.unwrap(operand session.hir)
             if op =? 'not' and target is? hir.TargetBool return put(hir.TargetBool[node.loc types.primitive('bool' @session.types) not target.value] @session)
+            if op =? 'not' and target is? hir.DecidedBool return put(hir.DecidedBool[node.loc types.primitive('bool' @session.types) not target.value] @session)
             let func = identifier(name id env @session)
             if func is? Error return func
             return call(func [operand] [] id env @session expected=expected)
@@ -515,6 +517,14 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if value is? Error return value
             let tested = declarations.resolve(node.right env.lexical @session)
             if tested is? Error return tested
+            # Do not discard an effectful operand merely because its result
+            # type is known. Concrete bindings/literals have no evaluation
+            # prefix to retain; arbitrary value expressions stay runtime tests.
+            let input=node_at(value session)
+            if input is? hir.ExpressedIdentifier|hir.Integer|hir.Bool|hir.String|hir.NoneValue|hir.TypeValue {
+                let decided=type_tests.decide(input.value_type tested session.links @session.types)
+                if decided isnt? none return put(hir.DecidedBool[node.loc types.primitive('bool' @session.types) decided not=? (op =? 'isnt?')] @session)
+            }
             return put(hir.TypeTest[node.loc types.primitive('bool' @session.types) value tested op =? 'isnt?'] @session)
         }
         if contexts.node_at(node.op env.lexical session) is? post.CombinedAssignment return compound_assignment(id node env @session)
@@ -1315,12 +1325,12 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
         let condition=if spec.condition is? none match_condition(spec remaining @session) else expression(spec.condition remaining @session expected=types.primitive('bool' @session.types))
         if condition is? Error return condition
         let decided=target_values.unwrap(condition session.hir)
-        if decided is? hir.TargetBool {
+        if decided is? hir.TargetBool|hir.DecidedBool {
             if not decided.value continue
             # Platform declarations inhabit the surrounding lexical scope.
             # Runtime flows and static type decisions keep their own scope.
             let syntax=contexts.node_at(spec.body env.lexical session)
-            if expected is? none and syntax is? parser.Block and syntax.delims =? '\{}' {
+            if decided is? hir.TargetBool and expected is? none and syntax is? parser.Block and syntax.delims =? '\{}' {
                 let body=block(spec.body env @session)
                 if body is? Error return body
                 let contents=node_at(body session)
