@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native blocks postpone function bodies whose complete signatures are known
+  until eager declarations have supplied their value types. The resulting HIR
+  retains the original statement order, so early calls still fail initialization
+  analysis. Signature collection checks defaults before deciding to defer a
+  body; generic declarations retain their instantiation behavior. This removes
+  the self-build's forward lookup failure for the string-method table. All 25
+  source-comparison groups pass with the final checker; graph execution and
+  direct native checks cover later values and early-call rejection.
+
 - Integer conversion contexts include a union's single available word or
   bigint representation, including `addr | none` and `bigint | none`.
   Constant nonzero evidence survives packing a bigint for compound division

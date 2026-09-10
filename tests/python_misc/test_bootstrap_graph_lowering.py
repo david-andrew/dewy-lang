@@ -39,6 +39,8 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let read=():>int64=>ANSWER\nconst ANSWER=42\nlet main=():>int64=>read()'}, 42),
+        ({'entry.dewy': 'let outer=():>int64=>{let read=():>int64=>answer\nlet answer:int64=42\nreturn read()}\nlet main=():>int64=>outer()'}, 42),
         # Native HIR must retain a literal field as the subject of its proof.
         # This traverses a loop with a continue in obligations.field_subject.
         ({'entry.dewy': 'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet main=():>int64=>{let one:BigInt<sign =? 1>=[sign=1 limbs=[1]] return one.sign+41}'}, 42),
@@ -108,6 +110,7 @@ main=(argv:array<string>):>int64=>{{
     assert str(bad / 'dependency.dewy') in result.stderr
 
     for index, (body, title) in enumerate([
+        ('let read=():>int64=>answer\nread()\nlet answer:int64=42', 'before initialization'),
         ('let read=(value:int64):>int64=>{let narrow:uint8|none=value return 0}', 'cannot prove this integer fits'),
         ('let main=():>int64=>{let position:addr|none=-1 return 0}', 'refinement refuted'),
         ('let f=(n:int64):>int64=>{ $assert n >? 0\nreturn n }', 'cannot prove assertion'),

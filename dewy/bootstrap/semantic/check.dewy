@@ -1157,9 +1157,24 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
         if error isnt? none return error
     }
     let items:array<addr> = []
+    let deferred:dict<addr addr>=[]
     let result = types.primitive('void' @session.types)
     let values:addr = 0
     loop item in node.inner {
+        # A complete signature is enough to check calls. Check its body after
+        # eager declarations have supplied the remaining value types, while
+        # retaining this statement's original initialization position. Generic
+        # declarations keep their existing deferred-instantiation behavior.
+        let reference=contexts.syntax_ref(item inner.lexical @session)
+        let reserved=session.registry.by_syntax.get(reference)
+        if reserved isnt? none {
+            let binding=bindings.binding_at(session.registry reserved)
+            if binding.kind =? 'function' and binding.function is? none and binding.declaration is? none {
+                deferred[items.length]=item
+                items.push(void_at(item inner @session))
+                continue
+            }
+        }
         # A result expectation belongs to the block's expressed value, not
         # each statement. A single-item wrapper remains transparent so a
         # literal can use its context; multi-item blocks check their result
@@ -1175,6 +1190,12 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
         if not types.is_primitive(atom 'void') {
             values += 1 result = type
         }
+    }
+    loop [position item] in deferred {
+        let value=expression(item inner @session)
+        if value is? Error return value
+        $runtime_assert position <? items.length
+        items[position]=value
     }
     if scoped and values >? 1 return problem(id 'block expresses multiple values' 'suppress unused expressions with a semicolon' env session)
     let value=put(hir.Block[node.loc result items scoped] @session)
@@ -1302,6 +1323,22 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     if signature isnt? parser.BinOp or not source_views.is_operator(signature.op ':>' env.lexical session) return none
     let shape = function_shape(literal env @session)
     if shape is? Error return shape
+    let signature_type = dispatch.method_at(session.types shape)
+    if signature_type.type_params.length =? 0 {
+        # A default is part of collecting a complete signature in the hosted
+        # checker. If it needs a value whose type is not available yet, leave
+        # this declaration in source order; only its body may be deferred.
+        # Generic defaults remain attached to their instantiable source.
+        let arguments=contexts.node_at(signature.left env.lexical session)
+        let rows:array<addr>=if arguments is? parser.Block arguments.inner else [signature.left]
+        loop i in 0.. and i <? rows.length and i <? signature_type.pos_or_kw.length {
+            let row=contexts.node_at(rows[i] env.lexical session)
+            if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
+                let value=expression(row.right env @session expected=signature_type.pos_or_kw[i].value_type)
+                if value is? Error return none
+            }
+        }
+    }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
     if name in? scope.names return problem(id "duplicate declaration `{name}`" 'this scope already declares the name' env session)
     let reference = contexts.syntax_ref(id env.lexical @session)
@@ -1309,7 +1346,6 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = shape binding.store_type = shape
     binding.literal_path_parameter=source_views.path_parameter(literal env.lexical session)
-    let signature_type = dispatch.method_at(session.types shape)
     if signature_type.type_params.length >? 0 {
         let literal_ref = contexts.syntax_ref(node.right env.lexical @session)
         session.retained_read_states.add(env.state)
