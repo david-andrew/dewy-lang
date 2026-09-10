@@ -660,7 +660,13 @@ class _ObjectLowering:
                     # strings and arrays are copied for escape too, like the literal's own
                     prelude, src = self._extract_object_pointer(field.value)
                     statements.extend(prelude)
-                    statements.extend(self._object_copy(address, src, field_type, field.loc, arena=self._has_arena()))
+                    fresh = (isinstance(field.value, hir.FunctionCall)
+                             and isinstance(field.value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)))
+                    # An ordinary call has already returned an independent
+                    # value. Transfer its fields into the containing record;
+                    # copying would abandon the original returned payload.
+                    statements.extend(self._object_copy(address, src, field_type, field.loc,
+                                                        arena=self._has_arena(), move=fresh))
                     continue
                 else:
                     prelude, value = self._extract_expression(field.value)

@@ -432,6 +432,61 @@ let main=():>int64=>{
     assert len(set(cursors[2:])) == 1, cursors
 
 
+def test_record_field_takes_ownership_of_fresh_call_result(tmp_path):
+    source = '''
+Box:type=[words:array<string>]
+Outer:type=[box:Box]
+let calls:int64=0
+let make=():>Box=>{calls+=1 return Box[["value-{calls}"]]}
+let exercise=():>void=>{
+    let value=Outer[make()]
+    $runtime_assert value.box.words.length=?1
+    let kept=value.box.words[0]
+    value.box.words.clear
+    $runtime_assert kept=?"value-{calls}"
+}
+let main=():>int64=>{
+    loop warmup in 0..12 {exercise();}
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
+@pytest.mark.parametrize('result_type', ['Box', 'Box|none', 'Box|string', 'array<string>|none'])
+def test_discarded_call_statements_release_their_payloads(result_type, tmp_path):
+    value = 'words' if result_type.startswith('array') else 'Box[words]'
+    alternative = ('if calls % 2 =? 0 return none' if '|none' in result_type
+                   else 'if calls % 2 =? 0 return "other-{calls}"' if '|string' in result_type
+                   else '')
+    source = f'''
+Box:type=[words:array<string>]
+let calls:int64=0
+let make=():>{result_type}=>{{
+    calls+=1
+    {alternative}
+    let words:array<string>=["value-{{calls}}"]
+    return {value}
+}}
+let exercise=():>void=>{{
+    let before=calls
+    make(); make();
+    $runtime_assert calls=?before+2
+}}
+let main=():>int64=>{{
+    loop warmup in 0..12 {{exercise();}}
+    loop i in 0..12 {{exercise(); printl(_arena_cursor)}}
+    return 0
+}}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('result_type', ['Box|none', 'Box|string', 'array<string>|none'])
 def test_discarded_call_type_tests_release_their_payloads(result_type, tmp_path):
     value = 'words' if result_type.startswith('array') else 'Box[words]'

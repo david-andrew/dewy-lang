@@ -4192,9 +4192,30 @@ class _Lowerer(
                 hir.Break(node.loc, ty.BOTTOM_TYPE),
             ]
         prelude, value = self._extract_expression(node)
+        cleanup = self._discarded_call_result(node, value)
+        if cleanup is not None:
+            return [*prelude, *cleanup]
         if prelude and isinstance(value, hir.Void):
             return prelude
         return [*prelude, value]
+
+    def _discarded_call_result(self, source: hir.AST, value: hir.AST) -> list[hir.AST] | None:
+        """Release an unused ordinary call's record/cell result, once evaluated.
+
+        These ABI roots are caller-prepared frame storage. Only the fields or
+        active payload are owned allocations. Methods have separate result
+        conventions; strings and dynamic arrays already track temporaries.
+        """
+        if (not self._has_arena() or not isinstance(source, hir.FunctionCall)
+                or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+            return None
+        if isinstance(source.type, ty.ObjectType):
+            return self._release_object_members(value, source.type, source.loc)
+        members = self._field_union_members(source.type)
+        if members is not None:
+            return self._release_cell_payload(value, members, source.loc,
+                                             prepared=ty.optional_payload(source.type) is None)
+        return None
 
     # --- enums: unions of singletons as words -----------------------------
 
@@ -4489,21 +4510,13 @@ class _Lowerer(
             # cells. Methods have their own result ownership paths.
             if (self._has_arena() and isinstance(node.value, hir.FunctionCall)
                     and isinstance(node.value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
-                    and ((temporary_members := self._field_union_members(node.value.type)) is not None
+                    and (self._field_union_members(node.value.type) is not None
                          or isinstance(node.value.type, ty.ObjectType))):
                 prelude, cell = self._extract_expression(node.value)
                 extra, tested = self._extract_expression(replace(node, value=replace(cell, type=node.value.type)))
                 result = self._new_string_temp(node.loc, 'bool', 'temporary_type_test')
-                if isinstance(node.value.type, ty.ObjectType):
-                    # The caller prepared the root in its frame; only the
-                    # owned fields (including dynamic descendants) escape.
-                    cleanup = self._release_object_members(cell, node.value.type, node.loc)
-                else:
-                    assert temporary_members is not None
-                    cleanup = self._release_cell_payload(
-                        cell, temporary_members, node.loc,
-                        prepared=ty.optional_payload(node.value.type) is None,
-                    )
+                cleanup = self._discarded_call_result(node.value, cell)
+                assert cleanup is not None
                 return [*prelude, *extra,
                         hir.Declare(node.loc, ty.VOID_TYPE, 'let', result.name, 'bool', tested),
                         *cleanup], result
