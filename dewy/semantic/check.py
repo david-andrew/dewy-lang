@@ -14836,6 +14836,11 @@ def _literal_path_call_result(
     if not isinstance(argument.type, ty.StringLiteralType):
         return None
     declared = ty.unfold(left.type.ret)
+    if isinstance(declared, ty.ObjectType):
+        # The singleton path is a new structural view, so it is not itself
+        # in pending_methods. Prepare its declaring type before sharing the
+        # method entries; member lookup on the view must see their bindings.
+        _declare_pending_methods(ctx=ctx, for_type=declared)
     methods = declared.methods if isinstance(declared, ty.ObjectType) else ()
     return ty.PathLiteralType(argument.type.value, methods=methods)   # `p"…"` has `Path`'s methods
 
