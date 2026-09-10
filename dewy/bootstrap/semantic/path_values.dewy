@@ -1,0 +1,66 @@
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"syntax.dewy" as syntax
+import p"context.dewy" as contexts
+import p"bindings.dewy" as bindings
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+
+# The hosted path-constructor rule recognizes a field initialized directly
+# from a parameter; it is not tied to the spelling `p`. Calls retain a path
+# literal only when that argument is an exact string.
+parameter = (function:parser.BinOp nodes:array<tokens.Token>):>string? => {
+    let body=tokens.node_at(nodes function.right)
+    if body isnt? parser.Block or body.delims not=? '[]' return none
+    let result:string?=none
+    let count:addr=0
+    loop id in body.inner {
+        let field=tokens.node_at(nodes id)
+        if field is? parser.BinOp and syntax.is_operator(field.op '=' nodes) and syntax.identifier(field.left nodes) =? 'path' {
+            count += 1
+            result=syntax.identifier(field.right nodes)
+        }
+    }
+    return if count =? 1 result else none
+}
+unwrap = (id:addr nodes:array<hir.AST>):>hir.AST => {
+    let node=hir.node_at(nodes id)
+    loop true {
+        if node is? hir.ValueCast|hir.RepresentationCast {node=hir.node_at(nodes node.expr)}
+        else if node is? hir.Block and not node.scoped and node.items.length =? 1 {node=hir.node_at(nodes node.items[0])}
+        else return node
+    }
+}
+LiteralResult:type = const [value_type:addr owner:addr]
+call_result = (function:hir.AST positional:array<addr> keyword:dict<string addr> @session:contexts.Session):>LiteralResult? => {
+    if function isnt? hir.ExpressedIdentifier or function.binding_id is? none return none
+    let binding=bindings.binding_at(session.registry function.binding_id)
+    let name=binding.literal_path_parameter
+    let signature=types.node_at(session.types function.value_type)
+    if name is? none or signature isnt? types.FunctionType return none
+    let argument=keyword.get(name)
+    loop index in 0.. and index <? signature.pos_or_kw.length and index <? positional.length {
+        if signature.pos_or_kw[index].name =? name {argument=positional[index] break}
+    }
+    if argument is? none return none
+    let value=unwrap(argument session.hir)
+    let type=types.node_at(session.types value.value_type)
+    if type isnt? types.StringLiteralType return none
+    let owner=types.unfold(signature.ret session.types)
+    let declared=types.node_at(session.types owner)
+    let methods:array<types.MethodSpec>=if declared is? types.ObjectType declared.methods else []
+    return LiteralResult[types.path_type(type.value methods @session.types) owner]
+}
+literal = (value:addr session:contexts.Session):>string? => {
+    let node=unwrap(value session.hir)
+    let type=types.node_at(session.types node.value_type)
+    if type is? types.PathLiteralType return type.value
+    if type is? types.ObjectType {
+        let field=types.object_field(type 'path')
+        if field isnt? none {
+            let text=types.node_at(session.types field.value_type)
+            if text is? types.StringLiteralType return text.value
+        }
+    }
+    return none
+}

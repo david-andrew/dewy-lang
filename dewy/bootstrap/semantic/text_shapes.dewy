@@ -15,8 +15,9 @@ literal_length = (text:string element:types.Type):>addr? => {
 }
 materialization_target = (source:addr target:addr @nodes:array<types.Type>):>addr => {
     let literal=types.node_at(nodes source)
-    if literal isnt? types.StringLiteralType return target
     let destination=types.node_at(nodes target)
+    if literal is? types.BinaryLiteralType and destination is? types.ArrayType and destination.length is? none and types.is_primitive(types.node_at(nodes destination.element) 'uint8') return types.array_type(destination.element literal.value.length @nodes)
+    if literal isnt? types.StringLiteralType return target
     if destination is? types.TypeOr {
         loop item in destination.items {
             let member=types.node_at(nodes item)

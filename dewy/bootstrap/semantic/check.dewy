@@ -33,6 +33,8 @@ import p"function_contracts.dewy" as contracts
 import p"text_shapes.dewy" as text_shapes
 import p"target_values.dewy" as target_values
 import p"integer_ranges.dewy" as integer_ranges
+import p"binary_literals.dewy" as binary_literals
+import p"path_values.dewy" as path_values
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -109,6 +111,7 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if not subtyping.is_subtype(node.value_type expected session.links @session.types) return problem(id 'type mismatch' "`{display.type_to_dewy(node.value_type session.types)}` does not fit `{display.type_to_dewy(expected session.types)}`" env session)
     if node.value_type =? expected return value
     let actual = types.node_at(session.types node.value_type)
+    if actual is? types.BinaryLiteralType return put(hir.RepresentationCast[node.loc text_shapes.materialization_target(node.value_type expected @session.types) value] @session)
     if actual is? types.StringLiteralType and target is? types.ArrayType return put(hir.RepresentationCast[node.loc text_shapes.materialization_target(node.value_type expected @session.types) value] @session)
     if actual is? types.StringLiteralType and (target is? types.StringType or target is? types.Primitive and target.name in? ['string' 'char' 'grapheme']) return put(hir.RepresentationCast[node.loc expected value] @session)
     if actual is? types.ArrayType and target is? types.ArrayType and target.length is? none and actual.element =? target.element return value
@@ -148,6 +151,40 @@ widen = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
         if storage not=? node.value_type return against(value storage id env @session)
     }
     return value
+}
+binary_array = (value:addr @session:contexts.Session):>addr => {
+    let node=node_at(value session)
+    let type=types.node_at(session.types node.value_type)
+    if type isnt? types.BinaryLiteralType return value
+    let target=types.array_type(types.primitive('uint8' @session.types) type.value.length @session.types)
+    return put(hir.RepresentationCast[node.loc target value] @session)
+}
+include_bytes = (arguments:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let items=source_arguments(arguments env session)
+    if items.length not=? 1 return problem(id '`$include_bytes` takes one path' 'write `$include_bytes(p"...")`' env session)
+    let value=expression(items[0] env @session)
+    if value is? Error return value
+    let path=path_values.literal(value session)
+    if path is? none return problem(items[0] '`$include_bytes` needs a compile-time path' display.type_to_dewy(node_at(value session).value_type session.types) env session)
+    let source=contexts.source_at(env.lexical session)
+    let loc=tokens.node_at(source.nodes id).loc
+    let included=binary_literals.read_file(path source.srcfile loc)
+    if included is? Error return included
+    return put(hir.BasedString[loc types.binary_literal(included.packed.bytes @session.types) '0x' included.packed.digits included.packed.bytes included.path] @session)
+}
+include_declaration = (name:string value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    # Like the hosted include declaration, this creates a new binding even
+    # when an earlier local used the same spelling. Earlier HIR keeps its id.
+    let node=node_at(value session)
+    let reference=contexts.syntax_ref(id env.lexical @session)
+    let binding_id=bindings.allocate(@session.registry reference name 'value' node.loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=node.value_type binding.store_type=node.value_type
+    let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
+    binding.declaration=declaration
+    session.registry.by_id[binding_id]=binding
+    bindings.bind(@session.scopes env.lexical.scope name binding_id)
+    return declaration
 }
 identifier = (name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let source = contexts.node_at(id env.lexical session)
@@ -258,6 +295,22 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     # Promises stay on the selected signature. The expressed result sheds
     # call-specific facts while retaining named types such as addr/nat64.
     let result_type = views.strip_result_refinement(method.ret @session.types)
+    let path=path_values.call_result(func positional keyword @session)
+    if path isnt? none {
+        result_type=path.value_type
+        # A literal path is a more precise view of the declared result. It
+        # keeps the existing method implementations and their receiver types.
+        let owner=types.node_at(session.types path.owner)
+        if owner is? types.ObjectType {
+            let error=prepare_methods(path.owner display.type_to_dewy(path.owner session.types) env @session)
+            if error isnt? none return error
+            loop method in owner.methods {
+                let entry=session.methods.get(method_key(path.owner method))
+                if entry isnt? none {session.methods[method_key(path.value_type method)]=entry}
+            }
+            session.prepared_methods.add(path.value_type)
+        }
+    }
     let result = put(hir.FunctionCall[source.loc result_type callee args kwargs selected] @session)
     return if expected is? none result else against(result expected id env @session)
 }
@@ -291,6 +344,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
     let node = tokens.node_at(source.nodes id)
     if node is? parser.Directive return directive(id node env @session)
     if node is? parser.Ambiguous return ambiguous(id node env @session expected=expected call_target=call_target allow_place=allow_place)
+    let included=binary_literals.include_arguments(id source.nodes)
+    if included isnt? none {
+        let value=include_bytes(included id env @session)
+        if value is? Error return value
+        return if expected is? none value else against(value expected id env @session)
+    }
     let number = syntax.integer(id source.nodes)
     if number isnt? none {
         let literal = types.integer_literal(number @session.types)
@@ -302,6 +361,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         let value:addr|Error = void_at(id env @session)
         if atom is? tokens.Identifier { value = identifier(atom.name id env @session) }
         else if atom is? tokens.String { value = put(hir.String[node.loc types.string_literal(atom.content @session.types) atom.content] @session) }
+        else if atom is? tokens.BasedString {
+            let packed=binary_literals.pack(atom source.srcfile)
+            if packed is? Error return packed
+            value=put(hir.BasedString[node.loc types.binary_literal(packed.bytes @session.types) atom.base packed.digits packed.bytes] @session)
+        }
         else if atom is? tokens.Bool { value = put(hir.Bool[node.loc types.primitive('bool' @session.types) atom.value] @session) }
         else if atom is? tokens.Metatag and atom.name =? 'target' {value=put(hir.TargetString[node.loc types.string_literal(session.target @session.types) session.target] @session)}
         else return pending(id "{atom.kind} value" env session)
@@ -391,6 +455,13 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if op =? '=>' return function_literal(id node env @session expected_signature=expected)
         if op =? '=' or op =? ':=' or op =? '::' return declaration(id env @session)
         if op =? 'as' {
+            let included=binary_literals.include_arguments(node.left source.nodes)
+            let name=syntax.identifier(node.right source.nodes)
+            if included isnt? none and name isnt? none {
+                let value=include_bytes(included id env @session)
+                if value is? Error return value
+                return include_declaration(name value id env @session)
+            }
             let value=expression(node.left env @session)
             if value is? Error return value
             let target = declarations.resolve(node.right env.lexical @session)
@@ -445,7 +516,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             let type = types.node_at(session.types types.strip_refinement(value.value_type session.types))
             if type is? types.CallableType and 'CallJuxtapose' in? adjacency.options return call_syntax(left node.right id env @session expected=expected)
-            if (type is? types.ArrayType|types.StringType|types.StringLiteralType or types.is_primitive(type 'string') or views.container_entry_types(value.value_type session.types) isnt? none) and 'IndexJuxtapose' in? adjacency.options return index_syntax(left node.right id env @session)
+            if (type is? types.ArrayType|types.BinaryLiteralType|types.StringType|types.StringLiteralType or types.is_primitive(type 'string') or views.container_entry_types(value.value_type session.types) isnt? none) and 'IndexJuxtapose' in? adjacency.options return index_syntax(left node.right id env @session)
             let number = types.primitive('number' @session.types)
             if 'MultiplyJuxtapose' in? adjacency.options and subtyping.is_subtype(value.value_type number session.links @session.types) {
                 let right = expression(node.right env @session)
@@ -696,7 +767,10 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     container_state.seed_fields(binding_id value env.state @session)
     let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id] @session)
     binding.declaration = declared
-    if checked is? hir.FunctionLiteral | hir.GenericFunction { binding.function = value binding.kind = 'function' }
+    if checked is? hir.FunctionLiteral | hir.GenericFunction {
+        binding.function = value binding.kind = 'function'
+        if rhs is? parser.BinOp {binding.literal_path_parameter=path_values.parameter(rhs source.nodes)}
+    }
     if checked is? hir.OverloadedFunction {binding.function=value binding.kind='overload'}
     session.registry.by_id[binding_id] = binding
     return declared
@@ -854,6 +928,7 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     let binding_id = bindings.allocate(@session.registry reference name 'function' node.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = shape binding.store_type = shape
+    binding.literal_path_parameter=path_values.parameter(literal source.nodes)
     let signature_type = dispatch.method_at(session.types shape)
     if signature_type.type_params.length >? 0 {
         let literal_ref = contexts.syntax_ref(node.right env.lexical @session)
@@ -1219,6 +1294,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
 # The index scope binds `end` to this sequence's last position. Its binding
 # is lexical and disappears after the index; a nested index gets its own end.
 index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    sequence=binary_array(sequence @session)
     if views.container_entry_types(node_at(sequence session).value_type session.types) isnt? none return container_index(sequence index_id id env @session)
     let source = contexts.source_at(env.lexical session)
     let arguments = tokens.node_at(source.nodes index_id)
@@ -1318,6 +1394,7 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
     return member_named(receiver name id env @session)
 }
 member_named = (receiver:addr name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    if name =? 'length' {receiver=binary_array(receiver @session)}
     let value = node_at(receiver session)
     let type = types.node_at(session.types views.structural_base(value.value_type session.types))
     let loc = contexts.node_at(id env.lexical session).loc
@@ -3171,6 +3248,12 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
     target=text_shapes.materialization_target(node.value_type target @session.types)
     let destination=types.node_at(session.types target)
     if types.same_type(node.value_type target session.types) return value
+    if source is? types.BinaryLiteralType {
+        let payload=views.optional_payload(target @session.types)
+        if payload isnt? none and views.string_valued(payload session.types) return put(hir.RepresentationCast[node.loc target binary_array(value @session)] @session)
+        if subtyping.is_subtype(node.value_type target session.links @session.types) return put(hir.RepresentationCast[node.loc target value] @session)
+        if views.string_valued(target session.types) return problem(id 'binary data is not Unicode text' 'decode bytes explicitly with `as string | none`' env session)
+    }
     if source is? types.StringLiteralType and subtyping.is_subtype(node.value_type target session.links @session.types) return put(hir.RepresentationCast[node.loc target value] @session)
     if views.string_valued(node.value_type session.types) and destination is? types.ArrayType {
         let element=types.node_at(session.types destination.element)

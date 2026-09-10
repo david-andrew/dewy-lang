@@ -25,6 +25,21 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native based strings pack power-of-two radixes into exact bytes, retaining
+  the hosted reserved radixes and padding rules. Byte materialization, indices,
+  lengths, compile-time path constructor views, and `$include_bytes` now check
+  through HIR. Literal path views reuse their declaring type's method bindings.
+  The native module loader checks the ordered prelude through strings, arrays,
+  paths, Unicode's embedded case-folding table, and math. Callable intersections
+  retain ordered overload alternatives and their selected methods.
+
+- Hosted call lowering completes earlier operands before executing a later
+  argument's preparation. Copy barriers account for direct place arguments and
+  later nested mutations; already completed calls do not force new snapshots.
+  Primitive compound updates use ordinary operator lowering, preserving bitwise
+  spellings, unsigned division, and fixed-width wrapping. The native match suite
+  passes again after its full-suite regression exposed the operand-order bug.
+
 - Native module graphs accept an ordered prelude, retaining library binding
   identities while allowing module declarations to shadow inherited names.
   Target queries select platform branches and prepare their imports; ordinary
@@ -436,6 +451,9 @@ of settled new constructs. Any necessary provisional design (including
 allocation) will be recorded here with examples and implementation limits.
 
 No provisional language syntax or allocator design has been introduced yet.
+The new [resource-exhaustion discussion](../semantic/resource_exhaustion.md)
+remains an open design problem. Existing borrow/copy optimizations do not claim
+to establish resource availability or a new failure policy.
 
 ## Verification checkpoint
 

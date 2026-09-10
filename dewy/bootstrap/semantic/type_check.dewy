@@ -3,6 +3,7 @@ import p"../targets.dewy" as targets
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"context.dewy" as contexts
+import p"binary_literals.dewy" as binary_literals
 import p"syntax.dewy" as syntax
 import p"namespaces.dewy" as namespaces
 import p"ty.dewy" as types
@@ -491,6 +492,11 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
         let item = tokens.node_at(source.nodes node.item)
         if item is? tokens.Identifier return resolve_name(item.name id context @session)
         if item is? tokens.String return types.string_literal(item.content @session.types)
+        if item is? tokens.BasedString {
+            let packed=binary_literals.pack(item source.srcfile)
+            if packed is? Error return packed
+            return types.binary_literal(packed.bytes @session.types)
+        }
         return contexts.unsupported(id "{item.kind} in type position" context session)
     }
     if node is? parser.KeywordExpr and node.parts.length =? 2 {

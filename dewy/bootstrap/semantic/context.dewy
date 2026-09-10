@@ -69,7 +69,12 @@ source_at = (context:Context session:Session):>Source => {
     $runtime_assert context.source <? session.sources.length
     return session.sources[context.source]
 }
-node_at = (id:addr context:Context session:Session):>tokens.Token => tokens.node_at(source_at(context session).nodes id)
+node_at = (id:addr context:Context session:Session):>tokens.Token => {
+    # Read one node through the arena. Returning a whole Source first would
+    # copy its complete token forest merely to select this element.
+    $runtime_assert context.source <? session.sources.length
+    return tokens.node_at(session.sources[context.source].nodes id)
+}
 syntax_ref = (id:addr context:Context @session:Session):>addr => {
     loop i in 0.. and i <? session.syntax_refs.length {
         let reference = session.syntax_refs[i]

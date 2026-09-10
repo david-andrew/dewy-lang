@@ -1,0 +1,92 @@
+from reporting import SrcFile, Span, Error, Pointer
+import p"../parser/t0.dewy" as raw
+import p"../parser/t1.dewy" as tokens
+import p"../parser/t2.dewy" as post
+import p"../parser/p0.dewy" as parser
+import p"syntax.dewy" as syntax
+
+doc"""
+Power-of-two based strings pack high bits first, padding a partial final byte
+with low zero bits. Other radixes remain reserved for dense packing, as in
+the hosted checker. Base-64 accepts its existing alphabet and URL aliases;
+padding is permitted only at the end, without imposing a new padding count.
+"""
+
+Packed:type = const [bytes:array<uint8> digits:string]
+const widths:dict<raw.BasePrefix uint8> = ['0b'->1 '0q'->2 '0o'->3 '0x'->4 '0u'->5 '0g'->6]
+pack = (literal:tokens.BasedString source:SrcFile):>Packed|Error => {
+    let width=widths.get(literal.base)
+    if width is? none {
+        let pointer=Pointer[span=literal.loc message="base-{raw.BASE_SPECS[literal.base].radix} based strings are reserved for future dense packing"]
+        return Error[srcfile=source title='based-string packing is reserved' pointers=[pointer]]
+    }
+    $runtime_assert width >=? 1 and width <=? 6
+    let chunks:array<string>=[]
+    loop part in literal.digits {chunks.push(raw.token_text(part))}
+    let digits=chunks.join
+    let padding=false
+    let packed:array<uint8>=[]
+    let pending:int64=0
+    let bits:int64=0
+    loop digit in digits {
+        if literal.base =? '0g' {
+            if digit =? '=' {padding=true continue}
+            if padding {
+                let pointer=Pointer[span=literal.loc message='`=` may only appear at the end of a base-64 based string']
+                return Error[srcfile=source title='invalid base-64 padding' pointers=[pointer]]
+            }
+        } else if digit =? '_' continue
+        let value=syntax.integer_value(digit literal.base)
+        $runtime_assert value >=? 0 and value <? 64
+        let word=value as int64
+        # At most seven residual bits precede a digit of at most six bits.
+        # These facts make all packing arithmetic fit an ordinary word.
+        $runtime_assert pending >=? 0 and pending <=? 127 and bits >=? 0 and bits <? 8
+        pending=(pending << width) | word
+        bits += (width as int64)
+        loop bits >=? 8 {
+            bits -= 8
+            $runtime_assert bits >=? 0 and bits <=? 5
+            let byte=(pending >> (bits as uint8)) & 255
+            $runtime_assert byte >=? 0 and byte <=? 255
+            packed.push(byte as uint8)
+            pending &= (1 << (bits as uint8))-1
+        }
+    }
+    if bits >? 0 {
+        $runtime_assert bits <? 8
+        let byte=pending << ((8-bits) as uint8)
+        $runtime_assert byte >=? 0 and byte <=? 255
+        packed.push(byte as uint8)
+    }
+    return Packed[packed digits]
+}
+
+include_arguments = (id:addr nodes:array<tokens.Token>):>addr? => {
+    let node=tokens.node_at(nodes id)
+    if node isnt? parser.BinOp return none
+    let op=tokens.node_at(nodes node.op)
+    if op isnt? post.Juxtapose or 'CallJuxtapose' not in? op.options return none
+    let callee=tokens.node_at(nodes node.left)
+    if callee isnt? parser.Atom return none
+    let tag=tokens.node_at(nodes callee.item)
+    return if tag is? tokens.Metatag and tag.name =? 'include_bytes' node.right else none
+}
+Included:type = const [packed:Packed path:string]
+read_file = (path:string source:SrcFile loc:Span):>Included|Error => {
+    let filename=if path.startswith('/') path else "{p(source.path).parent.path}/{path}"
+    let file=p(filename)
+    if not file.is_file {
+        let pointer=Pointer[span=loc message="no such file: {filename}"]
+        return Error[srcfile=source title='included file not found' pointers=[pointer]]
+    }
+    let content=file.read_bytes
+    if content isnt? array<uint8> return Error[srcfile=source title='could not read included file' message=filename]
+    const alphabet='0123456789abcdef'
+    let digits:array<string>=[]
+    loop byte in content {
+        digits.push(alphabet[byte // 16])
+        digits.push(alphabet[byte % 16])
+    }
+    return Included[Packed[content digits.join] filename]
+}
