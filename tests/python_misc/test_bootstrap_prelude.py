@@ -53,3 +53,12 @@ def test_native_portable_prelude_and_embedded_unicode(tmp_path):
     names = ['linux/files', 'linux/process', 'strings', 'arrays', 'path', 'unicode', 'math']
     prelude = [ROOT / f'library/{name}.dewy' for name in names]
     assert run_module(tmp_path, entry, prelude, timeout=300) == ['value:int64', 'path:p"folder/file.txt"', 'folded:string']
+
+
+def test_native_numeric_prelude(tmp_path):
+    entry = tmp_path / 'numeric.dewy'
+    entry.write_text('let value:int64=min(7 9)\n')
+    names = ['linux/files', 'linux/process', 'strings', 'arrays', 'path', 'unicode',
+             'math', 'rational', 'fixed', 'bigint', 'bigrational']
+    prelude = [ROOT / f'library/{name}.dewy' for name in names]
+    assert run_module(tmp_path, entry, prelude, timeout=600) == ['value:int64']

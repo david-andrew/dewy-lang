@@ -42,8 +42,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   `if value =? 0 return 0` excludes BigInt's zero alternative afterward.
   Source readers borrow the token arena for a single query rather than copying
   a whole source forest. Three native source comparison groups pass together.
-  The numeric prelude reaches BigRational; its contextual record construction
-  is the next checking gap under investigation.
+  Contextual record construction selects a union member before checking its
+  fields. Four record cases and two rejections pass, and the full numeric
+  prelude through BigRational now checks natively. Remaining portable
+  libraries and target services are under investigation.
 
 - The latest full regression run exposed four failures: one retained container
   slice lifetime bug and three outdated code-generation expectations. Those
