@@ -25,6 +25,23 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- The paired native build is now executable through
+  `tools/bootstrap_native.sh`. Its first Dewy attempt reached the compiler's
+  own semantic sources and stopped on optional-value interpolation in
+  proposition keys. This remains an implementation gap, not a verified
+  self-build. `tools/package_native.sh` requires matching generations,
+  binary checksums and unchanged source inputs; packaging tests use fixtures,
+  and the public installer has not switched to an unverified native release.
+
+- BigInt source arithmetic and fixed-width conversions match 27 accepted
+  and three rejected hosted source cases. Six bounds comparisons verify
+  that word narrowing requires sufficient signed/unsigned range evidence.
+  Speculative readings save arena lengths and HIR rewrite undo records;
+  nested rollback/replay and the full source/containers comparison pass.
+  Array growth now returns obsolete owned buffers to the existing arena;
+  the complete native lowering execution suite includes reuse and retained
+  value regressions.
+
 - The native checker now accepts the complete parser (`p0.dewy`, including
   t0/t1/t2 imports) with all **18 prelude modules**. The latest full source
   check completed in 1,084 seconds. Successive union type tests distribute
@@ -41,11 +58,21 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   guard is joined away. Differential bounds cases cover `min`, `max`, nested
   selections, scoped result bindings, and rejection of a false contract.
 
-- A first public native command driver builds and handles help/version. A
-  small emitted program runs through native µDewy and returns 42. The full
-  prelude compilation reached proof validation and exposed the `min` gap
-  fixed above; that complete run is being repeated. This is not yet a native
-  Dewy rebuild or a release-ready compiler pair.
+- The native command pair passes run/compile, help/version, debug-build,
+  analysis, and invalid-entry checks with a small installed prelude. Native
+  µDewy compiles the approximately 96 MiB emitted Dewy compiler. Its former
+  fixed 256 MiB arena now grows in stable, word-aligned chunks; overflow and
+  allocation failure terminate before handing out invalid storage. The wasm
+  reservation remains bounded and no longer aliases successive mappings.
+  All nine µDewy backend parity tests pass, and two native µDewy generations
+  remain byte-identical after this change.
+
+- Full-prelude validation exposed a missing projected-field proof: the guard
+  on a fixed-point value's raw field established nonzero evidence, but a
+  record refinement did not consult that route. The fixed bounds visitor
+  passes differential tests including invalidation by a subsequent field
+  write. Full native Dewy rebuilding and native release packaging remain
+  unverified; Python still supplies the initial Dewy seed.
 
 - Native local functions are hoisted with hidden read-only capture arguments,
   including defaults, recursive calls, and transitive captures. The lowering
