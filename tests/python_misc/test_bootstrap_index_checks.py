@@ -157,6 +157,19 @@ main = ():>int64 => {{
     ]]]
     let state:flow.State = []
 {chr(10).join(checks)}
+    # A saved index is not the binding's current value after another
+    # argument has assigned it. Current symbolic facts cannot prove that
+    # earlier observation, even though its nonnegative interval survives.
+    state.clear
+    flow.put(@state flow.index({i.binding_id} {array.binding_id}) ranges.UNKNOWN)
+    let observed=ranges.Interval[0 none]
+    let current=proofs.Context[env relation_context []]
+    let stale=hir.node_at(nodes {names[id(queries[5])]})
+    $runtime_assert stale is? hir.Index
+    let rejected=checks.check_index(stale observed none state current srcfile @registry symbolic=false)
+    $runtime_assert rejected is? Error
+    let method_rejected=checks.check_method_index('pop' {names[id(i)]} observed state {array.binding_id} ranges.Interval[0 1024] false current srcfile @registry symbolic=false)
+    $runtime_assert method_rejected is? Error
     return 0
 }}
 ''')

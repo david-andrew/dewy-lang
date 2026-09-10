@@ -37,6 +37,17 @@ Checker:type = [
     unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
     warnings:array<Warning>=[]
 ]
+# Construct the same declared-width environment for every invocation. Tests
+# and module drivers must not quietly use different loop-widening contracts.
+configure = (@checker:Checker):>void => {
+    let env=checker.data.env
+    let context=facts.Context[env.cap element_roots=elements.roots(checker.data.registry)]
+    loop [id binding] in env.registry.by_id {
+        let interval=values.type_interval(id env)
+        if interval isnt? none {context.widths[id]=interval}
+    }
+    checker.data.relations=relations.Context[context]
+}
 node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nodes id)
 fail = (id:addr title:string message:string @checker:Checker hint:string=''):>void => {
     if checker.problem isnt? none return
@@ -130,6 +141,21 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
             let remaining=output.normal
             loop local in locals {stores.forget(@remaining local @checker.data)}
             output.normal=remaining
+        }
+        if node.scoped {
+            let breaks:array<Exit>=[]
+            let continues:array<Exit>=[]
+            loop exit in output.breaks {
+                let remaining=exit.state
+                loop local in locals {stores.forget(@remaining local @checker.data)}
+                breaks.push(Exit[exit.levels remaining])
+            }
+            loop exit in output.continues {
+                let remaining=exit.state
+                loop local in locals {stores.forget(@remaining local @checker.data)}
+                continues.push(Exit[exit.levels remaining])
+            }
+            output.breaks=breaks output.continues=continues
         }
         return output
     }
@@ -232,7 +258,7 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     let before=if previous is? none values.length_default(checker.data.env.cap) else previous
     if validate and index isnt? none and method.name in? ['pop' 'insert'] {
         let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
-        let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' context checker.srcfile @checker.data.registry)
+        let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' context checker.srcfile @checker.data.registry symbolic=intervals.stable(index checker.data.snapshot checker.data.env.nodes))
         if error isnt? none {checker.problem=error}
     }
     if validate and method.name =? 'truncate' and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
@@ -420,7 +446,7 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
     if node is? hir.Index|hir.StringIndex {
         let sequence=if node is? hir.Index node.array else node.string
         let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
-        let checked=indices.check_index(node checker.data.snapshot.numbers.get(node.index) checker.data.snapshot.lengths.get(sequence) state context checker.srcfile @checker.data.registry)
+        let checked=indices.check_index(node checker.data.snapshot.numbers.get(node.index) checker.data.snapshot.lengths.get(sequence) state context checker.srcfile @checker.data.registry symbolic=intervals.stable(node.index checker.data.snapshot checker.data.env.nodes))
         if checked is? Error {checker.problem=checked}
         else if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
     }
