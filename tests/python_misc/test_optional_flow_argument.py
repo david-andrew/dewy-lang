@@ -58,3 +58,23 @@ let main=():>int64=>{
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ['true', '0', 'true', '0', '22', '1']
+
+
+def test_narrowed_absent_field_can_be_copied_into_an_optional(tmp_path):
+    source = '''
+Box:type=[value:bool?]
+let copy=(box:Box):>Box=>{
+    if box.value isnt? none return [value=true]
+    return [value=box.value]
+}
+let main=():>int64=>{
+    let empty=copy(Box[none])
+    let full=copy(Box[false])
+    return if empty.value is? none and full.value =? true 42 else 0
+}
+'''
+    output = tmp_path / 'absent_field.udewy'
+    output.write_text(codegen(SrcFile(None, source)))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], timeout=30, check=False)
+    assert result.returncode == 42

@@ -698,8 +698,12 @@ class _ObjectLowering:
             return replace(cell, type='int64')
         system = ty.TypeSystem()
         member = next((m for m in members if system.is_subtype(static_type, m)), None)
-        if member is None or member == 'none':
+        if member is None:
             self._target_error(node, 'a union field read of this type')
+        if member == 'none':
+            # A narrowed absent field has no payload to load. The enclosing
+            # extraction has already evaluated the receiver's effects.
+            return self._int64_literal(node.loc, 0)
         return self._optional_load_payload(replace(cell, type='int64'), member, node.loc)
 
     def _extract_object_field_identifier(
