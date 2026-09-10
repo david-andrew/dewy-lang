@@ -33,19 +33,30 @@ locals = (id:addr nodes:array<hir.AST> @result:set<addr> @seen:set<addr>):>void 
     }
     loop child in hir.children(node) {locals(child nodes @result @seen)}
 }
+# Storage exposed to mutation by one node. Keep this shared with call-boundary
+# borrowing: an array method or dictionary update matters just as much as an
+# assignment spelled with `=`. Children are visited by the caller.
+write_targets = (node:hir.AST nodes:array<hir.AST>):>array<addr> => {
+    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place|hir.IteratorExpression return [node.target]
+    if node is? hir.DictStore|hir.DictRemove {
+        let result:array<addr>=[node.keys]
+        let values=node.values
+        if values isnt? none {result.push(values)}
+        return result
+    }
+    if node is? hir.FunctionCall {
+        let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ArrayMethod and callee.name not=? 'join' return [callee.array]
+    }
+    return []
+}
+
 references = (id:addr nodes:array<hir.AST> plan:Plan symbols:set<addr> @function:Function @seen:set<addr>):>void => {
     if id in? seen return void
     seen.add(id)
     let node=hir.node_at(nodes id)
     if node is? hir.FunctionLiteral {function.dependencies.add(id) return void}
-    let target:addr?=none
-    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
-    if node is? hir.DictStore|hir.DictRemove {target=node.keys}
-    if node is? hir.FunctionCall {
-        let callee=hir.node_at(nodes node.func)
-        if callee is? hir.ArrayMethod and callee.name not=? 'join' {target=callee.array}
-    }
-    if target isnt? none {
+    loop target in write_targets(node nodes) {
         let binding=root_binding(target nodes)
         if binding isnt? none {function.writes.add(binding)}
     }

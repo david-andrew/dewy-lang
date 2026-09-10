@@ -1,0 +1,157 @@
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/analyze/effects.dewy" as effects
+import p"captures.dewy" as captures
+import p"emit.dewy" as emit
+
+# Value copies remain the default. A direct callee may borrow a read-only
+# aggregate argument when no later argument or place can change its storage.
+# This makes arena readers practical without weakening value semantics.
+Route:type = const [binding:addr fields:array<string>]
+route = (id:addr nodes:array<hir.AST>):>Route? => {
+    let current=id
+    let reverse:array<string>=[]
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        if node is? hir.MemberAccess {reverse.push(node.name) current=node.value continue}
+        # Unknown indices may alias; only fields above the index distinguish
+        # storage. Do not infer that two different index expressions differ.
+        if node is? hir.Index {reverse.clear current=node.array continue}
+        if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
+        let fields:array<string>=[]
+        loop reverse.length >? 0 {fields.push(reverse.pop)}
+        return Route[node.binding_id fields]
+    }
+}
+overlap = (a:Route b:Route):>bool => {
+    if a.binding not=? b.binding return false
+    loop i in 0.. and i <? a.fields.length and i <? b.fields.length {
+        if a.fields[i] not=? b.fields[i] return false
+    }
+    return true
+}
+arguments = (call:hir.FunctionCall):>array<addr> => {
+    let result=call.pos_args
+    loop value in call.kw_args.values {result.push(value)}
+    return result
+}
+conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AST>):>bool => {
+    let args=arguments(call)
+    loop i in 0.. and i <? args.length {
+        let pending:array<addr>=[args[i]]
+        let seen:set<addr>=set[]
+        loop pending.length >? 0 {
+            let id=pending.pop
+            if id in? seen continue
+            seen.add(id)
+            let node=hir.node_at(nodes id)
+            if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            # A later call can write through an ambient or raw alias without
+            # spelling a place here. Until call-site alias effects are modeled,
+            # keep the earlier value's snapshot across every such call.
+            if i >? position and node is? hir.FunctionCall return true
+            let targets:array<addr>=[]
+            if node is? hir.Place {targets=[node.target]}
+            else if i >? position {targets=captures.write_targets(node nodes)}
+            loop target in targets {
+                let exposed=route(target nodes)
+                if exposed is? none or overlap(source exposed) return true
+            }
+            # Earlier argument evaluation has finished; only its directly
+            # passed place remains live. Later arguments can mutate during
+            # evaluation, even if their final value is an ordinary integer.
+            if i >? position {loop child in hir.children(node) {pending.push(child)}}
+        }
+    }
+    return false
+}
+
+# A place parameter can refer to caller storage that also has a global name.
+# Conservatively exclude callees with ambient writes/unknown callbacks. The
+# semantic parameter summaries alone cannot establish that global boundary.
+ambient_writers = (plan:captures.Plan nodes:array<hir.AST> opaque_only:bool=false):>set<addr> => {
+    let dirty:set<addr>=set[]
+    loop [id function] in plan.functions {
+        if not opaque_only {loop binding in function.writes {if binding in? plan.globals {dirty.add(id)}}}
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let pending:array<addr>=[literal.body]
+        let seen:set<addr>=set[]
+        loop pending.length >? 0 {
+            let child=pending.pop
+            if child in? seen continue
+            seen.add(child)
+            let node=hir.node_at(nodes child)
+            if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            if node is? hir.Transmute {dirty.add(id)}
+            if node is? hir.FunctionCall {
+                let callee=hir.node_at(nodes node.func)
+                if callee is? hir.ExpressedIdentifier {
+                    if callee.binding_id isnt? none and callee.binding_id in? plan.named {}
+                    else if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
+                } else if callee isnt? hir.ArrayMethod|hir.FunctionLiteral {dirty.add(id)}
+            }
+            loop next in hir.children(node) {pending.push(next)}
+        }
+    }
+    let changed=true
+    loop changed {
+        changed=false
+        loop [id function] in plan.functions {
+            if id in? dirty continue
+            loop dependency in function.dependencies {
+                if dependency in? dirty {dirty.add(id) changed=true break}
+            }
+        }
+    }
+    return dirty
+}
+analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan):>dict<addr set<addr>> => {
+    let summaries=effects.analyze_effects(root nodes type_nodes)
+    let dirty=ambient_writers(plan nodes)
+    # Raw address operations and unknown callbacks can expose storage even
+    # without a declared place. They always require the ordinary value copy;
+    # writes to unrelated globals only matter for an aliasing place source.
+    let opaque=ambient_writers(plan nodes opaque_only=true)
+    let places:set<addr>=set[]
+    loop id in plan.functions.keys {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        loop parameter in effects.literal_params(literal) {
+            if parameter.place and parameter.binding_id isnt? none {places.add(parameter.binding_id)}
+        }
+    }
+    let result:dict<addr set<addr>>=[]
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(nodes id)
+        loop child in hir.children(node) {pending.push(child)}
+        if node isnt? hir.FunctionCall continue
+        let callee=hir.node_at(nodes node.func)
+        let direct=if callee is? hir.FunctionLiteral node.func else if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none plan.named.get(callee.binding_id) else none
+        if direct is? none or direct in? opaque continue
+        let literal=hir.node_at(nodes direct)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let pairs=effects.pair_arguments(node literal)
+        if pairs is? none continue
+        let allowed:set<addr>=set[]
+        let rejected:set<addr>=set[]
+        let position:addr=0
+        loop pair in pairs {
+            let source=route(pair.argument nodes)
+            let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
+            if source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes) {allowed.add(pair.argument)}
+            else {rejected.add(pair.argument)}
+            position+=1
+        }
+        # A shared HIR expression used at two positions is borrowed only if
+        # both positions are safe; one earlier snapshot must not be lost.
+        result[id]=allowed-rejected
+    }
+    return result
+}

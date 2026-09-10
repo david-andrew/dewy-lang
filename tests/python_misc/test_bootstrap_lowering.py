@@ -70,6 +70,26 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('let identity=(values:array<int64>):>array<int64>=>values\nlet main=():>int64=>{let values:array<int64>=[42] let pointer=__load_i64__(identity(values)) __store_i64__(99 pointer) return values[0]}', 42),
+    ('Box:type=[values:array<int64>]\nlet identity=(box:Box):>Box=>box\nlet main=():>int64=>{let box=Box[[42]] let pointer=__load_i64__(identity(box).values) __store_i64__(99 pointer) return box.values[0]}', 42),
+
+    ('let change=(pointer:int64):>int64=>{__store_i64__(99 pointer) return 0}\nlet read=(values:array<int64> other:int64):>int64=>values[0]\nlet main=():>int64=>{let values:array<int64>=[42] let pointer=__load_i64__(values) return read(values change(pointer))}', 42),
+
+    ('let read=(values:array<int64> other:int64):>int64=>values.length\nlet main=():>int64=>{let values:array<int64>=[40 2] return read(values values.pop)+40}', 42),
+
+    # A raw address returned from a value parameter must refer to its private
+    # snapshot; writing through it later cannot change the caller's array.
+    ('let expose=(values:array<int64>):>int64=>__load_i64__(values)\nlet main=():>int64=>{let values:array<int64>=[42] let pointer=expose(values) __store_i64__(99 pointer) return values[0]}', 42),
+    ('let read=(values:array<int64> other:int64):>int64=>values[0]\nlet main=():>int64=>{let values:array<int64>=[42] return read(values {values[0]=99; 0})}', 42),
+    ('let counter:int64=0\nlet read=(values:array<int64>):>int64=>{counter+=1 return values[0]}\nlet main=():>int64=>{let values:array<int64>=[42] let before=_arena_cursor let answer=read(values) return if before =? _arena_cursor answer else 0}', 42),
+    # Read-only calls borrow without allocation; overlapping places, later
+    # argument writes and ambient global writes still require value snapshots.
+    ('let read=(values:array<int64>):>int64=>values[0]\nlet main=():>int64=>{let values:array<int64>=[42] let before=_arena_cursor let answer=read(values) return if before =? _arena_cursor answer else 0}', 42),
+    ('Box:type=[values:array<int64>]\nlet read=(box:Box):>int64=>box.values[0]\nlet main=():>int64=>{let box=Box[[42]] let before=_arena_cursor let answer=read(box) return if before =? _arena_cursor answer else 0}', 42),
+    ('let change=(@values:array<int64>):>int64=>{values[0]=99 return 0}\nlet read=(values:array<int64> other:int64):>int64=>values[0]\nlet main=():>int64=>{let values:array<int64>=[40] return read(values change(@values))+2}', 42),
+    ('let read=(values:array<int64> @other:array<int64>):>int64=>{other[0]=99 return values[0]}\nlet main=():>int64=>{let values:array<int64>=[40] return read(values @values)+2}', 42),
+    ('Box:type=[values:array<int64> other:int64]\nlet read=(values:array<int64> @other:int64):>int64=>{other=99 return values[0]}\nlet main=():>int64=>{let box=Box[[42] 0] let before=_arena_cursor let answer=read(box.values @box.other) return if before =? _arena_cursor answer else 0}', 42),
+    ('let shared:array<int64>=[40]\nlet read=(values:array<int64>):>int64=>{shared[0]=99 return values[0]}\nlet outer=(@values:array<int64>):>int64=>read(values)\nlet main=():>int64=>outer(@shared)+2', 42),
     ('Box:type=[n:int64]\nlet main=():>int64=>{let box=Box[40] let read=():>int64=>box.n box.n=42 return read()}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40] let read=():>int64=>values[0] values[0]=42 return read()}', 42),
     ('let main=():>int64=>{let value:int64|none=42 let read=():>int64=>if value is? int64 value else 0 return read()}', 42),
