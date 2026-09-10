@@ -1,0 +1,49 @@
+import p"context.dewy" as contexts
+import p"ty.dewy" as types
+import p"subtyping.dewy" as subtyping
+import p"dispatch.dewy" as dispatch
+import p"builtins.dewy" as builtins
+import p"numeric_values.dewy" as numeric_values
+
+# Type products choose a numeric representation and compose physical factors.
+# Dimensions themselves have no runtime storage. Singleton numeric factors
+# retain exact scales, as in the prelude's `1 * Time` unit constants.
+numeric = (id:addr context:contexts.Context @session:contexts.Session):>bool =>
+    subtyping.is_subtype(id types.primitive('number' @session.types) session.links @session.types) or
+    numeric_values.is_family(id 'Rational' context session) or numeric_values.is_family(id 'BigRational' context session) or numeric_values.is_family(id 'Fixed' context session)
+
+number_product = (left:addr right:addr @session:contexts.Session):>addr? => {
+    let number=types.primitive('number' @session.types)
+    if not subtyping.is_subtype(left number session.links @session.types) or not subtyping.is_subtype(right number session.links @session.types) return none
+    let a=types.node_at(session.types left)
+    let b=types.node_at(session.types right)
+    if a is? types.IntegerLiteralType and b is? types.IntegerLiteralType return types.integer_literal(a.value * b.value @session.types)
+    if types.same_type(left right session.types) return left
+    if subtyping.is_subtype(left right session.links @session.types) return right
+    if subtyping.is_subtype(right left session.links @session.types) return left
+    let real=types.primitive('real' @session.types)
+    if a is? types.IntegerLiteralType and subtyping.is_subtype(right real session.links @session.types) return right
+    if b is? types.IntegerLiteralType and subtyping.is_subtype(left real session.links @session.types) return left
+    return dispatch.promote_type(left right dispatch.System[session.links builtins.promotions] @session.types)
+}
+product = (left:addr right:addr context:contexts.Context @session:contexts.Session):>addr? => {
+    let a=types.node_at(session.types left)
+    let b=types.node_at(session.types right)
+    if a is? types.DimensionType and b is? types.DimensionType return types.multiply_dimensions(left right @session.types)
+    if a is? types.DimensionType {
+        if b is? types.QuantityType return types.quantity_type(b.number types.multiply_dimensions(left b.dimension @session.types) @session.types)
+        if numeric(right context @session) return types.quantity_type(right left @session.types)
+    }
+    if b is? types.DimensionType {
+        if a is? types.QuantityType return types.quantity_type(a.number types.multiply_dimensions(a.dimension right @session.types) @session.types)
+        if numeric(left context @session) return types.quantity_type(left right @session.types)
+    }
+    if a is? types.QuantityType or b is? types.QuantityType {
+        let number=number_product(if a is? types.QuantityType a.number else left if b is? types.QuantityType b.number else right @session)
+        if number is? none return none
+        let empty=types.dimension([] @session.types)
+        let dimension=types.multiply_dimensions(if a is? types.QuantityType a.dimension else empty if b is? types.QuantityType b.dimension else empty @session.types)
+        return if types.dimension_at(dimension session.types).powers.length =? 0 number else types.quantity_type(number dimension @session.types)
+    }
+    return number_product(left right @session)
+}

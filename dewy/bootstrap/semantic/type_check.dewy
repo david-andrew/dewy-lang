@@ -16,6 +16,8 @@ import p"type_queries.dewy" as views
 import p"type_display.dewy" as display
 import p"subtyping.dewy" as subtyping
 import p"type_aliases.dewy" as aliases
+import p"type_products.dewy" as type_products
+import p"numeric_values.dewy" as numeric_values
 
 doc"""
 Resolve source type expressions into the compilation's type arena.
@@ -641,6 +643,15 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
                 return refine(boolean [when_true(p true) when_true(facts.negated(p) false)] @session)
             }
         }
+        if op =? '*' {
+            let left=resolve(node.left context @session)
+            if left is? Error return left
+            let right=resolve(node.right context @session)
+            if right is? Error return right
+            let product=type_products.product(left right context @session)
+            if product is? none return contexts.problem(id 'invalid type product' "cannot form a result type from `{display.type_to_dewy(left session.types)} * {display.type_to_dewy(right session.types)}`" context session)
+            return product
+        }
         if op =? 'TypeParamJuxtapose' return parameterize(node id context @session)
         if op =? ':>' {
             let args = function_args(node.left context @session)
@@ -723,6 +734,14 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
         let bound = bind_subjects(selected promises id context @session)
         if bound is? Error return bound
         return refine(selected bound @session)
+    }
+    if name =? 'rational' and lookup('rational' context session) is? none and arguments.length =? 1 and promises.length =? 0 {
+        let part=types.node_at(session.types arguments[0])
+        # Part types explicitly choose the prelude representation. This is
+        # distinct from a source alias named rational, which takes precedence.
+        if types.is_primitive(part 'int64') return resolve_name('Rational' id context @session)
+        if types.is_primitive(part 'int') or numeric_values.is_family(arguments[0] 'BigInt' context session) return resolve_name('BigRational' id context @session)
+        return contexts.problem(id 'rational parts must be int64 or bigint' display.type_to_dewy(arguments[0] session.types) context session)
     }
     if name =? 'set' and arguments.length =? 1 return views.set_type(word_element(arguments[0] @session) @session.types)
     if (name =? 'dict' or name =? 'totaldict') and arguments.length =? 2 {
