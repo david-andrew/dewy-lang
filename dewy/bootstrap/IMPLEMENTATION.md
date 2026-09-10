@@ -25,6 +25,32 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native scalar legalization now executes ten source programs through native
+  parsing/checking/lowering/emission and µDewy: empty input, type aliases,
+  global startup, forward calls, local shadowing, branches, loops, narrow word
+  wrapping, and compound bitwise updates. This test intentionally enters below
+  the full proof driver; it is not a public unchecked compilation route.
+
+- BigInt aliases and annotated numeric boundaries use the prelude's own type.
+  Exact constants materialize into canonical base-2^32 limbs; signed and
+  unsigned words call the ordinary prelude conversion helpers. Oversized
+  unannotated integers retain their abstract type for representation analysis.
+  The native constant and boundary comparisons pass. Runtime arithmetic
+  dispatch and the whole-program representation pass remain pending.
+
+- Literal-member equality now uses ordinary union tag narrowing, so an early
+  `if value =? 0 return 0` excludes BigInt's zero alternative afterward.
+  Source readers borrow the token arena for a single query rather than copying
+  a whole source forest. Three native source comparison groups pass together.
+  The numeric prelude reaches BigRational; its contextual record construction
+  is the next checking gap under investigation.
+
+- The latest full regression run exposed four failures: one retained container
+  slice lifetime bug and three outdated code-generation expectations. Those
+  are fixed; all 288 tests in the affected ownership/execution groups pass.
+  Returning a string view's container provenance is necessary even when its
+  descriptor also requires temporary storage.
+
 - Native µDewy emission accepts lowered HIR expressions, statements, function
   units, globals, ordered startup, and an entry wrapper. Twenty-two expression
   forms match hosted spelling; emitted direct/startup/empty programs compile
