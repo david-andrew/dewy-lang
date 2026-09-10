@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native assertion checking covers `$assert`, `$runtime_assert`, `$expect`,
+  and `$fail`, with compile obligations, failure-only messages, continuation
+  facts, and collected warnings. Nineteen accepted and fourteen rejected
+  programs agree with the hosted checker. Runtime reporting remains deferred
+  HIR for the native lowering stage. Nested membership tests retain the key
+  proof without assuming their search-position temporary escapes the test.
+
 - `semantic/value_sets.dewy` supplies exact integer coverage for match arms.
   Sorted disjoint intervals retain holes, unlike the convex bounds used by
   flow analysis. Forty native comparisons exercise union, intersection,

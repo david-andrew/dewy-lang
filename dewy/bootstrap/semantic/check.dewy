@@ -1,4 +1,4 @@
-from reporting import Error, Span
+from reporting import Error, Span, Warning, Pointer
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"../parser/t2.dewy" as post
@@ -207,6 +207,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let node = tokens.node_at(source.nodes id)
+    if node is? parser.Directive return directive(id node env @session)
     if node is? parser.Ambiguous return ambiguous(id node env @session expected=expected call_target=call_target allow_place=allow_place)
     let number = syntax.integer(id source.nodes)
     if number isnt? none {
@@ -742,6 +743,16 @@ select_type = (current:addr tested:addr truth:bool @session:contexts.Session):>a
     if truth and subtyping.is_subtype(tested current session.links @session.types) return tested
     return if truth overlap else types.intersect([current types.negate(tested @session.types)] @session.types)
 }
+# Only a search emitted directly before its branch has a reusable result
+# slot there. Nested short-circuit searches still prove membership, but the
+# enclosing continuation must perform its own lookup for the position.
+hoist_condition = (condition:addr @session:contexts.Session):>void => {
+    let value=node_at(condition session)
+    if value is? hir.DictContains {
+        $runtime_assert condition <? session.hir.length
+        session.hir[condition]=hir.DictContains[value.loc value.value_type value.keys value.key value.position true]
+    }
+}
 refined = (condition:addr truth:bool env:Environment @session:contexts.Session invalidated:set<addr>=set[] moved:set<addr>=set[]):>Environment => {
     let result = fork(env @session)
     let node = node_at(condition session)
@@ -758,7 +769,7 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
     if node is? hir.DictContains and truth {
         let array = node_at(node.keys session)
         if array is? hir.MemberAccess {
-            let position = node.position
+            let position = if node.hoisted node.position else none
             loop binding in predicate_effects.read_bindings(node.keys session.hir) { if binding in? moved { position = none break } }
             container_state.remember(array.value node.key result.state @session position=position)
         }
@@ -830,6 +841,7 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
         if keyword isnt? tokens.Keyword or keyword.name not=? 'if' return pending(arm_id 'loop transfer and iterator checking' env session)
         let condition = expression(arm.parts[1] remaining @session expected=types.primitive('bool' @session.types))
         if condition is? Error return condition
+        hoist_condition(condition @session)
         let positive = refined(condition true remaining @session)
         let body = expression(arm.parts[2] positive @session expected=expected)
         if body is? Error return body
@@ -1593,6 +1605,7 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
         loop predicate_id in predicates {
             let predicate = expression(predicate_id body_env @session expected=types.primitive('bool' @session.types))
             if predicate is? Error return predicate
+            hoist_condition(predicate @session)
             body_env = refined(predicate true body_env @session)
             loop index in 0.. and index <? iterators.length {
                 let iter = node_at(iterators[index] session)
@@ -1620,6 +1633,7 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
         let value = expression(arm.parts[1] env @session expected=types.primitive('bool' @session.types))
         if value is? Error return value
         condition = value
+        hoist_condition(value @session)
         body_env = refined(value true env @session)
     }
     $runtime_assert condition isnt? none
@@ -2035,4 +2049,115 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     session.registry.by_id[binding_id] = binding
     session.hoisted.push(declared)
     return put(hir.ExpressedIdentifier[callee.loc resolved name binding_id] @session)
+}
+
+
+# Keep source diagnostics beside their proof obligation. Reporting is a
+# runtime-library operation, separate from checking the condition and from
+# carrying facts along the continuation that can actually be reached.
+const assertion_whitespace=set['\u0009' '\u000a' '\u000b' '\u000c' '\u000d' '\u001c' '\u001d' '\u001e' '\u001f' '\u0020' '\u0085' '\u00a0' '\u1680' '\u2000' '\u2001' '\u2002' '\u2003' '\u2004' '\u2005' '\u2006' '\u2007' '\u2008' '\u2009' '\u200a' '\u2028' '\u2029' '\u202f' '\u205f' '\u3000']
+assertion_source = (id:addr env:Environment session:contexts.Session):>string => {
+    let source = contexts.source_at(env.lexical session)
+    let span = tokens.node_at(source.nodes id).loc
+    let text = source.srcfile.body
+    $runtime_assert span.start <=? span.stop and span.stop <=? text.length
+    if span.start =? span.stop return ''
+    # Match the hosted diagnostic's whitespace normalization, including
+    # Unicode separators; source offsets themselves remain untouched.
+    let parts:array<string>=[]
+    let pending_space:bool=false
+    let i=span.start
+    loop i <? span.stop {
+        let char=text[i]
+        let space=char in? assertion_whitespace
+        if space { pending_space=parts.length >? 0 }
+        else {
+            if pending_space { parts.push(' ') pending_space=false }
+            parts.push(char)
+        }
+        i += 1
+    }
+    return parts.join
+}
+assertion_failure = (id:addr node:parser.Directive condition:addr? text:string env:Environment @session:contexts.Session):>addr|Error => {
+    let message:addr? = none
+    let dimmed:Span? = none
+    if node.message isnt? none {
+        let checked = expression(node.message env @session expected=types.primitive('string' @session.types))
+        if checked is? Error return checked
+        message = checked
+        if node.condition isnt? none {
+            let condition_span = contexts.node_at(node.condition env.lexical session).loc
+            let message_span = contexts.node_at(node.message env.lexical session).loc
+            dimmed = Span[condition_span.stop message_span.stop]
+        }
+    }
+    let mode:'assert'|'expect'|'fail' = if node.name =? 'expect' 'expect' else if node.name =? 'fail' 'fail' else 'assert'
+    return put(hir.RuntimeFailure[node.loc types.primitive('never' @session.types) contexts.source_at(env.lexical session).srcfile text mode condition message dimmed] @session)
+}
+directive = (id:addr node:parser.Directive env:Environment @session:contexts.Session):>addr|Error => {
+    if node.name =? 'abstract' return problem(id '`$abstract` marks a `type of` mint' 'it belongs on the value of a type alias' env session)
+    if node.name =? 'breakpoint' return pending(id 'debugger binding snapshots and breakpoint reporting' env session)
+    if node.name =? 'expect' or node.name =? 'fail' {
+        if env.return_type is? none return problem(id "`${node.name}` outside a function" 'a failed expectation returns from the enclosing void function' env session)
+        if not types.is_primitive(types.node_at(session.types env.return_type) 'void') return problem(id "`${node.name}` in a function that returns a value" 'expectations belong in void functions' env session)
+    }
+    if node.name =? 'fail' return assertion_failure(id node none 'fail' env @session)
+    if node.name not in? ['assert' 'runtime_assert' 'expect'] return pending(id "directive `${node.name}`" env session)
+    $runtime_assert node.condition isnt? none
+    let condition = expression(node.condition env @session expected=types.primitive('bool' @session.types))
+    if condition is? Error return condition
+    let value = node_at(condition session)
+    hoist_condition(condition @session)
+    let text = assertion_source(node.condition env session)
+    let dimmed:Span? = none
+    if node.message isnt? none {
+        let condition_span = contexts.node_at(node.condition env.lexical session).loc
+        let message_span = contexts.node_at(node.message env.lexical session).loc
+        dimmed = Span[condition_span.stop message_span.stop]
+    }
+    let empty = types.primitive('void' @session.types)
+    if node.name =? 'assert' {
+        let message:string? = none
+        if node.message isnt? none {
+            let checked = expression(node.message env @session)
+            if checked is? Error return checked
+            let literal = node_at(checked session)
+            if literal isnt? hir.String return problem(node.message 'a compile-time assertion message must be a string literal' 'the message cannot depend on runtime values' env session)
+            message = literal.content
+        }
+        if value is? hir.Bool {
+            if not value.value return problem(node.condition 'assertion refuted' if message is? none 'this condition is false at compile time' else message env session)
+            return void_at(id env @session)
+        }
+        return put(hir.Assert[node.loc empty condition text message dimmed=dimmed] @session)
+    }
+    if value is? hir.Bool {
+        if not value.value and node.name not=? 'expect' return problem(node.condition 'assertion refuted' 'this condition is false at compile time' env session)
+        if not value.value {
+            let syntax = contexts.node_at(node.condition env.lexical session)
+            let literal = if syntax is? parser.Atom contexts.node_at(syntax.item env.lexical session) is? tokens.Bool else false
+            if not literal {
+                let pointer=Pointer[span=syntax.loc message='this condition is false']
+                session.warnings.push(Warning[srcfile=contexts.source_at(env.lexical session).srcfile title='expectation refuted at compile time' pointers=[pointer] hint='the test will fail when it runs'])
+            }
+            return assertion_failure(id node condition text env @session)
+        }
+        # Dead messages are still checked, matching the hosted source checker.
+        if node.message isnt? none {
+            let message = expression(node.message env @session)
+            if message is? Error return message
+        }
+        return void_at(id env @session)
+    }
+    let failure_env = refined(condition false env @session)
+    let failed = assertion_failure(id node condition text failure_env @session)
+    if failed is? Error return failed
+    let failure = put(hir.Block[node.loc types.primitive('never' @session.types) [failed] true] @session)
+    let arm = put(hir.IfArm[node.loc empty condition void_at(id env @session)] @session)
+    let flow = put(hir.Flow[node.loc empty [arm] failure] @session)
+    let obligation = put(hir.Assert[node.loc empty condition text none runtime=true dimmed=dimmed expect=node.name =? 'expect'] @session)
+    let held = refined(condition true env @session)
+    join_reads([held] env @session)
+    return put(hir.Block[node.loc empty [obligation flow] false] @session)
 }

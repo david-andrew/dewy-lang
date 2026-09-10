@@ -122,6 +122,21 @@ Assert = type of AST & [
     expect:bool=false
 ]
 
+# A failure branch, retaining the original source and checked message until
+# runtime reporting helpers are installed. `assert` reports and exits 101;
+# `expect`/`fail` record a test failure and return from the enclosing void
+# function. The message runs only on this path. `condition` is diagnostic
+# metadata referring to the guard's already evaluated operands: lowering
+# must retain those values, never evaluate the condition a second time.
+RuntimeFailure = type of AST & [
+    srcfile:SrcFile
+    source:string
+    mode:'assert'|'expect'|'fail'
+    condition:addr?=none
+    message:addr?=none
+    dimmed:Span?=none
+]
+
 # Exit an enclosing loop, optionally selected through a scope metatag.
 Break = type of AST & [
     label:(string)?=none
@@ -314,6 +329,8 @@ DictContains = type of AST & [
     keys:addr
     key:addr
     position:(string)?=none
+    # Assertions retain the tested entry position for their continuation.
+    hoisted:bool=false
 ]
 
 # ``d.pop(key)`` (proven key): remove the entry, shifting later entries
@@ -737,6 +754,10 @@ children = (node:AST):>array<addr> => {
     }
     if node is? Assert {
         result.push(node.condition)
+        return result
+    }
+    if node is? RuntimeFailure {
+        if node.message isnt? none { result.push(node.message) }
         return result
     }
     if node is? ShortCircuit | SetAlgebra | StringEqual | StringConcat {

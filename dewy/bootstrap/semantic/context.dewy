@@ -1,4 +1,4 @@
-from reporting import SrcFile, Error, Pointer
+from reporting import SrcFile, Error, Pointer, Warning
 import p"../targets.dewy" as targets
 import p"../parser/t1.dewy" as tokens
 import p"ty.dewy" as types
@@ -28,6 +28,8 @@ PendingAlias:type = const [expression:SyntaxRef]
 # A branch copies this state; declaration/type/HIR identities remain shared.
 ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
 Session:type = [
+    # Checking collects diagnostics; the invocation decides how to render them.
+    warnings:array<Warning>=[]
     target:targets.Target=$target
     sources:array<Source>=[]
     read_states:array<ReadState>=[]
