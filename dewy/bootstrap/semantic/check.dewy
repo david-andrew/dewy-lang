@@ -1007,6 +1007,32 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     return none
 }
+# An unannotated literal parameter takes the corresponding expected slot's
+# input type. The parameter's own spelling remains its lexical name. Explicit
+# annotations and place parameters keep their declared contracts; generic
+# expected functions require their own instantiation before contextual use.
+contextual_parameters = (literal:parser.BinOp shape:types.FunctionType expected:addr? env:Environment session:contexts.Session):>array<types.PosOrKwArg> => {
+    let parameters=shape.pos_or_kw
+    if expected is? none return parameters
+    let wanted=types.node_at(session.types types.strip_refinement(expected session.types))
+    if wanted isnt? types.FunctionType or wanted.type_params.length >? 0 return parameters
+    let signature=contexts.node_at(literal.left env.lexical session)
+    let parameter_id=if signature is? parser.BinOp and source_views.is_operator(signature.op ':>' env.lexical session) signature.left else literal.left
+    let syntax=contexts.node_at(parameter_id env.lexical session)
+    let rows:array<addr>=if syntax is? parser.Block syntax.inner else [parameter_id]
+    loop i in 0.. and i <? parameters.length and i <? wanted.pos_or_kw.length and i <? rows.length {
+        let parameter=parameters[i]
+        # Defaults already supply a concrete inferred type in function_args.
+        if parameter.place or not parameter.required continue
+        let bare=source_views.identifier(rows[i] env.lexical session)
+        if bare is? none continue
+        let type=types.strip_refinement(wanted.pos_or_kw[i].value_type session.types)
+        if types.is_primitive(types.node_at(session.types type) 'any') continue
+        parameters[i]=types.PosOrKwArg[parameter.name type parameter.required parameter.place]
+    }
+    return parameters
+}
+
 function_literal = (id:addr literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false name:string='<anonymous>' method:contexts.MethodEntry?=none owner:addr?=none expected_signature:addr?=none):>addr|Error => {
     let resolved = function_shape(literal env @session concrete=concrete)
     if resolved is? Error return resolved
@@ -1016,6 +1042,7 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
         let reference = contexts.syntax_ref(id env.lexical @session)
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
+    shape.pos_or_kw=contextual_parameters(literal shape expected_signature env session)
     let contract=shape.ret
     if expected_signature isnt? none {
         let required=types.node_at(session.types types.strip_refinement(expected_signature session.types))
