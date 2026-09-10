@@ -46,6 +46,16 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   tests cover both outcomes of each operator, impossible paths, and a later
   assignment that invalidates an earlier operand. Atomic proof transfer is
   supplied as a typed function argument.
+  Expression interval transfer now consumes evaluated child snapshots for
+  scalar reads, arithmetic, casts, field contracts, lengths, and slices.
+  Mutation removes symbolic identities while preserving already evaluated
+  values; 128 numeric/length queries match the hosted evaluator, with added
+  tests for arguments read before a later write. Selected function-result
+  contracts transfer argument intervals, order/index facts, and slice-window
+  bounds, and return compound boolean promises to the predicate traversal.
+  Compiled tests cover conditional/unconditional promises, impossible paths,
+  and invalidation of historical argument values. These kernels still need
+  the complete effect-ordered bounds traversal before native compilation.
 
 - Hosted cleanup now releases owned aggregate payloads in record fields and
   array union cells, including recursive aliases. Brace-less return, break,

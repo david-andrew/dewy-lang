@@ -50,14 +50,14 @@ argument_value = (id:addr nodes:array<hir.AST>):>addr => {
     let node = hir.node_at(nodes id)
     return if node is? hir.Place node.target else id
 }
-call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types.Type>):>addr? => {
+call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types.Type> unwrap:bool=true):>addr? => {
     let signature = call_function_type(id nodes type_nodes)
     let call = hir.node_at(nodes strip_casts(id nodes))
     if signature is? none or call isnt? hir.FunctionCall return none
-    if name in? call.kw_args return argument_value(call.kw_args[name] nodes)
+    if name in? call.kw_args return if unwrap argument_value(call.kw_args[name] nodes) else call.kw_args[name]
     loop i in 0.. and i <? signature.pos_or_kw.length {
         if signature.pos_or_kw[i].name =? name {
-            if i <? call.pos_args.length return argument_value(call.pos_args[i] nodes)
+            if i <? call.pos_args.length return if unwrap argument_value(call.pos_args[i] nodes) else call.pos_args[i]
             return none
         }
     }

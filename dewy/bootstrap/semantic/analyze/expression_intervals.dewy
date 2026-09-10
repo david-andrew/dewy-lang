@@ -1,0 +1,251 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"refinement_facts.dewy" as refinements
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+
+doc"""
+Interval transfer for one evaluated expression.
+
+The traversal evaluates children and their effects first. This module reads
+their results from a snapshot; it never walks a call or assignment again to
+recover a number. In particular, an earlier argument keeps the value it had
+before a later argument changed its source binding. Snapshots belong to one
+evaluation path, and must not be reused across loop iterations or branches.
+
+Numeric values and sequence lengths are separate results. Neither proves an
+index, cast, or refinement obligation by itself: the driver checks those at
+the corresponding evaluation boundary before lowering can consume the HIR.
+"""
+
+Snapshot:type = [
+    numbers:dict<addr ranges.Interval>=[] lengths:dict<addr ranges.Interval>=[]
+    terms:dict<addr terms.Offset>=[] sequences:dict<addr addr>=[]
+]
+# A stored result retains its interval after a write, but no longer denotes
+# the binding's current value. The traversal also forgets affected projected
+# route ids when a whole record or container is replaced.
+forget = (@snapshot:Snapshot binding:addr):>void => {
+    let removed:array<addr>=[]
+    loop [id term] in snapshot.terms {if term.term.binding_id =? binding {removed.push(id)}}
+    loop id in removed {if id in? snapshot.terms {snapshot.terms.pop(id);}}
+    removed.clear
+    loop [id sequence] in snapshot.sequences {if sequence =? binding {removed.push(id)}}
+    loop id in removed {if id in? snapshot.sequences {snapshot.sequences.pop(id);}}
+}
+stable = (id:addr snapshot:Snapshot nodes:array<hir.AST>):>bool => {
+    let pending:array<addr>=[id]
+    loop pending.length >? 0 {
+        let current=pending.pop
+        let node=hir.node_at(nodes current)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and current not in? snapshot.terms return false
+        loop child in hir.children(node) {pending.push(child)}
+    }
+    return true
+}
+meet = (left:ranges.Interval? right:ranges.Interval?):>ranges.Interval? => {
+    if left is? none return right
+    if right is? none return left
+    return ranges.intersect(left right)
+}
+own_bounds = (id:addr env:values.Environment):>ranges.Interval? => {
+    let node=types.node_at(env.types id)
+    if node isnt? types.RefinedType return none
+    let direct:array<propositions.Proposition>=[]
+    loop p in node.propositions {
+        if p.term is? none and propositions.field(p) is? none {direct.push(p)}
+    }
+    return values.bounds_of(direct env.cap)
+}
+identifier = (node:hir.ExpressedIdentifier state:facts.State env:values.Environment):>ranges.Interval? => {
+    let interval:ranges.Interval?=none
+    if node.binding_id isnt? none {interval=facts.lookup(state facts.value(facts.Term[node.binding_id]))}
+    interval=meet(interval own_bounds(node.value_type env))
+    if interval isnt? none {
+        if node.binding_id isnt? none and facts.nonzero(node.binding_id).key in? state {
+            let excluded=ranges.exclude(interval 0)
+            return if excluded is? none ranges.EMPTY else excluded
+        }
+        return interval
+    }
+    let seen:set<addr>=set[]
+    let constant=values.constant_binding(node.binding_id env.nodes env.types env.registry @seen)
+    if constant isnt? none return constant
+    let declared=if node.binding_id is? none none else values.type_interval(node.binding_id env)
+    return meet(declared values.fixed_bounds(node.value_type env.types))
+}
+
+# The array's declared length can be wider than the literal carried through
+# a cast. A dynamic read uses the current route and field contract instead.
+exact_length = (id:addr env:values.Environment):>bigint? => {
+    let node=types.node_at(env.types types.unfold(types.strip_refinement(id env.types) env.types))
+    if node is? types.ArrayType|types.StringType return node.length
+    if node is? types.StringLiteralType return node.value.length
+    return none
+}
+length = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
+    let node=hir.node_at(env.nodes id)
+    let exact=exact_length(node.value_type env)
+    if exact isnt? none return ranges.exact(exact)
+    if node is? hir.ValueCast|hir.RepresentationCast return snapshot.lengths.get(node.expr)
+    if node is? hir.Obligation return snapshot.lengths.get(node.value)
+    if node is? hir.StringSlice return slice_length(node state snapshot env @registry)
+    let declared=ranges.propositions_interval(expressions.member_invariant(id env.nodes env.types) 'length')
+    let sequence=terms.sequence_id(id env @registry)
+    if sequence is? none return if declared is? none none else ranges.intersect(values.length_default(env.cap) declared)
+    let known=facts.lookup(state facts.value(facts.Term[sequence 'length']))
+    return meet((if known is? none values.length_default(env.cap) else known) declared)
+}
+slice_length = (node:hir.StringSlice state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
+    let range=hir.node_at(env.nodes node.range)
+    $runtime_assert range is? hir.Range
+    let bounds=if range.bounds is? none '[]' else range.bounds
+    let start=if range.left is? none ranges.exact(0) else snapshot.numbers.get(range.left)
+    let end=if range.right is? none snapshot.lengths.get(node.string) else snapshot.numbers.get(range.right)
+    let shift=(if range.right isnt? none and bounds.endswith(']') 1 else 0)-(if bounds.startswith('(') 1 else 0)
+    let bound:ranges.Interval?=none
+    if range.left isnt? none {
+        let first=snapshot.terms.get(range.left)
+        let last:terms.Offset?=none
+        if range.right isnt? none {last=snapshot.terms.get(range.right)}
+        else {
+            let sequence=snapshot.sequences.get(node.string)
+            if sequence isnt? none {last=terms.Offset[facts.Term[sequence 'length'] 0]}
+        }
+        if first isnt? none and last isnt? none {
+            let lower=facts.lookup(state facts.order(first.term last.term))
+            let upper=facts.lookup(state facts.order(last.term first.term))
+            let delta=last.shift-first.shift
+            bound=ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta)]
+        }
+    }
+    let result=ranges.binary('__sub__' end start ranges.Interval[(-9223372036854775808) 9223372036854775807] bound)
+    if result is? none return none
+    # Endpoint validation is the driver's responsibility. Once validated,
+    # reversed endpoints select an empty string instead of a negative length.
+    return ranges.intersect(ranges.Interval[ranges.shift_endpoint(result.lower shift) ranges.shift_endpoint(result.upper shift) result.capped] ranges.Interval[0 none])
+}
+
+difference = (left:addr right:addr state:facts.State snapshot:Snapshot):>ranges.Interval? => {
+    let a=snapshot.terms.get(left)
+    let b=snapshot.terms.get(right)
+    if a is? none or b is? none return none
+    let delta=a.shift-b.shift
+    if facts.same_term(a.term b.term) return ranges.exact(delta)
+    let lower=facts.lookup(state facts.order(b.term a.term))
+    let upper=facts.lookup(state facts.order(a.term b.term))
+    return ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta)]
+}
+call = (id:addr node:hir.FunctionCall state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
+    let function=hir.node_at(env.nodes node.func)
+    let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier function.name else ''
+    let result:ranges.Interval?=none
+    let arithmetic=false
+    if node.pos_args.length =? 1 {
+        let inner=snapshot.numbers.get(node.pos_args[0])
+        if node.integer_operation =? 'identity' {result=inner}
+        else if node.integer_operation =? 'narrow' {result=ranges.fits(inner values.result_width(node.value_type env.types))}
+        else if name =? '__unary_sub__' {
+            arithmetic=true
+            if inner isnt? none {
+                result=ranges.fits(ranges.Interval[(if inner.upper is? none none else -inner.upper) (if inner.lower is? none none else -inner.lower)] values.result_width(node.value_type env.types))
+            }
+        }
+    }
+    else if node.pos_args.length =? 2 and name is? ranges.Operation {
+        arithmetic=true
+        let bound=if name =? '__sub__' difference(node.pos_args[0] node.pos_args[1] state snapshot) else none
+        result=values.binary(name snapshot.numbers.get(node.pos_args[0]) snapshot.numbers.get(node.pos_args[1]) node.value_type env.types bound floor=node.integer_operation isnt? none)
+    }
+    if not arithmetic and node.integer_operation is? none {result=meet(result values.fixed_bounds(node.value_type env.types))}
+    let signature=expressions.call_function_type(id env.nodes env.types)
+    if signature isnt? none {result=meet(result own_bounds(signature.ret env))}
+    return result
+}
+
+transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
+    let node=hir.node_at(env.nodes id)
+    if node is? hir.Obligation return snapshot.numbers.get(node.value)
+    let type=types.node_at(env.types node.value_type)
+    if type is? types.IntegerLiteralType return ranges.exact(type.value)
+    if node is? hir.Integer return ranges.exact(node.value)
+    if node is? hir.ObjectLiteral and node.integer_value isnt? none return ranges.exact(node.integer_value)
+    if node is? hir.ExpressedIdentifier return identifier(node state env)
+    if node is? hir.ValueCast {
+        let inner=meet(snapshot.numbers.get(node.expr) values.fixed_bounds(hir.node_at(env.nodes node.expr).value_type env.types))
+        return ranges.fits(inner values.result_width(node.value_type env.types))
+    }
+    if node is? hir.ArrayLength {
+        let length=snapshot.lengths.get(node.array)
+        return if length is? none values.length_default(env.cap) else length
+    }
+    if node is? hir.StringLength {
+        let length=snapshot.lengths.get(node.string)
+        return if length is? none values.length_default(env.cap) else length
+    }
+    if node is? hir.FunctionCall return call(id node state snapshot env @registry)
+    if node is? hir.MemberAccess {
+        let route=bindings.array_route_id(id env.nodes @registry)
+        let interval=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
+        interval=meet(interval values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
+        return meet(interval refinements.field_interval(node state env @registry))
+    }
+    if node is? hir.ForwardingAccess return values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap)
+    if node is? hir.Index|hir.DictLookup|hir.DictRemove return own_bounds(node.value_type env)
+    if node is? hir.Block and node.items.length >? 0 return snapshot.numbers.get(node.items[node.items.length-1])
+    return none
+}
+affine = (id:addr snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>terms.Offset? => {
+    let node=hir.node_at(env.nodes id)
+    if node is? hir.ValueCast return snapshot.terms.get(node.expr)
+    if node is? hir.Obligation return snapshot.terms.get(node.value)
+    if node is? hir.ArrayLength|hir.StringLength {
+        let source=if node is? hir.ArrayLength node.array else node.string
+        let sequence=snapshot.sequences.get(source)
+        return if sequence is? none none else terms.Offset[facts.Term[sequence 'length'] 0]
+    }
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess {
+        let term=terms.binding_term(id env @registry)
+        return if term is? none none else terms.Offset[term 0]
+    }
+    if node isnt? hir.FunctionCall return none
+    if node.pos_args.length =? 1 and (node.integer_operation =? 'identity' or node.integer_operation =? 'narrow') return snapshot.terms.get(node.pos_args[0])
+    if node.pos_args.length not=? 2 return none
+    let function=hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return none
+    loop side in 0..1 {
+        if side =? 1 and function.name =? '__sub__' break
+        let value=if side =? 0 node.pos_args[0] else node.pos_args[1]
+        let other=if side =? 0 node.pos_args[1] else node.pos_args[0]
+        let base=snapshot.terms.get(value)
+        let constant=snapshot.numbers.get(other)
+        if base isnt? none and constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) {
+            return terms.Offset[base.term base.shift+(if function.name =? '__add__' constant.lower else -constant.lower)]
+        }
+    }
+    return none
+}
+record = (@snapshot:Snapshot id:addr state:facts.State env:values.Environment @registry:bindings.Registry):>void => {
+    let number=transfer(id state snapshot env @registry)
+    let size=length(id state snapshot env @registry)
+    if number isnt? none {snapshot.numbers[id]=number}
+    else if id in? snapshot.numbers {snapshot.numbers.pop(id);}
+    if size isnt? none {snapshot.lengths[id]=size}
+    else if id in? snapshot.lengths {snapshot.lengths.pop(id);}
+    let term=affine(id snapshot env @registry)
+    if term isnt? none {snapshot.terms[id]=term}
+    else if id in? snapshot.terms {snapshot.terms.pop(id);}
+    let node=hir.node_at(env.nodes id)
+    let sequence:addr?=none
+    if node is? hir.ValueCast {sequence=snapshot.sequences.get(node.expr)}
+    else if node is? hir.Obligation {sequence=snapshot.sequences.get(node.value)}
+    else {sequence=terms.sequence_id(id env @registry)}
+    if sequence isnt? none {snapshot.sequences[id]=sequence}
+    else if id in? snapshot.sequences {snapshot.sequences.pop(id);}
+}

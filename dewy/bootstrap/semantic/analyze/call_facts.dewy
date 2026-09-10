@@ -1,0 +1,101 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"expression_intervals.dewy" as intervals
+import p"comparison_facts.dewy" as comparisons
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+
+doc"""
+Substitute actual arguments into a selected function result's promises.
+
+`truth` selects a boolean result arm. A type-test arm can instead supply the
+single surviving refined member. Unconditional promises apply in both cases.
+No signature is guessed from a union of possible callees.
+
+Boolean argument promises are returned to the predicate traversal as proof
+requests. That traversal can refine a compound condition without executing
+it again. Numeric promises transfer here, including bounds against slices:
+`prefix.length <=? src[i..].length` establishes `src.length - i >= prefix.length`.
+"""
+
+Condition:type = const [expression:addr truth:bool]
+Applied:type = [state:facts.State? conditions:array<Condition>=[]]
+Context:type = const [env:values.Environment relations:relations.Context snapshot:intervals.Snapshot]
+
+operand = (argument:addr projection:propositions.Projection state:facts.State context:Context @registry:bindings.Registry):>comparisons.Operand => {
+    let node=hir.node_at(context.env.nodes argument)
+    let current=node is? hir.Place
+    let id=if node is? hir.Place node.target else argument
+    if projection =? 'length' {
+        let sequence=if current terms.sequence_id(id context.env @registry) else context.snapshot.sequences.get(id)
+        let term=if sequence is? none none else facts.Term[sequence 'length']
+        let interval=if current and term isnt? none relations.interval_of(term state context.relations) else context.snapshot.lengths.get(id)
+        return comparisons.Operand[interval=interval term=term]
+    }
+    let saved=context.snapshot.terms.get(id)
+    let term=if current terms.binding_term(id context.env @registry) else if saved is? none or saved.shift not=? 0 none else saved.term
+    if term isnt? none and term.projection not=? 'value' {term=none}
+    let interval=if current and term isnt? none relations.interval_of(term state context.relations) else context.snapshot.numbers.get(id)
+    return comparisons.Operand[interval=interval term=term]
+}
+
+apply = (state:facts.State call:addr truth:bool? context:Context @registry:bindings.Registry member:types.RefinedType?=none):>Applied => {
+    let result=Applied[state]
+    let contracts=expressions.call_result_refinements(call context.env.nodes context.env.types)
+    if member isnt? none {contracts=[member]}
+    loop contract in contracts {
+        loop p in contract.propositions {
+            let name=propositions.parameter(p)
+            if name is? none or p.tested_type isnt? none continue
+            if p.when isnt? none and p.when not=? truth continue
+            let argument=expressions.call_argument(call name context.env.nodes context.env.types unwrap=false)
+            if argument is? none continue
+            let subject_id=expressions.strip_casts(expressions.argument_value(argument context.env.nodes) context.env.nodes)
+            let subject_node=hir.node_at(context.env.nodes subject_id)
+            if types.is_primitive(types.node_at(context.env.types subject_node.value_type) 'bool') and p.projection =? 'value' and p.op =? '=?' and p.term is? none and (p.value =? 0 or p.value =? 1) {
+                if hir.node_at(context.env.nodes argument) is? hir.Place or intervals.stable(subject_id context.snapshot context.env.nodes) {
+                    result.conditions.push(Condition[subject_id p.value =? 1])
+                }
+                continue
+            }
+            if result.state is? none return result
+            let subject=operand(argument p.projection result.state context @registry)
+            let bound=comparisons.Operand[interval=ranges.exact(p.value)]
+            let window:terms.Window?=none
+            if p.term isnt? none {
+                let supplied=expressions.call_argument(call p.term context.env.nodes context.env.types unwrap=false)
+                if supplied is? none continue
+                let bound_id=expressions.strip_casts(supplied context.env.nodes)
+                bound=operand(supplied p.term_projection result.state context @registry)
+                if p.term_projection =? 'length' and bound.term is? none and intervals.stable(bound_id context.snapshot context.env.nodes) {window=terms.slice_bounds(bound_id context.env @registry)}
+            }
+            if result.state is? none return result
+            result.state=comparisons.refine(result.state p.op subject bound true context.relations)
+            if result.state is? none return result
+            if window isnt? none {
+                let current=result.state
+                loop direction in terms.directions(p.op) {
+                    if direction.direction not=? 'upper' continue
+                    let gap=direction.gap-window.adjust
+                    if subject.term isnt? none {
+                        facts.put(@current facts.remainder(subject.term window.upper window.offset) ranges.Interval[gap none])
+                    }
+                    else if subject.interval isnt? none and subject.interval.lower isnt? none {
+                        let key=facts.order(facts.Term[window.offset] window.upper)
+                        let previous=facts.lookup(current key)
+                        let needed=subject.interval.lower+gap
+                        facts.put(@current key ranges.Interval[(if previous is? none needed else ranges.maximum_lower(previous.lower needed)) none])
+                    }
+                }
+                result.state=current
+            }
+        }
+    }
+    return result
+}
