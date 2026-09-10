@@ -202,5 +202,17 @@ normalize = (source:program.Program input:emit.Input):>Result => {
     }
     let startup:array<addr>=[]
     loop item in source.startup_items {append(@startup statement(item @state))}
-    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup source.argv_prologue source.argv_value source.source] emit.Input[state.nodes state.types]]
+    let argv_prologue:array<addr>|none=none
+    let argv_value=source.argv_value
+    if source.argv_prologue isnt? none {
+        let prologue:array<addr>=[]
+        loop item in source.argv_prologue {append(@prologue statement(item @state))}
+        if argv_value isnt? none {
+            let lowered=expression(argv_value @state)
+            append(@prologue lowered.prefix)
+            argv_value=lowered.value
+        }
+        argv_prologue=prologue
+    }
+    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types]]
 }

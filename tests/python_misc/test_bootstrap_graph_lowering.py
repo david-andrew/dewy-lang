@@ -131,3 +131,38 @@ let main=():>int64=>{{
         run = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10, check=False)
         assert run.returncode == expected, run.stdout + run.stderr
         assert run.stderr == stderr
+
+    unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
+    for index, body in enumerate([
+        'let combine=(left:string right:string):>string=>left+right\nlet main=():>int64=>{let joined=combine("e" "\\u0301x") return if joined.length=?2 and joined[0]=?"é" 42 else 0}',
+        'let decode=(bytes:array<uint8>):>string|none=>bytes as string|none\nlet main=():>int64=>{let text=decode([0x68 0xc3 0xa9]) return if text is? string and text=?"hé" and text.length=?2 42 else 0}',
+        'let decode=(bytes:array<uint8>):>string|none=>bytes as string|none\nlet main=():>int64=>{let bad=decode([0xed 0xa0 0x80]) let empty=decode([]) return if bad is? none and empty is? string and empty.length=?0 42 else 0}',
+        'let main=():>int64=>{let bytes:array<uint8>=[0x61] let text=bytes as string|none bytes[0]=0x7a return if text is? string and text=?"a" 42 else 0}',
+        'let format=(number:uint64 small:int8 flag:bool):>string=>"{number}:{small}:{flag}"\nlet main=():>int64=>{let text=format(18446744073709551615 (-128) false) return if text=?"18446744073709551615:-128:false" 42 else 0}',
+        'let format=(number:int64):>string=>"{number}"\nlet main=():>int64=>{return if format(-9223372036854775808)=?"-9223372036854775808" and format(0)=?"0" 42 else 0}',
+        'let combine=(first:string last:string):>string=>"{first}{last}"\nlet main=():>int64=>{let text=combine("e" "\\u0301x") return if text.length=?2 42 else 0}',
+        'let combine=(words:array<string> sep:string):>string=>words.join(sep)\nlet main=():>int64=>{let text=combine(["a" "b" "c"] "/") let empty=combine([] "/") return if text=?"a/b/c" and empty=?"" 42 else 0}',
+        'let main=():>int64=>{let parts:array<string>=["e" "\\u0301x"] let text=parts.join return if text.length=?2 and text[0]=?"é" 42 else 0}',
+    ]):
+        source = tmp_path / f'unicode-runtime-{index}.dewy'
+        source.write_text(body)
+        lowered = subprocess.run([binary, source, reporting, unicode_runtime], capture_output=True, text=True, timeout=120, check=False)
+        assert lowered.returncode == 0, lowered.stdout + lowered.stderr
+        output = source.with_suffix('.udewy')
+        output.write_text(lowered.stdout)
+        assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+        run = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=15, check=False)
+        assert run.returncode == 42, run.stdout + run.stderr
+
+    source = tmp_path / 'command-line.dewy'
+    source.write_text('let initialized:int64=41\nlet main=(argv:array<string>):>int64=>{if argv.length=?4 and argv[1]=?"a" and argv[2].length=?1 and argv[3]=?"" return initialized+1 return 0}')
+    lowered = subprocess.run([binary, source, reporting, unicode_runtime], capture_output=True, text=True, timeout=120, check=False)
+    assert lowered.returncode == 0, lowered.stdout + lowered.stderr
+    output = source.with_suffix('.udewy')
+    output.write_text(lowered.stdout)
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    executable = cache_artifact(output).resolve()
+    run = subprocess.run([executable, 'a', 'é', ''], capture_output=True, text=True, timeout=15, check=False)
+    assert run.returncode == 42, run.stdout + run.stderr
+    invalid = subprocess.run([bytes(executable), b'\xff'], capture_output=True, timeout=15, check=False)
+    assert invalid.returncode == 1, invalid.stdout + invalid.stderr
