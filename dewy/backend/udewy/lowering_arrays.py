@@ -267,7 +267,35 @@ class _ArrayLowering:
         )
 
     @staticmethod
-    def _call_place_argument_roots(call: hir.FunctionCall) -> set[int]:
+    def _storage_field_route(node: hir.AST) -> tuple[int, tuple[str, ...]] | None:
+        """A root and its statically distinct record fields.
+
+        An index discards projections beneath it: unknown indices and aliased
+        elements remain conservative, while `session.hir` and `session.registry`
+        can be proved disjoint without any index or ownership speculation.
+        """
+        fields: list[str] = []
+        while True:
+            if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+                node = node.items[0]
+            elif isinstance(node, hir.MemberAccess):
+                fields.append(node.name)
+                node = node.value
+            elif isinstance(node, hir.Index):
+                fields.clear()
+                node = node.array
+            else:
+                break
+        if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+            return node.binding_id, tuple(reversed(fields))
+        return None
+
+    @staticmethod
+    def _storage_routes_overlap(left: tuple[int, tuple[str, ...]], right: tuple[int, tuple[str, ...]]) -> bool:
+        return left[0] == right[0] and all(a == b for a, b in zip(left[1], right[1]))
+
+    @classmethod
+    def _call_place_argument_routes(cls, call: hir.FunctionCall) -> set[tuple[int, tuple[str, ...]]]:
         """Storage exposed by places during argument evaluation or the call.
 
         A later argument may itself call a mutator: `read(box.items f(@box))`
@@ -275,7 +303,7 @@ class _ArrayLowering:
         """
         from ...semantic.analyze.effects import _iter_children
 
-        roots: set[int] = set()
+        routes: set[tuple[int, tuple[str, ...]]] = set()
         pending = [*call.pos_args, *call.kw_args.values()]
         seen: set[int] = set()
         while pending:
@@ -286,26 +314,17 @@ class _ArrayLowering:
             pending.extend(_iter_children(argument))
             if not isinstance(argument, hir.Place):
                 continue
-            target: hir.AST = argument.target
-            while isinstance(target, (hir.MemberAccess, hir.Index)):
-                target = (
-                    target.value
-                    if isinstance(target, hir.MemberAccess)
-                    else target.array
-                )
-            if (
-                isinstance(target, hir.ExpressedIdentifier)
-                and target.binding_id is not None
-            ):
-                roots.add(target.binding_id)
-        return roots
+            route = cls._storage_field_route(argument.target)
+            if route is not None:
+                routes.add(route)
+        return routes
 
     def _analyze_array_call_boundaries(self) -> dict[int, set[ArrayUse]]:
         boundary_uses: dict[int, set[ArrayUse]] = defaultdict(set)
         self.array_call_boundary_analyses = {}
         for call in self.array_calls:
             function = self._direct_call_function(call)
-            place_roots = self._call_place_argument_roots(call)
+            place_routes = self._call_place_argument_routes(call)
             for position, argument, parameter in self._call_array_arguments(
                 call,
                 function,
@@ -318,6 +337,7 @@ class _ArrayLowering:
                 )
                 storage_root = self._array_argument_storage_root(argument)
                 storage_root_id = storage_root.semantic_id if storage_root is not None else None
+                storage_route = self._storage_field_route(argument)
                 group = (
                     self.array_alias_groups[
                         self.array_alias_group_by_binding[source_id]
@@ -336,10 +356,11 @@ class _ArrayLowering:
                     and parameter_analysis is not None
                     and parameter_analysis.adapter_safe
                     and storage_root_id is not None
-                    # A place argument in the same call exposing the same
-                    # binding could write mid-call; a borrowed value argument
-                    # would observe those writes, so the boundary must copy.
-                    and storage_root_id not in place_roots
+                    and storage_route is not None
+                    and storage_route[0] == storage_root_id
+                    # A place into the same storage needs a snapshot; sibling
+                    # record fields do not overlap merely by sharing a root.
+                    and not any(self._storage_routes_overlap(storage_route, place) for place in place_routes)
                     and (
                         raw_kind is None
                         or self._raw_array_group_uses_are_safe(group, raw_kind)

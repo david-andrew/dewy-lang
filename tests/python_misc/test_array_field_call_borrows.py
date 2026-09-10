@@ -91,3 +91,60 @@ let main=():>int64=>{
     result = subprocess.run([binary], capture_output=True, timeout=10, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout == b'7\n9\n'
+
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='native Linux process memory limit')
+@pytest.mark.parametrize('object_argument', [False, True])
+def test_disjoint_field_places_do_not_force_value_copies(tmp_path, object_argument):
+    parameter = 'before:Content' if object_argument else 'before:array<Entry>'
+    items = 'before.items' if object_argument else 'before'
+    argument = 'bag.content' if object_argument else 'bag.content.items'
+    source = '''Entry:type=[value:int64]
+Content:type=[items:array<Entry>]
+Bag:type=[content:Content calls:int64=0]
+let read=(PARAMETER @calls:int64):>int64=>{
+    calls += 1
+    $runtime_assert ITEMS.length >? 0
+    return ITEMS[0].value
+}
+let main=():>int64=>{
+    let bag=Bag[Content[[]]]
+    loop i in 0..511 {bag.content.items.push(Entry[7])}
+    let total:int64=0
+    loop i in 0..99999 {total += read(ARGUMENT @bag.calls)}
+    printl(total)
+    printl(bag.calls)
+    return 0
+}
+'''.replace('PARAMETER', parameter).replace('ITEMS', items).replace('ARGUMENT', argument)
+    binary = _build(tmp_path, source)
+
+    def limit_memory():
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (128 * 1024**2, 128 * 1024**2))
+
+    result = subprocess.run([binary], capture_output=True, timeout=10, check=False, preexec_fn=limit_memory)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == b'700000\n100000\n'
+
+
+def test_a_place_inside_the_same_array_field_keeps_the_before_value(tmp_path):
+    binary = _build(tmp_path, '''Entry:type=[value:int64]
+Bag:type=[items:array<Entry>]
+let observe=(before:array<Entry> @entry:Entry):>int64=>{
+    $runtime_assert before.length >? 0
+    entry.value=9
+    return before[0].value
+}
+let main=():>int64=>{
+    let bag=Bag[[Entry[7]]]
+    $runtime_assert bag.items.length >? 0
+    printl(observe(bag.items @bag.items[0]))
+    $runtime_assert bag.items.length >? 0
+    printl(bag.items[0].value)
+    return 0
+}
+''')
+    result = subprocess.run([binary], capture_output=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == b'7\n9\n'

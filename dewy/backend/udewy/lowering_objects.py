@@ -120,32 +120,17 @@ class _ObjectLowering:
 
         The bare handle is passed, because the callee prologue either clones
         it or, for a proven read-only parameter, borrows it. When a place
-        argument in the same call exposes the same binding's storage, a
+        argument in the same call exposes overlapping storage, a
         borrowing callee could observe mid-call writes, so the caller clones
-        the argument first.
+        the argument first. Distinct fields of a record do not overlap.
         """
         if isinstance(arg.type, ty.ObjectType):
-            place_roots = self._call_place_argument_roots(call)
-            if place_roots:
-                base: hir.AST = arg
-                while True:
-                    if (
-                        isinstance(base, hir.Block)
-                        and not base.scoped
-                        and len(base.items) == 1
-                    ):
-                        base = base.items[0]
-                    elif isinstance(base, hir.MemberAccess):
-                        base = base.value
-                    elif isinstance(base, hir.Index):
-                        base = base.array
-                    else:
-                        break
-                if (
-                    isinstance(base, hir.ExpressedIdentifier)
-                    and base.binding_id in place_roots
-                ):
-                    return self._clone_object_value(arg, arg.type)
+            route = self._storage_field_route(arg)
+            if route is not None and any(
+                self._storage_routes_overlap(route, place)
+                for place in self._call_place_argument_routes(call)
+            ):
+                return self._clone_object_value(arg, arg.type)
         return self._extract_object_pointer(arg)
 
     def _clone_object_value(
