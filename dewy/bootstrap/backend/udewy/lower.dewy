@@ -1118,6 +1118,7 @@ array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:S
 }
 array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
     if method.name =? 'join' return string_join(call method @state)
+    if method.name =? 'sort' return array_sort(call method @state)
     if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'insert'] return reject(call "array {method.name} lowering" @state)
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
     $runtime_assert type isnt? none
@@ -1179,6 +1180,126 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     if result is? none {prefix.push(put(hir.Void[call.loc void_type] @state))}
     else {prefix.push(result)}
     return put(hir.Block[call.loc runtime_type(call.value_type call @state) prefix false] @state)
+}
+
+# Sort records carry a normalized unsigned key and the original element bits.
+# Keys are evaluated once, in source order, before rearranging the array.
+# Stable insertion keeps equal keys in their original order in either direction.
+# The hosted large-array radix path can share this record format in a later
+# optimization; the native path currently uses insertion for every length.
+sort_record = (base:addr index:addr node:hir.AST @state:State):>addr => word_op('__add__' base word_op('__mul__' index word(16 node @state) node @state) node @state)
+assign_value = (target:addr value:addr node:hir.AST @state:State):>addr => put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) target '=' value] @state)
+loop_while = (condition:addr body:array<addr> node:hir.AST @state:State):>addr => {
+    let type=types.primitive('void' @state.type_nodes)
+    let arm=put(hir.LoopArm[node.loc type condition sequence(body node @state)] @state)
+    return put(hir.Flow[node.loc type [arm] none] @state)
+}
+sort_key = (value:addr type:addr mask:addr node:hir.AST @state:State):>addr => {
+    let layout=views.fixed_integer_layout(type state.type_nodes)
+    if layout is? none return reject(node 'a sort key must return a fixed-width integer' @state)
+    let unsigned=types.primitive('uint64' @state.type_nodes)
+    let wide=put(hir.ValueCast[node.loc types.primitive(if layout.signed 'int64' else 'uint64' @state.type_nodes) value] @state)
+    let key=put(hir.Transmute[node.loc unsigned wide] @state)
+    if layout.signed {
+        let sign=put(hir.Transmute[node.loc unsigned word(-9223372036854775808 node @state)] @state)
+        key=intrinsic('__xor__' [key sign] unsigned node @state)
+    }
+    return intrinsic('__xor__' [key mask] unsigned node @state)
+}
+array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
+    let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
+    $runtime_assert type isnt? none
+    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    if layout is? layouts.Pending return reject(call layout.detail @state)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let unsigned=types.primitive('uint64' @state.type_nodes)
+    let prefix:array<addr>=[]
+    let descriptor=snapshot(expression(method.array @state) @prefix @state)
+    let key_function:addr?=none
+    let key_signature:types.FunctionType?=none
+    let key_type=type.element
+    let reverse=put(hir.Bool[call.loc boolean false] @state)
+    # Options are ordinary arguments: even an empty array evaluates them.
+    loop [name argument] in call.kw_args {
+        let value=snapshot(expression(argument @state) @prefix @state)
+        if name =? 'reverse' {reverse=value}
+        else if name =? 'key' {
+            key_function=value
+            let signature=types.node_at(state.type_nodes types.strip_refinement(hir.node_at(state.input.nodes argument).value_type state.type_nodes))
+            if signature isnt? types.FunctionType return reject(call 'a sort key must be a single function' @state)
+            key_signature=signature key_type=signature.ret
+        }
+    }
+    if views.fixed_integer_layout(key_type state.type_nodes) is? none return reject(call 'a sort key must return a fixed-width integer' @state)
+    let length=snapshot(read_word(descriptor layouts.array_descriptor.length call @state) @prefix @state)
+    let data=snapshot(read_word(descriptor layouts.array_descriptor.data call @state) @prefix @state)
+    let size=snapshot(word_op('__mul__' length word(16 call @state) call @state) @prefix @state)
+    let records=snapshot(allocation(size call @state) @prefix @state)
+    let mask=snapshot(put(hir.Transmute[call.loc unsigned word(0 call @state)] @state) @prefix @state)
+    let descending=put(hir.Transmute[call.loc unsigned word(-1 call @state)] @state)
+    prefix.push(conditional(reverse assign_value(mask descending call @state) call @state))
+    let index=snapshot(word(0 call @state) @prefix @state)
+    let record=sort_record(records index call @state)
+    let element_pointer=word_op('__add__' data word_op('__mul__' index word(layout.size call @state) call @state) call @state)
+    let building:array<addr>=[]
+    let element=snapshot(array_load(element_pointer type.element call @state) @building @state)
+    let key=element
+    if key_function isnt? none and key_signature isnt? none {
+        let args:array<addr>=[]
+        let first=true
+        loop parameter in key_signature.pos_or_kw {
+            let argument:addr?=none
+            if first {argument=snapshot(owned_copy(element type.element call @state) @building @state)}
+            call_slot(argument parameter.value_type parameter.required call @args @state)
+            first=false
+        }
+        loop parameter in key_signature.kw_only {call_slot(none parameter.value_type parameter.required call @args @state)}
+        key=snapshot(put(hir.FunctionCall[call.loc runtime_type(key_type call @state) key_function args []] @state) @building @state)
+    }
+    let normalized=sort_key(key key_type mask call @state)
+    building.push(store_word(put(hir.Transmute[call.loc types.primitive('int64' @state.type_nodes) normalized] @state) record 0 call @state))
+    building.push(array_store(element address(record 8 call @state) type.element call @state))
+    building.push(assign_value(index word_op('__add__' index word(1 call @state) call @state) call @state))
+    prefix.push(loop_while(intrinsic('__lt__' [index length] boolean call @state) building call @state))
+
+    let outer=snapshot(word(1 call @state) @prefix @state)
+    let inserting:array<addr>=[]
+    let held_record=sort_record(records outer call @state)
+    let held_key=snapshot(read_word(held_record 0 call @state) @inserting @state)
+    let held_element=snapshot(read_word(held_record 8 call @state) @inserting @state)
+    let inner=snapshot(outer @inserting @state)
+    let previous=word_op('__sub__' inner word(1 call @state) call @state)
+    let before=sort_record(records previous call @state)
+    let current=sort_record(records inner call @state)
+    let before_key=put(hir.Transmute[call.loc unsigned read_word(before 0 call @state)] @state)
+    let comparison=intrinsic('__gt__' [before_key put(hir.Transmute[call.loc unsigned held_key] @state)] boolean call @state)
+    let condition=put(hir.ShortCircuit[call.loc boolean 'and' intrinsic('__gt__' [inner word(0 call @state)] boolean call @state) comparison] @state)
+    let moving:array<addr>=[
+        store_word(read_word(before 0 call @state) current 0 call @state)
+        store_word(read_word(before 8 call @state) current 8 call @state)
+        assign_value(inner previous call @state)
+    ]
+    inserting.push(loop_while(condition moving call @state))
+    inserting.push(store_word(held_key current 0 call @state))
+    inserting.push(store_word(held_element current 8 call @state))
+    inserting.push(assign_value(outer word_op('__add__' outer word(1 call @state) call @state) call @state))
+    prefix.push(loop_while(intrinsic('__lt__' [outer length] boolean call @state) inserting call @state))
+
+    prefix.push(assign_value(index word(0 call @state) call @state))
+    let restored=array_load(address(record 8 call @state) type.element call @state)
+    prefix.push(loop_while(intrinsic('__lt__' [index length] boolean call @state) [
+        array_store(restored element_pointer type.element call @state)
+        assign_value(index word_op('__add__' index word(1 call @state) call @state) call @state)
+    ] call @state))
+    # Record movement transfers existing handles. Only the scratch buffer is
+    # owned by this operation; array elements retain their existing owners.
+    let release=state.runtime_helpers.get('_arena_release')
+    if state.allocator isnt? none and release isnt? none {
+        let name=state.symbols.get(release)
+        if name is? none return reject(call 'the arena release helper is absent from the lowered graph' @state)
+        prefix.push(intrinsic(name [records size] types.primitive('void' @state.type_nodes) call @state))
+    }
+    return sequence(prefix call @state)
 }
 
 # Record fields embed other records, but store arrays and callable values as

@@ -72,6 +72,15 @@ ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 STRINGS = (ROOT / 'library/strings.dewy').read_text()
 SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
 ARENA_CASES = [
+    ('let main=():>int64=>{let xs:array<int8>=[127 (-128) 0 (-1)] xs.sort return if xs[0]=?(-128) and xs[1]=?(-1) and xs[2]=?0 and xs[3]=?127 42 else 0}', 42),
+    ('let main=():>int64=>{let xs:array<uint64>=[18446744073709551615 0 9223372036854775808 1] xs.sort(reverse=true) return if xs[0]=?18446744073709551615 and xs[1]=?9223372036854775808 and xs[2]=?1 and xs[3]=?0 42 else 0}', 42),
+    ('let main=():>int64=>{let words:array<string>=["bbb" "a" "cc" "d"] words.sort(key=(.length)) return if words[0]=?"a" and words[1]=?"d" and words[2]=?"cc" and words[3]=?"bbb" 42 else 0}', 42),
+    ('let main=():>int64=>{let words:array<string>=["a" "bbb" "d" "cc"] words.sort(key=(.length) reverse=true) return if words[0]=?"bbb" and words[1]=?"cc" and words[2]=?"a" and words[3]=?"d" 42 else 0}', 42),
+    ('let calls:int64=0\nlet trace:int64=0\nlet key=(x:int64):>uint8=>{calls+=1 trace=trace*10+x return (x%2) as uint8}\nlet main=():>int64=>{let xs:array<int64>=[3 1 2] xs.sort(key=@key) return if calls=?3 and trace=?312 and xs[0]=?2 and xs[1]=?3 and xs[2]=?1 42 else 0}', 42),
+    ('Row:type=[rank:int64 name:string]\nlet key=(row:Row):>int64=>{let rank=row.rank row.rank=99 return rank}\nlet main=():>int64=>{let rows:array<Row>=[Row[2 "a"] Row[1 "b"] Row[2 "c"]] let copy=rows rows.sort(key=@key) return if rows[0].name=?"b" and rows[1].name=?"a" and rows[2].name=?"c" and rows[0].rank=?1 and copy[0].name=?"a" 42 else 0}', 42),
+    ('let calls:int64=0\nlet descending=():>bool=>{calls+=1 return true}\nlet main=():>int64=>{let xs:array<int64>=[] xs.sort(reverse=descending()) xs.push(42) xs.sort return if calls=?1 and xs[0]=?42 42 else 0}', 42),
+    ('let main=():>int64=>{let xs:array<int64>=[4 3 2 1] xs.sort let before=_arena_cursor loop i in 0..20 {xs.sort(reverse=true) xs.sort} return if _arena_cursor=?before and xs[0]=?1 and xs[3]=?4 42 else 0}', 42),
+
     (SET_OF_ARRAY + 'let calls:int64=0\nlet next=():>1=>{calls+=1 return 1}\nlet main=():>int64=>{let values:set<int64>=set[next() next()] return if calls=?2 and values.length=?1 42 else 0}', 42),
 
     (SET_OF_ARRAY + 'let calls:int64=0\nlet next=():>int64=>{calls+=1 return calls}\nlet main=():>int64=>{let values:set<int64>=set[next() next() 1] let order=values.values return if calls=?2 and values.length=?2 and order.length=?2 and order[0]=?1 and order[1]=?2 42 else 0}', 42),
@@ -339,3 +348,13 @@ main = (argv:array<string>):>int64 => {{
         native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
         assert native.returncode != 0, text
         assert 'closure storage' in native.stderr, native.stdout + native.stderr
+
+    for index, text in enumerate([
+        'let main=():>int64=>{let xs:array<int64>=[1] xs.sort(key=(x:int64):>bool=>true) return 0}',
+        'let main=():>int64=>{let xs:array<int64>=[1] xs.sort(key=(x:int64):>int=>x) return 0}',
+    ]):
+        case = tmp_path / f'invalid-sort-key-{index}.dewy'
+        case.write_text(text)
+        native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
+        assert native.returncode != 0, text
+        assert 'a sort key must return a fixed-width integer' in native.stderr, native.stdout + native.stderr

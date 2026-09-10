@@ -35,6 +35,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   checksums and unchanged source inputs; packaging tests use fixtures, and
   the public installer has not switched to an unverified native release.
 
+- Native array sorting evaluates options once and keys once per element in
+  original order, then stably permutes fixed-width integer keys and element
+  handles. Signed and unsigned limits, reverse stability, record value copies,
+  empty arrays and scratch-buffer reuse pass the lowering execution suite.
+  The current implementation uses insertion sort at every length; the hosted
+  large-array radix optimization remains a performance follow-up.
+
 - Selected overload calls now lower through their concrete function bodies,
   including named/nested overload sets, imported alternatives, defaults and
   captured locals. Unused overload declarations do not require runtime

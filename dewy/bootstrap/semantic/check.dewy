@@ -560,6 +560,10 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         return if expected is? none result else against(result expected id env @session)
     }
     if func is? hir.ArrayMethod {
+        if func.name =? 'sort' and 'key' in? kwargs {
+            let key=types.node_at(session.types types.strip_refinement(node_at(kwargs['key'] session).value_type session.types))
+            if key isnt? types.FunctionType or views.fixed_integer_layout(key.ret session.types) is? none return problem(id 'a sort key must return a fixed-width integer' 'return int64, uint64, or another fixed-width integer from the key function' env session)
+        }
         let error = array_transition(func args kwargs id env @session)
         if error isnt? none return error
     }
