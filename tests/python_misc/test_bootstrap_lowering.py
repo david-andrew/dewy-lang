@@ -63,6 +63,24 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('Box:type=[value:int64|none other:int64]\nlet main=():>int64=>{let box=Box[40 0] if box.value is? int64 {box.other=99 return box.value+2} return 0}', 42),
+    ('Box:type=[value:int64|none]\nOuter:type=[box:Box]\nlet main=():>int64=>{let outer=Outer[Box[40]] if outer.box.value is? int64 return outer.box.value+2 return 0}', 42),
+    ('Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] if box.value is? int64 {box.value=none return if box.value is? none 42 else 0} return 0}', 42),
+
+    ('let main=():>int64=>{let value:int64|none=40 if value isnt? none return value+2 return 0}', 42),
+    ('let main=():>int64=>{let value:int64|none=none return if value is? none 42 else 0}', 42),
+    ('let main=():>int64=>{let value:int64|none=40 let copy=value value=none if copy is? int64 return copy+2 return 0}', 42),
+    ('let make=(value:int64):>int64|none=>value\nlet main=():>int64=>{let value=make(40) if value is? int64 return value+2 return 0}', 42),
+    ('let take=(value:int64|none):>int64=>{if value is? int64 return value+2 return 0}\nlet main=():>int64=>take(40)', 42),
+    ('let main=():>int64=>{let value:bool|none=true return if value is? bool and value 42 else 0}', 42),
+    ('let main=():>int64=>{let value:int64|bool|none=true let copy=value value=40 return if copy is? bool and copy 42 else 0}', 42),
+    ('let main=():>int64=>{let value:string|none="é" return if value is? string and value=?"é" 42 else 0}', 42),
+    ('Pair:type=[x:int64 y:int64]\nlet main=():>int64=>{let value:Pair|none=Pair[40 2] let copy=value if copy is? Pair {copy.x=99} if value is? Pair return value.x+value.y return 0}', 42),
+    ('Pair:type=[x:int64 y:int64]\nlet make=():>Pair|none=>Pair[40 2]\nlet main=():>int64=>{let value=make() if value is? Pair return value.x+value.y return 0}', 42),
+    ('Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] let copy=box copy.value=none if box.value is? int64 return box.value+2 return 0}', 42),
+    ('let main=():>int64=>{let values:array<int64|none>=[40 none] let copy=values copy[0]=none let value=values[0] if value is? int64 return value+2 return 0}', 42),
+    ('let narrow=(value:bool):>int64|none=>if value 40 else none\nlet main=():>int64=>{let value:int64|bool|none=narrow(true) if value is? int64 return value+2 return 0}', 42),
+
     ('let main=():>int64=>{let text:string="héllo" return text.length+37}', 42),
     ('let main=():>int64=>{let text:string="a\\u0301👩\u200d👩\u200d👧\u200d👦Z" return text.length+39}', 42),
     ('let main=():>int64=>{let a:string="hello" let b:string="hello" return if a=?b 42 else 0}', 42),
@@ -103,6 +121,9 @@ ARENA_CASES = [
     ('let make=():>array<bool>=>[false true]\nlet main=():>int64=>{let values=make() return if values[1] and not values[0] 42 else 0}', 42),
 ]
 
+
+# Replacing a field or an ancestor invalidates its narrowed read type.
+REJECTED_CASES = ['Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] if box.value is? int64 {box.value=none return box.value+2} return 0}', 'Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] if box.value is? int64 {box=Box[none] return box.value+2} return 0}', 'Box:type=[value:int64|none]\nOuter:type=[box:Box]\nlet main=():>int64=>{let outer=Outer[Box[40]] if outer.box.value is? int64 {outer.box=Box[none] return outer.box.value+2} return 0}']
 
 def test_native_scalar_lowering(tmp_path):
     source = tmp_path / 'lowering.dewy'
@@ -151,3 +172,10 @@ main = (argv:array<string>):>int64 => {{
         assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
         result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
         assert result.returncode == expected_exit, text
+
+    for index,text in enumerate(REJECTED_CASES):
+        case=tmp_path/f'rejected-{index}.dewy'
+        case.write_text(text)
+        native=subprocess.run([binary,case],capture_output=True,text=True,timeout=60,check=False)
+        assert native.returncode!=0,text
+        assert 'no overload takes' in native.stderr,native.stdout+native.stderr

@@ -230,7 +230,7 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
     let binding_id = declarations.lookup(name env.lexical session)
     if binding_id isnt? none {
         let binding = bindings.binding_at(session.registry binding_id)
-        if binding.replacement isnt? none return binding.replacement
+        if binding.replacement isnt? none return match_read(binding.replacement env @session)
         let value = binding.type_value
         if value is? none and binding_id in? session.pending_aliases {
             let resolved = declarations.resolve_alias(binding_id @session)
@@ -808,7 +808,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if member isnt? hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
         let error = writable(place id env session)
         if error isnt? none return error
-        let value = expression(node.right env @session expected=member.value_type)
+        let value = expression(node.right env @session expected=store_type(place @session))
         if value is? Error return value
         container_state.replaced(place env.state @session)
         if member is? hir.Index return put(hir.IndexAssign[node.loc types.primitive('void' @session.types) place value] @session)
@@ -839,7 +839,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
             if member isnt? hir.MemberAccess return problem(id 'cannot assign to a method' name env session)
             let error=writable(prior.replacement id env session)
             if error isnt? none return error
-            let value=expression(node.right env @session expected=member.value_type)
+            let value=expression(node.right env @session expected=store_type(prior.replacement @session))
             if value is? Error return value
             container_state.replaced(prior.replacement env.state @session)
             return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) prior.replacement value] @session)
@@ -1227,11 +1227,11 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
                 if name is? none continue
                 let actual=hir_facts.call_argument(condition name session.hir session.types)
                 if actual is? none continue
-                let value=node_at(hir_facts.strip_casts(actual session.hir) session)
-                if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {
-                    let current=read_type(value.binding_id result session)
+                let route=bindings.array_route_id(hir_facts.strip_casts(actual session.hir) session.hir @session.registry)
+                if route isnt? none {
+                    let current=read_type(route result session)
                     $runtime_assert current isnt? none
-                    set_read_type(value.binding_id select_type(current promise.tested_type promise.op =? 'is?' @session) result @session)
+                    set_read_type(route select_type(current promise.tested_type promise.op =? 'is?' @session) result @session)
                 }
             }
         }
@@ -1245,11 +1245,15 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         }
     }
     if node is? hir.TypeTest {
-        let value = node_at(node.value session)
-        if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {
-            let current = read_type(value.binding_id result session)
+        # A named field path is stable storage just like its root binding.
+        # The route carries the declared contract; only this branch's read
+        # alternatives change. Indexed projections still need their own
+        # element-identity proof before they can participate in this rule.
+        let route=bindings.array_route_id(node.value session.hir @session.registry)
+        if route isnt? none {
+            let current = read_type(route result session)
             $runtime_assert current isnt? none
-            set_read_type(value.binding_id select_type(current node.test_type truth not=? node.negated @session) result @session)
+            set_read_type(route select_type(current node.test_type truth not=? node.negated @session) result @session)
         }
     }
     if node is? hir.ShortCircuit {
@@ -1584,7 +1588,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     if entry isnt? none return container_member(receiver entry name id env @session)
     if type is? types.ObjectType {
         let field = types.object_field(type name)
-        if field isnt? none return put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session)
+        if field isnt? none return match_read(put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session) env @session)
         let selected=method_member(views.structural_base(value.value_type session.types) receiver name id env @session)
         if selected is? Error return selected
         if selected isnt? none return selected
@@ -3034,13 +3038,25 @@ match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):
 # binding identities. A shadowing pattern name must not redirect a subject.
 match_read = (id:addr env:Environment @session:contexts.Session):>addr => {
     let node=node_at(id session)
-    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
-        let type=read_type(node.binding_id env session)
-        $runtime_assert type isnt? none
-        return put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @session)
-    }
+    let route=bindings.array_route_id(id session.hir @session.registry)
+    if route is? none return id
+    let type=read_type(route env session)
+    $runtime_assert type isnt? none
+    if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @session)
+    if node is? hir.MemberAccess return put(hir.MemberAccess[node.loc type node.value node.name node.mutable] @session)
     return id
 }
+# A narrowed read does not narrow the destination's assignment contract.
+store_type = (id:addr @session:contexts.Session):>addr => {
+    let route=bindings.array_route_id(id session.hir @session.registry)
+    if route isnt? none {
+        let binding=bindings.binding_at(session.registry route)
+        let declared=if binding.store_type is? none binding.value_type else binding.store_type
+        if declared isnt? none return declared
+    }
+    return node_at(id session).value_type
+}
+
 MatchTest:type = const [conditions:array<addr> environment:Environment]
 match_test = (subject:addr pattern:patterns.Pattern env:Environment @session:contexts.Session):>MatchTest|Error => {
     if pattern.kind =? 'any' return MatchTest[[] env]

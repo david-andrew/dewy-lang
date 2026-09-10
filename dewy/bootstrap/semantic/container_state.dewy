@@ -28,7 +28,15 @@ changed = (binding:addr state:addr @session:contexts.Session):>void => {
     loop item in session.registry.routes {
         if item.id =? binding { owner = item.root prefix = item.path break }
     }
-    loop child in bindings.routes_under(session.registry owner prefix) { current = keys.forget(current changed=child) }
+    # Replacement invalidates facts about the whole projected subtree,
+    # including narrowed member types, while unrelated sibling routes stay.
+    $runtime_assert state <? session.read_states.length
+    let reads=session.read_states[state]
+    loop child in bindings.routes_under(session.registry owner prefix) {
+        current = keys.forget(current changed=child)
+        if child in? reads.types {reads.types.pop(child);}
+    }
+    session.read_states[state]=reads
     set_facts(state current @session)
 }
 replaced = (value:addr state:addr @session:contexts.Session):>void => {

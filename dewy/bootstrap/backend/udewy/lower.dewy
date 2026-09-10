@@ -9,6 +9,7 @@ import p"../../semantic/type_queries.dewy" as views
 import p"../../semantic/builtins.dewy" as builtins
 import p"../../semantic/brands.dewy" as brands
 import p"../../semantic/subtyping.dewy" as subtyping
+import p"../../semantic/type_tests.dewy" as type_tests
 
 doc"""
 Legalize validated semantic HIR into concrete µDewy function units.
@@ -17,15 +18,15 @@ Binding ids choose symbols, so source shadowing and imported names cannot
 silently capture each other during hoisting. Input nodes remain immutable;
 the output arena has its own indices and shares only the type arena values.
 
-This slice handles scalar and aggregate array storage, including independent
-argument/default copies, returned arena values, and growth/removal methods.
-Records preserve inline fields, copied array members, and dynamic brands.
-Cached copy helpers retain independent values through nested arrays and
-minted record hierarchies. Strings use grapheme boundary tables and immutable
-views; converting to a byte array produces independent mutable storage.
-Captures, place parameters, union storage, and proof node removal belong to
-subsequent legalization steps. Until those exist,
-reaching them returns a diagnostic rather than emitting an unsafe program.
+Scalar and aggregate storage preserves independent value copies through
+arguments, defaults, returns, records, and nested arrays. Cached recursive
+copy helpers preserve dynamic brands and the active payload of union cells.
+Strings use immutable UTF-8 views with grapheme boundary tables; byte-array
+conversions create independent storage.
+
+Closure captures, iterators, place parameters, and proof-node removal remain
+subsequent legalization steps. Unsupported representations report a pending
+implementation diagnostic before program emission.
 """
 State:type = [
     input:emit.Input
@@ -38,6 +39,9 @@ State:type = [
     allocator:addr?=none
     layout_context:layouts.Context=layouts.Context[]
     brand_numbers:array<brands.NumberedBrand>=[]
+    storage_types:dict<addr addr>=[]
+    union_tags:dict<string addr>=[]
+    next_tag:addr=1
     copy_helpers:dict<string string>=[]
     generated:array<program.Function>=[]
     problem:Error?=none
@@ -57,20 +61,21 @@ symbol = (name:string binding:addr? @state:State):>string => {
     return name
 }
 runtime_type = (id:addr node:hir.AST @state:State):>addr => {
-    let plain=types.unfold(types.strip_refinement(id state.input.types) state.input.types)
-    let type=types.node_at(state.input.types plain)
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    let type=types.node_at(state.type_nodes plain)
     if type is? types.IntegerLiteralType {
         if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {reject(node 'arbitrary-precision integer storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.Primitive {
         if type.name in? ['int' 'uint'] return types.primitive(if type.name =? 'int' 'int64' else 'uint64' @state.type_nodes)
-        if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.input.types) isnt? none return plain
+        if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.type_nodes) isnt? none return plain
     }
+    if cell_members(id @state) isnt? none or types.is_primitive(type 'none') return types.primitive('int64' @state.type_nodes)
     if string_type(id state) return types.primitive('int64' @state.type_nodes)
     if type is? types.ArrayType {
-        let element=types.node_at(state.input.types types.unfold(types.strip_refinement(type.element state.input.types) state.input.types))
-        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and not string_type(type.element state) and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.input.types) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
+        let element=types.node_at(state.type_nodes types.unfold(types.strip_refinement(type.element state.type_nodes) state.type_nodes))
+        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and cell_members(type.element @state) is? none and not string_type(type.element state) and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.type_nodes) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.ObjectType {
@@ -103,7 +108,10 @@ parameters = (node:hir.FunctionLiteral):>array<hir.Param> => {
 }
 discover = (id:addr @state:State):>void => {
     let node=hir.node_at(state.input.nodes id)
-    if node is? hir.Declare and node.binding_id isnt? none {state.symbols[node.binding_id]="__dewy_binding_{node.binding_id}_{node.name}"}
+    if node is? hir.Declare and node.binding_id isnt? none {
+        state.symbols[node.binding_id]="__dewy_binding_{node.binding_id}_{node.name}"
+        state.storage_types[node.binding_id]=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
+    }
     if node is? hir.ObjectLiteral {
         loop field in node.fields {
             if field.binding_id isnt? none {state.symbols[field.binding_id]="__dewy_binding_{field.binding_id}_{field.name}"}
@@ -111,7 +119,7 @@ discover = (id:addr @state:State):>void => {
     }
     if node is? hir.FunctionLiteral {
         loop parameter in parameters(node) {
-            if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}"}
+            if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}" state.storage_types[parameter.binding_id]=parameter.value_type}
         }
     }
     loop child in hir.children(node) {discover(child @state)}
@@ -135,34 +143,44 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.StringEqual return string_equal(node @state)
     if node is? hir.RepresentationCast return representation(node @state)
     if node is? hir.ObjectLiteral return object_literal(node @state)
-    if node is? hir.TypeTest return object_test(node @state)
-    if node is? hir.MemberAccess return field_read(field_pointer(node @state) node.value_type node @state)
+    if node is? hir.TypeTest return runtime_test(node @state)
+    if node is? hir.NoneValue return word(0 node @state)
+    if node is? hir.MemberAccess {
+        let stored=stored_type(id state)
+        return read_value(field_read(field_pointer(node @state) stored node @state) stored node.value_type node @state)
+    }
     if node is? hir.MemberAssign {
         let target=hir.node_at(state.input.nodes node.target)
         if target isnt? hir.MemberAccess return reject(node 'a non-record member assignment' @state)
         let prefix:array<addr>=[]
         let pointer=snapshot(field_pointer(target @state) @prefix @state)
-        prefix.push(field_write(pointer owned_value(node.value @state) target.value_type node @state))
+        let source=snapshot(owned_value(node.value @state) @prefix @state)
+        prefix.push(field_write(pointer source stored_type(node.target state) node @state))
         return sequence(prefix node @state)
     }
     if node is? hir.ArrayLiteral return array_literal(node @state)
     if node is? hir.ArrayLength return intrinsic('__load_i64__' [address(expression(node.array @state) layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state)
     if node is? hir.Index {
         let pointer=array_index(node @state)
-        return array_load(pointer node.value_type node @state)
+        let stored=stored_type(id state)
+        return read_value(array_load(pointer stored node @state) stored node.value_type node @state)
     }
     if node is? hir.IndexAssign {
         let target=hir.node_at(state.input.nodes node.target)
         if target isnt? hir.Index return reject(node 'a non-array index assignment' @state)
         let prefix:array<addr>=[]
         let pointer=snapshot(array_index(target @state) @prefix @state)
-        prefix.push(array_store(owned_value(node.value @state) pointer target.value_type node @state))
+        prefix.push(array_store(owned_value(node.value @state) pointer stored_type(node.target state) node @state))
         return put(hir.Block[node.loc type prefix false] @state)
     }
     if node is? hir.Void return put(hir.Void[node.loc type] @state)
     if node is? hir.Integer return put(hir.Integer[node.loc type node.prefix node.value] @state)
     if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
-    if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc type symbol(node.name node.binding_id @state) node.binding_id] @state)
+    if node is? hir.ExpressedIdentifier {
+        let stored=stored_type(id state)
+        let raw=put(hir.ExpressedIdentifier[node.loc runtime_type(stored node @state) symbol(node.name node.binding_id @state) node.binding_id] @state)
+        return read_value(raw stored node.value_type node @state)
+    }
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
     if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
@@ -172,7 +190,9 @@ expression = (id:addr @state:State):>addr => {
         return put(hir.Declare[node.loc type node.decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
     }
     if node is? hir.Assign {
-        let target=expression(node.target @state)
+        let original=hir.node_at(state.input.nodes node.target)
+        if original isnt? hir.ExpressedIdentifier return reject(node 'a non-binding assignment target' @state)
+        let target=put(hir.ExpressedIdentifier[original.loc runtime_type(stored_type(node.target state) original @state) symbol(original.name original.binding_id @state) original.binding_id] @state)
         let value=owned_value(node.value @state)
         if node.op not=? '=' {
             if node.op.length <? 2 return reject(node 'invalid compound assignment spelling' @state)
@@ -218,7 +238,7 @@ expression = (id:addr @state:State):>addr => {
 # Copies own their bytes; aggregate elements still need recursive ownership
 # lowering. Arena release/reuse insertion remains a subsequent lifetime pass.
 array_type = (id:addr state:State):>types.ArrayType? => {
-    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(id state.input.types) state.input.types))
+    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
     return if type is? types.ArrayType type else none
 }
 word = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('int64' @state.type_nodes) '0d' value] @state)
@@ -248,6 +268,7 @@ allocation = (size:addr node:hir.AST @state:State):>addr => {
 owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     let value=expression(id @state)
+    if cell_members(node.value_type @state) isnt? none return cell_copy(value node.value_type node @state)
     let array=array_type(node.value_type state)
     if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
     if object_type(node.value_type state) isnt? none and node isnt? hir.ObjectLiteral return object_copy(value node.value_type node @state)
@@ -268,8 +289,8 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
     return ArrayMemory[descriptor data prefix]
 }
 array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>addr => {
-    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(element state.input.types) state.input.types))
-    if type is? types.ObjectType|types.ArrayType or string_type(element state) return store_word(value pointer 0 node @state)
+    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
+    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or string_type(element state) return store_word(value pointer 0 node @state)
     if type is? types.FunctionType {
         let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
         return store_word(word pointer 0 node @state)
@@ -278,19 +299,19 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
         let byte=put(hir.Transmute[node.loc types.primitive('uint8' @state.type_nodes) value] @state)
         return intrinsic('__store_u8__' [byte pointer] types.primitive('void' @state.type_nodes) node @state)
     }
-    let layout=views.fixed_integer_layout(element state.input.types)
+    let layout=views.fixed_integer_layout(element state.type_nodes)
     if layout is? none return reject(node 'array element store representation' @state)
     return intrinsic("__store_{if layout.signed 'i' else 'u'}{layout.bits}__" [value pointer] types.primitive('void' @state.type_nodes) node @state)
 }
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
-    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(element state.input.types) state.input.types))
-    if type is? types.ObjectType|types.ArrayType or string_type(element state) return read_word(pointer 0 node @state)
+    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
+    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or string_type(element state) return read_word(pointer 0 node @state)
     if type is? types.FunctionType return put(hir.Transmute[node.loc runtime_type(element node @state) read_word(pointer 0 node @state)] @state)
     if types.is_primitive(type 'bool') {
         let byte=intrinsic('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
         return put(hir.Transmute[node.loc types.primitive('bool' @state.type_nodes) byte] @state)
     }
-    let layout=views.fixed_integer_layout(element state.input.types)
+    let layout=views.fixed_integer_layout(element state.type_nodes)
     if layout is? none return reject(node 'array element load representation' @state)
     return intrinsic("__load_{if layout.signed 'i' else 'u'}{layout.bits}__" [pointer] runtime_type(element node @state) node @state)
 }
@@ -350,7 +371,7 @@ array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr =
 }
 object_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
     if state.allocator is? none return object_copy_body(value type node @state)
-    let key="object:{types.unfold(types.strip_refinement(type state.input.types) state.input.types)}"
+    let key="object:{types.unfold(types.strip_refinement(type state.type_nodes) state.type_nodes)}"
     let name=state.copy_helpers.get(key)
     if name is? none {
         let generated_name=fresh('copy_object' @state)
@@ -365,6 +386,7 @@ object_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
     return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
 owned_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    if cell_members(type @state) isnt? none return cell_copy(value type node @state)
     let array=array_type(type state)
     if array isnt? none return array_copy(value array node @state)
     if object_type(type state) isnt? none return object_copy(value type node @state)
@@ -410,14 +432,154 @@ array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>a
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
+# Optional and general union cells share two words: a program-wide member
+# tag, then a scalar payload or an owned aggregate handle. None is tag zero.
+# A narrower view therefore uses the same tags as its original storage.
+cell_members = (id:addr @state:State):>array<addr>|none => {
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    let payload=views.optional_payload(plain @state.type_nodes)
+    if payload isnt? none return [types.primitive('none' @state.type_nodes) payload]
+    return views.runtime_union_members(plain @state.type_nodes)
+}
+member_tag = (type:addr @state:State):>addr => {
+    let plain=types.unfold(types.strip_refinement(type state.type_nodes) state.type_nodes)
+    if types.is_primitive(types.node_at(state.type_nodes plain) 'none') return 0
+    let key=if string_type(plain state) 'string' else types.shape_of(plain state.type_nodes)
+    let tag=state.union_tags.get(key)
+    if tag isnt? none return tag
+    let fresh:addr=state.next_tag
+    state.next_tag+=1
+    state.union_tags[key]=fresh
+    return fresh
+}
+# The read type may be narrower than a binding or field's physical slot.
+# Preserve the declared type separately; only a single-member read loads
+# the payload. A read that still has several alternatives remains a cell.
+stored_type = (id:addr state:State):>addr => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        let type=state.storage_types.get(node.binding_id)
+        if type isnt? none return type
+    }
+    if node is? hir.MemberAccess {
+        let record=object_type(hir.node_at(state.input.nodes node.value).value_type state)
+        if record isnt? none {
+            let field=types.object_field(record node.name)
+            if field isnt? none return field.value_type
+        }
+    }
+    if node is? hir.Index {
+        let array=array_type(hir.node_at(state.input.nodes node.array).value_type state)
+        if array isnt? none return array.element
+    }
+    return node.value_type
+}
+cell_payload = (cell:addr type:addr node:hir.AST @state:State):>addr => {
+    let value=read_word(cell 8 node @state)
+    let runtime=runtime_type(type node @state)
+    if types.is_primitive(types.node_at(state.type_nodes runtime) 'int64') return value
+    return put(hir.Transmute[node.loc runtime value] @state)
+}
+read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr => {
+    if cell_members(stored @state) isnt? none and cell_members(read @state) is? none return cell_payload(value read node @state)
+    return value
+}
+cell_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none return cell_copy_body(value type node @state)
+    let key="cell:{types.shape_of(type state.type_nodes)}"
+    let name=state.copy_helpers.get(key)
+    if name is? none {
+        let generated_name=fresh('copy_cell' @state)
+        name=generated_name
+        state.copy_helpers[key]=generated_name
+        let parameter=fresh('copy_source' @state)
+        let source=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) parameter] @state)
+        let body=cell_copy_body(source type node @state)
+        finish_copy(generated_name parameter body node @state)
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+}
+cell_write = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
+    let members=cell_members(type @state)
+    $runtime_assert members isnt? none
+    let prefix:array<addr>=[]
+    source=snapshot(source @prefix @state)
+    let tag=snapshot(read_word(source 0 node @state) @prefix @state)
+    let payload=snapshot(read_word(source 8 node @state) @prefix @state)
+    let arms:array<addr>=[]
+    loop member in members {
+        if not aggregate(member state) continue
+        let condition=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let copy=owned_copy(payload member node @state)
+        arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition store_word(copy destination 8 node @state)] @state))
+    }
+    let fallback=store_word(payload destination 8 node @state)
+    prefix.push(store_word(tag destination 0 node @state))
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms fallback] @state))
+    return sequence(prefix node @state)
+}
+cell_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let cell=snapshot(allocation(word(16 node @state) node @state) @prefix @state)
+    prefix.push(cell_write(cell source type node @state))
+    prefix.push(cell)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>addr => {
+    let members=cell_members(expected @state)
+    $runtime_assert members isnt? none
+    if cell_members(actual @state) isnt? none return value
+    let selected:addr?=none
+    loop member in members {
+        if subtyping.is_subtype(actual member subtyping.default_links @state.type_nodes) {
+            if selected isnt? none return reject(node 'overlapping union payload representations' @state)
+            selected=member
+        }
+    }
+    if selected is? none return reject(node 'the value has no member in this union storage' @state)
+    let prefix:array<addr>=[]
+    let payload=snapshot(owned_copy(value selected node @state) @prefix @state)
+    let word_value=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) payload] @state)
+    let cell=snapshot(allocation(word(16 node @state) node @state) @prefix @state)
+    prefix.push(store_word(word(member_tag(selected @state) node @state) cell 0 node @state))
+    prefix.push(store_word(word_value cell 8 node @state))
+    prefix.push(cell)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+runtime_test = (node:hir.TypeTest @state:State):>addr => {
+    let actual=hir.node_at(state.input.nodes node.value).value_type
+    let members=cell_members(actual @state)
+    if members is? none return object_test(node @state)
+    let tested=types.node_at(state.type_nodes node.test_type)
+    if tested is? types.RefinedType return reject(node 'runtime refinement predicates on a union payload' @state)
+    let prefix:array<addr>=[]
+    let source=snapshot(expression(node.value @state) @prefix @state)
+    let tag=snapshot(read_word(source 0 node @state) @prefix @state)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let result=put(hir.Bool[node.loc boolean false] @state)
+    loop member in members {
+        if subtyping.is_subtype(member node.test_type subtyping.default_links @state.type_nodes) {
+            let matches=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
+            result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
+        } else if not type_tests.disjoint(member node.test_type subtyping.default_links @state.type_nodes) {
+            return reject(node 'a runtime test within one union payload alternative' @state)
+        }
+    }
+    if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+    prefix.push(result)
+    return put(hir.Block[node.loc boolean prefix false] @state)
+}
+
 # Strings are immutable views over UTF-8 bytes and a table of grapheme byte
 # boundaries. A slice advances the boundary pointer but retains the original
 # byte base. The start word is therefore an absolute offset into that base.
 # The current arena keeps its allocations for the process lifetime, so copies
 # can share bytes/tables; descriptor allocation must still outlive the view.
 string_type = (id:addr state:State):>bool => {
-    let plain=types.unfold(types.strip_refinement(id state.input.types) state.input.types)
-    return types.node_at(state.input.types plain) isnt? types.TypeOr and views.string_valued(plain state.input.types)
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    return views.string_valued(plain state.type_nodes)
 }
 string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -523,11 +685,12 @@ string_bytes = (value:addr node:hir.AST @state:State):>addr => {
 }
 representation = (node:hir.RepresentationCast @state:State):>addr => {
     let source=hir.node_at(state.input.nodes node.expr)
+    if cell_members(node.value_type @state) isnt? none return cell_pack(expression(node.expr @state) source.value_type node.value_type node @state)
     if string_type(source.value_type state) {
         let value=expression(node.expr @state)
         if string_type(node.value_type state) return value
         let array=array_type(node.value_type state)
-        if array isnt? none and types.is_primitive(types.node_at(state.input.types array.element) 'uint8') return string_bytes(value node @state)
+        if array isnt? none and types.is_primitive(types.node_at(state.type_nodes array.element) 'uint8') return string_bytes(value node @state)
     }
     return reject(node 'this representation conversion' @state)
 }
@@ -644,10 +807,13 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
 # than blindly reading the maximum reserved size of a parent: a smaller
 # child need not contain the storage reserved for one of its siblings.
 object_type = (id:addr state:State):>types.ObjectType? => {
-    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(id state.input.types) state.input.types))
+    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
     return if type is? types.ObjectType type else none
 }
-aggregate = (id:addr state:State):>bool => string_type(id state) or array_type(id state) isnt? none or object_type(id state) isnt? none
+aggregate = (id:addr state:State):>bool => {
+    let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
+    return plain is? types.TypeOr or string_type(id state) or array_type(id state) isnt? none or object_type(id state) isnt? none
+}
 object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
     let layout=layouts.record(id state.layout_context @state.type_nodes)
     if layout is? layouts.Pending {reject(node layout.detail @state); return layouts.Record[1 1 []]}
@@ -665,18 +831,19 @@ field_pointer = (node:hir.MemberAccess @state:State):>addr => {
     return address(expression(node.value @state) offset node @state)
 }
 field_read = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
-    if object_type(type state) isnt? none return pointer
+    if cell_members(type @state) isnt? none or object_type(type state) isnt? none return pointer
     if array_type(type state) isnt? none return read_word(pointer 0 node @state)
-    let plain=types.node_at(state.input.types types.strip_refinement(type state.input.types))
+    let plain=types.node_at(state.type_nodes types.strip_refinement(type state.type_nodes))
     if plain is? types.FunctionType {
         return put(hir.Transmute[node.loc runtime_type(type node @state) read_word(pointer 0 node @state)] @state)
     }
     return array_load(pointer type node @state)
 }
 field_write = (pointer:addr value:addr type:addr node:hir.AST @state:State):>addr => {
+    if cell_members(type @state) isnt? none return cell_write(pointer value type node @state)
     if object_type(type state) isnt? none return object_write(pointer value type node @state)
     if array_type(type state) isnt? none return store_word(value pointer 0 node @state)
-    let plain=types.node_at(state.input.types types.strip_refinement(type state.input.types))
+    let plain=types.node_at(state.type_nodes types.strip_refinement(type state.type_nodes))
     if plain is? types.FunctionType {
         let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
         return store_word(word pointer 0 node @state)
@@ -713,7 +880,7 @@ object_write = (destination:addr source:addr type:addr node:hir.AST @state:State
     let tag=snapshot(read_word(source tag_offset node @state) @prefix @state)
     let arms:array<addr>=[]
     loop entry in state.layout_context.brands.entries {
-        let candidate=types.node_at(state.input.types entry.value_type)
+        let candidate=types.node_at(state.type_nodes entry.value_type)
         $runtime_assert candidate is? types.ObjectType
         if not subtyping.is_subtype(entry.value_type type subtyping.default_links @state.type_nodes) continue
         let brand=brand_number(entry.name state)
@@ -821,7 +988,7 @@ call_slot = (value:addr? type:addr required:bool node:hir.AST @args:array<addr> 
 }
 ordinary_call = (node:hir.FunctionCall result_type:addr @state:State):>addr => {
     let callee=hir.node_at(state.input.nodes node.func)
-    let signature=types.node_at(state.input.types types.strip_refinement(callee.value_type state.input.types))
+    let signature=types.node_at(state.type_nodes types.strip_refinement(callee.value_type state.type_nodes))
     if signature isnt? types.FunctionType return reject(node 'a call requires its selected concrete signature' @state)
     if signature.rest isnt? none return reject(node 'rest argument legalization' @state)
     let prefix:array<addr>=[]
