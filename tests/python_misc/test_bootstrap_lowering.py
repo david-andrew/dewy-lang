@@ -70,6 +70,11 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ("let same=(a:string|none b:string):>bool=>a =? b\nlet main=():>int64=>if same('a' 'a') and not same(none 'a') and not same('b' 'a') 42 else 0", 42),
+    ("let same=(a:int64|string|none b:none|string|int64):>bool=>a =? b\nlet main=():>int64=>if same(3 3) and same('a' 'a') and same(none none) and not same(3 'a') and not same(none 3) 42 else 0", 42),
+    ("let different=(a:int64|none b:none|int64):>bool=>a not=? b\nlet main=():>int64=>if different(3 4) and different(none 3) and not different(3 3) and not different(none none) 42 else 0", 42),
+    ("let calls:int64=0\nlet value:int64|none=none\nlet next=():>int64=>{calls+=1 value=3 return 3}\nlet main=():>int64=>{let answer=value =? next() return if not answer and calls =? 1 42 else 0}", 42),
+    ("let calls:int64=0\nlet next=():>none=>{calls+=1 return none}\nlet same=(x:int64|none):>bool=>x =? next()\nlet main=():>int64=>{let answer=same(none) return if answer and calls =? 1 42 else 0}", 42),
     ("let main=():>int64=>{let d=['a' -> 40] d['a']+=2 return d['a']}", 42),
     ("let main=():>int64=>{let d=['a' -> 40] d['a'] += {d.pop('a'); 2} return d['a']}", 42),
     ("let calls:int64=0\nlet next=():>'a'=>{calls+=1 return 'a'}\nlet main=():>int64=>{let d:totaldict<'a' int64>=['a' -> 40] d[next()]+=2 return if calls=?1 d['a'] else 0}", 42),
