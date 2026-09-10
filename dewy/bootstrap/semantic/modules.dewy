@@ -12,6 +12,7 @@ import p"hir.dewy" as hir
 import p"match_patterns.dewy" as patterns
 import p"target_values.dewy" as target_values
 import p"module_directives.dewy" as directives
+import p"test_syntax.dewy" as tests
 
 doc"""
 File-relative source modules, corresponding to semantic/modules.py.
@@ -40,6 +41,8 @@ Engine:type = [
     prelude_bindings:dict<string addr>=[]
     prelude_loaded:bool=false
     prelude_loading:bool=false
+    test_mode:bool=false
+    entry_name:string='main'
 ]
 module_at = (id:addr engine:Engine):>Module => {
     $runtime_assert id <? engine.modules.length
@@ -227,7 +230,10 @@ load_source = (path:string @engine:Engine):>addr|Error => {
     let source = SrcFile[path body]
     let parsed = parser.parse(source)
     if parsed is? Error return parsed
-    let program = parsed
+    let prepared=tests.prepare(source parsed run_tests=engine.test_mode and engine.loading.length =? 1 and not engine.prelude_loading)
+    if prepared is? Error return prepared
+    source=prepared.source
+    let program = prepared.program
     let root = tokens.node_at(program.nodes program.root)
     $runtime_assert root is? parser.Block
     let directed=directives.read(root source program.nodes engine.session.target)

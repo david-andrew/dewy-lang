@@ -37,7 +37,7 @@ visit = (id:addr functions:dict<addr addr> nodes:array<hir.AST> @seen:set<addr> 
 assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):>Prepared => {
     let module=modules.module_at(entry engine)
     let source=sources.srcfile(module.context engine.session)
-    let main=module.exports.get('main')
+    let main=module.exports.get(engine.entry_name)
     let items:array<addr>=[]
     let source_by_item:dict<addr SrcFile>=[]
     let functions:dict<addr addr>=[]
@@ -90,7 +90,8 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
 # The executable boundary: every module proves its contracts before storage
 # selection, and startup is checked with the explicit entry export. Keep the
 # lower-level checked-HIR entry available for focused legalization tests.
-lower_validated = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
+Compilation:type = const [lowered:lower.Result analysis:validation.Result]
+compile = (entry:addr @engine:modules.Engine):>Compilation|Error => {
     let validated=validation.validate(@engine)
     if validated is? Error return validated
     let allocator=engine.prelude_bindings.get('_arena_alloc')
@@ -103,5 +104,12 @@ lower_validated = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
     let prepared=assemble(entry @engine required_bindings=required)
     let error=initialization.validate_initialization(prepared.root engine.session.hir engine.session.types engine.session.registry prepared.source entry=prepared.entry source_by_item=prepared.source_by_item)
     if error isnt? none return error
-    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings)
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings)
+    if lowered is? Error return lowered
+    return Compilation[lowered validated]
+}
+
+lower_validated = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
+    let result=compile(entry @engine)
+    return if result is? Error result else result.lowered
 }

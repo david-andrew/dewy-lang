@@ -1,0 +1,149 @@
+from reporting import SrcFile, Error
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"../parser/t2.dewy" as post
+import p"syntax.dewy" as syntax
+import p"module_directives.dewy" as directives
+
+# Tests are ordinary functions. Their adjacent annotations are removed in
+# every compilation, and only the entry module of `dewy test` gets a runner.
+# Like the hosted compiler, synthesize source so normal call checking owns
+# argument matching, including named fields in a written-out case record.
+const entry_name='__dewy_test_main'
+Spec:type = const [name:string cases:addr?]
+Extracted:type = const [statements:array<addr> tests:array<Spec>]
+Prepared:type = const [source:SrcFile program:parser.Program]
+Declaration:type = const [name:string value:addr]
+
+declaration = (id:addr nodes:array<tokens.Token>):>Declaration? => {
+    let node=tokens.node_at(nodes id)
+    if node is? parser.KeywordExpr and node.parts.length =? 2 {node=tokens.node_at(nodes node.parts[1])}
+    if node isnt? parser.BinOp or not syntax.is_operator(node.op '=' nodes) return none
+    let name=syntax.identifier(node.left nodes)
+    return if name is? none none else Declaration[name node.right]
+}
+call_operator = (id:addr nodes:array<tokens.Token>):>bool => {
+    let node=tokens.node_at(nodes id)
+    return node is? post.Juxtapose and 'CallJuxtapose' in? node.options
+}
+extract = (root:parser.Block source:SrcFile nodes:array<tokens.Token>):>Extracted|Error => {
+    let items:array<addr>=[]
+    let tests:array<Spec>=[]
+    let index:addr=0
+    loop index <? root.inner.length {
+        let id=root.inner[index]
+        let node=tokens.node_at(nodes id)
+        let annotated=directives.metatag(id nodes) =? 'test'
+        let parameters:addr?=none
+        if node is? parser.BinOp and directives.metatag(node.left nodes) =? 'test' and call_operator(node.op nodes) {
+            annotated=true parameters=node.right
+        }
+        if not annotated {items.push(id) index+=1 continue}
+        index+=1
+        if index >=? root.inner.length return directives.problem(id '`$test` must mark a function declaration' 'expected a function after this annotation' source nodes)
+        let following=root.inner[index]
+        let named=declaration(following nodes)
+        if named is? none return directives.problem(id '`$test` must mark a function declaration' 'expected a named function after this annotation' source nodes)
+        let function=tokens.node_at(nodes named.value)
+        if function isnt? parser.BinOp or not syntax.is_operator(function.op '=>' nodes) return directives.problem(id '`$test` must mark a function declaration' 'the following value is not a function literal' source nodes)
+        let signature=tokens.node_at(nodes function.left)
+        if signature is? parser.BinOp and syntax.is_operator(signature.op ':>' nodes) {signature=tokens.node_at(nodes signature.left)}
+        let takes_parameters=not (signature is? parser.Block and signature.delims =? '()' and signature.inner.length =? 0)
+        let cases:addr?=none
+        if parameters isnt? none {
+            let block=tokens.node_at(nodes parameters)
+            if block isnt? parser.Block return directives.problem(id '`$test` parameters need parentheses' 'write `$test(cases=...)`' source nodes)
+            loop parameter in block.inner {
+                let pair=declaration(parameter nodes)
+                if pair is? none return directives.problem(parameter '`$test` parameters are `name=value` pairs' 'the supported parameter is `cases`' source nodes)
+                if pair.name not=? 'cases' return directives.problem(parameter "unknown `$test` parameter `{pair.name}`" 'the supported parameter is `cases`' source nodes)
+                if cases isnt? none return directives.problem(parameter '`$test` parameter `cases` is given twice' 'second occurrence' source nodes)
+                cases=pair.value
+            }
+        }
+        if takes_parameters and cases is? none return directives.problem(id 'this test takes parameters but `$test` gives no cases' 'supply `$test(cases=...)`' source nodes)
+        if not takes_parameters and cases isnt? none return directives.problem(id 'this test takes no parameters, but `$test` gives cases' 'add a parameter or remove `cases`' source nodes)
+        tests.push(Spec[named.name cases])
+        items.push(following)
+        index+=1
+    }
+    return Extracted[items tests]
+}
+source_text = (id:addr source:SrcFile nodes:array<tokens.Token>):>string => {
+    let span=tokens.node_at(nodes id).loc
+    let start=span.start
+    let limit=span.stop
+    $runtime_assert start <=? limit and limit <=? source.body.length
+    return source.body[start..limit)
+}
+case_arguments = (id:addr statements:array<addr> source:SrcFile nodes:array<tokens.Token> seen:set<addr>=set[]):>array<string>|none => {
+    # A declaration cycle is not a literal cases list; ordinary checking will
+    # report it. Do not recurse indefinitely while preparing the test runner.
+    if id in? seen return none
+    seen.add(id)
+    let name=syntax.identifier(id nodes)
+    if name isnt? none {
+        loop statement in statements {
+            let named=declaration(statement nodes)
+            if named isnt? none and named.name =? name return case_arguments(named.value statements source nodes seen)
+        }
+        return none
+    }
+    let block=tokens.node_at(nodes id)
+    if block isnt? parser.Block or block.delims not in? ['[]' '()'] or block.inner.length =? 0 return none
+    let arguments:array<string>=[]
+    loop case in block.inner {
+        let record=tokens.node_at(nodes case)
+        let fields:array<string>=[]
+        if record is? parser.Block and record.delims =? '[]' and record.inner.length >? 0 {
+            loop field in record.inner {
+                let named=declaration(field nodes)
+                if named is? none {fields.clear break}
+                fields.push("{named.name}={source_text(named.value source nodes)}")
+            }
+        }
+        arguments.push(if fields.length >? 0 fields.join(' ') else "({source_text(case source nodes)})")
+    }
+    return arguments
+}
+runner = (extracted:Extracted source:SrcFile nodes:array<tokens.Token>):>string => {
+    let lines:array<string>=[
+        '' '# ---- generated by dewy test: calls are checked like ordinary source'
+        "let {entry_name}=(args:array<string>):>int64=>\{"
+        'let json=false let brief=false'
+        r'loop arg in args {if arg =? "--json" {json=true} if arg =? "--brief" {brief=true}}'
+        '_test_init(json)'
+    ]
+    loop spec in extracted.tests {
+        if spec.cases is? none {
+            lines.push("_test_begin(json) {spec.name}() _test_end({_quoted(spec.name)} (-1) json)")
+            continue
+        }
+        let arguments=case_arguments(spec.cases extracted.statements source nodes)
+        if arguments isnt? none {
+            loop index in 0.. and index <? arguments.length {
+                lines.push("_test_begin(json) {spec.name}({arguments[index]}) _test_end({_quoted(spec.name)} {index} json)")
+            }
+        } else {
+            lines.push("\{let index:int64=0 loop case in ({source_text(spec.cases source nodes)}) \{")
+            lines.push("_test_begin(json) {spec.name}(case) _test_end({_quoted(spec.name)} index json) index+=1\}\}")
+        }
+    }
+    lines.push(r'return _test_summary(json brief) }')
+    return lines.join('\n')+'\n'
+}
+prepare = (source:SrcFile program:parser.Program run_tests:bool=false):>Prepared|Error => {
+    let root=tokens.node_at(program.nodes program.root)
+    $runtime_assert root is? parser.Block
+    let extracted=extract(root source program.nodes)
+    if extracted is? Error return extracted
+    if run_tests {
+        let augmented=SrcFile[source.path source.body+runner(extracted source program.nodes)]
+        let parsed=parser.parse(augmented)
+        if parsed is? Error return parsed
+        return prepare(augmented parsed)
+    }
+    let cleaned=parser.Block[loc=root.loc inner=extracted.statements delims=root.delims base=root.base]
+    program.root=tokens.append_node(@program.nodes cleaned)
+    return Prepared[source program]
+}
