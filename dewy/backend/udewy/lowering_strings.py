@@ -3027,7 +3027,7 @@ class _StringLowering:
         released before the taker is done."""
         out = self._new_string_temp(loc, 'int64', 'taken')
         length = self._new_string_temp(loc, 'int64', 'taken_length')
-        copy, copied = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc)
+        copy, copied = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc, segmented_source=descriptor)
         return [
             hir.Declare(loc, ty.VOID_TYPE, 'let', out.name, 'int64', descriptor),
             hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
@@ -3292,7 +3292,7 @@ class _StringLowering:
         statements.append(
             hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(descriptor, STRING_BYTE_LENGTH_OFFSET, loc))
         )
-        copy, result = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc)
+        copy, result = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc, segmented_source=descriptor)
         return [*statements, *copy], result
 
     STRING_CLONE_SYMBOL = '__dewy_string_clone'
