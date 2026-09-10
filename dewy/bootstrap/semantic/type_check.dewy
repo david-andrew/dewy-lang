@@ -412,17 +412,18 @@ function_result = (id:addr context:contexts.Context @session:contexts.Session):>
 
 # Defaults remain syntax. Infer their storage shape here when the expression
 # itself supplies it; arbitrary calls need the value checker's resolution.
-infer_default = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+infer_default = (id:addr context:contexts.Context @session:contexts.Session singleton:bool=false):>addr|Error => {
     let source = contexts.source_at(context session)
     let node = tokens.node_at(source.nodes syntax.unparen(id source.nodes))
     let number = syntax.integer(id source.nodes)
     if number isnt? none {
+        if singleton return types.integer_literal(number @session.types)
         if number >=? -9223372036854775808 and number <=? 9223372036854775807 return types.primitive('int64' @session.types)
         return contexts.unsupported(id 'materializing a large default through the numeric prelude' context session)
     }
     if node is? parser.Atom {
         let atom = tokens.node_at(source.nodes node.item)
-        if atom is? tokens.String return types.primitive('string' @session.types)
+        if atom is? tokens.String return if singleton types.string_literal(atom.content @session.types) else types.primitive('string' @session.types)
         if atom is? tokens.Bool return types.primitive('bool' @session.types)
         if atom is? tokens.Identifier {
             if atom.name =? 'none' return types.primitive('none' @session.types)
@@ -1006,7 +1007,25 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         immutable = immutable or node.immutable
         if node.minted continue
         if node.brand isnt? none return contexts.unsupported(id 'minting a compiler representation family' context session)
-        let error = records.merge(@fields node.fields default_only id context @session owner=binding.name)
+        # A bare inherited default is a value checked against the inherited
+        # contract, not a declaration of wider storage. Preserve literal
+        # identity during this compatibility check; merge keeps the original
+        # field type, mutability, and predicates. Construction checks the
+        # saved expression against that same contract.
+        let additions=node.fields
+        loop i in 0.. and i <? additions.length {
+            let field=additions[i]
+            if field.name not in? default_only or field.default is? none continue
+            let inherited=false
+            loop previous in fields {if previous.name =? field.name {inherited=true break}}
+            if not inherited {continue}
+            $runtime_assert field.default <? session.syntax_refs.length
+            let reference=session.syntax_refs[field.default]
+            let inferred=infer_default(reference.node contexts.Context[reference.source reference.scope] @session singleton=true)
+            if inferred is? Error return inferred
+            additions[i]=types.ObjectField[field.name inferred field.mutable field.default field.refinement]
+        }
+        let error = records.merge(@fields additions default_only id context @session owner=binding.name)
         if error isnt? none return error
         let declared_methods:array<types.MethodSpec>=[]
         loop method in node.methods {

@@ -6,12 +6,21 @@ from dewy.semantic import check
 import test_bootstrap_prelude as prelude
 
 CASES = [
+    # Scalar field predicates are checked at construction; alias composition
+    # retains them and does not evaluate an unused default.
+    'Base:type=type of [code:1|2=1]\nChild:type=type of Base & [code=3]',
+
+    'Report:type=type of [severity:"error"|"warning"="warning"]\nError:type=type of Report & [severity="error"]\nlet report=Error[]',
+    'Base:type=type of [code:1|2=1]\nChild:type=type of Base & [code=2]\nlet child=Child[]',
+
     'Choice:type=0|[x:int64]\nlet f=(x:int64):>Choice=>[x=x]',
     'Choice:type=0|[x:int64<x >? 0>]\nlet f=(x:int64<x >? 0>):>Choice=>[x=x]',
     'Choice:type=0|[x:int64]|[y:bool]\nlet f=(y:bool):>Choice=>[y=y]',
     'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nR:type=0|[numerator:BigInt & ~0 denominator:BigInt<sign =? 1>]\nlet f=(numerator:BigInt denominator:BigInt<sign =? 1>):>R=>{if numerator =? 0 return 0\nreturn [numerator=numerator denominator=denominator]}',
 ]
 ERRORS = [
+    'Report:type=type of [severity:"error"|"warning"="warning"]\nError:type=type of Report & [severity="unknown"]',
+
     "Choice:type=0|[x:int64]\nlet f=():>Choice=>[x='wrong']",
     'Choice:type=0|[x:int64]|[x:bool]\nlet f=():>Choice=>[x=1]',
 ]
