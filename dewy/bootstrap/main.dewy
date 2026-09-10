@@ -16,7 +16,15 @@ let main=(argv:array<string>):>int64=>{
         printl('  dewy update')
         return 0
     }
-    if request.version {printl('dewy 0.0.0-dev.0+bootstrap.dewy') return 0}
+    if request.version {
+        # Embed the version belonging to these compiler sources. Installed
+        # invocation must not depend on the caller's working directory.
+        let bytes=$include_bytes(p"../../VERSION")
+        let version=bytes as string|none
+        $runtime_assert version isnt? none
+        printl("dewy {version}")
+        return 0
+    }
     let cwd=platform.kernel_path(false)
     if cwd is? Error {cwd.fail}
     let executable=platform.kernel_path(true)
