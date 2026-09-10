@@ -250,6 +250,32 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
     return problem(id "undefined name `{name}`" 'no declaration of this name is in scope' env session)
 }
 
+# Expected types serve two different purposes: selecting a call and checking
+# its result. An umbrella like any supplies no inference information. For a
+# builtin numeric operator, unions and materialized targets are result
+# conversions, and a concrete operand width chooses the arithmetic width.
+call_hint = (expected:addr? function:addr arguments:array<addr> env:Environment session:contexts.Session):>addr? => {
+    if expected is? none return none
+    let target=types.node_at(session.types expected)
+    if target is? types.Primitive and target.name in? ['any' 'void' 'untyped'] return none
+    let callee=node_at(function session)
+    if callee isnt? hir.ExpressedIdentifier or callee.binding_id is? none return expected
+    let binding=bindings.binding_at(session.registry callee.binding_id)
+    if binding.kind not=? 'function' or binding.syntax isnt? none or binding.declaration isnt? none return expected
+    if callee.name not in? builtins.binary_operators.values and callee.name not in? builtins.prefix_operators.values and callee.name not in? builtins.inverted_comparisons.values return expected
+    if target is? types.TypeOr return none
+    let number=if target is? types.QuantityType target.number else expected
+    if numeric_values.is_family(number 'Fixed' env.lexical session) or numeric_values.is_family(number 'Rational' env.lexical session) or numeric_values.is_family(number 'BigRational' env.lexical session) return none
+    if views.fixed_integer_layout(number session.types) isnt? none {
+        loop argument in arguments {
+            let actual=types.strip_refinement(node_at(argument session).value_type session.types)
+            let type=types.node_at(session.types actual)
+            if views.fixed_integer_layout(actual session.types) isnt? none or type is? types.Primitive and type.name in? ['int' 'uint'] return none
+        }
+    }
+    return expected
+}
+
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     if keyword.length =? 0 {
         let specialized=builtin_value(function positional id env @session)
@@ -281,12 +307,13 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     loop argument in positional { pos_types.push(node_at(argument session).value_type) }
     loop [name argument] in keyword { kw_types[name] = node_at(argument session).value_type }
     let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)]
-    let matched = dispatch.match_best_function(methods pos_types kw_types expected system @session.types)
+    let hint=call_hint(expected function positional env session)
+    let matched = dispatch.match_best_function(methods pos_types kw_types hint system @session.types)
     if matched is? dispatch.DispatchError return problem(id 'no matching function' matched.message env session)
     let callee = function
     let method = dispatch.method_at(session.types matched.method)
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and shape is? types.FunctionType and shape.type_params.length >? 0 {
-        let instance = instantiate_call(func shape pos_types kw_types expected id env @session)
+        let instance = instantiate_call(func shape pos_types kw_types hint id env @session)
         if instance is? Error return instance
         if instance isnt? none {
             callee = instance
