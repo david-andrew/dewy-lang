@@ -31,7 +31,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   and remainder; extracting the proven record alternative is a checked
   payload read. Source comparisons retain rejection of zero and unproven
   divisors, and native execution covers the converted compound operations.
-  These changes are undergoing the full paired self-build.
+  A full-library native invocation now executes compound bigint division and
+  remainder successfully. Explicit integer-to-bigint casts share annotated
+  storage conversion in both checkers, including literals larger than a word;
+  source comparisons and signed/unsigned boundary obligations pass. These
+  changes are undergoing the full paired self-build.
 
 - The paired native build is executable through `tools/bootstrap_native.sh`.
   Native checks of the compiler's own semantic sources exposed optional-value
@@ -108,9 +112,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 - Fresh nested array rows now transfer their owned elements into the stored
   row. Callers release record argument snapshots after the protected call,
   including snapshots required by overlapping place arguments. Fresh record
-  arguments use the same lifetime boundary. All 36 aggregate ownership tests
-  pass. Profiling localized most remaining full-invocation allocation growth
-  to validation, and the next seed includes these additional cleanup paths.
+  arguments use the same lifetime boundary. Discarded ordinary record and
+  union call results also release their payloads, and a fresh record returned
+  into another record's field transfers its ownership. The 41 ownership
+  cases pass (the new nested-field case includes a guard for its array read).
+  Profiling localized most remaining full-invocation allocation growth to
+  validation; the newest seed is being built with these cleanup paths.
   No allocator policy or language syntax changed.
 
 - Native version output embeds the shared `VERSION` at compilation. A native
