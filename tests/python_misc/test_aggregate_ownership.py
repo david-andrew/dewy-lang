@@ -456,6 +456,36 @@ let main=():>int64=>{
     assert len(set(cursors[2:])) == 1, cursors
 
 
+@pytest.mark.parametrize('replacement', ['Box[value.words]', 'copy(value)'])
+def test_fresh_record_replacements_transfer_fields_before_releasing_old_value(replacement, tmp_path):
+    source = '''
+Box:type=[words:array<string>]
+Outer:type=[box:Box]
+let copy=(value:Box):>Box=>value
+let replace=(@value:Box):>void=>{value=REPLACEMENT}
+let exercise=():>void=>{
+    let value=Box[["owned words"]]
+    let kept=value.words
+    value=REPLACEMENT
+    replace(@value)
+    let outer=Outer[value]
+    outer.box=FIELD_REPLACEMENT
+    outer.box.words.clear
+    value.words.clear
+    $runtime_assert kept.length=?1
+    $runtime_assert kept[0]=?"owned words"
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''.replace('FIELD_REPLACEMENT', replacement.replace('value', 'outer.box')).replace('REPLACEMENT', replacement)
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('result_type', ['Box', 'Box|none', 'Box|string', 'array<string>|none'])
 def test_discarded_call_statements_release_their_payloads(result_type, tmp_path):
     value = 'words' if result_type.startswith('array') else 'Box[words]'

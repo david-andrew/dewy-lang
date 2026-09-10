@@ -1060,22 +1060,26 @@ class _ObjectLowering:
             fresh_destination = True
         prelude, src = self._extract_object_pointer(node.value)
         statements.extend(prelude)
-        statements.extend(self._replace_object_value(dest, src, node.target.type, node.loc, fresh=fresh_destination))
+        statements.extend(self._replace_object_value(dest, src, node.target.type, node.loc,
+                                                    fresh=fresh_destination,
+                                                    move=self._object_expression_owns_fresh_storage(node.value)))
         return statements
 
-    def _replace_object_value(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span, *, fresh: bool = False) -> list[hir.AST]:
+    def _replace_object_value(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span, *, fresh: bool = False, move: bool = False) -> list[hir.AST]:
         """Make an independent value before replacing an existing object.
 
         A member or place can alias the RHS. Copy first, release the previous
         members, then move the temporary's inline bytes into the destination.
         Every nested handle in the temporary belongs to the replacement, so
         no descriptor from a shorter-lived frame escapes through a field.
+        A fresh literal or call already owns its value: transfer its fields
+        instead of abandoning them after a second independent copy.
         """
         size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
         temporary = self._new_object_temp(loc)
         statements = [
             hir.Declare(loc, ty.VOID_TYPE, 'let', temporary.name, 'int64', self._object_allocation(loc, size)),
-            *self._object_copy(temporary, src, object_type, loc, arena=self._has_arena()),
+            *self._object_copy(temporary, src, object_type, loc, arena=self._has_arena(), move=move),
         ]
         if not fresh and self._has_arena():
             statements.extend(self._release_object_members(dest, object_type, loc))
@@ -1089,7 +1093,8 @@ class _ObjectLowering:
             return self._replace_cell_value(address, value, members, loc, prepared=False)
         if isinstance(field_type, ty.ObjectType):
             prelude, source = self._extract_object_pointer(value)
-            return [*prelude, *self._replace_object_value(address, source, field_type, loc)]
+            return [*prelude, *self._replace_object_value(address, source, field_type, loc,
+                                                        move=self._object_expression_owns_fresh_storage(value))]
         if isinstance(field_type, ty.ArrayType):
             prelude, replacement = self._transfer_array_value(value, self._copy_source_expression(value), field_type, site='stored in a field')
             held = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('replacement_field'))
