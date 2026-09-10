@@ -1,0 +1,101 @@
+from reporting import SrcFile, Error
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
+import p"../../dewy/bootstrap/semantic/check.dewy" as checking
+import p"../../dewy/bootstrap/semantic/type_display.dewy" as display
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/match_patterns.dewy" as patterns
+loop_summary = (id:addr session:contexts.Session function_types:bool):>string => {
+    let node=checking.node_at(id session)
+    let parts:array<string>=[]
+    if node is? hir.FunctionLiteral and function_types { parts.push("function:{display.type_to_dewy(node.value_type session.types)};") }
+    if node is? hir.LoopArm { parts.push("loop:{display.type_to_dewy(node.value_type session.types)};") }
+    if node is? hir.IndexAssign { parts.push('index_store;') }
+    if node is? hir.Index|hir.StringIndex {
+        let kind = if node is? hir.Index 'index' else 'string_index'
+        let slot = if node.constant_index is? none 'none' else "{node.constant_index}"
+        parts.push("{kind}:{slot};")
+    }
+    if node is? hir.StringSlice { parts.push("slice:{display.type_to_dewy(node.value_type session.types)};") }
+    if node is? hir.SetAlgebra { parts.push("algebra:{node.op};") }
+    if node is? hir.StringEqual { parts.push("string_equal:{node.negated};") }
+    if node is? hir.StringConcat { parts.push('concat;') }
+    if node is? hir.DictLookup {
+        let slot = if node.static_position is? none 'none' else "{node.static_position}"
+        parts.push("lookup:{display.type_to_dewy(node.value_type session.types)}:{node.proven}:{node.position isnt? none}:{slot};")
+    }
+    if node is? hir.DictRemove { parts.push("remove:{display.type_to_dewy(node.value_type session.types)}:{node.default isnt? none}:{node.lenient};") }
+    if node is? hir.DictStore { parts.push(if node.values is? none 'store:set;' else 'store:dict;') }
+    if node is? hir.DictView { parts.push("view:{node.name};") }
+    if node is? hir.IteratorExpression {
+        let target=checking.node_at(node.target session)
+        let last=if node.last is? none 'none' else "{node.last}"
+        let count=if node.count is? none 'none' else "{node.count}"
+        parts.push("iter:{display.type_to_dewy(target.value_type session.types)}:{node.first}:{node.step}:{last}:{count}:{node.guarded};")
+    }
+    if node is? hir.Break { parts.push("break:{node.loop_levels};") }
+    if node is? hir.Continue { parts.push("continue:{node.loop_levels};") }
+    loop child in hir.children(node) { parts.push(loop_summary(child session function_types)) }
+    return parts.join
+}
+# One compiled driver serves all source comparisons. Programs arrive as
+# files so adding a case does not rebuild the parser and semantic checker.
+main = (argv:array<string>):>int64 => {
+    $runtime_assert argv.length >=? 5
+    let invalid=argv[1] =? 'invalid'
+    let function_types=argv[2] =? 'true'
+    let validate_matches=argv[3] =? 'true'
+    let failures:int64=0
+    let unordered_instances=argv[4] =? 'true'
+    let index:addr=5
+    loop index <? argv.length {
+        let path=argv[index]
+        index += 1
+        let text=p(path).read_text
+        if text isnt? string { printl("cannot read {path}") return 1 }
+        let source=SrcFile[path text]
+        let parsed=parser.parse(source)
+        if parsed is? Error {parsed.fail return 1}
+        let session=contexts.Session[]
+        let lexical=contexts.begin(source parsed.nodes @session)
+        let environment=checking.begin(lexical @session)
+        let result=checking.module(parsed.root environment @session)
+        if validate_matches and result isnt? Error {
+            let error=patterns.validate(session)
+            if error isnt? none {result=error}
+        }
+        if invalid {
+            if result isnt? Error { printl("accepted invalid source: {path}") failures += 1 continue }
+            if result.title =? 'native checker implementation pending' {result.render(source) failures += 1 continue}
+            $runtime_assert result.pointers.length >? 0 and result.pointers[0].message.length >? 0
+            printl('rejected')
+            continue
+        }
+        if result is? Error {result.render(source) failures += 1 continue}
+        let node=checking.node_at(result session)
+        let instances:array<string>=[]
+        loop item in session.hoisted {
+            let declared=checking.node_at(item session)
+            $runtime_assert declared is? hir.Declare
+            instances.push(display.type_to_dewy(checking.node_at(declared.expr session).value_type session.types))
+        }
+        if unordered_instances {
+            # Independent method/constructor bodies may be hoisted in a
+            # different order. Compare their signatures as a multiset.
+            let i:addr=1
+            loop i <? instances.length {
+                let value=instances[i]
+                let j=i
+                loop j >? 0 and j <? instances.length and types.name_before(value instances[j-1]) {
+                    let previous=instances[j-1]
+                    instances[j]=previous instances[j-1]=value
+                    j -= 1
+                }
+                i += 1
+            }
+        }
+        printl("{display.type_to_dewy(node.value_type session.types)}|{loop_summary(result session function_types)}|instances:{instances.join(',')}")
+    }
+    return if failures =? 0 0 else 1
+}

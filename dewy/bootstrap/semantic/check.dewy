@@ -27,6 +27,9 @@ import p"container_state.dewy" as container_state
 import p"match_patterns.dewy" as patterns
 import p"propositions.dewy" as propositions
 import p"inferred_results.dewy" as inferred_results
+import p"method_syntax.dewy" as method_syntax
+import p"type_names.dewy" as type_names
+import p"function_contracts.dewy" as contracts
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -92,7 +95,12 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if node.value_type =? expected return value
     let actual = types.node_at(session.types node.value_type)
     if actual is? types.ArrayType and target is? types.ArrayType and target.length is? none and actual.element =? target.element return value
+    if actual is? types.FunctionType and target is? types.FunctionType return value
     if types.is_primitive(target 'any') return value
+    # A value seen through the unbranded structure that carries its fields
+    # still carries its nominal brand. The binding's annotation remains its
+    # store contract; this read can retain the more specific value type.
+    if actual is? types.ObjectType and target is? types.ObjectType and target.brand is? none return value
     # An abstract integer parameter does not materialize a new machine
     # representation. Keep singleton bounds for guards such as `i <? 3`.
     if actual is? types.IntegerLiteralType and (types.is_primitive(target 'int') or types.is_primitive(target 'uint')) return value
@@ -155,6 +163,22 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
 
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let func = node_at(function session)
+    if func is? hir.BoundMethod {
+        let arguments:array<addr>=[]
+        if func.receiver isnt? none {
+            let signature=dispatch.method_at(session.types node_at(func.function session).value_type)
+            $runtime_assert signature.pos_or_kw.length >? 0
+            let receiver=func.receiver
+            if signature.pos_or_kw[0].place {
+                let borrowed=place(receiver id env @session)
+                if borrowed is? Error return borrowed
+                receiver=borrowed
+            }
+            arguments.push(receiver)
+        }
+        loop argument in positional {arguments.push(argument)}
+        return call(func.function arguments keyword id env @session expected=expected)
+    }
     let shape = types.node_at(session.types func.value_type)
     if shape isnt? types.CallableType return problem(id 'value is not callable' display.type_to_dewy(func.value_type session.types) env session)
     let methods:array<addr> = if shape is? types.OverloadType shape.methods else [func.value_type]
@@ -218,6 +242,21 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     return if expected is? none result else against(result expected id env @session)
 }
 
+# A static method with arguments is an ordinary function value. An
+# instance method cannot escape its receiver; only truly zero-argument
+# methods auto-call (defaults alone do not make a record method zero-arg).
+auto_call = (value:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let node=node_at(value session)
+    if node is? hir.BoundMethod {
+        let signature=dispatch.method_at(session.types node.value_type)
+        if signature.pos_or_kw.length >? 0 or signature.kw_only.length >? 0 or signature.rest isnt? none {
+            if node.receiver isnt? none return problem(id 'a method must be called' 'this method takes arguments; supply them explicitly' env session)
+            return if expected is? none node.function else against(node.function expected id env @session)
+        }
+    }
+    return call(value [] [] id env @session expected=expected)
+}
+
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let node = tokens.node_at(source.nodes id)
@@ -237,7 +276,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         else if atom is? tokens.Bool { value = put(hir.Bool[node.loc types.primitive('bool' @session.types) atom.value] @session) }
         else return pending(id "{atom.kind} value" env session)
         if value is? Error return value
-        if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return call(value [] [] id env @session expected=expected)
+        if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return auto_call(value id env @session expected=expected)
         return if expected is? none value else against(value expected id env @session)
     }
     if node is? parser.Flow return flow(id node env @session expected=expected)
@@ -278,6 +317,10 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let value = expression(node.item env @session call_target=true)
             if value is? Error return value
             let target = node_at(value session)
+            if target is? hir.BoundMethod {
+                if target.receiver isnt? none return pending(id 'extracting an instance method as a function value' env session)
+                return target.function
+            }
             if types.node_at(session.types target.value_type) is? types.CallableType return value
             if not allow_place return problem(id 'a place can only be used as a function argument' 'pass it directly to an `@` parameter' env session)
             return place(value id env @session)
@@ -306,7 +349,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             return put(hir.TypeTest[node.loc types.primitive('bool' @session.types) value tested op =? 'isnt?'] @session)
         }
         if tokens.node_at(source.nodes node.op) is? post.CombinedAssignment return compound_assignment(id node env @session)
-        if op =? '=>' return function_literal(id node env @session)
+        if op =? '=>' return function_literal(id node env @session expected_signature=expected)
         if op =? '=' or op =? ':=' or op =? '::' return declaration(id env @session)
         if op =? 'as' {
             let target = declarations.resolve(node.right env.lexical @session)
@@ -321,7 +364,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let value = member(selected node.right id env @session)
             if value is? Error return value
             if base is? hir.Place return place(value id env @session)
-            if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return call(value [] [] id env @session expected=expected)
+            if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return auto_call(value id env @session expected=expected)
             return if expected is? none value else against(value expected id env @session)
         }
         let adjacency = tokens.node_at(source.nodes node.op)
@@ -376,7 +419,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if negate is? Error return negate
             return call(negate [result] [] id env @session)
         }
-        let operator = builtins.binary_operators.get(op)
+        let operator = builtins.binary_operators.get(if op =? 'MultiplyJuxtapose' '*' else op)
         if op =? 'not=?' { operator = '__ne__' }
         if operator isnt? none {
             let left = expression(node.left env @session)
@@ -507,6 +550,10 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     if existing isnt? none and existing in? session.pending_aliases {
         let value = declarations.resolve_alias(existing @session)
         if value is? Error return value
+        if value is? addr {
+            let error=prepare_methods(value name env @session)
+            if error isnt? none return error
+        }
         let expr = put(hir.TypeValue[node.loc types.primitive('type' @session.types) value name] @session)
         return put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation expr existing] @session)
     }
@@ -518,6 +565,16 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     if existing isnt? none and not reserved {
         let prior = bindings.binding_at(session.registry existing)
         if explicit return problem(id "duplicate declaration `{name}`" 'this scope already declares the name' env session)
+        if prior.replacement isnt? none {
+            let member=node_at(prior.replacement session)
+            if member isnt? hir.MemberAccess return problem(id 'cannot assign to a method' name env session)
+            let error=writable(prior.replacement id env session)
+            if error isnt? none return error
+            let value=expression(node.right env @session expected=member.value_type)
+            if value is? Error return value
+            container_state.replaced(prior.replacement env.state @session)
+            return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) prior.replacement value] @session)
+        }
         if prior.read_only_reason isnt? none return problem(id 'cannot assign to a constant' name env session)
         let required = if prior.store_type is? none prior.value_type else prior.store_type
         let value = expression(node.right env @session expected=required)
@@ -531,7 +588,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' value] @session)
     }
     let rhs = tokens.node_at(source.nodes node.right)
-    let value = if rhs is? parser.BinOp and syntax.is_operator(rhs.op '=>' source.nodes) function_literal(node.right rhs env @session name=name) else expression(node.right env @session expected=annotation)
+    let value = if rhs is? parser.BinOp and syntax.is_operator(rhs.op '=>' source.nodes) function_literal(node.right rhs env @session name=name expected_signature=annotation) else expression(node.right env @session expected=annotation)
     if value is? Error return value
     if annotation is? none and not constant { value = widen(value node.right env @session) }
     if value is? Error return value
@@ -558,9 +615,17 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
     let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.Block return expression(id env @session expected=expected)
     let inner = if scoped Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector] else env
+    let aliases:array<addr>=[]
     loop statement in node.inner {
         let alias = declarations.predeclare_alias(statement inner.lexical @session)
         if alias is? Error return alias
+        if alias isnt? none {aliases.push(alias)}
+    }
+    # Resolve aliases in declaration order before signature lookup can enter
+    # a recursive family through one of its function-typed slots.
+    loop alias in aliases {
+        let resolved=declarations.resolve_alias(alias @session)
+        if resolved is? Error return resolved
     }
     loop statement in node.inner {
         let error = predeclare_function(statement inner @session)
@@ -696,7 +761,7 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     return none
 }
-function_literal = (id:addr literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false name:string='<anonymous>'):>addr|Error => {
+function_literal = (id:addr literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false name:string='<anonymous>' method:contexts.MethodEntry?=none owner:addr?=none expected_signature:addr?=none):>addr|Error => {
     let resolved = function_shape(literal env @session concrete=concrete)
     if resolved is? Error return resolved
     let shape = dispatch.method_at(session.types resolved)
@@ -704,10 +769,15 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
         let reference = contexts.syntax_ref(id env.lexical @session)
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
-    let infer=types.is_primitive(types.node_at(session.types shape.ret) 'untyped')
+    let contract=shape.ret
+    if expected_signature isnt? none {
+        let required=types.node_at(session.types types.strip_refinement(expected_signature session.types))
+        if required is? types.FunctionType and required.type_params.length =? 0 {contract=contracts.adopt(contract required shape.pos_or_kw @session.types)}
+    }
+    let infer=types.is_primitive(types.node_at(session.types contract) 'untyped')
     let collector=session.return_collectors.length
     session.return_collectors.push(contexts.ReturnCollector[])
-    let annotation:addr?=if infer none else shape.ret
+    let annotation:addr?=if infer none else contract
     let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state annotation return_collector=collector]
     container_state.set_facts(inner.state container_state.inherited(env.state session) @session)
     let parameters:array<hir.Param> = []
@@ -743,19 +813,51 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
         if default is? none { parameters.push(hir.Param[param.name param.value_type binding_id place=param.place]) }
         else { parameters.push(hir.BoundParam[param.name param.value_type binding_id value=default place=param.place]) }
     }
+    # Parameter defaults above retain the defining scope. The body sees
+    # member proxies in a parent of its parameter scope, so local bindings
+    # and nested function parameters shadow members by ordinary lookup.
+    if method isnt? none and owner isnt? none {
+        let member_scope=contexts.child(env.lexical @session)
+        let receiver:addr?=none
+        if method.receiver_type isnt? none {
+            let receiver_type=method.receiver_type
+            let receiver_id=bindings.allocate_param(@session.registry '__dewy_receiver' receiver_type literal.loc)
+            receiver=put(hir.ExpressedIdentifier[literal.loc receiver_type '__dewy_receiver' receiver_id] @session)
+            let with_receiver:array<hir.Param>=[hir.Param['__dewy_receiver' receiver_type receiver_id place=method.place_self]]
+            loop parameter in parameters {with_receiver.push(parameter)}
+            parameters=with_receiver
+        }
+        let error=bind_method_members(owner receiver member_scope env @session)
+        if error isnt? none return error
+        let parameter_scope=bindings.scope_at(session.scopes inner.lexical.scope)
+        parameter_scope.parent=member_scope.scope
+        $runtime_assert inner.lexical.scope <? session.scopes.length
+        session.scopes[inner.lexical.scope]=parameter_scope
+    }
+    if not infer {
+        let unknown=contracts.unknown_parameter(contract parameters session.types)
+        if unknown isnt? none return problem(id 'result fact names something that is not a parameter' unknown env session)
+        contract=contracts.bind_parameters(contract parameters @session.types)
+        annotation=contract
+        inner=Environment[inner.lexical inner.state contract inner.loop_depth inner.return_collector]
+    }
     let body=expression(literal.right inner @session expected=annotation)
     if body is? Error return body
     let result=infer_function_result(body literal.right inner @session)
     if result is? Error return result
-    if not infer and not subtyping.is_subtype(types.strip_refinement(result session.types) types.strip_refinement(shape.ret session.types) session.links @session.types) return problem(id 'function body does not provide its result' display.type_to_dewy(shape.ret session.types) env session)
-    let returns=if infer result else shape.ret
+    if not infer and not subtyping.is_subtype(types.strip_refinement(result session.types) types.strip_refinement(contract session.types) session.links @session.types) return problem(id 'function body does not provide its result' display.type_to_dewy(contract session.types) env session)
+    let returns=if infer result else contract
     $runtime_assert collector <? session.return_collectors.length
     if infer and session.return_collectors[collector].sites.length =? 0 and types.is_primitive(types.node_at(session.types returns) 'bool') {
         let predicate=inferred_results.predicate(body parameters @session)
         if predicate isnt? none {returns=predicate}
     }
-    let function_type=types.function_type(shape.pos_or_kw shape.kw_only shape.rest returns [] @session.types)
-    return put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=contexts.source_at(env.lexical session).srcfile] @session)
+    let slots:array<types.PosOrKwArg>=[]
+    if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
+    loop slot in shape.pos_or_kw {slots.push(slot)}
+    let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types)
+    let value=put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=contexts.source_at(env.lexical session).srcfile] @session)
+    return if expected_signature is? none value else against(value expected_signature id env @session)
 }
 
 # A type test selects a read alternative; it does not alter the binding's
@@ -1100,11 +1202,22 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
         let binding = bindings.binding_at(session.registry field.binding_id)
         return put(hir.ExpressedIdentifier[loc field.value_type binding.name field.binding_id] @session)
     }
+    if value is? hir.TypeValue and value.value is? addr {
+        if name =? 'typename' return type_names.literal(value.value loc @session)
+        let selected=method_member(value.value none name id env @session)
+        if selected is? Error return selected
+        if selected isnt? none return selected
+    }
     let entry = views.container_entry_types(value.value_type session.types)
     if entry isnt? none return container_member(receiver entry name id env @session)
     if type is? types.ObjectType {
         let field = types.object_field(type name)
         if field isnt? none return put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session)
+        let selected=method_member(views.structural_base(value.value_type session.types) receiver name id env @session)
+        if selected is? Error return selected
+        if selected isnt? none return selected
+        if name =? 'typename' return type_names.instance(receiver loc @session)
+        return problem(id 'object has no such member' name env session)
     }
     if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
     if name =? 'length' {
@@ -1121,6 +1234,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
             return put(hir.StringLength[loc result receiver] @session)
         }
     }
+    if type is? types.Primitive|types.IntegerLiteralType|types.FunctionType|types.ArrayType return problem(id 'member access requires an object' display.type_to_dewy(value.value_type session.types) env session)
     return pending(id "member `{name}` on `{display.type_to_dewy(value.value_type session.types)}`" env session)
 }
 
@@ -1201,7 +1315,9 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
     let shape = types.node_at(session.types type)
     if shape isnt? types.ObjectType return pending(id 'non-record type constructor' env session)
     if shape.abstract return problem(id 'cannot construct an abstract type' display.type_to_dewy(type session.types) env session)
-    if shape.constructors.length >? 0 return pending(id 'user constructor overloads' env session)
+    let overload=constructor_overload(constructor arguments_id id env @session expected=expected)
+    if overload is? Error return overload
+    if overload isnt? none return overload
     let source = contexts.source_at(env.lexical session)
     let arguments = tokens.node_at(source.nodes arguments_id)
     let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
@@ -1240,6 +1356,20 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
             let checked = expression(supplied inner @session expected=field.value_type)
             if checked is? Error return checked
             value = checked
+        } else if field.default is? none and implemented_slot(shape field session) {
+            let error=prepare_methods(type if constructor.name is? none display.type_to_dewy(type session.types) else constructor.name env @session)
+            if error isnt? none return error
+            let method=types.object_method(shape field.name)
+            $runtime_assert method isnt? none
+            let entry=session.methods.get(method_key(type method))
+            $runtime_assert entry isnt? none
+            if entry.receiver_type isnt? none return problem(id 'a function slot needs a static implementation' field.name env session)
+            let binding=bindings.binding_at(session.registry entry.binding)
+            $runtime_assert binding.value_type isnt? none
+            let function=put(hir.ExpressedIdentifier[constructor.loc binding.value_type binding.name binding.id] @session)
+            let checked=against(function field.value_type id env @session)
+            if checked is? Error return checked
+            value=checked
         } else {
             if field.default is? none return problem(id 'missing constructor field' field.name env session)
             $runtime_assert field.default <? session.syntax_refs.length
@@ -1470,6 +1600,7 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     let target = expression(node.left env @session call_target=true)
     if target is? Error return target
     let read = node_at(target session)
+    if read is? hir.TypeValue and symbol =? '&' return declare_constructor(read node.right id env @session)
     if read isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
     let error = writable(target id env session)
     if error isnt? none return error
@@ -2580,4 +2711,291 @@ infer_function_result = (body:addr id:addr env:Environment @session:contexts.Ses
     if not bare and not types.is_primitive(types.node_at(session.types body_type) 'never') return problem(id 'not all paths return a value' 'control reaches the end of a body which explicitly returns values' env session)
     if discarded_expression(body session) return problem(id 'expressed value is discarded' 'this body returns explicitly; use return or suppress the unused expression with a semicolon' env session)
     return if bare types.primitive('void' @session.types) else subtyping.join(values session.links @session.types)
+}
+
+# Type metadata retains source methods unchanged. Compilation-owned entries
+# hold hidden functions, keeping interned type keys stable across checking.
+method_key = (owner:addr method:types.MethodSpec):>string => "{owner}:{method.literal}"
+MethodPlan:type = const [method:types.MethodSpec references:set<string> instance:bool mutates:bool]
+prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Session):>Error? => {
+    let type_id=views.structural_base(owner session.types)
+    let type=types.node_at(session.types type_id)
+    if type isnt? types.ObjectType or type.methods.length =? 0 return none
+    if type_id in? session.prepared_methods or type_id in? session.preparing_methods return none
+    if env.return_collector isnt? none {
+        $runtime_assert type.methods.length >? 0
+        let first=type.methods[0]
+        $runtime_assert first.literal <? session.syntax_refs.length
+        let reference=session.syntax_refs[first.literal]
+        return pending(reference.node 'methods on a type declared inside a function' Environment[contexts.Context[reference.source reference.scope] env.state] session)
+    }
+    session.preparing_methods.add(type_id)
+    let names:set<string>=set['typename']
+    let fields:set<string>=set['typename']
+    loop field in type.fields {names.add(field.name) fields.add(field.name)}
+    loop method in type.methods {names.add(method.name)}
+    let plans:array<MethodPlan>=[]
+    let instances:set<string>=set[]
+    let mutations:set<string>=set[]
+    loop method in type.methods {
+        $runtime_assert method.literal <? session.syntax_refs.length
+        let reference=session.syntax_refs[method.literal]
+        let lexical=contexts.Context[reference.source reference.scope]
+        let nodes=contexts.source_at(lexical session).nodes
+        let literal=tokens.node_at(nodes reference.node)
+        $runtime_assert literal is? parser.BinOp
+        # A minted child's inherited body belongs to its declaring family.
+        # Reuse that family's receiver type and hidden binding.
+        if method.owner isnt? none and method.owner not=? alias {
+            let parent=method_owner(method.owner lexical @session)
+            if parent is? Error return parent
+            if parent isnt? none {
+                let error=prepare_methods(parent method.owner env @session)
+                if error isnt? none return error
+                let inherited=session.methods.get(method_key(views.structural_base(parent session.types) method))
+                if inherited isnt? none {
+                    session.methods[method_key(type_id method)]=inherited
+                    if inherited.receiver_type isnt? none {instances.add(method.name)}
+                    if inherited.place_self {mutations.add(method.name)}
+                    continue
+                }
+            }
+        }
+        let hidden=method_syntax.parameter_names(literal nodes)
+        loop name in method_syntax.locals(literal.right nodes) {hidden.add(name)}
+        let visible:set<string>=set[]
+        loop name in names {if name not in? hidden {visible.add(name)}}
+        let analysis=method_syntax.scan(literal.right visible nodes)
+        let instance=false
+        loop name in analysis.references {if name in? fields {instance=true}}
+        if instance {instances.add(method.name)}
+        if analysis.mutates {mutations.add(method.name)}
+        plans.push(MethodPlan[method analysis.references instance analysis.mutates])
+    }
+    let changed=true
+    loop changed {
+        changed=false
+        loop plan in plans {
+            loop name in plan.references {
+                if name in? instances and plan.method.name not in? instances {instances.add(plan.method.name) changed=true}
+            }
+        }
+    }
+    # Reserve annotated signatures before bodies. Inferred methods become
+    # callable only after their body supplies the result, just like functions.
+    loop plan in plans {
+        let spec=plan.method
+        $runtime_assert spec.literal <? session.syntax_refs.length
+        let reference=session.syntax_refs[spec.literal]
+        let defining=Environment[contexts.Context[reference.source reference.scope] env.state]
+        let literal=contexts.node_at(reference.node defining.lexical session)
+        $runtime_assert literal is? parser.BinOp
+        let instance=spec.name in? instances
+        let mutates=spec.name in? mutations
+        if instance and mutates and type.immutable return problem(reference.node 'method changes an immutable record' spec.name defining session)
+        let shape=function_shape(literal defining @session)
+        if shape is? Error return shape
+        let signature=dispatch.method_at(session.types shape)
+        if signature.type_params.length >? 0 return pending(reference.node 'generic record methods' defining session)
+        let parameters:array<types.PosOrKwArg>=[]
+        if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true mutates])}
+        loop parameter in signature.pos_or_kw {parameters.push(parameter)}
+        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types)
+        let binding_id=bindings.allocate(@session.registry none "{alias}__{spec.name}" 'function' literal.loc)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.value_type=full binding.store_type=full
+        session.registry.by_id[binding_id]=binding
+        session.method_bindings.add(binding_id)
+        session.methods[method_key(type_id spec)]=contexts.MethodEntry[binding_id if instance type_id else none mutates]
+    }
+    # Prefer callees before callers so inferred methods have concrete results.
+    # Cycles with complete signatures are already reserved above; an inferred
+    # cycle remains an ordinary unresolved-result error.
+    let remaining=plans
+    loop remaining.length >? 0 {
+        let selected:addr=0
+        loop i in 0.. and i <? remaining.length {
+            let ready=true
+            loop other in remaining {
+                if other.method.literal not=? remaining[i].method.literal and other.method.name in? remaining[i].references {ready=false}
+            }
+            if ready {selected=i break}
+        }
+        $runtime_assert selected <? remaining.length
+        let plan=remaining[selected]
+        let next:array<MethodPlan>=[]
+        loop i in 0.. and i <? remaining.length {if i not=? selected {next.push(remaining[i])}}
+        remaining=next
+        let entry=session.methods.get(method_key(type_id plan.method))
+        $runtime_assert entry isnt? none and plan.method.literal <? session.syntax_refs.length
+        let reference=session.syntax_refs[plan.method.literal]
+        let defining=Environment[contexts.Context[reference.source reference.scope] env.state]
+        let literal=contexts.node_at(reference.node defining.lexical session)
+        $runtime_assert literal is? parser.BinOp
+        let binding=bindings.binding_at(session.registry entry.binding)
+        let slot=types.object_field(type plan.method.name)
+        let expected:addr?=none
+        if entry.receiver_type is? none and slot isnt? none and types.node_at(session.types slot.value_type) is? types.FunctionType {expected=slot.value_type}
+        let checked=function_literal(reference.node literal defining @session name=binding.name method=entry owner=type_id expected_signature=expected)
+        if checked is? Error return checked
+        if expected isnt? none and not subtyping.is_subtype(node_at(checked session).value_type expected session.links @session.types) return problem(reference.node 'method does not fit its slot' plan.method.name defining session)
+        binding.value_type=node_at(checked session).value_type binding.store_type=binding.value_type binding.function=checked
+        let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' binding.name none checked binding.id] @session)
+        binding.declaration=declared
+        session.registry.by_id[binding.id]=binding
+        session.hoisted.push(declared)
+    }
+    session.prepared_methods.add(type_id)
+    if type_id in? session.preparing_methods {session.preparing_methods.pop(type_id);}
+    return none
+}
+method_value = (entry:contexts.MethodEntry receiver:addr? loc:Span @session:contexts.Session):>addr => {
+    let binding=bindings.binding_at(session.registry entry.binding)
+    $runtime_assert binding.value_type isnt? none
+    let signature=dispatch.method_at(session.types binding.value_type)
+    let parameters:array<types.PosOrKwArg>=[]
+    let index:addr=0
+    loop slot in signature.pos_or_kw {
+        if index >? 0 or entry.receiver_type is? none {parameters.push(slot)}
+        index += 1
+    }
+    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types)
+    let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
+    return put(hir.BoundMethod[loc exposed function if entry.receiver_type is? none none else receiver] @session)
+}
+method_member = (owner:addr receiver:addr? name:string id:addr env:Environment @session:contexts.Session):>addr|none|Error => {
+    let type_id=views.structural_base(owner session.types)
+    let type=types.node_at(session.types type_id)
+    if type isnt? types.ObjectType return none
+    let method=types.object_method(type name)
+    if method is? none return none
+    let alias=if type.brand is? none display.type_to_dewy(type_id session.types) else type.brand
+    let error=prepare_methods(type_id alias env @session)
+    if error isnt? none return error
+    let entry=session.methods.get(method_key(type_id method))
+    $runtime_assert entry isnt? none
+    if entry.receiver_type isnt? none and receiver is? none return problem(id 'instance method needs a receiver' name env session)
+    let binding=bindings.binding_at(session.registry entry.binding)
+    $runtime_assert binding.value_type isnt? none
+    let signature=dispatch.method_at(session.types binding.value_type)
+    if types.is_primitive(types.node_at(session.types signature.ret) 'untyped') return problem(id 'cannot infer a recursive method result' 'add a result annotation' env session)
+    return method_value(entry receiver contexts.node_at(id env.lexical session).loc @session)
+}
+bind_method_members = (owner:addr receiver:addr? lexical:contexts.Context env:Environment @session:contexts.Session):>Error? => {
+    let type=types.node_at(session.types owner)
+    $runtime_assert type is? types.ObjectType
+    let source=contexts.source_at(lexical session)
+    $runtime_assert source.nodes.length >? 0
+    let loc=source.nodes[0].loc
+    if receiver isnt? none {
+        let name_value=type_names.instance(receiver loc @session)
+        bind_member_proxy('typename' name_value lexical @session);
+        loop field in type.fields {
+            let value=put(hir.MemberAccess[loc field.value_type receiver field.name field.mutable and not type.immutable] @session)
+            bind_member_proxy(field.name value lexical @session);
+        }
+    }
+    loop method in type.methods {
+        let entry=session.methods.get(method_key(owner method))
+        if entry is? none continue
+        if entry.receiver_type isnt? none and receiver is? none continue
+        if receiver isnt? none and types.object_field(type method.name) isnt? none continue
+        let binding=bindings.binding_at(session.registry entry.binding)
+        $runtime_assert binding.value_type isnt? none
+        let signature=dispatch.method_at(session.types binding.value_type)
+        if types.is_primitive(types.node_at(session.types signature.ret) 'untyped') continue
+        let value=method_value(entry receiver loc @session)
+        bind_member_proxy(method.name value lexical @session);
+    }
+    return none
+}
+bind_member_proxy = (name:string value:addr lexical:contexts.Context @session:contexts.Session):>void => {
+    let node=node_at(value session)
+    let id=bindings.allocate(@session.registry none name 'value' node.loc)
+    let binding=bindings.binding_at(session.registry id)
+    binding.value_type=node.value_type binding.store_type=node.value_type binding.replacement=value
+    session.registry.by_id[id]=binding
+    bindings.bind(@session.scopes lexical.scope name id)
+}
+
+
+# Constructor overloads join the existing field-wise signature. Their bodies
+# are ordinary functions, with the same defining scope, inference, and call
+# validation. A dispatch probe owns its speculative arenas and read facts;
+# choosing the field-wise form leaves its sequential initializer scope intact.
+declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    if constructor.value isnt? addr return pending(id 'generic type constructor overloads' env session)
+    let owner=views.structural_base(constructor.value session.types)
+    if types.node_at(session.types owner) isnt? types.ObjectType return problem(id 'constructor overload needs a record type' 'the left side names a record type' env session)
+    let literal=contexts.node_at(literal_id env.lexical session)
+    if literal isnt? parser.BinOp or not syntax.is_operator(literal.op '=>' contexts.source_at(env.lexical session).nodes) return problem(id 'a constructor overload must be a function literal' 'use `(params):>Type => ...`' env session)
+    let overloads=session.constructors.get(owner contexts.ConstructorSet[])
+    let alias=if constructor.name is? none display.type_to_dewy(owner session.types) else constructor.name
+    let name="{alias}__new_{overloads.bindings.length + 1}"
+    let checked=function_literal(literal_id literal env @session name=name)
+    if checked is? Error return checked
+    let binding_id=bindings.allocate(@session.registry none name 'function' literal.loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=node_at(checked session).value_type binding.store_type=binding.value_type binding.function=checked
+    let declaration=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' name none checked binding_id] @session)
+    binding.declaration=declaration
+    session.registry.by_id[binding_id]=binding
+    session.method_bindings.add(binding_id)
+    session.hoisted.push(declaration)
+    overloads.bindings.push(binding_id)
+    session.constructors[owner]=overloads
+    return void_at(id env @session)
+}
+constructor_overload = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|none|Error => {
+    $runtime_assert constructor.value is? addr
+    let owner=views.structural_base(constructor.value session.types)
+    let type=types.node_at(session.types owner)
+    $runtime_assert type is? types.ObjectType
+    let overloads=session.constructors.get(owner contexts.ConstructorSet[type.constructors])
+    if overloads.bindings.length =? 0 return none
+    let trial=session
+    let parameters:array<types.PosOrKwArg>=[]
+    loop field in type.fields {parameters.push(types.PosOrKwArg[field.name field.value_type field.default is? none and not implemented_slot(type field session)])}
+    let fieldwise=types.function_type(parameters [] none owner [] @trial.types)
+    let signatures:array<addr>=[fieldwise]
+    loop id in overloads.bindings {
+        let binding=bindings.binding_at(trial.registry id)
+        $runtime_assert binding.value_type isnt? none
+        signatures.push(binding.value_type)
+    }
+    let shape=types.overload_type(signatures @trial.types)
+    let callee=put(hir.ExpressedIdentifier[constructor.loc shape '__dewy_constructor_choice' none] @trial)
+    let checked=call_syntax(callee arguments_id id env @trial)
+    # As in the hosted dispatcher, the ordinary constructor reports failures
+    # when no unique user overload wins. Do not leak speculative declarations.
+    if checked is? Error return none
+    let call_node=node_at(checked trial)
+    $runtime_assert call_node is? hir.FunctionCall and call_node.selected_method_index isnt? none
+    let selected=call_node.selected_method_index
+    if selected =? 0 return none
+    let position=selected - 1
+    $runtime_assert position >=? 0 and position <? overloads.bindings.length
+    let binding=bindings.binding_at(trial.registry overloads.bindings[position])
+    $runtime_assert binding.value_type isnt? none
+    let function=put(hir.ExpressedIdentifier[constructor.loc binding.value_type binding.name binding.id] @trial)
+    let result=call(function call_node.pos_args call_node.kw_args id env @trial expected=expected)
+    if result is? Error return result
+    session=trial
+    return result
+}
+
+# A method implementing an inherited function field supplies its constructor
+# default. The field remains real storage, so callers may override the value.
+implemented_slot = (owner:types.ObjectType field:types.ObjectField session:contexts.Session):>bool =>
+    types.node_at(session.types field.value_type) is? types.FunctionType and types.object_method(owner field.name) isnt? none
+
+method_owner = (name:string lexical:contexts.Context @session:contexts.Session):>addr|none|Error => {
+    # A minted name may have a disambiguating suffix; it need not be a source
+    # spelling in this module. The program registry retains its real identity.
+    loop brand in session.brands.entries {if brand.name =? name return brand.value_type}
+    let binding=declarations.lookup(name lexical session)
+    if binding is? none return none
+    let value=declarations.resolve_alias(binding @session)
+    if value is? Error return value
+    return if value is? addr value else none
 }

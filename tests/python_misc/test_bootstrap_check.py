@@ -1,6 +1,5 @@
 """Native source expressions enter HIR through the shared lexical/type arenas."""
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -307,7 +306,7 @@ def loop_summary(node, *, function_types=False):
     return ''.join(parts)
 
 
-def test_native_source_values(tmp_path, *, validate_matches=False, function_types=False):
+def test_native_source_values(tmp_path, *, validate_matches=False, function_types=False, unordered_instances=False):
     expected = []
     for text in CASES:
         ty.reset_program_brands()
@@ -315,7 +314,10 @@ def test_native_source_values(tmp_path, *, validate_matches=False, function_type
         module, context = check._typecheck_module(SrcFile(None, text))
         if validate_matches:
             check.validate_brand_matches()
-        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module, function_types=function_types) + "|instances:" + ",".join(type_to_dewy(item.expr.type) for item in context.generic_instances))
+        instances = [type_to_dewy(item.expr.type) for item in context.generic_instances]
+        if unordered_instances:
+            instances.sort()
+        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module, function_types=function_types) + "|instances:" + ",".join(instances))
     for text in ERROR_CASES:
         ty.reset_program_brands()
         check.pending_brand_matches.clear()
@@ -323,100 +325,40 @@ def test_native_source_values(tmp_path, *, validate_matches=False, function_type
             check._typecheck_module(SrcFile(None, text))
             if validate_matches:
                 check.validate_brand_matches()
-    cases = ' '.join(json.dumps(text).replace('{', r'\{') for text in CASES)
-    errors = ' '.join(json.dumps(text).replace('{', r'\{') for text in ERROR_CASES)
-    source = tmp_path / 'check.dewy'
-    source.write_text(f'''from reporting import SrcFile, Error
-import p"{ROOT / 'dewy/bootstrap/parser/p0.dewy'}" as parser
-import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
-import p"{ROOT / 'dewy/bootstrap/semantic/check.dewy'}" as checking
-import p"{ROOT / 'dewy/bootstrap/semantic/type_display.dewy'}" as display
-import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
-import p"{ROOT / 'dewy/bootstrap/semantic/match_patterns.dewy'}" as patterns
-loop_summary = (id:addr session:contexts.Session):>string => {{
-    let node=checking.node_at(id session)
-    let parts:array<string>=[]
-    if node is? hir.FunctionLiteral and {str(function_types).lower()} {{ parts.push("function:{{display.type_to_dewy(node.value_type session.types)}};") }}
-    if node is? hir.LoopArm {{ parts.push("loop:{{display.type_to_dewy(node.value_type session.types)}};") }}
-    if node is? hir.IndexAssign {{ parts.push('index_store;') }}
-    if node is? hir.Index|hir.StringIndex {{
-        let kind = if node is? hir.Index 'index' else 'string_index'
-        let slot = if node.constant_index is? none 'none' else "{{node.constant_index}}"
-        parts.push("{{kind}}:{{slot}};")
-    }}
-    if node is? hir.StringSlice {{ parts.push("slice:{{display.type_to_dewy(node.value_type session.types)}};") }}
-    if node is? hir.SetAlgebra {{ parts.push("algebra:{{node.op}};") }}
-    if node is? hir.StringEqual {{ parts.push("string_equal:{{node.negated}};") }}
-    if node is? hir.StringConcat {{ parts.push('concat;') }}
-    if node is? hir.DictLookup {{
-        let slot = if node.static_position is? none 'none' else "{{node.static_position}}"
-        parts.push("lookup:{{display.type_to_dewy(node.value_type session.types)}}:{{node.proven}}:{{node.position isnt? none}}:{{slot}};")
-    }}
-    if node is? hir.DictRemove {{ parts.push("remove:{{display.type_to_dewy(node.value_type session.types)}}:{{node.default isnt? none}}:{{node.lenient}};") }}
-    if node is? hir.DictStore {{ parts.push(if node.values is? none 'store:set;' else 'store:dict;') }}
-    if node is? hir.DictView {{ parts.push("view:{{node.name}};") }}
-    if node is? hir.IteratorExpression {{
-        let target=checking.node_at(node.target session)
-        let last=if node.last is? none 'none' else "{{node.last}}"
-        let count=if node.count is? none 'none' else "{{node.count}}"
-        parts.push("iter:{{display.type_to_dewy(target.value_type session.types)}}:{{node.first}}:{{node.step}}:{{last}}:{{count}}:{{node.guarded}};")
-    }}
-    if node is? hir.Break {{ parts.push("break:{{node.loop_levels}};") }}
-    if node is? hir.Continue {{ parts.push("continue:{{node.loop_levels}};") }}
-    loop child in hir.children(node) {{ parts.push(loop_summary(child session)) }}
-    return parts.join
-}}
-main = ():>int64 => {{
-    let cases:array<string> = [{cases}]
-    let failures:int64 = 0
-    loop text in cases {{
-        let source = SrcFile['fixture' text]
-        let parsed = parser.parse(source)
-        if parsed is? Error {{ parsed.fail return 1 }}
-        let session = contexts.Session[]
-        let lexical = contexts.begin(source parsed.nodes @session)
-        let environment = checking.begin(lexical @session)
-        let module = checking.module(parsed.root environment @session)
-        if module is? Error {{ module.render(source) failures += 1 continue }}
-        if {str(validate_matches).lower()} {{
-            let error=patterns.validate(session)
-            if error isnt? none {{error.fail return 1}}
-        }}
-        let node = checking.node_at(module session)
-        let instances:array<string>=[]
-        loop item in session.hoisted {{
-            let declared=checking.node_at(item session)
-            $runtime_assert declared is? hir.Declare
-            instances.push(display.type_to_dewy(checking.node_at(declared.expr session).value_type session.types))
-        }}
-        printl("{{display.type_to_dewy(node.value_type session.types)}}|{{loop_summary(module session)}}|instances:{{instances.join(',')}}")
-    }}
-    let invalid:array<string> = [{errors}]
-    loop text in invalid {{
-        let source = SrcFile['fixture' text]
-        let parsed = parser.parse(source)
-        if parsed is? Error {{ parsed.fail return 1 }}
-        let session = contexts.Session[]
-        let lexical = contexts.begin(source parsed.nodes @session)
-        let environment = checking.begin(lexical @session)
-        let result = checking.module(parsed.root environment @session)
-        if {str(validate_matches).lower()} and result isnt? Error {{
-            let error=patterns.validate(session)
-            if error isnt? none {{result=error}}
-        }}
-        $runtime_assert result is? Error
-        $runtime_assert result.title not=? 'native checker implementation pending'
-        $runtime_assert result.pointers.length >? 0 and result.pointers[0].message.length >? 0
-        printl('rejected')
-    }}
-    return if failures =? 0 0 else 1
-}}
-''')
-    output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source)))
-    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=180, check=False)
-    (tmp_path / 'native-output.txt').write_text(result.stdout)
+    executable = _native_driver(tmp_path)
+    output = []
+    for mode, texts in [('valid', CASES), ('invalid', ERROR_CASES)]:
+        if not texts:
+            continue
+        paths = []
+        for index, text in enumerate(texts):
+            path = tmp_path / f'{mode}-{index}.dewy'
+            path.write_text(text)
+            paths.append(str(path))
+        result = subprocess.run(
+            [executable, mode, str(function_types).lower(), str(validate_matches).lower(), str(unordered_instances).lower(), *paths],
+            capture_output=True, text=True, timeout=180, check=False,
+        )
+        output.extend(result.stdout.splitlines())
+        (tmp_path / 'native-output.txt').write_text('\n'.join(output) + '\n')
+        assert result.returncode == 0, result.stderr + result.stdout
     (tmp_path / 'expected-output.txt').write_text('\n'.join(expected + ['rejected'] * len(ERROR_CASES)) + '\n')
-    assert result.returncode == 0, result.stderr
-    assert list(zip(CASES + ERROR_CASES, result.stdout.splitlines(), strict=True)) == list(zip(CASES + ERROR_CASES, expected + ['rejected'] * len(ERROR_CASES), strict=True))
+    assert list(zip(CASES + ERROR_CASES, output, strict=True)) == list(zip(CASES + ERROR_CASES, expected + ['rejected'] * len(ERROR_CASES), strict=True))
+
+
+_NATIVE_DRIVER = None
+
+
+def _native_driver(tmp_path):
+    """Build once per pytest worker; each case still has its own Session."""
+    global _NATIVE_DRIVER
+    if _NATIVE_DRIVER is False:
+        pytest.fail('native checker build failed in an earlier case')
+    if _NATIVE_DRIVER is None:
+        _NATIVE_DRIVER = False
+        source = ROOT / 'tests/fixtures/bootstrap_source_check.dewy'
+        output = tmp_path / 'source-checker.udewy'
+        output.write_text(codegen(SrcFile.from_path(source)))
+        assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+        _NATIVE_DRIVER = cache_artifact(output).resolve()
+    return _NATIVE_DRIVER

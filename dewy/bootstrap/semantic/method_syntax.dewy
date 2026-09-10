@@ -1,0 +1,93 @@
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"../parser/t2.dewy" as post
+import p"syntax.dewy" as syntax
+import p"loop_syntax.dewy" as traversal
+
+doc"""
+Method dependency and receiver classification before checking bodies.
+
+A record initializer's keys are declarations, not member reads or writes.
+Only its values participate in this scan. The checked body uses lexical
+bindings for members; this analysis never rewrites the source tree.
+"""
+
+parameter_name = (id:addr nodes:array<tokens.Token>):>string? => {
+    let current=id
+    loop true {
+        let node=tokens.node_at(nodes current)
+        if node is? parser.BinOp and syntax.symbol(node.op nodes) in? ['=' ':'] {current=node.left}
+        else if node is? parser.Prefix {current=node.item}
+        else return syntax.identifier(current nodes)
+    }
+}
+parameter_names = (literal:parser.BinOp nodes:array<tokens.Token>):>set<string> => {
+    let id=literal.left
+    let signature=tokens.node_at(nodes id)
+    if signature is? parser.BinOp and syntax.is_operator(signature.op ':>' nodes) {id=signature.left}
+    let params=tokens.node_at(nodes id)
+    let rows:array<addr>=if params is? parser.Block params.inner else [id]
+    let names:set<string>=set[]
+    loop row in rows {let name=parameter_name(row nodes) if name isnt? none {names.add(name)}}
+    return names
+}
+# Keep the hosted conservative classification of explicit locals and loop
+# targets. Actual resolution still follows scopes, including nested lambdas.
+locals = (id:addr nodes:array<tokens.Token>):>set<string> => {
+    let node=tokens.node_at(nodes id)
+    let names:set<string>=set[]
+    if node is? parser.KeywordExpr and node.parts.length =? 2 {
+        let keyword=tokens.node_at(nodes node.parts[0])
+        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] {
+            let name=parameter_name(node.parts[1] nodes)
+            if name isnt? none {names.add(name)}
+        }
+    }
+    if node is? parser.BinOp and syntax.is_operator(node.op 'in' nodes) {
+        let name=syntax.identifier(node.left nodes)
+        if name isnt? none {names.add(name)}
+    }
+    loop child in traversal.children(node) {loop name in locals(child nodes) {names.add(name)}}
+    return names
+}
+record_value = (id:addr nodes:array<tokens.Token>):>addr? => {
+    let node=tokens.node_at(nodes id)
+    if node isnt? parser.BinOp or not syntax.is_operator(node.op '=' nodes) return none
+    return if parameter_name(node.left nodes) isnt? none node.right else none
+}
+Analysis:type = [references:set<string>=set[] mutates:bool=false]
+scan = (id:addr visible:set<string> nodes:array<tokens.Token>):>Analysis => {
+    let node=tokens.node_at(nodes id)
+    let result=Analysis[]
+    let name=syntax.identifier(id nodes)
+    if name isnt? none and name in? visible {result.references.add(name)}
+    let children=traversal.children(node)
+    if node is? parser.BinOp {
+        let op=syntax.symbol(node.op nodes)
+        if op =? '.' {children=[node.left]}
+        if op =? '=' or tokens.node_at(nodes node.op) is? post.CombinedAssignment {
+            let root=traversal.root_name(node.left nodes)
+            if root isnt? none and root in? visible {result.mutates=true}
+        }
+        # A mutating library member borrows its receiver even without an
+        # explicit source `@`. Its root may itself be a record field.
+        if op =? '.' and syntax.identifier(node.right nodes) in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'add' 'remove'] {
+            let root=traversal.root_name(node.left nodes)
+            if root isnt? none and root in? visible {result.mutates=true}
+        }
+    }
+    if node is? parser.Prefix and syntax.is_operator(node.op '@' nodes) {
+        let root=traversal.root_name(node.item nodes)
+        if root isnt? none and root in? visible {result.mutates=true}
+    }
+    if node is? parser.Block and node.delims =? '[]' {
+        children=[]
+        loop item in node.inner {let value=record_value(item nodes) children.push(if value is? none item else value)}
+    }
+    loop child in children {
+        let nested=scan(child visible nodes)
+        loop reference in nested.references {result.references.add(reference)}
+        result.mutates=result.mutates or nested.mutates
+    }
+    return result
+}

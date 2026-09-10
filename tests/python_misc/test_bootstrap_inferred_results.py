@@ -35,6 +35,8 @@ CASES = [
     'Root=$abstract type of [x:int64]\nA=type of Root\nlet choose=(flag:bool root:Root child:A)=>{if flag return root return child}',
 ]
 ERRORS = [
+    'let n:int64=9\nlet f=(x:int64):>int64<i=>i <? n>=>1',
+    'let text:string="abc"\nlet f=():>int64<i=>i <=? text.length>=>1',
     'let f=(flag:bool)=>{if flag return 1}',
     'let f=(flag:bool)=>{if flag return 1 return}',
     'let f=(flag:bool)=>{if flag return return 1}',

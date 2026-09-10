@@ -25,6 +25,19 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native record methods now compile into hidden functions with lexical member
+  bindings, static/instance receivers, direct mutation barriers, and inherited
+  method ownership. Constructor overloads participate in ordinary argument
+  dispatch alongside field-wise construction. Function-typed protocol slots
+  supply expected return contracts, renamed by parameter position and then
+  attached to binding identities. Record names retain carried brands through
+  family and structural views. Focused comparisons cover 25 method programs
+  and 12 rejections, nine constructor programs and five rejections, ten name
+  queries, and seven slot implementations with two rejections. Those groups,
+  function inference, matches, and the existing source comparison pass together
+  through a reusable native file-driven checker. Generic record methods and
+  extracting a receiver-bound function retain explicit pending diagnostics.
+
 - Native match checking now resolves typed, catch-all, record, and sequence
   signatures into ordinary conditional HIR, evaluates non-name scrutinees
   once, and scopes pattern bindings to their arms. Thirty-five valid and
@@ -385,10 +398,16 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The committed match checkpoint (`082455e4`) passed **1,876 tests,
+The committed method-place checkpoint (`0a9f59a3`) passed **1,886 tests,
 23 skipped** in a fresh checkout. Thirteen skips were SDL tests whose generated
 artifacts were absent from that checkout; all thirteen passed separately in
 the main workspace, leaving the usual ten unavailable-toolchain skips.
+The following record-method checkpoint passes seven native comparison groups
+in 482.61 seconds. Its hosted seed also copies retained string reads out of
+array/record storage before replacement can release that storage; six native
+execution regressions cover direct, aliased, sliced, block, conditional, and
+field reads. Related ownership checks pass in two focused batches (20 and 29
+tests). These later changes are not included in the full-suite count above.
 The generic source visitor also matches the 126-program comparison; its 64
 rejection cases pass through the native module loader. Imported generic
 instances preserve their original lexical bindings. The subsequent sequence

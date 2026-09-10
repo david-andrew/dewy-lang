@@ -1,0 +1,107 @@
+import p"ty.dewy" as types
+import p"hir.dewy" as hir
+import p"propositions.dewy" as facts
+import p"type_queries.dewy" as views
+
+doc"""
+A function implementing a slot proves the slot's return promises. Parameter
+names in that contract refer to corresponding parameters of the literal,
+not to similarly named outer bindings. Once parameters have binding ids,
+those identities replace the temporary names used during signature checking.
+"""
+
+rename = (id:addr names:dict<string string> @nodes:array<types.Type>):>addr => {
+    let node=types.node_at(nodes id)
+    if node is? types.TypeOr {
+        let members:array<addr>=[]
+        loop item in node.items {members.push(rename(item names @nodes))}
+        return types.union(members @nodes)
+    }
+    if node isnt? types.RefinedType return id
+    let promises:array<facts.Proposition>=[]
+    loop p in node.propositions {
+        let subject=p.subject
+        let parameter=facts.parameter(p)
+        if parameter isnt? none {subject="@{names.get(parameter parameter)}"}
+        let term=if p.term is? none none else names.get(p.term p.term)
+        promises.push(facts.Proposition[subject p.op p.value p.projection term p.term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
+    }
+    return types.refined_type(node.base promises @nodes)
+}
+member = (id:addr contract:array<addr> @nodes:array<types.Type>):>addr => {
+    let node=types.node_at(nodes id)
+    let base=types.strip_refinement(id nodes)
+    loop candidate in contract {
+        if not types.same_type(base types.strip_refinement(candidate nodes) nodes) continue
+        let expected=types.node_at(nodes candidate)
+        if node isnt? types.RefinedType return candidate
+        if expected isnt? types.RefinedType return id
+        let promises=expected.propositions
+        loop p in node.propositions {if not views.has_proposition(promises p) {promises.push(p)}}
+        return types.refined_type(node.base promises @nodes)
+    }
+    return id
+}
+adopt = (result:addr expected:types.FunctionType parameters:array<types.PosOrKwArg> @nodes:array<types.Type>):>addr => {
+    let promised=types.node_at(nodes expected.ret)
+    let has_promises=promised is? types.RefinedType
+    if promised is? types.TypeOr {
+        loop item in promised.items {if types.node_at(nodes item) is? types.RefinedType {has_promises=true}}
+    }
+    if not has_promises return result
+    let names:dict<string string>=[]
+    loop i in 0.. and i <? expected.pos_or_kw.length and i <? parameters.length {
+        let before=expected.pos_or_kw[i].name
+        let after=parameters[i].name
+        if before isnt? none and after isnt? none {names[before]=after}
+    }
+    let contract=rename(expected.ret names @nodes)
+    let node=types.node_at(nodes result)
+    if types.is_primitive(node 'untyped') return contract
+    let desired=types.node_at(nodes contract)
+    let members:array<addr>=if desired is? types.TypeOr desired.items else [contract]
+    if node isnt? types.TypeOr return member(result members @nodes)
+    let output:array<addr>=[]
+    loop item in node.items {output.push(member(item members @nodes))}
+    return types.union(output @nodes)
+}
+bind_parameters = (id:addr parameters:array<hir.Param> @nodes:array<types.Type>):>addr => {
+    let node=types.node_at(nodes id)
+    if node is? types.TypeOr {
+        let members:array<addr>=[]
+        loop item in node.items {members.push(bind_parameters(item parameters @nodes))}
+        return types.union(members @nodes)
+    }
+    if node isnt? types.RefinedType return id
+    let promises:array<facts.Proposition>=[]
+    loop p in node.propositions {
+        let term_id=p.term_id
+        let subject_id=p.subject_id
+        loop param in parameters {
+            if p.term =? param.name {term_id=param.binding_id}
+            if facts.parameter(p) =? param.name {subject_id=param.binding_id}
+        }
+        promises.push(facts.Proposition[p.subject p.op p.value p.projection p.term term_id p.term_projection p.tested_type p.when subject_id p.axiom])
+    }
+    return types.refined_type(node.base promises @nodes)
+}
+
+unknown_parameter = (id:addr parameters:array<hir.Param> nodes:array<types.Type>):>string? => {
+    let node=types.node_at(nodes id)
+    if node is? types.TypeOr {
+        loop item in node.items {
+            let unknown=unknown_parameter(item parameters nodes)
+            if unknown isnt? none return unknown
+        }
+    }
+    if node is? types.RefinedType {
+        let names:set<string>=set[]
+        loop param in parameters {names.add(param.name)}
+        loop promise in node.propositions {
+            if promise.term isnt? none and promise.term not in? names return promise.term
+            let subject=facts.parameter(promise)
+            if subject isnt? none and subject not in? names return subject
+        }
+    }
+    return none
+}

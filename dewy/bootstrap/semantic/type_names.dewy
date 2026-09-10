@@ -1,0 +1,68 @@
+from reporting import Span
+import p"context.dewy" as contexts
+import p"bindings.dewy" as bindings
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"type_display.dewy" as display
+import p"type_queries.dewy" as views
+import p"subtyping.dewy" as subtyping
+import p"brands.dewy" as brands
+
+doc"""
+The name a record carries: a minted name, otherwise its structural spelling.
+A value viewed through a family or its original structure can carry a more
+specific brand. Tests run deepest-first because a descendant also passes a
+test of its parent. The receiver is evaluated once before dispatch.
+"""
+
+spelling = (id:addr session:contexts.Session):>string => {
+    let node=types.node_at(session.types views.structural_base(id session.types))
+    if node is? types.ObjectType and node.minted and node.brand isnt? none return node.brand
+    return display.type_to_dewy(id session.types)
+}
+literal = (id:addr loc:Span @session:contexts.Session):>addr => {
+    let text=spelling(id session)
+    return hir.append_node(@session.hir hir.String[loc types.string_literal(text @session.types) text])
+}
+Alternative:type = const [value_type:addr depth:addr]
+instance = (value:addr loc:Span @session:contexts.Session):>addr => {
+    let node=hir.node_at(session.hir value)
+    let owner=types.node_at(session.types views.structural_base(node.value_type session.types))
+    let choices:array<Alternative>=[]
+    if owner is? types.ObjectType {
+        loop brand in session.brands.entries {
+            let candidate=types.node_at(session.types brand.value_type)
+            $runtime_assert candidate is? types.ObjectType
+            if candidate.brand =? owner.brand continue
+            if subtyping.brand_descends(candidate owner session.types) or subtyping.brand_carries(candidate owner session.types) {
+                let item=Alternative[brand.value_type brands.ancestry(brand.name session.brands).length]
+                choices.push(item)
+                let index=choices.length - 1
+                loop index >? 0 and index <? choices.length and choices[index-1].depth <? item.depth {
+                    let previous=choices[index-1]
+                    choices[index-1]=item choices[index]=previous
+                    index -= 1
+                }
+            }
+        }
+    }
+    let fallback=literal(node.value_type loc @session)
+    # Match the hosted constant-name path. TODO: audit whether an effectful
+    # receiver should still run when its name needs no runtime brand dispatch.
+    if choices.length =? 0 return fallback
+    let id=bindings.allocate(@session.registry none "__dewy_typename_{session.registry.next_id}" 'value' loc)
+    let binding=bindings.binding_at(session.registry id)
+    binding.value_type=node.value_type binding.store_type=node.value_type
+    session.registry.by_id[id]=binding
+    let declared=hir.append_node(@session.hir hir.Declare[loc types.primitive('void' @session.types) 'const' binding.name none value id])
+    let read=hir.append_node(@session.hir hir.ExpressedIdentifier[loc node.value_type binding.name id])
+    let arms:array<addr>=[]
+    let result_type=types.primitive('string' @session.types)
+    loop choice in choices {
+        let condition=hir.append_node(@session.hir hir.TypeTest[loc types.primitive('bool' @session.types) read choice.value_type false])
+        let body=literal(choice.value_type loc @session)
+        arms.push(hir.append_node(@session.hir hir.IfArm[loc result_type condition body]))
+    }
+    let flow=hir.append_node(@session.hir hir.Flow[loc result_type arms fallback])
+    return hir.append_node(@session.hir hir.Block[loc result_type [declared flow] false])
+}

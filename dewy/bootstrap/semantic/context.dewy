@@ -30,6 +30,8 @@ PendingAlias:type = const [expression:SyntaxRef]
 ReturnSite:type = const [value_type:addr loc:Span]
 ReturnCollector:type = [sites:array<ReturnSite>=[]]
 ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
+ConstructorSet:type = [bindings:array<addr>=[]]
+MethodEntry:type = const [binding:addr receiver_type:addr?=none place_self:bool=false]
 Session:type = [
     # Checking collects diagnostics; the invocation decides how to render them.
     warnings:array<Warning>=[]
@@ -45,6 +47,13 @@ Session:type = [
     hir:array<hir.AST>=[]
     # Concrete generic bodies are module-level declarations, emitted once.
     hoisted:array<addr>=[]
+    # Method identity includes the declaring type; structural equality must
+    # not merge distinct bodies or defaults. Inherited entries reuse owners.
+    constructors:dict<addr ConstructorSet>=[]
+    methods:dict<string MethodEntry>=[]
+    method_bindings:set<addr>=set[]
+    preparing_methods:set<addr>=set[]
+    prepared_methods:set<addr>=set[]
     registry:bindings.Registry=bindings.Registry[]
     scopes:array<bindings.Scope>=[]
     brands:brands.Registry=brands.Registry[]
