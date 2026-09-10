@@ -1264,7 +1264,8 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
                 }
             }
         } else if keyword.name =? 'if' {specs.push(FlowSpec[arm_id arm.parts[2] condition=arm.parts[1]])}
-        else return pending(arm_id 'loop transfer and iterator checking in this flow chain' env session)
+        else if keyword.name =? 'loop' {specs.push(FlowSpec[arm_id arm.parts[2] condition=arm.parts[1] is_loop=true])}
+        else return pending(arm_id 'this flow-chain keyword' env session)
     }
     if has_match and not match_total and node.default is? none return problem(id 'match is not exhaustive' if uncovered is? none 'the arms do not cover the scrutinee' else "{uncovered} is not handled by any arm" env session)
     let remaining=fork(env @session)
@@ -1273,6 +1274,23 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
     let exits:array<Environment>=[]
     let selected=false
     loop spec in specs {
+        if spec.is_loop {
+            # Reuse the ordinary loop's mutation invalidation and iterator
+            # scope. Later alternatives see its condition fail before the
+            # first iteration; exits from an entered loop skip those arms.
+            let syntax=contexts.node_at(spec.syntax remaining.lexical session)
+            $runtime_assert syntax is? parser.KeywordExpr
+            let checked=loop_flow(spec.syntax syntax remaining @session)
+            if checked is? Error return checked
+            let checked_flow=node_at(checked session)
+            $runtime_assert checked_flow is? hir.Flow and checked_flow.arms.length =? 1
+            let arm=node_at(checked_flow.arms[0] session)
+            $runtime_assert arm is? hir.LoopArm
+            arms.push(checked_flow.arms[0])
+            if not types.is_primitive(types.node_at(session.types arm.value_type) 'never') {results.push(arm.value_type) exits.push(fork(remaining @session))}
+            remaining=refined(arm.condition false remaining @session)
+            continue
+        }
         let condition=if spec.condition is? none match_condition(spec remaining @session) else expression(spec.condition remaining @session expected=types.primitive('bool' @session.types))
         if condition is? Error return condition
         let decided=target_values.unwrap(condition session.hir)
@@ -2844,7 +2862,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
 # A flow specification keeps source bodies unevaluated while all match
 # patterns establish reachability and exhaustiveness. Scrutinees which are
 # not named storage are evaluated once, in the flow's prelude.
-FlowSpec:type = const [syntax:addr body:addr condition:addr?=none patterns:array<patterns.Pattern>=[] subjects:array<addr>=[]]
+FlowSpec:type = const [syntax:addr body:addr condition:addr?=none patterns:array<patterns.Pattern>=[] subjects:array<addr>=[] is_loop:bool=false]
 MatchPlan:type = const [specs:array<FlowSpec> prelude:array<addr> total:bool coverage:array<patterns.Coordinate>]
 match_bind = (name:string value:addr id:addr env:Environment @session:contexts.Session hidden:bool=false):>addr|Error => {
     let loc=contexts.node_at(id env.lexical session).loc

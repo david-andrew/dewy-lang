@@ -13,6 +13,22 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    ('let main=():>int64=>{let memory=__alloca__(8) __store_i64__(42 memory) return __load_i64__(memory)}', 42),
+    ('Fn:type=(x:int64):>int64\nlet twice=(x:int64):>int64=>x*2\nlet apply=(f:Fn=@twice):>int64=>f(21)\nlet main=():>int64=>apply()', 42),
+
+    ('let f=(flag:bool=true):>int64=>if flag 42 else 0\nlet main=():>int64=>f()', 42),
+    ('let seed:int64=0\nlet tick=():>bool=>{seed+=1 return seed <? 4}\nlet main=():>int64=>{loop tick() {} return seed+38}', 42),
+    ('let seed:int64=0\nlet tick=():>bool=>{seed+=1 return false}\nlet main=():>int64=>{loop tick() {} else {seed+=41} return seed}', 42),
+    ('let seed:int64=0\nlet tick=():>bool=>{seed+=1 return true}\nlet f=(flag:bool):>bool=>flag and tick()\nlet main=():>int64=>{f(false); f(true); return seed+41}', 42),
+    ('let seed:int64=0\nlet tick=():>bool=>{seed+=1 return true}\nlet f=(flag:bool):>bool=>flag nor tick()\nlet main=():>int64=>{f(true); f(false); return seed+41}', 42),
+
+    ('Fn:type=(x:int64):>int64\nlet apply=(f:Fn x:int64):>int64=>f(x)\nlet twice=(x:int64):>int64=>x*2\nlet main=():>int64=>apply(@twice 21)', 42),
+    ('let add=(x:int64 y:int64=2):>int64=>x+y\nlet main=():>int64=>add(40)', 42),
+    ('let add=(x:int64 y:int64=9):>int64=>x+y\nlet main=():>int64=>add(y=2 x=40)', 42),
+    ('let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(10 right=16)', 42),
+    ('let seed:int64=0\nlet next=():>int64=>{seed+=1 return seed}\nlet choose=(x:int64=next()):>int64=>x\nlet main=():>int64=>{choose(99); choose(); choose(); return seed+40}', 42),
+    ('let seed:int64=0\nlet next=():>int64=>{seed+=1 return seed}\nlet difference=(x:int64 y:int64):>int64=>x-y\nlet main=():>int64=>difference(y=next() x=next())+41', 42),
+
     ('', 0),
     ('Word:type=int64\nlet main=():>Word=>42', 42),
     ('let main=():>int64=>42', 42),

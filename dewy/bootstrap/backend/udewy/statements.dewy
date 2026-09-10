@@ -1,0 +1,206 @@
+import p"emit.dewy" as emit
+import p"program.dewy" as program
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+
+# µDewy expressions contain values only. Lift evaluation steps into their
+# enclosing statement list, retaining the source ordering and branch where
+# each step runs. This is scalar legalization; ownership-aware aggregate
+# extraction will use the same boundary when its storage rules are added.
+State:type = [nodes:array<hir.AST> types:array<types.Type> serial:addr=0]
+Expression:type = [prefix:array<addr> value:addr]
+Result:type = const [program:program.Program input:emit.Input]
+put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)
+node_at = (id:addr state:State):>hir.AST => hir.node_at(state.nodes id)
+void_type = (@state:State):>addr => types.primitive('void' @state.types)
+boolean = (@state:State):>addr => types.primitive('bool' @state.types)
+append = (@target:array<addr> items:array<addr>):>void => {loop item in items {target.push(item)}}
+fresh = (@state:State):>string => {state.serial+=1 return "__dewy_step_{state.serial}"}
+# Binding discovery already gave each lexical local a unique symbol. µDewy
+# has braces on control-flow bodies, but no standalone lexical block statement.
+# Flatten statement scopes while keeping every conditional body's boundary.
+flatten = (items:array<addr> state:State):>array<addr> => {
+    let result:array<addr>=[]
+    loop id in items {
+        let node=node_at(id state)
+        if node is? hir.Block {append(@result flatten(node.items state))}
+        else {result.push(id)}
+    }
+    return result
+}
+block = (loc:hir.AST items:array<addr> @state:State):>addr => put(hir.Block[loc.loc void_type(@state) flatten(items state) true] @state)
+reference = (name:string type:addr node:hir.AST @state:State):>addr => put(hir.ExpressedIdentifier[node.loc type name] @state)
+zero = (type:addr node:hir.AST @state:State):>addr => {
+    let target=types.node_at(state.types type)
+    if types.is_primitive(target 'bool') return put(hir.Bool[node.loc type false] @state)
+    if target is? types.FunctionType {
+        let word=put(hir.Integer[node.loc types.primitive('int64' @state.types) '0d' 0] @state)
+        return put(hir.Transmute[node.loc type word] @state)
+    }
+    return put(hir.Integer[node.loc type '0d' 0] @state)
+}
+snapshot = (value:addr @prefix:array<addr> @state:State):>addr => {
+    let node=node_at(value state)
+    let name=fresh(@state)
+    prefix.push(put(hir.Declare[node.loc void_type(@state) 'let' name node.value_type value] @state))
+    return reference(name node.value_type node @state)
+}
+
+# Store the selected value on each reachable path. A returning path already
+# leaves the function and must not acquire a spurious store afterward.
+write = (id:addr target:addr @state:State):>array<addr> => {
+    let node=node_at(id state)
+    if node is? hir.Return return statement(id @state)
+    if node is? hir.Block {
+        let result:array<addr>=[]
+        loop i in 0.. and i <? node.items.length {
+            if i + 1 =? node.items.length {append(@result write(node.items[i] target @state))}
+            else {append(@result statement(node.items[i] @state))}
+        }
+        return result
+    }
+    if node is? hir.Flow {
+        let arms:array<addr>=[]
+        loop id in node.arms {
+            let arm=node_at(id state)
+            $runtime_assert arm is? hir.IfArm|hir.LoopArm
+            let body=block(arm write(arm.body target @state) @state)
+            arms.push(if arm is? hir.IfArm put(hir.IfArm[arm.loc void_type(@state) arm.condition body] @state) else put(hir.LoopArm[arm.loc void_type(@state) arm.condition body] @state))
+        }
+        let fallback:addr?=none
+        if node.default isnt? none {fallback=block(node write(node.default target @state) @state)}
+        return flow(hir.Flow[node.loc void_type(@state) arms fallback] 0 @state)
+    }
+    let value=expression(id @state)
+    value.prefix.push(put(hir.Assign[node.loc void_type(@state) target '=' value.value] @state))
+    return value.prefix
+}
+expression = (id:addr @state:State):>Expression => {
+    let node=node_at(id state)
+    if node is? hir.Block or node is? hir.Flow {
+        let name=fresh(@state)
+        let target=reference(name node.value_type node @state)
+        let prefix:array<addr>=[put(hir.Declare[node.loc void_type(@state) 'let' name node.value_type zero(node.value_type node @state)] @state)]
+        append(@prefix write(id target @state))
+        return Expression[prefix target]
+    }
+    if node is? hir.Transmute|hir.ValueCast|hir.RepresentationCast {
+        let inner=expression(node.expr @state)
+        if node is? hir.Transmute {inner.value=put(hir.Transmute[node.loc node.value_type inner.value] @state)}
+        return inner
+    }
+    if node is? hir.ShortCircuit {
+        let conjunction=node.op in? ['and' 'nand']
+        let other=put(hir.Bool[node.loc boolean(@state) not conjunction] @state)
+        let arm=put(hir.IfArm[node.loc node.value_type node.left if conjunction node.right else other] @state)
+        let selected=put(hir.Flow[node.loc node.value_type [arm] if conjunction other else node.right] @state)
+        if node.op in? ['nand' 'nor'] {
+            let type=types.function_type([types.PosOrKwArg[none boolean(@state)]] [] none boolean(@state) [] @state.types)
+            let negate=reference('__not__' type node @state)
+            selected=put(hir.FunctionCall[node.loc node.value_type negate [selected] []] @state)
+        }
+        return expression(selected @state)
+    }
+    if node is? hir.FunctionCall {
+        let function=expression(node.func @state)
+        let arguments:array<Expression>=[]
+        let pending:addr=0
+        loop argument in node.pos_args {
+            let value=expression(argument @state)
+            if value.prefix.length >? 0 {pending+=1}
+            arguments.push(value)
+        }
+        let prefix=function.prefix
+        let callee=node_at(function.value state)
+        let intrinsic=callee is? hir.ExpressedIdentifier and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics)
+        if pending >? 0 and not intrinsic {function.value=snapshot(function.value @prefix @state)}
+        let values:array<addr>=[]
+        loop argument in arguments {
+            append(@prefix argument.prefix)
+            if argument.prefix.length >? 0 {pending-=1}
+            values.push(if pending >? 0 snapshot(argument.value @prefix @state) else argument.value)
+        }
+        return Expression[prefix put(hir.FunctionCall[node.loc node.value_type function.value values [] node.selected_method_index node.integer_operation] @state)]
+    }
+    return Expression[[] id]
+}
+
+# A later arm's condition is evaluated only after preceding arms fail. A
+# lifted loop condition runs on every iteration. The entered bit retains the
+# loop/else rule: the fallback runs only when that arm never entered.
+flow = (node:hir.Flow position:addr @state:State):>array<addr> => {
+    if position >=? node.arms.length return if node.default is? none [] else statement(node.default @state)
+    let arm=node_at(node.arms[position] state)
+    $runtime_assert arm is? hir.IfArm|hir.LoopArm
+    let condition=expression(arm.condition @state)
+    let body=block(arm statement(arm.body @state) @state)
+    let later=flow(node position+1 @state)
+    let fallback:addr?=if later.length =? 0 none else block(node later @state)
+    if arm is? hir.IfArm {
+        let lowered=put(hir.IfArm[arm.loc void_type(@state) condition.value body] @state)
+        condition.prefix.push(put(hir.Flow[node.loc void_type(@state) [lowered] fallback] @state))
+        return condition.prefix
+    }
+    if condition.prefix.length =? 0 {
+        let lowered=put(hir.LoopArm[arm.loc void_type(@state) condition.value body] @state)
+        return [put(hir.Flow[node.loc void_type(@state) [lowered] fallback] @state)]
+    }
+    let name=fresh(@state)
+    let entered=reference(name boolean(@state) node @state)
+    let result:array<addr>=[put(hir.Declare[node.loc void_type(@state) 'let' name boolean(@state) zero(boolean(@state) node @state)] @state)]
+    let yes=put(hir.Bool[node.loc boolean(@state) true] @state)
+    let entered_body=block(node [put(hir.Assign[node.loc void_type(@state) entered '=' yes] @state) body] @state)
+    let branch=put(hir.IfArm[node.loc void_type(@state) condition.value entered_body] @state)
+    let stop=put(hir.Break[node.loc void_type(@state)] @state)
+    condition.prefix.push(put(hir.Flow[node.loc void_type(@state) [branch] stop] @state))
+    let loop_body=block(node condition.prefix @state)
+    let loop_arm=put(hir.LoopArm[node.loc void_type(@state) yes loop_body] @state)
+    result.push(put(hir.Flow[node.loc void_type(@state) [loop_arm] none] @state))
+    if fallback isnt? none {
+        let already=put(hir.IfArm[node.loc void_type(@state) entered block(node [] @state)] @state)
+        result.push(put(hir.Flow[node.loc void_type(@state) [already] fallback] @state))
+    }
+    return result
+}
+statement = (id:addr @state:State):>array<addr> => {
+    let node=node_at(id state)
+    if node is? hir.Block {
+        let output:array<addr>=[]
+        loop item in node.items {append(@output statement(item @state))}
+        return output
+    }
+    if node is? hir.Flow return flow(node 0 @state)
+    if node is? hir.Declare {
+        let value=expression(node.expr @state)
+        value.prefix.push(put(hir.Declare[node.loc node.value_type node.decltype node.name node.annotation value.value node.binding_id] @state))
+        return value.prefix
+    }
+    if node is? hir.Assign {
+        let value=expression(node.value @state)
+        value.prefix.push(put(hir.Assign[node.loc node.value_type node.target node.op value.value] @state))
+        return value.prefix
+    }
+    if node is? hir.Return and node.item isnt? none {
+        let value=expression(node.item @state)
+        value.prefix.push(put(hir.Return[node.loc node.value_type value.value] @state))
+        return value.prefix
+    }
+    let value=expression(id @state)
+    value.prefix.push(value.value)
+    return value.prefix
+}
+normalize = (source:program.Program input:emit.Input):>Result => {
+    let state=State[input.nodes input.types]
+    let functions:array<program.Function>=[]
+    loop entry in source.functions {
+        let function=node_at(entry.literal state)
+        $runtime_assert function is? hir.FunctionLiteral
+        let body=function.body
+        if not emit.contains_return(body input) and not types.is_primitive(types.node_at(input.types function.rettype) 'void') and not types.is_primitive(types.node_at(input.types function.rettype) 'never') {body=put(hir.Return[function.loc void_type(@state) body] @state)}
+        let lowered=block(function statement(body @state) @state)
+        functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type function.pos_or_kw_args function.kw_only_args function.rest_args function.rettype lowered source=function.source] @state)])
+    }
+    let startup:array<addr>=[]
+    loop item in source.startup_items {append(@startup statement(item @state))}
+    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup source.argv_prologue source.argv_value source.source] emit.Input[state.nodes state.types]]
+}

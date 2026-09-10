@@ -25,11 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- Native scalar legalization now executes ten source programs through native
-  parsing/checking/lowering/emission and µDewy: empty input, type aliases,
-  global startup, forward calls, local shadowing, branches, loops, narrow word
-  wrapping, and compound bitwise updates. This test intentionally enters below
-  the full proof driver; it is not a public unchecked compilation route.
+- Native scalar legalization now executes 23 source programs through native
+  parsing/checking/lowering/emission and µDewy. It includes function values,
+  callee-evaluated defaults, keyword argument ordering, direct intrinsics,
+  conditional expression extraction, short circuits, and repeated loop-call
+  conditions. Loop fallbacks retain the zero-iteration rule. Type aliases,
+  global startup, forward calls, local shadowing, and narrow word operations
+  remain covered. This test intentionally enters below the full proof driver;
+  it is not a public unchecked compilation route.
 
 - BigInt aliases and annotated numeric boundaries use the prelude's own type.
   Exact constants materialize into canonical base-2^32 limbs; signed and
