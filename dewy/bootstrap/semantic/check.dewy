@@ -1315,6 +1315,22 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
     }
     return result
 }
+# Lengths established by branches are facts about one array's current value,
+# not different storage alternatives. Preserve an agreed exact length; when
+# they differ, retain the shared element contract and let bounds analysis
+# join the numeric length facts. Different element contracts remain a union.
+array_read_join = (alternatives:array<addr> @session:contexts.Session):>addr? => {
+    if alternatives.length =? 0 return none
+    let first=types.node_at(session.types types.unfold(types.strip_refinement(alternatives[0] session.types) session.types))
+    if first isnt? types.ArrayType return none
+    let length=first.length
+    loop alternative in alternatives {
+        let type=types.node_at(session.types types.unfold(types.strip_refinement(alternative session.types) session.types))
+        if type isnt? types.ArrayType or not types.same_type(type.element first.element session.types) return none
+        if type.length not=? length {length=none}
+    }
+    return types.array_type(first.element length @session.types)
+}
 join_reads = (exits:array<Environment> env:Environment @session:contexts.Session):>void => {
     if exits.length =? 0 return void
     let names:set<addr> = set[]
@@ -1336,7 +1352,8 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
             if type isnt? none { alternatives.push(type) }
         }
         if alternatives.length =? exits.length {
-            let result=subtyping.join(alternatives session.links @session.types)
+            let array=array_read_join(alternatives @session)
+            let result=if array is? none subtyping.join(alternatives session.links @session.types) else array
             let original=read_type(binding env session)
             # A family split by `is? Child` rejoins to the same family.
             # The negative arm is represented explicitly as T & ~Child;
