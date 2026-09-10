@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native comparison transfer connects interval bounds with stable value and
+  length routes, including affine offsets, index propagation, nonzero facts,
+  and strictness recovered from excluded equality. A compiled test covers
+  all feasible pairs in 432 bounded numeric cases plus relational routes.
+  Traversal must still invalidate historical predicates after writes before
+  feeding this transfer; the complete bounds controller remains in progress.
+
 - Hosted cleanup now releases owned aggregate payloads in record fields and
   array union cells, including recursive aliases. Brace-less return, break,
   and continue arms run scope cleanup. `clear` and `truncate` release their

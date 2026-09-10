@@ -1,0 +1,97 @@
+import p"../propositions.dewy" as propositions
+import p"intervals.dewy" as ranges
+import p"fact_state.dewy" as facts
+import p"relations.dewy" as relations
+
+# Transfer for an already-evaluated comparison. The traversal supplies each
+# operand's numeric interval, its stable binding/length route when present,
+# and an optional affine form. It must discard historical predicates after
+# writes before calling this module; a comparison is evidence about the
+# values it observed, not about later replacements.
+Operand:type = const [
+    interval:ranges.Interval?=none
+    term:facts.Term?=none
+    affine:facts.Term?=term
+    shift:bigint=0
+]
+negate = (op:propositions.Operator):>propositions.Operator => {
+    if op =? '<?' return '>=?'
+    if op =? '<=?' return '>?'
+    if op =? '>?' return '<=?'
+    if op =? '>=?' return '<?'
+    return if op =? '=?' 'not=?' else '=?'
+}
+reverse = (op:propositions.Operator):>propositions.Operator => {
+    if op =? '<?' return '>?'
+    if op =? '<=?' return '>=?'
+    if op =? '>?' return '<?'
+    if op =? '>=?' return '<=?'
+    return op
+}
+
+ordered = (@state:facts.State smaller:Operand larger:Operand strict:bool):>void => {
+    if smaller.affine is? none or larger.affine is? none or facts.same_term(smaller.affine larger.affine) return
+    let gap=(if strict 1 else 0)+smaller.shift-larger.shift
+    # Propagate a known index bound through the comparison, retaining its
+    # sequence identity. An offset that reverses the guaranteed order cannot
+    # transfer the fact. The general order relation still records that gap.
+    if gap >=? 0 and smaller.affine.projection =? 'value' and larger.affine.projection =? 'value' {
+        let entries=state.values
+        loop entry in entries {
+            let fact=entry.fact
+            if fact is? facts.Index and fact.index =? larger.affine.binding_id {
+                facts.put(@state facts.index(smaller.affine.binding_id fact.sequence) ranges.exact(1))
+            }
+        }
+    }
+    facts.put(@state facts.order(smaller.affine larger.affine) ranges.Interval[gap none])
+    if gap >=? 1 and smaller.affine.projection =? 'value' and larger.affine.projection =? 'length' {
+        facts.put(@state facts.index(smaller.affine.binding_id larger.affine.binding_id) ranges.exact(1))
+    }
+}
+
+narrow = (@state:facts.State op:propositions.Operator subject:Operand other:Operand context:relations.Context):>bool => {
+    if subject.term is? none or other.interval is? none return true
+    let previous=relations.interval_of(subject.term state context)
+    let constraint=ranges.constraint(op other.interval true)
+    let narrowed:ranges.Interval?=previous
+    if constraint isnt? none {narrowed=ranges.intersect(previous constraint)}
+    else if op =? 'not=?' and other.interval.lower isnt? none and ranges.same_endpoint(other.interval.lower other.interval.upper) {
+        narrowed=ranges.exclude(previous other.interval.lower)
+        if other.interval.lower =? 0 and subject.term.projection =? 'value' {
+            facts.put(@state facts.nonzero(subject.term.binding_id) ranges.exact(1))
+        }
+    }
+    if narrowed is? none or ranges.is_empty(narrowed) return false
+    facts.set_value(@state subject.term narrowed)
+    return true
+}
+
+refine = (state:facts.State op:propositions.Operator left:Operand right:Operand truth:bool context:relations.Context):>facts.State? => {
+    let decided=ranges.decide(op left.interval right.interval)
+    if decided isnt? none and decided not=? truth return none
+    let result=state
+    let effective=if truth op else negate(op)
+    if effective =? '<?' or effective =? '<=?' {ordered(@result left right effective =? '<?')}
+    else if effective =? '>?' or effective =? '>=?' {ordered(@result right left effective =? '>?')}
+    else if effective =? '=?' {
+        ordered(@result left right false)
+        ordered(@result right left false)
+    }
+    else if effective =? 'not=?' and left.term isnt? none and right.term isnt? none and not facts.same_term(left.term right.term) {
+        # Under a <= b, excluding equality establishes a < b. Keep the
+        # opposite direction too when it exists; interval narrowing below
+        # rejects any resulting impossible value interval.
+        let orders=[facts.order(left.term right.term) facts.order(right.term left.term)]
+        loop order in orders {
+            let bound=facts.lookup(result order)
+            if bound isnt? none and bound.lower =? 0 {facts.put(@result order ranges.Interval[1 bound.upper])}
+        }
+    }
+    if not narrow(@result effective left right context) return none
+    # The traversal may revisit a conjunction to propagate newly sharpened
+    # evidence. Within this transfer the original operand intervals remain
+    # conservative, matching the values supplied by the caller.
+    if not narrow(@result reverse(effective) right left context) return none
+    return result
+}
