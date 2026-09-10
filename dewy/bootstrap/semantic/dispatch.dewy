@@ -260,6 +260,13 @@ more_specific = (m1:types.FunctionType m2:types.FunctionType system:System @node
 }
 
 match_best_function = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>DispatchResult | DispatchError => {
+    # Applicability and numeric promotion use each argument's representation
+    # base. Keep its refinements on the source value for the later parameter
+    # obligations, rather than making an `addr` fail int/int64 promotion.
+    loop i in 0.. and i <? pos.length {pos[i]=types.strip_refinement(pos[i] nodes)}
+    let named:dict<string addr>=[]
+    loop [name type] in kw {named[name]=types.strip_refinement(type nodes)}
+    kw=named
     let apps = applicable(methods pos kw expected system @nodes)
     let promote_pos:array<addr?> = []
     loop arg in pos { promote_pos.push(none) }

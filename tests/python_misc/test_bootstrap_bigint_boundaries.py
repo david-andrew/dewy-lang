@@ -7,6 +7,9 @@ let _bigint_from_int=(value:int64):>BigInt=>0
 let _bigint_from_uint=(value:uint64):>BigInt=>0
 '''
 CASES = [
+    'let f=(arity:addr):>void=>{loop i in 0.. and i <? arity {}}\nf(2)',
+    'let f=(limit:int64<n=>n>=?0>):>bool=>{let current:int=0 return current <? limit}\nf(2)',
+
     BIG + 'let take=(value:bigint):>bigint=>value\ntake(7)',
     BIG + 'let take=(value:bigint & ~0):>bigint=>value\ntake(7)',
     BIG + 'let take=(value:bigint):>bigint=>value\ntake(1267650600228229401496703205393)',

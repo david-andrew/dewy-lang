@@ -13,6 +13,7 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    ('let count=(arity:addr):>int64=>{let n:int64=0 loop i in 0.. and i <? arity {n+=1} return n}\nlet main=():>int64=>count(2)+40', 42),
     ('let main=():>int64=>{let twice=(x:int64):>int64=>x*2 return twice(21)}', 42),
     ('let main=():>int64=>{let n:int64=40 let read=():>int64=>n n=42 return read()}', 42),
     ('let main=():>int64=>{let n:int64=40 let first=():>int64=>second() let second=():>int64=>n+2 return first()}', 42),
