@@ -2980,6 +2980,12 @@ class _StringLowering:
             elif isinstance(expr, hir.ExpressedIdentifier):
                 if expr.binding_id is None:
                     found.add(('unknown', None))
+                elif expr.name in self.owned_cells:
+                    # A narrowed match binding can alias a cell whose payload
+                    # is now released at scope exit. Follow that ownership,
+                    # even when the original string escape analysis called
+                    # its initializer a fresh decode or call result.
+                    found.add(('owning', expr.binding_id))
                 elif expr.binding_id in params:
                     found.add(('fresh' if viewed else 'param', None))
                 elif expr.binding_id in self.owning_string_bindings:
@@ -3068,7 +3074,7 @@ class _StringLowering:
         comes back as a fresh view of the same bytes (the caller may release the
         view; the bytes stay the owner's)."""
         source = self._unwrap_transparent(item)
-        if isinstance(source, hir.ExpressedIdentifier) and source.binding_id in self.owning_string_bindings:
+        if isinstance(source, hir.ExpressedIdentifier) and source.name in self.owned_strings:
             return self._extract_expression(item)   # moved: `_insert_releases` skips it at this return
         self._consume_string_value(item)   # the caller takes a call's result over
         kinds = self._string_sources(item)

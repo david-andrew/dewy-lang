@@ -3215,7 +3215,7 @@ class _Lowerer(
             blocks = isinstance(self._unwrap_transparent(node.expr), hir.ArrayLiteral)
             self.owned_raw_arrays[node.name] = (exact.length, exact.element, blocks)
 
-    def _replace_owned_cell(self, cell: hir.ExpressedIdentifier, value: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool) -> list[hir.AST]:
+    def _replace_cell_value(self, cell: hir.AST, value: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool) -> list[hir.AST]:
         """Compute the replacement before releasing the previous payload.
 
         The RHS can read the destination directly, through a field, or in a
@@ -3226,7 +3226,7 @@ class _Lowerer(
         statements = [
             hir.Declare(loc, ty.VOID_TYPE, 'let', temporary.name, 'int64', self._optional_allocation(loc)),
             *self._union_write(temporary, value, members, prepared=False),
-            *self._release_cell_payload(cell, members, loc, prepared=prepared, strings=cell.name in self.owned_cells),
+            *self._release_cell_payload(cell, members, loc, prepared=prepared),
         ]
         if prepared:
             statements.extend(self._union_copy_cell(cell, temporary, members, loc, prepared=True))
@@ -4039,7 +4039,7 @@ class _Lowerer(
                     prologue.extend(self._union_prepare_trees(cell, members, node.loc))
                     self.union_globals_initialized.add(node.target.binding_id)
                 if node.target.name in self.owned_aggregate_cells or node.target.name in self.owned_cells:
-                    return [*prologue, *self._replace_owned_cell(cell, node.value, members, node.loc, prepared=True)]
+                    return [*prologue, *self._replace_cell_value(cell, node.value, members, node.loc, prepared=True)]
                 return [*prologue, *self._union_write(cell, node.value, members)]
             payload = (
                 self.optional_payloads.get(node.target.binding_id)
@@ -4068,7 +4068,7 @@ class _Lowerer(
                     self.optional_globals_initialized.add(node.target.binding_id)
                 value = node.value
                 if node.target.name in self.owned_aggregate_cells or node.target.name in self.owned_cells:
-                    return [*statements, *self._replace_owned_cell(cell, value, ('none', payload), node.loc, prepared=False)]
+                    return [*statements, *self._replace_cell_value(cell, value, ('none', payload), node.loc, prepared=False)]
                 statements.extend(self._optional_write(cell, value, payload))
                 return statements
             if self._is_string_valued(node.target.type) and self._has_arena():

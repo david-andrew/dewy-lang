@@ -157,3 +157,54 @@ let main=():>int64=>{
 '''
     cursors = run(source, tmp_path).splitlines()
     assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_returned_match_payload_survives_reuse_of_its_cell_storage(tmp_path):
+    source = '''
+let decode=(bytes:array<uint8>):>string=>{
+    match bytes as string|none {text:string => return text <none> => return ""}
+}
+let main=():>int64=>{
+    let kept=decode([65 66 67])
+    loop i in 0..20 {
+        let overwrite=decode([88 89 90])
+        $runtime_assert overwrite =? "XYZ"
+        $runtime_assert kept =? "ABC"
+        $runtime_assert chr(65) =? "A"
+    }
+    return 0
+}
+'''
+    run(source, tmp_path)
+
+
+def test_checkpoint_field_replacements_release_previous_values(tmp_path):
+    source = '''
+Bag:type=[values:array<int64>]
+Box:type=[nested:Bag values:array<int64> maybe:Bag|none text:string]
+let restore=(@target:Box source:Box):>void=>{
+    target.nested=source.nested
+    target.values=source.values
+    target.maybe=source.maybe
+    target.text=source.text
+    target.nested=target.nested
+    target.values=target.values
+    target.maybe=target.maybe
+    target.text=target.text
+}
+let main=():>int64=>{
+    let bag=Bag[[loop i in 0..128 {i}]]
+    let source=Box[bag bag.values bag "snapshot-{42}"]
+    let target=source
+    loop i in 0..20 {
+        restore(@target source)
+        $runtime_assert target.values.length =? 129
+        $runtime_assert target.nested.values.length =? 129
+        $runtime_assert target.text =? "snapshot-42"
+        printl(_arena_cursor)
+    }
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(set(cursors[2:])) == 1, cursors

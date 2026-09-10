@@ -46,6 +46,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   checks pass (including the updated return-copy assertion). The full prelude
   still checks in 240 seconds after the first cleanup changes; larger memory
   measurements are being repeated with local-cell cleanup included.
+  Field and whole-object replacement now share copy-before-release behavior,
+  including implicit receivers and checkpoint restoration. Fourteen lifetime
+  cases verify repeated restoration and self-assignment without arena growth;
+  35 place/string and 85 numeric/container regressions pass. Native rebuilding
+  exposed a returned match-string alias freed with its cell; string escape
+  classification now follows that owner and copies the returned payload.
 
 - Native module assembly retains dependency initialization order and binding
   identities, emits each loaded module once, and selects only the entry

@@ -1020,22 +1020,64 @@ class _ObjectLowering:
             fresh_destination = True
         prelude, src = self._extract_object_pointer(node.value)
         statements.extend(prelude)
-        if not self._place_is_owned(node.target):
-            # Replacing caller/global storage must not install descriptors
-            # from this frame. Finish an independent copy before releasing
-            # the old fields: the RHS can be the destination itself or one
-            # of its members. Then transfer that copy's ownership by moving
-            # the inline object bytes into the existing caller-owned block.
-            size, _offsets = self._object_layout(node.target.type, node)
-            temporary = self._new_object_temp(node.loc)
-            statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', temporary.name, 'int64', self._object_allocation(node.loc, size)))
-            statements.extend(self._object_copy(temporary, src, node.target.type, node.loc, arena=True))
-            if not fresh_destination and self._has_arena():
-                statements.extend(self._release_object_members(dest, node.target.type, node.loc))
-            statements.extend(self._byte_copy_loop(dest, temporary, self._int64_literal(node.loc, size), node.loc))
-            return statements
-        statements.extend(self._object_copy(dest, src, node.target.type, node.loc))
+        statements.extend(self._replace_object_value(dest, src, node.target.type, node.loc, fresh=fresh_destination))
         return statements
+
+    def _replace_object_value(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span, *, fresh: bool = False) -> list[hir.AST]:
+        """Make an independent value before replacing an existing object.
+
+        A member or place can alias the RHS. Copy first, release the previous
+        members, then move the temporary's inline bytes into the destination.
+        Every nested handle in the temporary belongs to the replacement, so
+        no descriptor from a shorter-lived frame escapes through a field.
+        """
+        size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+        temporary = self._new_object_temp(loc)
+        statements = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', temporary.name, 'int64', self._object_allocation(loc, size)),
+            *self._object_copy(temporary, src, object_type, loc, arena=self._has_arena()),
+        ]
+        if not fresh and self._has_arena():
+            statements.extend(self._release_object_members(dest, object_type, loc))
+        statements.extend(self._byte_copy_loop(dest, temporary, self._int64_literal(loc, size), loc))
+        return statements
+
+    def _replace_field_value(self, address: hir.AST, value: hir.AST, field_type: ty.Type, loc: Span) -> list[hir.AST]:
+        """The same replacement rule for explicit and implicit receivers."""
+        members = self._field_union_members(field_type)
+        if members is not None:
+            return self._replace_cell_value(address, value, members, loc, prepared=False)
+        if isinstance(field_type, ty.ObjectType):
+            prelude, source = self._extract_object_pointer(value)
+            return [*prelude, *self._replace_object_value(address, source, field_type, loc)]
+        if isinstance(field_type, ty.ArrayType):
+            prelude, replacement = self._transfer_array_value(value, self._copy_source_expression(value), field_type, site='stored in a field')
+            held = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('replacement_field'))
+            previous = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('previous_field'))
+            element = field_type.element
+            return [
+                *prelude,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', replace(replacement, type='int64')),
+                hir.Declare(loc, ty.VOID_TYPE, 'let', previous.name, 'int64', self._value_load(address, field_type, loc)),
+                *self._release_owned_array(previous, loc,
+                    string_elements=self._is_string_valued(element),
+                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
+                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None),
+                *self._value_store(held, address, field_type, loc),
+            ]
+        if self._is_string_valued(field_type):
+            prelude, replacement = self._escaping_string_value(value)
+            held = self._new_string_temp(loc, 'int64', 'replacement_field')
+            previous = self._new_string_temp(loc, 'int64', 'previous_field')
+            return [
+                *prelude,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', replace(replacement, type='int64')),
+                hir.Declare(loc, ty.VOID_TYPE, 'let', previous.name, 'int64', self._intrinsic_call('__load_i64__', [address], 'int64', loc)),
+                self._release_string_by_owner(previous, loc),
+                *self._value_store(held, address, field_type, loc),
+            ]
+        prelude, replacement = self._extract_expression(value)
+        return [*prelude, *self._value_store(replacement, address, field_type, loc)]
 
     def _lower_object_field_assign(self, node: hir.Assign) -> list[hir.AST]:
         if self.current_object_receiver is None or self.current_object_type is None:
@@ -1050,25 +1092,6 @@ class _ObjectLowering:
         )
         field = self.current_object_type.field(name)
         field_type = field.type if field is not None else node.target.type
-        if isinstance(field_type, ty.ObjectType):
-            if node.op != '=':
-                self._target_error(node, f'object field compound assignment `{node.op}`')
-            prelude, src = self._extract_object_pointer(node.value)
-            return [*prelude, *self._object_copy(address, src, field_type, node.loc)]
-        if isinstance(field_type, ty.ArrayType) and node.op == '=':
-            if field_type.length is None:
-                # the field outlives the frame: an owned local moves in at its
-                # last use (`pointers = moved`), anything else is cloned into the arena
-                prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field')
-            else:
-                prelude, value = self._independent_array_value(
-                    node.value,
-                    field_type,
-                )
-            return [
-                *prelude,
-                *self._value_store(value, address, field_type, node.loc),
-            ]
         assigned_value = node.value
         if node.op != '=':
             symbol = node.op[:-1]
@@ -1095,8 +1118,7 @@ class _ObjectLowering:
                 ],
                 {},
             )
-        prelude, value = self._extract_expression(assigned_value)
-        return [*prelude, *self._value_store(value, address, field_type, node.loc)]
+        return self._replace_field_value(address, assigned_value, field_type, node.loc)
 
     def _place_is_owned(self, place: hir.AST) -> bool:
         """Whether a place's storage belongs to an owned local of this frame: the
@@ -1119,45 +1141,10 @@ class _ObjectLowering:
         address = self._field_address(obj, offsets[node.target.name], node.loc)
         field = node.target.value.type.field(node.target.name)
         field_type = field.type if field is not None else node.target.type
-        # A place parameter or global may outlive this function. Its nested
-        # descriptors and array data must not be copied into this frame.
-        local_destination = self._place_is_owned(node.target.value)
-        members = self._field_union_members(field_type)
-        if members is not None:
-            return [*prelude, *self._union_write(address, node.value, members, prepared=False)]
-        if isinstance(field_type, ty.ObjectType):
-            value_prelude, src = self._extract_object_pointer(node.value)
-            return [
-                *prelude,
-                *value_prelude,
-                *(self._object_copy(address, src, field_type, node.loc) if local_destination
-                  else self._copy_object_into_result_storage(address, src, field_type, node.loc)),
-            ]
-        if isinstance(field_type, ty.ArrayType) and field_type.length is None:
-            if isinstance(node.target.value, hir.ExpressedIdentifier):
-                fields = self.borrowed_fields.setdefault(local_binding_key(node.target.value), set())
-                (fields.discard if self._array_value_is_owned(node.value) else fields.add)(node.target.name)
-            value_prelude, value = self._transfer_array_value(node.value, self._copy_source_expression(node.value), field_type, site='stored in a field', frame_copy=local_destination)
-        elif isinstance(field_type, ty.ArrayType):
-            # Exact arrays already have complete destination storage. Keep
-            # that caller-owned buffer instead of installing a local pointer.
-            if not local_destination:
-                target_array = self._value_load(address, field_type, node.loc)
-                return [*prelude, *self._write_array_result_value(target_array, node.value, field_type)]
-            value_prelude, value = self._independent_array_value(node.value, field_type)
-        elif self._is_string_valued(field_type):
-            value_prelude, value = self._escaping_string_value(node.value)
-            if self._place_is_owned(node.target.value):
-                # the object (a local, or a member or element of one) owns the string it held: give it back by its owner word
-                old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'old_field').name)
-                value_prelude = [
-                    *value_prelude,
-                    hir.Declare(node.loc, ty.VOID_TYPE, 'let', old.name, 'int64', self._intrinsic_call('__load_i64__', [address], 'int64', node.loc)),
-                    self._release_string_by_owner(old, node.loc),
-                ]
-        else:
-            value_prelude, value = self._extract_expression(node.value)
-        return [*prelude, *value_prelude, *self._value_store(value, address, field_type, node.loc)]
+        if isinstance(field_type, ty.ArrayType) and field_type.length is None and isinstance(node.target.value, hir.ExpressedIdentifier):
+            fields = self.borrowed_fields.setdefault(local_binding_key(node.target.value), set())
+            (fields.discard if self._array_value_is_owned(node.value) else fields.add)(node.target.name)
+        return [*prelude, *self._replace_field_value(address, node.value, field_type, node.loc)]
 
     def _object_result_write(self, item: hir.AST) -> list[hir.AST]:
         if self.current_object_result is None:
