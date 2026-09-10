@@ -474,16 +474,8 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         if node.delims =? '[]' {
-            if node.inner.length =? 1 {
-                let candidate=contexts.node_at(node.inner[0] env.lexical session)
-                if candidate is? parser.Flow and candidate.arms.length =? 1 and candidate.default is? none {
-                    let arm=contexts.node_at(candidate.arms[0] env.lexical session)
-                    if arm is? parser.KeywordExpr and arm.parts.length =? 3 {
-                        let keyword=contexts.node_at(arm.parts[0] env.lexical session)
-                        if keyword is? tokens.Keyword and keyword.name =? 'loop' return loop_capture(id node.inner[0] env @session expected=expected)
-                    }
-                }
-            }
+            let captured=captured_loop(node env session)
+            if captured isnt? none return loop_capture(id captured env @session expected=expected)
             let entry = if expected is? none none else views.container_entry_types(expected session.types)
             if entry isnt? none and entry.value isnt? none return container_literal(id node env @session expected=expected)
             loop item in node.inner {
@@ -2394,6 +2386,8 @@ container_array = (items:array<addr> wanted:addr? id:addr env:Environment @sessi
     return put(hir.ArrayLiteral[loc types.array_type(element converted.length @session.types) converted] @session)
 }
 container_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none is_set:bool=false):>addr|Error => {
+    let captured=captured_loop(node env session)
+    if is_set and captured isnt? none return loop_capture(id captured env @session expected=expected is_set=true)
     let annotation = if expected is? none none else views.container_entry_types(expected session.types)
     let key_nodes:array<addr> = []
     let value_nodes:array<addr> = []
@@ -3729,17 +3723,22 @@ capture_pushes = (id:addr receiver:addr element:addr syntax:addr env:Environment
     if types.is_primitive(type 'void') or types.is_primitive(type 'never') return id
     let value=against(id element syntax env @session)
     if value is? Error return value
+    if views.container_entry_types(node_at(receiver session).value_type session.types) isnt? none {
+        let arrays=container_values.arrays(receiver @session)
+        return put(hir.DictStore[node.loc void_type arrays.keys none value none] @session)
+    }
     let signature=array_methods.signature('push' element @session.types)
     let method=put(hir.ArrayMethod[node.loc signature receiver 'push'] @session)
     return put(hir.FunctionCall[node.loc void_type method [value] []] @session)
 }
-loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session expected:addr?=none is_set:bool=false):>addr|Error => {
     let checked=expression(syntax env @session)
     if checked is? Error return checked
     let values=capture_values(checked session)
     if values.length =? 0 return problem(id 'this loop expresses no value to capture' 'end the body with the value to collect' env session)
     let target=types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
-    let element:addr?=if target is? types.ArrayType target.element else none
+    let entries=if expected is? none none else views.container_entry_types(expected session.types)
+    let element:addr?=if is_set and entries isnt? none entries.key else if target is? types.ArrayType target.element else none
     if element is? none {
         loop value in values {
             let widened=widen(value id env @session)
@@ -3753,12 +3752,13 @@ loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session ex
     }
     $runtime_assert element isnt? none
     let loc=contexts.node_at(id env.lexical session).loc
-    let type=types.array_type(element none @session.types)
+    let type=if is_set views.set_type(element @session.types) else types.array_type(element none @session.types)
     let name="__dewy_capture_{session.registry.next_id}"
     let binding_id=bindings.allocate_param(@session.registry name type loc)
     let receiver=put(hir.ExpressedIdentifier[loc type name binding_id] @session)
     let empty=put(hir.ArrayLiteral[loc types.array_type(element 0 @session.types) []] @session)
-    let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name type empty binding_id] @session)
+    let initial=if is_set container_values.literal(loc type empty none @session) else empty
+    let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name type initial binding_id] @session)
     let binding=bindings.binding_at(session.registry binding_id)
     binding.declaration=declaration binding.store_type=type
     session.registry.by_id[binding_id]=binding
@@ -3767,4 +3767,16 @@ loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session ex
     # Local result storage stays in the expression's evaluation position.
     # Lowering legalizes this block with the same rules as ordinary user code.
     return put(hir.Block[loc type [declaration filled receiver] true] @session)
+}
+
+# Only a single loop flow denotes a capture; a list containing other values
+# still follows ordinary literal checking. Shared by array and set syntax.
+captured_loop = (block:parser.Block env:Environment session:contexts.Session):>addr? => {
+    if block.inner.length not=? 1 return none
+    let candidate=contexts.node_at(block.inner[0] env.lexical session)
+    if candidate isnt? parser.Flow or candidate.arms.length not=? 1 or candidate.default isnt? none return none
+    let arm=contexts.node_at(candidate.arms[0] env.lexical session)
+    if arm isnt? parser.KeywordExpr or arm.parts.length not=? 3 return none
+    let keyword=contexts.node_at(arm.parts[0] env.lexical session)
+    return if keyword is? tokens.Keyword and keyword.name =? 'loop' block.inner[0] else none
 }

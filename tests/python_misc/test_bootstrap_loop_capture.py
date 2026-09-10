@@ -8,6 +8,8 @@ from dewy.reporting import SrcFile
 from dewy.semantic import check
 
 CASES = [
+    'let values:array<int64>=[1 2 2]\nlet selected:set<int64>=set[loop value in values if value>?1 value]',
+    'let values:array<int64>=[1 2 2]\nlet selected=set[loop value in values value]',
     "let values:array<int64>=[1 2 3]\nlet selected:array<int64>=[loop value in values if value>?1 value]",
     "let values:array<int64>=[1 2]\nlet selected=[loop value in values if value>?1 value else value+1]",
     "let values:array<int64>=[1 2]\nlet selected:array<int64>=[loop value in values {let next=value+1 next}]",
