@@ -105,6 +105,18 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
         }
         let checked = against(value target.base id env @session)
         if checked is? Error return checked
+        # A singleton value can discharge constant scalar promises here.
+        # Preserve the checked expression (and its effects); unknown, field,
+        # conditional, and relational promises still go to bounds analysis.
+        let constant=constant_integer(checked session)
+        if constant isnt? none {
+            let proven=true
+            loop promise in target.propositions {
+                if promise.subject not=? 'self' or promise.projection not=? 'value' or promise.term isnt? none or promise.tested_type isnt? none or promise.when isnt? none or promise.axiom isnt? none {proven=false break}
+                if not propositions.holds(promise constant) {proven=false break}
+            }
+            if proven return checked
+        }
         return put(hir.Obligation[node.loc node_at(checked session).value_type checked expected display.type_to_dewy(expected session.types)] @session)
     }
     let inhabitant=unit_inhabitant(value expected id env @session)
@@ -281,12 +293,37 @@ call_hint = (expected:addr? function:addr arguments:array<addr> env:Environment 
 }
 
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let func = node_at(function session)
+    if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
+        let binding=bindings.binding_at(session.registry func.binding_id)
+        let builtin=binding.kind =? 'function' and binding.syntax is? none and binding.declaration is? none
+        if builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+            # A finite integer set is not closed under arithmetic. Decode its
+            # physical tag before selecting the ordinary numeric operation.
+            loop i in 0.. and i <? positional.length {
+                let value=positional[i]
+                let members=views.enum_members(node_at(value session).value_type session.types)
+                if members is? none continue
+                let integers=true
+                let fits=true
+                loop member in members {
+                    let type=types.node_at(session.types member)
+                    if type isnt? types.IntegerLiteralType {integers=false break}
+                    if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {fits=false}
+                }
+                if not integers continue
+                if not fits return pending(id 'arithmetic on literal enums wider than an integer word' env session)
+                let converted=against(value types.primitive('int64' @session.types) id env @session)
+                if converted is? Error return converted
+                positional[i]=converted
+            }
+        }
+    }
     if keyword.length =? 0 {
         let specialized=builtin_value(function positional id env @session)
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
     }
-    let func = node_at(function session)
     if func is? hir.BoundMethod {
         let arguments:array<addr>=[]
         if func.receiver isnt? none {

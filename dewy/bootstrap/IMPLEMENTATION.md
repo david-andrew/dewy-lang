@@ -32,7 +32,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Array-field mutation retains its declared store contract after `clear`,
   including implicit method receivers and subsequent pushes in a loop.
 
-- Native legalization executes 101 source programs through native checking,
+- Native legalization executes 121 source programs through native checking,
   lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
   handles scalar arrays with independent declaration/assignment copies,
   keyword-ordered argument copies, callee defaults, arena-backed returns and
@@ -53,6 +53,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   including empty inputs, continue/break, filtered captures, and nested
   captures. Iterator setup remains local to the reached arm and advancement
   precedes each condition; exhausting an array never reads past its end.
+  Conjunctive multi-iterators advance their participating sequences before
+  evaluating the combined condition. Literal enums preserve tags across
+  variables, fields, arrays, calls, casts, and arithmetic; numeric operations
+  decode their values first. String alternatives sharing a union tag compare
+  their payload for literal tests. Constant scalar promises discharge only
+  when proven, preserving effects and every unresolved obligation. Two such
+  unresolved/refuted programs still stop before unchecked legalization.
   Frame/arena lifetime optimization and release insertion remain pending.
   These tests enter below the full proof driver; they are not a public
   unchecked compilation route.

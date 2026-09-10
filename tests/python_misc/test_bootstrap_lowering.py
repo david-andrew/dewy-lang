@@ -63,6 +63,30 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('let main=():>int64=>{let value:int64<v=>v>?0>=42 return value}', 42),
+    ('let count:int64=0\nlet next=():>42=>{count+=1 return 42}\nlet main=():>int64=>{let value:int64<v=>v>?0>=next() return count+41}', 42),
+    ('let choose=(value:int64|"a"|"b"):>int64=>if value is? "a" 0 else 42\nlet main=():>int64=>choose("b")', 42),
+    ('let choose=(value:string):>int64=>if value is? "ok" 42 else 0\nlet main=():>int64=>choose("ok")', 42),
+    ('let choose=(value:int64|"a"|"b"):>int64=>{if value is? int64 return 0 return if value is? "b" 42 else 0}\nlet main=():>int64=>choose("b")', 42),
+    ('let choose=(value:string):>int64=>if value isnt? "👩\u200d👩\u200d👧\u200d👦" 42 else 0\nlet main=():>int64=>choose("👩\u200d👩\u200d👦")', 42),
+    ('Box:type=[values:array<int64>]\nlet main=():>int64=>{let box=Box[[1 2]] box.values.clear box.values.push(42) return box.values[0]}', 42),
+    ('Sign:type=-1|1\nlet add=(left:Sign right:Sign):>int64=>left+right\nlet main=():>int64=>add(-1 1)+42',42),
+    ('Sign:type=-1|1\nlet main=():>int64=>{let value:Sign=-1 let copy=value copy=1 return if value is? -1 42 else 0}', 42),
+    ('Sign:type=-1|1\nlet number=(value:Sign):>int64=>value\nlet main=():>int64=>number(-1)+43', 42),
+    ('Sign:type=-1|1\nBox:type=[sign:Sign]\nlet main=():>int64=>{let value=Box[-1] return value.sign+43}', 42),
+    ('Choice:type=0|"ready"|"done"\nlet main=():>int64=>{let value:Choice="done" return if value is? "done" 42 else 0}', 42),
+    ('Choice:type=0|"ready"|"done"\nlet result=(flag:bool):>Choice=>if flag "ready" else 0\nlet main=():>int64=>{let value=result(true) if value is? string return if value=?"ready" 42 else 0 return 0}', 42),
+    ('Sign:type=-1|1\nlet main=():>int64=>{let values:array<Sign>=[-1 1] return (values[0] as int64)+(values[1] as int64)+42}', 42),
+    ('Sign:type=-1|1\nlet select=(value:-1|0|1):>Sign=>if value is? Sign value else 1\nlet main=():>int64=>(select(-1) as int64)+43', 42),
+    ('Sign:type=-1|1\nlet count:int64=0\nlet next=():>1=>{count+=1 return 1}\nlet main=():>int64=>{let value:Sign=next() return count+41}', 42),
+
+
+    ('let main=():>int64=>{let total:int64=0 let left:array<int64>=[20 20] let right:array<int64>=[1 1 99] loop a in left and b in right {total+=a+b} return total}', 42),
+    ('let main=():>int64=>{let total:int64=0 let values:array<int64>=[20 21] loop i in 0.. and value in values {total+=i+value} return total}', 42),
+    ('let main=():>int64=>{let total:int64=0 let values:array<int64>=[20 22] loop i in 0.. and i<?values.length {total+=values[i]} return total}', 42),
+    ('let main=():>int64=>{let total:int64=0 let left:string="ab" let right:string="XY" loop a in left and b in right {total+=a.length+b.length} return total+38}', 42),
+
+
     ('let main=():>int64=>{let total:int64=0 loop i in 0..6 {total+=i} return total*2}', 42),
     ('let main=():>int64=>{let total:int64=0 loop i in 0,2..6 {total+=i} return total+30}', 42),
     ('let main=():>int64=>{let total:int64=0 loop i in 6,4..0 {total+=i} return total+30}', 42),
@@ -193,3 +217,15 @@ main = (argv:array<string>):>int64 => {{
         native=subprocess.run([binary,case],capture_output=True,text=True,timeout=60,check=False)
         assert native.returncode!=0,text
         assert 'no overload takes' in native.stderr,native.stdout+native.stderr
+
+    # This driver deliberately stops below full bounds analysis. Unknown or
+    # refuted promises must survive checking and prevent unchecked lowering.
+    for index, text in enumerate([
+        'let f=(x:int64):>int64<v=>v>?0>=>x',
+        'let main=():>int64=>{let value:int64<v=>v>?0>=-1 return value}',
+    ]):
+        case = tmp_path / f'unresolved-{index}.dewy'
+        case.write_text(text)
+        native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
+        assert native.returncode != 0, text
+        assert 'Obligation legalization' in native.stderr, native.stdout + native.stderr

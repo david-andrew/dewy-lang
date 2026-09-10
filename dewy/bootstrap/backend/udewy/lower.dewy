@@ -72,11 +72,12 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
         if type.name in? ['int' 'uint'] return types.primitive(if type.name =? 'int' 'int64' else 'uint64' @state.type_nodes)
         if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.type_nodes) isnt? none return plain
     }
+    if enum_members(id state) isnt? none return types.primitive('int64' @state.type_nodes)
     if cell_members(id @state) isnt? none or types.is_primitive(type 'none') return types.primitive('int64' @state.type_nodes)
     if string_type(id state) return types.primitive('int64' @state.type_nodes)
     if type is? types.ArrayType {
         let element=types.node_at(state.type_nodes types.unfold(types.strip_refinement(type.element state.type_nodes) state.type_nodes))
-        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and cell_members(type.element @state) is? none and not string_type(type.element state) and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.type_nodes) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
+        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and cell_members(type.element @state) is? none and enum_members(type.element state) is? none and not string_type(type.element state) and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.type_nodes) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.ObjectType {
@@ -140,7 +141,12 @@ items = (ids:array<addr> @state:State):>array<addr> => {
 expression = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
-    if node is? hir.ValueCast return expression(node.expr @state)
+    if node is? hir.ValueCast {
+        let actual=hir.node_at(state.input.nodes node.expr).value_type
+        if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) actual node.value_type node @state)
+        if enum_members(actual state) isnt? none return enum_read(expression(node.expr @state) actual node.value_type node @state)
+        return expression(node.expr @state)
+    }
     if node is? hir.Suppress return expression(node.item @state)
     if node is? hir.GenericFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     let type=runtime_type(node.value_type node @state)
@@ -298,7 +304,7 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
 }
 array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
-    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or string_type(element state) return store_word(value pointer 0 node @state)
+    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) return store_word(value pointer 0 node @state)
     if type is? types.FunctionType {
         let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
         return store_word(word pointer 0 node @state)
@@ -313,7 +319,7 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
 }
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
-    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or string_type(element state) return read_word(pointer 0 node @state)
+    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) return read_word(pointer 0 node @state)
     if type is? types.FunctionType return put(hir.Transmute[node.loc runtime_type(element node @state) read_word(pointer 0 node @state)] @state)
     if types.is_primitive(type 'bool') {
         let byte=intrinsic('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
@@ -489,6 +495,7 @@ cell_payload = (cell:addr type:addr node:hir.AST @state:State):>addr => {
     return put(hir.Transmute[node.loc runtime value] @state)
 }
 read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr => {
+    if enum_members(stored state) isnt? none return enum_read(value stored read node @state)
     if cell_members(stored @state) isnt? none and cell_members(read @state) is? none return cell_payload(value read node @state)
     return value
 }
@@ -556,10 +563,42 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>ad
     prefix.push(cell)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# Runtime predicate lowering must not silently erase refinements while
+# distributing a tested union into its storage alternatives.
+test_has_refinement = (id:addr state:State):>bool => {
+    let type=types.node_at(state.type_nodes types.unfold(id state.type_nodes))
+    if type is? types.RefinedType return true
+    if type is? types.TypeOr {
+        loop member in type.items {if test_has_refinement(member state) return true}
+    }
+    return false
+}
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
+    if test_has_refinement(node.test_type state) return reject(node 'runtime refinement predicates' @state)
     let actual=hir.node_at(state.input.nodes node.value).value_type
+    let enum=enum_members(actual state)
+    if enum isnt? none {
+        let prefix:array<addr>=[]
+        let tag=snapshot(expression(node.value @state) @prefix @state)
+        let boolean=types.primitive('bool' @state.type_nodes)
+        let result=put(hir.Bool[node.loc boolean false] @state)
+        loop member in enum {
+            if not subtyping.is_subtype(member node.test_type subtyping.default_links @state.type_nodes) continue
+            let matches=intrinsic('__eq__' [tag word(enum_tag(member @state) node @state)] boolean node @state)
+            result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
+        }
+        if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+        prefix.push(result)
+        return put(hir.Block[node.loc boolean prefix false] @state)
+    }
     let members=cell_members(actual @state)
-    if members is? none return object_test(node @state)
+    if members is? none {
+        if string_type(actual state) {
+            let result=string_type_test(expression(node.value @state) node.test_type node @state)
+            return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
+        }
+        return object_test(node @state)
+    }
     let tested=types.node_at(state.type_nodes node.test_type)
     if tested is? types.RefinedType return reject(node 'runtime refinement predicates on a union payload' @state)
     let prefix:array<addr>=[]
@@ -567,8 +606,20 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
     let tag=snapshot(read_word(source 0 node @state) @prefix @state)
     let boolean=types.primitive('bool' @state.type_nodes)
     let result=put(hir.Bool[node.loc boolean false] @state)
+    let seen:set<addr>=set[]
     loop member in members {
-        if subtyping.is_subtype(member node.test_type subtyping.default_links @state.type_nodes) {
+        let tag_number=member_tag(member @state)
+        if tag_number in? seen continue
+        seen.add(tag_number)
+        # String alternatives share the descriptor representation and tag.
+        # Their literal spelling is in the payload, never in that shared tag.
+        if string_type(member state) {
+            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let payload=cell_payload(source types.primitive('string' @state.type_nodes) node @state)
+            let matches=string_type_test(payload node.test_type node @state)
+            let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
+            result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
+        } else if subtyping.is_subtype(member node.test_type subtyping.default_links @state.type_nodes) {
             let matches=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
         } else if not type_tests.disjoint(member node.test_type subtyping.default_links @state.type_nodes) {
@@ -657,10 +708,11 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
     prefix.push(string_view(value first count node @state))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
-string_equal = (node:hir.StringEqual @state:State):>addr => {
+string_equal = (node:hir.StringEqual @state:State):>addr => string_equal_values(expression(node.left @state) expression(node.right @state) node node.negated @state)
+string_equal_values = (a_value:addr b_value:addr node:hir.AST negated:bool @state:State):>addr => {
     let prefix:array<addr>=[]
-    let left=snapshot(expression(node.left @state) @prefix @state)
-    let right=snapshot(expression(node.right @state) @prefix @state)
+    let left=snapshot(a_value @prefix @state)
+    let right=snapshot(b_value @prefix @state)
     let length=snapshot(read_word(left layouts.string_descriptor.byte_length node @state) @prefix @state)
     let boolean=types.primitive('bool' @state.type_nodes)
     let same=snapshot(intrinsic('__eq__' [length read_word(right layouts.string_descriptor.byte_length node @state)] boolean node @state) @prefix @state)
@@ -678,7 +730,7 @@ string_equal = (node:hir.StringEqual @state:State):>addr => {
     let body=sequence([assign increment] node @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
-    prefix.push(if node.negated intrinsic('__not__' [same] boolean node @state) else same)
+    prefix.push(if negated intrinsic('__not__' [same] boolean node @state) else same)
     return put(hir.Block[node.loc boolean prefix false] @state)
 }
 string_bytes = (value:addr node:hir.AST @state:State):>addr => {
@@ -693,6 +745,8 @@ string_bytes = (value:addr node:hir.AST @state:State):>addr => {
 }
 representation = (node:hir.RepresentationCast @state:State):>addr => {
     let source=hir.node_at(state.input.nodes node.expr)
+    if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) source.value_type node.value_type node @state)
+    if enum_members(source.value_type state) isnt? none return enum_read(expression(node.expr @state) source.value_type node.value_type node @state)
     if cell_members(node.value_type @state) isnt? none return cell_pack(expression(node.expr @state) source.value_type node.value_type node @state)
     if string_type(source.value_type state) {
         let value=expression(node.expr @state)
@@ -820,7 +874,7 @@ object_type = (id:addr state:State):>types.ObjectType? => {
 }
 aggregate = (id:addr state:State):>bool => {
     let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
-    return plain is? types.TypeOr or string_type(id state) or array_type(id state) isnt? none or object_type(id state) isnt? none
+    return (plain is? types.TypeOr and enum_members(id state) is? none) or string_type(id state) or array_type(id state) isnt? none or object_type(id state) isnt? none
 }
 object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
     let layout=layouts.record(id state.layout_context @state.type_nodes)
@@ -1159,8 +1213,8 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     let test=hir.node_at(state.input.nodes arm.condition)
     let prefix:array<addr>=[]
     let condition:addr=0
-    if arm is? hir.LoopArm and test is? hir.IteratorExpression {
-        let step=iterator_step(test @state)
+    if arm is? hir.LoopArm and test is? hir.IteratorExpression|hir.MultiIteratorExpression {
+        let step=iterator_condition(test @state)
         prefix=step.prefix condition=step.condition
     } else {condition=expression(arm.condition @state)}
     let body=expression(arm.body @state)
@@ -1170,4 +1224,130 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     if prefix.length =? 0 return flow
     prefix.push(flow)
     return put(hir.Block[node.loc type prefix false] @state)
+}
+
+# A zip/formula advances all its leaves eagerly, then combines their boolean
+# availability. Computing the formula must not short-circuit an iterator's
+# advancement: otherwise a later leaf would resume at a different position.
+iterator_condition = (node:hir.AST @state:State):>IteratorStep => {
+    if node is? hir.IteratorExpression return iterator_step(node @state)
+    if node isnt? hir.MultiIteratorExpression return IteratorStep[[] reject(node 'this iterator condition' @state)]
+    if node.repeats_when_exhausted return IteratorStep[[] reject(node 'repeating exhausted iterator formulas' @state)]
+    let prefix:array<addr>=[]
+    let advance:array<addr>=[]
+    let values:array<addr>=[]
+    loop id in node.iterators {
+        let iterator=hir.node_at(state.input.nodes id)
+        $runtime_assert iterator is? hir.IteratorExpression
+        let step=iterator_step(iterator @state)
+        loop setup in step.prefix {prefix.push(setup)}
+        values.push(snapshot(step.condition @advance @state))
+    }
+    let stack:array<addr>=[]
+    let boolean=types.primitive('bool' @state.type_nodes)
+    loop token in node.formula {
+        if token is? addr {
+            $runtime_assert token <? values.length
+            stack.push(values[token])
+        } else {
+            if stack.length <? 2 return IteratorStep[prefix reject(node 'an invalid iterator formula' @state)]
+            let right=stack.pop
+            let left=stack.pop
+            if token is? 'xor'|'xnor' {
+                let value=intrinsic('__xor__' [left right] boolean node @state)
+                stack.push(if token =? 'xnor' intrinsic('__not__' [value] boolean node @state) else value)
+            } else {stack.push(put(hir.ShortCircuit[node.loc boolean token left right] @state))}
+        }
+    }
+    if stack.length not=? 1 return IteratorStep[prefix reject(node 'an invalid iterator formula' @state)]
+    advance.push(stack[0])
+    return IteratorStep[prefix put(hir.Block[node.loc boolean advance false] @state)]
+}
+
+# Literal enums use one word. As with union cells, program-wide tags keep
+# narrowing and widening independent of the declaration's member order.
+# An enum tag is distinct from its integer member's mathematical value.
+enum_members = (id:addr state:State):>array<addr>|none => views.enum_members(types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes) state.type_nodes)
+enum_tag = (id:addr @state:State):>addr => {
+    let key="enum:{types.shape_of(id state.type_nodes)}"
+    let tag=state.union_tags.get(key)
+    if tag isnt? none return tag
+    let fresh:addr=state.next_tag
+    state.next_tag+=1
+    state.union_tags[key]=fresh
+    return fresh
+}
+enum_literal = (id:addr node:hir.AST @state:State):>addr => {
+    let value=types.node_at(state.type_nodes types.strip_refinement(id state.type_nodes))
+    if value is? types.IntegerLiteralType return word(value.value node @state)
+    if value is? types.StringLiteralType return string_literal(hir.String[node.loc id value.value] @state)
+    return reject(node 'a nonliteral enum member' @state)
+}
+enum_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>addr => {
+    if enum_members(actual state) isnt? none return value
+    let members=enum_members(expected state)
+    $runtime_assert members isnt? none
+    loop member in members {
+        if not types.same_type(types.strip_refinement(actual state.type_nodes) member state.type_nodes) continue
+        let prefix:array<addr>=[]
+        snapshot(value @prefix @state);
+        prefix.push(word(enum_tag(member @state) node @state))
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
+    return reject(node 'converting a runtime value into a literal enum' @state)
+}
+enum_read = (value:addr stored:addr view:addr node:hir.AST @state:State):>addr => {
+    if enum_members(view state) isnt? none return value
+    let members=enum_members(stored state)
+    $runtime_assert members isnt? none
+    let prefix:array<addr>=[]
+    let tag=snapshot(value @prefix @state)
+    let arms:array<addr>=[]
+    let fallback:addr?=none
+    let type=runtime_type(view node @state)
+    loop member in members {
+        if not subtyping.is_subtype(member view subtyping.default_links @state.type_nodes) continue
+        let literal=enum_literal(member node @state)
+        if fallback isnt? none {
+            # Every arm has a literal result. The final member is the default
+            # once the checker has excluded all alternatives outside this view.
+            let prior=hir.node_at(state.nodes fallback)
+            $runtime_assert prior is? hir.IfArm
+            arms.push(fallback)
+        }
+        let condition=intrinsic('__eq__' [tag word(enum_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        fallback=put(hir.IfArm[node.loc type condition literal] @state)
+    }
+    if fallback is? none return reject(node 'an empty literal enum read view' @state)
+    let last=hir.node_at(state.nodes fallback)
+    $runtime_assert last is? hir.IfArm
+    prefix.push(put(hir.Flow[node.loc type arms last.body] @state))
+    return put(hir.Block[node.loc type prefix false] @state)
+}
+
+# Literal-string tests compare bytes; string/grapheme shape tests read the
+# descriptor's length. This helper also handles the string payload group in
+# a general union, and its caller guards that group before dereferencing it.
+string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let result=put(hir.Bool[node.loc boolean false] @state)
+    loop member in type_tests.members(tested state.type_nodes) {
+        let type=types.node_at(state.type_nodes types.unfold(member state.type_nodes))
+        let matches:addr?=none
+        if type is? types.StringLiteralType {
+            let literal=string_literal(hir.String[node.loc member type.value] @state)
+            matches=string_equal_values(source literal node false @state)
+        } else if type is? types.StringType {
+            if type.length is? none {matches=put(hir.Bool[node.loc boolean true] @state)}
+            else {matches=intrinsic('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(type.length node @state)] boolean node @state)}
+        } else if types.is_primitive(type 'string') {matches=put(hir.Bool[node.loc boolean true] @state)}
+        else if types.is_primitive(type 'char') or types.is_primitive(type 'grapheme') {
+            matches=intrinsic('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(1 node @state)] boolean node @state)
+        }
+        if matches isnt? none {result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)}
+    }
+    prefix.push(result)
+    return put(hir.Block[node.loc boolean prefix false] @state)
 }
