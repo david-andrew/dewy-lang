@@ -1,0 +1,85 @@
+from reporting import Error
+import p"options.dewy" as options
+import p"platform.dewy" as platform
+import p"cache.dewy" as cache
+import p"../paths.dewy" as paths
+import p"../semantic/modules.dewy" as modules
+import p"../semantic/prelude.dewy" as prelude
+import p"../semantic/test_syntax.dewy" as tests
+import p"../backend/udewy/graph.dewy" as graph
+import p"../backend/udewy/program.dewy" as program
+import p"../../../tools/dewy_test.dewy" as directory_tests
+
+# The command's compilation boundary is the same validated graph used by
+# native backend tests. Keep warnings/analysis alongside the result; running
+# validation twice would analyze HIR whose proof witnesses were discharged.
+build = (request:options.Request cwd:string library:string):>graph.Compilation|Error => {
+    $runtime_assert request.source isnt? none
+    let engine=modules.Engine[library_roots=[library] prelude_files=prelude.files(library request.target)]
+    engine.session.target=request.target
+    engine.test_mode=request.command =? 'test'
+    if engine.test_mode {engine.entry_name=tests.entry_name}
+    let entry=modules.load(paths.absolute(request.source cwd) @engine)
+    if entry is? Error return entry
+    loop warning in engine.session.warnings {warning.warn}
+    let result=graph.compile(entry @engine)
+    if result is? Error return result
+    loop warning in result.analysis.warnings {warning.warn}
+    return result
+}
+execute = (request:options.Request cwd:string executable:string):>int64|Error => {
+    if request.command =? 'test' and request.source isnt? none and p(request.source).is_dir {
+        return directory_tests.run_directory(request.source request.json [executable 'test' '--target' request.target])
+    }
+    let library=platform.library_root(executable cwd)
+    if library is? Error return library
+    let compiled=build(request cwd library)
+    if compiled is? Error return compiled
+    if request.command =? 'analyze' {
+        # Representation notes currently retain source spans. Add ownership
+        # and cap decisions here as their lowering passes gain native reports.
+        loop note in compiled.analysis.notes {printl(note.message)}
+        printl("{compiled.analysis.notes.length} big integer representation decisions")
+        return 0
+    }
+    let emitted=program.render(compiled.lowered.program compiled.lowered.input debug_locations=request.command =? 'debug')
+    if emitted is? Error return emitted
+    $runtime_assert request.source isnt? none
+    let suffix=if request.command =? 'debug' '.debug.udewy' else if request.command =? 'test' '.test.udewy' else '.udewy'
+    let source=cache.artifact(request.source cwd suffix)
+    let error=platform.directories(p(source).parent.path)
+    if error isnt? none return error
+    let written=p(source).write_text(emitted)
+    if written isnt? int64 return Error[title='cannot write generated µDewy source' message=source]
+    let backend=platform.udewy(executable cwd)
+    if backend is? Error return backend
+    let arguments:array<string>=['--target' request.target]
+    if request.compile_only or request.command is? 'debug'|'test' {arguments.push('-c')}
+    arguments.push(source)
+    if request.command =? 'run' {loop argument in request.arguments {arguments.push(argument)}}
+    let status=run(backend arguments)
+    if status isnt? int64 return Error[title='could not start the native µDewy compiler' message=backend]
+    if request.command =? 'test' and status not=? 0 return 102
+    let binary=paths.absolute(cache.artifact(source cwd) cwd)
+    if request.command =? 'test' {
+        # Distinguish a backend build failure (102) from a built test suite's
+        # own failure count. The compiler and test process have separate exits.
+        let test_args:array<string>=[]
+        if request.json {test_args.push('--json')}
+        if request.brief {test_args.push('--brief')}
+        let tested=run(binary test_args)
+        if tested isnt? int64 return Error[title='could not start the compiled test suite' message=binary]
+        return tested
+    }
+    if status not=? 0 or request.command not=? 'debug' return status
+    if request.build {printl(binary) return 0}
+    let selected=request.debugger
+    let debugger:string=if selected isnt? none selected else if platform.find_program('gdb' cwd) isnt? none 'gdb' else 'lldb'
+    let tool=platform.find_program(debugger cwd)
+    if tool is? none return Error[title='dewy debug needs gdb or lldb on PATH']
+    let debug_args:array<string>=if debugger =? 'gdb' ['-q' '--args' binary] else ['--' binary]
+    loop argument in request.arguments {debug_args.push(argument)}
+    let debug_status=run(tool debug_args)
+    if debug_status isnt? int64 return Error[title='could not start the debugger' message=tool]
+    return debug_status
+}

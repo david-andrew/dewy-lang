@@ -1,0 +1,30 @@
+from reporting import Error
+import p"invocation/options.dewy" as options
+import p"invocation/platform.dewy" as platform
+import p"invocation/compiler.dewy" as compiler
+import p"invocation/update.dewy" as update
+
+let main=(argv:array<string>):>int64=>{
+    let request=options.parse(argv)
+    if request is? Error {request.fail}
+    if request.help {
+        printl('Dewy Compiler')
+        printl('  dewy [-c] [-t target] file.dewy [program args]')
+        printl('  dewy analyze [-t target] file.dewy')
+        printl('  dewy debug [--build] [--debugger gdb|lldb] file.dewy [program args]')
+        printl('  dewy test [--json] [file.dewy | directory]')
+        printl('  dewy update')
+        return 0
+    }
+    if request.version {printl('dewy 0.0.0-dev.0+bootstrap.dewy') return 0}
+    let cwd=platform.kernel_path(false)
+    if cwd is? Error {cwd.fail}
+    let executable=platform.kernel_path(true)
+    if executable is? Error {executable.fail}
+    let result=if request.command =? 'update' update.execute(cwd) else compiler.execute(request cwd executable)
+    if result is? Error {
+        if request.command =? 'test' {result.warn return 102}
+        result.fail
+    }
+    return result
+}

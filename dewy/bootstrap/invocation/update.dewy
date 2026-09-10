@@ -1,0 +1,32 @@
+from reporting import Error
+import p"platform.dewy" as platform
+
+# The update command runs only when explicitly invoked. Download into a new
+# private directory, propagate subprocess failures, and clean up afterwards.
+# The installer owns the release layout and atomic replacement of the pair.
+execute = (cwd:string):>int64|Error => {
+    let curl=platform.find_program('curl' cwd)
+    let bash=platform.find_program('bash' cwd)
+    let mktemp=platform.find_program('mktemp' cwd)
+    if curl is? none or bash is? none or mktemp is? none return Error[title='dewy update needs curl, bash and mktemp on PATH']
+    let created=capture(mktemp ['-d' '-t' 'dewy-update-XXXXXXXX'])
+    if created isnt? Output return Error[title='could not create the installer directory']
+    if created.status not=? 0 return created.status
+    let text=created.stdout_text
+    if text is? none return Error[title='installer directory is not UTF-8']
+    let directory=text.trim_end
+    let installer=p"{directory}/install.sh"
+    printl('Downloading the latest Dewy installer from https://dewy-lang.org/install.sh')
+    let downloaded=run(curl ['-fsSL' 'https://dewy-lang.org/install.sh' '-o' installer.path])
+    let result:int64|Error=Error[title='could not start the installer download']
+    if downloaded is? int64 {
+        result=downloaded
+        if downloaded =? 0 {
+            let installed=run(bash [installer.path])
+            result=if installed is? int64 installed else Error[title='could not start the Dewy installer']
+        }
+    }
+    installer.unlink;
+    p(directory).rmdir;
+    return result
+}

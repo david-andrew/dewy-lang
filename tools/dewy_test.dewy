@@ -5,7 +5,7 @@
 # Finds every `.dewy` file under the directory (default `.`; hidden entries,
 # `__dewycache__` and `node_modules` are skipped) that has a line starting
 # with `$test`, runs `dewy test <file>` on each (through `$DEWY_PYTHON`, or
-# `python3` from the PATH), and adds up the failures. `dewy test <file>`
+# `python3` from the PATH, or `$DEWY_COMPILER`), and adds up the failures. `dewy test <file>`
 # exits with the module's failure count (at most 100), 101 when a
 # `$runtime_assert` aborted the test binary, 102 when the module did not
 # build, or 128+n for a signal. This runner exits with the total number of
@@ -61,19 +61,9 @@ let collect = (dir:string):>array<string> => {
     return found
 }
 
-let main = (args:array<string>):>int64 => {
-    let json:bool = false
-    let directory:string = "."
-    let i:int64 = 1
-    loop i <? args.length {
-        if args[i] =? "--json" { json = true } else { directory = args[i] }
-        i += 1
-    }
-    let python:string = "python3"
-    match environment("DEWY_PYTHON") {
-        s:string => { python = s }
-        <none> => {}
-    }
+# A native compiler supplies `[its_executable "test"]`; the hosted command
+# supplies `[python "-m" "dewy" "test"]`. Discovery and reporting are shared.
+let run_directory = (directory:string json:bool command:array<string>):>int64 => {
     let files = collect(directory)
     let total_failures:int64 = 0
     let failed_files:int64 = 0
@@ -82,8 +72,8 @@ let main = (args:array<string>):>int64 => {
     loop file in files {
         # the module prints its marks after the name: `tests/x.dewy ...F.`
         if not json { print"{file} " }
-        # `env` does the PATH search (or execs `$DEWY_PYTHON` directly)
-        let test_args:array<string> = [python "-m" "dewy" "test"]
+        # `env` searches PATH for the explicitly supplied compiler command.
+        let test_args=command
         if json { test_args.push("--json") } else { test_args.push("--brief") }
         test_args.push(file)
         let failures:int64 = 0
@@ -114,4 +104,22 @@ let main = (args:array<string>):>int64 => {
     }
     if total_failures >? 200 { return 200 }
     return total_failures
+}
+
+let main = (args:array<string>):>int64 => {
+    let json:bool = false
+    let directory:string = "."
+    let i:int64 = 1
+    loop i <? args.length {
+        if args[i] =? "--json" { json = true } else { directory = args[i] }
+        i += 1
+    }
+    let python:string = "python3"
+    match environment("DEWY_PYTHON") {
+        s:string => { python = s }
+        <none> => {}
+    }
+    let native=environment("DEWY_COMPILER")
+    let command:array<string>=if native is? string [native "test"] else [python "-m" "dewy" "test"]
+    return run_directory(directory json command)
 }
