@@ -1,4 +1,5 @@
 """Native emission matches hosted operand rules and produces runnable µDewy."""
+import json
 import subprocess
 from pathlib import Path
 
@@ -121,3 +122,55 @@ main = ():>int64 => {{
         assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
         result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
         assert result.returncode == expected_exit
+
+
+def test_native_include_paths_use_preprocessor_spelling(tmp_path):
+    paths = [tmp_path / name for name in ['plain.bin', 'a"b.bin', 'a\\b.bin', 'a\nb.bin']]
+    for path in paths:
+        path.write_bytes(b'*')
+    source = tmp_path / 'include-emitter.dewy'
+    source.write_text(f'''
+from reporting import Span, Error
+import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
+import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
+import p"{ROOT / 'dewy/bootstrap/backend/udewy/emit.dewy'}" as emit
+import p"{ROOT / 'dewy/bootstrap/backend/udewy/program.dewy'}" as program
+let main=():>int64=>{{
+    loop path in [{' '.join(json.dumps(str(path)) for path in paths)}] {{
+        let nodes:array<hir.AST>=[]
+        let type_nodes:array<types.Type>=[]
+        let span=Span[0 0]
+        let word=types.primitive('int64' @type_nodes)
+        let byte=types.primitive('uint8' @type_nodes)
+        let load_type=types.function_type([types.PosOrKwArg[none word]] [] none byte [] @type_nodes)
+        let main_type=types.function_type([] [] none byte [] @type_nodes)
+        let data=hir.append_node(@nodes hir.BasedString[span word '0x' '2a' [42] path])
+        let load=hir.append_node(@nodes hir.ExpressedIdentifier[span load_type '__load_u8__'])
+        let value=hir.append_node(@nodes hir.FunctionCall[span byte load [data] []])
+        let result=hir.append_node(@nodes hir.Return[span types.primitive('never' @type_nodes) value])
+        let body=hir.append_node(@nodes hir.Block[span byte [result] true])
+        let function=hir.append_node(@nodes hir.FunctionLiteral[span main_type [] [] none byte body])
+        let text=program.render(program.Program[functions=[program.Function['main' function]]] emit.Input[nodes type_nodes])
+        if text is? Error {{text.fail}}
+        printl('PROGRAM')
+        printl(text)
+    }}
+    return 0
+}}
+''')
+    seed = source.with_suffix('.udewy')
+    seed.write_text(codegen(SrcFile.from_path(source)))
+    assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
+    native = subprocess.run([cache_artifact(seed).resolve()], capture_output=True, text=True, timeout=30, check=False)
+    assert native.returncode == 0, native.stdout + native.stderr
+    programs = native.stdout.split('PROGRAM\n')[1:]
+    assert len(programs) == 4
+    assert programs[0].startswith(f'$include_bytes(p"{paths[0]}")')
+    for index, code in enumerate(programs):
+        if index:
+            assert '$include_bytes(' not in code and '0x"2a"' in code
+        output = tmp_path / f'include-{index}.udewy'
+        output.write_text(code)
+        assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+        result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
+        assert result.returncode == 42

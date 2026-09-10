@@ -474,7 +474,14 @@ def emit_based_string(string: hir.BasedString, ctx: 'EmitContext | None' = None)
     so the program text stays small.
     """
 
-    if string.include_path is not None and ctx is not None and ctx.include_directives is not None:
+    # Include paths are raw preprocessor text, not runtime string literals.
+    # Embed bytes directly if quoting would change the filesystem name.
+    if (
+        string.include_path is not None
+        and not any(char in string.include_path for char in '\n\r"\\')
+        and ctx is not None
+        and ctx.include_directives is not None
+    ):
         name = ctx.include_directives.get(string.include_path)
         if name is None:
             name = f'__dewy_include_{len(ctx.include_directives) + 1}'

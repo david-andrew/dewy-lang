@@ -1,4 +1,6 @@
 """`$include_bytes(p"…")`: a file's bytes at compile time, embedded by the target."""
+import json
+
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -33,3 +35,16 @@ def test_dewy_include_bytes_is_a_binary_literal_from_a_compile_time_path(tmp_pat
     assert emitted.count("$include_bytes(") == 1 and '0x"0001020304"' not in emitted
     with pytest.raises(UserError, match="compile-time path"):
         codegen(SrcFile(None, 'let name:string = "x"\nlet t = $include_bytes(p(name))\nlet main = ():>int64 => 0\n'))
+
+
+@pytest.mark.parametrize('name', ['a"b.bin', 'a\\b.bin', 'a\nb.bin'])
+def test_dewy_embeds_bytes_when_a_path_needs_escaping(tmp_path, name):
+    (tmp_path / name).write_bytes(b'abc')
+    source = tmp_path / 'main.dewy'
+    source.write_text(f'$include_bytes(p{json.dumps(name)}) as t\nlet main=():>int64=>t.length\n')
+    emitted = codegen(SrcFile.from_path(source))
+    assert '$include_bytes(' not in emitted
+    assert '0x"616263"' in emitted
+    output = source.with_suffix('.udewy')
+    output.write_text(emitted)
+    assert t0.load_program(output).source

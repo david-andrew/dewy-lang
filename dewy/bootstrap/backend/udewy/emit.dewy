@@ -57,6 +57,15 @@ intrinsic_names = ():>set<string> => {
 }
 const intrinsics=intrinsic_names()
 
+# µDewy's include preprocessor reads the path literally, unlike an ordinary
+# runtime string. Paths needing quote/escape syntax can still embed their
+# bytes directly; they must not be emitted as a different filesystem name.
+include_path_literal = (path:string):>bool => {
+    let bytes=path as array<uint8>
+    loop byte in bytes {if byte in? [10 13 34 92] return false}
+    return true
+}
+
 reject = (node:hir.AST message:string scope:Scope @state:State):>string => {
     if state.problem is? none {
         state.problem=Error[srcfile=scope.source title='unlowered HIR reached µDewy emission' pointers=[Pointer[span=node.loc message=message]]]
@@ -204,7 +213,7 @@ ast = (id:addr @scope:Scope input:Input @state:State):>string => {
     if node is? hir.Bool return if node.value 'true' else 'false'
     if node is? hir.Void return 'void'
     if node is? hir.BasedString {
-        if node.include_path isnt? none {
+        if node.include_path isnt? none and include_path_literal(node.include_path) {
             let path=node.include_path
             let existing=state.includes.get(path)
             if existing isnt? none return existing
