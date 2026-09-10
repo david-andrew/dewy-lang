@@ -1232,6 +1232,21 @@ select_type = (current:addr tested:addr truth:bool @session:contexts.Session):>a
         loop member in node.items { members.push(select_type(member tested truth @session)) }
         return subtyping.join(members session.links @session.types)
     }
+    # A test of A|B has one successful route per alternative; failure
+    # excludes both. Distribute before intersecting with earlier exclusions,
+    # so a family narrowed by successive tests still exposes its selected
+    # record layouts (rather than an opaque Family & (A|B) conjunction).
+    let target=types.node_at(session.types types.unfold(tested session.types))
+    if target is? types.TypeOr {
+        if truth {
+            let members:array<addr>=[]
+            loop member in target.items {members.push(select_type(current member true @session))}
+            return subtyping.join(members session.links @session.types)
+        }
+        let remaining=current
+        loop member in target.items {remaining=select_type(remaining member false @session)}
+        return remaining
+    }
     if subtyping.is_subtype(current tested session.links @session.types) return if truth current else types.primitive('never' @session.types)
     let overlap = types.intersect([current tested] @session.types)
     if subtyping.is_empty(overlap session.links @session.types) return if truth types.primitive('never' @session.types) else current

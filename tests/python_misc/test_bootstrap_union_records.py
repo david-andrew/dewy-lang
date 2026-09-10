@@ -7,6 +7,10 @@ from dewy.reporting import SrcFile
 from dewy.semantic import check
 
 CASES = [
+    # A union test after a failed family test must select its surviving
+    # descendants, including at branch joins and common-field reads.
+    'Token:type=$abstract type of [loc:int64]\nA:type=type of Token & [a:bool]\nB:type=type of Token & [b:string]\nC:type=type of Token & [c:int64]\nlet read=(token:Token):>int64=>{if token is? A return token.loc\nif token is? A|B|C {if token isnt? A|B {token.c;} return token.loc} return token.loc}',
+
     'Base:type=$abstract type of []\nB:type=type of Base & [value:bool]\nI:type=type of Base & [value:[x:int64]]\nlet read=(node:Base):>int64=>{if node is? B return if node.value 1 else 0\nif node is? I return node.value.x\nreturn 0}',
     'Base:type=$abstract type of []\nB:type=type of Base & [value:bool|none]\nI:type=type of Base & [value:int64|none]\nlet read=(node:Base):>int64=>{if node is? B {if node.value is? bool return if node.value 1 else 0}\nif node is? I {if node.value is? int64 return node.value}\nreturn 0}',
     'Base:type=$abstract type of []\nB:type=type of Base & [value:bool]\nI:type=type of Base & [value:int64]\nlet change=(node:Base):>void=>{if node is? B {node.value=true}\nelse if node is? I {node.value=42}}',
