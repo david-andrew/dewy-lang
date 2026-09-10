@@ -89,3 +89,37 @@ def test_two_cells_compare_after_both_operands_are_captured() -> None:
 def test_unions_with_different_alternatives_still_require_narrowing() -> None:
     with pytest.raises(NotImplementedYet, match='unions with different alternatives'):
         _check('let x:int64|none = 1\nlet y:string|none = "a"\nif x =? y { let a = 0 }')
+
+
+def test_none_returning_operand_keeps_its_effects(tmp_path):
+    import subprocess
+    from dewy.backend.udewy import codegen
+    from udewy.cache import cache_artifact
+    from udewy.frontend import EntryPointOptions, entry_point
+
+    source = SrcFile(None, '''let calls:int64=0
+let next=():>none=>{calls+=1 return none}
+let same=(x:int64|none):>bool=>x =? next()
+let main=():>int64=>{let answer=same(none) return if answer and calls=?1 42 else 0}
+''')
+    output = tmp_path / 'none_effects.udewy'
+    output.write_text(codegen(source))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, timeout=30, check=False)
+    assert result.returncode == 42, result.stderr
+
+
+def test_standalone_none_crosses_a_parameter_and_local_binding(tmp_path):
+    import subprocess
+    from dewy.backend.udewy import codegen
+    from udewy.cache import cache_artifact
+    from udewy.frontend import EntryPointOptions, entry_point
+
+    source = SrcFile(None, '''let keep=(value:none):>none=>value
+let main=():>int64=>{let value:none=keep(none) return if value is? none 42 else 0}
+''')
+    output = tmp_path / 'none_value.udewy'
+    output.write_text(codegen(source))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, timeout=30, check=False)
+    assert result.returncode == 42, result.stderr

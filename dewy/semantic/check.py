@@ -10662,7 +10662,14 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
         other = _unwrap_parens(other)
         other_type = ty.unfold(ty.strip_refinement(other.type))
         if other_type == 'none':
-            return hir.TypeTest(loc, 'bool', value, 'none', negated)
+            if isinstance(other, hir.NoneValue):
+                return hir.TypeTest(loc, 'bool', value, 'none', negated)
+            # Returning only `none` does not make an expression effect-free.
+            # Equality evaluates both operands even when no payload is needed.
+            captured = [_equality_snapshot(arg, ctx) for arg in args]
+            tested = captured[0 if value is args[0] else 1][1]
+            test = hir.TypeTest(loc, 'bool', tested, 'none', negated)
+            return hir.Block(loc, 'bool', [*(declaration for declaration, _ in captured), test], False)
         if isinstance(other_type, ty.TypeOr):
             left_members = ty.strip_all_refinements(union)
             right_members = ty.strip_all_refinements(other_type)

@@ -1224,8 +1224,8 @@ class _Lowerer(
             return 'int64'   # a union of string literals is one string handle
         if ty.optional_payload(type_) is not None:
             return 'int64'
-        if ty.is_user_nominal(type_):
-            return 'int64'  # a unit-like error is a word (its union tag carries the identity)
+        if type_ == 'none' or ty.is_user_nominal(type_):
+            return 'int64'  # unit values use a zero word; union tags carry their identity
         if ty.runtime_union_members(type_) is not None:
             return 'int64'
         if ty.enum_members(type_) is not None:
@@ -1259,7 +1259,7 @@ class _Lowerer(
     def _target_scalar_type(self, type_: ty.Type, node: hir.AST) -> ty.Type:
         if isinstance(type_, ty.TypeOr) and ty.string_valued(type_):
             return 'int64'   # a union of string literals is one string handle
-        if ty.is_user_nominal(type_):
+        if type_ == 'none' or ty.is_user_nominal(type_):
             return 'int64'
         if ty.enum_members(type_) is not None:
             return 'int64'   # an enum result is its tag word
@@ -4460,7 +4460,8 @@ class _Lowerer(
         if isinstance(node, hir.MemberAccess):
             return self._extract_member_access(node)
         if isinstance(node, hir.NoneValue):
-            self._target_error(node, '`none` value without an optional context')
+            # A standalone unit can cross an ordinary call boundary too.
+            return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
         if isinstance(node, hir.ErrorValue):
             # a unit-like error is its tag; the payload word is zero
             return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
