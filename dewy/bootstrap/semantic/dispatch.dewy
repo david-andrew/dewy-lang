@@ -12,7 +12,12 @@ that normalized call, retaining each method's original declaration index.
 """
 
 Promotion:type = const [left:string right:string result:string]
-System:type = [links:array<subtyping.Link> promotions:array<Promotion>=[]]
+System:type = [
+    links:array<subtyping.Link> promotions:array<Promotion>=[]
+    # Prelude materializations belong to call acceptance, not structural
+    # subtyping. Absent prelude declarations cannot grant numeric conversions.
+    bigint:addr?=none
+]
 ArgumentPair:type = const [formal:addr actual:addr]
 ShapeMatch:type = [pairs:array<ArgumentPair>]
 Inference:type = [bindings:dict<string addr>=[] contextual:set<string>=set[]]
@@ -82,10 +87,35 @@ match_shape = (method:types.FunctionType pos:array<addr> kw:dict<string addr>):>
     return ShapeMatch[pairs=pairs]
 }
 
+accepts = (actual:addr formal:addr system:System @nodes:array<types.Type>):>bool => {
+    if subtyping.is_subtype(actual formal system.links @nodes) return true
+    if system.bigint is? none return false
+    let target=types.node_at(nodes types.strip_refinement(formal nodes))
+    if target is? types.TypeOr {
+        loop member in target.items {if accepts(actual member system @nodes) return true}
+        return false
+    }
+    let family=types.node_at(nodes system.bigint)
+    if family isnt? types.TypeOr return false
+    let member:addr?=none
+    loop id in family.items {
+        if types.node_at(nodes id) isnt? types.ObjectType continue
+        if member isnt? none return false
+        member=id
+    }
+    if member is? none or not types.same_type(types.strip_refinement(formal nodes) member nodes) return false
+    let source=types.node_at(nodes types.strip_refinement(actual nodes))
+    # The record alternative is the nonzero form. A constant zero belongs
+    # solely to the family's literal alternative; other integer values are
+    # materialized by the ordinary checking boundary after dispatch wins.
+    if source is? types.IntegerLiteralType return source.value not=? 0
+    return subtyping.is_subtype(actual types.primitive('int' @nodes) system.links @nodes)
+}
+
 call_accepted_concrete = (method:types.FunctionType pos:array<addr> kw:dict<string addr> system:System @nodes:array<types.Type>):>bool => {
     let shape = match_shape(method pos kw)
     if shape is? none return false
-    loop pair in shape.pairs { if not subtyping.is_subtype(pair.actual pair.formal system.links @nodes) return false }
+    loop pair in shape.pairs { if not accepts(pair.actual pair.formal system @nodes) return false }
     return true
 }
 

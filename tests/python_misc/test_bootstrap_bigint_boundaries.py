@@ -7,6 +7,11 @@ let _bigint_from_int=(value:int64):>BigInt=>0
 let _bigint_from_uint=(value:uint64):>BigInt=>0
 '''
 CASES = [
+    BIG + 'let take=(value:bigint):>bigint=>value\ntake(7)',
+    BIG + 'let take=(value:bigint & ~0):>bigint=>value\ntake(7)',
+    BIG + 'let take=(value:bigint):>bigint=>value\ntake(1267650600228229401496703205393)',
+    HELPERS + 'let take=(value:bigint):>bigint=>value\nlet word:int64=7\ntake(word)',
+
     BIG + 'let value:bigint=0\nvalue',
     BIG + 'let value:bigint=1\nvalue',
     BIG + 'let value:bigint = -1\nvalue',
@@ -17,7 +22,7 @@ CASES = [
     HELPERS + 'let word:int64=7\nlet value:bigint=word\nvalue',
     HELPERS + 'let word:uint64=18446744073709551615\nlet value:bigint=word\nvalue',
 ]
-ERRORS = [BIG + 'let value:bigint & ~0=0']
+ERRORS = [BIG + 'let value:bigint & ~0=0', BIG + 'let take=(value:bigint & ~0):>bigint=>value\ntake(0)']
 
 
 def test_native_bigint_boundaries(tmp_path, monkeypatch):

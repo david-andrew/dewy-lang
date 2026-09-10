@@ -280,7 +280,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let kw_types:dict<string addr> = []
     loop argument in positional { pos_types.push(node_at(argument session).value_type) }
     loop [name argument] in keyword { kw_types[name] = node_at(argument session).value_type }
-    let system = dispatch.System[session.links builtins.promotions]
+    let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)]
     let matched = dispatch.match_best_function(methods pos_types kw_types expected system @session.types)
     if matched is? dispatch.DispatchError return problem(id 'no matching function' matched.message env session)
     let callee = function
@@ -2631,7 +2631,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     if original.function is? none return none
     let generic = node_at(original.function session)
     if generic isnt? hir.GenericFunction return none
-    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[session.links builtins.promotions] @session.types)
+    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)] @session.types)
     if inference is? none return problem(id 'cannot infer generic type parameters' 'the arguments do not determine every type parameter' env session)
     let arguments:dict<string addr> = []
     loop param in generic.source.params {
