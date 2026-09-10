@@ -114,7 +114,22 @@ shape_of = (id:addr nodes:array<Type>):>string => {
     let shape=nodes[id].shape
     return if shape is? none nodes[id].key else shape
 }
-same_type = (a:addr b:addr nodes:array<Type>):>bool => a =? b or shape_of(a nodes) =? shape_of(b nodes)
+# Equality consumes the identity while its owners remain alive. Returning
+# both identity strings from shape_of would first copy and resegment them;
+# nested record keys can be large even when they differ in the first byte.
+same_shape = (left:Type right:Type):>bool => {
+    if left.shape isnt? none {
+        if right.shape isnt? none return left.shape =? right.shape
+        return left.shape =? right.key
+    }
+    if right.shape isnt? none return left.key =? right.shape
+    return left.key =? right.key
+}
+same_type = (a:addr b:addr nodes:array<Type>):>bool => {
+    if a =? b return true
+    $runtime_assert a <? nodes.length and b <? nodes.length
+    return same_shape(nodes[a] nodes[b])
+}
 # Shape components are length-prefixed, not recursively quoted. Quoting an
 # already encoded child doubles its escapes at every enclosing type layer;
 # nested compiler types then spend most of checking copying those escapes.
