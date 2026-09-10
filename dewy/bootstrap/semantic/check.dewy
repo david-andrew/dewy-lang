@@ -115,11 +115,13 @@ widen = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
 }
 identifier = (name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let source = contexts.node_at(id env.lexical session)
+    if name =? '..' return put(hir.Range[source.loc types.primitive('range' @session.types) none none none none] @session)
     if name =? 'none' return put(hir.NoneValue[source.loc types.primitive('none' @session.types)] @session)
     if name =? 'void' return void_at(id env @session)
     let binding_id = declarations.lookup(name env.lexical session)
     if binding_id isnt? none {
         let binding = bindings.binding_at(session.registry binding_id)
+        if binding.replacement isnt? none return binding.replacement
         let value = binding.type_value
         if value is? none and binding_id in? session.pending_aliases {
             let resolved = declarations.resolve_alias(binding_id @session)
@@ -133,11 +135,11 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
         if types.node_at(session.types current) is? types.ModuleType return put(hir.ModuleNamespace[source.loc current name] @session)
         return put(hir.ExpressedIdentifier[source.loc current name binding_id] @session)
     }
-    # A builtin type has no runtime declaration, but it may occur as a value
-    # to construct or as the operand of an explicit cast.
-    let type = declarations.resolve_name(name id env.lexical @session)
-    if type is? Error return problem(id "undefined name `{name}`" 'no declaration of this name is in scope' env session)
-    return put(hir.TypeValue[source.loc types.primitive('type' @session.types) type name] @session)
+    # Type spellings belong to the type visitor. A bare builtin type name
+    # is not an implicitly declared runtime value in the hosted language.
+    # In particular the primitive `end` must not make the index-local name
+    # available outside that index. Explicit type aliases above are values.
+    return problem(id "undefined name `{name}`" 'no declaration of this name is in scope' env session)
 }
 
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
@@ -471,17 +473,13 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         let place = expression(target_id env @session)
         if place is? Error return place
         let member = node_at(place session)
-        if member isnt? hir.MemberAccess return pending(id 'this projected assignment target' env session)
-        if not member.mutable return problem(id 'cannot assign to an immutable field' member.name env session)
-        let path = bindings.access_path(place session.hir)
-        let root = node_at(path.root session)
-        if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
-            let binding = bindings.binding_at(session.registry root.binding_id)
-            if binding.read_only_reason isnt? none return problem(id 'cannot mutate a field of a const binding' binding.name env session)
-        }
+        if member isnt? hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
+        let error = writable(place id env session)
+        if error isnt? none return error
         let value = expression(node.right env @session expected=member.value_type)
         if value is? Error return value
         container_state.replaced(place env.state @session)
+        if member is? hir.Index return put(hir.IndexAssign[node.loc types.primitive('void' @session.types) place value] @session)
         return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) place value] @session)
     }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
@@ -893,6 +891,8 @@ call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:
     return call(function positional keyword id env @session expected=expected)
 }
 
+# The index scope binds `end` to this sequence's last position. Its binding
+# is lexical and disappears after the index; a nested index gets its own end.
 index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     if views.container_entry_types(node_at(sequence session).value_type session.types) isnt? none return container_index(sequence index_id id env @session)
     let source = contexts.source_at(env.lexical session)
@@ -902,14 +902,86 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
         if arguments.inner.length not=? 1 return problem(id 'index requires one expression' 'select one element, or use a range for a slice' env session)
         item = arguments.inner[0]
     }
-    let index = expression(item env @session expected=types.primitive('int64' @session.types))
-    if index is? Error return index
     let value = node_at(sequence session)
     let type = types.node_at(session.types types.strip_refinement(value.value_type session.types))
-    let syntax = tokens.node_at(source.nodes id)
-    if type is? types.ArrayType return put(hir.Index[syntax.loc type.element sequence index none] @session)
-    if type is? types.StringType|types.StringLiteralType or types.is_primitive(type 'string') return put(hir.StringIndex[syntax.loc types.string_type(1 @session.types) sequence index none] @session)
-    return problem(id 'index target is not an array or string' display.type_to_dewy(value.value_type session.types) env session)
+    let string = views.string_valued(value.value_type session.types)
+    if type isnt? types.ArrayType and not string return problem(id 'index target is not an array or string' display.type_to_dewy(value.value_type session.types) env session)
+    let length:addr? = none
+    if type is? types.ArrayType|types.StringType { length = type.length }
+    else if type is? types.StringLiteralType { length = type.value.length }
+    let loc = tokens.node_at(source.nodes id).loc
+    let word = types.primitive('int64' @session.types)
+    let last:addr = 0
+    if length isnt? none {
+        let number:bigint = length-1
+        last = put(hir.Integer[loc types.integer_literal(number @session.types) '0d' number] @session)
+    } else {
+        let count = put(if string hir.StringLength[loc word sequence] else hir.ArrayLength[loc word sequence] @session)
+        let one = put(hir.Integer[loc word '0d' 1] @session)
+        let subtract = identifier('__sub__' id env @session)
+        if subtract is? Error return subtract
+        let computed = call(subtract [count one] [] id env @session)
+        if computed is? Error return computed
+        last = computed
+    }
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let binding_id = bindings.allocate_param(@session.registry 'end' node_at(last session).value_type loc)
+    let binding = bindings.binding_at(session.registry binding_id)
+    binding.replacement = last binding.read_only_reason = 'sequence index end'
+    session.registry.by_id[binding_id] = binding
+    bindings.bind(@session.scopes inner.lexical.scope 'end' binding_id)
+    let index = expression(item inner @session)
+    if index is? Error return index
+    let checked = node_at(index session)
+    let route = bindings.array_route_id(sequence session.hir @session.registry)
+    if checked is? hir.Range return sequence_slice(sequence index checked type length route id env @session)
+    if not subtyping.is_subtype(checked.value_type types.primitive('int' @session.types) session.links @session.types) return problem(item 'array index must be an integer' display.type_to_dewy(checked.value_type session.types) env session)
+    if length is? none and route is? none return problem(id 'sequence index is not proven in bounds' 'this sequence does not have an exact compile-time length or a stable storage route' env session)
+    let position = constant_integer(index session)
+    if position isnt? none and (position <? 0 or length isnt? none and position >=? length) return problem(item 'array index is out of bounds' 'this index is outside the sequence' env session)
+    let constant:addr? = none
+    if position isnt? none {
+        if position >? targets.max_length(session.target) return problem(item 'array index exceeds the target address space' 'no sequence on this target can contain this position' env session)
+        $runtime_assert position >=? 0 and position <=? targets.max_length(session.target)
+        constant = position as addr
+    }
+    if type is? types.ArrayType return put(hir.Index[loc type.element sequence index constant] @session)
+    return put(hir.StringIndex[loc types.string_type(1 @session.types) sequence index constant] @session)
+}
+
+sequence_slice = (sequence:addr index:addr range:hir.Range type:types.Type length:addr? route:addr? id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    if range.step_pair isnt? none return pending(id 'stepped sequence slicing' env session)
+    let string = views.string_valued(node_at(sequence session).value_type session.types)
+    if length is? none and (range.left isnt? none or range.right isnt? none) and not (string and route isnt? none) return problem(id 'sequence slice is not proven in bounds' 'bounded slicing requires a known length or a named string whose bounds can be checked' env session)
+    let start:bigint? = none
+    let stop:bigint? = none
+    let count:addr? = none
+    if length isnt? none {
+        start = if range.left is? none 0 else constant_integer(range.left session)
+        stop = if range.right is? none length-1 else constant_integer(range.right session)
+        if start isnt? none and stop isnt? none {
+            let bounds = if range.bounds is? none '[]' else range.bounds
+            if bounds =? '(]' or bounds =? '()' { start += 1 }
+            if bounds =? '[)' or bounds =? '()' { stop -= 1 }
+            if start <? 0 or start >? length or stop <? -1 or stop >=? length return problem(id 'sequence slice is out of bounds' 'this slice is outside the sequence' env session)
+            count = if stop <? start 0 else (stop-start+1) as addr
+        }
+    }
+    let loc = contexts.node_at(id env.lexical session).loc
+    if string return put(hir.StringSlice[loc types.string_type(count @session.types) sequence index] @session)
+    $runtime_assert type is? types.ArrayType
+    if count is? none or start is? none or stop is? none or length is? none return problem(id 'sequence slice is not proven in bounds' 'dynamic array slices require a runtime-sized result, which is not implemented yet' env session)
+    if node_at(sequence session) isnt? hir.ExpressedIdentifier return pending(id 'slicing an array expression with runtime evaluation' env session)
+    let items:array<addr> = []
+    $runtime_assert start >=? 0 and start <=? length and stop >=? -1 and stop <? length
+    let position:addr = start as addr
+    loop position <=? stop {
+        let constant = position as addr
+        let value = put(hir.Integer[loc types.integer_literal(position @session.types) '0d' position] @session)
+        items.push(put(hir.Index[loc type.element sequence value constant] @session))
+        position += 1
+    }
+    return put(hir.ArrayLiteral[loc types.array_type(type.element count @session.types) items] @session)
 }
 
 # Field reads preserve their receiver expression. The route registry can later
@@ -1100,18 +1172,33 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
 # A place keeps its declared storage type, even when the latest read carried
 # a stronger alternative or length. The callee can replace that storage, so
 # preparing the argument invalidates read facts about its containing root.
+# Every projected mutation follows the whole storage route. A mutable final
+# field does not authorize a write through an immutable ancestor or a borrowed
+# iterator value. Checking the route itself does not discard sequence lengths.
+writable = (value:addr id:addr env:Environment session:contexts.Session named:bool=false):>Error? => {
+    let path = bindings.access_path(value session.hir)
+    loop step in path.steps {
+        let member = node_at(step session)
+        if member is? hir.MemberAccess and not member.mutable return problem(id 'cannot mutate an immutable field' member.name env session)
+    }
+    let root = node_at(path.root session)
+    if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
+        let binding = bindings.binding_at(session.registry root.binding_id)
+        if binding.read_only_reason isnt? none return problem(id 'cannot mutate a read-only binding' binding.name env session)
+    }
+    else if named return problem(id 'a place needs a named root' 'this temporary does not name caller storage' env session)
+    return none
+}
+
 place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let target = node_at(value session)
     if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'a place needs mutable storage' 'use a binding, field, or indexed element' env session)
+    let error = writable(value id env session named=true)
+    if error isnt? none return error
     let path = bindings.access_path(value session.hir)
     let root = node_at(path.root session)
-    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'a place needs a named root' 'this temporary does not name caller storage' env session)
+    $runtime_assert root is? hir.ExpressedIdentifier and root.binding_id isnt? none
     let binding = bindings.binding_at(session.registry root.binding_id)
-    if binding.read_only_reason isnt? none return problem(id 'cannot pass a const binding as a mutable place' binding.name env session)
-    loop step in path.steps {
-        let member = node_at(step session)
-        if member is? hir.MemberAccess and not member.mutable return problem(id 'cannot pass an immutable field as a mutable place' member.name env session)
-    }
     let store_type = target.value_type
     if target is? hir.ExpressedIdentifier {
         if binding.store_type isnt? none { store_type = binding.store_type }
@@ -1283,18 +1370,17 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     let target = expression(node.left env @session call_target=true)
     if target is? Error return target
     let read = node_at(target session)
-    if read isnt? hir.ExpressedIdentifier|hir.MemberAccess return pending(id 'compound indexed assignment' env session)
-    let path = bindings.access_path(target session.hir)
-    let root = node_at(path.root session)
-    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'assignment needs named storage' 'the target is temporary' env session)
-    let binding = bindings.binding_at(session.registry root.binding_id)
-    if binding.read_only_reason isnt? none return problem(id 'cannot assign to a constant' binding.name env session)
-    loop step in path.steps {
-        let field = node_at(step session)
-        if field is? hir.MemberAccess and not field.mutable return problem(id 'cannot assign to an immutable field' field.name env session)
-    }
+    if read isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
+    let error = writable(target id env session)
+    if error isnt? none return error
     let required = read.value_type
-    if read is? hir.ExpressedIdentifier and binding.store_type isnt? none { required = binding.store_type }
+    if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
+        let binding = bindings.binding_at(session.registry read.binding_id)
+        if binding.store_type isnt? none { required = binding.store_type }
+    }
+    # The hosted placeholder remains until lowering preserves one evaluation
+    # of the array route and index across both the read and the write.
+    if read is? hir.Index return pending(id 'compound indexed assignment' env session)
     let right = expression(node.right env @session expected=read.value_type)
     if right is? Error return right
     let func = identifier(name id env @session)
@@ -1303,8 +1389,10 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     if result is? Error return result
     result = against(result required id env @session)
     if result is? Error return result
+    container_state.replaced(target env.state @session)
     if read is? hir.MemberAccess return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) target result] @session)
-    set_read_type(binding.id node_at(result session).value_type env @session)
+    $runtime_assert read is? hir.ExpressedIdentifier and read.binding_id isnt? none
+    set_read_type(read.binding_id node_at(result session).value_type env @session)
     # Keep the selected operation, including any conversions, on the RHS.
     # Lowering need not redispatch a source compound operator independently.
     return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' result] @session)

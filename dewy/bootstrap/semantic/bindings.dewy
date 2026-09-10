@@ -25,6 +25,9 @@ Binding:type = [
     declaration:addr?=none
     function:addr?=none
     syntax:addr?=none
+    # Compiler-bound expressions such as `end` inside a sequence index have
+    # lexical identity but introduce no runtime storage of their own.
+    replacement:addr?=none
     literal_path_parameter:string?=none
     read_only_reason:string?=none
     nominal_name:string?=none

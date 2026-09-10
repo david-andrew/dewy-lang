@@ -16,6 +16,36 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'let xs=[1 2]\nxs[0]=7\nxs.length',
+    'let p=[values=[1 2]]\np.values[0]=7\np.values',
+    'let xs=[[1 2] [3 4]]\nxs[0][1]=7\nxs[0]',
+    'let f=(@xs:array<int64> i:int64):>void=>{xs[i]=7}\nlet xs:array<int64>=[1 2]\nf(@xs 0)\nxs',
+    'let records=[[values=[1]]]\nloop r in records {let own=r own.values[0]=2}',
+    'let make=():>array<int64 length=2>=>[1 2]\nmake()[0]=7',
+
+    'let xs=[1 2 3]\nxs[1]',
+    'let xs=[1 2 3]\nxs[end]',
+    'let xs=[1 2 3]\nxs[end-1]',
+    'let xs=[1 2 3]\nxs[1..end]',
+    'let xs=[1 2 3]\nxs[..]',
+    'let xs=[1 2 3]\nxs[(0..2)]',
+    'let xs=[1 2 3]\nxs[(0..2]]',
+    'let xs=[1 2 3]\nxs[[0..2)]',
+    'let xs=[1 2 3]\nxs[2..1]',
+    'let xs:array<int64 length=0>=[]\nxs[..]',
+    "'abc'[end]",
+    "'abc'[end-1]",
+    "'abc'[1..end]",
+    "'abc'[(0..2]]",
+    "'abc'[..]",
+    "''[..]",
+    'let f=(s:string):>string=>s[1..]\nf("abc")',
+    'let f=(s:string):>string=>s[..end-1]\nf("abc")',
+    'let f=(xs:array<int64>):>int64=>xs[end]\nf([1 2])',
+    'let xs=[1 2 3]\nlet ys=[0 1]\nxs[ys[end]]',
+    'let end:int64=9\nlet xs=[1 2]\nxs[end]; end',
+    'A:type=[x:int64=1]\nB:type=[x:int64=2]\nlet fresh=<T>(unused:T):>T=>T[]\nfresh(A[]); fresh(B[])',
+
     'let identity=<T>(value:T):>T=>value\nidentity(7)',
     "let identity=<T>(value:T):>T=>value\nidentity('hi')",
     'let identity=<T>(value:T):>T=>value\nidentity(7); identity(8)',
@@ -144,6 +174,27 @@ CASES = [
 
 
 ERROR_CASES = [
+    'end', 'new', 'int64', 'string', 'type',
+
+    'const xs=[1 2]\nxs[0]=7',
+    'const xs=[1 2]\nxs[0]+=7',
+    'P:type=const [values:array<int64>]\nlet p:P=[values=[1 2]]\np.values[0]=7',
+    'let xs=[1 2]\nxs[0]="bad"',
+    'let xs=[1 2]\nxs[2]=7',
+    'let text="abc"\ntext[0]="a"',
+    'let records=[[values=[1]]]\nloop r in records {r.values[0]=2}',
+
+    'let xs=[1 2]\nxs[2]',
+    'let xs=[1 2]\nxs[-1]',
+    "'abc'[3]",
+    "'abc'[true]",
+    'let xs=[1 2]\nxs[false]',
+    'let xs=[1 2]\nxs[0 1]',
+    'let xs=[1 2]\nxs[0..2]',
+    "'abc'[-1..1]",
+    "'abc'[0..3]",
+    'let xs=[1 2]\nxs[end]; end',
+
     'let identity=<T T>(value:T):>T=>value',
     'let identity=<T>(value)=>value\nidentity(7)',
     'let identity=<T>(value):>T=>value\nidentity(7)',
@@ -220,6 +271,14 @@ def loop_summary(node):
     parts = []
     if isinstance(node, hir.LoopArm):
         parts.append(f'loop:{type_to_dewy(node.type)};')
+    if isinstance(node, hir.IndexAssign):
+        parts.append('index_store;')
+    if isinstance(node, (hir.Index, hir.StringIndex)):
+        kind = 'index' if isinstance(node, hir.Index) else 'string_index'
+        slot = 'none' if node.constant_index is None else str(node.constant_index)
+        parts.append(f'{kind}:{slot};')
+    if isinstance(node, hir.StringSlice):
+        parts.append(f'slice:{type_to_dewy(node.type)};')
     if isinstance(node, hir.SetAlgebra):
         parts.append(f'algebra:{node.op};')
     if isinstance(node, hir.StringEqual):
@@ -269,6 +328,13 @@ loop_summary = (id:addr session:contexts.Session):>string => {{
     let node=checking.node_at(id session)
     let parts:array<string>=[]
     if node is? hir.LoopArm {{ parts.push("loop:{{display.type_to_dewy(node.value_type session.types)}};") }}
+    if node is? hir.IndexAssign {{ parts.push('index_store;') }}
+    if node is? hir.Index|hir.StringIndex {{
+        let kind = if node is? hir.Index 'index' else 'string_index'
+        let slot = if node.constant_index is? none 'none' else "{{node.constant_index}}"
+        parts.push("{{kind}}:{{slot}};")
+    }}
+    if node is? hir.StringSlice {{ parts.push("slice:{{display.type_to_dewy(node.value_type session.types)}};") }}
     if node is? hir.SetAlgebra {{ parts.push("algebra:{{node.op}};") }}
     if node is? hir.StringEqual {{ parts.push("string_equal:{{node.negated}};") }}
     if node is? hir.StringConcat {{ parts.push('concat;') }}
@@ -301,7 +367,7 @@ main = ():>int64 => {{
         let lexical = contexts.begin(source parsed.nodes @session)
         let environment = checking.begin(lexical @session)
         let module = checking.module(parsed.root environment @session)
-        if module is? Error {{ module.fail failures += 1 continue }}
+        if module is? Error {{ module.render(source) failures += 1 continue }}
         let node = checking.node_at(module session)
         let instances:array<string>=[]
         loop item in session.hoisted {{
@@ -331,7 +397,7 @@ main = ():>int64 => {{
     output = source.with_suffix('.udewy')
     output.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=90, check=False)
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=180, check=False)
     (tmp_path / 'native-output.txt').write_text(result.stdout)
     (tmp_path / 'expected-output.txt').write_text('\n'.join(expected + ['rejected'] * len(ERROR_CASES)) + '\n')
     assert result.returncode == 0, result.stderr

@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  126 source programs and 64 invalid programs. Short-circuit boolean HIR,
+  154 source programs and 86 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -70,6 +70,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   type identity (including defaults/methods), and register before body checking
   so recursion reuses the same instance. Hoisted bodies remain with the module
   that first requested them; native namespaces export source declarations.
+  Sequence indexing binds `end` locally, records constant positions, and
+  rejects known invalid indices. String slices retain their ranges and known
+  lengths; exact array slices expand to element reads, matching the hosted
+  shape. Dynamic array slicing and stepped slices retain the hosted pending
+  work. Array element stores preserve lengths and follow the complete storage
+  route when checking const bindings and iterator borrows. Compound indexed
+  stores remain pending until their read and write share one evaluated route.
+  Primitive type spellings do not implicitly introduce runtime value bindings.
   Comparisons include instance counts/signatures, bounds, recursion, nested
   instantiation, lexical shadowing, and invariant refined array elements.
   Runtime set conversion and automatic library installation remain separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
@@ -349,7 +357,9 @@ artifacts were absent from that checkout; all thirteen passed separately in
 the main workspace, leaving the usual ten unavailable-toolchain skips.
 The generic source visitor also matches the 126-program comparison; its 64
 rejection cases pass through the native module loader. Imported generic
-instances preserve their original lexical bindings. The subsequent indexed
+instances preserve their original lexical bindings. The subsequent sequence
+comparison passes all **154 valid and 86 invalid programs**, including full
+instance and index/slice metadata. The subsequent indexed
 store borrow fix passes 33 focused tests, including native execution showing
 that an explicit copy can change its array without changing the borrowed one.
 
