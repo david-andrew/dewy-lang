@@ -112,6 +112,9 @@ resolve_name = (name:string id:addr context:contexts.Context @session:contexts.S
     }
     let alias = session.builtin_aliases.get(name)
     if alias isnt? none return alias
+    const numeric_names:dict<string string>=['bigint'->'BigInt' 'fixed'->'Fixed' 'rational'->'BigRational']
+    let numeric=numeric_names.get(name)
+    if numeric isnt? none and lookup(numeric context session) isnt? none return resolve_name(numeric id context @session)
     if name in? views.nat_bases {
         return refine(types.primitive(views.nat_bases[name] @session.types) [facts.Proposition['self' '>=?' 0]] @session)
     }
