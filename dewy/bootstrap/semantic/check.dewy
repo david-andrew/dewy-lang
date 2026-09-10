@@ -3968,6 +3968,10 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
             if types.is_primitive(destination 'string') and (element is? types.Primitive and element.name in? ['char' 'grapheme'] or element is? types.StringType and element.length =? 1) return put(hir.RepresentationCast[node.loc target value] @session)
         }
     }
+    # Explicit integer-to-bigint conversion uses the same literal limbs and
+    # word helpers as an annotated store. In particular a positive literal
+    # need not fit int64 before it can become a bigint (e.g. 2**63).
+    if numeric_values.is_family(target 'BigInt' env.lexical session) and views.integer_valued(node.value_type session.types) return against(value target id env @session)
     if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and views.fixed_integer_layout(types.strip_refinement(target session.types) session.types) isnt? none return against(value target id env @session)
     if subtyping.is_subtype(node.value_type target session.links @session.types) return value
     if subtyping.is_subtype(node.value_type types.primitive('int' @session.types) session.links @session.types) and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)

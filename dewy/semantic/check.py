@@ -15937,6 +15937,11 @@ def _explicit_value_conversion(
         if spelled is not None:
             return spelled
     source = node.type
+    # Explicit casts and annotated stores select the same BigInt storage.
+    # Do this before subsumption can erase the representation choice for a
+    # literal, and without requiring that the literal first fit a word.
+    if _is_bigint(target, ctx=ctx) and _integer_valued(source):
+        return check_against(node, target, ctx=ctx)
     if _is_bigint(source, ctx=ctx) and ty.fixed_integer_layout(ty.strip_refinement(target)) is not None:
         return _from_bigint(node, target, ctx=ctx)
     target = _refine_binary_materialization_target(source, target)

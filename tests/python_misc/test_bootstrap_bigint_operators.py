@@ -24,6 +24,10 @@ CASES = [PREFIX + f'let operation=(a:BigInt b:{other}):>{result}=>{left} {op} {r
          for other, left, right in [('int64', 'a', 'b'), ('uint64', 'b', 'a'), ('int8', 'a', 'b'), ('uint8', 'b', 'a')]
          for result in ['bool' if '?' in op else 'BigInt']]
 CASES += [PREFIX + body for body in [
+    'let operation=():>BigInt=>-(9223372036854775808 as BigInt)',
+    'let operation=():>BigInt=>18446744073709551616 as BigInt',
+    'let operation=(value:uint64):>BigInt=>value as BigInt',
+    'let operation=(value:int8):>BigInt=>value as BigInt',
     'let operation=(flag:bool):>BigInt|none=>if flag 1 else none',
     'let operation=(value:int64):>BigInt|none=>value',
     'let operation=(value:BigInt):>BigInt=>{let result=value result //= 4294967296 return result}',
