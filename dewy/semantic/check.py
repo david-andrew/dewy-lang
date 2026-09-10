@@ -2204,7 +2204,12 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
         result = check_against(result, lookup.type, ctx=ctx)
         _forget_positions(dictionary, ctx=ctx)
         position = _new_key_position_name()
-        _record_key_fact(dictionary, original_key, ctx=ctx, position=position)
+        # The RHS may have changed the original key binding. Record the
+        # captured value we actually stored, not the binding's current value.
+        _record_key_fact(dictionary, key_local, ctx=ctx, position=position)
+        identity = _key_identity(original_key, ctx=ctx)
+        if identity is not None and identity[0] == 'c':
+            _record_key_fact(dictionary, original_key, ctx=ctx, position=position)
         store = hir.DictStore(ast.loc, ty.VOID_TYPE, lookup.keys, lookup.values, lookup.key, result, position=position)
         return hir.Block(ast.loc, ty.VOID_TYPE, [key_declaration, store], False)
 

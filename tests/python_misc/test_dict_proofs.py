@@ -248,3 +248,15 @@ def test_unpacked_dictionary_records_are_read_only_borrows():
     _check("let d=['a' -> [x=1]]\nloop [k v] in d {let own=v own.x=2}")
     with pytest.raises(UserError, match='set iterator has one target'):
         _check('let s=set[1 2]\nloop [k v] in s {}')
+
+
+def test_compound_store_does_not_prove_a_key_changed_by_its_rhs():
+    with pytest.raises(UserError, match='dictionary key is not proven present'):
+        _check("let d:dict<string int64>=['a' -> 40]\n"
+               "let key:string='a'\n"
+               "if key in? d {d[key]+={key='missing'; 2}; d[key]}")
+
+
+def test_compound_store_reestablishes_its_literal_key_after_rhs_removal():
+    root = _check("let d=['a' -> 40]\nd['a']+={d.pop('a'); 2}; d['a'];")
+    assert all(lookup.proven for lookup in _lookups(root))
