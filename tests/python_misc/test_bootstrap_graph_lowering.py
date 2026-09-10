@@ -39,6 +39,8 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let count=(arity:addr):>int64=>{let n:int64=0 loop i in 0.. and i <? arity {n+=1} return n}\nlet main=():>int64=>count(2)+40'}, 42),
+
         ({
             'dependency.dewy': 'const s:(1 * Time)=1 transmute (1 * Time)\nconst ms=s/1000\nconst millisecond=ms\nconst minute=60*s',
             'entry.dewy': 'import p"dependency.dewy" as dependency\nlet main=():>int64=>42',

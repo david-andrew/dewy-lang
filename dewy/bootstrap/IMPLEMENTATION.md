@@ -53,6 +53,22 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   permit either member's effects to be discarded. The focused hosted set,
   dictionary-proof and union-container checks pass 41 tests.
 
+- Dispatch strips argument refinements before applicability and promotion,
+  matching the hosted boundary; parameter obligations retain the original
+  values. The type-algebra comparison and source numeric-boundary cases pass,
+  including ordinary `int` loop indices compared with `addr` parameters.
+
+- Hosted type tests release discarded optional/union call payloads after
+  evaluating their boolean result. An owned optional call result transfers
+  into another handle cell without abandoning an earlier copy. Repeated-call
+  ownership checks verify stable arena usage and independent retained copies.
+  Native boolean storage queries inspect type tags without constructing an
+  optional record merely to test its presence; the full native execution and
+  rejection suite passes with that change. The complete compiler rebuild
+  remains unverified: recent attempts exposed small-word bigint conversion
+  and full-library invocations reached the development memory cap. These are
+  implementation gaps, not new language-design decisions.
+
 - Source readers avoid copying complete token forests for individual nodes.
   Bounds analysis shares immutable module inputs across binding/refinement
   queries, recursive negation and ordinary index proofs. Changing interval
