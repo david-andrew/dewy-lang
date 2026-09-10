@@ -566,6 +566,8 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
     }
     if node is? parser.BinOp {
         let op = source_views.symbol(node.op env.lexical session)
+        let chain=comparison_chain(id env @session expected=expected)
+        if chain isnt? none return chain
         if op =? 'SemicolonJuxtapose' {
             let value = expression(node.left env @session)
             if value is? Error return value
@@ -3885,4 +3887,104 @@ captured_loop = (block:parser.Block env:Environment session:contexts.Session):>a
     if arm isnt? parser.KeywordExpr or arm.parts.length not=? 3 return none
     let keyword=contexts.node_at(arm.parts[0] env.lexical session)
     return if keyword is? tokens.Keyword and keyword.name =? 'loop' block.inner[0] else none
+}
+
+# A comparison chain is one monotonic statement, with equality allowed in
+# either direction. Parenthesized comparisons are values, not continuations.
+# Keep the operator token: `not <?` is an inverted test, even though the
+# ordinary binary dispatcher also presents it as `>=?`.
+chain_operator = (id:addr env:Environment session:contexts.Session):>string? => {
+    let token=contexts.node_at(id env.lexical session)
+    if token is? post.InvertedComparison return "not {token.symbol}"
+    if token is? tokens.Operator and token.symbol in? ['<?' '<=?' '>?' '>=?' '=?' 'is?' 'isnt?' 'in?'] return token.symbol
+    return none
+}
+chain_simple = (id:addr env:Environment session:contexts.Session):>bool => {
+    let node=contexts.node_at(id env.lexical session)
+    if node is? parser.Atom {
+        let token=contexts.node_at(node.item env.lexical session)
+        return token is? tokens.Identifier|tokens.String|tokens.Integer
+    }
+    let root=id
+    loop node is? parser.BinOp and source_views.is_operator(node.op '.' env.lexical session) {
+        if source_views.identifier(node.right env.lexical session) is? none return false
+        root=node.left
+        node=contexts.node_at(root env.lexical session)
+    }
+    return node is? parser.Atom and source_views.identifier(root env.lexical session) isnt? none
+}
+comparison_chain = (id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error|none => {
+    let current=id
+    let reversed:array<parser.BinOp>=[]
+    loop true {
+        let node=contexts.node_at(current env.lexical session)
+        if node isnt? parser.BinOp or chain_operator(node.op env session) is? none break
+        reversed.push(node)
+        current=node.left
+    }
+    if reversed.length <? 2 return none
+    let operations:array<parser.BinOp>=[]
+    loop reversed.length >? 0 {operations.push(reversed.pop)}
+    $runtime_assert operations.length >? 0
+    let rising=false
+    let falling=false
+    let operands:array<addr>=[operations[0].left]
+    loop operation in operations {
+        let symbol=chain_operator(operation.op env session)
+        $runtime_assert symbol isnt? none
+        if symbol not in? ['<?' '<=?' '>?' '>=?' '=?'] return problem(id 'comparison does not chain' "`{symbol}` cannot be part of a comparison chain; combine tests with `and`" env session)
+        if symbol in? ['<?' '<=?'] {rising=true}
+        if symbol in? ['>?' '>=?'] {falling=true}
+        operands.push(operation.right)
+    }
+    if rising and falling return problem(id 'comparison chain changes direction' 'a chain reads one way; write the other comparison with `and`' env session)
+    # Match hosted evaluation: computed interior values are bound before the
+    # conjunction. Simple reads retain their identities for relational facts.
+    let prelude:array<addr>=[]
+    let names:dict<addr string>=[]
+    let i:addr=1
+    loop i+1 <? operands.length {
+        if not chain_simple(operands[i] env session) {
+            let value=expression(operands[i] env @session)
+            if value is? Error return value
+            let name="__dewy_chain_{session.registry.next_id}"
+            let declaration=match_bind(name value operands[i] env @session hidden=true)
+            if declaration is? Error return declaration
+            prelude.push(declaration)
+            names[i]=name
+        }
+        i += 1
+    }
+    let combined:addr?=none
+    let active=env
+    let exits:array<Environment>=[]
+    i=0
+    loop i <? operations.length {
+        $runtime_assert i+1 <? operands.length
+        let left_name=names.get(i)
+        let right_name=names.get(i+1)
+        let left=if left_name isnt? none identifier(left_name operands[i] active @session) else expression(operands[i] active @session)
+        if left is? Error return left
+        let right=if right_name isnt? none identifier(right_name operands[i+1] active @session) else expression(operands[i+1] active @session)
+        if right is? Error return right
+        let symbol=source_views.symbol(operations[i].op env.lexical session)
+        let operator=builtins.binary_operators.get(symbol)
+        $runtime_assert operator isnt? none
+        let function=identifier(operator id active @session)
+        if function is? Error return function
+        let compared=call(function [left right] [] id active @session expected=types.primitive('bool' @session.types))
+        if compared is? Error return compared
+        exits.push(refined(compared false active @session))
+        active=refined(compared true active @session)
+        combined=if combined is? none compared else put(hir.ShortCircuit[contexts.node_at(id env.lexical session).loc types.primitive('bool' @session.types) 'and' combined compared] @session)
+        i += 1
+    }
+    exits.push(active)
+    join_reads(exits env @session)
+    $runtime_assert combined isnt? none
+    let value=if expected is? none combined else against(combined expected id env @session)
+    if value is? Error return value
+    if prelude.length =? 0 return value
+    prelude.push(value)
+    return put(hir.Block[contexts.node_at(id env.lexical session).loc node_at(value session).value_type prelude false] @session)
 }
