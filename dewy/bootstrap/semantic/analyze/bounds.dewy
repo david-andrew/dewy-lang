@@ -8,6 +8,7 @@ import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
 import p"expression_intervals.dewy" as intervals
 import p"predicate_facts.dewy" as predicates
+import p"predicate_paths.dewy" as paths
 import p"refinement_facts.dewy" as refinements
 import p"binding_facts.dewy" as stores
 import p"element_facts.dewy" as elements
@@ -30,6 +31,11 @@ Exit:type = const [levels:addr state:facts.State]
 Transfer:type = [normal:facts.State? breaks:array<Exit>=[] continues:array<Exit>=[]]
 Checker:type = [
     data:predicates.Data srcfile:SrcFile word_type:addr
+    # The HIR/type environment and default word do not change during this
+    # module's validation. Build their refinement view once, not per binding
+    # or function; only current facts and the route registry evolve.
+    refinement_context:refinements.Context=refinements.Context[data.env word_type]
+    path_context:paths.Context=paths.Context[data.env.nodes data.relations.facts]
     declared:refinements.Declared=[] assigned:set<addr>=set[]
     mutable_globals:set<addr>=set[] checked:set<addr>=set[]
     root_items:set<addr>=set[] deferred:array<addr>=[]
@@ -48,6 +54,7 @@ configure = (@checker:Checker):>void => {
         if interval isnt? none {context.widths[id]=interval}
     }
     checker.data.relations=relations.Context[context]
+    checker.path_context=paths.Context[env.nodes context]
 }
 node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nodes id)
 fail = (id:addr title:string message:string @checker:Checker hint:string=''):>void => {
@@ -57,7 +64,7 @@ fail = (id:addr title:string message:string @checker:Checker hint:string=''):>vo
 record = (id:addr state:facts.State @checker:Checker):>void => {
     intervals.record(@checker.data.snapshot id state checker.data.env @checker.data.registry)
 }
-refine = (state:facts.State id:addr truth:bool @checker:Checker):>facts.State? => predicates.refine(state id truth @checker.data)
+refine = (state:facts.State id:addr truth:bool @checker:Checker):>facts.State? => predicates.refine_with_context(state id truth checker.path_context @checker.data)
 joined = (states:array<facts.State> checker:Checker):>facts.State? => {
     if states.length =? 0 return none
     return facts.join(states checker.data.relations.facts)
@@ -67,7 +74,7 @@ append_exits = (@target:Transfer source:Transfer):>void => {
     loop exit in source.continues {target.continues.push(exit)}
 }
 install = (@state:facts.State subject:addr value:addr annotation:addr? loc:Span @checker:Checker):>void => {
-    stores.install(@state subject value annotation checker.word_type loc @checker.declared @checker.data)
+    stores.install(@state subject value annotation checker.word_type loc @checker.declared @checker.data context=checker.refinement_context)
     if obligations.nonzero(value checker.data.snapshot.numbers.get(value) state checker.data) {facts.put(@state facts.nonzero(subject) ranges.exact(1))}
 }
 
@@ -204,7 +211,7 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
             if shift is? none {stores.seed(@current subject node.value checker.word_type node.loc @checker.data)}
         }
         let declared=checker.declared.get(subject)
-        if declared isnt? none {refinements.seed_binding(@current @checker.declared subject declared refinements.Context[checker.data.env checker.word_type] node.loc @checker.data.registry)}
+        if declared isnt? none {refinements.seed_binding(@current @checker.declared subject declared checker.refinement_context node.loc @checker.data.registry)}
         return Transfer[current]
     }
     if node is? hir.Assert {
@@ -240,8 +247,7 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     loop parameter in node.kw_only_args {parameters.push(parameter)}
     if node.rest_args isnt? none {parameters.push(node.rest_args)}
     loop parameter in parameters {if parameter is? hir.BoundParam {evaluate(parameter.value @enclosing @checker validate)}}
-    let context=refinements.Context[checker.data.env checker.word_type]
-    refinements.seed_parameters(@enclosing @checker.declared node context @checker.data.registry)
+    refinements.seed_parameters(@enclosing @checker.declared node checker.refinement_context @checker.data.registry)
     analyze(node.body enclosing @checker validate);
     checker.srcfile=source
     checker.data.snapshot=saved
@@ -436,7 +442,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                 let declaration=if object is? none none else types.object_field(object field.name)
                 if declaration isnt? none and declaration.refinement.length >? 0 {
                     let refined=types.RefinedType[key="field-contract:{field.binding_id}" base=declaration.value_type propositions=declaration.refinement]
-                    refinements.seed_binding(@state @checker.declared field.binding_id refined refinements.Context[checker.data.env checker.word_type] field.loc @checker.data.registry)
+                    refinements.seed_binding(@state @checker.declared field.binding_id refined checker.refinement_context field.loc @checker.data.registry)
                 }
             }
         }
@@ -592,7 +598,7 @@ enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker):>fa
         let iterable=types.node_at(checker.data.env.types node_at(node.iterable checker).value_type)
         if iterable is? types.ArrayType {
             let element=types.node_at(checker.data.env.types iterable.element)
-            if element is? types.RefinedType {refinements.seed_binding(@current @checker.declared target.binding_id element refinements.Context[checker.data.env checker.word_type] node.loc @checker.data.registry)}
+            if element is? types.RefinedType {refinements.seed_binding(@current @checker.declared target.binding_id element checker.refinement_context node.loc @checker.data.registry)}
         }
     }
     return current

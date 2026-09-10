@@ -120,8 +120,14 @@ atomic = (state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data
     return comparisons.refine(state op operand(node.pos_args[0] state data) operand(node.pos_args[1] state data) truth data.relations)
 }
 
-refine = (state:facts.State condition:addr truth:bool @data:Data):>facts.State? => {
-    let context=paths.Context[data.env.nodes data.relations.facts]
+# The full module visitor retains these immutable inputs separately from
+# Data's evolving registry/snapshot. Passing the record directly avoids both
+# rebuilding it and boxing a copy into an optional at each predicate.
+refine_with_context = (state:facts.State condition:addr truth:bool context:paths.Context @data:Data):>facts.State? => {
     let invalidated:set<addr>=set[]
     return paths.refine(state condition truth invalidated context @data @atomic)
+}
+refine = (state:facts.State condition:addr truth:bool @data:Data):>facts.State? => {
+    let context=paths.Context[data.env.nodes data.relations.facts]
+    return refine_with_context(state condition truth context @data)
 }

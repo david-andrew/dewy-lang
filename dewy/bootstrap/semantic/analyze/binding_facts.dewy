@@ -138,7 +138,7 @@ fields = (@state:facts.State root:addr declared:types.ObjectType value:addr path
     }
 }
 
-install = (@state:facts.State subject:addr value:addr annotation:addr? word_type:addr loc:Span @declared:refinements.Declared @data:predicates.Data):>void => {
+install = (@state:facts.State subject:addr value:addr annotation:addr? word_type:addr loc:Span @declared:refinements.Declared @data:predicates.Data context:refinements.Context):>void => {
     facts.set_value(@state facts.Term[subject] data.snapshot.numbers.get(value))
     let length=data.snapshot.lengths.get(value)
     if length isnt? none {
@@ -148,8 +148,6 @@ install = (@state:facts.State subject:addr value:addr annotation:addr? word_type
     if annotation isnt? none {
         let contract=types.node_at(data.env.types annotation)
         if contract is? types.RefinedType {
-            # Ordinary declarations need no refinement environment snapshot.
-            let context=refinements.Context[data.env word_type]
             refinements.seed_binding(@state @declared subject contract context loc @data.registry)
         }
         let object=expressions.object_of(annotation data.env.types)

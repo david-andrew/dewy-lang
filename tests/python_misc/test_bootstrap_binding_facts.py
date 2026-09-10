@@ -56,10 +56,11 @@ main=():>int64=>{{
     loop id in 0.. and id <? nodes.length {{intervals.record(@snapshot id state env @registry)}}
     let data=predicates.Data[env relations.Context[facts.Context[1024]] snapshot registry]
     let declared:refinements.Declared=[]
-    stores.install(@state copy text none word span @declared @data)
-    stores.install(@state size length none word span @declared @data)
-    stores.install(@state object literal record word span @declared @data)
-    stores.install(@state result called none word span @declared @data)
+    let context=refinements.Context[env word]
+    stores.install(@state copy text none word span @declared @data context)
+    stores.install(@state size length none word span @declared @data context)
+    stores.install(@state object literal record word span @declared @data context)
+    stores.install(@state result called none word span @declared @data context)
     $runtime_assert facts.index(1 copy).key in? state
     $runtime_assert relations.ordered(facts.Term[size] facts.Term[2 'length'] 0 state data.relations)
     $runtime_assert relations.ordered(facts.Term[2 'length'] facts.Term[size] 0 state data.relations)
