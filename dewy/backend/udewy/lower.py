@@ -1018,7 +1018,9 @@ class _Lowerer(
                     [*default_prologue, transformed_body],
                     True,
                 )
-        body = self._lower_function_body(transformed_body, literal.rettype)
+        body = self._lower_function_body(
+            transformed_body, literal.rettype, parameter_prologue
+        )
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
         self.current_array_result = previous_array_result
@@ -1032,11 +1034,6 @@ class _Lowerer(
         self.current_object_field_ids = previous_field_ids
         self.current_object_field_names = previous_field_names
         self.current_literal = previous_literal
-        if parameter_prologue:
-            if isinstance(body, hir.Block):
-                body = replace(body, items=[*parameter_prologue, *body.items])
-            else:
-                body = hir.Block(body.loc, body.type, [*parameter_prologue, body], True)
         function_type = self._lower_callable_type(literal.type)
         if self.lifted.get(id(function)) and isinstance(function_type, ty.FunctionType):
             function_type = replace(
@@ -3033,7 +3030,9 @@ class _Lowerer(
             return statements[0]
         return hir.Block(node.loc, ty.VOID_TYPE, statements, True)
 
-    def _lower_function_body(self, node: hir.AST, rettype: ty.Type) -> hir.AST:
+    def _lower_function_body(
+        self, node: hir.AST, rettype: ty.Type, prologue: list[hir.AST] | None = None,
+    ) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set()
         self.owned_string_arrays = set()
@@ -3055,7 +3054,15 @@ class _Lowerer(
             self.loop_signal_kind = None
         self.lower_loop_depth = 0
 
-        lowered = self._with_descriptor_owners_zeroed(self._lower_function_body_inner(node, rettype))
+        lowered = self._lower_function_body_inner(node, rettype)
+        # Parameter copies are already lowered, but share the body's storage
+        # lifetime. Include them before creating and releasing frame regions.
+        if prologue:
+            lowered = (replace(lowered, items=[*prologue, *lowered.items])
+                       if isinstance(lowered, hir.Block) else
+                       hir.Block(lowered.loc, lowered.type, [*prologue, lowered], True))
+        lowered = self._region_back_dynamic_temporaries(lowered)
+        lowered = self._with_descriptor_owners_zeroed(lowered)
         regions = [*([self.frame_region] if self.frame_region is not None else []), *self.loop_region_headers]
         exit_statements = [self._region_call('_region_release', [region], node.loc, ty.VOID_TYPE) for region in regions]
         lowered = self._insert_releases(lowered, exit_statements)
@@ -3083,6 +3090,45 @@ class _Lowerer(
             self.lower_loop_depth,
         ) = previous_state
         return self._hoist_loop_allocations(lowered)
+
+    def _region_back_dynamic_temporaries(self, body: hir.AST) -> hir.AST:
+        """Runtime-sized compiler temporaries live in the function's region.
+
+        A value copy can be arbitrarily large. Allocating each copy on the
+        machine stack exhausted it while checking ordinary compiler source,
+        even at modest expression depth. The existing frame region has the
+        same lifetime and is released at every exit. Constant small storage
+        remains on the stack; explicit source __alloca__ calls retain their
+        requested behavior. Only compiler-generated declarations qualify.
+        """
+        if self.lowering_module_startup or self.current_literal is None:
+            return body
+        helpers = ('_region_new', '_region_alloc', '_region_release')
+        if not all(any(function.logical_name.endswith(name) for function in self.functions) for name in helpers):
+            return body
+
+        def walk(node: hir.AST) -> hir.AST:
+            if isinstance(node, hir.Declare) and node.binding_id is None and node.name.startswith('__dewy_'):
+                call = node.expr
+                if (
+                    isinstance(call, hir.FunctionCall)
+                    and isinstance(call.func, hir.ExpressedIdentifier)
+                    and call.func.name == '__alloca__'
+                    and len(call.pos_args) == 1
+                    and not isinstance(call.pos_args[0], hir.Integer)
+                ):
+                    region = self._frame_region(node.loc)
+                    return replace(node, expr=self._region_call('_region_alloc', [region, call.pos_args[0]], node.loc, 'int64'))
+            if isinstance(node, hir.Block):
+                return replace(node, items=[walk(item) for item in node.items])
+            if isinstance(node, hir.Flow):
+                return replace(node, arms=[replace(arm, body=walk(arm.body)) for arm in node.arms],
+                               default=walk(node.default) if node.default is not None else None)
+            if isinstance(node, hir.Suppress):
+                return replace(node, item=walk(node.item))
+            return node
+
+        return walk(body)
 
     def _hoist_loop_allocations(self, body: hir.AST) -> hir.AST:
         """Frame storage requested inside a loop is allocated once, at function entry.
