@@ -63,6 +63,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Compiled tests cover conditional/unconditional promises, impossible paths,
   and invalidation of historical argument values. These kernels still need
   the complete effect-ordered bounds traversal before native compilation.
+  Short-circuit transfer is now generic over its callback's analysis data,
+  passed by place. The hosted compiler preserves explicitly callable generic
+  parameters instead of converting their arguments to signature strings;
+  recursive callbacks and positional/keyword calls execute successfully.
 
 - Hosted cleanup now releases owned aggregate payloads in record fields and
   array union cells, including recursive aliases. Brace-less return, break,

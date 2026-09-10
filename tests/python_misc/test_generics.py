@@ -1,4 +1,6 @@
 """User generic functions: instantiation per call, hoisted instances, and the rejections."""
+import subprocess
+
 import pytest
 
 from dewy.reporting import SrcFile
@@ -91,3 +93,24 @@ def test_generic_function_rejections() -> None:
         _declared("let main = ():>int64 => (<T>(x:T):>T => x)(1)\n")
     with pytest.raises(UserError, match='cannot be used as a value'):
         _declared(FIRST + "let apply = (f:<(xs:array<int64>):>int64|none>):>int64 => 0\nlet main = ():>int64 => apply(@first)\n")
+
+
+@pytest.mark.parametrize('arguments', ['@value @leaf 2', '@value fn=@leaf count=2'])
+def test_generic_callable_parameters_keep_function_values(arguments, tmp_path):
+    from dewy.backend.udewy import codegen
+    from udewy.cache import cache_artifact
+    from udewy.frontend import EntryPointOptions, entry_point
+
+    source = '''Record:type=[value:int64]
+leaf=(@value:Record):>int64=>{value.value=42 return value.value}
+let apply=<T>(@value:T fn:<(@value:T):>int64> count:addr):>int64=>{
+    if count >? 0 return apply(@value @fn count-1)
+    return fn(@value)
+}
+main=():>int64=>{let value=Record[0] return apply(''' + arguments + ''')}
+'''
+    output = tmp_path / 'generic_callback.udewy'
+    output.write_text(codegen(SrcFile(None, source)))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=15, check=False)
+    assert result.returncode == 42, result.stdout + result.stderr

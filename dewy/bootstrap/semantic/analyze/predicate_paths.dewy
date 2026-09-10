@@ -5,8 +5,9 @@ import p"predicate_effects.dewy" as effects
 # Short-circuit proof paths, separate from evaluating a predicate's effects.
 # The enclosing bounds traversal supplies the atomic transfer: comparisons,
 # type tests, and function result contracts all participate through one rule.
+# The callback carries its own typed analysis data by place (for route
+# allocation and snapshots), without storing a function inside that record.
 # `none` means an impossible path; an empty state means no established facts.
-Leaf:type = <(state:facts.State condition:addr truth:bool nodes:array<hir.AST>):>facts.State?>
 Context:type = const [nodes:array<hir.AST> facts:facts.Context]
 
 merged_writes = (existing:set<addr> expression:addr nodes:array<hir.AST>):>set<addr> => {
@@ -23,10 +24,10 @@ join = (left:facts.State? right:facts.State? context:facts.Context):>facts.State
 # On the path that reaches the right operand, the left one did not decide
 # the chain. A write in the right operand makes the left predicate historical
 # even though it ran first. Forget its evidence before using either proof.
-after = (state:facts.State left:addr right:addr truth:bool invalidated:set<addr> context:Context leaf:Leaf):>facts.State? => {
-    let first=refine(state left not truth merged_writes(invalidated right context.nodes) context @leaf)
+let after = <Data>(state:facts.State left:addr right:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State?>):>facts.State? => {
+    let first=refine(state left not truth merged_writes(invalidated right context.nodes) context @data @leaf)
     if first is? none return none
-    return refine(first right truth invalidated context @leaf)
+    return refine(first right truth invalidated context @data @leaf)
 }
 conjuncts = (left:addr right:addr nodes:array<hir.AST>):>array<addr> => {
     let pending:array<addr>=[right left]
@@ -39,7 +40,7 @@ conjuncts = (left:addr right:addr nodes:array<hir.AST>):>array<addr> => {
     }
     return result
 }
-conjunction = (state:facts.State left:addr right:addr invalidated:set<addr> context:Context leaf:Leaf):>facts.State? => {
+let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State?>):>facts.State? => {
     let parts=conjuncts(left right context.nodes)
     let later:array<set<addr>>=[]
     let writes=invalidated
@@ -60,29 +61,29 @@ conjunction = (state:facts.State left:addr right:addr invalidated:set<addr> cont
             let reverse=parts.length-index-1
             $runtime_assert reverse <? later.length
             if current is? none return none
-            current=refine(current parts[index] true later[reverse] context @leaf)
+            current=refine(current parts[index] true later[reverse] context @data @leaf)
             index+=1
         }
     }
     return current
 }
 
-refine = (state:facts.State condition:addr truth:bool invalidated:set<addr> context:Context leaf:Leaf):>facts.State? => {
+let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State?>):>facts.State? => {
     let node=hir.node_at(context.nodes condition)
     if node is? hir.ShortCircuit {
         if node.op =? 'and' or node.op =? 'nand' {
             let effective=if node.op =? 'and' truth else not truth
-            if effective return conjunction(state node.left node.right invalidated context @leaf)
-            return join(refine(state node.left false invalidated context @leaf) after(state node.left node.right false invalidated context @leaf) context.facts)
+            if effective return conjunction(state node.left node.right invalidated context @data @leaf)
+            return join(refine(state node.left false invalidated context @data @leaf) after(state node.left node.right false invalidated context @data @leaf) context.facts)
         }
         if node.op =? 'or' or node.op =? 'nor' {
             let effective=if node.op =? 'or' truth else not truth
             if not effective {
-                let first=refine(state node.left false merged_writes(invalidated node.right context.nodes) context @leaf)
+                let first=refine(state node.left false merged_writes(invalidated node.right context.nodes) context @data @leaf)
                 if first is? none return none
-                return refine(first node.right false invalidated context @leaf)
+                return refine(first node.right false invalidated context @data @leaf)
             }
-            return join(refine(state node.left true invalidated context @leaf) after(state node.left node.right true invalidated context @leaf) context.facts)
+            return join(refine(state node.left true invalidated context @data @leaf) after(state node.left node.right true invalidated context @data @leaf) context.facts)
         }
         # XOR/XNOR retain the hosted conservative treatment here. Their
         # evaluation is defined; deriving stronger proof paths is later work.
@@ -92,5 +93,5 @@ refine = (state:facts.State condition:addr truth:bool invalidated:set<addr> cont
         if binding in? invalidated return state
     }
     if node is? hir.Bool return if node.value =? truth state else none
-    return leaf(state condition truth context.nodes)
+    return leaf(state condition truth context.nodes @data)
 }

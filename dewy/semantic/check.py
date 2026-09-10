@@ -15404,10 +15404,19 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         for index, name in enumerate(argument_order)
     )
     if isinstance(left.type, ty.FunctionType) and left.type.type_params:
-        # a generic's value parameter receives a compile-time-only argument
-        # (a type, a function) as its spelling
-        pos_args = [_spelling_string(arg, ctx=ctx) or arg for arg in pos_args]
-        kw_args = {name: _spelling_string(arg, ctx=ctx) or arg for name, arg in kw_args.items()}
+        # An unconstrained generic value parameter keeps the established
+        # spelling conversion for types/functions. An explicitly callable
+        # parameter needs the function itself, including when its signature
+        # mentions the surrounding generic's type variables.
+        def prepare_generic_argument(argument: hir.AST, parameter: ty.TypeExpr | None) -> hir.AST:
+            if parameter is not None and isinstance(ty.strip_refinement(parameter), ty.FunctionType):
+                return argument
+            return _spelling_string(argument, ctx=ctx) or argument
+
+        pos_args = [prepare_generic_argument(arg, left.type.pos_or_kw[index].type if index < len(left.type.pos_or_kw) else None)
+                    for index, arg in enumerate(pos_args)]
+        named_parameters = {param.name: param.type for param in [*left.type.pos_or_kw, *left.type.kw_only] if param.name is not None}
+        kw_args = {name: prepare_generic_argument(arg, named_parameters.get(name)) for name, arg in kw_args.items()}
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:
