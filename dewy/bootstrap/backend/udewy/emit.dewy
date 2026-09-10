@@ -1,0 +1,310 @@
+from reporting import SrcFile, Error, Pointer
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/type_display.dewy" as display
+import p"../../semantic/builtins.dewy" as builtins
+
+doc"""
+Emit the HIR subset produced by µDewy lowering. Semantic HIR must first
+legalize captures, overloads, aggregate storage, defaults, keyword slots,
+and labeled loop exits. Reaching an unlowered node is an explicit error.
+
+Operand parentheses preserve the hosted emitter's conservative policy.
+Precedence-aware minimization remains an optional later improvement.
+Debug locations and variable formatters belong to the program emitter;
+this module handles expressions, statements, and concrete function units.
+"""
+
+Input:type = const [nodes:array<hir.AST> types:array<types.Type>]
+Scope:type = [
+    direct_functions:set<string>=set[]
+    locals:set<string>=set[]
+    source:SrcFile=SrcFile['input' '']
+]
+State:type = [
+    includes:dict<string string>=[]
+    problem:Error?=none
+]
+const binary:dict<string string>=[
+    '__add__'->'+' '__sub__'->'-' '__mul__'->'*'
+    '__floordiv__'->'//' '__mod__'->'%'
+    '__lshift__'->'<<' '__rshift__'->'>>'
+    '__eq__'->'=?' '__ne__'->'not=?' '__lt__'->'<?' '__gt__'->'>?'
+    '__le__'->'<=?' '__ge__'->'>=?'
+    '__and__'->'and' '__or__'->'or' '__xor__'->'xor'
+    '__nand__'->'nand' '__nor__'->'nor' '__xnor__'->'xnor'
+]
+const prefix:dict<string string>=['__unary_sub__'->'-' '__not__'->'not']
+const unsigned:dict<string string>=[
+    '__floordiv__'->'__unsigned_idiv__' '__mod__'->'__unsigned_mod__'
+    '__lt__'->'__unsigned_lt__' '__le__'->'__unsigned_lte__'
+    '__gt__'->'__unsigned_gt__' '__ge__'->'__unsigned_gte__'
+]
+const widths:dict<string uint8>=[
+    'int8'->8 'int16'->16 'int32'->32 'int64'->64
+    'uint8'->8 'uint16'->16 'uint32'->32 'uint64'->64
+]
+const wrapping:set<string>=set[
+    '__add__' '__sub__' '__mul__' '__floordiv__' '__mod__'
+    '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__'
+]
+const derived:dict<string string>=['__nand__'->'and' '__nor__'->'or' '__xnor__'->'xor']
+const alphabet='0123456789abcdef'
+intrinsic_names = ():>set<string> => {
+    let nodes:array<types.Type>=[]
+    let functions=builtins.intrinsic_types(@nodes)
+    return functions.keys
+}
+const intrinsics=intrinsic_names()
+
+reject = (node:hir.AST message:string scope:Scope @state:State):>string => {
+    if state.problem is? none {
+        state.problem=Error[srcfile=scope.source title='unlowered HIR reached µDewy emission' pointers=[Pointer[span=node.loc message=message]]]
+    }
+    return ''
+}
+annotation = (id:addr input:Input):>string => {
+    let node=types.node_at(input.types id)
+    return if types.is_primitive(node 'never') 'void' else display.type_to_dewy(id input.types)
+}
+hex_byte = (byte:uint8):>string => alphabet[byte // 16] + alphabet[byte % 16]
+text_literal = (text:string):>string => {
+    let bytes=text as array<uint8>
+    let parts:array<string>=['"']
+    loop byte in bytes {parts.push("\\x{hex_byte(byte)}")}
+    parts.push('"')
+    return parts.join
+}
+integer_literal = (node:hir.Integer):>string => {
+    if node.prefix not in? ['0x' '0b'] return _bigint_as_string(node.value)
+    let radix:bigint & ~0=if node.prefix =? '0x' 16 else 2
+    let remaining=node.value
+    let negative=remaining <? 0
+    if negative {remaining = -remaining}
+    let reversed:array<string>=[]
+    loop remaining >? 0 {
+        let digit=remaining % radix
+        $runtime_assert digit >=? 0 and digit <? 16
+        reversed.push(alphabet[digit as int64])
+        remaining //= radix
+    }
+    if reversed.length =? 0 {reversed.push('0')}
+    let parts:array<string>=[if negative '-' else '' node.prefix]
+    loop reversed.length >? 0 {parts.push(reversed.pop)}
+    return parts.join
+}
+indent = (text:string):>string => {
+    let lines:array<string>=[]
+    loop line in text.split('\n') {lines.push(if line.length =? 0 '' else "    {line}")}
+    return lines.join('\n')
+}
+first_parameter = (call:hir.FunctionCall input:Input):>string? => {
+    let function=hir.node_at(input.nodes call.func)
+    if function isnt? hir.ExpressedIdentifier return none
+    let type=types.node_at(input.types function.value_type)
+    if type isnt? types.FunctionType or type.pos_or_kw.length =? 0 return none
+    let operand=types.node_at(input.types type.pos_or_kw[0].value_type)
+    if operand isnt? types.Primitive return none
+    if operand.name =? 'int' return 'int64'
+    if operand.name =? 'uint' return 'uint64'
+    return operand.name
+}
+wrap = (expression:string type:string?):>string => {
+    if type is? none return expression
+    let width=widths.get(type)
+    if width is? none or width =? 64 return expression
+    $runtime_assert width >? 0 and width <? 64
+    if type.startswith('u') return "({expression}) and {(1 << width)-1}"
+    let shift=64-(width as int64)
+    return "__signed_shr__(({expression}) << {shift} {shift})"
+}
+is_binary = (node:hir.AST input:Input):>bool => {
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 or node.kw_args.length >? 0 return false
+    let function=hir.node_at(input.nodes node.func)
+    return function is? hir.ExpressedIdentifier and function.name in? binary
+}
+is_prefix = (node:hir.AST input:Input):>bool => {
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 1 or node.kw_args.length >? 0 return false
+    let function=hir.node_at(input.nodes node.func)
+    return function is? hir.ExpressedIdentifier and function.name in? prefix
+}
+operand = (id:addr @scope:Scope input:Input @state:State):>string => {
+    let node=hir.node_at(input.nodes id)
+    let text=ast(id @scope input @state)
+    return if is_binary(node input) or node is? hir.Transmute|hir.ShortCircuit "({text})" else text
+}
+argument = (id:addr @scope:Scope input:Input @state:State):>string => {
+    let node=hir.node_at(input.nodes id)
+    let text=ast(id @scope input @state)
+    return if node is? hir.Transmute or node is? hir.Integer and node.value <? 0 or is_prefix(node input) "({text})" else text
+}
+function_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State):>string => {
+    if call.kw_args.length >? 0 return reject(call 'keyword arguments require positional legalization' scope @state)
+    let function=hir.node_at(input.nodes call.func)
+    if function is? hir.ExpressedIdentifier {
+        let name=function.name
+        let type=first_parameter(call input)
+        if call.pos_args.length =? 2 {
+            let left=call.pos_args[0] let right=call.pos_args[1]
+            if name in? ['__dewy_raw_lshift__' '__dewy_raw_rshift__'] {
+                let symbol=if name =? '__dewy_raw_lshift__' '<<' else '>>'
+                return "({operand(left @scope input @state)} {symbol} {operand(right @scope input @state)})"
+            }
+            if name in? unsigned and type isnt? none and type in? widths and type.startswith('u') {
+                return "{unsigned[name]}({ast(left @scope input @state)} {ast(right @scope input @state)})"
+            }
+            if name =? '__rshift__' {
+                if type isnt? none and type in? widths and not type.startswith('u') {
+                    return "__signed_shr__({ast(left @scope input @state)} {ast(right @scope input @state)})"
+                }
+                if type is? none or type not in? widths return reject(call 'right shift requires a selected integer width' scope @state)
+            }
+            if name in? binary {
+                let a=operand(left @scope input @state) let b=operand(right @scope input @state)
+                let expression=if name in? derived "not ({a} {derived[name]} {b})" else "{a} {binary[name]} {b}"
+                return if name in? wrapping wrap(expression type) else expression
+            }
+        }
+        if call.pos_args.length =? 1 and name in? prefix {
+            let separator=if name =? '__not__' ' ' else ''
+            return wrap("{prefix[name]}{separator}{operand(call.pos_args[0] @scope input @state)}" type)
+        }
+    }
+    let args:array<string>=[]
+    loop item in call.pos_args {args.push(argument(item @scope input @state))}
+    if function is? hir.ExpressedIdentifier {
+        if (function.name in? scope.direct_functions or function.name in? intrinsics) and function.name not in? scope.locals {
+            return "{function.name}({args.join(' ')})"
+        }
+        return "(@{function.name})({args.join(' ')})"
+    }
+    let callee=ast(call.func @scope input @state)
+    return if function is? hir.Block and not function.scoped "{callee}({args.join(' ')})" else "({callee})({args.join(' ')})"
+}
+
+statements = (items:array<addr> @scope:Scope input:Input @state:State):>array<string> => {
+    let lines:array<string>=[]
+    loop id in items {
+        lines.push(ast(id @scope input @state))
+        let node=hir.node_at(input.nodes id)
+        if node is? hir.Declare {scope.locals.add(node.name)}
+    }
+    return lines
+}
+flow_body = (id:addr @scope:Scope input:Input @state:State):>string => {
+    let node=hir.node_at(input.nodes id)
+    let text=ast(id @scope input @state)
+    return if node is? hir.Block and node.scoped text else "\{\n{indent(text)}\n}"
+}
+ast = (id:addr @scope:Scope input:Input @state:State):>string => {
+    if state.problem isnt? none return ''
+    let node=hir.node_at(input.nodes id)
+    if node is? hir.Integer return integer_literal(node)
+    if node is? hir.String return text_literal(node.content)
+    if node is? hir.Bool return if node.value 'true' else 'false'
+    if node is? hir.Void return 'void'
+    if node is? hir.BasedString {
+        if node.include_path isnt? none {
+            let path=node.include_path
+            let existing=state.includes.get(path)
+            if existing isnt? none return existing
+            let name="__dewy_include_{state.includes.length+1}"
+            state.includes[path]=name
+            return name
+        }
+        let bytes:array<string>=[]
+        loop byte in node.content {bytes.push(hex_byte(byte))}
+        return "0x\"{bytes.join}\""
+    }
+    if node is? hir.ExpressedIdentifier {
+        return if types.node_at(input.types node.value_type) is? types.CallableType "@{node.name}" else node.name
+    }
+    if node is? hir.FunctionCall return function_call(node @scope input @state)
+    if node is? hir.ValueCast return ast(node.expr @scope input @state)
+    if node is? hir.Transmute {
+        let text=ast(node.expr @scope input @state)
+        if hir.node_at(input.nodes node.expr) is? hir.Transmute {text="({text})"}
+        return "{text} transmute {annotation(node.value_type input)}"
+    }
+    if node is? hir.Return return if node.item is? none 'return void' else "return {ast(node.item @scope input @state)}"
+    if node is? hir.Break|hir.Continue {
+        if node.label isnt? none or node.loop_levels not=? 0 return reject(node 'labeled loop exits require legalization' scope @state)
+        return if node is? hir.Break 'break' else 'continue'
+    }
+    if node is? hir.Declare {
+        if hir.node_at(input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'local functions require hoisting' scope @state)
+        let type=if node.annotation is? none hir.node_at(input.nodes node.expr).value_type else node.annotation
+        return "{node.decltype} {node.name}:{annotation(type input)} = {ast(node.expr @scope input @state)}"
+    }
+    if node is? hir.Assign {
+        let target=hir.node_at(input.nodes node.target)
+        if target isnt? hir.ExpressedIdentifier return reject(node 'a projected assignment requires storage lowering' scope @state)
+        return "{target.name} {node.op} {ast(node.value @scope input @state)}"
+    }
+    if node is? hir.ShortCircuit {
+        let left=ast(node.left @scope input @state) let right=ast(node.right @scope input @state)
+        if hir.node_at(input.nodes node.left) is? hir.ShortCircuit {left="({left})"}
+        if hir.node_at(input.nodes node.right) is? hir.ShortCircuit {right="({right})"}
+        return "{left} {node.op} {right}"
+    }
+    if node is? hir.Block {
+        if not node.scoped and node.items.length =? 1 {
+            let item=hir.node_at(input.nodes node.items[0])
+            let text=ast(node.items[0] @scope input @state)
+            return if item is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.DictStore|hir.Declare|hir.Return|hir.Break|hir.Continue text else "({text})"
+        }
+        let child=scope
+        let lines=if node.scoped statements(node.items @child input @state) else statements(node.items @scope input @state)
+        let inner=indent(lines.join('\n'))
+        return if node.scoped "\{\n{inner}\n}" else "(\n{inner}\n)"
+    }
+    if node is? hir.Flow {
+        let parts:array<string>=[]
+        loop id in node.arms {
+            let arm=hir.node_at(input.nodes id)
+            if arm isnt? hir.IfArm|hir.LoopArm return reject(arm 'a flow arm must be conditional or a loop' scope @state)
+            let keyword=if arm is? hir.IfArm 'if' else 'loop'
+            parts.push("{keyword} {ast(arm.condition @scope input @state)} {flow_body(arm.body @scope input @state)}")
+        }
+        if node.default isnt? none {parts.push(flow_body(node.default @scope input @state))}
+        return parts.join(' else ')
+    }
+    return reject(node "{node.typename} needs lowering" scope @state)
+}
+
+contains_return = (id:addr input:Input):>bool => {
+    let node=hir.node_at(input.nodes id)
+    if node is? hir.Return return true
+    if node is? hir.Suppress return contains_return(node.item input)
+    if node is? hir.Block {
+        loop item in node.items {if contains_return(item input) return true}
+    }
+    if node is? hir.Flow {
+        loop id in node.arms {
+            let arm=hir.node_at(input.nodes id)
+            if arm is? hir.IfArm|hir.LoopArm and contains_return(arm.body input) return true
+        }
+        if node.default isnt? none return contains_return(node.default input)
+    }
+    return false
+}
+function_decl = (name:string function:hir.FunctionLiteral scope:Scope input:Input @state:State):>string => {
+    if function.kw_only_args.length >? 0 or function.rest_args isnt? none return reject(function 'function parameters require positional legalization' scope @state)
+    let arguments:array<string>=[]
+    let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else function.source]
+    loop arg in function.pos_or_kw_args {
+        if arg is? hir.BoundParam return reject(function 'default parameters require legalization' scope @state)
+        arguments.push("{arg.name}:{annotation(arg.value_type input)}")
+        inner.locals.add(arg.name)
+    }
+    let body=hir.node_at(input.nodes function.body)
+    let text:string=''
+    if contains_return(function.body input) {text=ast(function.body @inner input @state)}
+    else if types.is_primitive(types.node_at(input.types function.rettype) 'void') or types.is_primitive(types.node_at(input.types function.rettype) 'never') {
+        let items:array<addr>=if body is? hir.Block body.items else [function.body]
+        let lines=statements(items @inner input @state)
+        lines.push('return void')
+        text="\{\n{indent(lines.join('\n'))}\n}"
+    } else {text="\{\n{indent("return {ast(function.body @inner input @state)}")}\n}"}
+    return "let {name} = ({arguments.join(' ')}):>{annotation(function.rettype input)} => {text}"
+}

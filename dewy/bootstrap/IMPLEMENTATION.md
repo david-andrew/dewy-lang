@@ -25,6 +25,22 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native µDewy emission accepts lowered HIR expressions, statements, function
+  units, globals, ordered startup, and an entry wrapper. Twenty-two expression
+  forms match hosted spelling; emitted direct/startup/empty programs compile
+  and execute. The command-line wrapper accepts a lowered argument prologue;
+  argument construction and debug metadata still need their lowering passes.
+  This is an emission boundary, not yet a source-to-executable compiler.
+  Its binary-literal test exposed a hosted lifetime bug: views of static text
+  still have temporary descriptors. Retained views now get independent storage;
+  character and slice regressions execute through reused loop regions.
+
+- Native bindings retain literal string types unless explicitly widened by a
+  storage contract, matching hosted reassignment behavior. Fixed and rational
+  zero comparisons expose payload field facts. The numeric prelude checks
+  through fixed-point operations; arbitrary-precision library checking is the
+  next frontier. Numeric contracts, text, and source checks pass together.
+
 - Native decimal reals and decimal exponents retain arbitrary-precision exact
   fractions. Arithmetic and comparisons fold those constants, including exact
   integer division; division has no obsolete same-type result signature.

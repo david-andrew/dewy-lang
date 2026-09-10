@@ -1,0 +1,94 @@
+from reporting import Error, SrcFile
+import p"emit.dewy" as emit
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+
+# The boundary between legalization and emission. Function bodies and global
+# declarations refer to the lowered HIR arena, never the source token arena.
+Function:type = const [symbol:string literal:addr]
+Program:type = const [
+    functions:array<Function>
+    globals:array<addr>=[]
+    startup_items:array<addr>=[]
+    user_main_symbol:string?=none
+    startup_symbol:string='__dewy_startup'
+    needs_startup:bool=false
+    argv_prologue:array<addr> | none=none
+    argv_value:addr?=none
+    source:SrcFile=SrcFile['input' '']
+]
+
+# Startup preserves source order. The native process's argc/argv words are
+# received only when lowering has supplied the conversion to array<string>.
+# No command-line conversion, allocation, or module initialization is hidden
+# in an expression emitter.
+entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope input:emit.Input @state:emit.State):>string|Error => {
+    let inner=emit.Scope[scope.direct_functions set[] program.source]
+    let arguments:string=''
+    let lines:array<string>=["{program.startup_symbol}()"]
+    if program.argv_prologue isnt? none {
+        arguments='__dewy_argc:int64 __dewy_argv:int64'
+        inner.locals.add('__dewy_argc') inner.locals.add('__dewy_argv')
+        loop line in emit.statements(program.argv_prologue @inner input @state) {lines.push(line)}
+    }
+    let result:string='void'
+    if program.user_main_symbol is? none {lines.push('return void')}
+    else {
+        let symbol=program.user_main_symbol
+        let function_id=functions.get(symbol)
+        if function_id is? none return Error[title="entry function `{symbol}` is absent from the lowered program" srcfile=program.source]
+        let function=hir.node_at(input.nodes function_id)
+        if function isnt? hir.FunctionLiteral return Error[title='entry function is not a function literal' srcfile=program.source]
+        result=emit.annotation(function.rettype input)
+        let actual:string=''
+        if program.argv_value isnt? none {actual=emit.argument(program.argv_value @inner input @state)}
+        let call="{symbol}({actual})"
+        if result =? 'void' {lines.push(call) lines.push('return void')}
+        else {lines.push("return {call}")}
+    }
+    return "let main = ({arguments}):>{result} => \{\n{emit.indent(lines.join('\n'))}\n}"
+}
+
+# Publication is all-or-nothing: expression errors stay in State until this
+# boundary, which returns the diagnostic instead of partially emitted code.
+render = (program:Program input:emit.Input):>string|Error => {
+    if (program.argv_prologue is? none) not=? (program.argv_value is? none) return Error[title='command-line lowering must supply both a prologue and its argument value' srcfile=program.source]
+    let functions:dict<string addr>=[]
+    loop function in program.functions {
+        if function.symbol in? functions return Error[title="duplicate lowered function `{function.symbol}`" srcfile=program.source]
+        functions[function.symbol]=function.literal
+    }
+    let direct=functions.keys
+    if program.needs_startup {
+        if 'main' in? functions or program.startup_symbol in? functions return Error[title='startup symbols must be reserved during legalization' srcfile=program.source]
+        direct.add('main') direct.add(program.startup_symbol)
+    }
+    let scope=emit.Scope[direct set[] program.source]
+    let state=emit.State[]
+    let code:array<string>=[]
+    loop id in program.globals {
+        let declaration=hir.node_at(input.nodes id)
+        if declaration isnt? hir.Declare return Error[title='lowered global storage must be a declaration' srcfile=program.source]
+        scope.locals.add(declaration.name)
+    }
+    loop id in program.globals {code.push(emit.ast(id @scope input @state))}
+    loop function in program.functions {
+        let literal=hir.node_at(input.nodes function.literal)
+        if literal isnt? hir.FunctionLiteral return Error[title='lowered function unit must contain a function literal' srcfile=program.source]
+        code.push(emit.function_decl(function.symbol literal scope input @state))
+    }
+    if program.needs_startup {
+        let startup=emit.Scope[direct set[] program.source]
+        let lines=emit.statements(program.startup_items @startup input @state)
+        lines.push('return void')
+        code.push("let {program.startup_symbol} = ():>void => \{\n{emit.indent(lines.join('\n'))}\n}")
+        let main=entrypoint(program functions scope input @state)
+        if main is? Error return main
+        code.push(main)
+    } else if 'main' not in? functions {code.push(r'let main = ():>void => { return void }')}
+    if state.problem isnt? none return state.problem
+    let directives:array<string>=[]
+    loop [path name] in state.includes {directives.push("$include_bytes(p{emit.text_literal(path)}) as {name}")}
+    loop text in code {directives.push(text)}
+    return directives.join('\n')+'\n'
+}

@@ -114,7 +114,9 @@ def emit_hir(root, *, type_value=None, with_names=False):
         if isinstance(item, int):
             return str(item) if item >= 0 else f'({item})'
         if isinstance(item, str):
-            return json.dumps(item)
+            return json.dumps(item, ensure_ascii=False).replace('{', r'\{')
+        if isinstance(item, bytes):
+            return '[' + ' '.join(map(str, item)) + ']'
         if isinstance(item, Span):
             return 'span'
         if isinstance(item, hir.Param):
