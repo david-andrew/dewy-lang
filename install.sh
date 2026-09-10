@@ -46,7 +46,7 @@ fi
 
 source_dir="${temp_dir}/source"
 runtime_stage="${temp_dir}/runtime"
-for required_path in VERSION dewy/__main__.py udewy/__main__.py library/arrays.dewy library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/time.dewy library/doc.dewy library/unicode.dewy library/unicode/casefold.bin library/linux/io.dewy library/linux/files.dewy library/linux/process.dewy library/linux/system.dewy tools/dewy_lldb.py tools/dewy_gdb.py; do
+for required_path in VERSION dewy/__main__.py udewy/__main__.py library/arrays.dewy library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/time.dewy library/doc.dewy library/unicode.dewy library/unicode/casefold.bin library/unicode/runtime.dewy library/unicode/graphemes.dewy library/unicode/grapheme_break.bin library/unicode/indic_conjunct_break.bin library/unicode/extended_pictographic.bin library/linux/io.dewy library/linux/files.dewy library/linux/process.dewy library/linux/system.dewy tools/dewy_lldb.py tools/dewy_gdb.py; do
     if [ ! -f "${source_dir}/${required_path}" ]; then
         echo "Downloaded source archive is missing ${required_path}." >&2
         exit 1
@@ -87,26 +87,11 @@ copy_runtime_file "${source_dir}/VERSION"
 # the debugger scripts `dewy debug` loads into gdb / lldb (and an editor's launch configuration names)
 copy_runtime_file "${source_dir}/tools/dewy_lldb.py"
 copy_runtime_file "${source_dir}/tools/dewy_gdb.py"
-copy_runtime_file "${source_dir}/library/strings.dewy"
-copy_runtime_file "${source_dir}/library/arrays.dewy"
-copy_runtime_file "${source_dir}/library/path.dewy"
-copy_runtime_file "${source_dir}/library/math.dewy"
-copy_runtime_file "${source_dir}/library/rational.dewy"
-copy_runtime_file "${source_dir}/library/fixed.dewy"
-copy_runtime_file "${source_dir}/library/bigint.dewy"
-copy_runtime_file "${source_dir}/library/bigrational.dewy"
-copy_runtime_file "${source_dir}/library/io.dewy"
-copy_runtime_file "${source_dir}/library/reporting.dewy"
-copy_runtime_file "${source_dir}/library/testing.dewy"
-copy_runtime_file "${source_dir}/library/units.dewy"
-copy_runtime_file "${source_dir}/library/time.dewy"
-copy_runtime_file "${source_dir}/library/doc.dewy"
-copy_runtime_file "${source_dir}/library/unicode.dewy"
-copy_runtime_file "${source_dir}/library/unicode/casefold.bin"
-copy_runtime_file "${source_dir}/library/linux/io.dewy"
-copy_runtime_file "${source_dir}/library/linux/files.dewy"
-copy_runtime_file "${source_dir}/library/linux/process.dewy"
-copy_runtime_file "${source_dir}/library/linux/system.dewy"
+# Install the library dependency tree, including private Unicode modules and
+# generated tables, rather than maintaining another copy of the prelude list.
+while IFS= read -r -d '' source_file; do
+    copy_runtime_file "$source_file"
+done < <(find "${source_dir}/library" -type f \( -name '*.dewy' -o -name '*.bin' \) -print0)
 if [ -f "${source_dir}/assets/udewy_logo_128x128.png" ]; then
     copy_runtime_file "${source_dir}/assets/udewy_logo_128x128.png"
 fi

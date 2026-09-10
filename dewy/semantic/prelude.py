@@ -26,6 +26,7 @@ PORTABLE_LIBRARIES = (
     library / 'io.dewy',
     library / 'reporting.dewy',
     library / 'testing.dewy',
+    library / 'unicode/runtime.dewy',
     library / 'time.dewy',
     library / 'doc.dewy',
 )

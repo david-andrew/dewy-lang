@@ -16,26 +16,8 @@ REPO_ROOT = Path(__file__).parents[2]
 def _make_source_archive(path: Path) -> None:
     included = [
         REPO_ROOT / "VERSION",
-        REPO_ROOT / "library" / "strings.dewy",
-        REPO_ROOT / "library" / "arrays.dewy",
-        REPO_ROOT / "library" / "path.dewy",
-        REPO_ROOT / "library" / "math.dewy",
-        REPO_ROOT / "library" / "rational.dewy",
-        REPO_ROOT / "library" / "fixed.dewy",
-        REPO_ROOT / "library" / "bigint.dewy",
-        REPO_ROOT / "library" / "bigrational.dewy",
-        REPO_ROOT / "library" / "io.dewy",
-        REPO_ROOT / "library" / "reporting.dewy",
-        REPO_ROOT / "library" / "testing.dewy",
-        REPO_ROOT / "library" / "units.dewy",
-        REPO_ROOT / "library" / "time.dewy",
-        REPO_ROOT / "library" / "doc.dewy",
-        REPO_ROOT / "library" / "unicode.dewy",
-        REPO_ROOT / "library" / "unicode" / "casefold.bin",
-        REPO_ROOT / "library" / "linux" / "io.dewy",
-        REPO_ROOT / "library" / "linux" / "files.dewy",
-        REPO_ROOT / "library" / "linux" / "process.dewy",
-        REPO_ROOT / "library" / "linux" / "system.dewy",
+        *(REPO_ROOT / "library").rglob("*.dewy"),
+        *(REPO_ROOT / "library").rglob("*.bin"),
         REPO_ROOT / "tools" / "dewy_lldb.py",
         REPO_ROOT / "tools" / "dewy_gdb.py",
         REPO_ROOT / "assets" / "udewy_logo_128x128.png",
@@ -138,7 +120,8 @@ exec "$REAL_PYTHON" "$@"
     assert (runtime / "library" / "units.dewy").is_file()
     assert (runtime / "library" / "time.dewy").is_file()
     assert (runtime / "library" / "doc.dewy").is_file()
-    assert (runtime / "library" / "unicode" / "casefold.bin").is_file()
+    for name in ["casefold.bin", "runtime.dewy", "graphemes.dewy", "grapheme_break.bin", "indic_conjunct_break.bin", "extended_pictographic.bin"]:
+        assert (runtime / "library" / "unicode" / name).is_file()
     assert (runtime / "tools" / "dewy_lldb.py").is_file() and (runtime / "tools" / "dewy_gdb.py").is_file()
     assert (runtime / "library" / "linux" / "io.dewy").is_file()
     assert (runtime / "library" / "linux" / "files.dewy").is_file()

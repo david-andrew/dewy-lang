@@ -1,0 +1,7 @@
+# Shared segmentation for native string materialization. This late prelude
+# module follows reporting: the segmentation implementation uses checked
+# array accesses and ordinary runtime assertions for internal invariants.
+# UTF-8 validation and UAX #29 stay in library code over the same generated
+# Unicode tables as the hosted backend. Invalid input bytes yield none.
+import p"graphemes.dewy" as _graphemes
+let _utf8_boundaries = (bytes:array<uint8>):>array<int64>|none => _graphemes.boundaries(bytes)
