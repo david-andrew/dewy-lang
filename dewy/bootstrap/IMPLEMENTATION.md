@@ -43,6 +43,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   equivalent branch join retains the incoming union identity. Native source
   comparison covers ordinary/compound writes and rejection after storing none.
 
+- Hosted iterator bodies now isolate their new refinement, length and key
+  facts from the continuation after the loop. A final assignment in the body
+  does not describe an empty iteration or an earlier break/continue. Retaining
+  union assignment facts exposed this preexisting dictionary-sharing bug:
+  the seed incorrectly erased a literal-field proof path. The regression
+  executes all three exits, and 73 related control-flow checks pass.
+
 - The paired native build is executable through `tools/bootstrap_native.sh`.
   Native checks of the compiler's own semantic sources exposed optional-value
   interpolation and compound dictionary stores. Optional/union interpolation

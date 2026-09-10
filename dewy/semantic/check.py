@@ -5088,6 +5088,14 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             body_ast,
             ctx=replace(
                 body_ctx,
+                # Iterator scopes may share these dictionaries with their
+                # parent. A body assignment describes only that path, not
+                # an empty iteration, an earlier break, or a continue before
+                # the assignment. Incoming facts about writes were already
+                # invalidated above; keep new body facts inside the loop.
+                refinements=dict(body_ctx.refinements),
+                length_bounds=dict(body_ctx.length_bounds),
+                key_facts=dict(body_ctx.key_facts),
                 loop_boundaries=(*body_ctx.loop_boundaries, boundary),
             ),
         )
