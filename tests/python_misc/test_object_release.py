@@ -47,7 +47,7 @@ def test_a_copied_object_owns_its_copies_and_a_field_store_releases_the_old_stri
     assert re.search(r'__dewy_release_object_\d+\(two\)', body)
     assert re.search(r'__dewy_release_object_\d+\(one\)', body)
     # … and the store over `two.name` gives back the value it held first
-    assert re.search(r'let __dewy_string_old_field_\d+:int64 = __load_i64__\(two\)', body)
+    assert re.search(r'let __dewy_string_previous_field_\d+:int64 = __load_i64__\(two\)', body)
 
 
 def test_a_moved_out_array_forgets_its_elements_as_well_as_its_buffer() -> None:
@@ -74,7 +74,7 @@ def test_stores_through_nested_places_release_the_old_string_and_exact_arrays_re
         'let main = ():>int64 => round(1)\n'
     )
     body = _function(emitted, 'round')
-    assert len(re.findall(r'let __dewy_string_old_field_\d+:int64', body)) == 2      # o.inner.name, pts[0].name
+    assert len(re.findall(r'let __dewy_string_previous_field_\d+:int64', body)) == 2      # o.inner.name, pts[0].name
     assert len(re.findall(r'let __dewy_string_old_element_\d+:int64', body)) == 2    # o.tags[1], xs[0]
     # the exact-length arrays' elements are released with them: strings by owner word, the literal's element objects with their block
     assert len(re.findall(r'let __dewy_string_raw_element_\d+:int64', body)) == 3

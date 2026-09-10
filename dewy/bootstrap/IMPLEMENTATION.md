@@ -52,6 +52,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   35 place/string and 85 numeric/container regressions pass. Native rebuilding
   exposed a returned match-string alias freed with its cell; string escape
   classification now follows that owner and copies the returned payload.
+  The isolated non-bootstrap suite passed 1,695 tests with 23 skips; its four
+  failures were two field-temporary name assertions and two UTF-8 return/debug
+  lifetimes. All four pass in the subsequent 32-test focused run. Union string
+  copies now account for owner zero also describing frame storage. A moved
+  array result empties its source length before statement cleanup, preserving
+  transferred element handles; 21 ownership/move checks and the native
+  signature reconstruction probe pass.
 
 - Native module assembly retains dependency initialization order and binding
   identities, emits each loaded module once, and selects only the entry

@@ -695,7 +695,7 @@ class _OptionalLowering:
             if self._is_string_valued(member):
                 body = self._copy_string_element(
                     self._optional_load_payload(source, member, loc),
-                    self._optional_payload_address(dest, loc), member, loc,
+                    self._optional_payload_address(dest, loc), member, loc, may_be_frame=True,
                 )
             else:
                 body = self._union_aggregate_copy_into(
@@ -993,7 +993,7 @@ class _OptionalLowering:
             if self._is_string_valued(member) and self._has_arena():
                 body = self._copy_string_element(
                     self._optional_load_payload(source, member, loc),
-                    self._optional_payload_address(dest, loc), member, loc,
+                    self._optional_payload_address(dest, loc), member, loc, may_be_frame=True,
                 )
             elif self._union_member_kind(member, prepared=prepared) != 'word':
                 body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc)

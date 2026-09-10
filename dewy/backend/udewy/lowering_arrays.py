@@ -2350,6 +2350,12 @@ class _ArrayLowering:
             ),
             copy_loop,
         ]
+        if move:
+            # The copied handles now belong to the destination. A tracked
+            # call-result temporary still releases its original buffer and
+            # descriptor after this statement, but must not free the moved
+            # elements a second time.
+            statements.append(self._store_i64_field(source, ARRAY_LENGTH_OFFSET, self._int64_literal(node.loc, 0), node.loc))
         return statements, target
 
     def _extract_array_literal(
@@ -2662,12 +2668,20 @@ class _ArrayLowering:
             self._array_store(copied, target_address, element_type, loc),
         ]
 
-    def _copy_string_element(self, source_value: hir.AST, target_address: hir.AST, element_type: ty.Type, loc: Span) -> list[hir.AST]:
+    def _copy_string_element(self, source_value: hir.AST, target_address: hir.AST, element_type: ty.Type, loc: Span, *, may_be_frame: bool = False) -> list[hir.AST]:
         name = self._new_string_temp(loc, 'int64', 'element_copy').name
         element = hir.ExpressedIdentifier(loc, 'int64', name)
         self.string_clone_needed = True   # `__dewy_string_clone` is synthesized once per program
         clone_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
         cloned = hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, clone_type, self.STRING_CLONE_SYMBOL), [element], {})
+        if may_be_frame:
+            # Owner zero includes frame-backed strings, not just static ones.
+            # A union can hold a fresh decode before any escaping store has
+            # established the stricter array-element lifetime contract.
+            return [
+                hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(source_value, type='int64')),
+                self._array_store(cloned, target_address, element_type, loc),
+            ]
         owned = self._typed_equality(self._load_i64_field(element, STRING_OWNER_OFFSET, loc), self._int64_literal(loc, 0), 'int64', loc)
         return [
             hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(source_value, type='int64') if isinstance(source_value, hir.ExpressedIdentifier) else source_value),

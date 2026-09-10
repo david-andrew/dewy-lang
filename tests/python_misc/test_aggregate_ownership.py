@@ -208,3 +208,25 @@ let main=():>int64=>{
 '''
     cursors = run(source, tmp_path).splitlines()
     assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_array_call_result_transfers_elements_before_temporary_cleanup(tmp_path):
+    source = '''
+Param:type=const [name:string? value:addr required:bool=true place:bool=false]
+Shape:type=[args:array<Param>]
+let parameters=(shape:Shape):>array<Param>=>{let result=shape.args return result}
+let main=():>int64=>{
+    let shape=Shape[[Param["x" 0]]]
+    loop i in 0..20 {
+        shape.args=parameters(shape)
+        $runtime_assert shape.args.length =? 1
+        let first=shape.args[0]
+        $runtime_assert first.name isnt? none
+        $runtime_assert first.name =? "x"
+        printl(_arena_cursor)
+    }
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(set(cursors[2:])) == 1, cursors
