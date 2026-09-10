@@ -130,8 +130,8 @@ nodes for later phases to interpret.
 
 ## Validation
 
-The latest full suite passed with **1807 passed, 10 skipped**. See
-[IMPLEMENTATION.md](IMPLEMENTATION.md) for changes verified since that run.
+See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the latest full-suite and
+focused native verification results.
 Native semantic tests compare type algebra, dispatch, bindings, minting,
 parameter effects, source-order initialization, intervals, and relational
 fact states, shared type queries, source type rendering, generic alias

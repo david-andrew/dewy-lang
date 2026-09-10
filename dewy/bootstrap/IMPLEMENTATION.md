@@ -25,14 +25,35 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- Native scalar legalization now executes 23 source programs through native
-  parsing/checking/lowering/emission and µDewy. It includes function values,
-  callee-evaluated defaults, keyword argument ordering, direct intrinsics,
-  conditional expression extraction, short circuits, and repeated loop-call
-  conditions. Loop fallbacks retain the zero-iteration rule. Type aliases,
-  global startup, forward calls, local shadowing, and narrow word operations
-  remain covered. This test intentionally enters below the full proof driver;
-  it is not a public unchecked compilation route.
+- Native legalization executes 42 source programs through native checking,
+  lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
+  handles scalar arrays with independent declaration/assignment copies,
+  keyword-ordered argument copies, callee defaults, arena-backed returns and
+  globals, and push/pop/insert/reserve/truncate/clear. The allocator is the
+  existing prelude implementation, selected by binding identity. A separate
+  stress case verifies growth through 100 byte elements. Aggregate elements,
+  frame/arena lifetime optimization and release insertion remain pending.
+  These tests enter below the full proof driver; they are not a public
+  unchecked compilation route.
+
+- Native layout queries match the hosted layouts for primitive and nested
+  fields, scalar/handle array strides, inline union cells, and brand storage
+  through parent and structural views. Descriptors use typed byte offsets.
+  Record lowering is being tested against those layouts.
+
+- Contextual function expectations now supply unannotated lambda parameter
+  types before checking their bodies, including array sort keys. Explicit
+  annotations retain their meaning. Five accepted and two rejected native
+  cases agree with the hosted checker. Inherited bare record defaults retain
+  the earlier field contract while preserving literal identity for the
+  compatibility check; scalar field predicates are still checked at use.
+  Physical type products and rational part types also resolve natively.
+
+- Profiling found whole-source token copies in declaration and member reads.
+  Scoped read helpers removed those copies from the expression/type visitors;
+  the source type comparison passes, and the same full-prelude diagnostic
+  went from approximately 499 seconds to 297 seconds. Full-prelude checking
+  beyond that contextual-lambda gap is in progress.
 
 - BigInt aliases and annotated numeric boundaries use the prelude's own type.
   Exact constants materialize into canonical base-2^32 limbs; signed and
