@@ -699,8 +699,11 @@ predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):
     return binding_id
 }
 
-generic_alias = (parameters:parser.Block body:addr context:contexts.Context @session:contexts.Session):>types.GenericTypeAlias|Error => {
-    if parameters.inner.length =? 0 return contexts.problem(body 'generic type alias requires at least one parameter' 'this parameter list is empty' context session)
+GenericParameters:type = const [params:array<types.GenericParam> context:contexts.Context]
+
+# Type aliases and function literals use the same sequential parameter scope:
+# a later bound may mention an earlier parameter, never a caller's shadow.
+generic_parameters = (parameters:parser.Block context:contexts.Context @session:contexts.Session):>GenericParameters|Error => {
     let source = contexts.source_at(context session)
     let inner = contexts.child(context @session)
     let params:array<types.GenericParam> = []
@@ -725,9 +728,16 @@ generic_alias = (parameters:parser.Block body:addr context:contexts.Context @ses
         session.registry.by_id[binding_id] = binding
         bindings.bind(@session.scopes inner.scope name binding_id)
     }
-    let resolved = resolve(body inner @session)
+    return GenericParameters[params inner]
+}
+
+generic_alias = (parameters:parser.Block body:addr context:contexts.Context @session:contexts.Session):>types.GenericTypeAlias|Error => {
+    if parameters.inner.length =? 0 return contexts.problem(body 'generic type alias requires at least one parameter' 'this parameter list is empty' context session)
+    let declared = generic_parameters(parameters context @session)
+    if declared is? Error return declared
+    let resolved = resolve(body declared.context @session)
     if resolved is? Error return resolved
-    return types.GenericTypeAlias[params resolved]
+    return types.GenericTypeAlias[declared.params resolved]
 }
 
 contains_named = (id:addr nodes:array<types.Type>):>bool => {

@@ -152,7 +152,17 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let system = dispatch.System[session.links builtins.promotions]
     let matched = dispatch.match_best_function(methods pos_types kw_types expected system @session.types)
     if matched is? dispatch.DispatchError return problem(id 'no matching function' matched.message env session)
+    let callee = function
     let method = dispatch.method_at(session.types matched.method)
+    if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and shape is? types.FunctionType and shape.type_params.length >? 0 {
+        let instance = instantiate_call(func shape pos_types kw_types expected id env @session)
+        if instance is? Error return instance
+        if instance isnt? none {
+            callee = instance
+            method = dispatch.method_at(session.types node_at(instance session).value_type)
+        }
+        else { callee = put(hir.ExpressedIdentifier[func.loc matched.method func.name func.binding_id] @session) }
+    }
     let args:array<addr> = []
     let places:array<addr> = []
     loop i in 0.. and i <? positional.length {
@@ -179,12 +189,6 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     }
     let selected:addr? = if shape is? types.OverloadType matched.method_index else none
     let source = contexts.node_at(id env.lexical session)
-    # Generic builtins specialize their signature here. User generic bodies
-    # need instantiation and must not be emitted as unresolved generic calls.
-    let callee = function
-    if func is? hir.ExpressedIdentifier and shape is? types.FunctionType and shape.type_params.length >? 0 {
-        callee = put(hir.ExpressedIdentifier[func.loc matched.method func.name func.binding_id] @session)
-    }
     if func is? hir.DictMethod {
         let result = container_call(func args kwargs id env @session)
         if result is? Error return result
@@ -508,7 +512,8 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         set_read_type(existing node_at(value session).value_type env @session)
         return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' value] @session)
     }
-    let value = expression(node.right env @session expected=annotation)
+    let rhs = tokens.node_at(source.nodes node.right)
+    let value = if rhs is? parser.BinOp and syntax.is_operator(rhs.op '=>' source.nodes) function_literal(node.right rhs env @session name=name) else expression(node.right env @session expected=annotation)
     if value is? Error return value
     if annotation is? none and not constant { value = widen(value node.right env @session) }
     if value is? Error return value
@@ -526,7 +531,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     container_state.seed_fields(binding_id value env.state @session)
     let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id] @session)
     binding.declaration = declared
-    if checked is? hir.FunctionLiteral { binding.function = value }
+    if checked is? hir.FunctionLiteral | hir.GenericFunction { binding.function = value binding.kind = 'function' }
     session.registry.by_id[binding_id] = binding
     return declared
 }
@@ -561,6 +566,21 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
     return put(hir.Block[node.loc result items scoped] @session)
 }
 
+# Keep hoisted instances with the module that first requested them. Nested
+# instantiations append their callees first; the original result type is not
+# changed by the added void declarations.
+module = (id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let first = session.hoisted.length
+    let checked = block(id env @session)
+    if checked is? Error return checked
+    let root = node_at(checked session)
+    $runtime_assert root is? hir.Block
+    let items = root.items
+    let i = first
+    loop i <? session.hoisted.length { items.push(session.hoisted[i]) i += 1 }
+    return put(hir.Block[root.loc root.value_type items root.scoped] @session)
+}
+
 read_type = (id:addr env:Environment session:contexts.Session):>addr? => {
     $runtime_assert env.state <? session.read_states.length
     let state = session.read_states[env.state]
@@ -584,19 +604,47 @@ fork = (env:Environment @session:contexts.Session):>Environment => {
 # Annotated functions reserve their signature before any body in the block
 # is checked. Initialization analysis, not name resolution, decides whether
 # an eager call reaches a declaration before its value has been initialized.
-function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session):>addr|Error => {
+function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let signature = tokens.node_at(source.nodes literal.left)
-    if signature isnt? parser.BinOp or not syntax.is_operator(signature.op ':>' source.nodes) return pending(literal.left 'inferring a function result type' env session)
-    let args = declarations.function_args(signature.left env.lexical @session)
+    if signature isnt? parser.BinOp or not syntax.is_operator(signature.op ':>' source.nodes) {
+        if signature is? parser.BinOp and syntax.is_operator(signature.op 'TypeParamJuxtapose' source.nodes) return problem(literal.left 'a generic function needs a declared result type' 'annotate the result with `:>T`' env session)
+        return pending(literal.left 'inferring a function result type' env session)
+    }
+    let lexical = env.lexical
+    let parameter_id = signature.left
+    let generic:array<types.GenericParam> = []
+    let prefix = tokens.node_at(source.nodes parameter_id)
+    if prefix is? parser.BinOp and syntax.is_operator(prefix.op 'TypeParamJuxtapose' source.nodes) {
+        let parameters = tokens.node_at(source.nodes prefix.left)
+        if parameters isnt? parser.Block or parameters.delims not=? '<>' return problem(prefix.left 'invalid generic parameters' 'expected a type-parameter block' env session)
+        if parameters.inner.length =? 0 return problem(prefix.left 'a generic function needs at least one type parameter' 'this parameter list is empty' env session)
+        parameter_id = prefix.right
+        if not concrete {
+            let declared = declarations.generic_parameters(parameters lexical @session)
+            if declared is? Error return declared
+            lexical = declared.context generic = declared.params
+        }
+        # Generic signatures need declared parameter types; an implicit any
+        # would hide the connection between arguments and type parameters.
+        let arguments = tokens.node_at(source.nodes parameter_id)
+        let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
+        loop item in rows {
+            let row = tokens.node_at(source.nodes item)
+            if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) { row = tokens.node_at(source.nodes row.left) }
+            if row is? parser.Prefix and syntax.is_operator(row.op '@' source.nodes) { row = tokens.node_at(source.nodes row.item) }
+            if row isnt? parser.BinOp or not syntax.is_operator(row.op ':' source.nodes) return problem(item 'a generic function needs every parameter type declared' 'annotate this parameter' env session)
+        }
+    }
+    let args = declarations.function_args(parameter_id lexical @session)
     if args is? Error return args
     let parameters:array<types.PosOrKwArg> = []
     loop arg in args {
         parameters.push(types.PosOrKwArg[arg.name declarations.word_element(arg.value_type @session) arg.required arg.place])
     }
-    let result = declarations.function_result(signature.right env.lexical @session)
+    let result = declarations.function_result(signature.right lexical @session)
     if result is? Error return result
-    return types.function_type(parameters [] none declarations.word_element(result @session) [] @session.types)
+    return types.function_type(parameters [] none declarations.word_element(result @session) generic @session.types)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
     let source = contexts.source_at(env.lexical session)
@@ -619,22 +667,34 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     let binding_id = bindings.allocate(@session.registry reference name 'function' node.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = shape binding.store_type = shape
+    let signature_type = dispatch.method_at(session.types shape)
+    if signature_type.type_params.length >? 0 {
+        let literal_ref = contexts.syntax_ref(node.right env.lexical @session)
+        binding.function = put(hir.GenericFunction[literal.loc shape name hir.GenericSource[literal_ref env.state signature_type.type_params]] @session)
+    }
     session.registry.by_id[binding_id] = binding
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     return none
 }
-function_literal = (id:addr literal:parser.BinOp env:Environment @session:contexts.Session):>addr|Error => {
-    let resolved = function_shape(literal env @session)
+function_literal = (id:addr literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false name:string='<anonymous>'):>addr|Error => {
+    let resolved = function_shape(literal env @session concrete=concrete)
     if resolved is? Error return resolved
     let shape = dispatch.method_at(session.types resolved)
+    if shape.type_params.length >? 0 {
+        let reference = contexts.syntax_ref(id env.lexical @session)
+        return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
+    }
     let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state shape.ret]
     container_state.set_facts(inner.state container_state.inherited(env.state session) @session)
     let parameters:array<hir.Param> = []
     let source = contexts.source_at(env.lexical session)
     let signature = tokens.node_at(source.nodes literal.left)
     $runtime_assert signature is? parser.BinOp
-    let arguments = tokens.node_at(source.nodes signature.left)
-    let rows:array<addr> = if arguments is? parser.Block arguments.inner else [signature.left]
+    let parameter_id = signature.left
+    let prefix = tokens.node_at(source.nodes parameter_id)
+    if prefix is? parser.BinOp and syntax.is_operator(prefix.op 'TypeParamJuxtapose' source.nodes) { parameter_id = prefix.right }
+    let arguments = tokens.node_at(source.nodes parameter_id)
+    let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
     let position:addr = 0
     loop param in shape.pos_or_kw {
         $runtime_assert param.name isnt? none
@@ -1807,4 +1867,84 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
         return put(hir.StringConcat[loc types.string_type(none @session.types) left right] @session)
     }
     return none
+}
+
+# A generic's checked signature participates in normal dispatch, but its body
+# belongs to the defining source/scope. Call-site names only determine actual
+# types; they must not change how names inside that body resolve.
+instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType positional:array<addr> keyword:dict<string addr> expected:addr? id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    if callee.binding_id is? none return none
+    let original = bindings.binding_at(session.registry callee.binding_id)
+    if original.function is? none return none
+    let generic = node_at(original.function session)
+    if generic isnt? hir.GenericFunction return none
+    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[session.links builtins.promotions] @session.types)
+    if inference is? none return problem(id 'cannot infer generic type parameters' 'the arguments do not determine every type parameter' env session)
+    let arguments:dict<string addr> = []
+    loop param in generic.source.params {
+        let inferred = inference.bindings.get(param.name)
+        $runtime_assert inferred isnt? none
+        let type = types.node_at(session.types inferred)
+        let concrete = inferred
+        if type is? types.IntegerLiteralType or types.is_primitive(type 'int') {
+            concrete = types.primitive('int64' @session.types)
+            if type is? types.IntegerLiteralType and not subtyping.is_subtype(inferred concrete session.links @session.types) return pending(id 'a bigint generic type argument' env session)
+        }
+        else if type is? types.StringLiteralType | types.StringType { concrete = types.primitive('string' @session.types) }
+        else if type is? types.BinaryLiteralType { concrete = types.array_type(types.primitive('uint8' @session.types) type.value.length @session.types) }
+        # Refinements nested inside containers are invariant storage contracts,
+        # not scalar read facts. Inference retains them; do not erase them here.
+        arguments[param.name] = concrete
+    }
+    let cached:addr? = none
+    loop [binding_id instance] in session.registry.generic_instances {
+        if instance.generic not=? callee.binding_id continue
+        let matches = true
+        loop [name actual] in arguments {
+            let prior = instance.type_arguments.get(name)
+            # Type arena identity retains defaults/method source. Structural
+            # equality is sufficient for assignment, not for checking a body.
+            if prior is? none or prior not=? actual { matches = false break }
+        }
+        if matches { cached = binding_id break }
+    }
+    if cached isnt? none {
+        let binding = bindings.binding_at(session.registry cached)
+        $runtime_assert binding.value_type isnt? none
+        return put(hir.ExpressedIdentifier[callee.loc binding.value_type binding.name binding.id] @session)
+    }
+    let source = generic.source
+    $runtime_assert source.literal <? session.syntax_refs.length
+    let reference = session.syntax_refs[source.literal]
+    let lexical = contexts.child(contexts.Context[reference.source reference.scope] @session)
+    loop [name actual] in arguments {
+        let parameter_id = bindings.allocate_param(@session.registry name types.primitive('type' @session.types) generic.loc)
+        let parameter = bindings.binding_at(session.registry parameter_id)
+        parameter.type_value = actual
+        session.registry.by_id[parameter_id] = parameter
+        bindings.bind(@session.scopes lexical.scope name parameter_id)
+    }
+    let resolved = types.substitute_function(signature arguments true @session.types)
+    let name = "{generic.name}__instance_{session.registry.next_id}"
+    let binding_id = bindings.allocate(@session.registry none name 'function' generic.loc)
+    let binding = bindings.binding_at(session.registry binding_id)
+    binding.value_type = resolved binding.store_type = resolved
+    session.registry.by_id[binding_id] = binding
+    # Register before checking: a recursive call with these same types must
+    # refer to this declaration, rather than instantiate another body.
+    session.registry.generic_instances[binding_id] = bindings.GenericInstance[callee.binding_id arguments contexts.syntax_ref(id env.lexical @session)]
+    let literal = contexts.node_at(reference.node lexical session)
+    $runtime_assert literal is? parser.BinOp
+    let defining = Environment[lexical source.context]
+    let value = function_literal(reference.node literal defining @session concrete=true name=name)
+    if value is? Error {
+        if binding_id in? session.registry.generic_instances { session.registry.generic_instances.pop(binding_id); }
+        return value
+    }
+    let declared = put(hir.Declare[generic.loc types.primitive('void' @session.types) 'let' name none value binding_id] @session)
+    binding = bindings.binding_at(session.registry binding_id)
+    binding.declaration = declared binding.function = value
+    session.registry.by_id[binding_id] = binding
+    session.hoisted.push(declared)
+    return put(hir.ExpressedIdentifier[callee.loc resolved name binding_id] @session)
 }

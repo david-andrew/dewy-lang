@@ -36,6 +36,8 @@ Session:type = [
     syntax_refs:array<SyntaxRef>=[]
     types:array<types.Type>=[]
     hir:array<hir.AST>=[]
+    # Concrete generic bodies are module-level declarations, emitted once.
+    hoisted:array<addr>=[]
     registry:bindings.Registry=bindings.Registry[]
     scopes:array<bindings.Scope>=[]
     brands:brands.Registry=brands.Registry[]

@@ -30,7 +30,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   refinement obligations, typed and forward-declared functions, returns,
   conditional expressions, and type-test narrowing. Branch read alternatives
   are separate from declared store contracts. Its first comparison covers
-  112 source programs and 57 invalid programs. Short-circuit boolean HIR,
+  126 source programs and 64 invalid programs. Short-circuit boolean HIR,
   record construction and lexical defaults, member reads/stores, function
   defaults, and enclosing-scope assignments now share this visitor. Known
   sequence lengths remain singleton types. Place arguments preserve storage
@@ -65,8 +65,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   and string equality/concatenation retain their specialized HIR operations
   and literal folding. Membership survives view compaction while cached entry
   positions expire, including across short-circuit guards and const captures.
-  Runtime set conversion and
-  generic library calls remain separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
+  Generic functions share the type-alias parameter scope and ordinary call
+  inference. Concrete bodies resolve in their defining source, cache by full
+  type identity (including defaults/methods), and register before body checking
+  so recursion reuses the same instance. Hoisted bodies remain with the module
+  that first requested them; native namespaces export source declarations.
+  Comparisons include instance counts/signatures, bounds, recursion, nested
+  instantiation, lexical shadowing, and invariant refined array elements.
+  Runtime set conversion and automatic library installation remain separate work. `key_facts.dewy`, `container_state.dewy`, `container_values.dewy`,
   and `container_methods.dewy` keep those transfers outside the source visitor.
   This is an intermediate HIR entry point, not yet a
   compiler driver: the remaining value forms, proof validation,
@@ -337,13 +343,15 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The committed container checkpoint (`9dd54e51`) passed **1,859 tests,
+The committed initialization checkpoint (`0e5863b9`) passed **1,864 tests,
 23 skipped** in a fresh checkout. Thirteen skips were SDL tests whose generated
 artifacts were absent from that checkout; all thirteen passed separately in
 the main workspace, leaving the usual ten unavailable-toolchain skips.
-Container iteration then passed its expanded native comparison (100 valid
-programs and 53 rejected programs), and the const-container capture regression
-passes after discarding cached positions across function boundaries.
+The generic source visitor also matches the 126-program comparison; its 64
+rejection cases pass through the native module loader. Imported generic
+instances preserve their original lexical bindings. The subsequent indexed
+store borrow fix passes 33 focused tests, including native execution showing
+that an explicit copy can change its array without changing the borrowed one.
 
 
 The full suite passed with **1,837 passed, 10 skipped** after the source type

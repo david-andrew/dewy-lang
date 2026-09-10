@@ -16,6 +16,21 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'let identity=<T>(value:T):>T=>value\nidentity(7)',
+    "let identity=<T>(value:T):>T=>value\nidentity('hi')",
+    'let identity=<T>(value:T):>T=>value\nidentity(7); identity(8)',
+    'let identity=<T>(value:T):>T=>value\nidentity(7); identity(true)',
+    'let last=<T>(a:T b:T):>T=>b\nlast(1 2)',
+    'let identity=<T of int>(value:T):>T=>value\nidentity(7)',
+    'let identity=<T>(value:T):>T=>value\nlet f=(x:bool):>bool=>identity(x)\nf(true)',
+    'let outer=<T>(x:T):>T=>inner(x)\nlet inner=<U>(x:U):>U=>x\nouter(4)',
+    'let repeat=<T>(x:T n:int64):>T=>if n >? 0 repeat(x n-1) else x\nrepeat(7 2)',
+    'let identity=<T>(value:T):>T=>value\nlet a=[1 2]\nidentity(a)',
+    'let size=<T>(values:array<T>):>addr=>values.length\nsize([1 2])',
+    'let identity=<T>(value:T):>T=>value\nlet f=(T:string):>int64=>identity(7)\nf("shadow")',
+    'let seed:int64=9\nlet choose=<T>(x:T count:int64=seed):>T=>x\nchoose(7)',
+    'let use=<T>(x:array<T>):>void=>{x.push(1)}\nlet a:array<addr>=[0]\nuse(a)',
+
     'set[1 2] | set[2 3]',
     'set[1 2] and set[2 3]',
     'set[1 2] - set[2]',
@@ -129,6 +144,14 @@ CASES = [
 
 
 ERROR_CASES = [
+    'let identity=<T T>(value:T):>T=>value',
+    'let identity=<T>(value)=>value\nidentity(7)',
+    'let identity=<T>(value):>T=>value\nidentity(7)',
+    'let identity=<T of int>(value:T):>T=>value\nidentity("hi")',
+    'let broken=<T>(value:T):>T=>true\nbroken(7)',
+    'let need=<T U>(value:T):>T=>value\nneed(7)',
+    'let bad=<T>(x:array<T>):>void=>{x.push("bad")}\nlet a=[1 2]\nbad(a)',
+
     "set[1] | set['a']",
     "['a' -> 1] & ['b' -> 2]",
     "set[1] | ['a' -> 1]",
@@ -227,8 +250,8 @@ def test_native_source_values(tmp_path):
     expected = []
     for text in CASES:
         ty.reset_program_brands()
-        module, _ = check._typecheck_module(SrcFile(None, text))
-        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module))
+        module, context = check._typecheck_module(SrcFile(None, text))
+        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module) + "|instances:" + ",".join(type_to_dewy(item.expr.type) for item in context.generic_instances))
     for text in ERROR_CASES:
         ty.reset_program_brands()
         with pytest.raises((check.UserError, check.TypeCheckError, check.NotImplementedYet)):
@@ -277,10 +300,16 @@ main = ():>int64 => {{
         let session = contexts.Session[]
         let lexical = contexts.begin(source parsed.nodes @session)
         let environment = checking.begin(lexical @session)
-        let module = checking.block(parsed.root environment @session)
+        let module = checking.module(parsed.root environment @session)
         if module is? Error {{ module.fail failures += 1 continue }}
         let node = checking.node_at(module session)
-        printl("{{display.type_to_dewy(node.value_type session.types)}}|{{loop_summary(module session)}}")
+        let instances:array<string>=[]
+        loop item in session.hoisted {{
+            let declared=checking.node_at(item session)
+            $runtime_assert declared is? hir.Declare
+            instances.push(display.type_to_dewy(checking.node_at(declared.expr session).value_type session.types))
+        }}
+        printl("{{display.type_to_dewy(node.value_type session.types)}}|{{loop_summary(module session)}}|instances:{{instances.join(',')}}")
     }}
     let invalid:array<string> = [{errors}]
     loop text in invalid {{
@@ -290,7 +319,7 @@ main = ():>int64 => {{
         let session = contexts.Session[]
         let lexical = contexts.begin(source parsed.nodes @session)
         let environment = checking.begin(lexical @session)
-        let result = checking.block(parsed.root environment @session)
+        let result = checking.module(parsed.root environment @session)
         $runtime_assert result is? Error
         $runtime_assert result.title not=? 'native checker implementation pending'
         $runtime_assert result.pointers.length >? 0 and result.pointers[0].message.length >? 0

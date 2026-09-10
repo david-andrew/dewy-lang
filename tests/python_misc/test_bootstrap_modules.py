@@ -21,6 +21,8 @@ def test_native_module_graph_and_namespace_bindings(tmp_path):
 Number:type=type of [value:int64]
 let answer:int64=41
 let plus=(x:Number):>int64 => x.value+1
+let identity=<T>(x:T):>T=>x
+let answer_for=<T>(unused:T):>int64=>answer
 ''')
     entry = tmp_path / 'entry.dewy'
     entry.write_text('''$no_prelude
@@ -29,10 +31,17 @@ import p"./base.dewy" as base
 let n:base.Number=base.Number[value=base.answer]
 let result:int64=plus(n)
 let local=(base:[answer:int64]):>int64 => base.answer
+let same=base.identity(7)
+let same_again=base.identity(8)
+let name=base.identity("text")
+let shadow=(answer:string):>int64=>base.answer_for(answer)
+let original=shadow("caller")
 ''')
     ty.reset_program_brands()
     hosted = ModuleCompiler(SrcFile.from_path(entry)).load(entry, entry=True)
-    expected = [f'{name}:{type_to_dewy(binding.type)}' for name, binding in hosted.exports.items()]
+    # Hosted exports include generated instance names. The native graph keeps
+    # those in its hoisted declarations; compare the source-facing exports.
+    expected = [f'{name}:{type_to_dewy(binding.type)}' for name, binding in hosted.exports.items() if binding.generic_instance is None]
     missing = tmp_path / 'missing.dewy'
     missing.write_text('$no_prelude\nfrom p"base.dewy" import Missing\n')
     cycle_a, cycle_b = tmp_path / 'cycle_a.dewy', tmp_path / 'cycle_b.dewy'
@@ -48,6 +57,8 @@ main = ():>int64 => {{
     let entry=modules.load({json.dumps(str(entry))} @engine)
     if entry is? Error {{ entry.fail return 1 }}
     $runtime_assert engine.modules.length =? 2
+    $runtime_assert engine.session.registry.generic_instances.length =? 3
+    $runtime_assert engine.session.hoisted.length =? 3
     let root=modules.module_at(entry engine)
     loop [name binding_id] in root.exports {{
         let binding=bindings.binding_at(engine.session.registry binding_id)

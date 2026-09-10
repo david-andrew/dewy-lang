@@ -181,14 +181,14 @@ load_source = (path:string @engine:Engine):>addr|Error => {
         let error = install(spec module statement env @engine)
         if error isnt? none return error
     }
-    let checked = checking.block(root_id env @engine.session)
+    let checked = checking.module(root_id env @engine.session)
     if checked is? Error return checked
     let block = hir.node_at(engine.session.hir checked)
     $runtime_assert block is? hir.Block
     let exports:dict<string addr> = []
     loop item in block.items {
         let declaration = hir.node_at(engine.session.hir item)
-        if declaration is? hir.Declare and declaration.binding_id isnt? none { exports[declaration.name] = declaration.binding_id }
+        if declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id not in? engine.session.registry.generic_instances { exports[declaration.name] = declaration.binding_id }
     }
     let index = engine.modules.length
     engine.modules.push(Module[path env.lexical checked exports no_prelude])
