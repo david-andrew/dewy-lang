@@ -461,6 +461,43 @@ let main=():>int64=>{{
     assert len(set(cursors[2:])) == 1, cursors
 
 
+def test_discarded_base_record_type_test_releases_dynamic_child_fields(tmp_path):
+    source = '''
+Node:type=type of [key:string shape:string|none]
+Child:type=type of Node & [parts:array<array<string>>]
+Other:type=type of Node & [value:int64]
+let calls:int64=0
+let read=(nodes:array<Node>):>Node=>{
+    calls+=1
+    if nodes.length >? 0 {return nodes[0]}
+    return Node["" none]
+}
+let exercise=(nodes:array<Node>):>void=>{
+    let before=calls
+    $runtime_assert read(nodes) is? Child
+    $runtime_assert read(nodes) isnt? Other
+    $runtime_assert read(nodes) is? Child|Other
+    $runtime_assert calls=?before+3
+}
+let main=():>int64=>{
+    let nodes:array<Node>=[Child["key" "shape" [["payload"]]]]
+    exercise(nodes); exercise(nodes);
+    loop i in 0..12 {exercise(nodes); printl(_arena_cursor)}
+    let original=read(nodes)
+    $runtime_assert original is? Child and original.key=?"key" and original.shape=?"shape"
+    let parts=original.parts
+    $runtime_assert parts.length >? 0
+    let words=parts[0]
+    $runtime_assert words.length >? 0
+    $runtime_assert words[0]=?"payload"
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('array', [False, True])
 def test_optional_call_binding_takes_ownership_without_abandoning_payload(array, tmp_path):
     result_type = 'array<string>' if array else 'Box'
