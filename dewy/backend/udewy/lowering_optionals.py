@@ -194,38 +194,19 @@ class _OptionalLowering:
         cell: hir.AST,
         payload: ty.TypeExpr,
     ) -> tuple[list[hir.AST], hir.Flow]:
-        prelude: list[hir.AST] = []
-        arms: list[hir.IfArm | hir.LoopArm] = []
-        for index, arm in enumerate(node.arms):
-            condition_prelude, condition = self._prepare_condition(arm.condition)
-            if condition_prelude:
-                if isinstance(arm, hir.LoopArm) or index > 0:
-                    self._target_error(
-                        arm.condition,
-                        'optional flow condition requiring extracted statements',
-                    )
-                prelude.extend(condition_prelude)
-            arms.append(
-                replace(
-                    arm,
-                    condition=condition,
-                    body=self._optional_flow_body(
-                        arm.body,
-                        cell,
-                        payload,
-                    ),
-                )
-            )
-        default = (
-            self._optional_flow_body(node.default, cell, payload)
-            if node.default is not None
-            else None
-        )
-        return prelude, replace(
-            node,
-            type=ty.VOID_TYPE,
-            arms=arms,
-            default=default,
+        def lower_body(body: hir.AST) -> hir.AST:
+            return self._optional_flow_body(body, cell, payload)
+
+        def lower_loop(arm: hir.LoopArm, entry: LoopRegion, extracted: bool) -> hir.AST:
+            if extracted:
+                self._target_error(arm.condition, 'optional flow condition requiring extracted statements')
+            return lower_body(arm.body)
+
+        # Optional storage changes the branch result, not when its tests run.
+        # Share scalar/union sequencing so a later condition's extracted work
+        # and string temporaries stay inside the preceding arm's failure path.
+        return self._lower_flow_chain(
+            node, lower_body=lower_body, lower_loop=lower_loop, result_type=ty.VOID_TYPE,
         )
 
     def _optional_flow_body(
