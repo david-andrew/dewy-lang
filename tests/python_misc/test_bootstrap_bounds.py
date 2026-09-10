@@ -16,6 +16,12 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'Inner:type=[raw:int64]\nOuter:type=[part:Inner<raw not=? 0>]\nlet keep=(x:Outer):>Outer=>[part=x.part]',
+
+    'Inner:type=[sign:int64]\nOuter:type=[part:Inner<sign =? 1>]\nlet keep=(x:Outer):>Outer=>[part=x.part]',
+    'Inner:type=[sign:int64]\nOuter:type=[part:Inner]\nlet keep=(x:Outer):>Inner<sign =? 1>=>x.part',
+    'Inner:type=[sign:int64]\nOuter:type=[part:Inner<sign =? 1>]\nlet bad=(x:Outer):>Inner<sign =? 2>=>x.part',
+
     'Box:type=[raw:int64]\nlet accept=(box:Box<raw not=? 0>):>int64=>box.raw\nlet f=(box:Box):>int64=>if box.raw not=? 0 accept(box) else 0',
     'Box:type=[raw:int64]\nlet accept=(box:Box<raw not=? 0>):>int64=>box.raw\nlet f=(box:Box):>int64=>{if box.raw not=? 0 {box.raw=0 return accept(box)} return 0}',
 

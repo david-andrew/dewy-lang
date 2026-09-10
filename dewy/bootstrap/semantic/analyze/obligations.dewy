@@ -26,7 +26,7 @@ the field's storage route and declared contract. This avoids manufacturing
 new expression nodes merely to ask a question about an existing value.
 """
 
-Subject:type = const [expression:addr? interval:ranges.Interval? term:facts.Term?]
+Subject:type = const [expression:addr? interval:ranges.Interval? term:facts.Term? excludes_zero:bool=false]
 direct = (id:addr projection:propositions.Projection state:facts.State data:predicates.Data):>Subject => {
     if projection =? 'value' {
         let value=predicates.operand(id state data)
@@ -39,6 +39,22 @@ direct = (id:addr projection:propositions.Projection state:facts.State data:pred
     return Subject[id interval term]
 }
 
+# Carry enclosing field promises down a route without manufacturing HIR.
+# For example `.denominator.sign =? 1` becomes `.sign =? 1`, then `self =? 1`.
+project = (props:array<propositions.Proposition> name:string):>array<propositions.Proposition> => {
+    let result:array<propositions.Proposition>=[]
+    loop p in props {
+        let field=propositions.field(p)
+        if field is? none or p.when isnt? none continue
+        let subject:string=''
+        if field =? name {subject=if p.projection =? 'length' 'length' else 'self'}
+        else if field.startswith(name+'.') and name.length <? field.length {subject=field[name.length..]}
+        else continue
+        result.push(propositions.Proposition[subject p.op p.value p.projection p.term p.term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
+    }
+    return result
+}
+
 field_subject = (value:addr path:array<string> projection:propositions.Projection state:facts.State @data:predicates.Data):>Subject => {
     let current:addr?=value
     let type=hir.node_at(data.env.nodes value).value_type
@@ -49,7 +65,7 @@ field_subject = (value:addr path:array<string> projection:propositions.Projectio
     let existing=bindings.member_fields(access data.env.nodes)
     let route:array<string>=if existing is? none [] else existing
     if not intervals.stable(value data.snapshot data.env.nodes) {root=none}
-    let declared:array<propositions.Proposition>=[]
+    let declared=expressions.member_invariant(value data.env.nodes data.env.types)
     loop name in path {
         let found:addr?=none
         if current isnt? none {
@@ -67,15 +83,20 @@ field_subject = (value:addr path:array<string> projection:propositions.Projectio
             if not intervals.stable(found data.snapshot data.env.nodes) {root=none}
             existing=bindings.member_fields(access data.env.nodes)
             route=if existing is? none [] else existing
-            declared=[]
+            declared=expressions.member_invariant(found data.env.nodes data.env.types)
             continue
         }
+        let inherited=declared
+        let refined=types.node_at(data.env.types types.unfold(type data.env.types))
+        if refined is? types.RefinedType {loop p in refined.propositions {inherited.push(p)}}
+        inherited=project(inherited name)
         let object=expressions.object_of(type data.env.types)
         if object is? none return Subject[none none none]
         let field=types.object_field(object name)
         if field is? none return Subject[none none none]
         type=field.value_type
         declared=field.refinement
+        loop p in inherited {declared.push(p)}
         current=none
         route.push(name)
     }
@@ -89,7 +110,7 @@ field_subject = (value:addr path:array<string> projection:propositions.Projectio
         let width=if exact is? none values.length_default(data.env.cap) else ranges.exact(exact)
         return Subject[none intervals.meet(intervals.meet(known contract) width) term]
     }
-    return Subject[none intervals.meet(intervals.meet(known contract) values.fixed_bounds(type data.env.types)) term]
+    return Subject[none intervals.meet(intervals.meet(known contract) values.fixed_bounds(type data.env.types)) term excludes_zero(declared)]
 }
 subject = (p:propositions.Proposition value:addr state:facts.State @data:predicates.Data):>Subject => {
     let field=propositions.field(p)
@@ -209,7 +230,7 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
     let interval=target.interval
     # A projected field may have no standalone HIR expression. Its stable
     # route still carries exclusions established by a guard on that field.
-    let excludes=(target.expression isnt? none and nonzero(target.expression interval state data)) or (target.term isnt? none and target.term.projection =? 'value' and facts.nonzero(target.term.binding_id).key in? state)
+    let excludes=target.excludes_zero or (target.expression isnt? none and nonzero(target.expression interval state data)) or (target.term isnt? none and target.term.projection =? 'value' and facts.nonzero(target.term.binding_id).key in? state)
     if interval isnt? none and excludes {interval=ranges.exclude(interval 0)}
     let decided=ranges.decide(p.op interval ranges.exact(p.value))
     if decided isnt? none return decided
