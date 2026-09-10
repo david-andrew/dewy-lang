@@ -5646,11 +5646,21 @@ def _local_names(body: p0.AST) -> set[str]:
 _RECEIVER = '__dewy_receiver'
 
 
-def _rewrite_members_to_self(node: p0.AST, members: set[str]) -> p0.AST:
+def _named_record_initializer(node: p0.AST) -> bool:
+    """An object row's key is a declaration target, including `name:T=value`."""
+    if not isinstance(node, p0.BinOp) or _operator_symbol(node.op) != '=':
+        return False
+    target = node.left
+    if isinstance(target, p0.BinOp) and _operator_symbol(target.op) == ':':
+        target = target.left
+    return isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier)
+
+
+def _rewrite_members_to_self(node: p0.AST, members: set[str], *, receiver: str = _RECEIVER) -> p0.AST:
     """Bare references to fields/methods inside a method body become reads of the hidden receiver."""
 
     def self_access(atom: p0.Atom) -> p0.AST:
-        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, _RECEIVER)), atom)
+        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, receiver)), atom)
 
     def rewrite(value: object) -> object:
         if isinstance(value, list):
@@ -5666,12 +5676,7 @@ def _rewrite_members_to_self(node: p0.AST, members: set[str]) -> p0.AST:
             # `[path = _path_parent(path)]` rewrites only the value
             items = []
             for item in value.inner:
-                if (
-                    isinstance(item, p0.BinOp)
-                    and _operator_symbol(item.op) == '='
-                    and isinstance(item.left, p0.Atom)
-                    and isinstance(item.left.item, t1.Identifier)
-                ):
+                if _named_record_initializer(item):
                     items.append(replace(item, right=rewrite(item.right)))
                 else:
                     items.append(rewrite(item))
@@ -5708,7 +5713,7 @@ def _referenced_members(body: p0.AST, members: set[str]) -> set[str]:
             return
         if isinstance(value, p0.Block) and value.kind == '[]':
             for item in value.inner:
-                if isinstance(item, p0.BinOp) and _operator_symbol(item.op) == '=' and isinstance(item.left, p0.Atom) and isinstance(item.left.item, t1.Identifier):
+                if _named_record_initializer(item):
                     walk(item.right)   # an object literal's keys are field names
                 else:
                     walk(item)
@@ -5722,29 +5727,12 @@ def _referenced_members(body: p0.AST, members: set[str]) -> set[str]:
 
 
 def _rewrite_static_calls(node: p0.AST, statics: set[str], alias: str) -> p0.AST:
-    """In a static method, bare names of the type's other static methods become `Alias.name`."""
+    """Static calls follow the same read positions as instance member reads.
 
-    def type_access(atom: p0.Atom) -> p0.AST:
-        return p0.BinOp(atom.loc, t1.Operator(atom.loc, '.'), p0.Atom(atom.loc, t1.Identifier(atom.loc, alias)), atom)
-
-    def rewrite(value: object) -> object:
-        if isinstance(value, list):
-            return [rewrite(item) for item in value]
-        if isinstance(value, p0.Atom):
-            if isinstance(value.item, t1.Identifier) and value.item.name in statics:
-                return type_access(value)
-            return value
-        if isinstance(value, p0.BinOp) and _operator_symbol(value.op) == '.':
-            return replace(value, left=rewrite(value.left))
-        if isinstance(value, (t1.Token, t2.Operator, t1.Operator)):
-            return value   # tokens and operators carry no member reads
-        if is_dataclass(value) and not isinstance(value, type):
-            return replace(value, **{field_.name: rewrite(getattr(value, field_.name)) for field_ in fields(value) if field_.init and field_.name != 'loc'})
-        return value
-
-    result = rewrite(node)
-    assert isinstance(result, p0.AST)
-    return result
+    In particular an object literal's field keys remain keys, even when a
+    static method has that name. Only the field's value may call the method.
+    """
+    return _rewrite_members_to_self(node, statics, receiver=alias)
 
 
 def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
@@ -5786,12 +5774,7 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
             # an object literal's keys are field names, not member writes:
             # `[path = _path_parent(path)]` builds a new value
             for item in value.inner:
-                if (
-                    isinstance(item, p0.BinOp)
-                    and _operator_symbol(item.op) == '='
-                    and isinstance(item.left, p0.Atom)
-                    and isinstance(item.left.item, t1.Identifier)
-                ):
+                if _named_record_initializer(item):
                     walk(item.right)
                 else:
                     walk(item)
