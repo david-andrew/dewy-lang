@@ -25,15 +25,18 @@ def test_native_aggregate_layouts(tmp_path, monkeypatch):
     function = ty.FunctionType([], [], None, 'int64')
     optional = ty.optional('int64')
     union = ty.union('int64', 'string')
+    enum = ty.union(ty.IntegerLiteralType(-1), ty.IntegerLiteralType(1))
+    mixed = ty.union(ty.IntegerLiteralType(0), ty.StringLiteralType('ready'))
     records = [
         record(), record(field('flag', 'bool')),
         pair, record(field('wide', 'uint64'), field('small', 'uint8')),
         record(field('head', 'bool'), field('pair', pair), field('tail', 'uint8')),
         record(field('items', ty.ArrayType('int64')), field('text', 'string')),
         record(field('call', function), field('maybe', optional), field('choice', union)),
+        record(field('sign', enum), field('mixed', mixed)),
     ]
     elements = ['bool', 'int8', 'uint8', 'int64', 'uint64', 'string', pair,
-                ty.ArrayType('uint8'), function, optional, union]
+                ty.ArrayType('uint8'), function, optional, union, enum, mixed]
     lines, checks, expected = [], [], []
     build = type_builder(lines)
     for index, type_ in enumerate(records):

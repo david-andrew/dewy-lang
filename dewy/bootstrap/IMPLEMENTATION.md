@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- The function-region/checkpoint regression suite passes 1,954 tests, with
+  23 skipped. Two code-shape assertions now expect region-backed dynamic
+  copies; the remaining quota-interrupted tests passed on disk-backed storage.
+  Later hosted enum fixes pass 66 focused numeric and ownership regressions.
+  Array-field mutation retains its declared store contract after `clear`,
+  including implicit method receivers and subsequent pushes in a loop.
+
 - Native legalization executes 101 source programs through native checking,
   lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
   handles scalar arrays with independent declaration/assignment copies,
