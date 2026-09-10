@@ -1,0 +1,73 @@
+from reporting import Error
+import p"../targets.dewy" as targets
+
+# Match the hosted command boundary: options precede the source file, and
+# run/debug pass everything after that file to the program unchanged. Test
+# and analyze have no program arguments. Parsing is independent of loading,
+# so --help and --version never need a source file or a compiler cache.
+Command:type = 'run'|'test'|'analyze'|'debug'|'update'
+Request:type = [
+    command:Command='run'
+    source:string?=none
+    arguments:array<string>=[]
+    target:targets.Target=$target
+    compile_only:bool=false
+    help:bool=false
+    version:bool=false
+    json:bool=false
+    brief:bool=false
+    build:bool=false
+    debugger:('gdb'|'lldb')?=none
+]
+
+parse = (argv:array<string>):>Request|Error => {
+    let result=Request[]
+    let index:addr=1
+    if argv.length >? 1 {
+        let first=argv[1]
+        if first is? 'test'|'analyze'|'debug'|'update' {
+            result.command=first
+            index=2
+        }
+    }
+    let options=true
+    loop index <? argv.length {
+        let arg=argv[index]
+        index+=1
+        if result.source isnt? none and result.command is? 'run'|'debug' {result.arguments.push(arg) continue}
+        if options and arg =? '--' {options=false continue}
+        if options and arg is? '-h'|'--help' {result.help=true return result}
+        if options and result.command =? 'run' and arg is? '-v'|'--version' {result.version=true return result}
+        if options and result.command =? 'run' and arg is? '-c'|'--compile' {result.compile_only=true continue}
+        if options and result.command =? 'test' and arg =? '--json' {result.json=true continue}
+        if options and result.command =? 'test' and arg =? '--brief' {result.brief=true continue}
+        if options and result.command =? 'debug' and arg =? '--build' {result.build=true continue}
+        if options and result.command =? 'debug' and arg =? '--debugger' {
+            if index >=? argv.length return Error[title='--debugger needs gdb or lldb']
+            let debugger=argv[index]
+            index+=1
+            if debugger isnt? 'gdb'|'lldb' return Error[title='unknown debugger' message=debugger]
+            result.debugger=debugger
+            continue
+        }
+        if options and result.command not=? 'update' and (arg is? '-t'|'--target' or arg.startswith('--target=')) {
+            let selected:string=''
+            if arg.startswith('--target=') {selected=arg[9..]}
+            else {
+                if index >=? argv.length return Error[title='--target needs a backend name']
+                selected=argv[index]
+                index+=1
+            }
+            if selected isnt? targets.Target return Error[title='unknown target' message=selected]
+            result.target=selected
+            continue
+        }
+        if options and arg.startswith('-') return Error[title='unknown option' message=arg]
+        if result.command =? 'update' return Error[title='update takes no source file']
+        if result.source isnt? none return Error[title='expected one source file' message=arg]
+        result.source=arg
+    }
+    if result.command =? 'test' and result.source is? none {result.source='.'}
+    if result.command not=? 'update' and result.source is? none return Error[title='expected a source file' hint='Use --help for usage.']
+    return result
+}
