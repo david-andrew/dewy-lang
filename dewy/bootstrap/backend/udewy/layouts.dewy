@@ -31,7 +31,7 @@ handle = (type:types.Type):>bool => type is? types.ArrayType|types.FunctionType|
 # a union cell. A record field instead embeds nested records and union cells
 # inline. Keeping these queries separate prevents an array stride from being
 # mistaken for the size of a record stored behind its element handle.
-element = (id:addr @nodes:array<types.Type>):>Storage|Pending => {
+element = (id:addr @nodes:array<types.Type> nominals:set<addr>=set[]):>Storage|Pending => {
     let plain=types.unfold(types.strip_refinement(id nodes) nodes)
     let type=types.node_at(nodes plain)
     if types.is_primitive(type 'bool') return Storage[1 1 false]
@@ -41,7 +41,7 @@ element = (id:addr @nodes:array<types.Type>):>Storage|Pending => {
         let bytes:uint8 & ~0=word.bits // 8
         return Storage[bytes as int64 bytes word.signed]
     }
-    if handle(type) or type is? types.ObjectType|types.MetaType or views.string_valued(plain nodes) or views.enum_members(plain nodes) isnt? none or views.optional_payload(plain @nodes) isnt? none or views.runtime_union_members(plain @nodes) isnt? none return Storage[8 8 true]
+    if plain in? nominals or types.is_primitive(type 'none') or handle(type) or type is? types.ObjectType|types.MetaType or views.string_valued(plain nodes) or views.enum_members(plain nodes) isnt? none or views.optional_payload(plain @nodes) isnt? none or views.runtime_union_members(plain @nodes) isnt? none return Storage[8 8 true]
     return Pending['array element has no selected runtime representation']
 }
 field = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]):>Storage|Pending => {
@@ -54,7 +54,7 @@ field = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]
         let bytes:uint8 & ~0=word.bits // 8
         return Storage[bytes as int64 bytes word.signed]
     }
-    if handle(type) or plain in? context.nominals or views.string_valued(plain nodes) or views.enum_members(plain nodes) isnt? none or type is? types.MetaType return Storage[8 8 true]
+    if types.is_primitive(type 'none') or handle(type) or plain in? context.nominals or views.string_valued(plain nodes) or views.enum_members(plain nodes) isnt? none or type is? types.MetaType return Storage[8 8 true]
     if views.runtime_union_members(plain @nodes) isnt? none or views.optional_payload(plain @nodes) isnt? none return Storage[16 8 true]
     if type is? types.ObjectType {
         let layout=record(plain context @nodes active=active)

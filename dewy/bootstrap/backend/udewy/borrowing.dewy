@@ -96,7 +96,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
                 if callee is? hir.ExpressedIdentifier {
-                    if callee.binding_id isnt? none and callee.binding_id in? plan.named {}
+                    if captures.resolve(node.func node.selected_method_index plan nodes) isnt? none {}
                     else if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
                 } else if callee isnt? hir.ArrayMethod|hir.FunctionLiteral {dirty.add(id)}
             }
@@ -141,7 +141,7 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
         loop child in hir.children(node) {pending.push(child)}
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)
-        let direct=if callee is? hir.FunctionLiteral node.func else if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none plan.named.get(callee.binding_id) else none
+        let direct=captures.resolve(node.func node.selected_method_index plan nodes)
         if direct is? none or direct in? opaque continue
         let literal=hir.node_at(nodes direct)
         $runtime_assert literal is? hir.FunctionLiteral

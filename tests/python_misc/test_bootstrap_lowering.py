@@ -70,11 +70,23 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+
+    ('let one=(x:int64):>int64=>0\nlet two=(x:bool):>int64=>if x 40 else 0\nlet base=@one & @two\nlet three=(x:string):>int64=>2\nlet choose=@base & @three\nlet main=():>int64=>choose(true)+choose("hi")', 42),
+
+    ('Missing:type=type of error\nlet make=():>Missing=>Missing\nlet main=():>int64=>{let value:int64|Missing=make() return if value is? Missing 42 else 0}', 42),
+    ('Missing:type=type of error\nOther:type=type of error\nlet choose=(x:bool):>int64|Missing|Other=>if x Missing else Other\nlet main=():>int64=>{let value=choose(true) return if value is? error and value is? Missing 42 else 0}', 42),
+    ('Missing:type=type of error\nlet main=():>int64=>{let values:array<Missing>=[Missing] values.push(Missing) let own=values return if own.length=?2 42 else 0}', 42),
+
+    ('let choose=((value:int64):>int64=>value+2)&((value:bool):>int64=>if value 40 else 0)\nlet main=():>int64=>choose(choose(true))', 42),
+    ('let integer=(value:int64):>int64=>value+2\nlet truth=(value:bool):>int64=>if value 40 else 0\nlet choose=@integer & @truth\nlet main=():>int64=>choose(choose(true))', 42),
+    ('let main=():>int64=>{let offset:int64=40 let choose=((value:int64):>int64=>value+offset)&((value:bool):>int64=>if value 2 else 0) return choose(choose(true))}', 42),
+
     ("let same=(a:string|none b:string):>bool=>a =? b\nlet main=():>int64=>if same('a' 'a') and not same(none 'a') and not same('b' 'a') 42 else 0", 42),
     ("let same=(a:int64|string|none b:none|string|int64):>bool=>a =? b\nlet main=():>int64=>if same(3 3) and same('a' 'a') and same(none none) and not same(3 'a') and not same(none 3) 42 else 0", 42),
     ("let different=(a:int64|none b:none|int64):>bool=>a not=? b\nlet main=():>int64=>if different(3 4) and different(none 3) and not different(3 3) and not different(none none) 42 else 0", 42),
     ("let calls:int64=0\nlet value:int64|none=none\nlet next=():>int64=>{calls+=1 value=3 return 3}\nlet main=():>int64=>{let answer=value =? next() return if not answer and calls =? 1 42 else 0}", 42),
     ("let calls:int64=0\nlet next=():>none=>{calls+=1 return none}\nlet same=(x:int64|none):>bool=>x =? next()\nlet main=():>int64=>{let answer=same(none) return if answer and calls =? 1 42 else 0}", 42),
+
     ("let main=():>int64=>{let d=['a' -> 40] d['a']+=2 return d['a']}", 42),
     ("let main=():>int64=>{let d=['a' -> 40] d['a'] += {d.pop('a'); 2} return d['a']}", 42),
     ("let calls:int64=0\nlet next=():>'a'=>{calls+=1 return 'a'}\nlet main=():>int64=>{let d:totaldict<'a' int64>=['a' -> 40] d[next()]+=2 return if calls=?1 d['a'] else 0}", 42),
@@ -269,7 +281,7 @@ main = (argv:array<string>):>int64 => {{
     let helpers:dict<string addr>=[]
     let release=bindings.lookup(session.scopes env.lexical.scope '_arena_release')
     if release isnt? none {{helpers['_arena_release']=release}}
-    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator layout_context=layouts.Context[session.brands] runtime_helpers=helpers)
+    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator layout_context=layouts.Context[session.brands session.error_types] runtime_helpers=helpers links=session.links)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)
     if code is? Error {{code.fail}}

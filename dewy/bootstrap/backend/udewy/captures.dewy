@@ -6,7 +6,7 @@ import p"../../semantic/hir.dewy" as hir
 # Capturing functions used as values and writes through captures still need
 # closure storage; keep those cases explicit rather than silently copying.
 Function:type = [id:addr locals:set<addr>=set[] direct:set<addr>=set[] dependencies:set<addr>=set[] captures:set<addr>=set[] writes:set<addr>=set[]]
-Plan:type = [functions:dict<addr Function>=[] named:dict<addr addr>=[] globals:set<addr>=set[]]
+Plan:type = [functions:dict<addr Function>=[] named:dict<addr addr>=[] definitions:dict<addr addr>=[] globals:set<addr>=set[]]
 
 discover = (root:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void => {
     if root in? seen return void
@@ -14,9 +14,47 @@ discover = (root:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void => 
     let node=hir.node_at(nodes root)
     if node is? hir.FunctionLiteral {plan.functions[root]=Function[root]}
     if node is? hir.Declare and node.binding_id isnt? none {
+        plan.definitions[node.binding_id]=node.expr
         if hir.node_at(nodes node.expr) is? hir.FunctionLiteral {plan.named[node.binding_id]=node.expr}
     }
     loop child in hir.children(node) {discover(child nodes @plan @seen)}
+}
+# The checker flattens callable signatures in dispatch order. Identifier
+# alternatives may themselves name overload sets, so flatten their bodies in
+# that same order before selecting the recorded method. Each branch owns its
+# cycle guard: two alternatives may legitimately share one source function.
+callables = (id:addr plan:Plan nodes:array<hir.AST> seen:set<addr>=set[]):>array<addr>|none => {
+    if id in? seen return none
+    seen.add(id)
+    let node=hir.node_at(nodes id)
+    if node is? hir.FunctionLiteral return [id]
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        let definition=plan.definitions.get(node.binding_id)
+        if definition isnt? none return callables(definition plan nodes seen)
+    } else if node is? hir.OverloadedFunction {
+        let result:array<addr>=[]
+        loop alternative in node.alternates {
+            let resolved=callables(alternative plan nodes seen)
+            if resolved is? none return none
+            loop function in resolved {result.push(function)}
+        }
+        return result
+    } else if node is? hir.Block and not node.scoped and node.items.length =? 1 return callables(node.items[0] plan nodes seen)
+    return none
+}
+resolve = (id:addr selected:addr? plan:Plan nodes:array<hir.AST>):>addr? => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.FunctionLiteral return id
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id is? none return none
+        let named=plan.named.get(node.binding_id)
+        if named isnt? none return named
+        if node.binding_id not in? plan.definitions return none
+    } else if node isnt? hir.OverloadedFunction|hir.Block return none
+    let alternatives=callables(id plan nodes)
+    if alternatives is? none return none
+    if selected is? none return if alternatives.length =? 1 alternatives[0] else none
+    return if selected <? alternatives.length alternatives[selected] else none
 }
 locals = (id:addr nodes:array<hir.AST> @result:set<addr> @seen:set<addr>):>void => {
     if id in? seen return void
@@ -56,6 +94,15 @@ references = (id:addr nodes:array<hir.AST> plan:Plan symbols:set<addr> @function
     seen.add(id)
     let node=hir.node_at(nodes id)
     if node is? hir.FunctionLiteral {function.dependencies.add(id) return void}
+    if node is? hir.FunctionCall {
+        let direct=resolve(node.func node.selected_method_index plan nodes)
+        if direct isnt? none {
+            function.dependencies.add(direct)
+            loop argument in node.pos_args {references(argument nodes plan symbols @function @seen)}
+            loop argument in node.kw_args.values {references(argument nodes plan symbols @function @seen)}
+            return void
+        }
+    }
     loop target in write_targets(node nodes) {
         let binding=root_binding(target nodes)
         if binding isnt? none {function.writes.add(binding)}

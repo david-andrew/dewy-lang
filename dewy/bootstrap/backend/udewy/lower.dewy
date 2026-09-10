@@ -44,6 +44,7 @@ State:type = [
     allocator:addr?=none
     runtime_helpers:dict<string addr>=[]
     layout_context:layouts.Context=layouts.Context[]
+    links:array<subtyping.Link>=subtyping.default_links
     brand_numbers:array<brands.NumberedBrand>=[]
     storage_types:dict<addr addr>=[]
     capture_plan:captures.Plan=captures.Plan[]
@@ -74,6 +75,13 @@ symbol = (name:string binding:addr? @state:State):>string => {
     # for every source declaration, including a declaration shadowing one.
     return name
 }
+# Unit error mints occupy one zero payload word. Their identity travels in
+# a surrounding union's tag; the compilation supplies the nominal registry
+# and links so a test against the exception/error family selects those tags.
+unit_type = (id:addr state:State):>bool => {
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    return plain in? state.layout_context.nominals or types.is_primitive(types.node_at(state.type_nodes plain) 'none')
+}
 runtime_type = (id:addr node:hir.AST @state:State):>addr => {
     let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
     let type=types.node_at(state.type_nodes plain)
@@ -81,6 +89,7 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
         if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {reject(node 'arbitrary-precision integer storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
+    if unit_type(plain state) return types.primitive('int64' @state.type_nodes)
     if type is? types.Primitive {
         if type.name in? ['int' 'uint'] return types.primitive(if type.name =? 'int' 'int64' else 'uint64' @state.type_nodes)
         if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.type_nodes) isnt? none return plain
@@ -91,7 +100,7 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
     if type is? types.BinaryLiteralType return types.primitive('int64' @state.type_nodes)
     if type is? types.ArrayType {
         let element=types.node_at(state.type_nodes types.unfold(types.strip_refinement(type.element state.type_nodes) state.type_nodes))
-        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and cell_members(type.element @state) is? none and enum_members(type.element state) is? none and not string_type(type.element state) and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.type_nodes) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
+        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and cell_members(type.element @state) is? none and enum_members(type.element state) is? none and not string_type(type.element state) and not types.is_primitive(element 'bool') and not unit_type(type.element state) and views.fixed_integer_layout(type.element state.type_nodes) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.ObjectType {
@@ -177,7 +186,7 @@ expression = (id:addr @state:State):>addr => {
     }
     if node is? hir.Suppress return expression(node.item @state)
     if node is? hir.Place return place_address(node.target @state)
-    if node is? hir.GenericFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+    if node is? hir.GenericFunction|hir.OverloadedFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     let type=runtime_type(node.value_type node @state)
     if node is? hir.String return string_literal(node @state)
     if node is? hir.BasedString return binary_literal(node @state)
@@ -198,7 +207,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.DictEntries return dict_entries(node @state)
     if node is? hir.DictView return dict_view(node @state)
     if node is? hir.SetAlgebra return set_algebra(node @state)
-    if node is? hir.NoneValue return word(0 node @state)
+    if node is? hir.NoneValue|hir.ErrorValue return word(0 node @state)
     if node is? hir.MemberAccess {
         let stored=stored_type(id state)
         return read_value(field_read(field_pointer(node @state) stored node @state) stored node.value_type node @state)
@@ -241,7 +250,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
     if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
-        if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return put(hir.Void[node.loc type] @state)
+        if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral|hir.OverloadedFunction return put(hir.Void[node.loc type] @state)
         let value=owned_value(node.expr @state)
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
@@ -392,7 +401,7 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
 }
 array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
-    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) return store_word(value pointer 0 node @state)
+    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) or unit_type(element state) return store_word(value pointer 0 node @state)
     if type is? types.FunctionType {
         let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
         return store_word(word pointer 0 node @state)
@@ -407,7 +416,7 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
 }
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
-    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) return read_word(pointer 0 node @state)
+    if type is? types.ObjectType|types.ArrayType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) or unit_type(element state) return read_word(pointer 0 node @state)
     if type is? types.FunctionType return put(hir.Transmute[node.loc runtime_type(element node @state) read_word(pointer 0 node @state)] @state)
     if types.is_primitive(type 'bool') {
         let byte=intrinsic('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
@@ -420,7 +429,7 @@ array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
 array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     let type=array_type(node.value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes)
+    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let memory=array_memory(word(node.items.length node @state) layout.size node @state)
     let offset:addr=0
@@ -437,7 +446,7 @@ array_index = (node:hir.Index @state:State):>addr => {
     let index=snapshot(expression(node.index @state) @prefix @state)
     let type=array_type(hir.node_at(state.input.nodes node.array).value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes)
+    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let data=intrinsic('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state)
     let offset=word_op('__mul__' index word(layout.size node @state) node @state)
@@ -500,7 +509,7 @@ array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>a
     let descriptor=snapshot(value @prefix @state)
     let source=snapshot(intrinsic('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let length=snapshot(intrinsic('__load_i64__' [address(descriptor layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
-    let layout=layouts.element(type.element @state.type_nodes)
+    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let memory=array_memory(length layout.size node @state)
     loop item in memory.prefix {prefix.push(item)}
@@ -636,7 +645,7 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>ad
     if cell_members(actual @state) isnt? none return value
     let selected:addr?=none
     loop member in members {
-        if subtyping.is_subtype(actual member subtyping.default_links @state.type_nodes) {
+        if subtyping.is_subtype(actual member state.links @state.type_nodes) {
             if selected isnt? none return reject(node 'overlapping union payload representations' @state)
             selected=member
         }
@@ -671,7 +680,7 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
         let boolean=types.primitive('bool' @state.type_nodes)
         let result=put(hir.Bool[node.loc boolean false] @state)
         loop member in enum {
-            if not subtyping.is_subtype(member node.test_type subtyping.default_links @state.type_nodes) continue
+            if not subtyping.is_subtype(member node.test_type state.links @state.type_nodes) continue
             let matches=intrinsic('__eq__' [tag word(enum_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
         }
@@ -707,10 +716,10 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
             let matches=string_type_test(payload node.test_type node @state)
             let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
-        } else if subtyping.is_subtype(member node.test_type subtyping.default_links @state.type_nodes) {
+        } else if subtyping.is_subtype(member node.test_type state.links @state.type_nodes) {
             let matches=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
-        } else if not type_tests.disjoint(member node.test_type subtyping.default_links @state.type_nodes) {
+        } else if not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
             return reject(node 'a runtime test within one union payload alternative' @state)
         }
     }
@@ -1101,7 +1110,7 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'insert'] return reject(call "array {method.name} lowering" @state)
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes)
+    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(call layout.detail @state)
     let prefix:array<addr>=[]
     let descriptor=snapshot(expression(method.array @state) @prefix @state)
@@ -1241,7 +1250,7 @@ object_write = (destination:addr source:addr type:addr node:hir.AST @state:State
     loop entry in state.layout_context.brands.entries {
         let candidate=types.node_at(state.type_nodes entry.value_type)
         $runtime_assert candidate is? types.ObjectType
-        if not subtyping.is_subtype(entry.value_type type subtyping.default_links @state.type_nodes) continue
+        if not subtyping.is_subtype(entry.value_type type state.links @state.type_nodes) continue
         let brand=brand_number(entry.name state)
         $runtime_assert brand isnt? none
         let condition=intrinsic('__eq__' [tag word(brand.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
@@ -1347,11 +1356,12 @@ call_slot = (value:addr? type:addr required:bool node:hir.AST @args:array<addr> 
 }
 ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State):>addr => {
     let callee=hir.node_at(state.input.nodes node.func)
-    let signature=types.node_at(state.type_nodes types.strip_refinement(callee.value_type state.type_nodes))
+    let direct=captures.resolve(node.func node.selected_method_index state.capture_plan state.input.nodes)
+    let signature_type=if direct is? none callee.value_type else hir.node_at(state.input.nodes direct).value_type
+    let signature=types.node_at(state.type_nodes types.strip_refinement(signature_type state.type_nodes))
     if signature isnt? types.FunctionType return reject(node 'a call requires its selected concrete signature' @state)
     if signature.rest isnt? none return reject(node 'rest argument legalization' @state)
     let prefix:array<addr>=[]
-    let direct=if callee is? hir.FunctionLiteral node.func else if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none state.capture_plan.named.get(callee.binding_id) else none
     let function=if direct is? none snapshot(expression(node.func @state) @prefix @state) else code_reference(direct callee @state)
     let borrowed=state.borrowed_arguments.get(id set[])
     let positional:array<addr>=[]
@@ -1480,8 +1490,8 @@ function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
     return put(hir.FunctionLiteral[node.loc code_type(id node @state) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr SrcFile>=[] runtime_helpers:dict<string addr>=[]):>Result|Error => {
-    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context brand_numbers=brands.numbered(layout_context.brands)]
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr SrcFile>=[] runtime_helpers:dict<string addr>=[] links:array<subtyping.Link>=subtyping.default_links):>Result|Error => {
+    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links brand_numbers=brands.numbered(layout_context.brands)]
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)
@@ -1508,7 +1518,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             let value=hir.node_at(input.nodes node.expr)
             # Aliases are already resolved in the type arena. Any runtime
             # type value is an explicit TypeValue expression at its use site.
-            if value is? hir.GenericFunction|hir.TypeValue continue
+            if value is? hir.GenericFunction|hir.TypeValue|hir.OverloadedFunction continue
             let name=symbol(node.name node.binding_id @state)
             if value is? hir.FunctionLiteral {
                 if entry_binding isnt? none and node.binding_id =? entry_binding or entry_binding is? none and infer_entry and node.name =? 'main' {main=name entry_literal=node.expr}
@@ -1614,7 +1624,7 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
         let sequence=snapshot(expression(node.iterable @state) @prefix @state)
         let array=array_type(source.value_type state)
         if array isnt? none {
-            let layout=layouts.element(array.element @state.type_nodes)
+            let layout=layouts.element(array.element @state.type_nodes nominals=state.layout_context.nominals)
             if layout is? layouts.Pending return IteratorStep[prefix reject(node layout.detail @state)]
             length=snapshot(read_word(sequence layouts.array_descriptor.length node @state) @prefix @state)
             let data=snapshot(read_word(sequence 0 node @state) @prefix @state)
@@ -1740,7 +1750,7 @@ enum_read = (value:addr stored:addr view:addr node:hir.AST @state:State):>addr =
     let fallback:addr?=none
     let type=runtime_type(view node @state)
     loop member in members {
-        if not subtyping.is_subtype(member view subtyping.default_links @state.type_nodes) continue
+        if not subtyping.is_subtype(member view state.links @state.type_nodes) continue
         let literal=enum_literal(member node @state)
         if fallback isnt? none {
             # Every arm has a literal result. The final member is the default
@@ -1803,7 +1813,7 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
     loop member in members {
         let actual=member
         let value=cell_payload(receiver member node @state)
-        if not subtyping.is_subtype(member node.exception_type subtyping.default_links @state.type_nodes) {
+        if not subtyping.is_subtype(member node.exception_type state.links @state.type_nodes) {
             let record=object_type(member state)
             if record is? none return reject(node 'a forwarded member is not a record or exception' @state)
             let field=types.object_field(record node.field)
@@ -1857,14 +1867,14 @@ dict_set_field = (parts:DictParts name:string value:addr node:hir.AST @state:Sta
     return store_word(value parts.pointer offset node @state)
 }
 dict_element_pointer = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => {
-    let layout=layouts.element(element @state.type_nodes)
+    let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     return word_op('__add__' read_word(descriptor layouts.array_descriptor.data node @state) word_op('__mul__' index word(layout.size node @state) node @state) node @state)
 }
 dict_element = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => array_load(dict_element_pointer(descriptor index element node @state) element node @state)
 dict_store_element = (descriptor:addr index:addr value:addr element:addr node:hir.AST @state:State):>addr => array_store(value dict_element_pointer(descriptor index element node @state) element node @state)
 dict_push = (descriptor:addr value:addr element:addr node:hir.AST @state:State):>addr => {
-    let layout=layouts.element(element @state.type_nodes)
+    let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let prefix:array<addr>=[]
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
@@ -2163,7 +2173,7 @@ dict_empty = (type:addr node:hir.AST @prefix:array<addr> @state:State):>DictPart
         let element=types.primitive('int64' @state.type_nodes)
         if field =? 'keys' {element=entries.key}
         else if field =? 'values' and entries.value isnt? none {element=entries.value}
-        let storage=layouts.element(element @state.type_nodes)
+        let storage=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
         if storage is? layouts.Pending {reject(node storage.detail @state); return parts}
         let memory=array_memory(word(0 node @state) storage.size node @state)
         loop statement in memory.prefix {prefix.push(statement)}

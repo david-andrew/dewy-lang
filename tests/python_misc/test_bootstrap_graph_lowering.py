@@ -40,6 +40,15 @@ main=(argv:array<string>):>int64=>{{
     binary = cache_artifact(seed).resolve()
     cases = [
         ({
+            'dependency.dewy': 'let unused=((x:int64):>array<int64>=>[x]) & ((x:bool):>array<bool>=>[x])',
+            'entry.dewy': 'import p"dependency.dewy" as dependency\nlet main=():>int64=>42',
+        }, 42),
+        ({
+            'dependency.dewy': 'let choose=((x:int64):>int64=>x+2) & ((x:bool):>int64=>if x 40 else 0)',
+            'entry.dewy': 'import p"dependency.dewy" as dependency\nlet main=():>int64=>dependency.choose(dependency.choose(true))',
+        }, 42),
+
+        ({
             'core.dewy': 'let count:int64=0\nlet tick=():>int64=>{count+=1 return count}',
             'left.dewy': 'import p"core.dewy" as core\nlet value:int64=core.tick()',
             'right.dewy': 'import p"./core.dewy" as core\nlet value:int64=core.tick()',

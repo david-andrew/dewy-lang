@@ -49,7 +49,7 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
             items.push(id) source_by_item[id]=origin
             let declaration=hir.node_at(engine.session.hir id)
             if declaration is? hir.Declare and declaration.binding_id isnt? none {
-                if hir.node_at(engine.session.hir declaration.expr) is? hir.FunctionLiteral {functions[declaration.binding_id]=id}
+                if hir.node_at(engine.session.hir declaration.expr) is? hir.FunctionLiteral|hir.OverloadedFunction {functions[declaration.binding_id]=id}
             }
         }
     }
@@ -85,7 +85,7 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
-    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings)
+    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links)
 }
 # The executable boundary: every module proves its contracts before storage
 # selection, and startup is checked with the explicit entry export. Keep the
@@ -104,7 +104,7 @@ compile = (entry:addr @engine:modules.Engine):>Compilation|Error => {
     let prepared=assemble(entry @engine required_bindings=required)
     let error=initialization.validate_initialization(prepared.root engine.session.hir engine.session.types engine.session.registry prepared.source entry=prepared.entry source_by_item=prepared.source_by_item)
     if error isnt? none return error
-    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings)
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links)
     if lowered is? Error return lowered
     return Compilation[lowered validated]
 }
