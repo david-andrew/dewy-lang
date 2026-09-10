@@ -85,6 +85,7 @@ unit_type = (id:addr state:State):>bool => {
 runtime_type = (id:addr node:hir.AST @state:State):>addr => {
     let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
     let type=types.node_at(state.type_nodes plain)
+    if type is? types.QuantityType return runtime_type(type.number node @state)
     if type is? types.IntegerLiteralType {
         if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {reject(node 'arbitrary-precision integer storage' @state);}
         return types.primitive('int64' @state.type_nodes)
@@ -175,6 +176,15 @@ items = (ids:array<addr> @state:State):>array<addr> => {
     loop id in ids {result.push(expression(id @state))}
     return result
 }
+# Exact rational scales and ranges remain compile-time bindings, as in the
+# hosted backend. Checking resolves their supported uses; a surviving runtime
+# read still receives the ordinary unsupported-representation diagnostic.
+compile_time_binding = (node:hir.Declare state:State):>bool => {
+    let id=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
+    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
+    if type is? types.QuantityType {type=types.node_at(state.type_nodes type.number)}
+    return type is? types.RationalLiteralType or types.is_primitive(type 'range')
+}
 expression = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
@@ -250,6 +260,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
     if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
+        if compile_time_binding(node state) return put(hir.Void[node.loc type] @state)
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral|hir.OverloadedFunction return put(hir.Void[node.loc type] @state)
         let value=owned_value(node.expr @state)
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
@@ -1518,7 +1529,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             let value=hir.node_at(input.nodes node.expr)
             # Aliases are already resolved in the type arena. Any runtime
             # type value is an explicit TypeValue expression at its use site.
-            if value is? hir.GenericFunction|hir.TypeValue|hir.OverloadedFunction continue
+            if value is? hir.GenericFunction|hir.TypeValue|hir.OverloadedFunction or compile_time_binding(node state) continue
             let name=symbol(node.name node.binding_id @state)
             if value is? hir.FunctionLiteral {
                 if entry_binding isnt? none and node.binding_id =? entry_binding or entry_binding is? none and infer_entry and node.name =? 'main' {main=name entry_literal=node.expr}

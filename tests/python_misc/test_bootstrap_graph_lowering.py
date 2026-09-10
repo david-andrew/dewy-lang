@@ -40,6 +40,14 @@ main=(argv:array<string>):>int64=>{{
     binary = cache_artifact(seed).resolve()
     cases = [
         ({
+            'dependency.dewy': 'const s:(1 * Time)=1 transmute (1 * Time)\nconst ms=s/1000\nconst millisecond=ms\nconst minute=60*s',
+            'entry.dewy': 'import p"dependency.dewy" as dependency\nlet main=():>int64=>42',
+        }, 42),
+        ({
+            'entry.dewy': 'let identity=(x:int64 * Time):>int64 * Time=>x\nlet main=():>int64=>(identity(42 transmute (int64 * Time))) transmute int64',
+        }, 42),
+
+        ({
             'dependency.dewy': 'let unused=((x:int64):>array<int64>=>[x]) & ((x:bool):>array<bool>=>[x])',
             'entry.dewy': 'import p"dependency.dewy" as dependency\nlet main=():>int64=>42',
         }, 42),
