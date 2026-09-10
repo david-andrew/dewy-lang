@@ -1328,7 +1328,22 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
             let type = read_type(binding exit session)
             if type isnt? none { alternatives.push(type) }
         }
-        if alternatives.length =? exits.length { joined.types[binding] = subtyping.join(alternatives session.links @session.types) }
+        if alternatives.length =? exits.length {
+            let result=subtyping.join(alternatives session.links @session.types)
+            let original=read_type(binding env session)
+            # A family split by `is? Child` rejoins to the same family.
+            # The negative arm is represented explicitly as T & ~Child;
+            # retaining Child | (T & ~Child) here would invent tagged storage
+            # and hide ordinary family members such as `.typename`.
+            if original isnt? none and types.node_at(session.types original) is? types.ObjectType and subtyping.is_subtype(original result session.links @session.types) {
+                let covered=true
+                loop alternative in alternatives {
+                    if not subtyping.covered(views.structural_base(alternative session.types) original set[] session.links @session.types) {covered=false break}
+                }
+                if covered {result=original}
+            }
+            joined.types[binding]=result
+        }
     }
     $runtime_assert env.state <? session.read_states.length
     session.read_states[env.state] = joined

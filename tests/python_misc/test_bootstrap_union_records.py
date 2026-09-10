@@ -1,11 +1,15 @@
 """Record literals keep the selected union member's field checking context."""
 import subprocess
 
-from dewy.reporting import SrcFile
-from dewy.semantic import check
 import test_bootstrap_prelude as prelude
 
+from dewy.reporting import SrcFile
+from dewy.semantic import check
+
 CASES = [
+    'Token:type=$abstract type of [value:int64]\nWord:type=type of Token\nNumber:type=type of Token & [base:int64]\nlet name=(token:Token):>string=>{let value=token.value if token is? Number {value=token.base} return token.typename}',
+    'Token:type=$abstract type of [value:int64]\nWord:type=type of Token\nNumber:type=type of Token & [base:int64]\nlet value=(token:Token):>int64=>{if token is? Number {token.base;} return token.value}',
+
     # Scalar field predicates are checked at construction; alias composition
     # retains them and does not evaluate an unused default.
     'Base:type=type of [code:1|2=1]\nChild:type=type of Base & [code=3]',
