@@ -1,0 +1,158 @@
+from reporting import Span
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"expression_intervals.dewy" as intervals
+import p"predicate_facts.dewy" as predicates
+import p"refinement_facts.dewy" as refinements
+import p"element_facts.dewy" as elements
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"relations.dewy" as relations
+import p"intervals.dewy" as ranges
+
+doc"""
+Transfer an evaluated value's evidence into named storage.
+
+Assignments first discard the destination's old identity and projected
+routes, then install the observed value and its surviving relationships.
+The snapshot contains values already evaluated by the visitor: this module
+never evaluates an initializer again to recover an interval.
+
+A copied array or record owns its evidence too. Later replacement of the
+source loses source relationships without erasing the copy's own promises.
+"""
+
+forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<string>=[]):>void => {
+    if prefix.length =? 0 {
+        facts.forget(@state facts.Term[subject])
+        facts.forget(@state facts.Term[subject 'length'])
+        intervals.forget(@data.snapshot subject)
+        if subject in? data.member_calls {data.member_calls.pop(subject); }
+    }
+    loop route in data.registry.routes {
+        if route.root =? subject and bindings.path_starts_with(route.path prefix) {
+            facts.forget(@state facts.Term[route.id])
+            facts.forget(@state facts.Term[route.id 'length'])
+            intervals.forget(@data.snapshot route.id)
+            if route.id in? data.member_calls {data.member_calls.pop(route.id); }
+        }
+    }
+}
+
+# Bind a checked call result's concrete and symbolic promises. A mutated
+# argument can still supply its saved interval, but never a current identity.
+call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data):>void => {
+    loop result in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+        loop p in result.propositions {
+            if p.term is? none or p.subject not=? 'self' or p.term_projection not=? 'length' continue
+            let argument=expressions.call_argument(value p.term data.env.nodes data.env.types)
+            if argument is? none continue
+            let length=data.snapshot.lengths.get(argument)
+            if length is? none continue
+            let bound=ranges.constraint(p.op length true)
+            if bound isnt? none {
+                facts.set_value(@state facts.Term[subject] intervals.meet(facts.lookup(state facts.value(facts.Term[subject])) bound))
+            }
+        }
+    }
+    if not intervals.stable(value data.snapshot data.env.nodes) return
+    terms.seed(@state facts.Term[subject] terms.call_facts(value 'self' data.env @data.registry) data.relations)
+    terms.seed(@state facts.Term[subject 'length'] terms.call_facts(value 'length' data.env @data.registry) data.relations)
+}
+
+seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data:predicates.Data):>void => {
+    call_result(@state subject value @data)
+    if not intervals.stable(value data.snapshot data.env.nodes) return
+    terms.seed_sum(@state subject value data.env data.relations @data.registry)
+    let id=expressions.strip_casts(value data.env.nodes)
+    let node=hir.node_at(data.env.nodes id)
+    let target=facts.Term[subject]
+    if node is? hir.StringSlice {
+        let source=data.snapshot.sequences.get(node.string)
+        if source isnt? none {facts.put(@state facts.order(facts.Term[subject 'length'] facts.Term[source 'length']) ranges.Interval[0 none])}
+        let range=hir.node_at(data.env.nodes node.range)
+        $runtime_assert range is? hir.Range
+        if range.left is? none and range.right isnt? none {
+            let end=data.snapshot.terms.get(range.right)
+            if end isnt? none and end.term.projection =? 'value' and end.shift =? 0 {
+                let extra:bigint=if range.bounds is? none or range.bounds.endswith(']') 1 else 0
+                facts.put(@state facts.order(end.term facts.Term[subject 'length']) ranges.Interval[extra none])
+                facts.put(@state facts.order(facts.Term[subject 'length'] end.term) ranges.Interval[-extra none])
+            }
+        }
+        return
+    }
+    let saved=data.snapshot.terms.get(value)
+    if expressions.sequence_of(id data.env.nodes) isnt? none and saved isnt? none {
+        facts.put(@state facts.order(target saved.term) ranges.Interval[-saved.shift none])
+        facts.put(@state facts.order(saved.term target) ranges.Interval[saved.shift none])
+        return
+    }
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess and saved isnt? none and saved.shift =? 0 {
+        relations.copy_relational(@state saved.term target)
+        let sequence=data.snapshot.sequences.get(value)
+        if sequence isnt? none {relations.copy_relational(@state facts.Term[sequence 'length'] facts.Term[subject 'length'])}
+        if node is? hir.ExpressedIdentifier {
+            elements.copy(@state saved.term.binding_id subject word_type loc @data.registry)
+            # Snapshot the routes before allocating copies of them.
+            let routes=data.registry.routes
+            loop route in routes {
+                if route.root =? saved.term.binding_id and route.path.length >? 0 and route.path[0] not=? '*' {
+                    let copied=bindings.route_id(@data.registry subject route.path word_type loc)
+                    relations.copy_relational(@state facts.Term[route.id] facts.Term[copied])
+                    relations.copy_relational(@state facts.Term[route.id 'length'] facts.Term[copied 'length'])
+                }
+            }
+        }
+        return
+    }
+    let element=elements.route_of(id data.env @data.registry)
+    if element isnt? none {relations.copy_relational(@state facts.Term[element] target)}
+    if node is? hir.Index {
+        let source=data.snapshot.sequences.get(node.array)
+        if source isnt? none {elements.read(@state source subject word_type loc @data.registry)}
+    }
+}
+
+# Field defaults may depend on earlier fields. The visitor records those
+# values in source order; here they become the completed record's routes.
+fields = (@state:facts.State root:addr declared:types.ObjectType value:addr path:array<string> @data:predicates.Data):>void => {
+    let literal=hir.node_at(data.env.nodes expressions.strip_casts(value data.env.nodes))
+    if literal isnt? hir.ObjectLiteral return
+    loop actual in literal.fields {
+        let field=types.object_field(declared actual.name)
+        if field is? none continue
+        let route=path
+        route.push(actual.name)
+        let nested=expressions.object_of(field.value_type data.env.types)
+        if nested isnt? none {fields(@state root nested actual.value route @data) continue}
+        let scalar=data.snapshot.numbers.get(actual.value)
+        let length=data.snapshot.lengths.get(actual.value)
+        if scalar is? none and length is? none continue
+        let subject=bindings.route_id(@data.registry root route field.value_type actual.loc)
+        if scalar isnt? none {facts.set_value(@state facts.Term[subject] scalar)}
+        if length isnt? none {facts.set_value(@state facts.Term[subject 'length'] length)}
+    }
+}
+
+install = (@state:facts.State subject:addr value:addr annotation:addr? word_type:addr loc:Span @declared:refinements.Declared @data:predicates.Data):>void => {
+    facts.set_value(@state facts.Term[subject] data.snapshot.numbers.get(value))
+    let length=data.snapshot.lengths.get(value)
+    if length isnt? none {
+        let known=facts.lookup(state facts.value(facts.Term[subject 'length']))
+        facts.set_value(@state facts.Term[subject 'length'] intervals.meet(known length))
+    }
+    let context=refinements.Context[data.env word_type]
+    if annotation isnt? none {
+        let contract=types.node_at(data.env.types annotation)
+        if contract is? types.RefinedType {refinements.seed_binding(@state @declared subject contract context loc @data.registry)}
+        let object=expressions.object_of(annotation data.env.types)
+        if object isnt? none {fields(@state subject object value [] @data)}
+    }
+    seed(@state subject value word_type loc @data)
+    let called=expressions.call_function_type(value data.env.nodes data.env.types)
+    if called isnt? none and types.node_at(data.env.types called.ret) is? types.TypeOr {data.member_calls[subject]=expressions.strip_casts(value data.env.nodes)}
+}
