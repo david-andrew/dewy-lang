@@ -31,6 +31,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   all feasible pairs in 432 bounded numeric cases plus relational routes.
   Traversal must still invalidate historical predicates after writes before
   feeding this transfer; the complete bounds controller remains in progress.
+  The short-circuit path kernel now carries that invalidation through `and`,
+  `or`, `nand`, and `nor`, joins alternative states, and revisits conjunctions
+  without resurrecting predicates invalidated by later writes. Its compiled
+  tests cover both outcomes of each operator, impossible paths, and a later
+  assignment that invalidates an earlier operand. Atomic proof transfer is
+  supplied as a typed function argument.
 
 - Hosted cleanup now releases owned aggregate payloads in record fields and
   array union cells, including recursive aliases. Brace-less return, break,
