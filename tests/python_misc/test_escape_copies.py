@@ -22,9 +22,11 @@ def test_static_literals_are_shared_but_temporary_views_and_owned_elements_are_c
         '}\n'
         'let main = ():>int64 => collect(["p"] [104]).length\n'
     )
-    # the join and the decoded string live in the frame region (no return reaches them): stored, they are copied
-    assert len(copies) == 4   # join, decode, temporary slice descriptor, and the element of `names`
-    assert sum('current frame' in message for message in copies) == 3 and sum('owned by the container' in message for message in copies) == 1
+    # A narrowed match payload is borrowed from its optional cell: retaining
+    # it as `s` and then storing it in `found` gives each owner its own copy.
+    assert len(copies) == 5   # join, retained decode, stored decode, slice, names element
+    assert sum('current frame' in message for message in copies) == 2
+    assert sum('owned by the container' in message for message in copies) == 3
 
 
 def test_frame_and_caller_strings_are_copied_and_reported() -> None:

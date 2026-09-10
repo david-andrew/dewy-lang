@@ -3200,16 +3200,17 @@ class _Lowerer(
             self.owned_objects[local_binding_key(node)] = unfolded
 
     def _note_owned_raw_array(self, node: hir.Declare, declared_type: ty.Type) -> None:
-        """An exact-length local array on the stack whose elements are string handles
-        or object handles: the arena strings stored into it (or into its element
-        objects) are released with it at scope exit (`_insert_releases`)."""
+        """An exact-length stack array owns its strings, objects, and cells.
+        Their payloads are released at scope exit even though the raw element
+        buffer itself needs no arena cleanup (`_insert_releases`)."""
         exact = declared_type if isinstance(declared_type, ty.ArrayType) and declared_type.length is not None else node.expr.type
         if (
             isinstance(exact, ty.ArrayType)
             and exact.length is not None   # `let xs:array<string> = ["m" "n"]`: the literal's length
             and not self.lowering_module_startup
             and self._has_arena()
-            and (self._is_string_valued(exact.element) or isinstance(ty.unfold(exact.element), ty.ObjectType))
+            and (self._is_string_valued(exact.element) or isinstance(ty.unfold(exact.element), ty.ObjectType)
+                 or self._is_optional_element(exact.element) or self._is_union_element(exact.element))
         ):
             # a literal's element objects are arena blocks (`_array_storage_value`); a copy's or a call's may be inline or frame storage
             blocks = isinstance(self._unwrap_transparent(node.expr), hir.ArrayLiteral)
@@ -3254,6 +3255,14 @@ class _Lowerer(
             statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', handle.name, 'int64', self._intrinsic_call('__load_i64__', [self._pointer_element_address(replace(word, type='int64'), index, element_bytes, loc)], 'int64', loc)))
             if self._is_string_valued(element):
                 statements.append(self._release_string_by_owner(handle, loc))
+            elif self._is_optional_element(element) or self._is_union_element(element):
+                # Cell elements always own arena storage, even when the array
+                # itself is a fixed-size stack buffer or a copied parameter.
+                plain = ty.strip_refinement(element)
+                payload = ty.optional_payload(plain)
+                members = ('none', payload) if payload is not None else (ty.runtime_union_members(plain) or ())
+                statements.extend(self._release_cell_payload(handle, members, loc))
+                statements.append(self._arena_release_call(handle, self._int64_literal(loc, 16), loc))
             else:
                 object_type = ty.unfold(element)
                 statements.extend(self._release_object_members(handle, object_type, loc))
@@ -3263,10 +3272,10 @@ class _Lowerer(
         return statements
 
     def _note_owned_array(self, node: hir.Declare, declared_type: ty.Type) -> None:
-        """A local that owns a runtime-length array's storage: released when its scope ends (`_insert_releases`)."""
+        """A descriptor-backed local owns its elements even with an exact length.
+        Release them at scope exit; owner flags decide which buffers to free."""
         if (
             isinstance(declared_type, ty.ArrayType)
-            and declared_type.length is None
             and not self.lowering_module_startup
             and self._array_representation(node) == 'descriptor'
         ):

@@ -268,3 +268,61 @@ let main=():>int64=>{
 '''
     cursors = run(source, tmp_path).splitlines()
     assert len(set(cursors[2:])) == 1, cursors
+
+
+@pytest.mark.parametrize('source', ['table.get(1)', 'values[0]', 'selected_value()'])
+def test_string_retained_from_a_narrowed_cell_outlives_its_scope(source, tmp_path):
+    program = '''
+let selected_value=():>string|none=>"retained payload"
+let inspect=(present:bool):>int64=>{
+    let name:string="fallback"
+    if present {
+        let table:dict<int64 string>=[1 -> "retained payload"]
+        let values:array<string|none>=["retained payload"]
+        let selected=SOURCE
+        if selected is? none return 0
+        name=selected
+    }
+    # The payload's owner has left scope before this read.
+    if present return if name =? "retained payload" 42 else 1
+    return if name =? "fallback" 42 else 1
+}
+let main=():>int64=>{
+    inspect(true);
+    inspect(false);
+    loop i in 0..20 {
+        $runtime_assert inspect(true) =? 42
+        $runtime_assert inspect(false) =? 42
+        printl(_arena_cursor)
+    }
+    return 0
+}
+'''.replace('SOURCE', source)
+    cursors = run(program, tmp_path).splitlines()
+    assert len(cursors) == 21
+    assert len(set(cursors[2:])) == 1, cursors
+
+
+@pytest.mark.parametrize('element,value', [
+    ('int64|none', '42'),
+    ('Item|Other', 'Item["retained payload"]'),
+])
+def test_fixed_array_cell_elements_release_after_parameter_copy(element, value, tmp_path):
+    source = """
+Item:type=[text:string]
+Other:type=[value:int64]
+let inspect=(source:array<ELEMENT length=1>):>int64=>{
+    let copy=source
+    return copy.length
+}
+let main=():>int64=>{
+    loop i in 0..20 {
+        let source:array<ELEMENT length=1>=[VALUE]
+        $runtime_assert inspect(source) =? 1
+        printl(_arena_cursor)
+    }
+    return 0
+}
+""".replace('ELEMENT', element).replace('VALUE', value)
+    cursors = run(source, tmp_path).splitlines()
+    assert len(set(cursors[2:])) == 1, cursors

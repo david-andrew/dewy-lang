@@ -410,6 +410,9 @@ class _DictLowering:
             # aggregate payloads through the normal prepared storage trees.
             cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('dict_value'))
             cell_word = replace(cell, type='int64')
+            if not self.lowering_module_startup:
+                self.owned_aggregate_cells[cell.name] = (members, True)
+                self.owned_cells[cell.name] = members
             element = self._name('dict_element', loc)
             found_body = [
                 self._declare(element, replace(value_at(position), type='int64'), loc),
@@ -427,6 +430,11 @@ class _DictLowering:
             raise TypeError('INTERNAL ERROR: dictionary lookup is not optional')
         cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('dict_value'))
         cell_word = replace(cell, type='int64')
+        if not self.lowering_module_startup:
+            # Lookup makes an independent payload, subsequently copied by
+            # its consumer. Its temporary owns that first copy until exit.
+            self.owned_aggregate_cells[cell.name] = (('none', payload), False)
+            self.owned_cells[cell.name] = ('none', payload)
         if isinstance(ty.unfold(payload), ty.ObjectType):
             # an object value: bind the element's handle to a name typed as the
             # object, then let the optional write copy it into the cell's prepared

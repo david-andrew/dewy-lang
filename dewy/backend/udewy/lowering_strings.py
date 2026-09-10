@@ -3190,6 +3190,17 @@ class _StringLowering:
             if self._string_storage(node.string, visiting=visiting) == 'element':
                 return 'element'   # a retained view must also survive replacement of its owner's bytes
             return 'frame'   # the descriptor is rebuilt, and loop regions reuse it
+        if isinstance(node, hir.ExpressedIdentifier) and self._is_string_valued(node.type):
+            # Inspect storage origins of every type, not just string locals:
+            # `selected:string|none` disappears from `_string_local_candidates`.
+            # Its narrowed payload is borrowed even when its read type names
+            # a string literal. Leaving/replacing the cell releases its bytes.
+            origins = [candidate.type for candidate in self.local_initializers.get(node.binding_id, [])]
+            if self.current_literal is not None:
+                origins.extend(param.type for param in [*self.current_literal.pos_or_kw_args, *self.current_literal.kw_only_args]
+                               if param.binding_id == node.binding_id)
+            if any(ty.optional_payload(origin) is not None or ty.runtime_union_members(origin) is not None for origin in origins):
+                return 'element'
         if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):
             return 'static'
         if isinstance(node, hir.InterpolatedString):
