@@ -108,8 +108,11 @@ node_at = (nodes:array<Type> id:addr):>Type => {
 }
 
 shape_of = (id:addr nodes:array<Type>):>string => {
-    let node = node_at(nodes id)
-    return if node.shape is? none node.key else node.shape
+    # Read only the identity fields. Returning a complete Type from node_at
+    # would copy its potentially large argument/field tables for this query.
+    $runtime_assert id <? nodes.length
+    let shape=nodes[id].shape
+    return if shape is? none nodes[id].key else shape
 }
 same_type = (a:addr b:addr nodes:array<Type>):>bool => a =? b or shape_of(a nodes) =? shape_of(b nodes)
 shapes_key = (items:array<addr> nodes:array<Type>):>string => {
