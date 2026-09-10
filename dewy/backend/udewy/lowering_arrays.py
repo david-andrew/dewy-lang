@@ -2612,7 +2612,9 @@ class _ArrayLowering:
             return self._optional_element_value(node, element_type)
         if self._is_union_element(element_type):
             return self._union_element_value(node, element_type)
-        if isinstance(node.type, ty.IntegerLiteralType):
+        # A singleton type can belong to an effectful call. Only replace an
+        # actual literal; ordinary extraction preserves all other evaluation.
+        if isinstance(node, hir.Integer) and isinstance(node.type, ty.IntegerLiteralType):
             return [], hir.Integer(
                 node.loc,
                 element_type,

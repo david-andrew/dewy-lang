@@ -7530,7 +7530,8 @@ def _tcr_set_literal(
     distinct: list[hir.AST] = []
     for item in members.items:
         identity = _key_identity(item, ctx=ctx)
-        if identity is None or identity[0] != 'c':
+        # Singleton result types prove a value, not that evaluation is inert.
+        if identity is None or identity[0] != 'c' or not isinstance(_unwrap_literal_value(item), (hir.String, hir.Integer, hir.Bool)):
             return _library_call('_set_of_array', [members], loc, ctx=ctx)
         if identity[1] in seen:
             continue
