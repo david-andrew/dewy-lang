@@ -103,62 +103,66 @@ binding_interval = (term:facts.Term state:facts.State env:Environment):>ranges.I
     return if declared is? none ranges.UNKNOWN else declared
 }
 
-constant_binding = (id:addr? env:Environment @seen:set<addr>):>ranges.Interval? => {
+constant_binding = (id:addr? nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
     if id is? none return none
     if id in? seen return none
-    let binding = env.registry.by_id.get(id)
+    let binding = registry.by_id.get(id)
     if binding is? none return none
     let declaration_id = binding.declaration
     if declaration_id is? none return none
-    let declaration = hir.node_at(env.nodes declaration_id)
+    let declaration = hir.node_at(nodes declaration_id)
     if declaration isnt? hir.Declare return none
     if declaration.decltype not=? 'const' return none
     seen.add(id)
-    return constant_expr(declaration.expr env @seen)
+    return constant_expr(declaration.expr nodes type_nodes registry @seen)
 }
-constant_expr = (id:addr env:Environment @seen:set<addr>):>ranges.Interval? => {
-    let node = hir.node_at(env.nodes id)
-    let value_type = types.node_at(env.types node.value_type)
+constant_expr = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
+    let node = hir.node_at(nodes id)
+    let value_type = types.node_at(type_nodes node.value_type)
     if value_type is? types.IntegerLiteralType return ranges.exact(value_type.value)
     if node is? hir.Integer return ranges.exact(node.value)
     if node is? hir.ObjectLiteral and node.integer_value isnt? none return ranges.exact(node.integer_value)
-    if node is? hir.ValueCast | hir.RepresentationCast return constant_expr(node.expr env @seen)
+    if node is? hir.ValueCast | hir.RepresentationCast return constant_expr(node.expr nodes type_nodes registry @seen)
     if node is? hir.ArrayLength {
-        let array_type = types.node_at(env.types hir.node_at(env.nodes node.array).value_type)
+        let array_type = types.node_at(type_nodes hir.node_at(nodes node.array).value_type)
         if array_type is? types.ArrayType {
             let length = array_type.length
             if length isnt? none return ranges.exact(length)
         }
         return none
     }
-    if node is? hir.ExpressedIdentifier return constant_binding(node.binding_id env @seen)
-    if node is? hir.Block and not node.scoped and node.items.length =? 1 return constant_expr(node.items[0] env @seen)
+    if node is? hir.ExpressedIdentifier return constant_binding(node.binding_id nodes type_nodes registry @seen)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 return constant_expr(node.items[0] nodes type_nodes registry @seen)
     if node isnt? hir.FunctionCall return none
-    let function = hir.node_at(env.nodes node.func)
+    let function = hir.node_at(nodes node.func)
     if function isnt? hir.ExpressedIdentifier return none
     let operation = if node.integer_operation is? none function.name else node.integer_operation
     if node.pos_args.length =? 1 and (node.integer_operation =? 'identity' or node.integer_operation =? 'narrow') {
-        let value = constant_expr(node.pos_args[0] env @seen)
-        return if operation =? 'identity' value else ranges.fits(value result_width(node.value_type env.types))
+        let value = constant_expr(node.pos_args[0] nodes type_nodes registry @seen)
+        return if operation =? 'identity' value else ranges.fits(value result_width(node.value_type type_nodes))
     }
     if node.pos_args.length =? 1 and operation =? '__unary_sub__' {
-        let value = constant_expr(node.pos_args[0] env @seen)
+        let value = constant_expr(node.pos_args[0] nodes type_nodes registry @seen)
         if value is? none return none
         let lower = value.lower
         if lower is? none return none
         return ranges.exact(-lower)
     }
     if node.pos_args.length =? 2 {
-        let left = constant_expr(node.pos_args[0] env @seen)
-        let right = constant_expr(node.pos_args[1] env @seen)
-        return binary(operation left right node.value_type env.types floor=node.integer_operation isnt? none)
+        let left = constant_expr(node.pos_args[0] nodes type_nodes registry @seen)
+        let right = constant_expr(node.pos_args[1] nodes type_nodes registry @seen)
+        return binary(operation left right node.value_type type_nodes floor=node.integer_operation isnt? none)
     }
     return none
 }
-constant = (id:addr env:Environment):>ranges.Interval? => {
+# Source checking already owns these arenas. Pass their read-only arguments
+# directly rather than constructing a value record that copies the registry
+# on every query. The complete Environment remains the analysis-pass API.
+constant_in = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry):>ranges.Interval? => {
     let seen:set<addr> = set[]
-    return constant_expr(id env @seen)
+    return constant_expr(id nodes type_nodes registry @seen)
 }
+constant = (id:addr env:Environment):>ranges.Interval? => constant_in(id env.nodes env.types env.registry)
 literal_elements = (id:addr env:Environment):>ranges.Interval? => {
     let node = hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
     if node isnt? hir.ArrayLiteral return none

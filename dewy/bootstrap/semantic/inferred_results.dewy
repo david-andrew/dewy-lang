@@ -5,7 +5,6 @@ import p"propositions.dewy" as facts
 import p"bindings.dewy" as bindings
 import p"analyze/hir_facts.dewy" as expressions
 import p"analyze/value_bounds.dewy" as constants
-import p"../targets.dewy" as targets
 
 doc"""
 Facts inferred from a function's expressed boolean result. A single predicate
@@ -26,7 +25,7 @@ measured = (id:addr names:dict<addr string> session:contexts.Session):>addr? => 
     return none
 }
 integer = (id:addr session:contexts.Session):>bigint? => {
-    let value=constants.constant(id constants.Environment[session.hir session.types session.registry targets.max_length(session.target)])
+    let value=constants.constant_in(id session.hir session.types session.registry)
     if value is? none or value.lower is? none or value.upper is? none or value.lower not=? value.upper return none
     return value.lower
 }

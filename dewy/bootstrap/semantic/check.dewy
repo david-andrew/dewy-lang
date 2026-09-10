@@ -352,6 +352,8 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let value = expression(node.item env @session call_target=true)
             if value is? Error return value
             let target = node_at(value session)
+            let type=types.node_at(session.types target.value_type)
+            if type is? types.FunctionType and type.type_params.length >? 0 return problem(id 'a generic function cannot be used as a value' 'call it by name, where its type arguments can be determined' env session)
             if target is? hir.BoundMethod {
                 if target.receiver isnt? none return pending(id 'extracting an instance method as a function value' env session)
                 return target.function
@@ -695,6 +697,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id] @session)
     binding.declaration = declared
     if checked is? hir.FunctionLiteral | hir.GenericFunction { binding.function = value binding.kind = 'function' }
+    if checked is? hir.OverloadedFunction {binding.function=value binding.kind='overload'}
     session.registry.by_id[binding_id] = binding
     return declared
 }
@@ -865,6 +868,7 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
     if resolved is? Error return resolved
     let shape = dispatch.method_at(session.types resolved)
     if shape.type_params.length >? 0 {
+        if name =? '<anonymous>' return problem(id 'a generic function must be declared with `let`' 'its instances are created where it is called by name' env session)
         let reference = contexts.syntax_ref(id env.lexical @session)
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
@@ -1842,8 +1846,7 @@ range_value = (id:addr node:parser.Flat env:Environment @session:contexts.Sessio
     return put(hir.Range[contexts.node_at(id env.lexical session).loc types.primitive('range' @session.types) delims pair checked_left checked_right] @session)
 }
 constant_integer = (id:addr session:contexts.Session):>bigint? => {
-    let env = constants.Environment[session.hir session.types session.registry targets.max_length(session.target)]
-    let value = constants.constant(id env)
+    let value = constants.constant_in(id session.hir session.types session.registry)
     if value is? none or value.lower is? none or value.upper is? none or value.lower not=? value.upper return none
     return value.lower
 }
@@ -2384,6 +2387,20 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
     let right = arguments[1]
     let a = node_at(left session)
     let b = node_at(right session)
+    if name =? '__and__' and types.node_at(session.types a.value_type) is? types.CallableType and types.node_at(session.types b.value_type) is? types.CallableType {
+        let methods:array<addr>=[]
+        let alternates:array<addr>=[]
+        loop argument in arguments {
+            let value=node_at(argument session)
+            let type=types.node_at(session.types value.value_type)
+            if type is? types.OverloadType {loop method in type.methods {methods.push(method)}}
+            else {methods.push(value.value_type)}
+            if value is? hir.OverloadedFunction {loop alternate in value.alternates {alternates.push(alternate)}}
+            else {alternates.push(argument)}
+        }
+        let loc=contexts.node_at(id env.lexical session).loc
+        return put(hir.OverloadedFunction[loc types.overload_type(methods @session.types) alternates] @session)
+    }
     if views.container_entry_types(a.value_type session.types) isnt? none or views.container_entry_types(b.value_type session.types) isnt? none return container_algebra(name left right id env @session)
     if not views.string_valued(a.value_type session.types) or not views.string_valued(b.value_type session.types) return none
     let loc = contexts.node_at(id env.lexical session).loc
