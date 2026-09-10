@@ -1,6 +1,5 @@
 """Equality with a literal alternative narrows a mixed union's tag."""
 import subprocess
-from udewy.cache import cache_artifact
 
 import test_bootstrap_check as source_values
 
@@ -34,7 +33,7 @@ def test_native_literal_union_equality(tmp_path, monkeypatch):
     # rejection) when a checker reports an implementation placeholder.
     pending = tmp_path / 'different-unions.dewy'
     pending.write_text('let same=(a:int64|none b:string|none):>bool=>a =? b')
-    executable = cache_artifact(tmp_path / 'source-checker.udewy').resolve()
+    executable = source_values._native_driver(tmp_path)
     result = subprocess.run([executable, 'invalid', 'true', 'false', 'false', pending],
                             capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 1
