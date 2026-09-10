@@ -368,3 +368,39 @@ let main = ():>int => {
         binary = _compile_with(command, source, 'x86_64', work)
         result = subprocess.run([str(binary)], capture_output=True, timeout=30, check=False)
         assert result.returncode == 0, (label, result.stderr)
+
+
+def test_native_arena_growth_preserves_previous_chunks(bootstrap_binary, tmp_path):
+    source = f'''import p"{REPO_ROOT / 'udewy/stdlib/stdlib.udewy'}"
+let main = ():>int => {{
+    arena_init()
+    let first:int = arena_alloc(1)
+    __store_u8__(42 first)
+    let second:int = arena_alloc(ARENA_SIZE)
+    __store_u8__(43 second)
+    __store_u8__(44 second + ARENA_SIZE - 1)
+    let oversized:int = arena_alloc(ARENA_SIZE + 1)
+    __store_u8__(45 oversized + ARENA_SIZE)
+    let next:int = arena_alloc(8)
+    __store__(46 next)
+    if ((first or second or oversized or next) and 7) not=? 0 {{ return 1 }}
+    if __load_u8__(first) not=? 42 {{ return 2 }}
+    if __load_u8__(second) not=? 43 {{ return 3 }}
+    if __load_u8__(second + ARENA_SIZE - 1) not=? 44 {{ return 4 }}
+    if __load_u8__(oversized + ARENA_SIZE) not=? 45 {{ return 5 }}
+    if __load__(next) not=? 46 {{ return 6 }}
+    return 0
+}}
+'''
+    binary = _compile_with([str(bootstrap_binary)], source, 'x86_64', tmp_path)
+    assert subprocess.run([binary], check=False).returncode == 0
+    # Overflow must fail before allocation, rather than wrap the cursor and
+    # hand out overlapping storage. No huge physical allocation is needed.
+    binary = _compile_with([str(bootstrap_binary)], f'''import p"{REPO_ROOT / 'udewy/stdlib/stdlib.udewy'}"
+let main = ():>int => {{
+    arena_init()
+    arena_alloc(9223372036854775807)
+    return 0
+}}
+''', 'x86_64', tmp_path)
+    assert subprocess.run([binary], check=False).returncode == 1

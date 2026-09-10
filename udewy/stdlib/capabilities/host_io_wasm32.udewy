@@ -38,12 +38,16 @@ let host_exit = (code:int):>void => {
     return void
 }
 
-# wasm32 cannot dynamically grow linear memory from user code, so we burn a
-# large static slab up front. 32 MB matches the host arena size on native.
+# Each wasm instance has a bounded static reservation. Suballocate mappings
+# so arena growth cannot silently reuse and overwrite an earlier chunk.
 const WASM_ARENA_RESERVED:int = 0x2000000
-
+let wasm_arena_used:int = 0
 let host_mmap_rw = (size:int):>int => {
-    return __static_alloca__(WASM_ARENA_RESERVED)
+    if size <? 0 or size >? WASM_ARENA_RESERVED - wasm_arena_used { return 0 }
+    let base:int = __static_alloca__(WASM_ARENA_RESERVED)
+    let ptr:int = base + wasm_arena_used
+    wasm_arena_used = wasm_arena_used + size
+    return ptr
 }
 
 let host_fork = ():>int => {
