@@ -39,6 +39,9 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        # Native HIR must retain a literal field as the subject of its proof.
+        # This traverses a loop with a continue in obligations.field_subject.
+        ({'entry.dewy': 'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet main=():>int64=>{let one:BigInt<sign =? 1>=[sign=1 limbs=[1]] return one.sign+41}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let position:addr|none=none loop i in 0.. and i <? 2 {position=i} return if position is? none 0 else position+41}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let number:int64=42 let value:uint8|none=number return if value is? none 0 else value as int64}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let number:uint8=42 let value:uint64|none=number return if value is? none 0 else if value =? 42 42 else 0}'}, 42),
