@@ -2823,7 +2823,8 @@ class _StringLowering:
     def _owning_string_locals(self, literal: hir.FunctionLiteral) -> set[int]:
         """String locals that own their value: every value they receive is a named
         function's result (static, or arena storage the caller owns — a returned
-        parameter comes back as a view, an element as a copy) or a literal; no
+        parameter comes back as a view, an element as a copy), a literal, or an
+        independent retained container read; no
         string assignment to another binding reaches them (`t = s` in a loop would
         outlive them); no nested function literal captures them. They are released
         by their owner word at scope exit, moved out by `return s`, copied when a
@@ -2844,6 +2845,8 @@ class _StringLowering:
 
         def fresh(expr: hir.AST) -> bool:
             expr = self._unwrap_transparent(expr)
+            if self._is_string_valued(expr.type) and self._string_storage(expr) == 'element':
+                return True   # a retained container read receives its own copy
             if isinstance(expr, (hir.String, hir.NoneValue)) or isinstance(expr.type, ty.StringLiteralType):
                 return True
             if isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
@@ -3037,6 +3040,11 @@ class _StringLowering:
         """A string value a binding keeps: a named call's result is taken over —
         copied when it is a view and the statement made temporaries the view may
         point into (`let x = f(g(s))`: `g`'s result dies after the statement)."""
+        # Containers can replace/release their owned strings while this
+        # binding still holds the old value. Copies include views and locals
+        # derived from those reads, not just a syntactically direct index.
+        if self._string_storage(node) == 'element':
+            return self._escaping_string_value(node)
         self._consume_string_value(node)
         prelude, value = self._extract_expression(node)
         if not self._is_named_string_call(node) or not self.statement_temporaries:
@@ -3161,14 +3169,23 @@ class _StringLowering:
                 # `bytes as string | none`: built in the frame region unless a return reaches it
                 return 'frame' if self._stays_in_frame(node) else 'arena'
             return self._string_storage(node.expr, visiting=visiting)
+        if isinstance(node, (hir.Index, hir.MemberAccess)):
+            return 'element'   # the owner can replace even a literal-valued slot
+        if isinstance(node, hir.Flow):
+            sources = [arm.body for arm in node.arms]
+            if node.default is not None:
+                sources.append(node.default)
+            if any(self._string_storage(source, visiting=visiting) == 'element' for source in sources):
+                return 'element'
+            return 'frame'
+        if isinstance(node, hir.Block) and node.items:
+            return self._string_storage(node.items[-1], visiting=visiting)
         if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):
             return 'static'
         if isinstance(node, hir.InterpolatedString):
             return 'frame'
         if isinstance(node, (hir.StringSlice, hir.StringIndex)):
             return self._string_storage(node.string, visiting=visiting)
-        if isinstance(node, (hir.Index, hir.MemberAccess)):
-            return 'element'   # a container's element or a field: the container owns it
         if isinstance(node, hir.ArrayMethod):
             return 'frame'
         if isinstance(node, hir.FunctionCall):
@@ -3198,7 +3215,7 @@ class _StringLowering:
             visiting.discard(node.binding_id)
             if storages <= {'static', 'arena'}:
                 return 'arena' if 'arena' in storages else 'static'
-            if storages <= {'static', 'arena', 'element'}:
+            if 'element' in storages:
                 return 'element'
             return 'caller' if storages <= {'static', 'arena', 'caller'} else 'frame'
         return 'frame'

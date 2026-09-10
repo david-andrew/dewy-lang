@@ -997,11 +997,11 @@ class _Lowerer(
         self.returned_string_nodes = self._returned_string_node_ids(analysis_literal)
         self.loop_string_escapes = self._loop_string_escapes(analysis_literal)
         self.local_initializers = self._local_initializers(analysis_literal)
+        self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.owning_string_bindings = self._owning_string_locals(analysis_literal)
         self.owned_strings = set()
         self.owned_raw_arrays = {}
         self.owned_cells = {}
-        self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.frame_region = None
         self.loop_regions = []
         self.loop_region_headers = []
