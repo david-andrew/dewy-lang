@@ -149,7 +149,10 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if numeric_values.is_family(expected 'BigInt' env.lexical session) and not numeric_values.is_family(node.value_type 'BigInt' env.lexical session) {
         let constant=constant_integer(value session)
         let nonzero=numeric_values.nonzero_form(expected 'BigInt' env.lexical session)
-        if constant isnt? none and not (nonzero and constant =? 0) {
+        # Zero already inhabits the literal alternative. Let the ordinary
+        # union path below pack it into a cell; returning a raw zero here
+        # would pass a null pointer to a BigInt parameter.
+        if constant isnt? none and constant not=? 0 {
             let declared=numeric_values.family('BigInt' env.lexical session)
             $runtime_assert declared isnt? none
             return numeric_values.bigint_literal(constant declared node.loc @session)
@@ -3988,6 +3991,10 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
 # The existing protocol takes no source arguments, even optional ones.
 conversion_method = (value:addr target:addr id:addr env:Environment @session:contexts.Session):>addr|none|Error => {
     let node=node_at(value session)
+    # Numeric representations use their registered prelude role just as
+    # arithmetic does. One formatter accepts both the zero and record arms,
+    # preserving ordinary call evaluation for explicit casts/interpolation.
+    if views.string_valued(target session.types) and numeric_values.is_family(node.value_type 'BigInt' env.lexical session) return library_call('_bigint_as_string' [value] id env @session)
     let owner=views.structural_base(node.value_type session.types)
     let type=types.node_at(session.types owner)
     if type isnt? types.ObjectType or types.object_method(type '__as__') is? none return none

@@ -12,6 +12,7 @@ let _bigint_from_uint_nonzero=(value:uint64 & ~0):>BigInt & ~0=>[sign=1 limbs=[1
 let _bigint_neg=(value:BigInt):>BigInt=>value
 let _bigint_to_int=(value:BigInt):>int64=>0
 let _bigint_to_uint=(value:BigInt):>uint64=>0
+let _bigint_as_string=(value:BigInt):>string=>"number"
 '''
 for suffix in ['add', 'sub', 'mul', 'floordiv', 'mod']:
     divisor = 'BigInt & ~0' if suffix in ('floordiv', 'mod') else 'BigInt'
@@ -24,6 +25,10 @@ CASES = [PREFIX + f'let operation=(a:BigInt b:{other}):>{result}=>{left} {op} {r
          for other, left, right in [('int64', 'a', 'b'), ('uint64', 'b', 'a'), ('int8', 'a', 'b'), ('uint8', 'b', 'a')]
          for result in ['bool' if '?' in op else 'BigInt']]
 CASES += [PREFIX + body for body in [
+    'let operation=(value:BigInt):>bool=>value >=? 0',
+    'let operation=(value:BigInt):>string=>"value {value}"',
+    'let operation=(value:BigInt):>string=>value as string',
+    'let operation=(value:BigInt|none):>string=>"value {value}"',
     'let operation=():>BigInt=>-(9223372036854775808 as BigInt)',
     'let operation=():>BigInt=>18446744073709551616 as BigInt',
     'let operation=(value:uint64):>BigInt=>value as BigInt',
