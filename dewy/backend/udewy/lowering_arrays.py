@@ -2598,7 +2598,11 @@ class _ArrayLowering:
         source_type = ty.strip_refinement(node.type)
         if isinstance(source_type, ty.ArrayType):
             array_type = source_type
-        return self._clone_array_value(node, array_type, arena=True)
+        # A literal/call row has no surviving source owner. Transfer its
+        # element handles into the stored row; cloning them would abandon
+        # the original owned strings, cells, and nested objects.
+        fresh = isinstance(self._copy_source_expression(node), (hir.ArrayLiteral, hir.FunctionCall))
+        return self._clone_array_value(node, array_type, arena=True, move=fresh)
 
     def _array_storage_value(
         self,

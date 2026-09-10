@@ -498,7 +498,8 @@ let main=():>int64=>{
     assert len(set(cursors[2:])) == 1, cursors
 
 
-def test_returned_record_field_views_release_receivers_after_retaining_values(tmp_path):
+@pytest.mark.parametrize('interpolated', [False, True])
+def test_returned_record_field_views_release_receivers_after_retaining_values(interpolated, tmp_path):
     source = '''
 Node:type=type of [key:string shape:string|none]
 Child:type=type of Node & [parts:array<array<string>>]
@@ -535,6 +536,13 @@ let main=():>int64=>{
     return 0
 }
 '''
+    if interpolated:
+        source = source.replace('Child["key" "shape" [["payload"]]]',
+                                'Child["key-{calls}" "shape-{calls}" [["payload-{calls}"]]]')
+        source = source.replace('retained=?"key"', 'retained=?"key-{before+1}"')
+        source = source.replace('shape=?"shape"', 'shape=?"shape-{before+2}"')
+        source = source.replace('returned=?"key"', 'returned=?"key-{before+3}"')
+        source = source.replace('words[0]=?"payload"', 'words[0]=?"payload-{before+4}"')
     cursors = run(source, tmp_path).splitlines()
     assert len(cursors) == 13
     assert len(set(cursors[2:])) == 1, cursors
