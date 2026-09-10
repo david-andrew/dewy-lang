@@ -430,3 +430,32 @@ let main=():>int64=>{
 """.replace('ELEMENT', element).replace('VALUE', value)
     cursors = run(source, tmp_path).splitlines()
     assert len(set(cursors[2:])) == 1, cursors
+
+
+@pytest.mark.parametrize('result_type', ['Box|none', 'Box|string', 'array<string>|none'])
+def test_discarded_call_type_tests_release_their_payloads(result_type, tmp_path):
+    value = 'words' if result_type.startswith('array') else 'Box[words]'
+    tested = 'array<string>' if result_type.startswith('array') else 'Box'
+    source = f'''
+Box:type=[words:array<string>]
+let calls:int64=0
+let make=():>{result_type}=>{{
+    calls+=1
+    let words:array<string>=["value-{{calls}}"]
+    return {value}
+}}
+let exercise=():>void=>{{
+    let before=calls
+    $runtime_assert make() is? {tested}
+    $runtime_assert not (make() isnt? {tested})
+    $runtime_assert calls=?before+2
+}}
+let main=():>int64=>{{
+    exercise(); exercise();
+    loop i in 0..12 {{exercise(); printl(_arena_cursor)}}
+    return 0
+}}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors

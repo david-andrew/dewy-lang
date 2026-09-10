@@ -4479,6 +4479,24 @@ class _Lowerer(
         if isinstance(node, hir.ForwardingAccess):
             return self._extract_forwarding_access(node)
         if isinstance(node, hir.TypeTest):
+            # A direct call's cell belongs to this test alone. Compute the
+            # boolean before releasing its active payload; knowing the tag
+            # must not leak the returned record/array/string on every query.
+            # Ordinary calls use unprepared optional cells and prepared union
+            # cells. Methods have their own result ownership paths.
+            if (self._has_arena() and isinstance(node.value, hir.FunctionCall)
+                    and isinstance(node.value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
+                    and (temporary_members := self._field_union_members(node.value.type)) is not None):
+                prelude, cell = self._extract_expression(node.value)
+                extra, tested = self._extract_expression(replace(node, value=replace(cell, type=node.value.type)))
+                result = self._new_string_temp(node.loc, 'bool', 'temporary_type_test')
+                cleanup = self._release_cell_payload(
+                    cell, temporary_members, node.loc,
+                    prepared=ty.optional_payload(node.value.type) is None,
+                )
+                return [*prelude, *extra,
+                        hir.Declare(node.loc, ty.VOID_TYPE, 'let', result.name, 'bool', tested),
+                        *cleanup], result
             if isinstance(node.test_type, ty.TypeOr) and any(self._brand_under_test(member) is not None for member in node.test_type.items):
                 # Membership in a union is disjunction (its negation is
                 # conjunction). Evaluate a potentially effectful receiver once.
