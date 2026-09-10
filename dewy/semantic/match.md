@@ -64,7 +64,11 @@ lets them:
 - an object member is covered by an unconstrained pattern, or when one of
   its fields' value sets is covered by the field patterns across arms
   (`[sign:1 …]` and `[sign:-1 …]` cover `[sign:-1|1 …]`);
-- a sequence scrutinee is covered by an arm that covers every element.
+- a sequence scrutinee is covered by one arm that covers every element on
+  its own. Separate arms cannot pool their coordinate coverage: patterns for
+  `(int64, int64)` and `(string, string)` leave mixed pairs uncovered. Product
+  reachability currently detects containment by a single earlier arm; it does
+  not attempt to combine several rectangles into a coverage proof.
 
 The diagnostic names the first uncovered member or value. An arm that adds
 nothing to the coverage of any member is **unreachable** and is an error:

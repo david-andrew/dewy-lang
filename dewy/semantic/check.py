@@ -3127,6 +3127,42 @@ def _pattern_coverage(pattern: _Pattern, coverage: list[_MemberCoverage], *, ctx
     return False
 
 
+def _fresh_member_coverage(coverage: list[_MemberCoverage]) -> list[_MemberCoverage]:
+    """The same domains, with none of their values covered yet."""
+    return [_MemberCoverage(member.member, member.domain, brands=member.brands) for member in coverage]
+
+
+def _member_coverage_contains(previous: _MemberCoverage, current: _MemberCoverage) -> bool:
+    """Whether one arm's admitted set contains another's for this member.
+
+    Object guards on different fields give no containment evidence. Keeping
+    that uncertainty is necessary when these sets are coordinates of a
+    product: coverage of x in one arm and y in another cannot be combined.
+    """
+    if previous.is_full():
+        return True
+    if current.is_full():
+        return False
+    if current.domain is not None:
+        return previous.covered.covers(current.covered)
+    if current.brands is not None:
+        return current.covered_brands <= previous.covered_brands
+    if not current.fields:
+        return True   # this arm admitted none of this atomic member
+    return any(
+        name in previous.fields and previous.fields[name][1].covers(covered)
+        for name, (_domain, covered) in current.fields.items()
+    )
+
+
+def _product_coverage_contains(previous: list[list[_MemberCoverage]], current: list[list[_MemberCoverage]]) -> bool:
+    return all(
+        _member_coverage_contains(before, after)
+        for previous_coordinate, current_coordinate in zip(previous, current, strict=True)
+        for before, after in zip(previous_coordinate, current_coordinate, strict=True)
+    )
+
+
 def _match_arm_specs(
     arm: p0.KeywordExpr,
     scrutinee_ast: p0.AST,
@@ -3186,6 +3222,7 @@ def _match_arm_specs(
             for member in members
         ])
     specs: list[_FlowArmSpec] = []
+    products: list[list[list[_MemberCoverage]]] = []
     total = False
     for arm_ast in arm_asts:
         if not (isinstance(arm_ast, p0.BinOp) and isinstance(arm_ast.op, t1.Operator) and arm_ast.op.symbol == '=>'):
@@ -3209,19 +3246,22 @@ def _match_arm_specs(
             _pattern_coverage(element_pattern, coverage, ctx=ctx)
             for element_pattern, coverage in zip(element_patterns, coverage_sets)
         ]
-        if not any(progressed):
-            user_error(ctx.srcfile, 'unreachable match arm', Pointer(span=pattern.loc, message='earlier arms already cover these values'))
         if sequence:
-            # a sequence is total only when one arm covers every element on its own
-            whole = all(
-                element_pattern.kind == 'any'
-                or (element_pattern.kind == 'type' and element_pattern.type_ast is not None
-                    and not isinstance(ast_to_type(element_pattern.type_ast, ctx=replace(ctx, refinement_subject=element_pattern.name)), ty.RefinedType))
-                or (element_pattern.kind == 'object' and all(sub is None for _, sub in element_pattern.fields))
-                for element_pattern in element_patterns
-            )
-            total = whole and all(all(member.is_full() for member in coverage) for coverage in coverage_sets)
+            # Each arm admits a product of sets. Test this product on its
+            # own: accumulated coordinate coverage loses correlations and
+            # can incorrectly fill the off-diagonal gaps between two arms.
+            admitted = [_fresh_member_coverage(coverage) for coverage in coverage_sets]
+            possible = [
+                _pattern_coverage(element_pattern, coordinate, ctx=ctx)
+                for element_pattern, coordinate in zip(element_patterns, admitted, strict=True)
+            ]
+            if not all(possible) or any(_product_coverage_contains(previous, admitted) for previous in products):
+                user_error(ctx.srcfile, 'unreachable match arm', Pointer(span=pattern.loc, message='earlier arms already cover these values, or the pattern admits no value'))
+            total = all(all(member.is_full() for member in coordinate) for coordinate in admitted)
+            products.append(admitted)
         else:
+            if not any(progressed):
+                user_error(ctx.srcfile, 'unreachable match arm', Pointer(span=pattern.loc, message='earlier arms already cover these values'))
             total = all(member.is_full() for member in coverage_sets[0])
 
         def make_condition(element_patterns: list[_Pattern] = element_patterns) -> Callable[[Context], hir.AST]:
