@@ -363,6 +363,7 @@ class _Lowerer(
         self.statement_temporaries: list[tuple[str, hir.ExpressedIdentifier]] = []   # string values of the statement being lowered that nothing keeps: released after it (`_lower_statement`)
         self.consumed_string_values: set[int] = set()   # call nodes whose string result a binding, a return, or a store takes over (not temporaries)
         self.temporary_array_elements: dict[str, ty.TypeExpr] = {}   # array temporaries' element types, by temp name
+        self.temporary_object_types: dict[str, ty.ObjectType] = {}
         self.owned_cells: dict[str, tuple[ty.TypeExpr, ...]] = {}   # optional/union locals (and match temporaries) whose string payload is released at scope exit
         self.owned_aggregate_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         self.local_initializers: dict[int, list[hir.AST]] = {}   # every local's initializers and assigned values (`_local_initializers`), this function
@@ -3711,6 +3712,8 @@ class _Lowerer(
                     value, value.loc,
                     element=element,
                 )
+            elif kind == 'object':
+                body = self._release_object_members(value, self.temporary_object_types[value.name], value.loc)
             else:
                 body = self._release_string_elements(value, value.loc)
             present = self._typed_equality(value, self._int64_literal(value.loc, 0), 'int64', value.loc)

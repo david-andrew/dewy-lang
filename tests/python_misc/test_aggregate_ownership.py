@@ -498,6 +498,48 @@ let main=():>int64=>{
     assert len(set(cursors[2:])) == 1, cursors
 
 
+def test_returned_record_field_views_release_receivers_after_retaining_values(tmp_path):
+    source = '''
+Node:type=type of [key:string shape:string|none]
+Child:type=type of Node & [parts:array<array<string>>]
+let calls:int64=0
+let make=():>Child=>{
+    calls+=1
+    return Child["key" "shape" [["payload"]]]
+}
+let read=():>Node=>make()
+let key=():>string=>read().key
+let parts=():>array<array<string>>=>make().parts
+let exercise=():>void=>{
+    let before=calls
+    let retained=read().key
+    let shape=read().shape
+    let returned=key()
+    let rows=parts()
+    let skipped=false and read().key.length >? 0
+    $runtime_assert not skipped and calls=?before+4
+    # Further allocations must not overwrite any of the retained fields.
+    $runtime_assert read().key.length >? 0
+    $runtime_assert retained=?"key"
+    $runtime_assert shape=?"shape"
+    $runtime_assert returned=?"key"
+    $runtime_assert rows.length >? 0
+    let words=rows[0]
+    $runtime_assert words.length >? 0
+    $runtime_assert words[0]=?"payload"
+    loop read().key.length >? 0 and calls <? before+8 {}
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('array', [False, True])
 def test_optional_call_binding_takes_ownership_without_abandoning_payload(array, tmp_path):
     result_type = 'array<string>' if array else 'Box'

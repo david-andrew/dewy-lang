@@ -674,6 +674,17 @@ class _ObjectLowering:
         prelude, obj = self._extract_object_pointer(node.value)
         if not isinstance(node.value.type, ty.ObjectType):
             self._target_error(node, 'member access requires an object')
+        if (self._has_arena() and not self.lowering_module_startup
+                and isinstance(node.value, hir.FunctionCall)
+                and isinstance(node.value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+            # A field view keeps its returned receiver alive for the whole
+            # statement. Retained fields are copied by their ordinary value
+            # boundary before this receiver's owned members are released.
+            temporary = self._new_string_temp(node.loc, 'int64', 'object_receiver')
+            self.statement_temporaries.append(('object', temporary))
+            self.temporary_object_types[temporary.name] = node.value.type
+            prelude.append(hir.Assign(node.loc, ty.VOID_TYPE, temporary, '=', obj))
+            obj = temporary
         _size, offsets = self._object_layout(node.value.type, node)
         address = self._field_address(obj, offsets[node.name], node.loc)
         field = node.value.type.field(node.name)
