@@ -1,0 +1,78 @@
+from reporting import Error
+import p"../paths.dewy" as paths
+
+# Linux invocation services, separate from the target of the emitted program.
+# The existing Linux prelude supplies filesystem/process error values. These
+# two kernel paths describe the compiler process, without trusting PWD or
+# argv[0] (which may be relative, a symlink, or supplied by another process).
+kernel_path = (executable:bool):>string|Error => {
+    let buffer:int64=__alloca__(4096)
+    let count:int64=0
+    if executable {
+        let name:array<uint8>='/proc/self/exe' as array<uint8>
+        name.push(0)
+        count=__syscall3__(89 __load_i64__(name) buffer 4096)
+        if count >=? 4096 return Error[title='compiler executable path is too long']
+    } else {
+        count=__syscall2__(79 buffer 4096)
+        if count >? 0 {count-=1} # getcwd includes its terminating NUL
+    }
+    if count <? 0 return Error[title='cannot read compiler process path']
+    let bytes:array<uint8>=[]
+    loop i in 0.. and i <? count {bytes.push(__load_u8__(buffer+i))}
+    let text=bytes as string|none
+    if text is? none return Error[title='compiler process path is not UTF-8']
+    return text
+}
+directories = (directory:string):>Error? => {
+    if p(directory).is_dir return none
+    let parent=p(directory).parent.path
+    if parent not=? directory {
+        let failed=directories(parent)
+        if failed isnt? none return failed
+    }
+    let made=p(directory).mkdir
+    if made is? bool or made is? FileExists and p(directory).is_dir return none
+    return Error[title='cannot create compiler cache directory' message=directory]
+}
+find_program = (name:string cwd:string):>string? => {
+    let candidates:array<string>=[]
+    if name.contains('/') {candidates.push(paths.absolute(name cwd))}
+    else {
+        let search=environment('PATH')
+        if search is? none return none
+        loop directory in search.split(':') {candidates.push(paths.absolute((if directory not=? '' "{directory}/{name}" else name) cwd))}
+    }
+    loop candidate in candidates {
+        let bytes=candidate as array<uint8>
+        bytes.push(0)
+        if p(candidate).is_file and __syscall2__(21 __load_i64__(bytes) 1) =? 0 return candidate
+    }
+    return none
+}
+library_root = (executable:string cwd:string):>string|Error => {
+    let configured=environment('DEWY_LIBRARY_ROOT')
+    if configured isnt? none {
+        let root=paths.absolute(configured cwd)
+        if p"{root}/path.dewy".is_file return root
+        return Error[title='DEWY_LIBRARY_ROOT does not contain the Dewy library' message=root]
+    }
+    let parent=p(executable).parent.path
+    loop root in ["{parent}/library" "{parent}/../library" "{cwd}/library"] {
+        if p"{root}/path.dewy".is_file return paths.normalize(root)
+    }
+    return Error[title='cannot locate the Dewy library' hint='Set DEWY_LIBRARY_ROOT to its installed directory.']
+}
+udewy = (executable:string cwd:string):>string|Error => {
+    let configured=environment('DEWY_UDEWY')
+    if configured isnt? none {
+        let found=find_program(configured cwd)
+        if found isnt? none return found
+        return Error[title='DEWY_UDEWY is not an executable compiler' message=configured]
+    }
+    let sibling=find_program("{p(executable).parent.path}/udewy" cwd)
+    if sibling isnt? none return sibling
+    let found=find_program('udewy' cwd)
+    if found isnt? none return found
+    return Error[title='cannot locate the native µDewy compiler' hint='Install the compiler pair or set DEWY_UDEWY.']
+}

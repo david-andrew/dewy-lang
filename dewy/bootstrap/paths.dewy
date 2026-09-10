@@ -1,0 +1,14 @@
+# Lexical path identities shared by module lookup and compiler caches.
+# This does not follow symlinks; filesystem identity is a separate service.
+normalize = (text:string):>string => {
+    let parts:array<string> = []
+    let absolute = text.startswith('/')
+    loop part in text.split('/') {
+        if part =? '' or part =? '.' continue
+        if part =? '..' and parts.length >? 0 and parts[parts.length-1] not=? '..' { parts.pop; }
+        else if part not=? '..' or not absolute { parts.push(part) }
+    }
+    return "{if absolute '/' else ''}{parts.join('/')}"
+}
+
+absolute = (text:string cwd:string):>string => normalize(if text.startswith('/') text else "{cwd}/{text}")

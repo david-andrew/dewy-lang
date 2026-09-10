@@ -1,4 +1,5 @@
 from reporting import SrcFile, Error
+import p"../paths.dewy" as paths
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"context.dewy" as contexts
@@ -48,16 +49,7 @@ module_at = (id:addr engine:Engine):>Module => {
 # Canonicalize lexical aliases before graph lookup. Filesystem identity
 # through symlinks still needs the portable path layer's realpath service;
 # lexical normalization must not be advertised as resolving those aliases.
-normalize_path = (text:string):>string => {
-    let parts:array<string> = []
-    let absolute = text.startswith('/')
-    loop part in text.split('/') {
-        if part =? '' or part =? '.' continue
-        if part =? '..' and parts.length >? 0 and parts[parts.length-1] not=? '..' { parts.pop; }
-        else if part not=? '..' or not absolute { parts.push(part) }
-    }
-    return "{if absolute '/' else ''}{parts.join('/')}"
-}
+normalize_path = (text:string):>string => paths.normalize(text)
 
 literal_path = (id:addr nodes:array<tokens.Token>):>string? => {
     let node = tokens.node_at(nodes syntax.unparen(id nodes))

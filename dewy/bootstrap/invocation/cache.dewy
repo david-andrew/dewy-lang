@@ -1,0 +1,44 @@
+import p"../paths.dewy" as paths
+
+# Share µDewy's cache identity (udewy/cache.py and runtime/paths.udewy).
+# Sources within the working directory mirror its tree; external sources
+# retain the tail after the common ancestor, under a hash of the full path.
+# Strip one cache prefix so compiling emitted µDewy finds the same artifact.
+hash12 = (path:string):>string => {
+    let hash:uint64=0xcbf29ce484222325
+    let bytes=path as array<uint8>
+    loop byte in bytes {hash=(hash xor (byte as uint64)) * 0x100000001b3}
+    let digits='0123456789abcdef'
+    let result:array<string>=[]
+    let shift:uint8=60
+    loop result.length <? 12 {
+        let digit:uint64=(hash >> shift) and 15
+        $runtime_assert digit <? digits.length
+        result.push(digits[digit])
+        shift-=4
+    }
+    return result.join
+}
+source_key = (source:string cwd:string):>string => {
+    let absolute=paths.absolute(source cwd)
+    let here=paths.normalize(cwd)
+    let source_parts=p(absolute).parts
+    let here_parts=p(here).parts
+    let common:addr=0
+    loop common <? source_parts.length and common <? here_parts.length {
+        if source_parts[common] not=? here_parts[common] break
+        common+=1
+    }
+    let tail:array<string>=[]
+    let start=common
+    if common =? here_parts.length and start <? source_parts.length and source_parts[start] =? '__dewycache__' {start+=1}
+    let i=start
+    loop i <? source_parts.length {tail.push(source_parts[i]) i+=1}
+    if tail.length =? 0 {tail.push(p(absolute).name)}
+    if common =? here_parts.length return tail.join('/')
+    return "__external__/{hash12(absolute)}/{tail.join('/')}"
+}
+artifact = (source:string cwd:string suffix:string=''):>string => {
+    let key=p(source_key(source cwd))
+    return paths.normalize("__dewycache__/{key.parent.path}/{key.stem}{suffix}")
+}
