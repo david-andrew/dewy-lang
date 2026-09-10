@@ -71,3 +71,23 @@ def test_native_library_search_roots(tmp_path):
     entry = tmp_path / 'uses-library.dewy'
     entry.write_text('from example import Word, answer\nlet value:Word=answer\n')
     assert run_module(tmp_path, entry, ['--library-root', library]) == ['value:int64']
+
+
+def test_native_string_methods_after_literal_exclusions(tmp_path):
+    prelude = tmp_path / 'string-method.dewy'
+    prelude.write_text('_string_startswith=(text:string prefix:string):>bool=>false\n')
+    entry = tmp_path / 'options.dewy'
+    entry.write_text('''classify=(arg:string):>int64=>{
+        if arg =? '--help' or arg =? '-h' return 0
+        else if arg.startswith('-') return 1
+        return arg.length
+    }
+''')
+    assert run_module(tmp_path, entry, [prelude]) == ['classify:<(arg:string):>int64>']
+
+
+def test_native_string_enum_interpolation(tmp_path):
+    entry = tmp_path / 'stage-label.dewy'
+    entry.write_text('Stage:type="t0"|"t1"|"t2"|"p0"\nlabel=(stage:Stage):>string=>"{stage} tokens"\n')
+    result = run_module(tmp_path, entry, [])
+    assert result[-1].startswith('label:')

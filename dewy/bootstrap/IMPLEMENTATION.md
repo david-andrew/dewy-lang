@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- The native checker now retains string methods after literal exclusions,
+  accepts literal-string enums in interpolation, and emits common-field
+  access for record unions, forwarding exception alternatives unchanged.
+  Focused native checks include missing-field rejection and optional results.
+  Checking the tokenizer's own source with the complete prelude is in progress;
+  this is a source-checking milestone, not a self-rebuild claim.
+
 - Hosted dictionary compaction releases dead entries and moves surviving
   handles without releasing their old slots a second time. Fresh `.values`
   arrays use the same temporary/ownership transfer as returned arrays.

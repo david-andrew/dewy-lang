@@ -13,6 +13,14 @@ These views inspect declared structure; subtyping remains a separate operation.
 string_valued = (id:addr nodes:array<types.Type>):>bool => {
     let node = types.node_at(nodes id)
     if node is? types.RefinedType return string_valued(node.base nodes)
+    # Excluding individual values does not change the remaining values'
+    # representation: after rejecting "--help", arg still has string
+    # methods. Keep the exclusions on the read type; inspect its positive
+    # structure only for this representation query.
+    if node is? types.TypeAnd {
+        let base = structural_base(id nodes)
+        if base not=? id return string_valued(base nodes)
+    }
     if node is? types.TypeOr {
         loop member in node.items { if not string_valued(member nodes) return false }
         return true

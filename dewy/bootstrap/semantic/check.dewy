@@ -1633,6 +1633,10 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     }
     if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
     if views.string_valued(value.value_type session.types) and name in? STRING_METHODS return string_method(receiver name id env @session)
+    if type is? types.TypeOr {
+        let forwarded=forwarding_member(receiver type name id env @session)
+        if forwarded isnt? none return forwarded
+    }
     if name =? 'length' {
         let word = types.primitive('int64' @session.types)
         if type is? types.ArrayType {
@@ -1649,6 +1653,39 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     }
     if type is? types.Primitive|types.IntegerLiteralType|types.FunctionType|types.ArrayType return problem(id 'member access requires an object' display.type_to_dewy(value.value_type session.types) env session)
     return pending(id "member `{name}` on `{display.type_to_dewy(value.value_type session.types)}`" env session)
+}
+
+# Common fields are read from the active ordinary alternative. Exceptions
+# propagate unchanged, preserving the same `R... | X...` result as the hosted
+# checker. The hidden binding makes evaluating the receiver exactly once an
+# explicit part of HIR, including when that receiver is a call.
+forwarding_member = (receiver:addr union:types.TypeOr name:string id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let exception=types.primitive('exception' @session.types)
+    let exceptions:array<addr>=[]
+    let ordinary:array<addr>=[]
+    loop member in union.items {
+        if subtyping.is_subtype(member exception session.links @session.types) {exceptions.push(member)}
+        else {ordinary.push(member)}
+    }
+    if ordinary.length =? 0 return none
+    loop member in ordinary {
+        if types.node_at(session.types views.structural_base(member session.types)) isnt? types.ObjectType return none
+    }
+    let results=exceptions
+    loop member in ordinary {
+        let object=types.node_at(session.types views.structural_base(member session.types))
+        $runtime_assert object is? types.ObjectType
+        let field=types.object_field(object name)
+        if field is? none return problem(id "member access requires every ordinary alternative to have `{name}`" "`{display.type_to_dewy(member session.types)}` has no field `{name}`; narrow the value with `is?` first" env session)
+        results.push(field.value_type)
+    }
+    let loc=contexts.node_at(id env.lexical session).loc
+    let hidden="__dewy_forward_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none hidden 'value' loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=node_at(receiver session).value_type
+    session.registry.by_id[binding_id]=binding
+    return put(hir.ForwardingAccess[loc types.union(results @session.types) receiver name hidden binding_id types.union(exceptions @session.types)] @session)
 }
 
 # The library owns these implementations. Binding a method removes the
@@ -3639,6 +3676,10 @@ interpolated_string = (id:addr node:parser.IString env:Environment @session:cont
         let converted=conversion_method(value string part_id env @session)
         if converted is? Error return converted
         if converted isnt? none {parts.push(converted) continue}
+        # A literal-string enum still contributes text. Retain its enum type
+        # so lowering selects the literal for its tag, just as for ordinary
+        # string arguments; it needs no structural object formatting.
+        if views.string_valued(node_at(value session).value_type session.types) {parts.push(value) continue}
         if type is? types.ObjectType|types.ArrayType|types.TypeOr return pending(part_id 'structural and union string interpolation' env session)
         parts.push(value)
     }

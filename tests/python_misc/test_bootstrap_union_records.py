@@ -17,12 +17,15 @@ CASES = [
     'Choice:type=0|[x:int64<x >? 0>]\nlet f=(x:int64<x >? 0>):>Choice=>[x=x]',
     'Choice:type=0|[x:int64]|[y:bool]\nlet f=(y:bool):>Choice=>[y=y]',
     'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nR:type=0|[numerator:BigInt & ~0 denominator:BigInt<sign =? 1>]\nlet f=(numerator:BigInt denominator:BigInt<sign =? 1>):>R=>{if numerator =? 0 return 0\nreturn [numerator=numerator denominator=denominator]}',
+    'A:type=type of [text:string]\nB:type=type of [code:int64 text:string]\nlet f=(ending:A|B):>string=>ending.text',
+    'A:type=type of [text:string]\nB:type=type of [text:int64]\nlet f=(ending:A|B|none):>string|int64|none=>ending.text',
 ]
 ERRORS = [
     'Report:type=type of [severity:"error"|"warning"="warning"]\nError:type=type of Report & [severity="unknown"]',
 
     "Choice:type=0|[x:int64]\nlet f=():>Choice=>[x='wrong']",
     'Choice:type=0|[x:int64]|[x:bool]\nlet f=():>Choice=>[x=1]',
+    'A:type=type of [text:string]\nB:type=type of [other:string]\nlet f=(ending:A|B):>string=>ending.text',
 ]
 
 
