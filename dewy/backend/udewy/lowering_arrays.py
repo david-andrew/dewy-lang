@@ -1163,6 +1163,17 @@ class _ArrayLowering:
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, function.symbol), [block, size], {})
 
+    def _release_array_elements(self, descriptor: hir.AST, element: ty.Type, loc: Span, *, start: hir.AST | None = None) -> list[hir.AST]:
+        """Release the discarded suffix without freeing the array's capacity."""
+        if self._is_string_valued(element):
+            return self._release_string_elements(descriptor, loc, start=start)
+        if self._is_optional_element(element) or self._is_union_element(element):
+            return self._release_cell_elements(descriptor, element, loc, start=start)
+        unfolded = ty.unfold(element)
+        if isinstance(unfolded, ty.ObjectType):
+            return self._release_object_elements(descriptor, unfolded, loc, start=start)
+        return []
+
     def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False, cell_element: ty.TypeExpr | None = None, object_element: ty.ObjectType | None = None) -> list[hir.AST]:
         """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
 
@@ -1227,10 +1238,50 @@ class _ArrayLowering:
         empty = self._typed_equality(string, self._int64_literal(loc, 0), 'int64', loc)
         return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, empty, hir.Block(loc, ty.VOID_TYPE, [], True))], by_owner)
 
+    def _release_unprepared_cell_payload(self, cell: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span) -> list[hir.AST]:
+        """Release the active value of an inline/container cell.
+
+        These cells own aggregate handles, unlike prepared local/result cells
+        whose payload can point into frame storage. Recursive aliases use the
+        cached object release helper, keeping both layouts and code finite.
+        A zero payload is an emptied slot after an ownership transfer.
+        """
+        tag = self._new_string_temp(loc, 'int64', 'cell_tag')
+        payload = self._new_string_temp(loc, 'int64', 'cell_payload')
+        arms: list[hir.IfArm | hir.LoopArm] = []
+        for member in members:
+            unfolded = ty.unfold(ty.strip_refinement(member))
+            release: list[hir.AST] = []
+            if self._is_string_valued(member):
+                release.append(self._release_string_by_owner(payload, loc))
+            elif isinstance(unfolded, ty.ArrayType):
+                element = unfolded.element
+                release.extend(self._release_owned_array(
+                    payload, loc,
+                    string_elements=self._is_string_valued(element),
+                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
+                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                ))
+            elif isinstance(unfolded, ty.ObjectType):
+                size, _offsets = self._object_layout(unfolded, hir.Void(loc, ty.VOID_TYPE))
+                release.extend(self._release_object_members(payload, unfolded, loc))
+                release.append(self._arena_release_call(payload, self._int64_literal(loc, size), loc))
+            if release:
+                arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, release, True)))
+        if not arms:
+            return []
+        nonempty = self._int64_comparison('__ne__', payload, self._int64_literal(loc, 0), loc)
+        return [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(cell, loc)),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', payload.name, 'int64', self._load_i64_field(cell, 8, loc)),
+            hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, nonempty,
+                hir.Block(loc, ty.VOID_TYPE, [hir.Flow(loc, ty.VOID_TYPE, arms, None)], True))], None),
+        ]
+
     def _release_object_members(self, base: hir.AST, object_type: ty.ObjectType, loc, *, inline: bool = False) -> list[hir.AST]:
         """Give back the runtime-sized storage an object's fields own, by their
         owner words: string fields, runtime-length array fields (with their
-        elements), the string payloads of inline union cells, and nested
+        elements), the owned payloads of inline union cells, and nested
         objects' fields. The object's own block is the caller's business."""
         if not inline:
             return [self._object_release_call(base, object_type, loc)]
@@ -1262,15 +1313,8 @@ class _ArrayLowering:
                 assert members is not None
                 cell = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
                 cell_declare, cell_ident = local('field_cell', cell)
-                tag_declare, tag = local('field_tag', self._optional_tag(cell_ident, loc))
-                statements.extend([cell_declare, tag_declare])
-                for index, member in enumerate(members):
-                    if self._is_string_valued(member):
-                        payload_declare, payload = local('field_payload', self._load_i64_field(cell_ident, 8, loc))
-                        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
-                            loc, ty.VOID_TYPE, self._tag_is(tag, member, loc),
-                            hir.Block(loc, ty.VOID_TYPE, [payload_declare, self._release_string_by_owner(payload, loc)], True),
-                        )], None))
+                statements.append(cell_declare)
+                statements.extend(self._release_unprepared_cell_payload(cell_ident, members, loc))
             elif isinstance(unfolded, ty.ObjectType):
                 nested = self._int64_binary('__add__', replace(base, type='int64') if isinstance(base, hir.ExpressedIdentifier) else base, self._int64_literal(loc, offset), loc)
                 nested_declare, nested_ident = local('field_object', nested)
@@ -1293,7 +1337,7 @@ class _ArrayLowering:
         statements.extend(self._by_brand(base, object_type, loc, child_fields))
         return statements
 
-    def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc) -> list[hir.AST]:
+    def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc, *, start: hir.AST | None = None) -> list[hir.AST]:
         """Give back each element object an owned array stores: its members, then its arena block."""
         size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
 
@@ -1302,7 +1346,7 @@ class _ArrayLowering:
             return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
 
         one = self._int64_literal(loc, 1)
-        index_declare, index = local('object_index', self._int64_literal(loc, 0))
+        index_declare, index = local('object_index', start if start is not None else self._int64_literal(loc, 0))
         length_declare, length = local('object_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
         data_declare, data = local('object_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
@@ -1314,11 +1358,8 @@ class _ArrayLowering:
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
         return [index_declare, length_declare, data_declare, loop]
 
-    def _release_cell_elements(self, word: hir.ExpressedIdentifier, element_type: ty.TypeExpr, loc) -> list[hir.AST]:
-        """Give back each optional/union cell an owned array stores: a string
-        payload the cell owns first (by the active member's tag and the
-        string's owner word), then the 16-byte cell. Object members' handles
-        are not released yet (objects have no release)."""
+    def _release_cell_elements(self, word: hir.ExpressedIdentifier, element_type: ty.TypeExpr, loc, *, start: hir.AST | None = None) -> list[hir.AST]:
+        """Release each owned cell's active payload, then its 16-byte block."""
         plain = ty.strip_refinement(element_type)
         payload = ty.optional_payload(plain)
         members: tuple[ty.TypeExpr, ...] = ('none', payload) if payload is not None else (ty.runtime_union_members(plain) or ())
@@ -1328,43 +1369,25 @@ class _ArrayLowering:
             return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
 
         one = self._int64_literal(loc, 1)
-        index_declare, index = local('cell_index', self._int64_literal(loc, 0))
+        index_declare, index = local('cell_index', start if start is not None else self._int64_literal(loc, 0))
         length_declare, length = local('cell_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
         data_declare, data = local('cell_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         cell_declare, cell = local('cell', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
-        tag_declare, tag = local('cell_tag', self._optional_tag(cell, loc))
-        payload_declare, payload_word = local('cell_payload', self._load_i64_field(cell, 8, loc))
-        body: list[hir.AST] = [cell_declare, tag_declare, payload_declare]
-        for tag_index, member in enumerate(members):
-            if not self._is_string_valued(member):
-                continue
-            owner_declare, owner = local('cell_string_owner', self._load_i64_field(payload_word, STRING_OWNER_OFFSET, loc))
-            bytes_plus_one = self._int64_binary('__add__', self._load_i64_field(payload_word, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
-            release_all = hir.Block(loc, ty.VOID_TYPE, [
-                self._arena_release_call(self._load_i64_field(payload_word, STRING_DATA_OFFSET, loc), bytes_plus_one, loc),
-                self._arena_release_call(self._load_i64_field(payload_word, STRING_BOUNDARIES_OFFSET, loc), self._int64_binary('__mul__', bytes_plus_one, self._int64_literal(loc, 4), loc), loc),
-                self._arena_release_call(payload_word, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
-            ], True)
-            release_descriptor = hir.Block(loc, ty.VOID_TYPE, [self._arena_release_call(payload_word, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc)], True)
-            by_owner = hir.Flow(loc, ty.VOID_TYPE, [
-                hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
-                hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
-            ], None)
-            body.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, [owner_declare, by_owner], True))], None))
+        body: list[hir.AST] = [cell_declare, *self._release_unprepared_cell_payload(cell, members, loc)]
         body.append(self._arena_release_call(cell, self._int64_literal(loc, 16), loc))
         body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)))
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
         return [index_declare, length_declare, data_declare, loop]
 
-    def _release_string_elements(self, word: hir.ExpressedIdentifier, loc) -> list[hir.AST]:
+    def _release_string_elements(self, word: hir.ExpressedIdentifier, loc, *, start: hir.AST | None = None) -> list[hir.AST]:
         """Give back each element string an owned string array stores, by the element's owner word."""
         def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
             name = self._new_string_temp(loc, 'int64', suffix).name
             return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
 
         one = self._int64_literal(loc, 1)
-        index_declare, index = local('release_index', self._int64_literal(loc, 0))
+        index_declare, index = local('release_index', start if start is not None else self._int64_literal(loc, 0))
         length_declare, length = local('release_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
         data_declare, data = local('release_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
@@ -1750,11 +1773,14 @@ class _ArrayLowering:
                 hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
                     loc, ty.VOID_TYPE,
                     self._int64_comparison('__lt__', count_name, length, loc),
-                    self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, count_name, loc),
+                    hir.Block(loc, ty.VOID_TYPE, [
+                        *self._release_array_elements(descriptor, element_type, loc, start=count_name),
+                        self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, count_name, loc),
+                    ], True),
                 )], None),
             ], hir.Void(loc, ty.VOID_TYPE)
         if method.name == 'clear':
-            return [*prelude], self._store_i64_field(
+            return [*prelude, *self._release_array_elements(descriptor, element_type, loc)], self._store_i64_field(
                 descriptor, ARRAY_LENGTH_OFFSET, self._int64_literal(loc, 0), loc
             )
         if method.name == 'sort':
@@ -2617,7 +2643,7 @@ class _ArrayLowering:
                 arena=arena,
             )
         elif self._is_optional_element(element_type) and self._has_arena() and not move:
-            return self._copy_optional_element(source_value, target_address, loc)
+            return self._copy_optional_element(source_value, target_address, element_type, loc)
         elif self._is_union_element(element_type) and self._has_arena() and not move:
             return self._copy_union_element(source_value, target_address, element_type, loc)
         elif self._is_string_valued(element_type) and self._has_arena() and not move:

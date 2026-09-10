@@ -3524,6 +3524,11 @@ class _Lowerer(
                 return walk_block(node, scopes, loop_marks)
             if isinstance(node, hir.Flow):
                 return walk_flow(node, scopes, loop_marks)
+            if isinstance(node, (hir.Return, hir.Break, hir.Continue)):
+                # Brace-less arms still leave their enclosing scopes. Routing
+                # them through the block visitor computes return values before
+                # releasing the storage they read, just like braced arms.
+                return walk_block(hir.Block(node.loc, node.type, [node], True), scopes, loop_marks)
             return node
 
         def walk_flow(flow: hir.Flow, scopes: list[list[hir.ExpressedIdentifier]], loop_marks: list[int]) -> hir.Flow:

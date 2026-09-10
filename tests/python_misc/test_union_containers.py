@@ -69,4 +69,4 @@ def test_union_valued_fields_that_are_not_names_are_hoisted() -> None:
 
 def test_owned_cell_arrays_release_their_cells() -> None:
     emitted = _compile('let main = ():>int64 => {\n    let xs:array<string|none> = []\n    xs.push"a"\n    return xs.length\n}\n')
-    assert 'cell_string_owner' in emitted and '_arena_release(' in emitted   # the payload string by its owner, then the cell
+    assert 'cell_payload' in emitted and '_arena_release(' in emitted   # the payload string by its owner, then the cell

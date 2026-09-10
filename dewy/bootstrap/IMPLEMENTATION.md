@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Hosted cleanup now releases owned aggregate payloads in record fields and
+  array union cells, including recursive aliases. Brace-less return, break,
+  and continue arms run scope cleanup. `clear` and `truncate` release their
+  discarded elements; optional string-array copies own independent strings.
+  Thirty focused union/string tests and a further 61 ownership/object/binary
+  checks pass. Repeated record and union-array copies reuse released arena
+  storage after warmup. Prepared local union payloads still need equivalent
+  ownership tracking; the full prelude memory measurement is being repeated.
+
 - Native module assembly retains dependency initialization order and binding
   identities, emits each loaded module once, and selects only the entry
   module's `main`. Reachability keeps callbacks and recursive functions while
