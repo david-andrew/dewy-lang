@@ -996,11 +996,12 @@ module = (id:addr env:Environment @session:contexts.Session):>addr|Error => {
     return put(hir.Block[root.loc root.value_type items root.scoped] @session)
 }
 
-read_type = (id:addr env:Environment session:contexts.Session):>addr? => {
+read_type = (id:addr env:Environment session:contexts.Session fallback:addr?=none):>addr? => {
     $runtime_assert env.state <? session.read_states.length
     let state = session.read_states[env.state]
     let type = state.types.get(id)
-    return if type is? none bindings.binding_at(session.registry id).value_type else type
+    if type isnt? none return type
+    return if fallback is? none bindings.binding_at(session.registry id).value_type else fallback
 }
 set_read_type = (id:addr type:addr env:Environment @session:contexts.Session):>void => {
     $runtime_assert env.state <? session.read_states.length
@@ -1273,7 +1274,7 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
                 if actual is? none continue
                 let route=bindings.array_route_id(hir_facts.strip_casts(actual session.hir) session.hir @session.registry)
                 if route isnt? none {
-                    let current=read_type(route result session)
+                    let current=read_type(route result session fallback=node_at(actual session).value_type)
                     $runtime_assert current isnt? none
                     set_read_type(route select_type(current promise.tested_type promise.op =? 'is?' @session) result @session)
                 }
@@ -1295,7 +1296,7 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         # element-identity proof before they can participate in this rule.
         let route=bindings.array_route_id(node.value session.hir @session.registry)
         if route isnt? none {
-            let current = read_type(route result session)
+            let current = read_type(route result session fallback=node_at(node.value session).value_type)
             $runtime_assert current isnt? none
             set_read_type(route select_type(current node.test_type truth not=? node.negated @session) result @session)
         }
@@ -2091,7 +2092,7 @@ array_transition = (method:hir.ArrayMethod positional:array<addr> keyword:dict<s
     let limit = targets.max_length(session.target)
     let route = bindings.array_route_id(method.array session.hir @session.registry)
     if route is? none return none
-    let current = read_type(route env session)
+    let current = read_type(route env session fallback=node_at(method.array session).value_type)
     let array = types.node_at(session.types node_at(method.array session).value_type)
     $runtime_assert array is? types.ArrayType
     let length:addr? = none
@@ -3167,7 +3168,10 @@ match_read = (id:addr env:Environment @session:contexts.Session):>addr => {
     let node=node_at(id session)
     let route=bindings.array_route_id(id session.hir @session.registry)
     if route is? none return id
-    let type=read_type(route env session)
+    # A route id identifies storage, not the record alternative first seen
+    # at that path. Without a fact in this branch, use this owner's field
+    # declaration (`Bool.value` and `Integer.value` can have different types).
+    let type=read_type(route env session fallback=node.value_type)
     $runtime_assert type isnt? none
     if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @session)
     if node is? hir.MemberAccess return put(hir.MemberAccess[node.loc type node.value node.name node.mutable] @session)
@@ -3178,7 +3182,16 @@ store_type = (id:addr @session:contexts.Session):>addr => {
     let route=bindings.array_route_id(id session.hir @session.registry)
     if route isnt? none {
         let binding=bindings.binding_at(session.registry route)
-        let declared=if binding.store_type is? none binding.value_type else binding.store_type
+        if binding.store_type isnt? none return binding.store_type
+        let node=node_at(id session)
+        if node is? hir.MemberAccess {
+            let owner=types.node_at(session.types views.structural_base(node_at(node.value session).value_type session.types))
+            if owner is? types.ObjectType {
+                let field=types.object_field(owner node.name)
+                if field isnt? none return field.value_type
+            }
+        }
+        let declared=binding.value_type
         if declared isnt? none return declared
     }
     return node_at(id session).value_type

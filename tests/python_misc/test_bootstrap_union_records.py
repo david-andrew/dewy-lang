@@ -7,6 +7,9 @@ from dewy.reporting import SrcFile
 from dewy.semantic import check
 
 CASES = [
+    'Base:type=$abstract type of []\nB:type=type of Base & [value:bool]\nI:type=type of Base & [value:[x:int64]]\nlet read=(node:Base):>int64=>{if node is? B return if node.value 1 else 0\nif node is? I return node.value.x\nreturn 0}',
+    'Base:type=$abstract type of []\nB:type=type of Base & [value:bool|none]\nI:type=type of Base & [value:int64|none]\nlet read=(node:Base):>int64=>{if node is? B {if node.value is? bool return if node.value 1 else 0}\nif node is? I {if node.value is? int64 return node.value}\nreturn 0}',
+    'Base:type=$abstract type of []\nB:type=type of Base & [value:bool]\nI:type=type of Base & [value:int64]\nlet change=(node:Base):>void=>{if node is? B {node.value=true}\nelse if node is? I {node.value=42}}',
     'Token:type=$abstract type of [value:int64]\nWord:type=type of Token\nNumber:type=type of Token & [base:int64]\nlet name=(token:Token):>string=>{let value=token.value if token is? Number {value=token.base} return token.typename}',
     'Token:type=$abstract type of [value:int64]\nWord:type=type of Token\nNumber:type=type of Token & [base:int64]\nlet value=(token:Token):>int64=>{if token is? Number {token.base;} return token.value}',
 
@@ -25,6 +28,7 @@ CASES = [
     'A:type=type of [text:string]\nB:type=type of [text:int64]\nlet f=(ending:A|B|none):>string|int64|none=>ending.text',
 ]
 ERRORS = [
+    'Base:type=$abstract type of []\nB:type=type of Base & [value:bool]\nI:type=type of Base & [value:int64]\nlet change=(node:Base):>void=>{if node is? B {node.value=true}\nelse if node is? I {node.value=false}}',
     'Report:type=type of [severity:"error"|"warning"="warning"]\nError:type=type of Report & [severity="unknown"]',
 
     "Choice:type=0|[x:int64]\nlet f=():>Choice=>[x='wrong']",
