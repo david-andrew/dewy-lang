@@ -336,6 +336,9 @@ is_empty = (id:addr links:array<Link> @nodes:array<types.Type>):>bool => {
 }
 
 is_subtype = (source:addr target:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+    # Reflexivity needs no normalized difference. Arena ids already name
+    # the same description, including any retained refinement metadata.
+    if source =? target return true
     let excluded = types.negate(target @nodes)
     let difference = types.intersect([source excluded] @nodes)
     return is_empty(difference links @nodes)
