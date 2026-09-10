@@ -26,12 +26,8 @@ State:type = [
     notes:array<Note>=[]
     problem:Error?=none
 ]
-const binary:dict<string string>=[
-    '__add__'->'_bigint_add' '__sub__'->'_bigint_sub' '__mul__'->'_bigint_mul'
-    '__floordiv__'->'_bigint_floordiv' '__mod__'->'_bigint_mod'
-    '__eq__'->'_bigint_eq' '__ne__'->'_bigint_ne' '__lt__'->'_bigint_lt'
-    '__le__'->'_bigint_le' '__gt__'->'_bigint_gt' '__ge__'->'_bigint_ge'
-]
+const binary=numeric.bigint_binary
+
 node_at = (id:addr session:contexts.Session):>hir.AST => hir.node_at(session.hir id)
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 is_big = (id:addr state:State session:contexts.Session):>bool => {

@@ -123,6 +123,19 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let inhabitant=unit_inhabitant(value expected id env @session)
     if inhabitant is? Error return inhabitant
     if inhabitant isnt? none return against(inhabitant expected id env @session)
+    if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and views.fixed_integer_layout(expected session.types) isnt? none {
+        let layout=views.fixed_integer_layout(expected session.types)
+        $runtime_assert layout isnt? none
+        let result=library_call(if layout.signed '_bigint_to_int' else '_bigint_to_uint' [value] id env @session)
+        if result is? Error return result
+        let called=node_at(result session)
+        $runtime_assert called is? hir.FunctionCall
+        # Extracting low bits is authorized only after bounds validation has
+        # proved the mathematical value fits. A user call to the same helper
+        # does not acquire this compiler-generated proof obligation.
+        let narrowed=put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args called.kw_args called.selected_method_index 'narrow'] @session)
+        return if types.same_type(called.value_type expected session.types) narrowed else put(hir.ValueCast[node.loc expected narrowed] @session)
+    }
     if numeric_values.is_family(expected 'BigInt' env.lexical session) and not numeric_values.is_family(node.value_type 'BigInt' env.lexical session) {
         let constant=constant_integer(value session)
         let nonzero=numeric_values.nonzero_form(expected 'BigInt' env.lexical session)
@@ -293,6 +306,45 @@ call_hint = (expected:addr? function:addr arguments:array<addr> env:Environment 
     return expected
 }
 
+# Explicit bigint operands already have their representation. Route their
+# operators to the same prelude helpers used by late representation selection,
+# widening word operands at the ordinary argument conversion boundary.
+bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let family=numeric_values.family('BigInt' env.lexical session)
+    if family is? none return none
+    let selected=expected isnt? none and numeric_values.is_family(expected 'BigInt' env.lexical session)
+    loop argument in arguments {
+        if numeric_values.is_family(node_at(argument session).value_type 'BigInt' env.lexical session) {selected=true}
+        let constant=constant_integer(argument session)
+        if constant isnt? none and (constant <? -9223372036854775808 or constant >? 18446744073709551615) {selected=true}
+    }
+    if not selected return none
+    if name =? '__truediv__' return pending(id 'runtime rational arithmetic materialization' env session)
+    let helper=numeric_values.bigint_binary.get(name)
+    if name =? '__unary_sub__' and arguments.length =? 1 {helper='_bigint_neg'}
+    else if arguments.length not=? 2 {helper=none}
+    if helper is? none return problem(id 'operator is not defined for big integers' name env session)
+    let operands:array<addr>=[]
+    loop i in 0.. and i <? arguments.length {
+        let target=family
+        if i =? 1 and name in? ['__floordiv__' '__mod__'] {
+            let constant=constant_integer(arguments[i] session)
+            if constant =? 0 return problem(id 'division by zero' 'the divisor is the constant `0`' env session)
+            let type=node_at(arguments[i] session).value_type
+            if numeric_values.is_family(type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(type 'BigInt' env.lexical session) return problem(id 'cannot prove the divisor is nonzero' 'guard the division or take a nonzero divisor' env session)
+            target=numeric_values.object_member(family session.types)
+        }
+        let operand=against(arguments[i] target id env @session)
+        if operand is? Error return operand
+        operands.push(operand)
+    }
+    let result=library_call(helper operands id env @session)
+    if result is? Error return result
+    let called=node_at(result session)
+    $runtime_assert called is? hir.FunctionCall
+    return put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args called.kw_args called.selected_method_index name] @session)
+}
+
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let func = node_at(function session)
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
@@ -324,6 +376,11 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         let specialized=builtin_value(function positional id env @session)
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
+        if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+            let numeric=bigint_operation(func.name positional expected id env @session)
+            if numeric is? Error return numeric
+            if numeric isnt? none return if expected is? none numeric else against(numeric expected id env @session)
+        }
     }
     if func is? hir.BoundMethod {
         let arguments:array<addr>=[]
@@ -3685,6 +3742,7 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
             if types.is_primitive(destination 'string') and (element is? types.Primitive and element.name in? ['char' 'grapheme'] or element is? types.StringType and element.length =? 1) return put(hir.RepresentationCast[node.loc target value] @session)
         }
     }
+    if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and views.fixed_integer_layout(types.strip_refinement(target session.types) session.types) isnt? none return against(value target id env @session)
     if subtyping.is_subtype(node.value_type target session.links @session.types) return value
     if subtyping.is_subtype(node.value_type types.primitive('int' @session.types) session.links @session.types) and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
     let converted=conversion_method(value target id env @session)

@@ -4,6 +4,14 @@ import p"bindings.dewy" as bindings
 import p"ty.dewy" as types
 import p"hir.dewy" as hir
 
+# Shared by source operator dispatch and late abstract-integer storage selection.
+const bigint_binary:dict<string string>=[
+    '__add__'->'_bigint_add' '__sub__'->'_bigint_sub' '__mul__'->'_bigint_mul'
+    '__floordiv__'->'_bigint_floordiv' '__mod__'->'_bigint_mod'
+    '__eq__'->'_bigint_eq' '__ne__'->'_bigint_ne' '__lt__'->'_bigint_lt'
+    '__le__'->'_bigint_le' '__gt__'->'_bigint_gt' '__ge__'->'_bigint_ge'
+]
+
 # Runtime numeric types are prelude declarations, not duplicate compiler-owned
 # records. Keep the binding identity supplied by the current lexical scope.
 # The source spellings bigint/fixed/rational resolve to these same declarations.
