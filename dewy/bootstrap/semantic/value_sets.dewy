@@ -1,0 +1,108 @@
+import p"analyze/intervals.dewy" as ranges
+import p"propositions.dewy" as propositions
+import p"ty.dewy" as types
+import p"type_queries.dewy" as views
+
+doc"""
+Exact integer coverage for match arms. Unlike flow bounds, a value set keeps
+holes: `x < 0` together with `x > 0` must not claim to cover zero. Endpoints
+are inclusive, arbitrary precision, and absent at infinity. Intervals are
+normalized in ascending order, with overlapping and adjacent pieces merged.
+"""
+
+Values:type = array<ranges.Interval>
+add = (@values:Values interval:ranges.Interval):>void => {
+    if ranges.is_empty(interval) return
+    let result:Values=[]
+    let pending=interval
+    let inserted=false
+    loop existing in values {
+        let before=existing.upper isnt? none and pending.lower isnt? none and existing.upper + 1 <? pending.lower
+        let after=pending.upper isnt? none and existing.lower isnt? none and pending.upper + 1 <? existing.lower
+        if before { result.push(existing) }
+        else if after {
+            if not inserted {result.push(pending) inserted=true}
+            result.push(existing)
+        }
+        else { pending=ranges.union(pending existing) }
+    }
+    if not inserted {result.push(pending)}
+    values=result
+}
+union = (left:Values right:Values):>Values => {
+    let result=left
+    loop interval in right {add(@result interval)}
+    return result
+}
+intersect = (left:Values right:Values):>Values => {
+    let result:Values=[]
+    loop a in left {loop b in right {add(@result ranges.intersect(a b))}}
+    return result
+}
+contains = (values:Values interval:ranges.Interval):>bool => {
+    loop existing in values {
+        if (existing.lower is? none or interval.lower isnt? none and existing.lower <=? interval.lower) and
+           (existing.upper is? none or interval.upper isnt? none and interval.upper <=? existing.upper) return true
+    }
+    return false
+}
+covers = (values:Values domain:Values):>bool => {
+    loop interval in domain {if not contains(values interval) return false}
+    return true
+}
+same = (left:Values right:Values):>bool => {
+    if left.length not=? right.length return false
+    loop i in 0.. and i <? left.length {
+        $runtime_assert i <? right.length
+        if not ranges.same_bounds(left[i] right[i]) return false
+    }
+    return true
+}
+exclude = (values:Values hole:bigint):>Values => {
+    let result:Values=[]
+    loop interval in values {
+        if (interval.lower is? none or interval.lower <=? hole) and (interval.upper is? none or hole <=? interval.upper) {
+            add(@result ranges.Interval[interval.lower hole-1])
+            add(@result ranges.Interval[hole+1 interval.upper])
+        } else {add(@result interval)}
+    }
+    return result
+}
+constrain = (domain:Values props:array<propositions.Proposition>):>Values => {
+    let interval=ranges.propositions_interval(props)
+    let result=if interval is? none domain else intersect(domain [interval])
+    loop p in props {
+        if p.subject =? 'self' and p.op =? 'not=?' {result=exclude(result p.value)}
+    }
+    return result
+}
+integer_domain = (id:addr nodes:array<types.Type>):>Values? => {
+    let base=types.strip_refinement(id nodes)
+    let type=types.node_at(nodes base)
+    let domain:Values=[]
+    if type is? types.IntegerLiteralType return [ranges.exact(type.value)]
+    if types.is_primitive(type 'bool') return [ranges.Interval[0 1]]
+    let fixed=views.fixed_integer_bounds(base nodes)
+    if fixed isnt? none {domain.push(ranges.Interval[fixed.minimum fixed.maximum])}
+    else if types.is_primitive(type 'int') {domain.push(ranges.UNKNOWN)}
+    else if types.is_primitive(type 'uint') {domain.push(ranges.Interval[0 none])}
+    else return none
+    let refined=types.node_at(nodes id)
+    return if refined is? types.RefinedType constrain(domain refined.propositions) else domain
+}
+# A counterexample for diagnostics, following the hosted lower-bound probe.
+first_uncovered = (values:Values domain:Values):>bigint? => {
+    loop interval in domain {
+        let probe=if interval.lower isnt? none interval.lower else if interval.upper is? none 0 else if interval.upper <? 0 interval.upper else 0
+        loop interval.upper is? none or probe <=? interval.upper {
+            if not contains(values ranges.exact(probe)) return probe
+            let end:bigint?=none
+            loop cover in values {
+                if contains([cover] ranges.exact(probe)) {end=cover.upper break}
+            }
+            if end is? none break
+            probe=end+1
+        }
+    }
+    return none
+}

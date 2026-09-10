@@ -25,6 +25,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- `semantic/value_sets.dewy` supplies exact integer coverage for match arms.
+  Sorted disjoint intervals retain holes, unlike the convex bounds used by
+  flow analysis. Forty native comparisons exercise union, intersection,
+  exclusion, coverage, and counterexamples with unbounded and bigint endpoints.
+
 - `semantic/check.dewy` begins the source value visitor: stable runtime
   bindings, literals/arrays, builtin dispatch, contextual conversions and
   refinement obligations, typed and forward-declared functions, returns,
