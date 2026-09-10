@@ -1,0 +1,124 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../subtyping.dewy" as subtyping
+import p"../propositions.dewy" as propositions
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"expression_intervals.dewy" as intervals
+import p"comparison_facts.dewy" as comparisons
+import p"predicate_paths.dewy" as paths
+import p"call_facts.dewy" as calls
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+
+doc"""
+Atomic predicates and their short-circuit proof paths.
+
+The evaluator supplies the values observed by this predicate. A surviving
+symbolic identity can be tightened by newer facts on the same path; a saved
+value whose binding has since changed keeps only its observed interval.
+No callback runs the predicate's effects again.
+
+A narrowed call-result member may promise facts about its arguments. The
+binding-to-call map describes that result's origin and must be forgotten on
+assignment. Losing the origin loses evidence, not the ordinary value type.
+"""
+
+Data:type = [
+    env:values.Environment
+    relations:relations.Context
+    snapshot:intervals.Snapshot
+    registry:bindings.Registry
+    member_calls:dict<addr addr>=[]
+    links:array<subtyping.Link>=subtyping.default_links
+]
+const operators:dict<string propositions.Operator>=[
+    '__lt__'->'<?' '__le__'->'<=?' '__gt__'->'>?' '__ge__'->'>=?'
+    '__eq__'->'=?' '__ne__'->'not=?'
+]
+
+operand = (id:addr state:facts.State data:Data):>comparisons.Operand => {
+    let interval=data.snapshot.numbers.get(id)
+    let saved=data.snapshot.terms.get(id)
+    if saved is? none return comparisons.Operand[interval=interval]
+    let current=relations.interval_of(saved.term state data.relations)
+    let shifted=ranges.Interval[ranges.shift_endpoint(current.lower saved.shift) ranges.shift_endpoint(current.upper saved.shift) current.capped]
+    interval=intervals.meet(interval shifted)
+    return comparisons.Operand[interval (if saved.shift =? 0 saved.term else none) saved.term saved.shift]
+}
+
+apply_call = (state:facts.State call:addr truth:bool? @data:Data member:types.RefinedType?=none):>facts.State? => {
+    let context=calls.Context[data.env data.relations data.snapshot]
+    let applied=calls.apply(state call truth context @data.registry member=member)
+    let current=applied.state
+    loop condition in applied.conditions {
+        if current is? none return none
+        current=refine(current condition.expression condition.truth @data)
+    }
+    return current
+}
+
+selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>facts.State? => {
+    let id=expressions.strip_casts(node.value data.env.nodes)
+    let tested=hir.node_at(data.env.nodes id)
+    if tested isnt? hir.ExpressedIdentifier or tested.binding_id is? none return state
+    if id not in? data.snapshot.terms return state
+    let remembered=data.member_calls.get(tested.binding_id)
+    if remembered is? none return state
+    let signature=expressions.call_function_type(remembered data.env.nodes data.env.types)
+    if signature is? none return state
+    let result=types.node_at(data.env.types signature.ret)
+    if result isnt? types.TypeOr return state
+    let survivors:array<addr>=[]
+    let type_nodes=data.env.types
+    let matches=truth not=? node.negated
+    loop member in result.items {
+        let base=types.strip_refinement(member type_nodes)
+        let inside=subtyping.is_subtype(base node.test_type data.links @type_nodes)
+        let overlapping=not inside and subtyping.is_subtype(node.test_type base data.links @type_nodes)
+        if inside =? matches or overlapping {survivors.push(member)}
+    }
+    if survivors.length not=? 1 return state
+    let survivor=types.node_at(type_nodes survivors[0])
+    if survivor isnt? types.RefinedType return state
+    let current=apply_call(state remembered none @data member=survivor)
+    if current is? none return none
+    let established=current
+    let own=intervals.own_bounds(survivors[0] data.env)
+    if own isnt? none {
+        let known=relations.interval_of(facts.Term[tested.binding_id] established data.relations)
+        let narrowed=ranges.intersect(known own)
+        if ranges.is_empty(narrowed) return none
+        facts.set_value(@established facts.Term[tested.binding_id] narrowed)
+    }
+    return established
+}
+
+atomic = (state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State? => {
+    let id=expressions.strip_casts(condition nodes)
+    let node=hir.node_at(nodes id)
+    if node is? hir.Bool return if node.value =? truth state else none
+    if node is? hir.TypeTest return selected_member(node truth state @data)
+    if node is? hir.ExpressedIdentifier and types.is_primitive(types.node_at(data.env.types node.value_type) 'bool') {
+        let subject=operand(id state data)
+        return comparisons.refine(state '=?' subject comparisons.Operand[interval=ranges.exact(if truth 1 else 0)] true data.relations)
+    }
+    if node isnt? hir.FunctionCall return state
+    let contracts=expressions.call_result_refinements(id nodes data.env.types)
+    if contracts.length >? 0 return apply_call(state id truth @data)
+    let function=hir.node_at(nodes node.func)
+    if function isnt? hir.ExpressedIdentifier return state
+    if function.name =? '__not__' and node.pos_args.length =? 1 return refine(state node.pos_args[0] not truth @data)
+    let name=if node.integer_operation is? none function.name else node.integer_operation
+    let op=operators.get(name)
+    if op is? none or node.pos_args.length not=? 2 return state
+    return comparisons.refine(state op operand(node.pos_args[0] state data) operand(node.pos_args[1] state data) truth data.relations)
+}
+
+refine = (state:facts.State condition:addr truth:bool @data:Data):>facts.State? => {
+    let context=paths.Context[data.env.nodes data.relations.facts]
+    let invalidated:set<addr>=set[]
+    return paths.refine(state condition truth invalidated context @data @atomic)
+}

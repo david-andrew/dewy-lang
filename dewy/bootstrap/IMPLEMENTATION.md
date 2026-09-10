@@ -67,6 +67,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   passed by place. The hosted compiler preserves explicitly callable generic
   parameters instead of converting their arguments to signature strings;
   recursive callbacks and positional/keyword calls execute successfully.
+  The native atomic predicate driver connects those paths to comparisons,
+  boolean bindings, negation, selected call promises, and narrowed result
+  members. Its compiled integration test covers chained length bounds and
+  historical-value invalidation. The current hosted non-bootstrap regression
+  checkpoint passes **1705 tests, with 23 skipped**, after the lifetime and
+  generic-callback changes.
 
 - Hosted cleanup now releases owned aggregate payloads in record fields and
   array union cells, including recursive aliases. Brace-less return, break,
