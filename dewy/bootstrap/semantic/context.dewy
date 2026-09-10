@@ -37,6 +37,7 @@ CheckState:type = [
     warnings:array<Warning>=[]
     pending_brand_matches:array<PendingBrandMatch>=[]
     read_states:array<ReadState>=[]
+    retained_read_states:set<addr>=set[]
     # Literal membership of already evaluated container values. A later
     # operand may mutate their source binding without changing these copies.
     value_keys:dict<addr array<keys.Fact>>=[]
@@ -79,6 +80,7 @@ checkpoint = (session:Session):>Checkpoint => {
         warnings=session.warnings
         pending_brand_matches=session.pending_brand_matches
         read_states=session.read_states
+        retained_read_states=session.retained_read_states
         value_keys=session.value_keys
         return_collectors=session.return_collectors
         prepared_imports=session.prepared_imports
@@ -119,29 +121,45 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     session.hir.truncate(checkpoint.hir)
     session.types.truncate(checkpoint.types)
     session.syntax_refs.truncate(checkpoint.syntax_refs)
-    let snapshot=checkpoint.state
-    session.warnings=snapshot.warnings
-    session.pending_brand_matches=snapshot.pending_brand_matches
-    session.read_states=snapshot.read_states
-    session.value_keys=snapshot.value_keys
-    session.return_collectors=snapshot.return_collectors
-    session.prepared_imports=snapshot.prepared_imports
-    session.next_key_position=snapshot.next_key_position
-    session.hoisted=snapshot.hoisted
-    session.constructors=snapshot.constructors
-    session.methods=snapshot.methods
-    session.method_bindings=snapshot.method_bindings
-    session.preparing_methods=snapshot.preparing_methods
-    session.prepared_methods=snapshot.prepared_methods
-    session.registry=snapshot.registry
-    session.scopes=snapshot.scopes
-    session.brands=snapshot.brands
-    session.error_types=snapshot.error_types
-    session.links=snapshot.links
-    session.builtin_aliases=snapshot.builtin_aliases
-    session.pending_aliases=snapshot.pending_aliases
-    session.resolving_aliases=snapshot.resolving_aliases
-    session.named_refs=snapshot.named_refs
+    session.warnings=checkpoint.state.warnings
+    session.pending_brand_matches=checkpoint.state.pending_brand_matches
+    session.read_states=checkpoint.state.read_states
+    session.retained_read_states=checkpoint.state.retained_read_states
+    session.value_keys=checkpoint.state.value_keys
+    session.return_collectors=checkpoint.state.return_collectors
+    session.prepared_imports=checkpoint.state.prepared_imports
+    session.next_key_position=checkpoint.state.next_key_position
+    session.hoisted=checkpoint.state.hoisted
+    session.constructors=checkpoint.state.constructors
+    session.methods=checkpoint.state.methods
+    session.method_bindings=checkpoint.state.method_bindings
+    session.preparing_methods=checkpoint.state.preparing_methods
+    session.prepared_methods=checkpoint.state.prepared_methods
+    session.registry=checkpoint.state.registry
+    session.scopes=checkpoint.state.scopes
+    session.brands=checkpoint.state.brands
+    session.error_types=checkpoint.state.error_types
+    session.links=checkpoint.state.links
+    session.builtin_aliases=checkpoint.state.builtin_aliases
+    session.pending_aliases=checkpoint.state.pending_aliases
+    session.resolving_aliases=checkpoint.state.resolving_aliases
+    session.named_refs=checkpoint.state.named_refs
+}
+
+# Branch environments live only while checking their enclosing flow/body.
+# Generic declarations retain their defining environment for later instances;
+# those ids remain stable, while finished nonescaping states release their
+# facts. Keeping every historical branch made speculative snapshots grow with
+# all previously checked functions rather than the current checking context.
+release_read_states = (first:addr @session:Session):>void => {
+    let stop=first
+    let i=first
+    loop i <? session.read_states.length {
+        if i in? session.retained_read_states {stop=i+1}
+        else {session.read_states[i]=ReadState[]}
+        i+=1
+    }
+    session.read_states.truncate(stop)
 }
 
 source_at = (context:Context session:Session):>Source => {

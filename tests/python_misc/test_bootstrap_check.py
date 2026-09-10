@@ -15,6 +15,8 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'let outer=(x:int64):>int64=>{let identity=<T>(value:T):>T=>value let inner=(y:int64):>int64=>identity(y) return inner(x)}\nouter(42)',
+    '\n'.join(f'let f{i}=(x:int64|none):>int64=>if x is? int64 x else 0' for i in range(40)) + '\nf0(42)',
     'let xs=[1 2 3]\nxs[0..2)',
     '"abc"[0..2)',
 

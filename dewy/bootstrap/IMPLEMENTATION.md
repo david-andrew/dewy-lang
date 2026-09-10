@@ -84,8 +84,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   remains unverified. Small-word bigint conversions now pass, as does a full
   native invocation through the library. A self-build exhausted its 32 GiB
   address-space cap while copying historical branch read states during
-  checkpoint restoration; scoped state reclamation is being verified. This
-  is implementation work, not a new language-design decision.
+  checkpoint restoration. Completed flows, loops, function bodies and modules
+  now release their temporary read states and return collectors; generic
+  declarations retain their defining state ids. Nested rollback/replay and
+  reclamation checks pass, together with 158 valid source comparisons and 86
+  rejection cases. A new paired build is in progress. This is implementation
+  work, not a new language-design decision.
 
 - Source readers avoid copying complete token forests for individual nodes.
   Bounds analysis shares immutable module inputs across binding/refinement

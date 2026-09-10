@@ -71,6 +71,14 @@ main = (argv:array<string>):>int64 => {
         let lexical=contexts.begin(source parsed.nodes @session)
         let environment=checking.begin(lexical @session)
         let result=checking.module(parsed.root environment @session)
+        # Completed flow/function environments cannot accumulate in the next
+        # speculative checkpoint. Only generic sources retain their state ids.
+        loop i in 0.. and i <? session.read_states.length {
+            if i >? environment.state and i not in? session.retained_read_states {
+                $runtime_assert session.read_states[i].types.length =? 0
+                $runtime_assert session.read_states[i].keys.length =? 0
+            }
+        }
         if validate_matches and result isnt? Error {
             let error=patterns.validate(session)
             if error isnt? none {result=error}

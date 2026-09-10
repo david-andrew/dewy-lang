@@ -21,6 +21,8 @@ main = ():>int64 => {{
     let session=contexts.Session[]
     let word=types.primitive('int64' @session.types)
     let original=hir.append_node(@session.hir hir.Integer[Span[0 1] word '0d' 1])
+    session.read_states.push(contexts.ReadState[types=[1 -> word]])
+    session.retained_read_states.add(0)
     let before=contexts.checkpoint(session)
     contexts.replace_hir(original hir.Integer[Span[0 1] word '0d' 2] @session)
     let added=hir.append_node(@session.hir hir.Integer[Span[0 1] word '0d' 3])
@@ -30,7 +32,11 @@ main = ():>int64 => {{
     let discarded=types.primitive('string' @session.types)
     session.syntax_refs.push(contexts.SyntaxRef[0 0 0])
     session.named_refs[12]=added
+    session.read_states.push(contexts.ReadState[types=[2 -> word]])
+    session.retained_read_states.add(1)
     contexts.restore(inner @session)
+    $runtime_assert session.read_states.length =? 1
+    $runtime_assert 0 in? session.retained_read_states and 1 not in? session.retained_read_states
     let restored=hir.node_at(session.hir original)
     let suffix=hir.node_at(session.hir added)
     $runtime_assert restored is? hir.Integer and restored.value =? 2
@@ -48,6 +54,17 @@ main = ():>int64 => {{
     contexts.restore(before @session)
     let final=hir.node_at(session.hir original)
     $runtime_assert final is? hir.Integer and final.value =? 1
+    # Finished branches release facts and trailing slots. Captured generic
+    # environments keep stable indices even when earlier slots are cleared.
+    session.read_states.push(contexts.ReadState[types=[2 -> word]])
+    session.read_states.push(contexts.ReadState[types=[3 -> word]])
+    session.retained_read_states.add(2)
+    session.read_states.push(contexts.ReadState[types=[4 -> word]])
+    contexts.release_read_states(1 @session)
+    $runtime_assert session.read_states.length =? 3
+    $runtime_assert session.read_states[1].types.length =? 0
+    $runtime_assert 3 in? session.read_states[2].types
+    $runtime_assert 1 in? session.read_states[0].types
     return 0
 }}
 ''')
