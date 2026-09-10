@@ -25,8 +25,28 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native module validation now precedes executable emission: it checks
+  proofs and integer representation, removes discharged witnesses, and
+  validates startup against the entry module's actual `main` binding.
+  Function signatures preserve mathematical `int` until bounds analysis;
+  the integration suite rejects an otherwise silently wrapping overflow.
+
+- Native dictionary/set lowering covers hashing, probing, insertion,
+  replacement, growth, tombstones, compaction, views and container algebra.
+  Place arguments cover bindings, fields, indexed elements, forwarding,
+  and whole aggregate replacement. The expanded driver executes **156
+  programs**, plus invalid calls and unresolved-proof rejection cases.
+  Native allocations still use process-lifetime storage; native ownership
+  cleanup, closures and full runtime string/reporting support remain needed.
+
+- Container membership records literal evidence at expression evaluation,
+  preserving an earlier operand's value across a later mutation. Six native
+  cases cover unions, intersections and rejection of unavailable keys.
+  An abstract integer can explicitly convert to a fixed width while keeping
+  the conversion for the bounds visitor to prove.
+
 - The native checker successfully checks the complete tokenizer source and
-  all 17 prelude modules (1,336 seconds in the measured run). This checks
+  all 17 prelude modules (625 seconds in the latest measured run). This checks
   source types; the paired native rebuild is still pending. Reflexive subtype
   queries now bypass normalization, with the type-algebra differential suite
   passing after that change.

@@ -25,8 +25,9 @@ Strings use immutable UTF-8 views with grapheme boundary tables; byte-array
 conversions create independent storage. Iterator setup remains local to its
 flow arm, and advancing happens before each condition, including continue.
 
-Closure captures, place parameters, and proof-node removal remain subsequent
-legalization steps. Reaching an unsupported representation reports a
+Places share binding slots or inline record/cell storage through fields,
+indices, and forwarded parameters. Closure captures and runtime reporting
+remain subsequent legalization steps. Reaching an unsupported representation reports a
 pending-implementation diagnostic before program emission.
 """
 State:type = [
@@ -41,6 +42,11 @@ State:type = [
     layout_context:layouts.Context=layouts.Context[]
     brand_numbers:array<brands.NumberedBrand>=[]
     storage_types:dict<addr addr>=[]
+    # A place is an address of the binding's storage, including the handle
+    # slot for an aggregate. Replacing a record/array through @ must replace
+    # that slot rather than merely mutate the old object's contents.
+    boxed:set<addr>=set[]
+    addressed:set<addr>=set[]
     union_tags:dict<string addr>=[]
     next_tag:addr=1
     copy_helpers:dict<string string>=[]
@@ -88,11 +94,11 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
         if type.type_params.length >? 0 or type.rest isnt? none {reject(node 'generic or rest function signatures' @state);}
         let arguments:array<types.PosOrKwArg>=[]
         loop argument in type.pos_or_kw {
-            arguments.push(types.PosOrKwArg[argument.name runtime_type(argument.value_type node @state)])
+            arguments.push(types.PosOrKwArg[argument.name if argument.place types.primitive('int64' @state.type_nodes) else runtime_type(argument.value_type node @state)])
             if not argument.required {arguments.push(types.PosOrKwArg[none types.primitive('bool' @state.type_nodes)])}
         }
         loop argument in type.kw_only {
-            arguments.push(types.PosOrKwArg[argument.name runtime_type(argument.value_type node @state)])
+            arguments.push(types.PosOrKwArg[argument.name if argument.place types.primitive('int64' @state.type_nodes) else runtime_type(argument.value_type node @state)])
             if not argument.required {arguments.push(types.PosOrKwArg[none types.primitive('bool' @state.type_nodes)])}
         }
         return types.function_type(arguments [] none runtime_type(type.ret node @state) [] @state.type_nodes)
@@ -110,6 +116,13 @@ parameters = (node:hir.FunctionLiteral):>array<hir.Param> => {
 }
 discover = (id:addr @state:State):>void => {
     let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Place {
+        let target=hir.node_at(state.input.nodes node.target)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+            state.addressed.add(target.binding_id)
+            if not inline_place(node.value_type @state) {state.boxed.add(target.binding_id)}
+        }
+    }
     if node is? hir.Declare and node.binding_id isnt? none {
         state.symbols[node.binding_id]="__dewy_binding_{node.binding_id}_{node.name}"
         state.storage_types[node.binding_id]=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
@@ -122,6 +135,10 @@ discover = (id:addr @state:State):>void => {
     if node is? hir.FunctionLiteral {
         loop parameter in parameters(node) {
             if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}" state.storage_types[parameter.binding_id]=parameter.value_type}
+            if parameter.place and parameter.binding_id isnt? none {
+                state.addressed.add(parameter.binding_id)
+                if not inline_place(parameter.value_type @state) {state.boxed.add(parameter.binding_id)}
+            }
         }
     }
     if node is? hir.IteratorExpression {
@@ -148,6 +165,7 @@ expression = (id:addr @state:State):>addr => {
         return expression(node.expr @state)
     }
     if node is? hir.Suppress return expression(node.item @state)
+    if node is? hir.Place return place_address(node.target @state)
     if node is? hir.GenericFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     let type=runtime_type(node.value_type node @state)
     if node is? hir.String return string_literal(node @state)
@@ -159,6 +177,13 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.ObjectLiteral return object_literal(node @state)
     if node is? hir.TypeTest return runtime_test(node @state)
     if node is? hir.ForwardingAccess return forwarding_field(node @state)
+    if node is? hir.DictContains return dict_contains(node @state)
+    if node is? hir.DictLookup return dict_lookup(node @state)
+    if node is? hir.DictStore return dict_store(node @state)
+    if node is? hir.DictRemove return dict_remove(node @state)
+    if node is? hir.DictEntries return dict_entries(node @state)
+    if node is? hir.DictView return dict_view(node @state)
+    if node is? hir.SetAlgebra return set_algebra(node @state)
     if node is? hir.NoneValue return word(0 node @state)
     if node is? hir.MemberAccess {
         let stored=stored_type(id state)
@@ -193,7 +218,8 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
     if node is? hir.ExpressedIdentifier {
         let stored=stored_type(id state)
-        let raw=put(hir.ExpressedIdentifier[node.loc runtime_type(stored node @state) symbol(node.name node.binding_id @state) node.binding_id] @state)
+        let raw=binding_storage(node stored @state)
+        if node.binding_id isnt? none and node.binding_id in? state.boxed {raw=array_load(raw stored node @state)}
         return read_value(raw stored node.value_type node @state)
     }
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
@@ -202,23 +228,31 @@ expression = (id:addr @state:State):>addr => {
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'hoisting a local function and its captures' @state)
         let value=owned_value(node.expr @state)
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
+        if node.binding_id isnt? none and node.binding_id in? state.boxed {
+            value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
+            annotation=types.primitive('int64' @state.type_nodes)
+        }
         return put(hir.Declare[node.loc type node.decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
     }
     if node is? hir.Assign {
         let original=hir.node_at(state.input.nodes node.target)
         if original isnt? hir.ExpressedIdentifier return reject(node 'a non-binding assignment target' @state)
-        let target=put(hir.ExpressedIdentifier[original.loc runtime_type(stored_type(node.target state) original @state) symbol(original.name original.binding_id @state) original.binding_id] @state)
+        let stored=stored_type(node.target state)
+        let target=binding_storage(original stored @state)
+        let boxed=original.binding_id isnt? none and original.binding_id in? state.boxed
         let value=owned_value(node.value @state)
         if node.op not=? '=' {
             if node.op.length <? 2 return reject(node 'invalid compound assignment spelling' @state)
             let operator=node.op[0..node.op.length-1)
             let name=builtins.binary_operators.get(operator)
             if name is? none return reject(node 'this compound assignment operator' @state)
-            let operand_type=hir.node_at(state.nodes target).value_type
+            let operand_type=runtime_type(stored node @state)
             let signature=types.function_type([types.PosOrKwArg[none operand_type] types.PosOrKwArg[none operand_type]] [] none operand_type [] @state.type_nodes)
             let function=put(hir.ExpressedIdentifier[node.loc signature name] @state)
-            value=put(hir.FunctionCall[node.loc operand_type function [target value] []] @state)
+            value=put(hir.FunctionCall[node.loc operand_type function [if boxed array_load(target stored node @state) else target value] []] @state)
         }
+        if boxed return array_store(value target stored node @state)
+        if original.binding_id isnt? none and original.binding_id in? state.addressed and inline_place(stored @state) return field_write(target value stored node @state)
         return put(hir.Assign[node.loc type target '=' value] @state)
     }
     if node is? hir.FunctionCall {
@@ -280,9 +314,35 @@ allocation = (size:addr node:hir.AST @state:State):>addr => {
     }
     return intrinsic(name [size] types.primitive('int64' @state.type_nodes) node @state)
 }
+# Records and tagged cells occupy inline storage in fields. Their existing
+# storage is itself the place; scalar values and array handles need a slot.
+inline_place = (type:addr @state:State):>bool => object_type(type state) isnt? none or cell_members(type @state) isnt? none
+binding_storage = (node:hir.ExpressedIdentifier stored:addr @state:State):>addr => {
+    let type=if node.binding_id isnt? none and node.binding_id in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
+    return put(hir.ExpressedIdentifier[node.loc type symbol(node.name node.binding_id @state) node.binding_id] @state)
+}
+box_value = (value:addr stored:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let initial=snapshot(value @prefix @state)
+    let pointer=snapshot(allocation(word(8 node @state) node @state) @prefix @state)
+    prefix.push(array_store(initial pointer stored node @state))
+    prefix.push(pointer)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+place_address = (id:addr @state:State):>addr => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.ExpressedIdentifier return binding_storage(node stored_type(id state) @state)
+    if node is? hir.MemberAccess return field_pointer(node @state)
+    if node is? hir.Index {
+        let pointer=array_index(node @state)
+        return if inline_place(stored_type(id state) @state) array_load(pointer stored_type(id state) node @state) else pointer
+    }
+    return reject(node 'an addressable place route' @state)
+}
 owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     let value=expression(id @state)
+    if node is? hir.Place return value
     if cell_members(node.value_type @state) isnt? none return cell_copy(value node.value_type node @state)
     let array=array_type(node.value_type state)
     if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
@@ -1088,10 +1148,15 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
     let void_type=types.primitive('void' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
     loop argument in parameters(node) {
-        if argument.place return reject(node 'place parameter legalization' @state)
-        if aggregate(argument.value_type state) and state.allocator is? none return reject(node 'aggregate arguments need the prelude arena allocator' @state)
+        if not argument.place and aggregate(argument.value_type state) and state.allocator is? none return reject(node 'aggregate arguments need the prelude arena allocator' @state)
         let type=runtime_type(argument.value_type node @state)
         let name=symbol(argument.name argument.binding_id @state)
+        let boxed=argument.binding_id isnt? none and argument.binding_id in? state.boxed
+        if argument.place {
+            if argument is? hir.BoundParam return reject(node 'a default place parameter' @state)
+            arguments.push(hir.Param[name types.primitive('int64' @state.type_nodes) argument.binding_id argument.position_only false])
+            continue
+        }
         if argument is? hir.BoundParam {
             let incoming=fresh('incoming' @state)
             let present=fresh('present' @state)
@@ -1102,7 +1167,13 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
             let default=owned_value(argument.value @state)
             let arm=put(hir.IfArm[node.loc type condition supplied] @state)
             let selected=put(hir.Flow[node.loc type [arm] default] @state)
+            if boxed {selected=box_value(selected argument.value_type node @state) type=types.primitive('int64' @state.type_nodes)}
             prologue.push(put(hir.Declare[node.loc void_type 'let' name type selected argument.binding_id] @state))
+        } else if boxed {
+            let incoming=fresh('incoming' @state)
+            arguments.push(hir.Param[incoming type position_only=argument.position_only])
+            let value=put(hir.ExpressedIdentifier[node.loc type incoming] @state)
+            prologue.push(put(hir.Declare[node.loc void_type 'let' name types.primitive('int64' @state.type_nodes) box_value(value argument.value_type node @state) argument.binding_id] @state))
         } else {arguments.push(hir.Param[name type argument.binding_id argument.position_only false])}
     }
     let body=expression(node.body @state)
@@ -1171,6 +1242,8 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
     let target_type=runtime_type(target.value_type target @state)
     let target_name=symbol(target.name target.binding_id @state)
     let initial=placeholder(target_type node @state)
+    let boxed=target.binding_id isnt? none and target.binding_id in? state.boxed
+    if boxed {initial=box_value(initial target.value_type node @state) target_type=types.primitive('int64' @state.type_nodes)}
     prefix.push(put(hir.Declare[node.loc void_type 'let' target_name target_type initial target.binding_id] @state))
     let into=put(hir.ExpressedIdentifier[node.loc target_type target_name target.binding_id] @state)
     let cursor=snapshot(word(-1 node @state) @prefix @state)
@@ -1196,7 +1269,7 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
     }
     let increment=put(hir.Assign[node.loc void_type cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
     let available=if length is? none put(hir.Bool[node.loc bool_type true] @state) else intrinsic('__lt__' [cursor length] bool_type node @state)
-    let store=put(hir.Assign[node.loc void_type into '=' value] @state)
+    let store=if boxed array_store(value into target.value_type node @state) else put(hir.Assign[node.loc void_type into '=' value] @state)
     let yes=put(hir.Bool[node.loc bool_type true] @state)
     let no=put(hir.Bool[node.loc bool_type false] @state)
     let body=put(hir.Block[node.loc bool_type [store yes] false] @state)
@@ -1395,4 +1468,402 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
     $runtime_assert last is? hir.IfArm
     prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
     return put(hir.Block[node.loc output prefix false] @state)
+}
+
+# Dictionaries and sets retain the hosted insertion-ordered entry layout.
+# Hashes belong to entries; sparse probe slots contain entry positions, -1
+# for empty, and -2 for a removed slot. Rebuilding moves live handles inside
+# the same owning arrays, so it must not turn those moves into value copies.
+DictParts:type = const [pointer:addr layout:layouts.Record key:addr value:addr?]
+DictProbe:type = const [found:addr position:addr slot:addr hash:addr]
+dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false):>DictParts => {
+    let source=hir.node_at(state.input.nodes dictionary)
+    let entries=views.container_entry_types(types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes) state.type_nodes)
+    $runtime_assert entries isnt? none
+    let pointer=snapshot((if copy owned_value(dictionary @state) else expression(dictionary @state)) @prefix @state)
+    return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value]
+}
+dict_from_keys = (keys:addr @prefix:array<addr> @state:State):>DictParts => {
+    let member=hir.node_at(state.input.nodes keys)
+    $runtime_assert member is? hir.MemberAccess
+    return dict_parts(member.value @prefix @state)
+}
+dict_field = (parts:DictParts name:string node:hir.AST @state:State):>addr => {
+    let offset=parts.layout.offsets.get(name)
+    $runtime_assert offset isnt? none
+    return read_word(parts.pointer offset node @state)
+}
+dict_set_field = (parts:DictParts name:string value:addr node:hir.AST @state:State):>addr => {
+    let offset=parts.layout.offsets.get(name)
+    $runtime_assert offset isnt? none
+    return store_word(value parts.pointer offset node @state)
+}
+dict_element_pointer = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => {
+    let layout=layouts.element(element @state.type_nodes)
+    if layout is? layouts.Pending return reject(node layout.detail @state)
+    return word_op('__add__' read_word(descriptor layouts.array_descriptor.data node @state) word_op('__mul__' index word(layout.size node @state) node @state) node @state)
+}
+dict_element = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => array_load(dict_element_pointer(descriptor index element node @state) element node @state)
+dict_store_element = (descriptor:addr index:addr value:addr element:addr node:hir.AST @state:State):>addr => array_store(value dict_element_pointer(descriptor index element node @state) element node @state)
+dict_push = (descriptor:addr value:addr element:addr node:hir.AST @state:State):>addr => {
+    let layout=layouts.element(element @state.type_nodes)
+    if layout is? layouts.Pending return reject(node layout.detail @state)
+    let prefix:array<addr>=[]
+    let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
+    let next=word_op('__add__' length word(1 node @state) node @state)
+    prefix.push(array_reserve(descriptor next layout.size node @state))
+    prefix.push(dict_store_element(descriptor length value element node @state))
+    prefix.push(store_word(next descriptor layouts.array_descriptor.length node @state))
+    return sequence(prefix node @state)
+}
+set_local = (target:addr value:addr node:hir.AST @state:State):>addr => put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) target '=' value] @state)
+while_loop = (condition:addr body:array<addr> node:hir.AST @state:State):>addr => {
+    let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition sequence(body node @state)] @state)
+    return put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state)
+}
+compare = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic(name [left right] types.primitive('bool' @state.type_nodes) node @state)
+uword = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('uint64' @state.type_nodes) '0d' value] @state)
+uword_op = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic(name [left right] types.primitive('uint64' @state.type_nodes) node @state)
+dict_hash = (key:addr type:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let hash:addr=0
+    let unsigned=types.primitive('uint64' @state.type_nodes)
+    if string_type(type state) {
+        hash=snapshot(uword(14695981039346656037 node @state) @prefix @state)
+        let data=snapshot(string_data(key node @state) @prefix @state)
+        let length=snapshot(read_word(key layouts.string_descriptor.byte_length node @state) @prefix @state)
+        let cursor=snapshot(word(0 node @state) @prefix @state)
+        let byte=intrinsic('__load_u8__' [word_op('__add__' data cursor node @state)] types.primitive('uint8' @state.type_nodes) node @state)
+        let widened=put(hir.Transmute[node.loc unsigned byte] @state)
+        let mixed=uword_op('__mul__' uword_op('__xor__' hash widened node @state) uword(1099511628211 node @state) node @state)
+        prefix.push(while_loop(compare('__lt__' cursor length node @state) [set_local(hash mixed node @state) set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state))
+    } else {
+        let layout=views.fixed_integer_layout(type state.type_nodes)
+        let atom=types.node_at(state.type_nodes types.strip_refinement(type state.type_nodes))
+        if layout is? none and not types.is_primitive(atom 'bool') and enum_members(type state) is? none return reject(node 'hashing this dictionary key representation' @state)
+        let bits=put(hir.Transmute[node.loc unsigned key] @state)
+        let mixed=snapshot(uword_op('__mul__' bits uword(11400714819323198485 node @state) node @state) @prefix @state)
+        hash=uword_op('__xor__' mixed uword_op('__rshift__' mixed uword(29 node @state) node @state) node @state)
+    }
+    let masked=uword_op('__and__' hash uword(9223372036854775807 node @state) node @state)
+    prefix.push(put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) masked] @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+dict_advance = (cursor:addr perturb:addr mask:addr node:hir.AST @state:State):>array<addr> => {
+    let shifted=word_op('__rshift__' perturb word(5 node @state) node @state)
+    let next=word_op('__and__' word_op('__add__' word_op('__add__' word_op('__mul__' cursor word(5 node @state) node @state) perturb node @state) word(1 node @state) node @state) mask node @state)
+    return [set_local(perturb shifted node @state) set_local(cursor next node @state)]
+}
+dict_rebuild = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let keys=snapshot(dict_field(parts 'keys' node @state) @prefix @state)
+    let hashes=snapshot(dict_field(parts 'hashes' node @state) @prefix @state)
+    let slots=snapshot(dict_field(parts 'indices' node @state) @prefix @state)
+    let count=snapshot(read_word(keys layouts.array_descriptor.length node @state) @prefix @state)
+    let hashed=snapshot(read_word(hashes layouts.array_descriptor.length node @state) @prefix @state)
+    prefix.push(array_reserve(hashes count 8 node @state))
+    let writer=snapshot(word(0 node @state) @prefix @state)
+    let reader=snapshot(word(0 node @state) @prefix @state)
+    let has_hash=compare('__lt__' reader hashed node @state)
+    let stored_hash=dict_element(hashes reader word_type node @state)
+    let dead=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' has_hash compare('__eq__' stored_hash word(-1 node @state) node @state)] @state)
+    let live:array<addr>=[]
+    let key=snapshot(dict_element(keys reader parts.key node @state) @live @state)
+    let hash_arm=put(hir.IfArm[node.loc word_type has_hash stored_hash] @state)
+    let moved_hash=snapshot(put(hir.Flow[node.loc word_type [hash_arm] dict_hash(key parts.key node @state)] @state) @live @state)
+    live.push(dict_store_element(keys writer key parts.key node @state))
+    if parts.value isnt? none {
+        let values=dict_field(parts 'values' node @state)
+        live.push(dict_store_element(values writer dict_element(values reader parts.value node @state) parts.value node @state))
+    }
+    live.push(dict_store_element(hashes writer moved_hash word_type node @state))
+    live.push(set_local(writer word_op('__add__' writer word(1 node @state) node @state) node @state))
+    let body:array<addr>=[conditional(intrinsic('__not__' [dead] types.primitive('bool' @state.type_nodes) node @state) sequence(live node @state) node @state)]
+    body.push(set_local(reader word_op('__add__' reader word(1 node @state) node @state) node @state))
+    prefix.push(while_loop(compare('__lt__' reader count node @state) body node @state))
+    prefix.push(store_word(writer keys layouts.array_descriptor.length node @state))
+    prefix.push(store_word(writer hashes layouts.array_descriptor.length node @state))
+    if parts.value isnt? none {prefix.push(store_word(writer dict_field(parts 'values' node @state) layouts.array_descriptor.length node @state))}
+    prefix.push(dict_set_field(parts 'live' writer node @state))
+    let capacity=snapshot(word(8 node @state) @prefix @state)
+    let needed=word_op('__mul__' word_op('__add__' writer word(room node @state) node @state) word(3 node @state) node @state)
+    prefix.push(while_loop(compare('__le__' word_op('__mul__' capacity word(2 node @state) node @state) needed node @state) [set_local(capacity word_op('__mul__' capacity word(2 node @state) node @state) node @state)] node @state))
+    prefix.push(array_reserve(slots capacity 8 node @state))
+    prefix.push(store_word(capacity slots layouts.array_descriptor.length node @state))
+    prefix.push(set_local(reader word(0 node @state) node @state))
+    prefix.push(while_loop(compare('__lt__' reader capacity node @state) [dict_store_element(slots reader word(-1 node @state) word_type node @state) set_local(reader word_op('__add__' reader word(1 node @state) node @state) node @state)] node @state))
+    prefix.push(set_local(reader word(0 node @state) node @state))
+    let entries:array<addr>=[]
+    let hash=snapshot(dict_element(hashes reader word_type node @state) @entries @state)
+    let mask=word_op('__sub__' capacity word(1 node @state) node @state)
+    let cursor=snapshot(word_op('__and__' hash mask node @state) @entries @state)
+    let perturb=snapshot(hash @entries @state)
+    entries.push(while_loop(compare('__ge__' dict_element(slots cursor word_type node @state) word(0 node @state) node @state) dict_advance(cursor perturb mask node @state) node @state))
+    entries.push(dict_store_element(slots cursor reader word_type node @state))
+    entries.push(set_local(reader word_op('__add__' reader word(1 node @state) node @state) node @state))
+    prefix.push(while_loop(compare('__lt__' reader writer node @state) entries node @state))
+    return sequence(prefix node @state)
+}
+dict_ensure = (parts:DictParts node:hir.AST @state:State room:addr=0 compact:bool=false):>addr => {
+    let slots=read_word(dict_field(parts 'indices' node @state) layouts.array_descriptor.length node @state)
+    let entries=read_word(dict_field(parts 'keys' node @state) layouts.array_descriptor.length node @state)
+    let condition=compare('__eq__' slots word(0 node @state) node @state)
+    let crowded=compare('__gt__' word_op('__mul__' word_op('__add__' entries word(room node @state) node @state) word(3 node @state) node @state) word_op('__mul__' slots word(2 node @state) node @state) node @state)
+    condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'or' condition crowded] @state)
+    if compact {
+        let dead=compare('__gt__' entries dict_field(parts 'live' node @state) node @state)
+        condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'or' condition dead] @state)
+    }
+    return conditional(condition dict_rebuild(parts room node @state) node @state)
+}
+dict_probe = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @state:State):>DictProbe => {
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let slots=snapshot(dict_field(parts 'indices' node @state) @prefix @state)
+    let keys=snapshot(dict_field(parts 'keys' node @state) @prefix @state)
+    let hashes=snapshot(dict_field(parts 'hashes' node @state) @prefix @state)
+    let hash=snapshot(dict_hash(key parts.key node @state) @prefix @state)
+    let mask=snapshot(word_op('__sub__' read_word(slots layouts.array_descriptor.length node @state) word(1 node @state) node @state) @prefix @state)
+    let cursor=snapshot(word_op('__and__' hash mask node @state) @prefix @state)
+    let perturb=snapshot(hash @prefix @state)
+    let found=snapshot(put(hir.Bool[node.loc boolean false] @state) @prefix @state)
+    let searching=snapshot(put(hir.Bool[node.loc boolean true] @state) @prefix @state)
+    let position=snapshot(word(-1 node @state) @prefix @state)
+    let slot=snapshot(word(-1 node @state) @prefix @state)
+    let dummy=snapshot(word(-1 node @state) @prefix @state)
+    let body:array<addr>=[]
+    let entry=snapshot(dict_element(slots cursor word_type node @state) @body @state)
+    let use_dummy=put(hir.IfArm[node.loc word_type compare('__ge__' dummy word(0 node @state) node @state) dummy] @state)
+    let selected=put(hir.Flow[node.loc word_type [use_dummy] cursor] @state)
+    let stop=set_local(searching put(hir.Bool[node.loc boolean false] @state) node @state)
+    let empty=sequence([set_local(slot selected node @state) stop] node @state)
+    let deleted=conditional(compare('__lt__' dummy word(0 node @state) node @state) set_local(dummy cursor node @state) node @state)
+    let existing=dict_element(keys entry parts.key node @state)
+    let equal=if string_type(parts.key state) string_equal_values(existing key node false @state) else compare('__eq__' existing key node @state)
+    let same_hash=compare('__eq__' dict_element(hashes entry word_type node @state) hash node @state)
+    let same=put(hir.ShortCircuit[node.loc boolean 'and' same_hash equal] @state)
+    let hit=sequence([set_local(found put(hir.Bool[node.loc boolean true] @state) node @state) set_local(position entry node @state) set_local(slot cursor node @state) stop] node @state)
+    let arms:array<addr>=[put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__eq__' entry word(-1 node @state) node @state) empty] @state) put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__eq__' entry word(-2 node @state) node @state) deleted] @state)]
+    body.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms conditional(same hit node @state)] @state))
+    loop step in dict_advance(cursor perturb mask node @state) {body.push(step)}
+    prefix.push(while_loop(searching body node @state))
+    return DictProbe[found position slot hash]
+}
+
+dict_contains = (node:hir.DictContains @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let parts=dict_from_keys(node.keys @prefix @state)
+    let key=snapshot(expression(node.key @state) @prefix @state)
+    prefix.push(dict_ensure(parts node @state))
+    let probe=dict_probe(parts key node @prefix @state)
+    if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) probe.position] @state))}
+    prefix.push(probe.found)
+    return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
+}
+dict_lookup = (node:hir.DictLookup @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let parts=dict_from_keys(node.keys @prefix @state)
+    $runtime_assert parts.value isnt? none
+    let key=snapshot(expression(node.key @state) @prefix @state)
+    let fallback:addr?=none
+    if node.default isnt? none {fallback=snapshot(owned_value(node.default @state) @prefix @state)}
+    let position:addr?=none
+    let found:addr?=none
+    if node.proven and node.static_position isnt? none {position=word(node.static_position node @state)}
+    else if node.proven and node.position isnt? none {position=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) node.position] @state)}
+    else {
+        prefix.push(dict_ensure(parts node @state))
+        let probe=dict_probe(parts key node @prefix @state)
+        position=probe.position found=probe.found
+    }
+    $runtime_assert position isnt? none
+    let value=dict_element(dict_field(parts 'values' node @state) position parts.value node @state)
+    if node.proven {value=read_value(value parts.value node.value_type node @state)}
+    else {
+        $runtime_assert found isnt? none
+        if fallback is? none {
+            let absent=types.primitive('none' @state.type_nodes)
+            fallback=cell_pack(word(0 node @state) absent node.value_type node @state)
+            value=cell_pack(value parts.value node.value_type node @state)
+        } else {value=read_value(value parts.value node.value_type node @state)}
+        let arm=put(hir.IfArm[node.loc runtime_type(node.value_type node @state) found value] @state)
+        value=put(hir.Flow[node.loc runtime_type(node.value_type node @state) [arm] fallback] @state)
+    }
+    prefix.push(value)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+}
+dict_insert = (parts:DictParts key:addr value:addr? node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    prefix.push(dict_ensure(parts node @state room=1))
+    let probe=dict_probe(parts key node @prefix @state)
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let added:array<addr>=[]
+    let keys=dict_field(parts 'keys' node @state)
+    added.push(set_local(probe.position read_word(keys layouts.array_descriptor.length node @state) node @state))
+    added.push(dict_push(keys key parts.key node @state))
+    if value isnt? none and parts.value isnt? none {added.push(dict_push(dict_field(parts 'values' node @state) value parts.value node @state))}
+    added.push(dict_push(dict_field(parts 'hashes' node @state) probe.hash word_type node @state))
+    added.push(dict_store_element(dict_field(parts 'indices' node @state) probe.slot probe.position word_type node @state))
+    added.push(dict_set_field(parts 'live' word_op('__add__' dict_field(parts 'live' node @state) word(1 node @state) node @state) node @state))
+    let changed=put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+    if value isnt? none and parts.value isnt? none {changed=dict_store_element(dict_field(parts 'values' node @state) probe.position value parts.value node @state)}
+    let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) probe.found changed] @state)
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] sequence(added node @state)] @state))
+    return probe.position
+}
+dict_store = (node:hir.DictStore @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let parts=dict_from_keys(node.keys @prefix @state)
+    let key=snapshot(owned_value(node.key @state) @prefix @state)
+    let value:addr?=none
+    if node.value isnt? none {value=snapshot(owned_value(node.value @state) @prefix @state)}
+    let position=dict_insert(parts key value node @prefix @state)
+    if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) position] @state))}
+    return sequence(prefix node @state)
+}
+dict_remove = (node:hir.DictRemove @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let parts=dict_from_keys(node.keys @prefix @state)
+    if node.key is? none {
+        let fields:array<string>=['keys' 'hashes' 'indices']
+        if parts.value isnt? none {fields.push('values')}
+        loop name in fields {prefix.push(store_word(word(0 node @state) dict_field(parts name node @state) layouts.array_descriptor.length node @state))}
+        prefix.push(dict_set_field(parts 'live' word(0 node @state) node @state))
+        return sequence(prefix node @state)
+    }
+    let key=snapshot(expression(node.key @state) @prefix @state)
+    let fallback:addr?=none
+    if node.default isnt? none {fallback=snapshot(owned_value(node.default @state) @prefix @state)}
+    prefix.push(dict_ensure(parts node @state))
+    let probe=dict_probe(parts key node @prefix @state)
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let removed:array<addr>=[]
+    let element=if parts.value is? none parts.key else parts.value
+    let field=if parts.value is? none 'keys' else 'values'
+    let value=snapshot(dict_element(dict_field(parts field node @state) probe.position element node @state) @removed @state)
+    removed.push(dict_store_element(dict_field(parts 'hashes' node @state) probe.position word(-1 node @state) word_type node @state))
+    removed.push(dict_store_element(dict_field(parts 'indices' node @state) probe.slot word(-2 node @state) word_type node @state))
+    removed.push(dict_set_field(parts 'live' word_op('__sub__' dict_field(parts 'live' node @state) word(1 node @state) node @state) node @state))
+    removed.push(read_value(value element node.value_type node @state))
+    let result=put(hir.Block[node.loc runtime_type(node.value_type node @state) removed false] @state)
+    if fallback isnt? none {
+        let arm=put(hir.IfArm[node.loc runtime_type(node.value_type node @state) probe.found result] @state)
+        result=put(hir.Flow[node.loc runtime_type(node.value_type node @state) [arm] fallback] @state)
+    }
+    prefix.push(result)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+}
+dict_entries = (node:hir.DictEntries @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let parts=dict_parts(node.dictionary @prefix @state)
+    prefix.push(dict_ensure(parts node @state compact=true))
+    prefix.push(dict_field(parts node.name node @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+dict_view = (node:hir.DictView @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let parts=dict_parts(node.dictionary @prefix @state)
+    prefix.push(dict_ensure(parts node @state compact=true))
+    if node.name =? 'values' {
+        let element=if parts.value is? none parts.key else parts.value
+        let field=if parts.value is? none 'keys' else 'values'
+        let array=array_type(types.array_type(element none @state.type_nodes) state)
+        $runtime_assert array isnt? none
+        prefix.push(array_copy(dict_field(parts field node @state) array node @state))
+    } else {
+        # A key view is an independent set, not an alias of the source's
+        # entry array. Its hash table is rebuilt lazily like a set literal's.
+        let layout=object_layout(node.value_type node @state)
+        let destination=snapshot(allocation(word(layout.size node @state) node @state) @prefix @state)
+        let output=DictParts[destination layout parts.key none]
+        let keys=array_type(types.array_type(parts.key none @state.type_nodes) state)
+        let hashes=array_type(types.array_type(types.primitive('int64' @state.type_nodes) none @state.type_nodes) state)
+        $runtime_assert keys isnt? none and hashes isnt? none
+        prefix.push(dict_set_field(output 'keys' array_copy(dict_field(parts 'keys' node @state) keys node @state) node @state))
+        prefix.push(dict_set_field(output 'hashes' array_copy(dict_field(parts 'hashes' node @state) hashes node @state) node @state))
+        let empty=array_memory(word(0 node @state) 8 node @state)
+        loop item in empty.prefix {prefix.push(item)}
+        prefix.push(dict_set_field(output 'indices' empty.descriptor node @state))
+        prefix.push(dict_set_field(output 'live' dict_field(parts 'live' node @state) node @state))
+        prefix.push(destination)
+    }
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+
+# Set algebra and dictionary union share insertion/probing with individual
+# stores. Iterating the left then the right preserves source insertion order;
+# a dictionary union replaces a repeated value without moving its key.
+dict_empty = (type:addr node:hir.AST @prefix:array<addr> @state:State):>DictParts => {
+    let entries=views.container_entry_types(type state.type_nodes)
+    $runtime_assert entries isnt? none
+    let layout=object_layout(type node @state)
+    let destination=snapshot(allocation(word(layout.size node @state) node @state) @prefix @state)
+    let parts=DictParts[destination layout entries.key entries.value]
+    let fields:array<string>=['keys' 'hashes' 'indices']
+    if entries.value isnt? none {fields.push('values')}
+    loop field in fields {
+        let element=types.primitive('int64' @state.type_nodes)
+        if field =? 'keys' {element=entries.key}
+        else if field =? 'values' and entries.value isnt? none {element=entries.value}
+        let storage=layouts.element(element @state.type_nodes)
+        if storage is? layouts.Pending {reject(node storage.detail @state); return parts}
+        let memory=array_memory(word(0 node @state) storage.size node @state)
+        loop statement in memory.prefix {prefix.push(statement)}
+        prefix.push(dict_set_field(parts field memory.descriptor node @state))
+    }
+    prefix.push(dict_set_field(parts 'live' word(0 node @state) node @state))
+    return parts
+}
+copy_stored = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    if cell_members(type @state) isnt? none return cell_copy(value type node @state)
+    let array=array_type(type state)
+    if array isnt? none return array_copy(value array node @state)
+    if object_type(type state) isnt? none return object_copy(value type node @state)
+    return value
+}
+algebra_entries = (source:DictParts other:DictParts destination:DictParts mode:string node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    prefix.push(dict_ensure(source node @state compact=true))
+    if mode not=? 'all' {prefix.push(dict_ensure(other node @state))}
+    let keys=snapshot(dict_field(source 'keys' node @state) @prefix @state)
+    let length=snapshot(read_word(keys layouts.array_descriptor.length node @state) @prefix @state)
+    let cursor=snapshot(word(0 node @state) @prefix @state)
+    let body:array<addr>=[]
+    let key=snapshot(dict_element(keys cursor source.key node @state) @body @state)
+    let wanted:addr?=none
+    if mode not=? 'all' {
+        let probe=dict_probe(other key node @body @state)
+        wanted=if mode =? 'present' probe.found else intrinsic('__not__' [probe.found] types.primitive('bool' @state.type_nodes) node @state)
+    }
+    let insert:array<addr>=[]
+    let copied=snapshot(copy_stored(key source.key node @state) @insert @state)
+    let value:addr?=none
+    if source.value isnt? none {
+        let stored=dict_element(dict_field(source 'values' node @state) cursor source.value node @state)
+        value=snapshot(copy_stored(stored source.value node @state) @insert @state)
+    }
+    dict_insert(destination copied value node @insert @state);
+    let statements=sequence(insert node @state)
+    body.push(if wanted is? none statements else conditional(wanted statements node @state))
+    body.push(set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state))
+    prefix.push(while_loop(compare('__lt__' cursor length node @state) body node @state))
+    return sequence(prefix node @state)
+}
+set_algebra = (node:hir.SetAlgebra @state:State):>addr => {
+    let prefix:array<addr>=[]
+    # Keep the left value before a later operand can mutate its binding.
+    let left=dict_parts(node.left @prefix @state copy=true)
+    let right=dict_parts(node.right @prefix @state copy=true)
+    let output=dict_empty(node.value_type node @prefix @state)
+    if node.op =? 'union' {
+        prefix.push(algebra_entries(left right output 'all' node @state))
+        prefix.push(algebra_entries(right left output 'all' node @state))
+    } else if node.op =? 'intersection' {prefix.push(algebra_entries(left right output 'present' node @state))}
+    else if node.op =? 'difference' {prefix.push(algebra_entries(left right output 'absent' node @state))}
+    else if node.op =? 'symmetric' {
+        prefix.push(algebra_entries(left right output 'absent' node @state))
+        prefix.push(algebra_entries(right left output 'absent' node @state))
+    } else return reject(node 'an unknown container algebra operation' @state)
+    prefix.push(output.pointer)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
