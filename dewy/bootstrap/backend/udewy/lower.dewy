@@ -44,6 +44,7 @@ State:type = [
     allocator:addr?=none
     runtime_helpers:dict<string addr>=[]
     layout_context:layouts.Context=layouts.Context[]
+    record_layouts:dict<addr layouts.Record>=[]
     links:array<subtyping.Link>=subtyping.default_links
     brand_numbers:array<brands.NumberedBrand>=[]
     storage_types:dict<addr addr>=[]
@@ -390,6 +391,15 @@ owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     let value=expression(id @state)
     if node is? hir.Place return value
+    # Ordinary Dewy calls already return independent aggregate storage: both
+    # explicit returns and implicit function results pass through this value
+    # boundary. Adopt that result instead of cloning it and abandoning its
+    # original allocation. Intrinsics and array methods have separate ABIs.
+    if node is? hir.FunctionCall {
+        let callee=hir.node_at(state.input.nodes node.func)
+        if callee is? hir.FunctionLiteral return value
+        if callee is? hir.ExpressedIdentifier and callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix return value
+    }
     if cell_members(node.value_type @state) isnt? none return cell_copy(value node.value_type node @state)
     let array=array_type(node.value_type state)
     if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
@@ -1328,8 +1338,15 @@ aggregate = (id:addr state:State):>bool => {
     return (plain is? types.TypeOr and enum_members(id state) is? none) or string_type(id state) or array_valued(id state) or object_valued(id state)
 }
 object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
-    let layout=layouts.record(id state.layout_context @state.type_nodes)
+    # Lowering only appends types, and the compilation's brand registry is
+    # already complete. A normalized record's offsets cannot change while
+    # legalizing another expression; retain them across loads and copy helpers.
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    let cached=state.record_layouts.get(plain)
+    if cached isnt? none return cached
+    let layout=layouts.record(plain state.layout_context @state.type_nodes)
     if layout is? layouts.Pending {reject(node layout.detail @state); return layouts.Record[1 1 []]}
+    state.record_layouts[plain]=layout
     return layout
 }
 brand_number = (name:string state:State):>brands.NumberedBrand? => {

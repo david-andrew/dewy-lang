@@ -36,7 +36,7 @@ arguments = (call:hir.FunctionCall):>array<addr> => {
     loop value in call.kw_args.values {result.push(value)}
     return result
 }
-conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AST>):>bool => {
+conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AST> plan:captures.Plan ambient:set<addr>):>bool => {
     let args=arguments(call)
     loop i in 0.. and i <? args.length {
         let pending:array<addr>=[args[i]]
@@ -47,10 +47,14 @@ conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AS
             seen.add(id)
             let node=hir.node_at(nodes id)
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
-            # A later call can write through an ambient or raw alias without
-            # spelling a place here. Until call-site alias effects are modeled,
-            # keep the earlier value's snapshot across every such call.
-            if i >? position and node is? hir.FunctionCall return true
+            # A later call may write through ambient or raw storage without
+            # spelling a place here. Known callees without those effects can
+            # preserve the earlier borrow; explicit place routes are checked
+            # below even for those callees. Unknown callbacks still conflict.
+            if i >? position and node is? hir.FunctionCall {
+                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+                if direct is? none or direct in? ambient return true
+            }
             let targets:array<addr>=[]
             if node is? hir.Place {targets=[node.target]}
             else if i >? position {targets=captures.write_targets(node nodes)}
@@ -98,7 +102,12 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
                 if callee is? hir.ExpressedIdentifier {
                     if captures.resolve(node.func node.selected_method_index plan nodes) isnt? none {}
                     else if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
-                } else if callee isnt? hir.ArrayMethod|hir.FunctionLiteral {dirty.add(id)}
+                } else if callee is? hir.ArrayMethod {
+                    # A sort invokes its key inside the method. In particular
+                    # a function-valued parameter can hide ambient writes;
+                    # it is not an ordinary HIR call with a known dependency.
+                    if callee.name =? 'sort' and 'key' in? node.kw_args {dirty.add(id)}
+                } else if callee isnt? hir.FunctionLiteral {dirty.add(id)}
             }
             loop next in hir.children(node) {pending.push(next)}
         }
@@ -153,7 +162,7 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
         loop pair in pairs {
             let source=route(pair.argument nodes)
             let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-            if source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes) {allowed.add(pair.argument)}
+            if source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
             else {rejected.add(pair.argument)}
             position+=1
         }

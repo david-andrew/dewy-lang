@@ -72,6 +72,16 @@ ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 STRINGS = (ROOT / 'library/strings.dewy').read_text()
 SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
 ARENA_CASES = [
+    ('Fn:type=(x:int64):>int64\nlet pointer:int64=0\nlet key=(x:int64):>int64=>{__store_i64__(99 pointer) return x}\nlet nested=(key:Fn):>int64=>{let other:array<int64>=[1] other.sort(key=@key) return 0}\nlet read=(values:array<int64> ignored:int64):>int64=>values[0]\nlet main=():>int64=>{let values:array<int64>=[42] pointer=__load_i64__(values) return read(values nested(@key))}', 42),
+
+    ('let last=(values:array<int64>):>int64=>values.length-1\nlet read=(values:array<int64> index:int64):>int64=>values[index]\nlet main=():>int64=>{let values:array<int64>=[42] let before=_arena_cursor let answer=read(values last(values)) return if before=?_arena_cursor answer else 0}', 42),
+
+    # Call results own their aggregate storage before a caller binds or passes
+    # them onward. Adopting the result must preserve ordinary value copies.
+    ('Box:type=[items:array<int64>]\nlet make=():>Box=>Box[[40 2]]\nlet forward=():>Box=>make()\nlet main=():>int64=>{let value=forward() let saved=value value.items[0]=99 return saved.items[0]+value.items[1]}', 42),
+    ('Box:type=[items:array<int64>]\nlet make=(present:bool):>Box|none=>if present Box[[42]] else none\nlet main=():>int64=>{let value=make(true) let saved=value value=make(false) if saved is? Box return saved.items[0] return 0}', 42),
+    ('let values:array<int64>=[42]\nlet make=():>array<int64>=>values\nlet mutate=():>int64=>{values[0]=99 return 0}\nlet first=(items:array<int64> ignored:int64):>int64=>items[0]\nlet main=():>int64=>first(make() mutate())', 42),
+
     ('let main=():>int64=>{let xs:array<int8>=[127 (-128) 0 (-1)] xs.sort return if xs[0]=?(-128) and xs[1]=?(-1) and xs[2]=?0 and xs[3]=?127 42 else 0}', 42),
     ('let main=():>int64=>{let xs:array<uint64>=[18446744073709551615 0 9223372036854775808 1] xs.sort(reverse=true) return if xs[0]=?18446744073709551615 and xs[1]=?9223372036854775808 and xs[2]=?1 and xs[3]=?0 42 else 0}', 42),
     ('let main=():>int64=>{let words:array<string>=["bbb" "a" "cc" "d"] words.sort(key=(.length)) return if words[0]=?"a" and words[1]=?"d" and words[2]=?"cc" and words[3]=?"bbb" 42 else 0}', 42),

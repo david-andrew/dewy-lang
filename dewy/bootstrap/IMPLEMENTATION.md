@@ -42,6 +42,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   The current implementation uses insertion sort at every length; the hosted
   large-array radix optimization remains a performance follow-up.
 
+- Ordinary native calls transfer their independently owned aggregate result
+  to the caller rather than leaving an abandoned clone. Proven read-only
+  arguments can remain borrowed across later direct calls without ambient
+  writes; raw operations and callbacks (including keyed sorts) preserve the
+  snapshot boundary. The lowering suite passes 213 execution cases plus its
+  rejection checks. Record layouts are cached against the fixed brand registry;
+  a full-library native invocation also compiles and runs the bigint/refined
+  index smoke program with these changes.
+
 - Selected overload calls now lower through their concrete function bodies,
   including named/nested overload sets, imported alternatives, defaults and
   captured locals. Unused overload declarations do not require runtime
@@ -72,9 +81,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Native boolean storage queries inspect type tags without constructing an
   optional record merely to test its presence; the full native execution and
   rejection suite passes with that change. The complete compiler rebuild
-  remains unverified: recent attempts exposed small-word bigint conversion
-  and full-library invocations reached the development memory cap. These are
-  implementation gaps, not new language-design decisions.
+  remains unverified. Small-word bigint conversions now pass, as does a full
+  native invocation through the library. A self-build exhausted its 32 GiB
+  address-space cap while copying historical branch read states during
+  checkpoint restoration; scoped state reclamation is being verified. This
+  is implementation work, not a new language-design decision.
 
 - Source readers avoid copying complete token forests for individual nodes.
   Bounds analysis shares immutable module inputs across binding/refinement
