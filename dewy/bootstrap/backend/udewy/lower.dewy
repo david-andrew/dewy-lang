@@ -22,11 +22,12 @@ Scalar and aggregate storage preserves independent value copies through
 arguments, defaults, returns, records, and nested arrays. Cached recursive
 copy helpers preserve dynamic brands and the active payload of union cells.
 Strings use immutable UTF-8 views with grapheme boundary tables; byte-array
-conversions create independent storage.
+conversions create independent storage. Iterator setup remains local to its
+flow arm, and advancing happens before each condition, including continue.
 
-Closure captures, iterators, place parameters, and proof-node removal remain
-subsequent legalization steps. Unsupported representations report a pending
-implementation diagnostic before program emission.
+Closure captures, place parameters, and proof-node removal remain subsequent
+legalization steps. Reaching an unsupported representation reports a
+pending-implementation diagnostic before program emission.
 """
 State:type = [
     input:emit.Input
@@ -120,6 +121,13 @@ discover = (id:addr @state:State):>void => {
     if node is? hir.FunctionLiteral {
         loop parameter in parameters(node) {
             if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}" state.storage_types[parameter.binding_id]=parameter.value_type}
+        }
+    }
+    if node is? hir.IteratorExpression {
+        let target=hir.node_at(state.input.nodes node.target)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+            state.symbols[target.binding_id]="__dewy_binding_{target.binding_id}_{target.name}"
+            state.storage_types[target.binding_id]=target.value_type
         }
     }
     loop child in hir.children(node) {discover(child @state)}
@@ -227,7 +235,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Block return put(hir.Block[node.loc type items(node.items @state) node.scoped] @state)
     if node is? hir.IfArm return put(hir.IfArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
     if node is? hir.LoopArm return put(hir.LoopArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
-    if node is? hir.Flow return put(hir.Flow[node.loc type items(node.arms @state) if node.default is? none none else expression(node.default @state)] @state)
+    if node is? hir.Flow return lower_flow(node 0 @state)
     if node is? hir.Break return put(hir.Break[node.loc type node.label node.loop_levels] @state)
     if node is? hir.Continue return put(hir.Continue[node.loc type node.label node.loop_levels] @state)
     return reject(node "{node.typename} legalization" @state)
@@ -235,8 +243,8 @@ expression = (id:addr @state:State):>addr => {
 # Scalar arrays use the hosted six-word descriptors. Without a runtime
 # allocator they stay within one function frame. The driver can supply the
 # prelude allocator binding for independent values that cross frames or grow.
-# Copies own their bytes; aggregate elements still need recursive ownership
-# lowering. Arena release/reuse insertion remains a subsequent lifetime pass.
+# Copies own their elements recursively. Arena release/reuse insertion
+# remains a subsequent lifetime pass.
 array_type = (id:addr state:State):>types.ArrayType? => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
     return if type is? types.ArrayType type else none
@@ -1090,4 +1098,76 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     loop function in state.generated {functions.push(function)}
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source] emit.Input[state.nodes state.type_nodes])
     return Result[normalized.program normalized.input]
+}
+
+# Iterator setup belongs to the point where its flow arm is reached, not the
+# containing function. The condition advances the cursor so `continue`
+# advances exactly once as well. An exhausted sequence never reads an item.
+IteratorStep:type = [prefix:array<addr> condition:addr]
+iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
+    let prefix:array<addr>=[]
+    let bool_type=types.primitive('bool' @state.type_nodes)
+    let void_type=types.primitive('void' @state.type_nodes)
+    let source=hir.node_at(state.input.nodes node.iterable)
+    let target=hir.node_at(state.input.nodes node.target)
+    $runtime_assert target is? hir.ExpressedIdentifier
+    let target_type=runtime_type(target.value_type target @state)
+    let target_name=symbol(target.name target.binding_id @state)
+    let initial=placeholder(target_type node @state)
+    prefix.push(put(hir.Declare[node.loc void_type 'let' target_name target_type initial target.binding_id] @state))
+    let into=put(hir.ExpressedIdentifier[node.loc target_type target_name target.binding_id] @state)
+    let cursor=snapshot(word(-1 node @state) @prefix @state)
+    let length:addr?=none
+    let value:addr=0
+    if source is? hir.Range {
+        if node.count isnt? none {length=word(node.count node @state)}
+        value=word_op('__add__' word(node.first node @state) word_op('__mul__' cursor word(node.step node @state) node @state) node @state)
+    } else {
+        let sequence=snapshot(expression(node.iterable @state) @prefix @state)
+        let array=array_type(source.value_type state)
+        if array isnt? none {
+            let layout=layouts.element(array.element @state.type_nodes)
+            if layout is? layouts.Pending return IteratorStep[prefix reject(node layout.detail @state)]
+            length=snapshot(read_word(sequence layouts.array_descriptor.length node @state) @prefix @state)
+            let data=snapshot(read_word(sequence 0 node @state) @prefix @state)
+            let pointer=word_op('__add__' data word_op('__mul__' cursor word(layout.size node @state) node @state) node @state)
+            value=array_load(pointer array.element node @state)
+        } else if string_type(source.value_type state) {
+            length=snapshot(read_word(sequence layouts.string_descriptor.grapheme_length node @state) @prefix @state)
+            value=string_view(sequence cursor word(1 node @state) node @state)
+        } else return IteratorStep[prefix reject(node 'this iterator sequence representation' @state)]
+    }
+    let increment=put(hir.Assign[node.loc void_type cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
+    let available=if length is? none put(hir.Bool[node.loc bool_type true] @state) else intrinsic('__lt__' [cursor length] bool_type node @state)
+    let store=put(hir.Assign[node.loc void_type into '=' value] @state)
+    let yes=put(hir.Bool[node.loc bool_type true] @state)
+    let no=put(hir.Bool[node.loc bool_type false] @state)
+    let body=put(hir.Block[node.loc bool_type [store yes] false] @state)
+    let arm=put(hir.IfArm[node.loc bool_type available body] @state)
+    let condition=put(hir.Flow[node.loc bool_type [arm] no] @state)
+    return IteratorStep[prefix put(hir.Block[node.loc bool_type [increment condition] false] @state)]
+}
+# Nested defaults retain lazy setup for later loop arms and the existing
+# rule that `else` runs only when that loop arm never entered.
+lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
+    let type=runtime_type(node.value_type node @state)
+    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else expression(node.default @state)
+    let arm=hir.node_at(state.input.nodes node.arms[position])
+    $runtime_assert arm is? hir.IfArm|hir.LoopArm
+    let fallback:addr?=none
+    if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state)}
+    let test=hir.node_at(state.input.nodes arm.condition)
+    let prefix:array<addr>=[]
+    let condition:addr=0
+    if arm is? hir.LoopArm and test is? hir.IteratorExpression {
+        let step=iterator_step(test @state)
+        prefix=step.prefix condition=step.condition
+    } else {condition=expression(arm.condition @state)}
+    let body=expression(arm.body @state)
+    let arm_type=runtime_type(arm.value_type arm @state)
+    let lowered=put(if arm is? hir.IfArm hir.IfArm[arm.loc arm_type condition body] else hir.LoopArm[arm.loc arm_type condition body] @state)
+    let flow=put(hir.Flow[node.loc type [lowered] fallback] @state)
+    if prefix.length =? 0 return flow
+    prefix.push(flow)
+    return put(hir.Block[node.loc type prefix false] @state)
 }

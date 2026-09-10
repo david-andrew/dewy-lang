@@ -63,6 +63,20 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('let main=():>int64=>{let total:int64=0 loop i in 0..6 {total+=i} return total*2}', 42),
+    ('let main=():>int64=>{let total:int64=0 loop i in 0,2..6 {total+=i} return total+30}', 42),
+    ('let main=():>int64=>{let total:int64=0 loop i in 6,4..0 {total+=i} return total+30}', 42),
+    ('let main=():>int64=>{let total:int64=0 loop i in 0..5 {if i=?2 continue total+=i} return total+29}', 42),
+    ('let main=():>int64=>{let total:int64=0 loop i in 0..5 {if i=?3 break total+=i} return total+39}', 42),
+    ('let main=():>int64=>{let total:int64=0 let values:array<int64>=[40 2] loop value in values {total+=value} return total}', 42),
+    ('let main=():>int64=>{let total:int64=0 let values:array<int64>=[] loop value in values {total+=value} return total+42}', 42),
+    ('Cell:type=[value:int64]\nlet main=():>int64=>{let total:int64=0 let values:array<Cell>=[Cell[40] Cell[2]] loop value in values {total+=value.value} return total}', 42),
+    ('let main=():>int64=>{let total:int64=0 let text:string="a\\u0301👩\u200d👩\u200d👧\u200d👦" loop grapheme in text {total+=grapheme.length} return total+40}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[20 22 99] let selected:array<int64>=[loop value in values if value<?90 value] if selected.length<?2 return 0 return selected[0]+selected[1]}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[20 22] let selected:array<int64>=[loop value in values {let copy=value copy}] if selected.length<?2 return 0 return selected[0]+selected[1]}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[20 22] let selected:array<int64>=[loop left in values loop right in values if right>?left right] if selected.length<?1 return 0 return selected[0]+20}', 42),
+
+
     ('Box:type=[value:int64|none other:int64]\nlet main=():>int64=>{let box=Box[40 0] if box.value is? int64 {box.other=99 return box.value+2} return 0}', 42),
     ('Box:type=[value:int64|none]\nOuter:type=[box:Box]\nlet main=():>int64=>{let outer=Outer[Box[40]] if outer.box.value is? int64 return outer.box.value+2 return 0}', 42),
     ('Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] if box.value is? int64 {box.value=none return if box.value is? none 42 else 0} return 0}', 42),

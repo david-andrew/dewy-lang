@@ -25,7 +25,7 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
-- Native legalization executes 89 source programs through native checking,
+- Native legalization executes 101 source programs through native checking,
   lowering, emission, and µDewy. Beyond scalar functions/control flow, it now
   handles scalar arrays with independent declaration/assignment copies,
   keyword-ordered argument copies, callee defaults, arena-backed returns and
@@ -42,6 +42,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   writes and are invalidated by field/parent replacement; three stale-read
   programs are rejected. Narrowing changes reads, never the physical write
   representation. Field writes evaluate their source once before copying it.
+  Range, array, record-element, and Unicode-grapheme iterators now execute,
+  including empty inputs, continue/break, filtered captures, and nested
+  captures. Iterator setup remains local to the reached arm and advancement
+  precedes each condition; exhausting an array never reads past its end.
   Frame/arena lifetime optimization and release insertion remain pending.
   These tests enter below the full proof driver; they are not a public
   unchecked compilation route.
