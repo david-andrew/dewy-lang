@@ -268,9 +268,22 @@ class _ArrayLowering:
 
     @staticmethod
     def _call_place_argument_roots(call: hir.FunctionCall) -> set[int]:
-        """Semantic binding ids whose storage a call's place arguments expose."""
+        """Storage exposed by places during argument evaluation or the call.
+
+        A later argument may itself call a mutator: `read(box.items f(@box))`
+        must retain the earlier array value before evaluating `f`.
+        """
+        from ...semantic.analyze.effects import _iter_children
+
         roots: set[int] = set()
-        for argument in [*call.pos_args, *call.kw_args.values()]:
+        pending = [*call.pos_args, *call.kw_args.values()]
+        seen: set[int] = set()
+        while pending:
+            argument = pending.pop()
+            if id(argument) in seen or isinstance(argument, (hir.FunctionLiteral, hir.GenericFunction)):
+                continue
+            seen.add(id(argument))
+            pending.extend(_iter_children(argument))
             if not isinstance(argument, hir.Place):
                 continue
             target: hir.AST = argument.target
@@ -303,6 +316,8 @@ class _ArrayLowering:
                     if source is not None and source.semantic_id is not None
                     else None
                 )
+                storage_root = self._array_argument_storage_root(argument)
+                storage_root_id = storage_root.semantic_id if storage_root is not None else None
                 group = (
                     self.array_alias_groups[
                         self.array_alias_group_by_binding[source_id]
@@ -320,11 +335,11 @@ class _ArrayLowering:
                     function is not None
                     and parameter_analysis is not None
                     and parameter_analysis.adapter_safe
-                    and source is not None
+                    and storage_root_id is not None
                     # A place argument in the same call exposing the same
                     # binding could write mid-call; a borrowed value argument
                     # would observe those writes, so the boundary must copy.
-                    and source_id not in place_roots
+                    and storage_root_id not in place_roots
                     and (
                         raw_kind is None
                         or self._raw_array_group_uses_are_safe(group, raw_kind)
@@ -390,6 +405,24 @@ class _ArrayLowering:
         if not isinstance(node, hir.ExpressedIdentifier):
             return None
         return self.identifier_bindings.get(id(node))
+
+    def _array_argument_storage_root(self, node: hir.AST) -> _Binding | None:
+        """The owner a place argument could expose while this array is read.
+
+        Field and indexed-field arrays already have descriptors. They can
+        borrow at a proven read-only boundary without belonging to a named
+        array representation group; the group's raw-storage adapter still
+        applies only to a direct array binding.
+        """
+        while True:
+            if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+                node = node.items[0]
+            elif isinstance(node, hir.MemberAccess):
+                node = node.value
+            elif isinstance(node, hir.Index):
+                node = node.array
+            else:
+                return self._array_argument_binding(node)
 
     def _potential_raw_array_group(
         self,
