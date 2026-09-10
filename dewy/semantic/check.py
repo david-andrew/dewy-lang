@@ -12077,35 +12077,17 @@ def tcr_assignment_target(
                 _refuse_immutable_write(resolved.keys, target.loc, 'store into a dictionary member', ctx=ctx)
                 not_implemented(ctx.srcfile, target.loc, 'storing into a dictionary reached through a field (`obj.d[k] = v`; a dictionary binding takes `d[k] = v`)')
             assert isinstance(resolved, hir.Index)
-            root = resolved.array
-            while True:
-                if isinstance(root, hir.Index):
-                    root = root.array
-                    continue
-                if (
-                    isinstance(root, hir.Block)
-                    and not root.scoped
-                    and len(root.items) == 1
-                ):
-                    root = root.items[0]
-                    continue
-                if isinstance(root, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
-                    root = root.expr
-                    continue
-                break
             _refuse_immutable_write(resolved, target.loc, 'assign an element of a member', ctx=ctx)
-            if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
-                binding = ctx.binding_registry.by_id[root.binding_id]
-                if (reason := _read_only_reason(binding)) is not None:
-                    user_error(
-                        ctx.srcfile,
-                        'cannot mutate an element of a const array',
-                        Pointer(
-                            span=root.loc,
-                            message=f'`{root.name}` {reason}',
-                        ),
-                        *_declaration_pointers(binding),
-                    )
+            # Index and member steps share the same root. Stopping at a
+            # member hid read-only iterator borrows such as r.values[i].
+            binding = _member_root_binding(resolved, ctx=ctx)
+            if binding is not None and (reason := _read_only_reason(binding)) is not None:
+                user_error(
+                    ctx.srcfile,
+                    'cannot mutate an element of a const array',
+                    Pointer(span=target.loc, message=f'`{binding.name}` {reason}'),
+                    *_declaration_pointers(binding),
+                )
             return resolved
 
     not_implemented(ctx.srcfile, target.loc, 'this assignment target')
