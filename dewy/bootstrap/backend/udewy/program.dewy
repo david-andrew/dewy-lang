@@ -51,7 +51,7 @@ entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope input
 
 # Publication is all-or-nothing: expression errors stay in State until this
 # boundary, which returns the diagnostic instead of partially emitted code.
-render = (program:Program input:emit.Input):>string|Error => {
+render = (program:Program input:emit.Input debug_locations:bool=false):>string|Error => {
     if (program.argv_prologue is? none) not=? (program.argv_value is? none) return Error[title='command-line lowering must supply both a prologue and its argument value' srcfile=program.source]
     let functions:dict<string addr>=[]
     loop function in program.functions {
@@ -63,7 +63,7 @@ render = (program:Program input:emit.Input):>string|Error => {
         if 'main' in? functions or program.startup_symbol in? functions return Error[title='startup symbols must be reserved during legalization' srcfile=program.source]
         direct.add('main') direct.add(program.startup_symbol)
     }
-    let scope=emit.Scope[direct set[] program.source]
+    let scope=emit.Scope[direct set[] program.source debug_locations=debug_locations]
     let state=emit.State[]
     let code:array<string>=[]
     loop id in program.globals {

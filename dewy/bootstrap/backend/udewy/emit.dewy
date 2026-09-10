@@ -1,4 +1,5 @@
 from reporting import SrcFile, Error, Pointer
+import p"debug.dewy" as debug
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_display.dewy" as display
@@ -20,6 +21,8 @@ Scope:type = [
     direct_functions:set<string>=set[]
     locals:set<string>=set[]
     source:SrcFile=SrcFile['input' '']
+    debug_locations:bool=false
+    debug_source:debug.Source?=none
 ]
 State:type = [
     includes:dict<string string>=[]
@@ -194,6 +197,10 @@ function_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State):>s
 statements = (items:array<addr> @scope:Scope input:Input @state:State):>array<string> => {
     let lines:array<string>=[]
     loop id in items {
+        if scope.debug_source isnt? none {
+            let marker=debug.marker(hir.node_at(input.nodes id).loc scope.debug_source)
+            if marker isnt? none {lines.push(marker)}
+        }
         lines.push(ast(id @scope input @state))
         let node=hir.node_at(input.nodes id)
         if node is? hir.Declare {scope.locals.add(node.name)}
@@ -301,6 +308,7 @@ function_decl = (name:string function:hir.FunctionLiteral scope:Scope input:Inpu
     if function.kw_only_args.length >? 0 or function.rest_args isnt? none return reject(function 'function parameters require positional legalization' scope @state)
     let arguments:array<string>=[]
     let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else function.source]
+    if scope.debug_locations and function.source isnt? none {inner.debug_locations=true inner.debug_source=debug.prepare(function.source)}
     loop arg in function.pos_or_kw_args {
         if arg is? hir.BoundParam return reject(function 'default parameters require legalization' scope @state)
         arguments.push("{arg.name}:{annotation(arg.value_type input)}")

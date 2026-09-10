@@ -1,0 +1,29 @@
+from reporting import SrcFile, Span, _is_line_end
+
+# Preindex each source once per function emission. Statement lookup is then
+# logarithmic in the number of lines, rather than rescanning a large module
+# for every generated statement. Offsets and columns remain grapheme based.
+Source:type = const [source:SrcFile starts:array<addr>]
+prepare = (source:SrcFile):>Source => {
+    let starts:array<addr>=[0]
+    loop i in 0.. and i <? source.body.length {
+        if _is_line_end(source.body[i]) {starts.push(i+1)}
+    }
+    return Source[source starts]
+}
+marker = (span:Span source:Source):>string? => {
+    if span.start =? 0 and span.stop =? 0 or span.stop >? source.source.body.length return none
+    # Newlines cannot be represented inside µDewy's line-comment marker.
+    if source.source.path.contains('\n') or source.source.path.contains('\r') return none
+    let low:addr=0
+    let high:addr=source.starts.length
+    loop low <? high {
+        let middle=(low+high)//2
+        $runtime_assert middle <? source.starts.length
+        if source.starts[middle] <=? span.start {low=middle+1} else {high=middle}
+    }
+    $runtime_assert low >? 0 and low <=? source.starts.length
+    let line=low-1
+    let column=span.start-source.starts[line]+1
+    return "# @loc {source.source.path}:{source.source.first_row+line}:{column}"
+}
