@@ -207,7 +207,9 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
         }
     }
     let interval=target.interval
-    let excludes=target.expression isnt? none and nonzero(target.expression interval state data)
+    # A projected field may have no standalone HIR expression. Its stable
+    # route still carries exclusions established by a guard on that field.
+    let excludes=(target.expression isnt? none and nonzero(target.expression interval state data)) or (target.term isnt? none and target.term.projection =? 'value' and facts.nonzero(target.term.binding_id).key in? state)
     if interval isnt? none and excludes {interval=ranges.exclude(interval 0)}
     let decided=ranges.decide(p.op interval ranges.exact(p.value))
     if decided isnt? none return decided

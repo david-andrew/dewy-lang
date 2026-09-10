@@ -16,6 +16,9 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'Box:type=[raw:int64]\nlet accept=(box:Box<raw not=? 0>):>int64=>box.raw\nlet f=(box:Box):>int64=>if box.raw not=? 0 accept(box) else 0',
+    'Box:type=[raw:int64]\nlet accept=(box:Box<raw not=? 0>):>int64=>box.raw\nlet f=(box:Box):>int64=>{if box.raw not=? 0 {box.raw=0 return accept(box)} return 0}',
+
     # Contracts apply before branch guards are joined away, and scoped
     # result bindings retain their evidence until their obligation is checked.
     'let min=(a:int64 b:int64):>int64<v=>v <=? a and v <=? b>=>if a <? b a else b',
