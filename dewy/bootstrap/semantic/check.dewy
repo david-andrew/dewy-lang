@@ -1475,7 +1475,20 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
     if index is? Error return index
     let checked = node_at(index session)
     let route = bindings.array_route_id(sequence session.hir @session.registry)
-    if checked is? hir.Range return sequence_slice(sequence index checked type length route id env @session)
+    if checked is? hir.Range {
+        let range:hir.Range=checked
+        let range_index:addr=index
+        # A range written directly in the index takes its open/closed ends
+        # from the indexing delimiters. An explicitly nested range already
+        # has its own bounds and keeps them (`text[(a..b]]`, for example).
+        if range.bounds is? none and arguments is? parser.Block {
+            let bounds=arguments.delims
+            $runtime_assert bounds is? '[]'|'[)'|'(]'|'()'
+            range=hir.Range[range.loc range.value_type bounds range.step_pair range.left range.right]
+            range_index=put(range @session)
+        }
+        return sequence_slice(sequence range_index range type length route id env @session)
+    }
     if not subtyping.is_subtype(checked.value_type types.primitive('int' @session.types) session.links @session.types) return problem(item 'array index must be an integer' display.type_to_dewy(checked.value_type session.types) env session)
     if length is? none and route is? none return problem(id 'sequence index is not proven in bounds' 'this sequence does not have an exact compile-time length or a stable storage route' env session)
     let position = constant_integer(index session)

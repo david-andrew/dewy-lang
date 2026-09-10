@@ -63,6 +63,21 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('let main=():>int64=>{let text:string="héllo" return text.length+37}', 42),
+    ('let main=():>int64=>{let text:string="a\\u0301👩\u200d👩\u200d👧\u200d👦Z" return text.length+39}', 42),
+    ('let main=():>int64=>{let a:string="hello" let b:string="hello" return if a=?b 42 else 0}', 42),
+    ('let main=():>int64=>{let a:string="hello" let b:string="jello" return if a not=?b 42 else 0}', 42),
+    ('let main=():>int64=>{let a:string="" let b:string="x" return if a not=?b 42 else 0}', 42),
+    ('let main=():>int64=>{let text:string="a\\u0301b" let g=text[0] return if g=?"a\\u0301" 42 else 0}', 42),
+    ('let main=():>int64=>{let text:string="AéBCD" let part=text[1..4) let nested=part[1..] return if nested=?"BC" 42 else 0}', 42),
+    ('let main=():>int64=>{let text:string="abc" let empty=text[2..1] return if empty=?"" 42 else 0}', 42),
+    ('let main=():>int64=>{let text:string="*" let bytes=text as array<uint8> return bytes[0] as int64}', 42),
+    ('let main=():>int64=>{let text:string="*" let bytes=text as array<uint8> bytes[0]=99 return if text=?"*" 42 else 0}', 42),
+    ('let tail=(text:string):>string=>if text.length>?1 text[1..] else ""\nlet main=():>int64=>{let text=tail("aé") return if text=?"é" 42 else 0}', 42),
+    ('let main=():>int64=>{let values:array<string>=["a" "é"] let copy=values copy[0]="z" return if values[0]=?"a" and copy[1]=?"é" 42 else 0}', 42),
+    ('Box:type=[text:string]\nlet make=():>Box=>Box["é"]\nlet main=():>int64=>{let box=make() let copy=box copy.text="z" return if box.text=?"é" 42 else 0}', 42),
+    ('let make=():>array<string>=>["a" "é"]\nlet main=():>int64=>{let values=make() if values.length<?2 return 0 return if values[1]=?"é" 42 else 0}', 42),
+
     ('Cell:type=[value:int64]\nlet main=():>int64=>{let item=Cell[40] let values:array<Cell>=[item] let copy=values copy[0].value=99 return item.value+values[0].value-38}', 42),
     ('let main=():>int64=>{let inner:array<int64>=[40 2] let rows:array<array<int64 length=2>>=[inner] let copy=rows copy[0][0]=99 return rows[0][0]+copy[0][1]}', 42),
     ('Cell:type=[value:int64]\nlet main=():>int64=>{let item=Cell[40] let values:array<Cell>=[] values.push(item) item.value=99 values.reserve(100) let removed=values.pop return removed.value+2}', 42),

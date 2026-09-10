@@ -20,10 +20,11 @@ the output arena has its own indices and shares only the type arena values.
 This slice handles scalar and aggregate array storage, including independent
 argument/default copies, returned arena values, and growth/removal methods.
 Records preserve inline fields, copied array members, and dynamic brands.
-Cached copy helpers retain value semantics through nested arrays and minted
-record hierarchies without recursively expanding the lowering visitor.
-Captures, place parameters, and proof node removal
-belong to subsequent legalization steps. Until those exist,
+Cached copy helpers retain independent values through nested arrays and
+minted record hierarchies. Strings use grapheme boundary tables and immutable
+views; converting to a byte array produces independent mutable storage.
+Captures, place parameters, union storage, and proof node removal belong to
+subsequent legalization steps. Until those exist,
 reaching them returns a diagnostic rather than emitting an unsafe program.
 """
 State:type = [
@@ -66,9 +67,10 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
         if type.name in? ['int' 'uint'] return types.primitive(if type.name =? 'int' 'int64' else 'uint64' @state.type_nodes)
         if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.input.types) isnt? none return plain
     }
+    if string_type(id state) return types.primitive('int64' @state.type_nodes)
     if type is? types.ArrayType {
         let element=types.node_at(state.input.types types.unfold(types.strip_refinement(type.element state.input.types) state.input.types))
-        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.input.types) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
+        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and not string_type(type.element state) and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.input.types) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.ObjectType {
@@ -126,6 +128,12 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Suppress return expression(node.item @state)
     if node is? hir.GenericFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     let type=runtime_type(node.value_type node @state)
+    if node is? hir.String return string_literal(node @state)
+    if node is? hir.StringLength return read_word(expression(node.string @state) layouts.string_descriptor.grapheme_length node @state)
+    if node is? hir.StringIndex return string_index(node @state)
+    if node is? hir.StringSlice return string_slice(node @state)
+    if node is? hir.StringEqual return string_equal(node @state)
+    if node is? hir.RepresentationCast return representation(node @state)
     if node is? hir.ObjectLiteral return object_literal(node @state)
     if node is? hir.TypeTest return object_test(node @state)
     if node is? hir.MemberAccess return field_read(field_pointer(node @state) node.value_type node @state)
@@ -159,14 +167,12 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'hoisting a local function and its captures' @state)
-        let original=hir.node_at(state.input.nodes node.expr)
         let value=owned_value(node.expr @state)
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         return put(hir.Declare[node.loc type node.decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
     }
     if node is? hir.Assign {
         let target=expression(node.target @state)
-        let original=hir.node_at(state.input.nodes node.value)
         let value=owned_value(node.value @state)
         if node.op not=? '=' {
             if node.op.length <? 2 return reject(node 'invalid compound assignment spelling' @state)
@@ -263,7 +269,7 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
 }
 array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.input.types types.unfold(types.strip_refinement(element state.input.types) state.input.types))
-    if type is? types.ObjectType|types.ArrayType return store_word(value pointer 0 node @state)
+    if type is? types.ObjectType|types.ArrayType or string_type(element state) return store_word(value pointer 0 node @state)
     if type is? types.FunctionType {
         let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
         return store_word(word pointer 0 node @state)
@@ -278,7 +284,7 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
 }
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.input.types types.unfold(types.strip_refinement(element state.input.types) state.input.types))
-    if type is? types.ObjectType|types.ArrayType return read_word(pointer 0 node @state)
+    if type is? types.ObjectType|types.ArrayType or string_type(element state) return read_word(pointer 0 node @state)
     if type is? types.FunctionType return put(hir.Transmute[node.loc runtime_type(element node @state) read_word(pointer 0 node @state)] @state)
     if types.is_primitive(type 'bool') {
         let byte=intrinsic('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
@@ -404,6 +410,128 @@ array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>a
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
+# Strings are immutable views over UTF-8 bytes and a table of grapheme byte
+# boundaries. A slice advances the boundary pointer but retains the original
+# byte base. The start word is therefore an absolute offset into that base.
+# The current arena keeps its allocations for the process lifetime, so copies
+# can share bytes/tables; descriptor allocation must still outlive the view.
+string_type = (id:addr state:State):>bool => {
+    let plain=types.unfold(types.strip_refinement(id state.input.types) state.input.types)
+    return types.node_at(state.input.types plain) isnt? types.TypeOr and views.string_valued(plain state.input.types)
+}
+string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let descriptor=snapshot(allocation(word(layouts.string_descriptor.size node @state) node @state) @prefix @state)
+    let fields:array<addr>=[data byte_length boundaries length start word(0 node @state)]
+    let offset:addr=0
+    loop value in fields {prefix.push(store_word(value descriptor offset node @state)) offset+=8}
+    prefix.push(descriptor)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+string_literal = (node:hir.String @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let bytes=node.content as array<uint8>
+    if bytes.length >? uint32.max return reject(node 'a string literal exceeding the runtime boundary offset range' @state)
+    # Segmentation here is a compile-time operation using Dewy's own string
+    # indexing. Runtime concatenation/UTF-8 decoding must segment the joined
+    # bytes afresh: concatenating two boundary tables is not Unicode-correct.
+    let offsets:array<addr>=[0]
+    let offset:addr=0
+    loop i in 0.. and i <? node.content.length {
+        let grapheme=node.content[i] as array<uint8>
+        offset+=grapheme.length
+        offsets.push(offset)
+    }
+    let boundaries=snapshot(intrinsic('__static_alloca__' [word(offsets.length*4 node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    loop i in 0.. and i <? offsets.length {
+        let value=put(hir.Integer[node.loc types.primitive('uint32' @state.type_nodes) '0d' offsets[i]] @state)
+        prefix.push(intrinsic('__store_u32__' [value word_op('__add__' boundaries word(i*4 node @state) node @state)] types.primitive('void' @state.type_nodes) node @state))
+    }
+    let data=put(hir.String[node.loc types.primitive('int64' @state.type_nodes) node.content] @state)
+    prefix.push(string_memory(data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) node @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+string_data = (value:addr node:hir.AST @state:State):>addr => word_op('__add__' read_word(value layouts.string_descriptor.data node @state) read_word(value layouts.string_descriptor.start node @state) node @state)
+string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let boundaries=snapshot(word_op('__add__' read_word(value layouts.string_descriptor.boundaries node @state) word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
+    let start=snapshot(intrinsic('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let end_pointer=word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)
+    let stop=snapshot(intrinsic('__load_u32__' [end_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    prefix.push(string_memory(read_word(value layouts.string_descriptor.data node @state) word_op('__sub__' stop start node @state) boundaries count start node @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+string_index = (node:hir.StringIndex @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let value=snapshot(expression(node.string @state) @prefix @state)
+    let index=snapshot(expression(node.index @state) @prefix @state)
+    prefix.push(string_view(value index word(1 node @state) node @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+string_slice = (node:hir.StringSlice @state:State):>addr => {
+    let range=hir.node_at(state.input.nodes node.range)
+    if range isnt? hir.Range or range.step_pair isnt? none return reject(node 'stepped string slicing' @state)
+    let prefix:array<addr>=[]
+    let value=snapshot(expression(node.string @state) @prefix @state)
+    let bounds=if range.bounds is? none '[]' else range.bounds
+    let first=if range.left is? none word(0 node @state) else expression(range.left @state)
+    if range.left isnt? none and bounds in? ['()' '(]'] {first=word_op('__add__' first word(1 node @state) node @state)}
+    first=snapshot(first @prefix @state)
+    let stop=if range.right is? none read_word(value layouts.string_descriptor.grapheme_length node @state) else expression(range.right @state)
+    if range.right isnt? none and bounds in? ['[]' '(]'] {stop=word_op('__add__' stop word(1 node @state) node @state)}
+    stop=snapshot(stop @prefix @state)
+    let count=snapshot(word_op('__sub__' stop first node @state) @prefix @state)
+    let negative=intrinsic('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let zero=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) count '=' word(0 node @state)] @state)
+    prefix.push(conditional(negative zero node @state))
+    prefix.push(string_view(value first count node @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+string_equal = (node:hir.StringEqual @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let left=snapshot(expression(node.left @state) @prefix @state)
+    let right=snapshot(expression(node.right @state) @prefix @state)
+    let length=snapshot(read_word(left layouts.string_descriptor.byte_length node @state) @prefix @state)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let same=snapshot(intrinsic('__eq__' [length read_word(right layouts.string_descriptor.byte_length node @state)] boolean node @state) @prefix @state)
+    let cursor=snapshot(word(0 node @state) @prefix @state)
+    let a=snapshot(string_data(left node @state) @prefix @state)
+    let b=snapshot(string_data(right node @state) @prefix @state)
+    let byte_type=types.primitive('uint8' @state.type_nodes)
+    let av=intrinsic('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state)
+    let bv=intrinsic('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)
+    let comparison=intrinsic('__eq__' [av bv] boolean node @state)
+    let assign=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) same '=' comparison] @state)
+    let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
+    let running=intrinsic('__lt__' [cursor length] boolean node @state)
+    let condition=put(hir.ShortCircuit[node.loc boolean 'and' same running] @state)
+    let body=sequence([assign increment] node @state)
+    let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
+    prefix.push(if node.negated intrinsic('__not__' [same] boolean node @state) else same)
+    return put(hir.Block[node.loc boolean prefix false] @state)
+}
+string_bytes = (value:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let length=snapshot(read_word(source layouts.string_descriptor.byte_length node @state) @prefix @state)
+    let memory=array_memory(length 1 node @state)
+    loop item in memory.prefix {prefix.push(item)}
+    prefix.push(counted_bytes(string_data(source node @state) memory.data word(0 node @state) length node @state))
+    prefix.push(memory.descriptor)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+representation = (node:hir.RepresentationCast @state:State):>addr => {
+    let source=hir.node_at(state.input.nodes node.expr)
+    if string_type(source.value_type state) {
+        let value=expression(node.expr @state)
+        if string_type(node.value_type state) return value
+        let array=array_type(node.value_type state)
+        if array isnt? none and types.is_primitive(types.node_at(state.input.types array.element) 'uint8') return string_bytes(value node @state)
+    }
+    return reject(node 'this representation conversion' @state)
+}
+
 # Receiver and written arguments are captured before a mutation starts.
 # A growable array keeps its descriptor identity while replacing its data;
 # shrinking preserves capacity. Only live bytes are copied during growth.
@@ -519,7 +647,7 @@ object_type = (id:addr state:State):>types.ObjectType? => {
     let type=types.node_at(state.input.types types.unfold(types.strip_refinement(id state.input.types) state.input.types))
     return if type is? types.ObjectType type else none
 }
-aggregate = (id:addr state:State):>bool => array_type(id state) isnt? none or object_type(id state) isnt? none
+aggregate = (id:addr state:State):>bool => string_type(id state) or array_type(id state) isnt? none or object_type(id state) isnt? none
 object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
     let layout=layouts.record(id state.layout_context @state.type_nodes)
     if layout is? layouts.Pending {reject(node layout.detail @state); return layouts.Record[1 1 []]}
