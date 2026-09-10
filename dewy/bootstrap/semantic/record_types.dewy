@@ -30,6 +30,34 @@ merge = (@fields:array<types.ObjectField> additions:array<types.ObjectField> def
     }
     return none
 }
+
+# A structure contributes an entire group for each method name. Its first
+# declaration overrides an inherited group; further `&=` rows extend that
+# new group. Replacing by name for every row would lose earlier conversions.
+merge_methods = (@methods:array<types.MethodSpec> additions:array<types.MethodSpec>):>void => {
+    let replaced:set<string>=set[]
+    loop method in additions {
+        let output:array<types.MethodSpec>=[]
+        let inserted=false
+        if method.name in? replaced {
+            let last:addr?=none
+            loop i in 0.. and i <? methods.length {if methods[i].name =? method.name {last=i}}
+            loop i in 0.. and i <? methods.length {
+                output.push(methods[i])
+                if last isnt? none and last =? i {output.push(method) inserted=true}
+            }
+        } else {
+            loop previous in methods {
+                if previous.name =? method.name {
+                    if not inserted {output.push(method) inserted=true}
+                } else {output.push(previous)}
+            }
+        }
+        if not inserted {output.push(method)}
+        methods=output
+        replaced.add(method.name)
+    }
+}
 flatten = (id:addr nodes:array<types.Type>):>array<addr> => {
     let node = types.node_at(nodes types.unfold(id nodes))
     if node isnt? types.TypeAnd return [id]

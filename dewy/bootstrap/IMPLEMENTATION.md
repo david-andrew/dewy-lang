@@ -398,16 +398,20 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The committed method-place checkpoint (`0a9f59a3`) passed **1,886 tests,
+The committed method/conversion checkpoint (`a297da0f`) passed **1,899 tests,
 23 skipped** in a fresh checkout. Thirteen skips were SDL tests whose generated
 artifacts were absent from that checkout; all thirteen passed separately in
 the main workspace, leaving the usual ten unavailable-toolchain skips.
-The following record-method checkpoint passes seven native comparison groups
+The record-method checkpoint passes seven native comparison groups
 in 482.61 seconds. Its hosted seed also copies retained string reads out of
 array/record storage before replacement can release that storage; six native
 execution regressions cover direct, aliased, sliced, block, conditional, and
 field reads. Related ownership checks pass in two focused batches (20 and 29
-tests). These later changes are not included in the full-suite count above.
+tests). The full-suite count includes those changes and the hosted conversion
+overload fixes: three execution cases retain separate string/integer bodies
+through structural declarations, minting, and inheritance. The subsequent
+lexer diagnostic change passes 22 focused tests, including an unfinished
+quote after 4,096 ordinary statements; its context reports stay concise.
 The generic source visitor also matches the 126-program comparison; its 64
 rejection cases pass through the native module loader. Imported generic
 instances preserve their original lexical bindings. The subsequent sequence

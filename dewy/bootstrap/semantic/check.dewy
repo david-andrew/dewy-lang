@@ -279,6 +279,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return auto_call(value id env @session expected=expected)
         return if expected is? none value else against(value expected id env @session)
     }
+    if node is? parser.IString {
+        let value=interpolated_string(id node env @session)
+        if value is? Error return value
+        return if expected is? none value else against(value expected id env @session)
+    }
     if node is? parser.Flow return flow(id node env @session expected=expected)
     if node is? parser.Flat and syntax.is_operator(node.op 'RangeJuxtapose' source.nodes) return range_value(id node env @session)
     if node is? parser.Block {
@@ -352,9 +357,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if op =? '=>' return function_literal(id node env @session expected_signature=expected)
         if op =? '=' or op =? ':=' or op =? '::' return declaration(id env @session)
         if op =? 'as' {
+            let value=expression(node.left env @session)
+            if value is? Error return value
             let target = declarations.resolve(node.right env.lexical @session)
             if target is? Error return target
-            return expression(node.left env @session expected=target)
+            return explicit_conversion(value target id env @session)
         }
         if op =? '.' {
             let receiver = expression(node.left env @session allow_place=allow_place)
@@ -2736,7 +2743,6 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
     loop method in type.methods {names.add(method.name)}
     let plans:array<MethodPlan>=[]
     let instances:set<string>=set[]
-    let mutations:set<string>=set[]
     loop method in type.methods {
         $runtime_assert method.literal <? session.syntax_refs.length
         let reference=session.syntax_refs[method.literal]
@@ -2756,7 +2762,6 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
                 if inherited isnt? none {
                     session.methods[method_key(type_id method)]=inherited
                     if inherited.receiver_type isnt? none {instances.add(method.name)}
-                    if inherited.place_self {mutations.add(method.name)}
                     continue
                 }
             }
@@ -2769,7 +2774,6 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let instance=false
         loop name in analysis.references {if name in? fields {instance=true}}
         if instance {instances.add(method.name)}
-        if analysis.mutates {mutations.add(method.name)}
         plans.push(MethodPlan[method analysis.references instance analysis.mutates])
     }
     let changed=true
@@ -2791,7 +2795,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let literal=contexts.node_at(reference.node defining.lexical session)
         $runtime_assert literal is? parser.BinOp
         let instance=spec.name in? instances
-        let mutates=spec.name in? mutations
+        let mutates=plan.mutates
         if instance and mutates and type.immutable return problem(reference.node 'method changes an immutable record' spec.name defining session)
         let shape=function_shape(literal defining @session)
         if shape is? Error return shape
@@ -2801,7 +2805,14 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true mutates])}
         loop parameter in signature.pos_or_kw {parameters.push(parameter)}
         let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types)
-        let binding_id=bindings.allocate(@session.registry none "{alias}__{spec.name}" 'function' literal.loc)
+        let ordinal:addr=0
+        loop earlier in type.methods {
+            if earlier.literal =? spec.literal break
+            if earlier.name =? spec.name {ordinal += 1}
+        }
+        let suffix=if ordinal =? 0 '' else "_{ordinal+1}"
+        let hidden_name="{alias}__{spec.name}{suffix}"
+        let binding_id=bindings.allocate(@session.registry none hidden_name 'function' literal.loc)
         let binding=bindings.binding_at(session.registry binding_id)
         binding.value_type=full binding.store_type=full
         session.registry.by_id[binding_id]=binding
@@ -2916,6 +2927,94 @@ bind_member_proxy = (name:string value:addr lexical:contexts.Context @session:co
     binding.value_type=node.value_type binding.store_type=node.value_type binding.replacement=value
     session.registry.by_id[id]=binding
     bindings.bind(@session.scopes lexical.scope name id)
+}
+
+
+# An explicit conversion is a value operation, distinct from an annotation's
+# store contract. In particular `7 as int64` may retain its singleton type;
+# a word-width conversion emits a cast whose range the analysis must prove.
+explicit_conversion = (value:addr target:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(value session)
+    let source=types.node_at(session.types node.value_type)
+    if types.is_primitive(source 'void') or types.is_primitive(source 'never') return problem(id 'conversion needs a value' 'this expression does not produce one' env session)
+    if views.string_valued(target session.types) {
+        let spelled=spelling_string(value @session)
+        if spelled isnt? none return spelled
+    }
+    if types.same_type(node.value_type target session.types) return value
+    if source is? types.StringLiteralType and subtyping.is_subtype(node.value_type target session.links @session.types) return put(hir.RepresentationCast[node.loc target value] @session)
+    if subtyping.is_subtype(node.value_type target session.links @session.types) return value
+    if views.fixed_integer_layout(node.value_type session.types) isnt? none and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
+    let converted=conversion_method(value target id env @session)
+    if converted is? Error return converted
+    if converted isnt? none return converted
+    let owner=types.node_at(session.types views.structural_base(node.value_type session.types))
+    if views.string_valued(target session.types) and owner is? types.ObjectType|types.ArrayType|types.TypeOr return pending(id 'structural and union string conversion' env session)
+    return problem(id 'unsupported value conversion' "cannot convert `{display.type_to_dewy(node.value_type session.types)}` to `{display.type_to_dewy(target session.types)}`" env session)
+}
+
+# Conversion overloads select by result type. Each declaration has its own
+# hidden signature, including whether that body requires a mutable receiver.
+# The existing protocol takes no source arguments, even optional ones.
+conversion_method = (value:addr target:addr id:addr env:Environment @session:contexts.Session):>addr|none|Error => {
+    let node=node_at(value session)
+    let owner=views.structural_base(node.value_type session.types)
+    let type=types.node_at(session.types owner)
+    if type isnt? types.ObjectType or types.object_method(type '__as__') is? none return none
+    let alias=if type.brand is? none display.type_to_dewy(owner session.types) else type.brand
+    let error=prepare_methods(owner alias env @session)
+    if error isnt? none return error
+    loop method in type.methods {
+        if method.name not=? '__as__' continue
+        let entry=session.methods.get(method_key(owner method))
+        $runtime_assert entry isnt? none
+        let binding=bindings.binding_at(session.registry entry.binding)
+        $runtime_assert binding.value_type isnt? none
+        let signature=dispatch.method_at(session.types binding.value_type)
+        let count=if entry.receiver_type is? none 0 else 1
+        if signature.pos_or_kw.length not=? count or signature.kw_only.length >? 0 or signature.rest isnt? none return problem(id '`__as__` takes no arguments' 'a conversion target is its result type; declare `__as__ = ():>T => ...`' env session)
+        if not subtyping.is_subtype(signature.ret target session.links @session.types) and not (views.string_valued(signature.ret session.types) and views.string_valued(target session.types)) continue
+        let bound=method_value(entry value node.loc @session)
+        return call(bound [] [] id env @session)
+    }
+    return none
+}
+spelling_string = (value:addr @session:contexts.Session):>addr? => {
+    let node=node_at(value session)
+    let text:string?=none
+    if node is? hir.TypeValue {
+        if node.value is? addr {text=display.type_to_dewy(node.value session.types)}
+        else {text=node.name}
+    } else if types.node_at(session.types node.value_type) is? types.CallableType {text=display.type_to_dewy(node.value_type session.types)}
+    if text is? none return none
+    return put(hir.String[node.loc types.string_literal(text @session.types) text] @session)
+}
+interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session):>addr|Error => {
+    let source=contexts.source_at(env.lexical session)
+    let parts:array<addr>=[]
+    let string=types.primitive('string' @session.types)
+    loop part_id in node.content {
+        let part=tokens.node_at(source.nodes part_id)
+        if part is? tokens.StringChunk {
+            if part.content.length >? 0 {parts.push(put(hir.String[part.loc types.string_literal(part.content @session.types) part.content] @session))}
+            continue
+        }
+        if part is? parser.ParametricEscape return pending(part_id 'parametric escape inside an interpolated string' env session)
+        if part isnt? parser.Block or part.inner.length not=? 1 return problem(part_id 'string interpolation requires one expression' 'place exactly one expression between these braces' env session)
+        let value=expression(part.inner[0] env @session)
+        if value is? Error return value
+        let spelled=spelling_string(value @session)
+        if spelled isnt? none {parts.push(spelled) continue}
+        let type=types.node_at(session.types types.strip_refinement(node_at(value session).value_type session.types))
+        if types.is_primitive(type 'none') {parts.push(put(hir.String[part.loc types.string_literal('none' @session.types) 'none'] @session)) continue}
+        if types.is_primitive(type 'void') or types.is_primitive(type 'never') return problem(part_id 'string interpolation needs a value' 'this expression does not produce one' env session)
+        let converted=conversion_method(value string part_id env @session)
+        if converted is? Error return converted
+        if converted isnt? none {parts.push(converted) continue}
+        if type is? types.ObjectType|types.ArrayType|types.TypeOr return pending(part_id 'structural and union string interpolation' env session)
+        parts.push(value)
+    }
+    return put(hir.InterpolatedString[node.loc string parts] @session)
 }
 
 

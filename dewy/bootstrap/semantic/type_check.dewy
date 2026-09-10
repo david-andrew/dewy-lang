@@ -910,14 +910,13 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         if node.brand isnt? none return contexts.unsupported(id 'minting a compiler representation family' context session)
         let error = records.merge(@fields node.fields default_only id context @session owner=binding.name)
         if error isnt? none return error
+        let declared_methods:array<types.MethodSpec>=[]
         loop method in node.methods {
             let owner = if method.owner is? none name else method.owner
             let declared = types.MethodSpec[method.name method.literal method.binding_id method.place_self owner method.static]
-            let slot:addr? = none
-            loop i in 0.. and i <? methods.length { if methods[i].name =? method.name { slot = i break } }
-            if slot is? none { methods.push(declared) }
-            else { $runtime_assert slot <? methods.length methods[slot] = declared }
+            declared_methods.push(declared)
         }
+        records.merge_methods(@methods declared_methods)
     }
     let minted = types.object_type(fields name immutable methods [] @session.types minted=true parent=if ancestor is? none parent else ancestor abstract=abstract)
     brands.register(minted @session.brands session.types)
