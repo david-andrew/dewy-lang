@@ -13,6 +13,8 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    ('', 0),
+    ('Word:type=int64\nlet main=():>Word=>42', 42),
     ('let main=():>int64=>42', 42),
     ('let score:int64=40\nlet main=():>int64=>score+2', 42),
     ('let main=():>int64=>twice(21)\nlet twice=(x:int64):>int64=>x*2', 42),

@@ -162,7 +162,9 @@ lower = (root:addr input:emit.Input source:SrcFile):>Result|Error => {
         let node=hir.node_at(input.nodes id)
         if node is? hir.Declare {
             let value=hir.node_at(input.nodes node.expr)
-            if value is? hir.GenericFunction continue
+            # Aliases are already resolved in the type arena. Any runtime
+            # type value is an explicit TypeValue expression at its use site.
+            if value is? hir.GenericFunction|hir.TypeValue continue
             let name=symbol(node.name node.binding_id @state)
             if value is? hir.FunctionLiteral {
                 functions.push(program.Function[name function(value @state)])
