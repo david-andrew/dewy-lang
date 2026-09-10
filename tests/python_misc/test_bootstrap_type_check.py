@@ -22,6 +22,8 @@ CASES = [
     '[x:int64 y:string]', '[x:int64 = 2]', 'const [x:int64 y:string]',
     '(x:int64 @out:array<string>):>bool', '((x):>int64)?', 'int64|none',
     'int64<i => i >=? 0>', 'string<length >? 0>', 'array<int64 1 <=? length <=? 8>',
+    'int64 & ~0', '~0 & int64', 'int64 & ~(0|1)', 'nat64 & ~0',
+    '(0|[value:int64]) & ~0',
     'int64<n => n not=? 0>', 'uint8<radix => radix =? alphabet.length>',
     'const [alphabet:string radix:uint8<radix =? alphabet.length> = alphabet.length]',
     'Box:type = <T>[item:T]\nBox<int64>',
@@ -50,6 +52,7 @@ ERROR_CASES = [
     'Node:type = [next:Node]\nNode', 'A:type = B\nB:type = A\nA',
     'Box:type = <T>[item:T]\nBox',
     'Box:type = <T of int>[item:T]\nBox<string>',
+    '(0|[value:int64]) & ~1',
 ]
 
 

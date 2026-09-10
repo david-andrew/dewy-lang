@@ -34,6 +34,8 @@ import p"text_shapes.dewy" as text_shapes
 import p"target_values.dewy" as target_values
 import p"integer_ranges.dewy" as integer_ranges
 import p"binary_literals.dewy" as binary_literals
+import p"numeric_literals.dewy" as numeric_literals
+import p"numeric_constants.dewy" as numeric_constants
 import p"path_values.dewy" as path_values
 
 doc"""
@@ -143,6 +145,7 @@ widen = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
     let type=types.node_at(session.types node.value_type)
     if type is? types.IntegerLiteralType return against(value types.primitive('int64' @session.types) id env @session)
     if type is? types.StringLiteralType return against(value types.primitive('string' @session.types) id env @session)
+    if type is? types.RationalLiteralType return pending(id 'runtime rational materialization' env session)
     if type is? types.TypeAnd {
         # A negative branch fact is not a new mutable variable's store
         # contract. A copy keeps the family's structure and may later hold
@@ -219,6 +222,11 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
 }
 
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    if keyword.length =? 0 {
+        let specialized=builtin_value(function positional id env @session)
+        if specialized is? Error return specialized
+        if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
+    }
     let func = node_at(function session)
     if func is? hir.BoundMethod {
         let arguments:array<addr>=[]
@@ -365,6 +373,14 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let packed=binary_literals.pack(atom source.srcfile)
             if packed is? Error return packed
             value=put(hir.BasedString[node.loc types.binary_literal(packed.bytes @session.types) atom.base packed.digits packed.bytes] @session)
+        }
+        else if atom is? tokens.Real {
+            let fraction=numeric_literals.real(atom source.srcfile)
+            if fraction is? Error return fraction
+            let type=types.rational_literal(fraction.numerator fraction.denominator @session.types)
+            let normalized=types.node_at(session.types type)
+            $runtime_assert normalized is? types.RationalLiteralType
+            value=put(hir.RationalConstant[node.loc type normalized.numerator normalized.denominator] @session)
         }
         else if atom is? tokens.Bool { value = put(hir.Bool[node.loc types.primitive('bool' @session.types) atom.value] @session) }
         else if atom is? tokens.Metatag and atom.name =? 'target' {value=put(hir.TargetString[node.loc types.string_literal(session.target @session.types) session.target] @session)}
@@ -586,11 +602,16 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if right is? Error return right
             let selected=target_values.logical(op left right session.hir)
             if selected isnt? none return put(hir.TargetBool[node.loc types.primitive('bool' @session.types) selected] @session)
+            # Exact division has no `T/T -> T` builtin signature. Its
+            # result representation depends on the numeric operands.
+            if operator =? '__truediv__' and declarations.lookup(operator env.lexical session) is? none {
+                let value=folded_number(operator [left right] id env @session)
+                if value is? Error return value
+                if value is? none return pending(id 'runtime exact division materialization' env session)
+                return if expected is? none value else against(value expected id env @session)
+            }
             let func = identifier(operator id env @session)
             if func is? Error return func
-            let specialized = builtin_value(func [left right] id env @session)
-            if specialized is? Error return specialized
-            if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
             let value = call(func [left right] [] id right_env @session expected=if logical types.primitive('bool' @session.types) else expected)
             if value is? Error return value
             let result = node_at(value session)
@@ -2453,12 +2474,27 @@ container_algebra = (name:string left:addr right:addr id:addr env:Environment @s
 # Some builtins select a representation-bearing HIR operation once their
 # operand types are known. Only the original builtin binding reaches these
 # rules; lexical operator declarations keep normal function-call semantics.
+folded_number = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let folded=numeric_constants.fold(name arguments session)
+    if folded isnt? none {
+        let loc=contexts.node_at(id env.lexical session).loc
+        if folded is? string return problem(id folded 'the divisor is the constant `0`' env session)
+        if folded is? bool return put(hir.Bool[loc types.primitive('bool' @session.types) folded] @session)
+        let type=types.rational_literal(folded.numerator folded.denominator @session.types)
+        let normalized=types.node_at(session.types type)
+        $runtime_assert normalized is? types.RationalLiteralType
+        return put(hir.RationalConstant[loc type normalized.numerator normalized.denominator] @session)
+    }
+    return none
+}
 builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     let func = node_at(function session)
     if func isnt? hir.ExpressedIdentifier or func.binding_id is? none return none
     let binding = bindings.binding_at(session.registry func.binding_id)
     if binding.kind not=? 'function' or binding.syntax isnt? none or binding.declaration isnt? none return none
     let name = func.name
+    let folded=folded_number(name arguments id env @session)
+    if folded isnt? none return folded
     if arguments.length not=? 2 return none
     let left = arguments[0]
     let right = arguments[1]

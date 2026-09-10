@@ -1,0 +1,60 @@
+from reporting import SrcFile, Error, Pointer
+import p"../parser/t0.dewy" as raw
+import p"../parser/t1.dewy" as tokens
+import p"syntax.dewy" as syntax
+
+doc"""
+Real literals denote exact fractions, including decimal exponents. Keep
+their parts arbitrary precision until a use requests a representation.
+The hosted parser also retains non-decimal reals and binary exponents;
+their numeric meaning is still pending, so those cases stay explicit here.
+"""
+
+Fraction:type = const [numerator:bigint denominator:bigint & ~0]
+power_ten = (exponent:bigint):>bigint => {
+    $runtime_assert exponent >=? 0
+    let remaining=exponent
+    let base:bigint=10
+    let value:bigint=1
+    loop remaining >? 0 {
+        if remaining % 2 =? 1 {value *= base}
+        remaining //= 2
+        if remaining >? 0 {base *= base}
+    }
+    return value
+}
+decimal_digits = (number:raw.Number):>string => {
+    let text=raw.token_text(number)
+    if text.length >=? 2 and text[0..1].casefold =? '0d' {text=text[2..]}
+    return text.replace('_' '')
+}
+real = (literal:tokens.Real source:SrcFile):>Fraction|Error => {
+    let numbers:array<raw.Number>=[literal.whole]
+    if literal.fraction isnt? none {numbers.push(literal.fraction)}
+    if literal.exponent isnt? none {numbers.push(literal.exponent.value)}
+    loop number in numbers {
+        if number.prefix not=? '0d' return Error[
+            srcfile=source title='non-decimal real literals are not implemented'
+            pointers=[Pointer[span=literal.loc message='the parser retains this base; numeric interpretation is pending']]
+        ]
+    }
+    let numerator=syntax.integer_value(raw.token_text(literal.whole) '0d')
+    let denominator:bigint=1
+    if literal.fraction isnt? none {
+        let digits=decimal_digits(literal.fraction)
+        denominator=power_ten(digits.length)
+        numerator=numerator * denominator + syntax.integer_value(digits '0d')
+    }
+    if literal.exponent isnt? none {
+        let exponent=literal.exponent
+        if exponent.binary return Error[
+            srcfile=source title='binary exponents in real literals are not implemented'
+            pointers=[Pointer[span=literal.loc message='the parser retains this exponent; numeric interpretation is pending']]
+        ]
+        let power=syntax.integer_value(raw.token_text(exponent.value) '0d')
+        let scale=power_ten(power)
+        if exponent.positive {numerator *= scale} else {denominator *= scale}
+    }
+    $runtime_assert denominator isnt? 0
+    return Fraction[numerator denominator]
+}

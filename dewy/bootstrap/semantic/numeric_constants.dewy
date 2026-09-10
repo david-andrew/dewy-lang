@@ -1,0 +1,51 @@
+import p"context.dewy" as contexts
+import p"ty.dewy" as types
+import p"hir.dewy" as hir
+import p"numeric_literals.dewy" as literals
+import p"analyze/value_bounds.dewy" as integers
+
+# Constant folding is independent of runtime representation selection. A
+# runtime rational will call its lexical numeric-library implementation.
+fraction = (numerator:bigint denominator:bigint):>literals.Fraction => {
+    $runtime_assert denominator isnt? 0
+    return literals.Fraction[numerator denominator]
+}
+value = (id:addr session:contexts.Session):>literals.Fraction? => {
+    let node=hir.node_at(session.hir id)
+    let type=types.node_at(session.types node.value_type)
+    if type is? types.RationalLiteralType return literals.Fraction[type.numerator type.denominator]
+    let integer=integers.constant_in(id session.hir session.types session.registry)
+    if integer is? none or integer.lower is? none or integer.upper is? none or integer.lower not=? integer.upper return none
+    return literals.Fraction[integer.lower 1]
+}
+fold = (name:string arguments:array<addr> session:contexts.Session):>literals.Fraction|bool|string|none => {
+    if arguments.length =? 0 return none
+    let rational=false
+    loop argument in arguments {
+        if types.node_at(session.types hir.node_at(session.hir argument).value_type) is? types.RationalLiteralType {rational=true}
+    }
+    if not rational and name not=? '__truediv__' return none
+    let a=value(arguments[0] session)
+    if a is? none return none
+    if arguments.length =? 1 and name =? '__unary_sub__' return fraction(-a.numerator a.denominator)
+    if arguments.length not=? 2 return none
+    let b=value(arguments[1] session)
+    if b is? none return none
+    if name =? '__add__' return fraction(a.numerator*b.denominator + b.numerator*a.denominator a.denominator*b.denominator)
+    if name =? '__sub__' return fraction(a.numerator*b.denominator - b.numerator*a.denominator a.denominator*b.denominator)
+    if name =? '__mul__' return fraction(a.numerator*b.numerator a.denominator*b.denominator)
+    if name =? '__truediv__' {
+        if b.numerator =? 0 return 'division by zero'
+        return fraction(a.numerator*b.denominator a.denominator*b.numerator)
+    }
+    # Stored rational singleton types have normalized positive denominators.
+    let left=a.numerator*b.denominator
+    let right=b.numerator*a.denominator
+    if name =? '__eq__' return left =? right
+    if name =? '__ne__' return left not=? right
+    if name =? '__lt__' return left <? right
+    if name =? '__le__' return left <=? right
+    if name =? '__gt__' return left >? right
+    if name =? '__ge__' return left >=? right
+    return none
+}

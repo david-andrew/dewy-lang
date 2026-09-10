@@ -44,6 +44,56 @@ word_element = (id:addr @session:contexts.Session):>addr => {
     if types.is_primitive(node 'uint') return types.primitive('uint64' @session.types)
     return id
 }
+
+# At a source type boundary, excluding integer singletons supplies value
+# facts. Preserve this distinction from the general type-algebra API: a
+# nonzero word is still a word when generic arithmetic infers its operand.
+excluded_integers = (id:addr nodes:array<types.Type>):>array<bigint> | none => {
+    let negation=types.node_at(nodes id)
+    if negation isnt? types.TypeNot return none
+    let inner=types.node_at(nodes negation.item)
+    let members:array<addr>=if inner is? types.TypeOr inner.items else [negation.item]
+    let values:array<bigint>=[]
+    loop member in members {
+        let literal=types.node_at(nodes member)
+        if literal isnt? types.IntegerLiteralType return none
+        values.push(literal.value)
+    }
+    return values
+}
+integer_base = (id:addr @session:contexts.Session):>bool => {
+    let base=types.strip_refinement(id session.types)
+    if types.node_at(session.types base) isnt? types.Primitive return false
+    return subtyping.is_subtype(base types.primitive('int' @session.types) session.links @session.types)
+}
+intersection = (left:addr right:addr id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let excluded=excluded_integers(right session.types)
+    let base=types.node_at(session.types left)
+    if excluded isnt? none and base is? types.TypeOr {
+        let remaining:array<addr>=[]
+        loop member in base.items {
+            let node=types.node_at(session.types member)
+            let removed=false
+            if node is? types.IntegerLiteralType {
+                loop value in excluded {if value =? node.value {removed=true break}}
+            }
+            if not removed {remaining.push(member)}
+        }
+        if remaining.length =? base.items.length return contexts.problem(id 'excluded value is not a member of the union' display.type_to_dewy(left session.types) context session)
+        return types.union(remaining @session.types)
+    }
+    let subject=left
+    if excluded is? none or not integer_base(left @session) {
+        excluded=excluded_integers(left session.types)
+        subject=right
+    }
+    if excluded isnt? none and integer_base(subject @session) {
+        let propositions:array<facts.Proposition>=[]
+        loop value in excluded {propositions.push(facts.Proposition['self' 'not=?' value])}
+        return refine(subject propositions @session)
+    }
+    return records.intersect(left right id context @session)
+}
 lookup = (name:string context:contexts.Context session:contexts.Session):>addr? => bindings.lookup(session.scopes context.scope name)
 resolve_name = (name:string id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
     let binding_id = lookup(name context session)
@@ -607,7 +657,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             if left is? Error return left
             let right = resolve(node.right context @session)
             if right is? Error return right
-            return if op =? '|' or op =? 'or' types.union([left right] @session.types) else records.intersect(left right id context @session)
+            return if op =? '|' or op =? 'or' types.union([left right] @session.types) else intersection(left right id context @session)
         }
     }
     return contexts.unsupported(id "{node.kind} in type position" context session)

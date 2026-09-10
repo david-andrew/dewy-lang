@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native decimal reals and decimal exponents retain arbitrary-precision exact
+  fractions. Arithmetic and comparisons fold those constants, including exact
+  integer division; division has no obsolete same-type result signature.
+  Runtime rational materialization remains pending. Source intersections such
+  as `int64 & ~0` become value refinements, while excluding literal union
+  members selects the remaining alternatives. Numeric constants/contracts,
+  existing source values, and matches pass in a four-group native run; the
+  source-type comparison passes separately with the new exclusion forms.
+
 - Native based strings pack power-of-two radixes into exact bytes, retaining
   the hosted reserved radixes and padding rules. Byte materialization, indices,
   lengths, compile-time path constructor views, and `$include_bytes` now check
