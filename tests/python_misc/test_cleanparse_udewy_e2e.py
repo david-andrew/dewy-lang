@@ -326,7 +326,8 @@ def test_array_value_semantics_fixture_copies_mutable_bindings() -> None:
     assert 'let transitive:int64 = copy' not in emitted
     assert 'let snapshot:int64 = copy' not in emitted
     assert '__dewy_array_copy_length_' in emitted
-    assert '__alloca__(__dewy_array_copy_length_' in emitted
+    assert '__alloca__(__dewy_array_copy_length_' not in emitted
+    assert '_region_alloc(' in emitted
     assert 'loop __dewy_array_copy_index_' in emitted
 
 

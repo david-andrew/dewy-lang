@@ -169,7 +169,10 @@ let mutate = ():>uint8 => {
     assert '__store_i64__(1 __dewy_array_1 + 24)' in emitted
     assert '__store_i64__(2 __dewy_array_1 + 32)' in emitted
     assert '__dewy_array_cow_data_' in emitted
-    assert '__dewy_string_' not in emitted
+    # The copy-on-write buffer can use a frame region without constructing
+    # any Unicode string descriptor or cloning a string value.
+    assert '__dewy_string_value_' not in emitted
+    assert '__dewy_string_clone' not in emitted
 
 
 @pytest.mark.skipif(
