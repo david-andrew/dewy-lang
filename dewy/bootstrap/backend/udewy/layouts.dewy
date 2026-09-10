@@ -6,9 +6,11 @@ import p"../../semantic/subtyping.dewy" as subtyping
 # Shared with the hosted backend and the source runtime library. Descriptors
 # are six words; offsets are bytes. Ownership flags describe storage, not the
 # type of the elements or their mutability contract.
-const array_descriptor=[data=0 length=8 capacity=16 stride=24 flags=32 owner=40 size=48]
+ArrayDescriptor:type = const [data:addr length:addr capacity:addr stride:addr flags:addr owner:addr size:addr]
+const array_descriptor:ArrayDescriptor=[0 8 16 24 32 40 48]
 const array_flags=[mutable=1 borrowed_static=2 arena_descriptor=4]
-const string_descriptor=[data=0 byte_length=8 boundaries=16 grapheme_length=24 start=32 owner=40 size=48]
+StringDescriptor:type = const [data:addr byte_length:addr boundaries:addr grapheme_length:addr start:addr owner:addr size:addr]
+const string_descriptor:StringDescriptor=[0 8 16 24 32 40 48]
 const brand_field='__brand__'
 
 Storage:type = const [size:addr alignment:uint8 & ~0 signed:bool=false]

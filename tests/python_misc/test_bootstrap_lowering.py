@@ -1,4 +1,4 @@
-"""The first native storage/legalization slice executes checked scalar programs.
+"""Native storage/legalization executes scalar and local array programs.
 
 This deliberately enters below the full validation driver; it is not a public
 compiler command and does not authorize arbitrary unchecked source emission.
@@ -13,6 +13,13 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    ('let main=():>int64=>{let values:array<int64>=[20 22] return values[0]+values[1]}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40 2] let copy=values copy[0]=99 return values[0]+copy[1]}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40 2] let copy:array<int64>=[0 0] copy=values copy[0]=99 return values[0]+copy[1]}', 42),
+    ('let main=():>int64=>{let values:array<bool>=[false true] values[0]=values[1] return if values[0] and values[1] 42 else 0}', 42),
+    ('let main=():>int64=>{let values:array<uint8>=[250 48] return (values[0]+values[1]) as int64}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[] return values.length+42}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40 2] values=values return values[0]+values[1]}', 42),
     ('let main=():>int64=>{let memory=__alloca__(8) __store_i64__(42 memory) return __load_i64__(memory)}', 42),
     ('Fn:type=(x:int64):>int64\nlet twice=(x:int64):>int64=>x*2\nlet apply=(f:Fn=@twice):>int64=>f(21)\nlet main=():>int64=>apply()', 42),
 
