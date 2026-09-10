@@ -5762,9 +5762,11 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
             if (symbol == '=' or isinstance(value.op, t2.CombinedAssignmentOp)) and root_name(value.left) in members:
                 found = True
                 return
-            if isinstance(value.op, (t2.CallJuxtapose, t2.QJuxtapose)) and isinstance(value.left, p0.BinOp) and _operator_symbol(value.left.op) == '.':
-                right = value.left.right
-                if isinstance(right, p0.Atom) and isinstance(right.item, t1.Identifier) and right.item.name in _MUTATING_METHODS and root_name(value.left.left) in members:
+            if symbol == '.' and isinstance(value.right, p0.Atom):
+                right = value.right.item
+                # Zero-argument members such as `items.clear` call without
+                # an explicit juxtaposition node, and still mutate storage.
+                if isinstance(right, t1.Identifier) and right.name in _MUTATING_METHODS and root_name(value.left) in members:
                     found = True
                     return
         if isinstance(value, p0.Prefix) and _operator_symbol(value.op) == '@' and root_name(value.item) in members:
@@ -10932,6 +10934,42 @@ def _dispatch_builtin(
     )
 
 
+def _mutable_place(target: hir.AST, loc: Span, *, ctx: Context) -> hir.Place:
+    """Explicit `@` and implicit method receivers share the write barrier.
+
+    Borrowing can change the root and projected storage, so neither route
+    refinements nor cached dictionary membership can survive the call.
+    """
+    for step in sb.access_path(target, unwrap=_unwrap_write_path, forwarding=True).steps:
+        if isinstance(step, hir.MemberAccess) and not step.mutable:
+            user_error(
+                ctx.srcfile,
+                f'cannot take the place of const object field `{step.name}`',
+                Pointer(span=loc, message='this field is const'),
+            )
+    binding = _member_root_binding(target, ctx=ctx)
+    _refuse_immutable_write(target, loc, 'pass a member', ctx=ctx)
+    if binding is not None:
+        if (reason := _read_only_reason(binding)) is not None:
+            user_error(
+                ctx.srcfile,
+                'cannot pass a const binding as a mutable place',
+                Pointer(
+                    span=loc,
+                    message=f'`{binding.name}` {reason}',
+                ),
+                *_declaration_pointers(binding),
+            )
+        # the callee may change the value: forget what was known about it
+        # (an exact length after `= []`, a refinement) for the code after the call
+        ctx.refinements.pop(binding.id, None)
+        ctx.length_bounds.pop(binding.id, None)
+        _invalidate_routes(binding.id, ctx=ctx)
+        _drop_key_facts(ctx, dictionary_id=binding.id)
+        _drop_key_facts(ctx, key_id=binding.id)
+    return hir.Place(loc, target.type, target)
+
+
 def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = None) -> hir.AST:
     """Typecheck a prefix operator through its builtin dunder."""
     if not isinstance(prefix.op, t1.Operator):
@@ -10982,27 +11020,7 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
                 prefix.loc,
                 'function handles and partial application with `@`',
             )
-        binding = _member_root_binding(target, ctx=ctx)
-        _refuse_immutable_write(target, prefix.loc, 'pass a member', ctx=ctx)
-        if binding is not None:
-            if (reason := _read_only_reason(binding)) is not None:
-                user_error(
-                    ctx.srcfile,
-                    'cannot pass a const binding as a mutable place',
-                    Pointer(
-                        span=prefix.loc,
-                        message=f'`{binding.name}` {reason}',
-                    ),
-                    *_declaration_pointers(binding),
-                )
-            # the callee may change the value: forget what was known about it
-            # (an exact length after `= []`, a refinement) for the code after the call
-            ctx.refinements.pop(binding.id, None)
-            ctx.length_bounds.pop(binding.id, None)
-            _invalidate_routes(binding.id, ctx=ctx)
-            _drop_key_facts(ctx, dictionary_id=binding.id)
-            _drop_key_facts(ctx, key_id=binding.id)
-        return hir.Place(prefix.loc, target.type, target)
+        return _mutable_place(target, prefix.loc, ctx=ctx)
     if prefix.op.symbol not in builtins.UNARY_PREFIX_DUNDER_MAP:
         not_implemented(ctx.srcfile, prefix.op.loc, f'prefix operator `{prefix.op.symbol}`')
     if (
@@ -15338,7 +15356,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
                     Pointer(span=receiver.loc, message='this value is not a binding or a field'),
                     hint='bind the value first (`let s = …`), then call the method on `s`',
                 )
-            receiver = hir.Place(receiver.loc, receiver.type, receiver)
+            receiver = _mutable_place(receiver, receiver.loc, ctx=ctx)
         pos_args = [receiver, *pos_args]
         argument_order = [None, *argument_order]
     for name, arg in kw_args.items():
