@@ -25,6 +25,33 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native local functions are hoisted with hidden read-only capture arguments,
+  including defaults, recursive calls, and transitive captures. The lowering
+  driver executes **166 programs**, plus invalid calls, unresolved proofs,
+  captured-write rejection, and escaping-capture rejection. This matches the
+  hosted lifting boundary; general closure records remain pending.
+
+- Runtime assertion failures now call the installed reporting helpers by
+  binding identity. Success skips the message, failure evaluates it once and
+  exits with 101, and a user function named `exit` cannot intercept it. Native
+  execution verifies those paths. Saved operand notes and the complete test
+  reporting interface still need work.
+
+- Native branch joins retain one mutable array contract when only current
+  lengths differ. Variant field reads use the field declaration of the
+  currently narrowed owner. Focused native source checks pass; the complete
+  parser source check is being repeated beyond those failures.
+
+- The hosted non-bootstrap checkpoint passes 1,726 cases with 10 skipped;
+  its sole installer failure was fixed and both installer cases subsequently
+  pass. The installer now includes nested library sources and generated
+  Unicode tables. It still installs the hosted compiler until the native
+  paired build has been verified.
+
+- The native µDewy rebuild script has again produced byte-identical stage 1
+  and stage 2 compilers without Python. This verifies the µDewy half only;
+  the paired Dewy/µDewy rebuild remains pending.
+
 - Native module validation now precedes executable emission: it checks
   proofs and integer representation, removes discharged witnesses, and
   validates startup against the entry module's actual `main` binding.
