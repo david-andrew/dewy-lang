@@ -474,6 +474,16 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         if node.delims =? '[]' {
+            if node.inner.length =? 1 {
+                let candidate=contexts.node_at(node.inner[0] env.lexical session)
+                if candidate is? parser.Flow and candidate.arms.length =? 1 and candidate.default is? none {
+                    let arm=contexts.node_at(candidate.arms[0] env.lexical session)
+                    if arm is? parser.KeywordExpr and arm.parts.length =? 3 {
+                        let keyword=contexts.node_at(arm.parts[0] env.lexical session)
+                        if keyword is? tokens.Keyword and keyword.name =? 'loop' return loop_capture(id node.inner[0] env @session expected=expected)
+                    }
+                }
+            }
             let entry = if expected is? none none else views.container_entry_types(expected session.types)
             if entry isnt? none and entry.value isnt? none return container_literal(id node env @session expected=expected)
             loop item in node.inner {
@@ -3640,4 +3650,105 @@ method_owner = (name:string lexical:contexts.Context @session:contexts.Session):
     let value=declarations.resolve_alias(binding @session)
     if value is? Error return value
     return if value is? addr value else none
+}
+
+# Capture only value positions: the last expression of a block, each flow
+# arm, and a nested loop's body. A statement or unmatched filter contributes
+# no element. In particular a flow's overall `void` type does not erase the
+# values expressed by its matching arms.
+capture_values = (id:addr session:contexts.Session):>array<addr> => {
+    let node=node_at(id session)
+    if node is? hir.Block {
+        if node.items.length =? 0 return []
+        return capture_values(node.items[node.items.length-1] session)
+    }
+    let values:array<addr>=[]
+    if node is? hir.Flow {
+        loop arm in node.arms {loop value in capture_values(arm session) {values.push(value)}}
+        if node.default isnt? none {loop value in capture_values(node.default session) {values.push(value)}}
+        return values
+    }
+    if node is? hir.IfArm|hir.LoopArm return capture_values(node.body session)
+    let type=types.node_at(session.types node.value_type)
+    if types.is_primitive(type 'void') or types.is_primitive(type 'never') return []
+    return [id]
+}
+# Rewrite the checked value sites, rather than rechecking their syntax in a
+# different scope. This preserves iterator identities and branch narrowing.
+capture_pushes = (id:addr receiver:addr element:addr syntax:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(id session)
+    let void_type=types.primitive('void' @session.types)
+    if node is? hir.Block {
+        if node.items.length =? 0 return id
+        let items=node.items
+        $runtime_assert items.length >? 0
+        let last=items.length-1
+        $runtime_assert last <? items.length
+        let value=capture_pushes(items[last] receiver element syntax env @session)
+        if value is? Error return value
+        items[last]=value
+        return put(hir.Block[node.loc void_type items node.scoped] @session)
+    }
+    if node is? hir.Flow {
+        let arms:array<addr>=[]
+        loop arm in node.arms {
+            let value=capture_pushes(arm receiver element syntax env @session)
+            if value is? Error return value
+            arms.push(value)
+        }
+        let default:addr?=none
+        if node.default isnt? none {
+            let value=capture_pushes(node.default receiver element syntax env @session)
+            if value is? Error return value
+            default=value
+        }
+        return put(hir.Flow[node.loc void_type arms default] @session)
+    }
+    if node is? hir.IfArm|hir.LoopArm {
+        let body=capture_pushes(node.body receiver element syntax env @session)
+        if body is? Error return body
+        return put(if node is? hir.IfArm hir.IfArm[node.loc void_type node.condition body] else hir.LoopArm[node.loc void_type node.condition body] @session)
+    }
+    let type=types.node_at(session.types node.value_type)
+    if types.is_primitive(type 'void') or types.is_primitive(type 'never') return id
+    let value=against(id element syntax env @session)
+    if value is? Error return value
+    let signature=array_methods.signature('push' element @session.types)
+    let method=put(hir.ArrayMethod[node.loc signature receiver 'push'] @session)
+    return put(hir.FunctionCall[node.loc void_type method [value] []] @session)
+}
+loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let checked=expression(syntax env @session)
+    if checked is? Error return checked
+    let values=capture_values(checked session)
+    if values.length =? 0 return problem(id 'this loop expresses no value to capture' 'end the body with the value to collect' env session)
+    let target=types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
+    let element:addr?=if target is? types.ArrayType target.element else none
+    if element is? none {
+        loop value in values {
+            let widened=widen(value id env @session)
+            if widened is? Error return widened
+            let current=node_at(widened session).value_type
+            if element is? none {element=current}
+            else if subtyping.is_subtype(current element session.links @session.types) {}
+            else if subtyping.is_subtype(element current session.links @session.types) {element=current}
+            else return problem(id 'loop capture values differ in type' 'annotate the container to choose its element type' env session)
+        }
+    }
+    $runtime_assert element isnt? none
+    let loc=contexts.node_at(id env.lexical session).loc
+    let type=types.array_type(element none @session.types)
+    let name="__dewy_capture_{session.registry.next_id}"
+    let binding_id=bindings.allocate_param(@session.registry name type loc)
+    let receiver=put(hir.ExpressedIdentifier[loc type name binding_id] @session)
+    let empty=put(hir.ArrayLiteral[loc types.array_type(element 0 @session.types) []] @session)
+    let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name type empty binding_id] @session)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.declaration=declaration binding.store_type=type
+    session.registry.by_id[binding_id]=binding
+    let filled=capture_pushes(checked receiver element id env @session)
+    if filled is? Error return filled
+    # Local result storage stays in the expression's evaluation position.
+    # Lowering legalizes this block with the same rules as ordinary user code.
+    return put(hir.Block[loc type [declaration filled receiver] true] @session)
 }
