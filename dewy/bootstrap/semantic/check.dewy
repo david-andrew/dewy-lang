@@ -843,10 +843,9 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
 # source catalog is read-only during expression checking and is not copied.
 # Restore every mutable arena/fact field on rejection, on ambiguity, and on
 # success; a losing reading cannot leak declarations, mints, or place effects.
-Choice:type = const [result:addr state:contexts.CheckState]
 ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let before=contexts.checkpoint(session)
-    let winner:Choice? = none
+    let winner:addr? = none
     let rejected:array<Error> = []
     let next:addr=0
     loop candidate in node.candidates {
@@ -863,7 +862,7 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
         # A final successful reading is already installed, with every earlier
         # reading rejected. Keep it without copying and restoring a winner.
         if next =? node.candidates.length return result
-        winner = Choice[result contexts.checkpoint(session)]
+        winner = candidate
     }
     if winner is? none {
         contexts.restore(before @session)
@@ -872,9 +871,11 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
         if rejected.length >? 0 return rejected[0]
         return problem(id 'no valid interpretation for ambiguous expression' 'no candidate expression typechecks' env session)
     }
-    let result = winner.result
-    contexts.restore(winner.state @session)
-    return result
+    # The sole successful earlier reading is replayed from its original
+    # state. Its node ids remain deterministic, and no discarded suffix must
+    # be retained just in case the final candidate fails.
+    contexts.restore(before @session)
+    return expression(winner env @session expected=expected call_target=call_target allow_place=allow_place)
 }
 
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
@@ -1317,7 +1318,7 @@ hoist_condition = (condition:addr @session:contexts.Session):>void => {
     let value=node_at(condition session)
     if value is? hir.DictContains {
         $runtime_assert condition <? session.hir.length
-        session.hir[condition]=hir.DictContains[value.loc value.value_type value.keys value.key value.position true]
+        contexts.replace_hir(condition hir.DictContains[value.loc value.value_type value.keys value.key value.position true] @session)
     }
 }
 refined = (condition:addr truth:bool env:Environment @session:contexts.Session invalidated:set<addr>=set[] moved:set<addr>=set[]):>Environment => {
@@ -2147,7 +2148,7 @@ array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Envir
                 binding.value_type = declared binding.store_type = declared
                 session.registry.by_id[binding.id] = binding
                 $runtime_assert declaration_id <? session.hir.length
-                session.hir[declaration_id] = hir.Declare[declaration.loc declaration.value_type declaration.decltype declaration.name declared declaration.expr declaration.binding_id]
+                contexts.replace_hir(declaration_id hir.Declare[declaration.loc declaration.value_type declaration.decltype declaration.name declared declaration.expr declaration.binding_id] @session)
             }
         }
         let shape = types.node_at(session.types types.strip_refinement(declared session.types))
@@ -2517,7 +2518,7 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
                 if hir_facts.predicate_bounds_counter(predicate target.binding_id session.hir session.types) {
                     let item = iterators[index]
                     $runtime_assert item <? session.hir.length
-                    session.hir[item] = hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true]
+                    contexts.replace_hir(item hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true] @session)
                 }
             }
             let loc = contexts.node_at(predicate_id env.lexical session).loc

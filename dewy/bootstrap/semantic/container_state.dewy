@@ -134,7 +134,12 @@ seed = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
     }
     let literal = values.literal_facts(binding value @session)
     loop fact in literal { keys.record(@current fact) }
-    loop fact in captured(value session) {keys.record(@current keys.Fact[binding fact.key])}
+    # Captured logical membership can add evidence for a computed value,
+    # but must not erase a more precise slot just seeded from its literal or
+    # unchanged source route. Algebra/view results carry no slot promises.
+    loop fact in captured(value session) {
+        if keys.find(current binding fact.key) is? none {keys.record(@current keys.Fact[binding fact.key])}
+    }
     let entry = views.container_entry_types(hir.node_at(session.hir value).value_type session.types)
     if entry isnt? none and entry.value isnt? none {
         let members = views.finite_members(entry.key session.types)

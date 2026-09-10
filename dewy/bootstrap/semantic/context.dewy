@@ -43,9 +43,6 @@ CheckState:type = [
     return_collectors:array<ReturnCollector>=[]
     prepared_imports:set<addr>=set[]
     next_key_position:addr=0
-    syntax_refs:array<SyntaxRef>=[]
-    types:array<types.Type>=[]
-    hir:array<hir.AST>=[]
     # Concrete generic bodies are module-level declarations, emitted once.
     hoisted:array<addr>=[]
     # Method identity includes the declaring type; structural equality must
@@ -66,38 +63,63 @@ CheckState:type = [
     resolving_aliases:set<addr>=set[]
     named_refs:dict<addr addr>=[]
 ]
-# Source forests are installed by the module loader, outside expression
-# transactions. Checking can only read them. Keep that immutable catalog
-# outside the copied state when trying alternative parser interpretations.
-Session:type = CheckState & [target:targets.Target=$target sources:array<Source>=[]]
-checkpoint = (session:Session):>CheckState => CheckState[
-    warnings=session.warnings
-    pending_brand_matches=session.pending_brand_matches
-    read_states=session.read_states
-    value_keys=session.value_keys
-    return_collectors=session.return_collectors
-    prepared_imports=session.prepared_imports
-    next_key_position=session.next_key_position
-    syntax_refs=session.syntax_refs
-    types=session.types
-    hir=session.hir
-    hoisted=session.hoisted
-    constructors=session.constructors
-    methods=session.methods
-    method_bindings=session.method_bindings
-    preparing_methods=session.preparing_methods
-    prepared_methods=session.prepared_methods
-    registry=session.registry
-    scopes=session.scopes
-    brands=session.brands
-    error_types=session.error_types
-    links=session.links
-    builtin_aliases=session.builtin_aliases
-    pending_aliases=session.pending_aliases
-    resolving_aliases=session.resolving_aliases
-    named_refs=session.named_refs
+# Types and syntax references are interned append-only. HIR also appends,
+# except for the few checking rewrites recorded below. A speculative parser
+# reading therefore needs arena lengths and an undo position, not copies of
+# every node compiled before it. All other mutable checking state is saved.
+HirEdit:type = const [id:addr previous:hir.AST]
+Session:type = CheckState & [
+    target:targets.Target=$target sources:array<Source>=[]
+    syntax_refs:array<SyntaxRef>=[] types:array<types.Type>=[] hir:array<hir.AST>=[]
+    hir_edits:array<HirEdit>=[]
 ]
-restore = (snapshot:CheckState @session:Session):>void => {
+Checkpoint:type = const [state:CheckState syntax_refs:addr types:addr hir:addr edits:addr]
+checkpoint = (session:Session):>Checkpoint => {
+    let state=CheckState[
+        warnings=session.warnings
+        pending_brand_matches=session.pending_brand_matches
+        read_states=session.read_states
+        value_keys=session.value_keys
+        return_collectors=session.return_collectors
+        prepared_imports=session.prepared_imports
+        next_key_position=session.next_key_position
+        hoisted=session.hoisted
+        constructors=session.constructors
+        methods=session.methods
+        method_bindings=session.method_bindings
+        preparing_methods=session.preparing_methods
+        prepared_methods=session.prepared_methods
+        registry=session.registry
+        scopes=session.scopes
+        brands=session.brands
+        error_types=session.error_types
+        links=session.links
+        builtin_aliases=session.builtin_aliases
+        pending_aliases=session.pending_aliases
+        resolving_aliases=session.resolving_aliases
+        named_refs=session.named_refs
+    ]
+    return Checkpoint[state session.syntax_refs.length session.types.length session.hir.length session.hir_edits.length]
+}
+# Every checking rewrite goes through here, including writes made by nested
+# speculative readings. Later validation/representation passes run outside
+# transactions and may rewrite their arenas directly.
+replace_hir = (id:addr value:hir.AST @session:Session):>void => {
+    $runtime_assert id <? session.hir.length
+    session.hir_edits.push(HirEdit[id session.hir[id]])
+    session.hir[id]=value
+}
+restore = (checkpoint:Checkpoint @session:Session):>void => {
+    loop session.hir_edits.length >? 0 {
+        if session.hir_edits.length <=? checkpoint.edits break
+        let edit=session.hir_edits.pop
+        $runtime_assert edit.id <? session.hir.length
+        session.hir[edit.id]=edit.previous
+    }
+    session.hir.truncate(checkpoint.hir)
+    session.types.truncate(checkpoint.types)
+    session.syntax_refs.truncate(checkpoint.syntax_refs)
+    let snapshot=checkpoint.state
     session.warnings=snapshot.warnings
     session.pending_brand_matches=snapshot.pending_brand_matches
     session.read_states=snapshot.read_states
@@ -105,9 +127,6 @@ restore = (snapshot:CheckState @session:Session):>void => {
     session.return_collectors=snapshot.return_collectors
     session.prepared_imports=snapshot.prepared_imports
     session.next_key_position=snapshot.next_key_position
-    session.syntax_refs=snapshot.syntax_refs
-    session.types=snapshot.types
-    session.hir=snapshot.hir
     session.hoisted=snapshot.hoisted
     session.constructors=snapshot.constructors
     session.methods=snapshot.methods
