@@ -349,9 +349,7 @@ class _Lowerer(
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
-        self.owned_string_arrays: set[str] = set()   # those whose elements are strings the array owns (released with it)
-        self.owned_cell_arrays: dict[str, ty.TypeExpr] = {}   # those whose elements are optional/union cells the array owns
-        self.owned_object_arrays: dict[str, ty.ObjectType] = {}   # those whose elements are objects the array owns
+        self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
         self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
@@ -3037,9 +3035,7 @@ class _Lowerer(
     ) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set()
-        self.owned_string_arrays = set()
-        self.owned_cell_arrays = {}
-        self.owned_object_arrays = {}
+        self.owned_array_elements = {}
         self.owned_objects = {}
         self.borrowed_fields = {}
         self.object_flow_targets = set()
@@ -3209,7 +3205,7 @@ class _Lowerer(
             and exact.length is not None   # `let xs:array<string> = ["m" "n"]`: the literal's length
             and not self.lowering_module_startup
             and self._has_arena()
-            and (self._is_string_valued(exact.element) or isinstance(ty.unfold(exact.element), ty.ObjectType)
+            and (self._is_string_valued(exact.element) or isinstance(ty.unfold(exact.element), (ty.ObjectType, ty.ArrayType))
                  or self._is_optional_element(exact.element) or self._is_union_element(exact.element))
         ):
             # a literal's element objects are arena blocks (`_array_storage_value`); a copy's or a call's may be inline or frame storage
@@ -3255,6 +3251,8 @@ class _Lowerer(
             statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', handle.name, 'int64', self._intrinsic_call('__load_i64__', [self._pointer_element_address(replace(word, type='int64'), index, element_bytes, loc)], 'int64', loc)))
             if self._is_string_valued(element):
                 statements.append(self._release_string_by_owner(handle, loc))
+            elif isinstance(ty.unfold(element), ty.ArrayType):
+                statements.extend(self._release_owned_array(handle, loc, element=ty.unfold(element).element))
             elif self._is_optional_element(element) or self._is_union_element(element):
                 # Cell elements always own arena storage, even when the array
                 # itself is a fixed-size stack buffer or a copied parameter.
@@ -3280,12 +3278,7 @@ class _Lowerer(
             and self._array_representation(node) == 'descriptor'
         ):
             self.owned_array_names.add(node.name)
-            if self._is_string_valued(declared_type.element):
-                self.owned_string_arrays.add(node.name)
-            elif self._is_optional_element(declared_type.element) or self._is_union_element(declared_type.element):
-                self.owned_cell_arrays[node.name] = declared_type.element
-            elif isinstance(ty.unfold(declared_type.element), ty.ObjectType):
-                self.owned_object_arrays[node.name] = ty.unfold(declared_type.element)
+            self.owned_array_elements[node.name] = declared_type.element
 
     def _owned_array_declaration(self, node: hir.AST) -> hir.Declare | None:
         """The declaration of a local that will own a runtime-length array's storage (the HIR-level twin of `_note_owned_array`)."""
@@ -3467,7 +3460,7 @@ class _Lowerer(
                     elif local_binding_key(local) in self.owned_objects:
                         released.extend(self._release_object_members(local, self.owned_objects[local_binding_key(local)], local.loc))
                     else:
-                        released.extend(self._release_owned_array(local, local.loc, string_elements=local.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(local.name), object_element=self.owned_object_arrays.get(local.name)))
+                        released.extend(self._release_owned_array(local, local.loc, element=self.owned_array_elements.get(local.name)))
             return released
 
         def diverges(item: hir.AST) -> bool:
@@ -3716,9 +3709,7 @@ class _Lowerer(
                 element = self.temporary_array_elements[value.name]
                 body = self._release_owned_array(
                     value, value.loc,
-                    string_elements=self._is_string_valued(element),
-                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
-                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                    element=element,
                 )
             else:
                 body = self._release_string_elements(value, value.loc)
@@ -3989,7 +3980,15 @@ class _Lowerer(
                     node.loc,
                 )
             old_release: list[hir.AST] = []
-            if self._is_string_valued(node.target.type) and self._has_arena() and self._place_is_owned(node.target.array):
+            if isinstance(node.target.type, ty.ArrayType) and self._has_arena():
+                # The replacement has already been copied. Give back the
+                # previous row recursively before publishing the new handle.
+                old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('old_row'))
+                old_release = [
+                    hir.Declare(node.loc, ty.VOID_TYPE, 'let', old.name, 'int64', self._intrinsic_call('__load_i64__', [address], 'int64', node.loc)),
+                    *self._release_owned_array(old, node.loc, element=node.target.type.element),
+                ]
+            elif self._is_string_valued(node.target.type) and self._has_arena() and self._place_is_owned(node.target.array):
                 # an owned array's element string is replaced: the old one goes back by its owner word
                 old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'old_element').name)
                 old_release = [

@@ -973,9 +973,7 @@ class _ArrayLowering:
                     hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied),
                     *self._release_owned_array(
                         target, node.loc,
-                        string_elements=self._is_string_valued(element),
-                        cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
-                        object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                        element=element,
                     ),
                     replace(node, target=target, value=fresh),
                     *self._value_store(target, place_cell, 'int64', node.loc),
@@ -1009,7 +1007,7 @@ class _ArrayLowering:
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('rebound'))
                 statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied))
                 assignment = replace(node, value=fresh)
-            statements.extend(self._release_owned_array(replace(node.target, type='int64'), node.loc, string_elements=node.target.name in self.owned_string_arrays, cell_element=self.owned_cell_arrays.get(node.target.name), object_element=self.owned_object_arrays.get(node.target.name)))
+            statements.extend(self._release_owned_array(replace(node.target, type='int64'), node.loc, element=self.owned_array_elements.get(node.target.name)))
             return [*statements, assignment]
         return [*prelude, assignment]
 
@@ -1172,9 +1170,11 @@ class _ArrayLowering:
         unfolded = ty.unfold(element)
         if isinstance(unfolded, ty.ObjectType):
             return self._release_object_elements(descriptor, unfolded, loc, start=start, stop=stop)
+        if isinstance(unfolded, ty.ArrayType):
+            return self._release_nested_array_elements(descriptor, unfolded, loc, start=start, stop=stop)
         return []
 
-    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False, cell_element: ty.TypeExpr | None = None, object_element: ty.ObjectType | None = None) -> list[hir.AST]:
+    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, element: ty.TypeExpr | None = None) -> list[hir.AST]:
         """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
 
         The `owner` word is 1 for arena-owned data (set by growth and by
@@ -1189,13 +1189,7 @@ class _ArrayLowering:
         size = self._int64_binary('__mul__', self._load_i64_field(word, ARRAY_CAPACITY_OFFSET, loc), self._load_i64_field(word, ARRAY_STRIDE_OFFSET, loc), loc)
         # the elements first, by their own owner words — an exact-length array
         # in frame storage still owns the strings and cells stored into it
-        elements: list[hir.AST] = []
-        if string_elements:
-            elements.extend(self._release_string_elements(word, loc))
-        elif cell_element is not None:
-            elements.extend(self._release_cell_elements(word, cell_element, loc))
-        elif object_element is not None:
-            elements.extend(self._release_object_elements(word, object_element, loc))
+        elements = self._release_array_elements(word, element, loc) if element is not None else []
         statements: list[hir.AST] = []
         statements.extend([
             self._arena_release_call(self._load_i64_field(word, ARRAY_DATA_OFFSET, loc), size, loc),
@@ -1259,9 +1253,7 @@ class _ArrayLowering:
                 element = unfolded.element
                 release.extend(self._release_owned_array(
                     payload, loc,
-                    string_elements=self._is_string_valued(element),
-                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
-                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                    element=element,
                 ))
             elif isinstance(unfolded, ty.ObjectType):
                 size, _offsets = self._object_layout(unfolded, hir.Void(loc, ty.VOID_TYPE))
@@ -1306,9 +1298,7 @@ class _ArrayLowering:
                 statements.append(declare)
                 statements.extend(self._release_owned_array(
                     array, loc,
-                    string_elements=self._is_string_valued(element),
-                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
-                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None,
+                    element=element,
                 ))
             elif self._field_union_members(field_type) is not None:
                 members = self._field_union_members(field_type)
@@ -1357,6 +1347,22 @@ class _ArrayLowering:
         body.extend(self._release_object_members(element, object_type, loc))
         body.append(self._arena_release_call(element, self._int64_literal(loc, size), loc))
         body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)))
+        loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
+        return [index_declare, length_declare, data_declare, loop]
+
+    def _release_nested_array_elements(self, word: hir.AST, row_type: ty.ArrayType, loc: Span, *, start: hir.AST | None = None, stop: hir.AST | None = None) -> list[hir.AST]:
+        """A row owns its elements, buffer and descriptor recursively."""
+        def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
+            name = self._new_array_name(suffix)
+            return hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', value), hir.ExpressedIdentifier(loc, 'int64', name)
+
+        index_declare, index = local('release_row_index', start if start is not None else self._int64_literal(loc, 0))
+        length_declare, length = local('release_row_count', stop if stop is not None else self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        data_declare, data = local('release_row_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
+        address = self._pointer_element_address(data, index, 8, loc)
+        row_declare, row = local('release_row', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
+        body = [row_declare, *self._release_owned_array(row, loc, element=row_type.element)]
+        body.append(hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc)))
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
         return [index_declare, length_declare, data_declare, loop]
 
@@ -1464,9 +1470,7 @@ class _ArrayLowering:
         if (members := ty.enum_members(element_type)) is not None:
             return self._enum_word_of(node, members)
         if isinstance(element_type, ty.ArrayType):
-            # a nested array element: an independent arena-backed handle
-            # (released with the owner's elements only one level deep so far)
-            return self._independent_array_value(node, element_type)
+            return self._stored_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
             # a fresh value (a call's result, a literal) dies here: its members move
             fresh = isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral))
@@ -2585,6 +2589,17 @@ class _ArrayLowering:
                 )
         return statements, target
 
+    def _stored_array_value(self, node: hir.AST, array_type: ty.ArrayType) -> tuple[list[hir.AST], hir.AST]:
+        """Rows own descriptors and buffers that outlive the creating frame.
+
+        Retain an exact source's layout while copying: an array literal may
+        be raw data even when the destination row has a dynamic-length type.
+        """
+        source_type = ty.strip_refinement(node.type)
+        if isinstance(source_type, ty.ArrayType):
+            array_type = source_type
+        return self._clone_array_value(node, array_type, arena=True)
+
     def _array_storage_value(
         self,
         node: hir.AST,
@@ -2605,7 +2620,7 @@ class _ArrayLowering:
                 node.type.value,
             )
         if isinstance(element_type, ty.ArrayType):
-            return self._independent_array_value(node, element_type)
+            return self._stored_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
             # an element object is an arena block (the array's release gives
             # it back as one), whether a dying temporary whose members move or
@@ -2636,11 +2651,13 @@ class _ArrayLowering:
         """
 
         source_value = self._array_load(source_address, element_type, loc)
-        if isinstance(element_type, ty.ArrayType):
+        if isinstance(element_type, ty.ArrayType) and move:
+            prelude, copied = [], source_value
+        elif isinstance(element_type, ty.ArrayType):
             prelude, copied = self._clone_array_value(
                 replace(source_value, type='int64'),
                 element_type,
-                arena=arena,
+                arena=True,
             )
         elif isinstance(element_type, ty.ObjectType) and move:
             prelude, copied = [], source_value   # the handle moves with its members
@@ -2807,6 +2824,11 @@ class _ArrayLowering:
                 return True
             if isinstance(element, ty.ObjectType):
                 return cls._object_result_fields_are_returnable(element)
+            if isinstance(element, ty.ArrayType):
+                # Each row is an owned descriptor handle. The recursive
+                # arena copy prepares its storage just like an object row;
+                # the caller need not know any row's length in advance.
+                return cls._array_result_elements_are_returnable(element)
             members = ty.runtime_union_members(element)
             if members is None and (payload := ty.optional_payload(element)) is not None:
                 members = ('none', payload)

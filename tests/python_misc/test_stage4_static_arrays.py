@@ -719,7 +719,10 @@ let read = ():>int64 => {
 
     assert 'let original:int64 = __alloca__(16)' in emitted
     assert 'let copy:int64 = __alloca__(16)' in emitted
-    assert emitted.count('__alloca__(48)') == 4
+    # The literal's temporary rows have frame descriptors. Stored rows and
+    # their independent copies own arena descriptors that can escape safely.
+    assert emitted.count('__alloca__(48)') == 2
+    assert emitted.count('_arena_alloc(48)') == 4
     assert '__store_i64__(9 __load_i64__(__load_i64__(copy)))' in emitted
 
 

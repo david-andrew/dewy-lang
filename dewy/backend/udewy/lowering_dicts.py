@@ -497,7 +497,14 @@ class _DictLowering:
         if node.position is not None:
             remembered.append(hir.Declare(loc, ty.VOID_TYPE, 'let', node.position, 'int64', position))
         replace_value = (
-            [self._dict_store_element(values, position, value, parts.value_type, loc)]
+            [
+                *self._release_array_elements(
+                    values, parts.value_type, loc,
+                    start=position,
+                    stop=self._int64_binary('__add__', position, self._int64_literal(loc, 1), loc),
+                ),
+                self._dict_store_element(values, position, value, parts.value_type, loc),
+            ]
             if values is not None and value is not None and parts.value_type is not None
             else []
         )
@@ -612,13 +619,17 @@ class _DictLowering:
         result_prelude, result_pointer = self._extract_object_pointer(empty)
         result_name = self._name('set_result', loc)
         result_object = replace(result_name, type=set_type)
-        left_prelude, left = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), node.left, 'keys'))
-        right_prelude, right = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), node.right, 'keys'))
+        # Preserve the value read before an effectful later operand changes
+        # its source (`left | clear_left_and_return_right()`).
+        left_copy, left_value = self._clone_object_value(node.left, set_type, arena=True, move=self._object_expression_owns_fresh_storage(node.left))
+        right_copy, right_value = self._clone_object_value(node.right, set_type, arena=True, move=self._object_expression_owns_fresh_storage(node.right))
+        left_prelude, left = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), replace(left_value, type=set_type), 'keys'))
+        right_prelude, right = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), replace(right_value, type=set_type), 'keys'))
         statements: list[hir.AST] = [
             *result_prelude,
             self._declare(result_name, result_pointer, loc),
-            *left_prelude,
-            *right_prelude,
+            *left_copy, *left_prelude,
+            *right_copy, *right_prelude,
             *self._dict_ensure_table(left, loc),
             *self._dict_ensure_table(right, loc),
         ]
@@ -675,6 +686,10 @@ class _DictLowering:
         else:  # symmetric difference
             statements.extend(add_members(left, right, when_found=False))
             statements.extend(add_members(right, left, when_found=False))
+        size, _offsets = self._object_layout(set_type, node)
+        for snapshot in (left_value, right_value):
+            statements.extend(self._release_object_members(snapshot, set_type, loc))
+            statements.append(self._arena_release_call(snapshot, self._int64_literal(loc, size), loc))
         return statements, result_name
 
     def _extract_dict_view(self, node: hir.DictView) -> tuple[list[hir.AST], hir.AST]:

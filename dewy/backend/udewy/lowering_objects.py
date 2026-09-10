@@ -109,7 +109,7 @@ class _ObjectLowering:
 
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._copy_source_expression(node)
-        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall))
+        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall, hir.SetAlgebra, hir.DictView))
 
     def _lower_object_argument(
         self,
@@ -958,7 +958,7 @@ class _ObjectLowering:
                 borrowed |= self.literal_borrowed_fields.get(id(value), set())
             self.borrowed_fields[local_binding_key(node)] = borrowed
             return [*statements, *flow_prelude, lowered]
-        if isinstance(node.expr, (hir.ObjectLiteral, hir.FunctionCall)):
+        if self._object_expression_owns_fresh_storage(node.expr):
             prelude, ptr = self._extract_expression(node.expr)
             self.borrowed_fields[local_binding_key(node)] = set(self.literal_borrowed_fields.get(id(node.expr), set()))
             return [
@@ -1059,10 +1059,7 @@ class _ObjectLowering:
                 *prelude,
                 hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', replace(replacement, type='int64')),
                 hir.Declare(loc, ty.VOID_TYPE, 'let', previous.name, 'int64', self._value_load(address, field_type, loc)),
-                *self._release_owned_array(previous, loc,
-                    string_elements=self._is_string_valued(element),
-                    cell_element=element if self._is_optional_element(element) or self._is_union_element(element) else None,
-                    object_element=ty.unfold(element) if isinstance(ty.unfold(element), ty.ObjectType) else None),
+                *self._release_owned_array(previous, loc, element=element),
                 *self._value_store(held, address, field_type, loc),
             ]
         if self._is_string_valued(field_type):

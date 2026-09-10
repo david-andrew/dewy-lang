@@ -18,6 +18,81 @@ def run(source, tmp_path):
     return result.stdout
 
 
+def test_returned_record_owns_nested_dynamic_array_rows(tmp_path):
+    source = '''
+Rows:type=[values:array<array<int64>>]
+let make=(count:int64):>Rows=>{
+    let rows:array<array<int64>>=[]
+    loop i in 0.. and i <? count {rows.push([20 22])}
+    return Rows[rows]
+}
+let exercise=():>void=>{
+    let rows=make(3)
+    let copy=rows
+    $runtime_assert rows.values.length >? 0 and copy.values.length >? 0
+    copy.values[0]=[99]
+    let original=rows.values[0]
+    let changed=copy.values[0]
+    $runtime_assert original.length =? 2 and changed.length =? 1
+    $runtime_assert original[0]+original[1] =? 42
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_returned_dictionary_owns_array_values(tmp_path):
+    source = '''
+Snapshot:type=[values:dict<int64 array<int64>>]
+let make=():>Snapshot=>Snapshot[[1->[20 22] 2->[7]]]
+let exercise=():>void=>{
+    let snapshot=make()
+    let copy=snapshot
+    copy.values[1]=[99]
+    let original=snapshot.values.get(1 [])
+    $runtime_assert original.length =? 2
+    $runtime_assert original[0]+original[1] =? 42
+    copy.values.clear
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_container_algebra_reads_left_before_effectful_right(tmp_path):
+    source = '''
+let left:set<int64>=set[40]
+let change=():>set<int64>=>{left.clear left.add(99) return set[2]}
+let exercise=():>void=>{
+    left.clear left.add(40)
+    let result=left|change()
+    let total:int64=0
+    loop value in result {total+=value}
+    $runtime_assert total =? 42
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('payload', ['Bag', 'array<int64>', 'Node'])
 @pytest.mark.parametrize('braced', [False, True])
 def test_union_record_copy_reuses_memory_on_every_return(payload, braced, tmp_path):
