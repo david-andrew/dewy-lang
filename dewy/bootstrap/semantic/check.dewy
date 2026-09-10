@@ -2732,6 +2732,18 @@ container_array = (items:array<addr> wanted:addr? id:addr env:Environment @sessi
     let loc = contexts.node_at(id env.lexical session).loc
     return put(hir.ArrayLiteral[loc types.array_type(element converted.length @session.types) converted] @session)
 }
+# Value identity alone is not permission to discard evaluation: a call can
+# have a singleton result type and still change state. Only literal payloads
+# and their inert wrappers can be collapsed before runtime set insertion.
+constant_member = (id:addr session:contexts.Session):>bool => {
+    let node=node_at(id session)
+    loop true {
+        if node is? hir.ValueCast|hir.RepresentationCast {node=node_at(node.expr session)}
+        else if node is? hir.Block and not node.scoped and node.items.length =? 1 {node=node_at(node.items[0] session)}
+        else return node is? hir.String|hir.Integer|hir.Bool
+    }
+    return false
+}
 container_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none is_set:bool=false):>addr|Error => {
     let captured=captured_loop(node env session)
     if is_set and captured isnt? none return loop_capture(id captured env @session expected=expected is_set=true)
@@ -2772,7 +2784,7 @@ container_literal = (id:addr node:parser.Block env:Environment @session:contexts
         let distinct:array<addr> = []
         loop item in key_node.items {
             let identity = keys.identity(item session.hir @session.registry @session.types)
-            if identity isnt? keys.Literal return pending(id 'runtime set literal materialization through the generic array-to-set helper' env session)
+            if identity isnt? keys.Literal or not constant_member(item session) return library_call('_set_of_array' [key_array] id env @session expected=expected)
             let duplicate = false
             loop prior in seen { if keys.same(prior identity) { duplicate = true break } }
             if not duplicate { seen.push(identity) distinct.push(item) }

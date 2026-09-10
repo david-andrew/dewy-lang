@@ -69,7 +69,13 @@ CASES = [
 # explicit stand-in for the full module driver's runtime identity lookup.
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
+STRINGS = (ROOT / 'library/strings.dewy').read_text()
+SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
 ARENA_CASES = [
+    (SET_OF_ARRAY + 'let calls:int64=0\nlet next=():>1=>{calls+=1 return 1}\nlet main=():>int64=>{let values:set<int64>=set[next() next()] return if calls=?2 and values.length=?1 42 else 0}', 42),
+
+    (SET_OF_ARRAY + 'let calls:int64=0\nlet next=():>int64=>{calls+=1 return calls}\nlet main=():>int64=>{let values:set<int64>=set[next() next() 1] let order=values.values return if calls=?2 and values.length=?2 and order.length=?2 and order[0]=?1 and order[1]=?2 42 else 0}', 42),
+    (SET_OF_ARRAY + 'let make=(value:string):>set<string>=>set[value "second" value]\nlet main=():>int64=>{let values=make("first") let order=values.values return if values.length=?2 and order.length=?2 and order[0]=?"first" and order[1]=?"second" 42 else 0}', 42),
 
     ('let one=(x:int64):>int64=>0\nlet two=(x:bool):>int64=>if x 40 else 0\nlet base=@one & @two\nlet three=(x:string):>int64=>2\nlet choose=@base & @three\nlet main=():>int64=>choose(true)+choose("hi")', 42),
 

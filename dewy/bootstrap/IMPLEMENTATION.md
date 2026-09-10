@@ -35,6 +35,24 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   checksums and unchanged source inputs; packaging tests use fixtures, and
   the public installer has not switched to an unverified native release.
 
+- Selected overload calls now lower through their concrete function bodies,
+  including named/nested overload sets, imported alternatives, defaults and
+  captured locals. Unused overload declarations do not require runtime
+  storage. Unit error mints and `none` use scalar payload storage; lowering
+  receives the compilation's nominal links for family tests. Native execution
+  covers error unions, error arrays, and overload/capture dispatch.
+
+- Native graph execution covers scalar quantity representations and erasure
+  of compile-time rational scale/range bindings. The library's time-unit
+  constants no longer require a runtime rational representation just to load
+  the prelude. This does not yet establish quantity storage in every nested
+  aggregate representation or runtime quantity arithmetic parity.
+
+- Hosted set folding and array storage preserve calls with singleton result
+  types. Knowing that two members have the same returned value does not
+  permit either member's effects to be discarded. The focused hosted set,
+  dictionary-proof and union-container checks pass 41 tests.
+
 - Source readers avoid copying complete token forests for individual nodes.
   Bounds analysis shares immutable module inputs across binding/refinement
   queries, recursive negation and ordinary index proofs. Changing interval
