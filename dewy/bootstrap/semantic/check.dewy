@@ -123,6 +123,16 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let inhabitant=unit_inhabitant(value expected id env @session)
     if inhabitant is? Error return inhabitant
     if inhabitant isnt? none return against(inhabitant expected id env @session)
+    if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and numeric_values.nonzero_form(expected 'BigInt' env.lexical session) {
+        let constant=constant_integer(value session)
+        if constant isnt? none and constant not=? 0 {
+            # Contextual conversion may already have packed a known bigint
+            # into its zero/object union. The numeric literal evidence still
+            # proves the nonzero alternative; unwrap without reevaluating or
+            # replacing the original expression.
+            return put(hir.RepresentationCast[node.loc expected value] @session)
+        }
+    }
     if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and views.fixed_integer_layout(expected session.types) isnt? none {
         let layout=views.fixed_integer_layout(expected session.types)
         $runtime_assert layout isnt? none
@@ -352,7 +362,7 @@ bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env
             let constant=constant_integer(arguments[i] session)
             if constant =? 0 return problem(id 'division by zero' 'the divisor is the constant `0`' env session)
             let type=node_at(arguments[i] session).value_type
-            if numeric_values.is_family(type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(type 'BigInt' env.lexical session) return problem(id 'cannot prove the divisor is nonzero' 'guard the division or take a nonzero divisor' env session)
+            if constant is? none and numeric_values.is_family(type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(type 'BigInt' env.lexical session) return problem(id 'cannot prove the divisor is nonzero' 'guard the division or take a nonzero divisor' env session)
             target=numeric_values.object_member(family session.types)
         }
         let operand=against(arguments[i] target id env @session)

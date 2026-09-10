@@ -24,6 +24,9 @@ CASES = [PREFIX + f'let operation=(a:BigInt b:{other}):>{result}=>{left} {op} {r
          for other, left, right in [('int64', 'a', 'b'), ('uint64', 'b', 'a'), ('int8', 'a', 'b'), ('uint8', 'b', 'a')]
          for result in ['bool' if '?' in op else 'BigInt']]
 CASES += [PREFIX + body for body in [
+    'let operation=(value:BigInt):>BigInt=>{let result=value result //= 4294967296 return result}',
+    'let operation=(value:BigInt):>BigInt=>{let result=value result %= 4294967296 return result}',
+    'let operation=(value:BigInt):>BigInt=>{let values:dict<string BigInt>=["value"->value] values["value"] //= 4294967296 return values["value"]}',
     'let operation=(a:int8):>BigInt=>a',
     'let operation=(a:uint8):>BigInt=>a',
     'let operation=(a:BigInt b:uint8 & ~0):>BigInt=>a // b',
@@ -41,6 +44,8 @@ CASES += [PREFIX + body for body in [
     'let operation=(a:BigInt b:BigInt):>BigInt=>if b not=? 0 a // b else 0',
 ]]
 ERRORS = [PREFIX + body for body in [
+    'let operation=(value:BigInt):>BigInt=>{let result=value result //= 0 return result}',
+    'let operation=(value:BigInt divisor:BigInt):>BigInt=>{let result=value result //= divisor return result}',
     'let operation=(a:BigInt):>BigInt=>a // 0',
     'let operation=(a:BigInt b:BigInt):>BigInt=>a // b',
     'let operation=(a:BigInt):>BigInt=>a and 1',
