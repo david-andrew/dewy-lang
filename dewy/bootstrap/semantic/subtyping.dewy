@@ -1,4 +1,5 @@
 import p"ty.dewy" as types
+import p"text_shapes.dewy" as text_shapes
 
 doc"""
 The hosted subtype rule is emptiness: S is a subtype of T when S & ~T is
@@ -144,17 +145,8 @@ string_literal_implies = (value:string target:types.Type nodes:array<types.Type>
     }
     if target is? types.ArrayType {
         let element = types.node_at(nodes target.element)
-        if element isnt? types.Primitive return false
-        let length:addr = value.length
-        if element.name =? 'uint8' {
-            let bytes = value as array<uint8>
-            length = bytes.length
-        }
-        else if element.name =? 'uint32' {
-            let scalars = value as array<uint32>
-            length = scalars.length
-        }
-        else if element.name not in? set['char' 'grapheme' 'string'] return false
+        let length=text_shapes.literal_length(value element)
+        if length is? none return false
         return target.length is? none or target.length =? length
     }
     return false

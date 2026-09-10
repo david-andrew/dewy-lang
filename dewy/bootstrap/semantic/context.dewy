@@ -57,6 +57,8 @@ Session:type = [
     registry:bindings.Registry=bindings.Registry[]
     scopes:array<bindings.Scope>=[]
     brands:brands.Registry=brands.Registry[]
+    # Unit-like error mints are named primitive types, not object brands.
+    error_types:set<addr>=set[]
     links:array<subtyping.Link>=subtyping.default_links
     builtin_aliases:dict<string addr>=[]
     pending_aliases:dict<addr PendingAlias>=[]

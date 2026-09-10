@@ -25,6 +25,24 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native text materialization tracks UTF-8 byte, scalar, and grapheme lengths;
+  checked byte decoding, word-shape transmutes, fixed integer limits, and
+  lexical string methods now reach checked HIR. Error mints denote singleton
+  values; contextual unit-like records use their ordinary constructor defaults.
+  Blocks apply result expectations to their expressed result, preserving void
+  statements and explicit returns. The text comparison covers 20 accepted and
+  eight rejected programs, including complete string and array library sources;
+  the unit comparison covers 13 accepted and four rejected programs, including
+  the Linux filesystem foundation. Native lowering remains separate work.
+
+- The hosted seed borrows array fields at proven read-only call boundaries.
+  Storage-root tracking preserves value isolation when another argument, or a
+  nested call while evaluating arguments, exposes that root as a place. Five
+  execution regressions cover direct/indexed/named field arguments and aliasing;
+  the repeated-read cases run under a 128 MiB memory limit. Related regressions
+  pass in focused batches of 31 and 143 tests. This avoids unnecessary copies
+  using the existing ownership model; it introduces no allocator design.
+
 - Native record methods now compile into hidden functions with lexical member
   bindings, static/instance receivers, direct mutation barriers, and inherited
   method ownership. Constructor overloads participate in ordinary argument

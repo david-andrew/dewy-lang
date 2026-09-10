@@ -1,0 +1,51 @@
+import p"ty.dewy" as types
+
+doc"""
+Text materialization changes its storage units, not its characters. Literal
+array lengths count UTF-8 bytes, Unicode scalars, or graphemes according to
+the destination. Runtime text does not acquire a guessed array length.
+"""
+
+literal_length = (text:string element:types.Type):>addr? => {
+    if element isnt? types.Primitive return none
+    if element.name =? 'uint8' {let bytes=text as array<uint8> return bytes.length}
+    if element.name =? 'uint32' {let scalars=text as array<uint32> return scalars.length}
+    if element.name in? ['char' 'grapheme' 'string'] return text.length
+    return none
+}
+materialization_target = (source:addr target:addr @nodes:array<types.Type>):>addr => {
+    let literal=types.node_at(nodes source)
+    if literal isnt? types.StringLiteralType return target
+    let destination=types.node_at(nodes target)
+    if destination is? types.TypeOr {
+        loop item in destination.items {
+            let member=types.node_at(nodes item)
+            if types.is_primitive(member 'string') or member is? types.StringType return types.string_type(none @nodes)
+        }
+    }
+    if destination isnt? types.ArrayType or destination.length isnt? none return target
+    let length=literal_length(literal.value types.node_at(nodes destination.element))
+    return if length is? none target else types.array_type(destination.element length @nodes)
+}
+
+# As in the hosted checker, transmute preserves the backend's word/handle
+# shape; it cannot reinterpret a string descriptor as an array descriptor.
+# TODO: tighten the other aggregate layout cases alongside representation
+# selection, rather than claiming this provisional word check proves them.
+transmute_compatible = (source:addr target:addr nodes:array<types.Type>):>bool => {
+    let a=types.node_at(nodes source)
+    let b=types.node_at(nodes target)
+    if a is? types.BinaryLiteralType or b is? types.BinaryLiteralType return false
+    if a is? types.Primitive and a.name in? ['void' 'untyped'] return false
+    if b is? types.Primitive and b.name in? ['void' 'untyped'] return false
+    if string_type(source nodes) and b is? types.ArrayType or a is? types.ArrayType and string_type(target nodes) return false
+    return true
+}
+string_type = (id:addr nodes:array<types.Type>):>bool => {
+    let type=types.node_at(nodes types.unfold(types.strip_refinement(id nodes) nodes))
+    if type is? types.TypeOr {
+        loop member in type.items {if not string_type(member nodes) return false}
+        return true
+    }
+    return type is? types.StringType|types.StringLiteralType or type is? types.Primitive and type.name in? ['string' 'grapheme' 'char']
+}

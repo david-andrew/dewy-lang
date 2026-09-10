@@ -30,6 +30,7 @@ import p"inferred_results.dewy" as inferred_results
 import p"method_syntax.dewy" as method_syntax
 import p"type_names.dewy" as type_names
 import p"function_contracts.dewy" as contracts
+import p"text_shapes.dewy" as text_shapes
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -79,6 +80,7 @@ begin = (source:contexts.Context @session:contexts.Session):>Environment => {
 # will join this boundary rather than becoming per-expression exceptions.
 against = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let node = node_at(value session)
+    if types.is_primitive(types.node_at(session.types node.value_type) 'never') return value
     let target = types.node_at(session.types expected)
     if target is? types.RefinedType {
         let total = views.total_dict_key(expected session.types)
@@ -91,9 +93,13 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
         if checked is? Error return checked
         return put(hir.Obligation[node.loc node_at(checked session).value_type checked expected display.type_to_dewy(expected session.types)] @session)
     }
+    let inhabitant=unit_inhabitant(value expected id env @session)
+    if inhabitant is? Error return inhabitant
+    if inhabitant isnt? none return against(inhabitant expected id env @session)
     if not subtyping.is_subtype(node.value_type expected session.links @session.types) return problem(id 'type mismatch' "`{display.type_to_dewy(node.value_type session.types)}` does not fit `{display.type_to_dewy(expected session.types)}`" env session)
     if node.value_type =? expected return value
     let actual = types.node_at(session.types node.value_type)
+    if actual is? types.StringLiteralType and target is? types.ArrayType return put(hir.RepresentationCast[node.loc text_shapes.materialization_target(node.value_type expected @session.types) value] @session)
     if actual is? types.ArrayType and target is? types.ArrayType and target.length is? none and actual.element =? target.element return value
     if actual is? types.FunctionType and target is? types.FunctionType return value
     if types.is_primitive(target 'any') return value
@@ -147,7 +153,10 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
             if resolved is? Error return resolved
             value = resolved
         }
-        if value isnt? none return put(hir.TypeValue[source.loc types.primitive('type' @session.types) value name] @session)
+        if value isnt? none {
+            if value is? addr and value in? session.error_types return put(hir.ErrorValue[source.loc value display.type_to_dewy(value session.types)] @session)
+            return put(hir.TypeValue[source.loc types.primitive('type' @session.types) value name] @session)
+        }
         if binding.value_type is? none return problem(id "cannot infer `{name}` before its declaration" 'add a type annotation to permit a forward reference' env session)
         let current = read_type(binding_id env session)
         $runtime_assert current isnt? none
@@ -363,7 +372,26 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if target is? Error return target
             return explicit_conversion(value target id env @session)
         }
+        if op =? 'transmute' {
+            let value=expression(node.left env @session)
+            if value is? Error return value
+            let target=declarations.resolve(node.right env.lexical @session)
+            if target is? Error return target
+            if not text_shapes.transmute_compatible(node_at(value session).value_type target session.types) return problem(id 'incompatible transmute representations' 'these types do not share the backend value shape' env session)
+            return put(hir.Transmute[node.loc target value] @session)
+        }
         if op =? '.' {
+            let primitive=syntax.identifier(node.left source.nodes)
+            if primitive isnt? none and declarations.lookup(primitive env.lexical session) is? none {
+                let bounds=views.fixed_integer_bounds(types.primitive(primitive @session.types) session.types)
+                if bounds isnt? none {
+                    let name=syntax.identifier(node.right source.nodes)
+                    if name not=? 'min' and name not=? 'max' return problem(id 'integer type has no such member' 'fixed-width integer types expose `min` and `max`' env session)
+                    let number=if name =? 'min' bounds.minimum else bounds.maximum
+                    let value=put(hir.Integer[node.loc types.integer_literal(number @session.types) '0d' number] @session)
+                    return if expected is? none value else against(value expected id env @session)
+                }
+            }
             let receiver = expression(node.left env @session allow_place=allow_place)
             if receiver is? Error return receiver
             let base = node_at(receiver session)
@@ -396,6 +424,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
                 if func is? Error return func
                 return call(func [left right] [] id env @session expected=expected)
             }
+            if value is? hir.ErrorValue return problem(id 'value is not callable or indexable' 'an error mint already denotes its singleton value' env session)
             return pending(id 'ambiguous adjacency involving this value type' env session)
         }
         if op =? 'CallJuxtapose' {
@@ -597,6 +626,12 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     let rhs = tokens.node_at(source.nodes node.right)
     let value = if rhs is? parser.BinOp and syntax.is_operator(rhs.op '=>' source.nodes) function_literal(node.right rhs env @session name=name expected_signature=annotation) else expression(node.right env @session expected=annotation)
     if value is? Error return value
+    if annotation is? none and explicit {
+        let inhabitant=unit_inhabitant(value none node.right env @session)
+        if inhabitant is? Error return inhabitant
+        if inhabitant isnt? none {value=inhabitant}
+    }
+    if value is? Error return value
     if annotation is? none and not constant { value = widen(value node.right env @session) }
     if value is? Error return value
     let checked = node_at(value session)
@@ -642,7 +677,11 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
     let result = types.primitive('void' @session.types)
     let values:addr = 0
     loop item in node.inner {
-        let value = expression(item inner @session expected=expected)
+        # A result expectation belongs to the block's expressed value, not
+        # each statement. A single-item wrapper remains transparent so a
+        # literal can use its context; multi-item blocks check their result
+        # below. Explicit returns use the enclosing function's own contract.
+        let value = expression(item inner @session expected=if node.inner.length =? 1 expected else none)
         if value is? Error return value
         items.push(value)
         let type = node_at(value session).value_type
@@ -653,7 +692,8 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
         }
     }
     if scoped and values >? 1 return problem(id 'block expresses multiple values' 'suppress unused expressions with a semicolon' env session)
-    return put(hir.Block[node.loc result items scoped] @session)
+    let value=put(hir.Block[node.loc result items scoped] @session)
+    return if expected is? none value else against(value expected id env @session)
 }
 
 # Keep hoisted instances with the module that first requested them. Nested
@@ -1061,10 +1101,16 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
     return put(hir.Block[node.loc node_at(value session).value_type prelude false] @session)
 }
 
-call_syntax = (function:addr arguments_id:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+# An absent argument block denotes an implicit zero-argument construction;
+# callers need no synthesized parser node merely to express an empty list.
+source_arguments = (id:addr? env:Environment session:contexts.Session):>array<addr> => {
+    if id is? none return []
+    let arguments=contexts.node_at(id env.lexical session)
+    return if arguments is? parser.Block arguments.inner else [id]
+}
+call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
-    let arguments = tokens.node_at(source.nodes arguments_id)
-    let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
+    let items=source_arguments(arguments_id env session)
     let signature = types.node_at(session.types node_at(function session).value_type)
     let positional:array<addr> = []
     let keyword:dict<string addr> = []
@@ -1205,7 +1251,10 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     if type is? types.ModuleType {
         let field = namespaces.field(type name)
         if field is? none return problem(id 'module does not export this name' name env session)
-        if field.type_value isnt? none return put(hir.TypeValue[loc types.primitive('type' @session.types) field.type_value name] @session)
+        if field.type_value isnt? none {
+            if field.type_value is? addr and field.type_value in? session.error_types return put(hir.ErrorValue[loc field.type_value display.type_to_dewy(field.type_value session.types)] @session)
+            return put(hir.TypeValue[loc types.primitive('type' @session.types) field.type_value name] @session)
+        }
         let binding = bindings.binding_at(session.registry field.binding_id)
         return put(hir.ExpressedIdentifier[loc field.value_type binding.name field.binding_id] @session)
     }
@@ -1227,6 +1276,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
         return problem(id 'object has no such member' name env session)
     }
     if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
+    if views.string_valued(value.value_type session.types) and name in? STRING_METHODS return string_method(receiver name id env @session)
     if name =? 'length' {
         let word = types.primitive('int64' @session.types)
         if type is? types.ArrayType {
@@ -1243,6 +1293,25 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     }
     if type is? types.Primitive|types.IntegerLiteralType|types.FunctionType|types.ArrayType return problem(id 'member access requires an object' display.type_to_dewy(value.value_type session.types) env session)
     return pending(id "member `{name}` on `{display.type_to_dewy(value.value_type session.types)}`" env session)
+}
+
+# The library owns these implementations. Binding a method removes the
+# leading text parameter from its exposed signature, so calls, defaults,
+# parameter facts, and receiver evaluation use the ordinary function path.
+const STRING_METHODS:set<string>=set['contains' 'startswith' 'endswith' 'find' 'rfind' 'split' 'lines' 'trim' 'trim_start' 'trim_end' 'replace' 'casefold']
+string_method = (receiver:addr name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let binding_id=declarations.lookup("_string_{name}" env.lexical session)
+    if binding_id is? none return problem(id "`.{name}` needs the prelude" 'string methods are implemented in the prelude string library' env session)
+    let binding=bindings.binding_at(session.registry binding_id)
+    if binding.value_type is? none return problem(id 'string method has no signature' name env session)
+    let signature=types.node_at(session.types binding.value_type)
+    if signature isnt? types.FunctionType or signature.pos_or_kw.length =? 0 return problem(id 'string method has no receiver parameter' name env session)
+    let parameters:array<types.PosOrKwArg>=[]
+    loop i in 1.. and i <? signature.pos_or_kw.length {parameters.push(signature.pos_or_kw[i])}
+    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types)
+    let loc=contexts.node_at(id env.lexical session).loc
+    let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding_id] @session)
+    return put(hir.BoundMethod[loc exposed function receiver] @session)
 }
 
 # Record fields enter a fresh lexical scope in source order, so later values
@@ -1312,11 +1381,27 @@ bind_field = (name:string type:addr loc:Span env:Environment @session:contexts.S
     return id
 }
 
+# A concrete empty mint has one inhabitant. Fully defaulted minted records
+# use their ordinary field-wise constructor too. The name remains a type in
+# an uncontextualized expression (for spelling and static members); a value
+# expectation or an explicit value declaration requests its inhabitant.
+unit_inhabitant = (value:addr expected:addr? id:addr env:Environment @session:contexts.Session):>addr|none|Error => {
+    let node=node_at(value session)
+    if node isnt? hir.TypeValue or node.value isnt? addr return none
+    let type=types.node_at(session.types types.unfold(node.value session.types))
+    if type isnt? types.ObjectType or not type.minted or type.abstract return none
+    if expected isnt? none and not subtyping.is_subtype(node.value types.strip_refinement(expected session.types) session.links @session.types) return none
+    loop field in type.fields {if field.default is? none and not implemented_slot(type field session) return none}
+    let constructed=construct(node none id env @session)
+    if constructed is? Error return constructed
+    return if node_at(constructed session) is? hir.ObjectLiteral constructed else none
+}
+
 # Constructor defaults retain their declaration's source and outer scope.
 # The completed earlier fields form the innermost scope in either source.
 # As in the hosted constructor, arguments bind slots first and field
 # initializers run in declaration order. Defaults only fill absent slots.
-construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     if constructor.value isnt? addr return pending(id 'generic type constructor inference' env session)
     let type = types.unfold(constructor.value session.types)
     let shape = types.node_at(session.types type)
@@ -1326,8 +1411,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
     if overload is? Error return overload
     if overload isnt? none return overload
     let source = contexts.source_at(env.lexical session)
-    let arguments = tokens.node_at(source.nodes arguments_id)
-    let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
+    let items=source_arguments(arguments_id env session)
     let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let given:dict<string addr> = []
     let positional:array<addr> = []
@@ -2941,8 +3025,23 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
         let spelled=spelling_string(value @session)
         if spelled isnt? none return spelled
     }
+    target=text_shapes.materialization_target(node.value_type target @session.types)
+    let destination=types.node_at(session.types target)
     if types.same_type(node.value_type target session.types) return value
     if source is? types.StringLiteralType and subtyping.is_subtype(node.value_type target session.links @session.types) return put(hir.RepresentationCast[node.loc target value] @session)
+    if views.string_valued(node.value_type session.types) and destination is? types.ArrayType {
+        let element=types.node_at(session.types destination.element)
+        if element is? types.Primitive and element.name in? ['uint8' 'uint32' 'char' 'grapheme'] return put(hir.RepresentationCast[node.loc target value] @session)
+    }
+    if source is? types.ArrayType {
+        let element=types.node_at(session.types source.element)
+        let payload=views.optional_payload(target @session.types)
+        if types.is_primitive(element 'uint8') and payload isnt? none and views.string_valued(payload session.types) return put(hir.RepresentationCast[node.loc target value] @session)
+        if views.string_valued(target session.types) {
+            if element is? types.Primitive and element.name in? ['uint8' 'uint32'] return problem(id 'string conversion requires a validity proof' 'decode bytes with `as string | none`; unvalidated scalars do not prove Unicode text' env session)
+            if types.is_primitive(destination 'string') and (element is? types.Primitive and element.name in? ['char' 'grapheme'] or element is? types.StringType and element.length =? 1) return put(hir.RepresentationCast[node.loc target value] @session)
+        }
+    }
     if subtyping.is_subtype(node.value_type target session.links @session.types) return value
     if views.fixed_integer_layout(node.value_type session.types) isnt? none and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
     let converted=conversion_method(value target id env @session)
@@ -3045,7 +3144,7 @@ declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Env
     session.constructors[owner]=overloads
     return void_at(id env @session)
 }
-constructor_overload = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|none|Error => {
+constructor_overload = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|none|Error => {
     $runtime_assert constructor.value is? addr
     let owner=views.structural_base(constructor.value session.types)
     let type=types.node_at(session.types owner)

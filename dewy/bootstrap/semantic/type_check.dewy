@@ -881,7 +881,9 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         if abstract return contexts.problem(id '`$abstract` marks an object mint' 'error types are not abstract' context session)
         if additions.length =? 0 {
             session.links.push(subtyping.Link[name parent_node.name])
-            return types.primitive(name @session.types)
+            let minted=types.primitive(name @session.types)
+            session.error_types.add(minted)
+            return minted
         }
     }
     let all:array<addr> = [parent]
