@@ -81,8 +81,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   retain a final successful candidate directly; all 242 source comparisons
   pass. String clones copy established grapheme boundaries instead of
   re-segmenting their bytes, with 42 focused string regressions passing.
-  The resulting checker reaches time-unit scales through the ordered prelude
-  in 263 seconds; exact constant quantity arithmetic is the next gap.
+  Exact constant quantity arithmetic now preserves and composes dimensions;
+  seven valid and five invalid source/HIR comparisons pass. All 17 ordered
+  prelude modules check natively in 240 seconds. Peak memory was about 36 GB,
+  so copy lifetimes remain a practical concern before larger bootstrap inputs.
 
 - Native layout queries match the hosted layouts for primitive and nested
   fields, scalar/handle array strides, inline union cells, and brand storage

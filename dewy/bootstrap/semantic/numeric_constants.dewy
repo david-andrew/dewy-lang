@@ -10,9 +10,40 @@ fraction = (numerator:bigint denominator:bigint):>literals.Fraction => {
     $runtime_assert denominator isnt? 0
     return literals.Fraction[numerator denominator]
 }
+number_type = (id:addr session:contexts.Session):>addr => {
+    let type=types.node_at(session.types hir.node_at(session.hir id).value_type)
+    return if type is? types.QuantityType type.number else hir.node_at(session.hir id).value_type
+}
+# Keep physical factors separate from a number's representation. Addition
+# and comparison require matching dimensions even when both operands are
+# constants; multiplication and division compose their exponents.
+result_dimension = (name:string arguments:array<addr> @session:contexts.Session):>addr|string|none => {
+    let quantities=false
+    loop argument in arguments {
+        if types.node_at(session.types hir.node_at(session.hir argument).value_type) is? types.QuantityType {quantities=true break}
+    }
+    if not quantities return none
+    let empty=types.dimension([] @session.types)
+    let dimensions:array<addr>=[]
+    loop argument in arguments {
+        let type=types.node_at(session.types hir.node_at(session.hir argument).value_type)
+        dimensions.push(if type is? types.QuantityType type.dimension else empty)
+    }
+    if dimensions.length =? 1 and name =? '__unary_sub__' return dimensions[0]
+    if dimensions.length not=? 2 return none
+    if name =? '__mul__' return types.multiply_dimensions(dimensions[0] dimensions[1] @session.types)
+    if name =? '__truediv__' return types.divide_dimensions(dimensions[0] dimensions[1] @session.types)
+    let comparison=name in? ['__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__']
+    if name in? ['__add__' '__sub__'] or comparison {
+        if not types.same_type(dimensions[0] dimensions[1] session.types) return 'incompatible physical dimensions'
+        return if comparison empty else dimensions[0]
+    }
+    return none
+}
 value = (id:addr session:contexts.Session):>literals.Fraction? => {
     let node=hir.node_at(session.hir id)
-    let type=types.node_at(session.types node.value_type)
+    let type=types.node_at(session.types number_type(id session))
+    if type is? types.IntegerLiteralType return literals.Fraction[type.value 1]
     if type is? types.RationalLiteralType return literals.Fraction[type.numerator type.denominator]
     let integer=integers.constant_in(id session.hir session.types session.registry)
     if integer is? none or integer.lower is? none or integer.upper is? none or integer.lower not=? integer.upper return none
@@ -22,7 +53,7 @@ fold = (name:string arguments:array<addr> session:contexts.Session):>literals.Fr
     if arguments.length =? 0 return none
     let rational=false
     loop argument in arguments {
-        if types.node_at(session.types hir.node_at(session.hir argument).value_type) is? types.RationalLiteralType {rational=true}
+        if types.node_at(session.types hir.node_at(session.hir argument).value_type) is? types.RationalLiteralType|types.QuantityType {rational=true}
     }
     if not rational and name not=? '__truediv__' return none
     let a=value(arguments[0] session)

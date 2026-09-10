@@ -2684,6 +2684,8 @@ container_algebra = (name:string left:addr right:addr id:addr env:Environment @s
 # operand types are known. Only the original builtin binding reaches these
 # rules; lexical operator declarations keep normal function-call semantics.
 folded_number = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let dimension=numeric_constants.result_dimension(name arguments @session)
+    if dimension is? string return problem(id dimension 'only quantities of the same dimension add, subtract, or compare' env session)
     let folded=numeric_constants.fold(name arguments session)
     if folded isnt? none {
         let loc=contexts.node_at(id env.lexical session).loc
@@ -2692,8 +2694,27 @@ folded_number = (name:string arguments:array<addr> id:addr env:Environment @sess
         let type=types.rational_literal(folded.numerator folded.denominator @session.types)
         let normalized=types.node_at(session.types type)
         $runtime_assert normalized is? types.RationalLiteralType
-        return put(hir.RationalConstant[loc type normalized.numerator normalized.denominator] @session)
+        let dimensioned=dimension isnt? none and types.dimension_at(dimension session.types).powers.length >? 0
+        let integers=true
+        loop argument in arguments {
+            if types.node_at(session.types numeric_constants.number_type(argument session)) isnt? types.IntegerLiteralType {integers=false break}
+        }
+        if normalized.denominator =? 1 and (dimensioned or integers and name not=? '__truediv__') {
+            let integer_type=types.integer_literal(normalized.numerator @session.types)
+            if dimensioned {
+                $runtime_assert dimension isnt? none
+                integer_type=types.quantity_type(integer_type dimension @session.types)
+            }
+            return put(hir.Integer[loc integer_type '0d' normalized.numerator] @session)
+        }
+        let result_type=type
+        if dimensioned {
+            $runtime_assert dimension isnt? none
+            result_type=types.quantity_type(type dimension @session.types)
+        }
+        return put(hir.RationalConstant[loc result_type normalized.numerator normalized.denominator] @session)
     }
+    if dimension isnt? none return pending(id 'runtime quantity arithmetic materialization' env session)
     return none
 }
 builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
